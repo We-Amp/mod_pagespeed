@@ -22,6 +22,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
+#include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_parse.h"
 
 namespace net_instaweb {
@@ -35,6 +36,7 @@ AmpDocumentFilter::AmpDocumentFilter(HtmlParse* html_parse,
     : html_parse_(html_parse),
       is_known_(false),
       saw_doctype_(false),
+      buffered_bytes_(0),
       discovered_(discovered) {}
 
 AmpDocumentFilter::~AmpDocumentFilter() {}
@@ -42,6 +44,7 @@ AmpDocumentFilter::~AmpDocumentFilter() {}
 void AmpDocumentFilter::StartDocument() {
   is_known_ = false;
   saw_doctype_ = false;
+  buffered_bytes_ = 0;
 }
 
 void AmpDocumentFilter::EndDocument() {
@@ -98,6 +101,34 @@ void AmpDocumentFilter::Characters(HtmlCharactersNode* characters) {
       is_known_ = true;
     }
   }
+}
+
+void AmpDocumentFilter::NoteUndecidedEvent(size_t bytes) {
+  if (is_known_) {
+    return;
+  }
+  // Count each event as more than its contents.
+  buffered_bytes_ += bytes + 32;
+  if (buffered_bytes_ > kMaxBufferedBytes) {
+    discovered_->Run(false);
+    is_known_ = true;
+  }
+}
+
+void AmpDocumentFilter::Comment(HtmlCommentNode* comment) {
+  NoteUndecidedEvent(comment->contents().size());
+}
+
+void AmpDocumentFilter::Cdata(HtmlCdataNode* cdata) {
+  NoteUndecidedEvent(cdata->contents().size());
+}
+
+void AmpDocumentFilter::Directive(HtmlDirectiveNode* directive) {
+  NoteUndecidedEvent(directive->contents().size());
+}
+
+void AmpDocumentFilter::IEDirective(HtmlIEDirectiveNode* directive) {
+  NoteUndecidedEvent(directive->contents().size());
 }
 
 }  // namespace net_instaweb

@@ -47,6 +47,10 @@
 namespace net_instaweb {
 namespace {
 
+// The site of the block that admitted the request, sha256("site-test").
+const char kSite[] =
+    "2007f4b98af3e43f6c81272c8606ea77a35978dd7a5c0ee623f15036edac5831";
+
 class NgxDaemonServeNotifyTest : public testing::Test {
  public:
   NgxDaemonServeNotifyTest()
@@ -98,6 +102,7 @@ class NgxDaemonServeNotifyTest : public testing::Test {
     request.url = "/a/photo.png";
     request.hostname = "example.com";
     request.scheme = "http";
+    request.site = kSite;
     return request;
   }
   DaemonServeDecision MakeFallbackDecision() {
@@ -132,7 +137,7 @@ class NgxDaemonServeNotifyTest : public testing::Test {
     EXPECT_TRUE(TryQueueDaemonCompletion(0, dropped_));
     return new DaemonServeNotify(
         kind, abi_.get(), "/tmp/notify.sock", "/a/photo.png", "example.com",
-        "http", decision, context_, signature_, notified_, failed_);
+        "http", kSite, decision, context_, signature_, notified_, failed_);
   }
 
   GoogleString StubLog() {
@@ -258,6 +263,7 @@ TEST_F(NgxDaemonServeNotifyTest, TheClosureOwnsItsStrings) {
   GoogleString url("/a/photo.png");
   GoogleString host("example.com");
   GoogleString scheme("http");
+  GoogleString site(kSite);
   GoogleString socket("/tmp/notify.sock");
   GoogleString context(context_);
   GoogleString signature(signature_);
@@ -265,12 +271,13 @@ TEST_F(NgxDaemonServeNotifyTest, TheClosureOwnsItsStrings) {
   EXPECT_TRUE(TryQueueDaemonCompletion(0, dropped_));
   DaemonServeNotify* notify = new DaemonServeNotify(
       DaemonServeNotifyKind::kFallbackRenotify, abi_.get(), socket, url, host,
-      scheme, decision, context, signature, notified_, failed_);
+      scheme, site, decision, context, signature, notified_, failed_);
   // Every source is destroyed or rewritten before the closure runs: the
   // send must carry the copies, untouched.
   url.assign("/tampered");
   host.assign("/tampered");
   scheme.assign("/tampered");
+  site.assign("/tampered");
   socket.assign("/tampered");
   context.assign("/tampered");
   signature.assign("/tampered");
@@ -281,6 +288,8 @@ TEST_F(NgxDaemonServeNotifyTest, TheClosureOwnsItsStrings) {
             log.find("notify socket=/tmp/notify.sock url=/a/photo.png "
                      "host=example.com scheme=http"));
   EXPECT_NE(GoogleString::npos, log.find(" mask=9 "));
+  EXPECT_NE(GoogleString::npos,
+            log.find(StrCat(" site=", kSite, " flags=2")));
   EXPECT_EQ(GoogleString::npos, log.find("tampered"));
   EXPECT_EQ(1, notified_->Get());
 }

@@ -27,6 +27,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
@@ -47,6 +48,21 @@ bool IsSensitiveKeyword(HtmlName::Keyword keyword) {
   return std::binary_search(kSensitiveTags, end, keyword);
 }
 
+// Whether whitespace inside element must be kept.  The parser gives SVG and
+// MathML elements no keyword, so an SVG pre or textarea is an ordinary
+// element whose whitespace may be collapsed, and HTML elements inside
+// integration points (such as SVG foreignObject) keep their HTML keyword.
+// SVG script and style elements still hold script and CSS text, so, like
+// their HTML namesakes, their whitespace is kept.
+bool IsSensitiveElement(const HtmlElement* element) {
+  HtmlName::Keyword keyword = element->keyword();
+  if (keyword != HtmlName::kNotAKeyword) {
+    return IsSensitiveKeyword(keyword);
+  }
+  StringPiece name = element->name_str();
+  return StringCaseEqual(name, "script") || StringCaseEqual(name, "style");
+}
+
 }  // namespace
 
 CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse) {
@@ -57,26 +73,24 @@ CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse) {
 
 CollapseWhitespaceFilter::~CollapseWhitespaceFilter() {}
 
-void CollapseWhitespaceFilter::StartDocument() { keyword_stack_.clear(); }
+void CollapseWhitespaceFilter::StartDocument() { sensitive_stack_.clear(); }
 
 void CollapseWhitespaceFilter::StartElement(HtmlElement* element) {
-  HtmlName::Keyword keyword = element->keyword();
-  if (IsSensitiveKeyword(keyword)) {
-    keyword_stack_.push_back(keyword);
+  if (IsSensitiveElement(element)) {
+    sensitive_stack_.push_back(element);
   }
 }
 
 void CollapseWhitespaceFilter::EndElement(HtmlElement* element) {
-  HtmlName::Keyword keyword = element->keyword();
-  if (!keyword_stack_.empty() && (keyword == keyword_stack_.back())) {
-    keyword_stack_.pop_back();
+  if (!sensitive_stack_.empty() && (element == sensitive_stack_.back())) {
+    sensitive_stack_.pop_back();
   } else {
-    DCHECK(!IsSensitiveKeyword(keyword));
+    DCHECK(!IsSensitiveElement(element));
   }
 }
 
 void CollapseWhitespaceFilter::Characters(HtmlCharactersNode* characters) {
-  if (keyword_stack_.empty()) {
+  if (sensitive_stack_.empty()) {
     // Mutate the contents-string in-place for speed.
     GoogleString* contents = characters->mutable_contents();
     // It is safe to directly mutate the bytes in the string because

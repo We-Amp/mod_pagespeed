@@ -21,8 +21,10 @@
 #       new build of the same sources gets a new tag.
 #   release_version.sh --self-test
 #
-# Tags: `module-v1.19.0` (a release) and `module-v1.19.0-rc.1` (a release
-# candidate, flagged as a pre-release). Build metadata (`+...`) is refused.
+# Tags: `module-v1.19.0` (a release), `module-v1.19.0-rc.1` (a release
+# candidate) and `module-v1.19.0-rehearsal.7` (the made-up tag of the weekly
+# rehearsal), the last two flagged as pre-releases. Build metadata (`+...`) is
+# refused.
 set -euo pipefail
 
 SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z]+(\.[0-9A-Za-z]+)*))?$'
@@ -104,6 +106,7 @@ self_test() {
 
   ok parse module-v1.19.0
   ok parse module-v1.19.0-rc.1
+  ok parse module-v1.19.0-rehearsal.7
   ok parse module-v0.0.1
   no parse module-v1.19
   no parse module-v1.19.0.1
@@ -124,6 +127,16 @@ self_test() {
   [ "$(printf '%s\n' "$out" | field pkg_version)" = "1.19.0~rc.1" ] || { echo "FAIL: pkg_version"; fail=1; }
   [ "$(printf '%s\n' "$out" | field release_tag)" = "v1.19.0-rc.1" ] || { echo "FAIL: release_tag"; fail=1; }
   [ "$(printf '%s\n' "$out" | field optimizer_tag)" = "optimizer-v1.19.0-rc.1" ] || { echo "FAIL: optimizer_tag"; fail=1; }
+  out="$(parse module-v2.8.0-rehearsal.12)"
+  [ "$(printf '%s\n' "$out" | field version)" = "2.8.0-rehearsal.12" ] || { echo "FAIL: rehearsal version"; fail=1; }
+  [ "$(printf '%s\n' "$out" | field base)" = "2.8.0" ] || { echo "FAIL: rehearsal base"; fail=1; }
+  [ "$(printf '%s\n' "$out" | field prerelease)" = "rehearsal.12" ] || { echo "FAIL: rehearsal prerelease"; fail=1; }
+  [ "$(printf '%s\n' "$out" | field is_prerelease)" = "true" ] || { echo "FAIL: rehearsal is_prerelease"; fail=1; }
+  [ "$(printf '%s\n' "$out" | field pkg_version)" = "2.8.0~rehearsal.12" ] || { echo "FAIL: rehearsal pkg_version"; fail=1; }
+  [ "$(printf '%s\n' "$out" | field optimizer_tag)" = "optimizer-v2.8.0-rehearsal.12" ] || { echo "FAIL: rehearsal optimizer_tag"; fail=1; }
+  printf 'MAJOR=2\nMINOR=7\nBUILD=0\n' > "$t/VR"
+  stamp module-v2.8.0-rehearsal.12 "$t/VR" || { echo "FAIL: stamp rehearsal"; fail=1; }
+  grep -qx 'PRERELEASE=rehearsal.12' "$t/VR" || { echo "FAIL: stamp rehearsal content"; cat "$t/VR"; fail=1; }
   out="$(parse module-v12.3.45)"
   [ "$(printf '%s\n' "$out" | field minor)" = "3" ] || { echo "FAIL: minor"; fail=1; }
   [ "$(printf '%s\n' "$out" | field build)" = "45" ] || { echo "FAIL: build"; fail=1; }

@@ -31,14 +31,32 @@
 
 namespace net_instaweb {
 
+namespace {
+
+// Is any '/'-separated segment of path "." or ".."?
+bool HasDotSegment(StringPiece path) {
+  StringPieceVector segments;
+  SplitStringPieceToVector(path, "/", &segments, true /* omit_empty_strings */);
+  for (StringPiece segment : segments) {
+    if (segment == "." || segment == "..") {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 FileLoadMapping::~FileLoadMapping() {}
 
 bool FileLoadMappingRegexp::Substitute(StringPiece url,
                                        GoogleString* filename) const {
   GoogleString potential_filename;
   url.CopyToString(&potential_filename);
+  // A mapping whose result has a "." or ".." segment does not apply.
   const bool ok =
-      RE2::Replace(&potential_filename, url_regexp_, filename_prefix_);
+      RE2::Replace(&potential_filename, url_regexp_, filename_prefix_) &&
+      !HasDotSegment(potential_filename);
   if (ok) {
     filename->swap(potential_filename);  // Using swap() to avoid copying.
   }

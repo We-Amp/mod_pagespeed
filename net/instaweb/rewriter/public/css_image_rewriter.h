@@ -77,6 +77,10 @@ class CssImageRewriter {
   // Expected to be called from context->Harvest().
   static void InheritChildImageInfo(RewriteContext* context);
 
+  // Adds the image bytes inlined into the stylesheets context flattened into
+  // it to its own count. Expected to be called from context->Harvest().
+  static void InheritChildInlinedImageBytes(RewriteContext* context);
+
  private:
   RewriteDriver* driver() const { return filter_->driver(); }
   bool RewriteImport(RewriteContext* parent, CssHierarchy* hierarchy,

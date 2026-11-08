@@ -25,6 +25,7 @@
 #include "base/logging.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/common_filter.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/data_url_input_resource.h"
@@ -44,7 +45,6 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/html/html_element.h"
-#include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -209,6 +209,22 @@ void CssSummarizerBase::Context::RewriteSingle(
     const OutputResourcePtr& output_resource) {
   StringPiece input_contents = input_resource->ExtractUncompressedContents();
 
+  // A stylesheet over CssParseMaxBytes is not parsed and gets no summary,
+  // just as one that fails to parse.
+  const GoogleString url =
+      (input_resource->has_url() && !IsDataUrl(input_resource->url()))
+          ? input_resource->url()
+          : Driver()->base_url().Spec().as_string();
+  if (CssFilter::OverParseMaxBytes(
+          Options(), input_contents.size(), url, "CSS not summarized",
+          FindServerContext()->statistics()->GetVariable(
+              CssFilter::kParseMaxBytesExceeded),
+          Driver()->message_handler(), nullptr)) {
+    mutable_output_partition(0)->clear_inlined_data();
+    RewriteDone(kRewriteFailed, 0);
+    return;
+  }
+
   // TODO(morlovich): Should we keep track of this so it can be restored?
   StripUtf8Bom(&input_contents);
 
@@ -233,7 +249,7 @@ void CssSummarizerBase::Context::RewriteSingle(
         input_resource.get(), StringPiece() /* attribute_charset */,
         StringPiece() /* enclosing_charset */));
   }
-  if (CssInlineFilter::HasClosingStyleTag(result->inlined_data())) {
+  if (CssInlineFilter::MayContainMarkup(result->inlined_data())) {
     result->clear_inlined_data();
   }
 
@@ -433,9 +449,7 @@ void CssSummarizerBase::ReportSummariesDone() {
           break;
       }
     }
-    GoogleString escaped;
-    HtmlKeywords::Escape(comment, &escaped);
-    InsertNodeAtBodyEnd(driver()->NewCommentNode(nullptr, escaped));
+    InsertDebugCommentAtBodyEnd(comment);
   }
   for (auto& summary : summaries_) {
     if (summary.state == kSummaryOk) {
@@ -477,7 +491,7 @@ void CssSummarizerBase::StartExternalRewrite(HtmlElement* link,
     // TODO(morlovich): Stat?
     if (DebugMode()) {
       if (is_authorized || url == nullptr) {
-        driver()->InsertComment(
+        driver()->InsertDebugCommentHere(
             StrCat(Name(), ": ", kCreateResourceFailedDebugMsg));
       } else {
         // Do not write a debug message in this case because that has already

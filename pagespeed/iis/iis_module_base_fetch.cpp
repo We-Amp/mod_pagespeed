@@ -413,8 +413,8 @@ void IisModuleBaseFetch::DetachFromRequest()
 
 // Guards that must disqualify aliasing at write time.  Runs on the PSOL
 // delivery thread while the request is parked (single-operator invariant:
-// OnBeginRequest returned RQ_NOTIFICATION_PENDING, so nothing else touches
-// the IHttpContext), the same contract the existing HandleWrite/SendData/
+// OnResolveRequestCache returned RQ_NOTIFICATION_PENDING, so nothing else
+// touches the IHttpContext), the same contract the existing HandleWrite/SendData/
 // CollectHeaders calls rely on.
 bool IisModuleBaseFetch::ZeroCopyGuardsAllowAlias()
 {
@@ -610,7 +610,7 @@ void IisModuleBaseFetch::StartZeroCopyServe()
 		return;
 	}
 	// Finished or aborted synchronously on this thread.  We are outside a
-	// notification handler (OnBeginRequest returned PENDING long ago), so
+	// notification handler (OnResolveRequestCache returned PENDING long ago), so
 	// resume the pipeline explicitly, exactly like the legacy HandleDone.
 	IHttpContext* http_context = http_context_;
 	http_context_ = nullptr;
@@ -732,8 +732,8 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
 		// event -- the same assumption every OVERLAPPED pattern rests on.)
 		zc_active_.store(true, std::memory_order_release);
 		// MERGE GATE (M1): this async Flush is initiated from a PSOL
-		// thread while the request is parked in RQ_BEGIN_REQUEST, relying
-		// on IIS routing its completion to the module's OnAsyncCompletion.
+		// thread while the request is parked in RQ_RESOLVE_REQUEST_CACHE,
+		// relying on IIS routing its completion to the module's OnAsyncCompletion.
 		// That matches the documented IIS async-module pattern, but this
 		// module has NO in-tree precedent for it; before any merge it must
 		// be validated on IIS with an integration test: slow client +
@@ -860,7 +860,7 @@ REQUEST_NOTIFICATION_STATUS IisModuleBaseFetch::OnZeroCopyCompletion(
 	}
 	zc_active_.store(false, std::memory_order_release);
 	http_context_ = nullptr;
-	// We are inside OnAsyncCompletion for the parked RQ_BEGIN_REQUEST:
+	// We are inside OnAsyncCompletion for the parked RQ_RESOLVE_REQUEST_CACHE:
 	// returning FINISH here resumes and finishes the request without an
 	// IndicateCompletion call.
 	return RQ_NOTIFICATION_FINISH_REQUEST;
@@ -1051,6 +1051,12 @@ int IisModuleBaseFetch::CollectHeaders()
 	if (fetch_type_ == FetchType::kInPlace || fetch_type_ == FetchType::kResource)
 	{
 		r->DeleteHeader("Content-MD5");
+	}
+	if (fetch_type_ == FetchType::kInPlace)
+	{
+		// An in-place answer depends on the client (image formats among
+		// others), and IIS's response caches would hand one copy to every client.
+		DisarmResponseCaches(r);
 	} else if (fetch_type_ == FetchType::kHtml) 
 	{
 		// TODO(oschaaF): using header_id should be faster, but doesn't seem to work :(

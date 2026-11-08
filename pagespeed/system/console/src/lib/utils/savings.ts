@@ -14,8 +14,10 @@
  * Both endpoints are untrusted: every counter is read through num(), byte
  * counts are clamped to >= 0, and percentages are rounded and clamped to
  * [0, 100]. A counter that says the optimized bytes exceed the original is
- * a regression: the display value clamps to "no net savings" and the raw
- * value stays visible so the page can say why.
+ * a regression. For the module's own rewrites the display value clamps to
+ * "no net savings" and the raw value stays visible so the page can say why;
+ * the optimizer's serve savings are signed instead, so such responses count
+ * as negative savings and only the percentage is clamped.
  */
 
 import { num } from "$lib/alerts";

@@ -163,6 +163,56 @@ the parser assigns at close-out (`unclosed` in 1.15, which maps them to
 `AUTO_CLOSE`-derived handling — see residual policy §5 if products differ
 here by construction).
 
+**Inline SVG and MathML (foreign content).** The parser follows the HTML
+Standard's tree construction rules for foreign content (section 13.2.6, the
+dispatcher, and section 13.2.6.5) wherever they change the event stream. Tag
+names compare ASCII case-insensitively.
+
+- An element opened in SVG or MathML content is an SVG or MathML element and
+  has no keyword, even when its name is an HTML keyword: a foreign `style`
+  renders `start - style` and its content is parsed as markup, not as raw
+  text. The same holds for `script`, `title`, `textarea`, `xmp`, `iframe`,
+  `a`, `link` and every other name. Foreign elements are never void, never
+  raw text, and never closed by an implied end tag; `<x/>` closes them
+  (`brief`). `svg` and `math` are not keywords in either content.
+- `<svg>` and `<math>` in HTML content open SVG and MathML content. In SVG
+  content `<math>` is an SVG element, and in MathML content `<svg>` is a
+  MathML element, except directly inside `annotation-xml`, where it opens
+  SVG content.
+- Integration points switch start tags and text back to the HTML rules: SVG
+  `foreignObject`, `desc` and `title`; MathML `mi`, `mo`, `mn`, `ms` and
+  `mtext` (except start tags `mglyph` and `malignmark`); MathML
+  `annotation-xml` whose `encoding` attribute is `text/html` or
+  `application/xhtml+xml`. An HTML `style` inside one renders with its
+  keyword and raw text as usual.
+- Breakout: in foreign content the start tags `b`, `big`, `blockquote`,
+  `body`, `br`, `center`, `code`, `dd`, `div`, `dl`, `dt`, `em`, `embed`,
+  `h1`-`h6`, `head`, `hr`, `i`, `img`, `li`, `listing`, `menu`, `meta`,
+  `nobr`, `ol`, `p`, `pre`, `ruby`, `s`, `small`, `span`, `strong`,
+  `strike`, `sub`, `sup`, `table`, `tt`, `u`, `ul`, `var`, `font` with a
+  `color`, `face` or `size` attribute, and the end tags `</br>` and `</p>`
+  first close the open foreign elements down to the nearest HTML element or
+  integration point, each with an `end ... unclosed` event, and are then
+  handled as HTML. These closes change the event sequence compared with the
+  source order.
+- An end tag in foreign content closes the nearest open element of that name
+  among the foreign elements above the nearest HTML element (the elements in
+  between end `unclosed`); otherwise it is handled as HTML. An end tag handled
+  as HTML never closes a foreign element and never reaches past an
+  integration point: when it would, it is kept as characters.
+- When an end tag handled as HTML has to look past open foreign elements,
+  it follows the "in body" rules for its name, and is kept as characters
+  wherever a browser would ignore it: `</body>`, `</html>`, `</head>` and
+  `</form>` never close the foreign content; a formatting end tag (`a`, `b`,
+  `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`,
+  `strong`, `tt`, `u`) closes it only when no special HTML element lies in
+  between; an end tag with in-scope rules (`div`, `li`, `dd`, `h1`, ...)
+  closes through special elements but stops at a scope boundary (`applet`,
+  `caption`, `html`, `marquee`, `object`, `table`, `td`, `template`, `th`;
+  for `</li>` also `ol` and `ul`); table and select end tags match as for
+  HTML content; any other end tag stops at the first special HTML element.
+  End tags that do not look past foreign elements match as they always have.
+
 **Flush events are not rendered.** The reference session (§2) flushes only
 once, inside `FinishParse`; flush boundaries carry no compared behavior.
 

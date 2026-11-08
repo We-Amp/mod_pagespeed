@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -88,10 +88,10 @@ jobs:
   vendor:
     needs: changes
     if: ${{ needs.changes.outputs.fleet == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo vendor
   other:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: bash tools/ci/test_queue_fork_guard.sh

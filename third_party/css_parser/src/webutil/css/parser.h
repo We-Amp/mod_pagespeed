@@ -194,6 +194,16 @@ class Parser {
   void set_max_function_depth(int x) { max_function_depth_ = x; }
   static const int kDefaultMaxFunctionDepth = 10;
 
+  // Every statement inside an @media block carries its own copy of the block's
+  // media queries. This is how much all the copies together (see
+  // MediaQueries::ApproximateBytes) may take for a stylesheet of css_bytes
+  // bytes; beyond it we give up on the stylesheet with a kMediaError. Ordinary
+  // CSS stays far below the per-byte rate, and the fixed allowance keeps small
+  // stylesheets out of the reckoning altogether.
+  static int64_t MaxMediaQueriesBytes(int64_t css_bytes) {
+    return (1 << 20) + 64 * css_bytes;
+  }
+
   // This is a bitmask of errors seen during the parse.  This is decidedly
   // incomplete --- there are definitely many errors that are not reported here.
   static const uint64_t kNoError = 0;
@@ -649,6 +659,10 @@ class Parser {
   // level since @media-in-@media stays rejected); > 0 iff inside a
   // group-rule body. Also gates the @import/@charset rejection there.
   int group_rule_depth_;
+
+  // Memory taken so far by the media queries copied onto the statements of
+  // @media blocks, capped by MaxMediaQueriesBytes().
+  int64_t media_queries_bytes_;
 
   // errors_seen_mask_ is non-zero iff we failed to parse part of the CSS
   // and could not recover and so we have lost information.

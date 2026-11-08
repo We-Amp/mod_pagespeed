@@ -1261,9 +1261,11 @@ TEST_F(ProxyInterfaceTest, ImplicitCachingHeadersForCss) {
   EXPECT_EQ(kContent, text);
   // One lookup for ajax metadata, one for the HTTP response and one by the css
   // filter which looks up metadata while rewriting. None are found.
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
+  // Plus the in-place load's hit on the stored entry and its miss on the
+  // remembered-failure key before the module's own fetch.
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
 
   ClearStats();
   // Fetch again from cache. It has nearly the same caching headers, but no
@@ -1710,9 +1712,11 @@ TEST_F(ProxyInterfaceTest, ModifiedImplicitCachingHeadersForCss) {
   EXPECT_EQ(kContent, text);
   // One lookup for ajax metadata, one for the HTTP response and one by the css
   // filter which looks up metadata while rewriting. None are found.
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
+  // Plus the in-place load's hit on the stored entry and its miss on the
+  // remembered-failure key before the module's own fetch.
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
 
   ClearStats();
   // Fetch again from cache. It has the same caching headers.
@@ -1961,9 +1965,11 @@ TEST_F(ProxyInterfaceTest, AjaxRewritingForCss) {
   CheckNumBackgroundFetches(0);
   // One lookup for ajax metadata, one for the HTTP response and one by the css
   // filter which looks up metadata while rewriting. None are found.
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
+  // Plus the in-place load's hit on the stored entry and its miss on the
+  // remembered-failure key before the module's own fetch.
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
 
   ClearStats();
   // The rewrite is complete and the optimized version is served.
@@ -2065,9 +2071,11 @@ TEST_F(ProxyInterfaceTest, FallbackNoAcceptGzip) {
   CheckNumBackgroundFetches(0);
   // One lookup for ajax metadata, one for the HTTP response and one by the css
   // filter which looks up metadata while rewriting. None are found.
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
+  // Plus the in-place load's hit on the stored entry and its miss on the
+  // remembered-failure key before the module's own fetch.
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
 
   ClearStats();
   // The rewrite is complete and the optimized version is served.

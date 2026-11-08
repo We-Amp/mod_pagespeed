@@ -638,10 +638,14 @@ cc_library(
 # abseil-cpp, googletest and re2 are bazel_deps in MODULE.bazel. Their version
 # and sha constants stay here, mirrored from MODULE.bazel, because the SBOM,
 # notices, CVE and vendoring tools read them from this file.
+# buildifier: disable=unused-variable (kept for the tools named in the comment above)
 _ABSEIL_VERSION = "20260817.0"  # mirrored in MODULE.bazel
+# buildifier: disable=unused-variable (kept for the tools named in the comment above)
 _ABSEIL_SHA = "f7e05179df39c45434cad433f5783840bb3788ef322976f9138bc6b72b3a107d"
+# buildifier: disable=unused-variable (kept for the tools named in the comment above)
 _RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
 # sha256 of the BCR source archive (re2-2025-11-05.zip release asset).
+# buildifier: disable=unused-variable (kept for the tools named in the comment above)
 _RE2_SHA = "c7b1a7a7c68d2d7cf8d343dc56655c1b5a8c8aadedc017db453d4c1d8913b844"
 
 def non_bcr_repositories():

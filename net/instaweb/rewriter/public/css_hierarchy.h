@@ -20,7 +20,9 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 
+#include <atomic>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource.h"
@@ -65,6 +67,17 @@ class MessageHandler;
 class CssHierarchy {
  public:
   static const char kFailureReasonPrefix[];
+
+  // The most @imports, summed over every level, that are expanded under one
+  // top-level CSS. Every @import becomes a nested rewrite with its own copy
+  // of the imported CSS, so the tree must be bounded as a whole and not just
+  // along one path (IsRecursive); past this flattening fails, as it does for
+  // the flattened result limit.
+  static constexpr int kMaxImportsPerRoot = 100;
+
+  // The least number of input bytes of nested CSS that are accepted under one
+  // top-level CSS, however small the flattened result limit is.
+  static constexpr int64 kMinInputBytesPerRoot = 2 * 1024 * 1024;
 
   // Initialized in an empty state, which is considered successful since it
   // can be flattened into nothing.
@@ -153,7 +166,19 @@ class CssHierarchy {
   // otherwise append the given one to what we have now, separated by " AND ".
   // We also strip any leading "Flattening failed: " from the given reason,
   // which can happen when rolling up hierarchies.
+  // The text kept is bounded: once it holds kMaxFailureReasonBytes, further
+  // reasons are replaced by one "AND more" marker.
   void AddFlatteningFailureReason(const GoogleString& reason);
+
+  static constexpr int kMaxFailureReasonBytes = 1024;
+  // Reasons remembered for duplicate detection.
+  static constexpr int kMaxRememberedFailureReasons = 256;
+
+  // Bytes of reason text searched so far for containment of a new reason;
+  // for tests of how the duplicate check scales.
+  int64 failure_reason_scan_bytes_for_testing() const {
+    return failure_reason_scan_bytes_;
+  }
 
   bool unparseable_detected() const { return unparseable_detected_; }
   void set_unparseable_detected(bool ok) { unparseable_detected_ = ok; }
@@ -243,6 +268,22 @@ class CssHierarchy {
   // to Parse() failed, in which case rolling up has not been performed and
   // 'this' is unchanged.
   bool RollUpStylesheets();
+
+  // Accounts for a nested CSS's already flattened result, of the given size,
+  // before it is copied and parsed (it came from the metadata cache or from
+  // an identical rewrite elsewhere in the tree). Every such result is a
+  // distinct piece of the top-level CSS's flattened result, so once they add
+  // up to the flattened result limit the top level cannot be flattened: in
+  // that case flattening is marked as failed and false is returned, and the
+  // caller must not load the result. Always true if there is no limit.
+  bool ReserveFlattenedBytes(int64 bytes);
+
+  // Accounts for the size of a nested CSS's input before it is transformed
+  // and parsed. The inputs of one tree may add up to twice the flattened
+  // result limit, but never less than kMinInputBytesPerRoot; past that
+  // flattening is marked as failed and false is returned, and the caller must
+  // not process the input. Always true if there is no limit.
+  bool ReserveInputBytes(int64 bytes);
 
  private:
   friend class CssHierarchyTest;
@@ -363,6 +404,12 @@ class CssHierarchy {
   // If flattening failed, a user-oriented description of why, for injection
   // into the HTML if the debug filter is enabled.
   GoogleString flattening_failure_reason_;
+  // Lower-cased reasons already added or found to be part of the text, so a
+  // repeat is recognised without searching the text.
+  std::set<GoogleString> seen_failure_reasons_;
+  bool failure_reason_has_prefix_ = false;
+  bool failure_reasons_capped_ = false;
+  int64 failure_reason_scan_bytes_ = 0;
 
   // An indication of whether anything unparseable was detected in this CSS.
   bool unparseable_detected_;
@@ -383,6 +430,18 @@ class CssHierarchy {
 
   // For logging messages.
   MessageHandler* message_handler_;
+
+  // The top-level CSS of the tree this CSS is in; 'this' for the top level.
+  CssHierarchy* root_;
+
+  // Totals for the whole tree, kept in the top-level CSS only: the number of
+  // @imports expanded (see kMaxImportsPerRoot) and the size of the flattened
+  // results loaded for them (see ReserveFlattenedBytes). Atomic because
+  // nested CSS is expanded in the low-priority rewrite thread while cached
+  // results are loaded in the rewrite thread.
+  std::atomic<int> imports_in_tree_;
+  std::atomic<int64> flattened_bytes_in_tree_;
+  std::atomic<int64> input_bytes_in_tree_;
 
   CssHierarchy(const CssHierarchy&) = delete;
   CssHierarchy& operator=(const CssHierarchy&) = delete;

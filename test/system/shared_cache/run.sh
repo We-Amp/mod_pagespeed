@@ -23,7 +23,13 @@
 # when the positive control is not a cache hit with the same bytes (a
 # response no cache stores would pass the first check trivially), when a
 # response's Vary does not name Accept, Save-Data, User-Agent and Sec-CH-DPR,
-# or when the 304 names a different set than its 200.
+# or when the 304 names a different set than its 200.  Last, on a URL nothing
+# has asked for: once only the phone's variant exists, a desktop through nginx
+# and a Save-Data desktop through Varnish are answered with a fallback, and the
+# cache may keep it only briefly (FALLBACK_MAX_AGE_S): both caches must hand
+# each client its own bytes once that lifetime has passed.  On nginx this runs
+# with the site's `expires`, without it, and with a long lifetime added by
+# add_header; every Cache-Control line is read.
 #
 # With PACKAGE_DIR=<dir> the packages come from that directory instead of the
 # repository: the module package of the tree under test (for apache,
@@ -58,6 +64,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 READY_TIMEOUT_S=${READY_TIMEOUT_S:-180}
 STABLE_POLLS=${STABLE_POLLS:-10}
+FALLBACK_MAX_AGE_S=60
 # SHARED_CACHE_PREFIX names this run's containers and network; it must be
 # unique to the run (a CI job passes its own job-scoped name).
 PREFIX="${SHARED_CACHE_PREFIX:-shared-cache-$$-${RANDOM}}"
@@ -152,6 +159,12 @@ fetch() {
   in_origin curl -s --max-time 30 -D /tmp/h -o /tmp/b -H 'Host: localhost' -H 'Accept: image/jpeg' "${args[@]}" "$1"
 }
 header() { in_origin sh -c "grep -i '^$1:' /tmp/h | cut -d' ' -f2- | tr -d '\r'"; }
+# Every line of a field, joined as one value (a field sent on two lines).
+header_joined() { header "$1" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }'; }
+# The longest max-age or s-maxage on any line of Cache-Control.
+longest_lifetime() {
+  header cache-control | grep -oiE '(max-age|s-maxage)=[0-9]+' | cut -d= -f2 | sort -n | tail -1
+}
 body_hash() { in_origin sha256sum /tmp/b | cut -c1-16; }
 describe() {
   printf '%-9s %-9s %7s bytes  %-4s  Vary: %s\n' "$1" \
@@ -266,5 +279,83 @@ for cache in "$NGINX_CACHE" "$VARNISH" "$NGINX_CLASS" "$VARNISH_CLASS"; do
       ;;
   esac
 done
+
+# Fallback lifetime.  Only the phone asks first, so only its variant exists.
+# On nginx both with the site's `expires` and without one: `expires` must not
+# lengthen a fallback, and must keep its say over a client's own variant.
+check_fallback_lifetime() {
+  local path=$1 want_own=$2 deadline phone_hash="" h pair cache c max_age own lines
+  echo "== $SERVER: fallback lifetime, $path"
+  deadline=$((SECONDS + READY_TIMEOUT_S))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    fetch "http://localhost$path" phone
+    h=$(body_hash)
+    if [ -n "$(header age)" ] && [ "$h" != "$origin_hash" ]; then
+      phone_hash=$h
+      break
+    fi
+    sleep 1
+  done
+  if [ -z "$phone_hash" ]; then
+    echo "  FAIL: the phone got no optimized variant of $path within ${READY_TIMEOUT_S}s"
+    fail=1
+    return
+  fi
+  describe phone
+  for pair in "$NGINX_CACHE:desktop" "$VARNISH:save-data"; do
+    cache=${pair%%:*} c=${pair##*:}
+    fetch "http://$cache$path" "$c"
+    describe "$c"
+    echo "  through ${cache#"$PREFIX"-}: Cache-Control: $(header_joined cache-control)  Expires: $(header expires)  Age: $(header age)"
+    if [ "$(body_hash)" != "$phone_hash" ]; then
+      echo "  FAIL: $c was not answered with the phone's bytes, so this run did not test a fallback"
+      fail=1
+    fi
+    # Every line counts: a cache may take the last lifetime it reads.
+    lines=$(header cache-control | grep -c .)
+    if [ "$lines" -ne 1 ]; then
+      echo "  FAIL: the fallback carries $lines Cache-Control lines"
+      fail=1
+    fi
+    max_age=$(longest_lifetime)
+    if [ -z "$max_age" ] || [ "$max_age" -gt "$FALLBACK_MAX_AGE_S" ]; then
+      echo "  FAIL: the fallback's lifetime is '${max_age}', longer than ${FALLBACK_MAX_AGE_S}s"
+      fail=1
+    fi
+    if [ -n "$(header expires)" ]; then
+      echo "  FAIL: the fallback carries Expires"
+      fail=1
+    fi
+  done
+  # Past the lifetime each cache must have let go of the fallback; its next
+  # answer may be a fallback again only while the client's own is unwritten.
+  sleep $((FALLBACK_MAX_AGE_S + 15))
+  for pair in "$NGINX_CACHE:desktop" "$VARNISH:save-data"; do
+    cache=${pair%%:*} c=${pair##*:}
+    fetch "http://localhost$path" "$c"
+    own=$(body_hash)
+    fetch "http://$cache$path" "$c"
+    describe "$c"
+    echo "  through ${cache#"$PREFIX"-}: Cache-Control: $(header_joined cache-control)  Age: $(header age)"
+    if [ "$(body_hash)" != "$own" ] || [ "$own" = "$phone_hash" ]; then
+      echo "  FAIL: $c through ${cache#"$PREFIX"-} still has the phone's bytes or differs from the origin"
+      fail=1
+    fi
+    # The desktop's own variant is not a fallback, so its field is untouched.
+    if [ "$c" = desktop ] && [ -n "$want_own" ] && [ "$(header_joined cache-control)" != "$want_own" ]; then
+      echo "  FAIL: the desktop's own variant has Cache-Control '$(header_joined cache-control)', expected '$want_own'"
+      fail=1
+    fi
+  done
+}
+if [ "$SERVER" = nginx ]; then
+  check_fallback_lifetime /fallback.jpg 'max-age=3600'
+  check_fallback_lifetime /no-expires/fallback-plain.jpg 'must-revalidate, max-age=300'
+  # The own variant's field there depends on what the recorder saw; only the
+  # fallback is asserted.
+  check_fallback_lifetime /add-header/fallback-added.jpg ''
+else
+  check_fallback_lifetime /fallback.jpg 'must-revalidate, max-age=3600'
+fi
 if [ $fail -eq 0 ]; then echo "PASS"; else echo "FAIL"; fi
 exit $fail

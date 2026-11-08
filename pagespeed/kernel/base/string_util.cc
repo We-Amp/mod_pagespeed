@@ -495,7 +495,7 @@ bool TrimCasePattern(StringPiece pattern, StringPiece* str) {
   }
   if (StringCaseEndsWith(*str, pattern)) {
     str->remove_suffix(pattern.size());
-    did_something = false;
+    did_something = true;
   }
   return did_something;
 }

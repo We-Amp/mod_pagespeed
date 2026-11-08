@@ -38,9 +38,13 @@
 #include "pagespeed/apache/apache_httpd_includes.h"
 #include "http_config.h"  // NOLINT
 #include "pagespeed/apache/apache_server_context.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/serve_host_names.h"
 #include "test/pagespeed/apache/mock_apache.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -158,6 +162,99 @@ class ApacheHostNamesTest : public testing::Test {
   server_rec server_;
   std::set<const server_rec*> stated_;
 };
+
+TEST_F(ApacheHostNamesTest, SiteIdentityHoldsStatedNamesWildcardsAndAddresses) {
+  apr_sockaddr_t* v4 = nullptr;
+  apr_sockaddr_t* v6 = nullptr;
+  ASSERT_EQ(APR_SUCCESS,
+            apr_sockaddr_info_get(&v4, "192.0.2.7", APR_INET, 80, 0, pool_));
+  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&v6, "2001:db8::7", APR_INET6,
+                                               8080, 0, pool_));
+  server_addr_rec addr6 = {};
+  addr6.host_addr = v6;
+  addr6.host_port = 8080;
+  server_addr_rec addr4 = {};
+  addr4.next = &addr6;
+  addr4.host_addr = v4;
+  addr4.host_port = 80;
+  server_.addrs = &addr4;
+
+  SiteIdentity identity;
+  AppendApacheSiteIdentity(&server_, &main_, stated_, &identity);
+  EXPECT_THAT(identity.names, testing::UnorderedElementsAre(
+                                  "www.example.test", "Static.Example.TEST",
+                                  "example.test", "*.example.test"));
+  EXPECT_THAT(identity.listen_addresses,
+              testing::ElementsAre("192.0.2.7:80", "[2001:db8::7]:8080"));
+
+  // A name httpd derived, not one the configuration states, does not count:
+  // it can differ between machines that share a configuration.
+  stated_.erase(&server_);
+  SiteIdentity unstated;
+  AppendApacheSiteIdentity(&server_, &main_, stated_, &unstated);
+  EXPECT_THAT(unstated.names,
+              testing::UnorderedElementsAre("Static.Example.TEST",
+                                            "example.test", "*.example.test"));
+  server_.addrs = nullptr;
+}
+
+GoogleString ReadApacheSource(const char* name) {
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  GoogleString source;
+  const GoogleString path = StrCat(GTestSrcDir(), "/pagespeed/apache/", name);
+  EXPECT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  return source;
+}
+
+TEST(ApacheSiteCacheFragmentPinTest, PostConfigDerivesTheFragmentPerRecord) {
+  const GoogleString source = ReadApacheSource("mod_instaweb.cc");
+  const size_t hook = source.find("int pagespeed_post_config(");
+  ASSERT_NE(GoogleString::npos, hook);
+  const size_t derive = source.find(
+      "site_fragments[server] = DeriveSiteCacheFragment(identity);", hook);
+  ASSERT_NE(GoogleString::npos, derive)
+      << "each server record without a CacheFragment gets its own keyspace";
+  EXPECT_NE(
+      GoogleString::npos,
+      source.rfind("AppendApacheSiteIdentity(server, server_list,", derive))
+      << "from that record's own names and addresses";
+  EXPECT_NE(GoogleString::npos,
+            source.rfind("if (!fragment.empty()) {", derive))
+      << "an explicit CacheFragment, set or inherited, wins";
+  EXPECT_NE(GoogleString::npos, source.find("APLOG_NOTICE", derive))
+      << "the value is withheld from the options payload, so it is logged";
+  // Before the contexts are configured from their options.
+  const size_t publish =
+      source.find("factory->set_site_cache_fragments(", derive);
+  const size_t post_config = source.find("factory->PostConfig(", hook);
+  ASSERT_NE(GoogleString::npos, publish);
+  ASSERT_NE(GoogleString::npos, post_config);
+  EXPECT_LT(publish, post_config);
+  EXPECT_LT(source.find("context->server() == server", derive), publish)
+      << "a context takes the value of the record it was made for";
+}
+
+TEST(ApacheSiteCacheFragmentPinTest, RequestsApplyTheirRecordsFragment) {
+  const GoogleString source = ReadApacheSource("instaweb_handler.cc");
+  const size_t compute =
+      source.find("void InstawebHandler::ComputeCustomOptions()");
+  ASSERT_NE(GoogleString::npos, compute);
+  const size_t lookup =
+      source.find("site_cache_fragment(request_->server)", compute);
+  ASSERT_NE(GoogleString::npos, lookup);
+  const size_t set = source.find(
+      "custom_options_->set_cache_fragment(*site_fragment);", lookup);
+  ASSERT_NE(GoogleString::npos, set);
+  // After every other source of options, and before options_ is chosen.
+  EXPECT_LT(source.find("rewrite_query_.options()", compute), lookup);
+  EXPECT_NE(GoogleString::npos,
+            source.find("options_ = custom_options_.get();", set));
+  EXPECT_NE(
+      GoogleString::npos,
+      source.find("server_context_->global_config()->cache_fragment()", lookup))
+      << "a fragment set for the directory or by remote configuration wins";
+}
 
 TEST_F(ApacheHostNamesTest, TheServerNameAndExactAliasesAreTheNames) {
   const ConfiguredHostNames names = OwnNames();

@@ -87,7 +87,10 @@ UpperCaseRewriter::~UpperCaseRewriter() {}
 
 NestedFilter::~NestedFilter() {}
 
-NestedFilter::Context::~Context() { STLDeleteElements(&strings_); }
+NestedFilter::Context::~Context() {
+  filter_->num_partitions_at_delete_ += num_output_partitions();
+  STLDeleteElements(&strings_);
+}
 
 void NestedFilter::Context::RewriteSingle(const ResourcePtr& input,
                                           const OutputResourcePtr& output) {

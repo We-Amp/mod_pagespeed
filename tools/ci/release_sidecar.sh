@@ -32,8 +32,10 @@
 # The gates, in the order the callers run them:
 #   hygiene  the module exports only the nginx module symbols and links no
 #            OpenSSL; nginx and the shim link no OpenSSL; none of the three
-#            needs libstdc++ or a glibc newer than 2.31.
-#   smoke    load, serve and optimize in Debian 11 and Debian 12
+#            needs libstdc++, a PCRE library of the host (nginx links the
+#            pinned PCRE2 statically) or a glibc newer than 2.31.
+#   smoke    load, serve and optimize in the SMOKE_IMAGES containers (Debian
+#            11, 12 and 13, Ubuntu 26.04), with no PCRE package installed
 #            (test/package-test/check-sidecar-pair.sh): X-Page-Speed carries
 #            the version of the tree, and no X-PageSpeed-Warn appears.
 #   strip    debug files split off into --debug, then hygiene and smoke
@@ -57,11 +59,14 @@
 #
 # `package` writes pagespeed-sidecar-native-<version>-linux-<arch>.tar.gz:
 # nginx, ngx_pagespeed_module.so, pagespeed-nginx-launch, build-info.json
-# (versions, the compilers that built the pair, and the sha256 of each binary)
+# (versions of nginx and PCRE2, the compilers that built the pair, and the
+# sha256 of each binary)
 # and the license files; with --debug also
 # pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz, the debug files
 # of the same binaries.
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # The build image of the pair, pinned by digest: Ubuntu 20.04 (glibc 2.31), the
 # compatibility floor of the sidecar. Ubuntu 20.04 is past its standard support
@@ -71,10 +76,13 @@ set -euo pipefail
 # aspnetcore/README.md.
 FOCAL_IMAGE="ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214"
 GLIBC_FLOOR="2.31"
-# The smoke hosts: the oldest and a current Debian the pair supports.
+# The smoke hosts: the oldest Debian the pair supports, the current Debian
+# releases, and Ubuntu 26.04 (none of the newer ones ships libpcre3).
 SMOKE_IMAGES=(
   "debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9"
   "debian:12@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858"
+  "debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6"
+  "ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
 )
 # The .NET SDKs the test suite runs under, one per framework the package ships.
 DOTNET_IMAGE_NET8="mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim@sha256:f7e28a0a3f6f9235929ec19274fd0ddf8534e9159f99fac602ac73304f1ce99f"
@@ -87,6 +95,47 @@ PAIR_FILES=(nginx ngx_pagespeed_module.so pagespeed-nginx-launch)
 TRANSIENT_FETCH_RE='Hash Sum mismatch|Unable to fetch some archives|bad record MAC|Connection reset|Temporary failure resolving|unexpected EOF|could not download Bazel|Failed to fetch'
 
 die() { echo "::error::release_sidecar: $*" >&2; exit 1; }
+
+# apt_install_retry [--no-install-recommends] PKG...: apt-get update and the
+# install of the packages, each with Acquire::Retries, the whole of it re-run
+# up to three times with a short sleep between, so that a short mirror outage
+# does not fail the step. A real outage still does: stderr is never redirected,
+# apt's own error stays visible and the failure is returned to the caller. The
+# function runs in the container's shell, not in this one: every call site
+# splices it into its docker run command with "$(declare -f
+# apt_install_retry)" and passes SIDECAR_APT_MIRROR along. That variable, when
+# set and not empty, is a host (with an optional port) that replaces the
+# image's own host in every apt source URL before the first update; unset or
+# empty, the sources are left as the image has them.
+apt_install_retry() {
+  local flags=() files=() f attempt
+  if [ "${1:-}" = "--no-install-recommends" ]; then flags=(--no-install-recommends); shift; fi
+  if [ -n "${SIDECAR_APT_MIRROR:-}" ]; then
+    # The one-line and the deb822 sources of the Debian and the Ubuntu images.
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+      if [ -f "$f" ]; then files+=("$f"); fi
+    done
+    if [ "${#files[@]}" -gt 0 ]; then
+      sed -i -e "s|//deb.debian.org|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//security.debian.org|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//archive.ubuntu.com|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//security.ubuntu.com|//${SIDECAR_APT_MIRROR}|g" "${files[@]}"
+    fi
+  fi
+  for attempt in 1 2 3; do
+    # stdout quiet as before; stderr left alone, also on the last attempt.
+    if apt-get update -qq -o Acquire::Retries=5 >/dev/null \
+      && apt-get install -y -qq -o Acquire::Retries=5 "${flags[@]}" "$@" >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -ge 3 ]; then
+      echo "::error::release_sidecar: apt install of $* failed after $attempt attempts" >&2
+      return 1
+    fi
+    echo "::warning::release_sidecar: apt install of $* failed (attempt $attempt of 3), retrying" >&2
+    sleep $((attempt * 5))
+  done
+}
 
 rid_of() {
   case "$1" in
@@ -125,6 +174,15 @@ focal_nginx_version() {
   v="$(awk '/^[[:space:]]*focal\)[[:space:]]*DEF_NGINX_VER=/ {
               if (match($0, /[0-9]+\.[0-9]+\.[0-9]+/)) { print substr($0, RSTART, RLENGTH); exit } }' "$recipe")"
   [ -n "$v" ] || { echo "release_sidecar: no focal DEF_NGINX_VER in $recipe" >&2; return 1; }
+  printf '%s\n' "$v"
+}
+
+# The PCRE2 version the focal recipe links into nginx (its PCRE2_VERSION).
+focal_pcre2_version() {
+  local recipe="$1/install/nginx/build_module_in_container.sh" v
+  [ -f "$recipe" ] || { echo "release_sidecar: no recipe at $recipe" >&2; return 1; }
+  v="$(sed -n 's/^PCRE2_VERSION="${PCRE2_VERSION:-\([0-9][0-9.]*\)}"$/\1/p' "$recipe" | head -1)"
+  [ -n "$v" ] || { echo "release_sidecar: no PCRE2_VERSION in $recipe" >&2; return 1; }
   printf '%s\n' "$v"
 }
 
@@ -214,6 +272,7 @@ build() {
     # nginx tree under the workspace is removed again, and the workspace (Bazel
     # adds to the repository cache under vendor/) and the outputs are handed
     # back to the runner user, so that a later checkout can clear them.
+    docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
     if docker run --rm --init --platform "$(platform_of "$ARCH")" ${mem_args[@]+"${mem_args[@]}"} \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
@@ -268,12 +327,15 @@ hygiene() {
   parse_args "$@" || return $?
   [ -n "$ARCH" ] || die "hygiene: --arch is required"
   need_native; need_src; need_pair
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$SRC:/src:ro" -v "$PAIR:/p:ro" -w /src \
     "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq >/dev/null && apt-get install -y -qq binutils >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry binutils
       # The module: no OpenSSL, and only the nginx module symbols exported.
       bash install/nginx/assert_symbol_hygiene.sh /p/ngx_pagespeed_module.so
       fail=0
@@ -282,6 +344,9 @@ hygiene() {
         echo "### $b NEEDED: $(echo $needed)"
         if printf "%s\n" "$needed" | grep -qiE "^lib(ssl|crypto)"; then
           echo "::error::$b links OpenSSL: the pair would not load where another OpenSSL is installed"; fail=1
+        fi
+        if printf "%s\n" "$needed" | grep -qiE "^libpcre"; then
+          echo "::error::$b needs a PCRE library of the host: nginx must link PCRE2 statically"; fail=1
         fi
         if printf "%s\n" "$needed" | grep -qE "^lib(stdc\+\+|gcc_s)"; then
           echo "::error::$b needs the C++ runtime of the host: it must be linked statically"; fail=1
@@ -313,11 +378,14 @@ strip_pair() {
   [ -n "$ARCH" ] && [ -n "$DEBUG_DIR" ] || die "strip: --arch and --debug are required"
   need_native; need_pair
   mkdir -p "$DEBUG_DIR"; DEBUG_DIR="$(abs_dir "$DEBUG_DIR")"
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$PAIR:/p" -v "$DEBUG_DIR:/d" "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq >/dev/null && apt-get install -y -qq binutils file >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry binutils file
       trap "chown -R \"$HOST_UID:$HOST_GID\" /p /d" EXIT
       cd /p
       for b in nginx ngx_pagespeed_module.so pagespeed-nginx-launch; do
@@ -393,18 +461,15 @@ PY
 run_suite() {
   local work="$1" image="$2" fw="$3" props="$4" rid="$5" require="$6" filter="$7" trx="$8" platform=""
   [ -z "$ARCH" ] || platform="$(platform_of "$ARCH")"
+  docker_pull_retry "$image" ${platform:+--platform "$platform"} || return 1
   docker run --rm --init ${platform:+--platform "$platform"} \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e FW="$fw" -e PROPS="$props" -e RID="$rid" -e REQUIRE="$require" -e FILTER="$filter" -e TRX="$trx" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
     -v "$work:/w" -v "$RESULTS:/results" -w /w \
     "$image" bash -c '
       set -euo pipefail
-      if [ -n "$RID" ]; then
-        # The bundled nginx links PCRE; a consumer host provides it.
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
-      fi
       # dotnet needs an account for the user it runs as.
       getent group "$HOST_GID" >/dev/null || groupadd -o -g "$HOST_GID" sidecar
       getent passwd "$HOST_UID" >/dev/null || useradd -o -M -u "$HOST_UID" -g "$HOST_GID" -d /tmp/home sidecar
@@ -543,7 +608,7 @@ package() {
   need_src; need_pair
   printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || die "package: --source-sha is not a commit id"
   printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die "package: bad --version '$VERSION'"
-  local rid ngxver tree name stage clang gcc
+  local rid ngxver pcre2ver tree name stage clang gcc
   rid="$(rid_of "$ARCH")"
   [ -s "$PAIR/toolchain.txt" ] || die "package: the pair has no toolchain.txt (built by an older build?)"
   clang="$(sed -n 's/^clang=//p' "$PAIR/toolchain.txt")"
@@ -551,6 +616,7 @@ package() {
   [ -n "$clang" ] && [ -n "$gcc" ] || die "package: toolchain.txt names no clang or gcc"
   case "$clang$gcc" in *\"*|*\\*) die "package: unexpected characters in toolchain.txt" ;; esac
   ngxver="$(focal_nginx_version "$SRC")"
+  pcre2ver="$(focal_pcre2_version "$SRC")"
   tree="$(tree_version "$SRC")"
   [ "$tree" = "$VERSION" ] || die "package: the tree is stamped $tree, not $VERSION"
   mkdir -p "$OUT"; OUT="$(abs_dir "$OUT")"
@@ -562,8 +628,9 @@ package() {
   # The tarball is written in a container: GNU tar for a reproducible archive
   # wherever the script runs. Every entry carries the time SOURCE_DATE_EPOCH
   # (default 0, the epoch), so the archive depends on its contents only.
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-    -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" \
+    -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" -e PCRE2VER="$pcre2ver" \
     -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
     -e CLANG="$clang" -e GCC="$gcc" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
     -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '
@@ -577,6 +644,7 @@ package() {
         printf "  \"mod_pagespeed_version\": \"%s\",\n" "$VERSION"
         printf "  \"rid\": \"%s\",\n" "$RID"
         printf "  \"nginx_version\": \"%s\",\n" "$NGXVER"
+        printf "  \"pcre2_version\": \"%s\",\n" "$PCRE2VER"
         printf "  \"glibc_floor\": \"%s\",\n" "$GLIBC_FLOOR"
         printf "  \"build_image\": \"%s\",\n" "$IMAGE"
         printf "  \"clang_version\": \"%s\",\n" "$CLANG"
@@ -604,6 +672,7 @@ package() {
       [ -s "$DEBUG_DIR/$f.debug" ] || die "package: no debug file $DEBUG_DIR/$f.debug"
       cp "$DEBUG_DIR/$f.debug" "$stage/$dname/"
     done
+    docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
     docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
       -e NAME="$dname" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
       -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '

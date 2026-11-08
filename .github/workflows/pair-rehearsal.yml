@@ -4,13 +4,17 @@
 # Pair rehearsal (docs/ci/release.md): before the release tag, check that the
 # module and the optimizer of the candidate are one pair, with the checks the
 # real tag runs. A `module-vX.Y.Z-pre.N` dry run of the release lane skips the
-# version pair check; this does not.
+# version pair check; this does not. A final tag (X.Y.Z or X.Y.Z-rc.N) that
+# does not exist yet is rehearsed from a candidate run of the release lane:
+# the run is verified through the Actions API and the commit it built (not a
+# tag) is the one checked out.
 #
 # Dispatch only, hosted, read-only: no environment, no secret, no write
 # permission, no call to another workflow. tools/ci/test_pair_rehearsal_shape.sh
 # keeps it that way.
 #
 # Try it:  gh workflow run pair-rehearsal.yml -f tag=module-v1.2.3-pre.1 -f dry_run_id=<release.yml dry run id>
+#          gh workflow run pair-rehearsal.yml -f tag=module-v1.2.3 -f candidate_run_id=<candidate run id>
 
 name: Pair rehearsal
 
@@ -18,11 +22,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Rehearsal tag of the candidate (module-vX.Y.Z-pre.N), or the release tag'
+        description: 'Rehearsal tag of the candidate (module-vX.Y.Z-pre.N), or the release tag (module-vX.Y.Z or module-vX.Y.Z-rc.N, with candidate_run_id, when the tag does not exist yet)'
         required: true
         type: string
       dry_run_id:
         description: 'Run id of the release lane dry run of this tag (without it the install-and-serve evidence is NOT checked, and the summary says so)'
+        required: false
+        type: string
+        default: ''
+      candidate_run_id:
+        description: 'Run id of a candidate run of the release lane, for a tag that does not exist yet (instead of dry_run_id): it is verified, and the commit it built is rehearsed'
         required: false
         type: string
         default: ''
@@ -39,7 +48,8 @@ jobs:
   rehearse:
     name: Pair rehearsal
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       # The check comes from master, never from the tree being rehearsed.
@@ -52,10 +62,25 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Checkout the candidate tag
+      # A candidate run is verified before anything of it is checked out; the
+      # commit it built is the only thing taken from it.
+      - name: Verify the candidate run
+        id: candidate
+        if: ${{ inputs.candidate_run_id != '' }}
+        env:
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in module-v*) ;; *) echo "::error::not a module-v* tag"; exit 1 ;; esac
+          case "$CANDIDATE_RUN_ID" in ""|*[!0-9]*) echo "::error::candidate_run_id is not a run id"; exit 1 ;; esac
+          bash tools/ci/pair_rehearsal.sh --resolve-candidate --tag "$TAG" --run-id "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --out "$GITHUB_OUTPUT"
+
+      - name: Checkout the candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ steps.candidate.outputs.head_sha || format('refs/tags/{0}', inputs.tag) }}
           path: candidate
           sparse-checkout: |
             /install/debian/optimizer-pin.json
@@ -67,6 +92,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           RUN_ID: ${{ inputs.dry_run_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -80,7 +106,13 @@ jobs:
           ARGS=(--tag "$TAG" --pin "$PIN" --optimizer-version-file optimizer-VERSION.txt
                 --optimizer-module-bazel optimizer-MODULE.bazel
                 --repositories-bzl candidate/bazel/repositories.bzl)
-          if [ -n "$RUN_ID" ]; then
+          if [ -n "$RUN_ID" ] && [ -n "$CANDIDATE_RUN_ID" ]; then
+            echo "::error::dry_run_id and candidate_run_id are exclusive"; exit 1
+          fi
+          if [ -n "$CANDIDATE_RUN_ID" ]; then
+            case "$CANDIDATE_RUN_ID" in *[!0-9]*) echo "::error::candidate_run_id is not a run id"; exit 1 ;; esac
+            ARGS+=(--candidate-run-id "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")
+          elif [ -n "$RUN_ID" ]; then
             case "$RUN_ID" in *[!0-9]*) echo "::error::dry_run_id is not a run id"; exit 1 ;; esac
             ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")
           else

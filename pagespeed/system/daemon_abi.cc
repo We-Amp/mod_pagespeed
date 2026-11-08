@@ -267,8 +267,9 @@ using SharedConfigVolumeSizeFn = uint64_t (*)(const char*);
 using SharedConfigGenerationFn = uint32_t (*)(const char*);
 using WriteParamsInitSizedFn = void (*)(PsWriteParams*, size_t);
 using NotifyParamsInitSizedFn = void (*)(PsNotifyParams*, size_t);
-using CacheWriteOriginalFn = int (*)(void*, const char*, const char*,
-                                     const char*, const PsWriteParams*, void**);
+using CacheWriteOriginalSiteFn = int (*)(void*, const char*, const char*,
+                                         const char*, const char*,
+                                         const PsWriteParams*, void**);
 using WriteDataFn = int (*)(void*, const void*, size_t);
 using WriteCloseFn = int (*)(void*);
 using WriteAbortFn = void (*)(void*);
@@ -281,10 +282,11 @@ using ClassifyFn = uint32_t (*)(const char*, const char*, const char*,
 using ClassifyContentTypeFn = int (*)(const char*);
 using OptionContextSignatureFn = int (*)(const char*, size_t, char*, size_t);
 using NotifyWorkerExFn = int (*)(const char*, const PsNotifyParams*);
-using CacheReadBestFn = int (*)(void*, const char*, const char*, const char*,
-                                uint32_t, void**);
-using CacheReadAlternateFn = int (*)(void*, const char*, const char*,
-                                     const char*, uint8_t, void**);
+using CacheReadBestSiteFn = int (*)(void*, const char*, const char*,
+                                    const char*, const char*, uint32_t, void**);
+using CacheReadAlternateSiteFn = int (*)(void*, const char*, const char*,
+                                         const char*, const char*, uint8_t,
+                                         void**);
 using ReadContentFn = int (*)(const void*, const uint8_t**, size_t*);
 using ReadUint32Fn = uint32_t (*)(const void*);
 using ReadUint16Fn = uint16_t (*)(const void*);
@@ -304,7 +306,21 @@ using ServeStatsRecordHitFn = void (*)(void*, int, uint64_t, uint64_t,
                                        uint32_t);
 using ServeStatsRecordHitHostFn = void (*)(void*, int, uint64_t, uint64_t,
                                            uint32_t, const char*, size_t);
+using ServeStatsRecordHitSplitFn = void (*)(void*, int, uint64_t, uint64_t,
+                                            uint64_t, uint32_t, const char*,
+                                            size_t);
+using ReadEncodedOriginLengthFn = int (*)(const void*, uint64_t*);
 using ServeStatsCloseFn = void (*)(void*);
+
+using HtmlStoreClassifyFn = int (*)(int, const char*, const char*, uint32_t,
+                                    int, const char* const*, const char* const*,
+                                    size_t, uint64_t, int, const char*, size_t,
+                                    uint64_t, uint32_t, int*, uint32_t*,
+                                    uint32_t*, uint16_t*, int*, char*, size_t,
+                                    size_t*);
+using HtmlDecisionFormatFn = int (*)(const char* const*, const char* const*,
+                                     size_t, char*, size_t, size_t*);
+using HtmlStoreReasonNameFn = const char* (*)(int);
 
 class LibraryDaemonAbi : public DaemonAbi {
  public:
@@ -351,6 +367,41 @@ class LibraryDaemonAbi : public DaemonAbi {
     return shared_config_volume_size_(volume_path);
   }
 
+  bool PublishesHtmlStorePolicy() const override {
+    return html_store_classify_ != nullptr;
+  }
+
+  int HtmlStoreClassify(int mode, const char* method, const char* url_path,
+                        uint32_t request_flags, int status,
+                        const char* const* names, const char* const* values,
+                        size_t count, uint64_t body_bytes, int body_complete,
+                        const char* body_prefix, size_t body_prefix_len,
+                        uint64_t max_body_bytes, uint32_t now_seconds,
+                        int* out_reason, uint32_t* out_lifetime_s,
+                        uint32_t* out_flags, uint16_t* out_cc_flags,
+                        int* out_sidecar, char* detail_buf,
+                        size_t detail_capacity,
+                        size_t* out_detail_len) const override {
+    if (html_store_classify_ == nullptr) return -1;
+    return html_store_classify_(
+        mode, method, url_path, request_flags, status, names, values, count,
+        body_bytes, body_complete, body_prefix, body_prefix_len, max_body_bytes,
+        now_seconds, out_reason, out_lifetime_s, out_flags, out_cc_flags,
+        out_sidecar, detail_buf, detail_capacity, out_detail_len);
+  }
+
+  int HtmlDecisionFormat(const char* const* keys, const char* const* values,
+                         size_t count, char* buf, size_t capacity,
+                         size_t* out_len) const override {
+    if (html_decision_format_ == nullptr) return -1;
+    return html_decision_format_(keys, values, count, buf, capacity, out_len);
+  }
+
+  const char* HtmlStoreReasonName(int reason) const override {
+    if (html_store_reason_name_ == nullptr) return nullptr;
+    return html_store_reason_name_(reason);
+  }
+
   bool PublishesVolumeSize() const override {
     return shared_config_volume_size_ != nullptr;
   }
@@ -393,11 +444,12 @@ class LibraryDaemonAbi : public DaemonAbi {
     notify_params_init_sized_(params, sizeof(PsNotifyParams));
   }
 
-  int CacheWriteOriginal(void* cache, const char* url, const char* hostname,
-                         const char* scheme, const PsWriteParams* params,
-                         void** out_handle) const override {
-    return cache_write_original_(cache, url, hostname, scheme, params,
-                                 out_handle);
+  int CacheWriteOriginalSite(void* cache, const char* url, const char* hostname,
+                             const char* scheme, const char* site,
+                             const PsWriteParams* params,
+                             void** out_handle) const override {
+    return cache_write_original_site_(cache, url, hostname, scheme, site,
+                                      params, out_handle);
   }
 
   int WriteData(void* handle, const void* data, size_t length) const override {
@@ -446,17 +498,19 @@ class LibraryDaemonAbi : public DaemonAbi {
     return notify_worker_ex_(socket_path, params);
   }
 
-  int CacheReadBest(void* cache, const char* url, const char* hostname,
-                    const char* scheme, uint32_t mask,
-                    void** out_result) const override {
-    return cache_read_best_(cache, url, hostname, scheme, mask, out_result);
+  int CacheReadBestSite(void* cache, const char* url, const char* hostname,
+                        const char* scheme, const char* site, uint32_t mask,
+                        void** out_result) const override {
+    return cache_read_best_site_(cache, url, hostname, scheme, site, mask,
+                                 out_result);
   }
 
-  int CacheReadAlternate(void* cache, const char* url, const char* hostname,
-                         const char* scheme, uint8_t alternate_id,
-                         void** out_result) const override {
-    return cache_read_alternate_(cache, url, hostname, scheme, alternate_id,
-                                 out_result);
+  int CacheReadAlternateSite(void* cache, const char* url, const char* hostname,
+                             const char* scheme, const char* site,
+                             uint8_t alternate_id,
+                             void** out_result) const override {
+    return cache_read_alternate_site_(cache, url, hostname, scheme, site,
+                                      alternate_id, out_result);
   }
 
   int ReadContent(const void* result, const uint8_t** out_data,
@@ -514,6 +568,26 @@ class LibraryDaemonAbi : public DaemonAbi {
 
   uint32_t ReadOriginContentLength(const void* result) const override {
     return read_origin_content_length_(result);
+  }
+
+  bool ReadEncodedOriginLength(const void* result,
+                               uint64_t* out) const override {
+    return read_encoded_origin_length_ != nullptr &&
+           read_encoded_origin_length_(result, out) != 0;
+  }
+
+  bool ServeStatsRecordHitSplit(void* handle, int content_type,
+                                uint64_t original_bytes,
+                                uint64_t encoded_origin_bytes,
+                                uint64_t optimized_bytes, uint32_t mask,
+                                StringPiece host) const override {
+    if (serve_stats_record_hit_split_ == nullptr) {
+      return false;
+    }
+    serve_stats_record_hit_split_(handle, content_type, original_bytes,
+                                  encoded_origin_bytes, optimized_bytes, mask,
+                                  host.data(), host.size());
+    return true;
   }
 
   void ReadFree(void* result) const override { read_free_(result); }
@@ -593,7 +667,9 @@ class LibraryDaemonAbi : public DaemonAbi {
                 error) &&
            Bind("ps_notify_params_init_sized", &notify_params_init_sized_,
                 error) &&
-           Bind("ps_cache_write_original", &cache_write_original_, error) &&
+           // The SITED writer, never the unsited one: see kRequiredAbiMinor.
+           Bind("ps_cache_write_original_site", &cache_write_original_site_,
+                error) &&
            Bind("ps_write_data", &write_data_, error) &&
            Bind("ps_write_close", &write_close_, error) &&
            Bind("ps_write_abort", &write_abort_, error) &&
@@ -611,12 +687,14 @@ class LibraryDaemonAbi : public DaemonAbi {
   }
 
   // The serve arm's surface, split out for readability only -- it is bound on
-  // exactly the same terms as everything above it.  Every symbol here was
-  // published at or before 1.2, so any floor this module has ever had already
-  // guarantees all of them and none of this has ever moved the floor.
+  // exactly the same terms as everything above it.  The two sited reads are
+  // 1.12, the floor, and published together with the sited writer, so a
+  // library this module records into can also be served from.
   bool BindServeArm(GoogleString* error) {
-    return Bind("ps_cache_read_best", &cache_read_best_, error) &&
-           Bind("ps_cache_read_alternate", &cache_read_alternate_, error) &&
+    // The SITED reads, never the unsited ones: see kRequiredAbiMinor.
+    return Bind("ps_cache_read_best_site", &cache_read_best_site_, error) &&
+           Bind("ps_cache_read_alternate_site", &cache_read_alternate_site_,
+                error) &&
            Bind("ps_read_content", &read_content_, error) &&
            Bind("ps_read_mask", &read_mask_, error) &&
            Bind("ps_read_flags", &read_flags_, error) &&
@@ -664,12 +742,34 @@ class LibraryDaemonAbi : public DaemonAbi {
     serve_stats_record_hit_host_ =
         reinterpret_cast<ServeStatsRecordHitHostFn>(NativeOps::Sym(
             handle_, "ps_serve_stats_record_hit_host", &unused_error));
+    // The split of the saving by serve (1.12): the encoded size of the
+    // origin bytes, and the recorder that takes it.  Optional: without them a
+    // serve is recorded as before, in the totals only.
+    read_encoded_origin_length_ =
+        reinterpret_cast<ReadEncodedOriginLengthFn>(NativeOps::Sym(
+            handle_, "ps_read_encoded_origin_length", &unused_error));
+    serve_stats_record_hit_split_ =
+        reinterpret_cast<ServeStatsRecordHitSplitFn>(NativeOps::Sym(
+            handle_, "ps_serve_stats_record_hit_split", &unused_error));
     // The per-failure explanation.  Optional on the same terms as the two
     // above and for a smaller stake: its absence costs one clause in an error
     // line, so refusing a library over it would trade a working degrade for a
     // server that will not start.
     last_error_message_ = reinterpret_cast<LastErrorMessageFn>(
         NativeOps::Sym(handle_, "ps_last_error_message", &unused_error));
+    // The HTML cache policy (1.12), as a set: the report needs all three, so
+    // a library with only some of them counts as one without the policy.
+    const auto classify = reinterpret_cast<HtmlStoreClassifyFn>(
+        NativeOps::Sym(handle_, "ps_html_store_classify", &unused_error));
+    const auto format = reinterpret_cast<HtmlDecisionFormatFn>(
+        NativeOps::Sym(handle_, "ps_html_decision_format", &unused_error));
+    const auto reason_name = reinterpret_cast<HtmlStoreReasonNameFn>(
+        NativeOps::Sym(handle_, "ps_html_store_reason_name", &unused_error));
+    if (classify != nullptr && format != nullptr && reason_name != nullptr) {
+      html_store_classify_ = classify;
+      html_decision_format_ = format;
+      html_store_reason_name_ = reason_name;
+    }
   }
 
  private:
@@ -696,9 +796,12 @@ class LibraryDaemonAbi : public DaemonAbi {
   CacheCloseFn cache_close_ = nullptr;
   StrErrorFn str_error_ = nullptr;
   LastErrorMessageFn last_error_message_ = nullptr;
+  HtmlStoreClassifyFn html_store_classify_ = nullptr;
+  HtmlDecisionFormatFn html_decision_format_ = nullptr;
+  HtmlStoreReasonNameFn html_store_reason_name_ = nullptr;
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
-  CacheWriteOriginalFn cache_write_original_ = nullptr;
+  CacheWriteOriginalSiteFn cache_write_original_site_ = nullptr;
   WriteDataFn write_data_ = nullptr;
   WriteCloseFn write_close_ = nullptr;
   WriteAbortFn write_abort_ = nullptr;
@@ -710,8 +813,8 @@ class LibraryDaemonAbi : public DaemonAbi {
   ClassifyContentTypeFn classify_content_type_ = nullptr;
   OptionContextSignatureFn option_context_signature_ = nullptr;
   NotifyWorkerExFn notify_worker_ex_ = nullptr;
-  CacheReadBestFn cache_read_best_ = nullptr;
-  CacheReadAlternateFn cache_read_alternate_ = nullptr;
+  CacheReadBestSiteFn cache_read_best_site_ = nullptr;
+  CacheReadAlternateSiteFn cache_read_alternate_site_ = nullptr;
   ReadContentFn read_content_ = nullptr;
   ReadUint32Fn read_mask_ = nullptr;
   ReadUint8Fn read_flags_ = nullptr;
@@ -733,6 +836,8 @@ class LibraryDaemonAbi : public DaemonAbi {
   ServeStatsRecordServeClassFn serve_stats_record_serve_class_ = nullptr;
   ServeStatsRecordHitFn serve_stats_record_hit_ = nullptr;
   ServeStatsRecordHitHostFn serve_stats_record_hit_host_ = nullptr;
+  ServeStatsRecordHitSplitFn serve_stats_record_hit_split_ = nullptr;
+  ReadEncodedOriginLengthFn read_encoded_origin_length_ = nullptr;
   ServeStatsCloseFn serve_stats_close_ = nullptr;
 };
 

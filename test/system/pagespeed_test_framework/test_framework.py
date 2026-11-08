@@ -23,6 +23,7 @@ Run with: python -m pytest -v test_framework.py
 
 import itertools
 import re
+import socket
 import socketserver
 import sys
 import threading
@@ -1266,7 +1267,7 @@ class TestLaneFixtureGate:
             "experiment_framework", "remote_config", "option_response_headers",
             "rule_packs", "rule_pack_log", "rule_pack_signing",
             "rule_pack_no_link_header", "rule_pack_multi", "daemon_arm",
-            "aspnet_stream",
+            "aspnet_stream", "daemon_html_report", "self_fetch_access",
         })
 
     def test_daemon_worker_is_only_believed_while_its_socket_answers(self):
@@ -1458,6 +1459,38 @@ class TestFlushOriginAndFetchChunks:
         assert css.startswith(b".peachpuff {background-color: peachpuff;}\n.")
         assert css.endswith(b" {background-color: antiquewhite;}\n")
         assert len(css) > 10000
+
+    @pytest.mark.parametrize("mode", ["length", "chunked"])
+    def test_abort_mid_body_cuts_only_the_first_response(self, origin_server, mode):
+        port = origin_server.server_address[1]
+        target = f"abort_mid_body.css?key=fw-{mode}&mode={mode}"
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5.0)
+        try:
+            sock.sendall(f"GET /{target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
+            raw = b""
+            while True:
+                data = sock.recv(65536)
+                if not data:
+                    break
+                raw += data
+        finally:
+            sock.close()
+        head, _, body = raw.partition(b"\r\n\r\n")
+        assert head.startswith(b"HTTP/1.1 200")
+        assert b".abort-rule-39" in body
+        assert b"tail-of-stylesheet" not in body
+        if mode == "length":
+            length = int(re.search(rb"Content-Length: (\d+)", head).group(1))
+            assert len(body) < length
+        else:
+            assert not body.endswith(b"0\r\n\r\n")
+        whole = self._fetch(origin_server, target)
+        assert whole.status == 200
+        assert whole.body.endswith(b".tail-of-stylesheet { color: blue; }\n")
+        assert whole.body.startswith(b".abort-rule-0 { color: red; margin: 0px; }\n")
+
+    def test_abort_mid_body_needs_a_key(self, origin_server):
+        assert self._fetch(origin_server, "abort_mid_body.css").status == 400
 
     def test_unknown_route_is_404(self, origin_server):
         assert self._fetch(origin_server, "nope").status == 404

@@ -1,0 +1,18 @@
+{
+  "name": "pagespeed-hydration-fixtures",
+  "private": true,
+  "description": "Pinned server-rendered framework pages for the hydration browser test",
+  "dependencies": {
+    "@vue/server-renderer": "3.5.44",
+    "esbuild": "0.28.2",
+    "esbuild-svelte": "0.9.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react17": "npm:react@17.0.2",
+    "react17-dom": "npm:react-dom@17.0.2",
+    "react18": "npm:react@18.3.1",
+    "react18-dom": "npm:react-dom@18.3.1",
+    "svelte": "5.57.3",
+    "vue": "3.5.44"
+  }
+}

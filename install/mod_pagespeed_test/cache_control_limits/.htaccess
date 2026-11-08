@@ -1,0 +1,24 @@
+# Rewritten HTML is never more storable than the operator or the origin
+# said: a private or no-store on any Cache-Control line, set with "Header
+# set", "Header add" or "Header always", stays on the one line the module
+# writes.  Other values are still replaced.
+ModPagespeedModifyCachingHeaders on
+<Files "private.html">
+  Header set Cache-Control "private, max-age=600"
+</Files>
+<Files "no_store.html">
+  Header add Cache-Control "max-age=600"
+  Header add Cache-Control "no-store"
+</Files>
+<Files "both.html">
+  Header always set Cache-Control "private, no-store"
+</Files>
+<Files "lines.html">
+  Header add Cache-Control "public, max-age=600"
+  Header add Cache-Control "private"
+  Header always add Cache-Control "no-store"
+</Files>
+<Files "public.html">
+  Header add Cache-Control "public, max-age=600"
+  Header always add Cache-Control "s-maxage=600"
+</Files>

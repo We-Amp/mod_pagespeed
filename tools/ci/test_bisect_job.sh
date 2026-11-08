@@ -34,6 +34,8 @@ FAILS=0
 PASSES=0
 pass() { PASSES=$((PASSES + 1)); echo "ok   $1"; }
 fail() { FAILS=$((FAILS + 1)); echo "FAIL $1: $2"; }
+# A case with no premise in this repository's table: not passed, not failed.
+skip() { echo "skip $1: $2"; }
 
 # --- The driver under test, next to its table and target parser ---------
 TOOLS="${WORK}/tools/ci"
@@ -460,6 +462,43 @@ else
   pass "${CASE}"
 fi
 
+# The driver starts only the services the table lists, so every variable
+# naming a service it does not start (an authenticated Redis, a Redis and a
+# memcached reached over a unix socket) must stay out of the table and of the
+# step command: set but empty, the cache cases that need them run against a
+# server that is not there and fail for the wrong reason; unset, they skip.
+# The ports of the services the driver does start are still passed. A table
+# whose jobs list no redis or memcached service has no ports to look for,
+# and one that names no unstarted-service variable has no names to look
+# for: the case skips (the same file runs in repositories of both kinds).
+CASE=unstarted-service-vars-are-left-out
+FAKE_STATE="${CULPRIT_STATE}"
+table_services=""
+for job in ${BISECT_JOBS:-}; do
+  J="$(printf '%s' "${job}" | tr 'a-z-' 'A-Z_')"
+  table_services="${table_services} $(eval "printf '%s' \"\${BISECT_${J}_SERVICES:-}\"")"
+done
+if ! grep -qw redis <<<"${table_services}" || ! grep -qw memcached <<<"${table_services}"; then
+  skip "${CASE}" "no redis or memcached service in the table"
+elif [ -z "${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}" ]; then
+  skip "${CASE}" "the table names no unstarted-service variable"
+else
+  bad=""
+  for k in ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}; do
+    grep -qE "(^|[[:space:]])${k}=" "${TOOLS}/bisect-job-table.sh" \
+      && bad="${bad} [${k} is still set in the table]"
+    grep -q -- "--test_env=${k}=" "${FAKE_STATE}/docker.log" \
+      && bad="${bad} [${k} reached the step as --test_env]"
+    grep -qE -- "-e ${k}=" "${FAKE_STATE}/docker.log" \
+      && bad="${bad} [${k} reached the step as container env]"
+  done
+  for k in REDIS_PORT=6379 MEMCACHED_PORT=11211; do
+    grep -q -- "--test_env=${k} " "${FAKE_STATE}/docker.log" \
+      || bad="${bad} [--test_env=${k} missing]"
+  done
+  if [ -n "${bad}" ]; then fail "${CASE}" "${bad}"; else pass "${CASE}"; fi
+fi
+
 # git 2.55 and later print "<sha> is the first 'bad' commit", older ones
 # "is the first bad commit". A git shim rewrites `git bisect run` output to
 # each wording, so both are pinned whatever git this runs on.
@@ -825,10 +864,12 @@ WF="${REPO_ROOT}/.github/workflows/pipeline-full.yml"
     for k in $(grep -oE '(^|[[:space:]])-e [A-Z_][A-Z0-9_]*=' <<<"${run_lines}" | sed 's/.*-e //; s/=$//' | sort -u); do
       case "${k}" in BAZEL_CONFIG) continue ;; esac
       case " ${services_up} " in *" ${k%_HOST} "*) continue ;; esac
+      case " ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-} " in *" ${k} "*) continue ;; esac
       case " $(v ENV) " in *" ${k}="*) ;; *) report "${job}: workflow env ${k} not in the table" ;; esac
     done
     for k in $(grep -oE -- '--test_env=[A-Z_][A-Z0-9_]*' <<<"${block}" | sed 's/--test_env=//' | sort -u); do
       case " ${services_up} " in *" ${k%_HOST} "*) continue ;; esac
+      case " ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-} " in *" ${k} "*) continue ;; esac
       case " $(v SERVICE_TEST_ENV) " in *" ${k}="*) ;; *) report "${job}: workflow --test_env=${k} not in the table" ;; esac
     done
     for e in $(v ENV); do
@@ -859,6 +900,12 @@ WF="${REPO_ROOT}/.github/workflows/pipeline-full.yml"
       | tr -d "' " | tr ',' '\n' | sed 's#/\*\*$##')
     want=$(printf '%s\n' ${BISECT_VENDOR_KEY_PATHS})
     [ "${keys}" = "${want}" ] || report "${job}: vendor key paths '$(echo ${keys})' != '$(echo ${want})'"
+  done
+  # The names of the services the driver does not start are allowed above;
+  # each of them must still be one a job sets, so the list carries no name
+  # the workflow no longer uses.
+  for k in ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}; do
+    grep -qE -- "(-e |--test_env=)${k}=" "${WF}" || report "left-out ${k} is set by no job"
   done
   exit "${bad}"
 ) && pass "${CASE}" || fail "${CASE}" "table and pipeline-full.yml disagree (above)"

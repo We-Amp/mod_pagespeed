@@ -77,6 +77,17 @@ DaemonReader* NgxServerContext::NewDaemonReader() {
                              message_handler());
 }
 
+DaemonHtmlReporter* NgxServerContext::daemon_html_reporter() {
+  std::call_once(daemon_html_reporter_once_, [this] {
+    const SystemRewriteOptions* options =
+        SystemRewriteOptions::DynamicCast(global_options());
+    daemon_html_reporter_ = std::make_unique<DaemonHtmlReporter>(
+        statistics(), timer(), options == nullptr ? "" : options->log_dir(),
+        message_handler());
+  });
+  return daemon_html_reporter_.get();
+}
+
 SystemRequestContext* NgxServerContext::NewRequestContext(
     ngx_http_request_t* r) {
   // Based on ngx_http_variable_server_port.

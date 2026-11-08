@@ -24,6 +24,7 @@
 #include <cstdarg>
 #include <cstddef>  // for size_t
 #include <cstdio>
+#include <cstring>
 #include <iterator>
 
 #include "base/logging.h"
@@ -131,6 +132,160 @@ bool IsInSet(const HtmlName::Keyword* keywords, int num,
 #define IS_IN_SET(keywords, keyword) \
   IsInSet(keywords, std::size(keywords), keyword)
 
+// Inline SVG and MathML ("foreign content") follow the HTML Standard,
+// section 13.2.6 (tree construction dispatcher) and section 13.2.6.5 (the
+// rules for parsing tokens in foreign content).  Tag names compare
+// ASCII case-insensitively, as the tokenizer lowercases them.
+
+// Whether name, compared ASCII case-insensitively, is in names, which holds
+// lowercase strings in strcmp order.
+bool NameIsOneOf(StringPiece name, const char* const* names, size_t num) {
+  char lower[32];
+  if (name.size() >= sizeof(lower)) {
+    return false;
+  }
+  for (size_t i = 0; i < name.size(); ++i) {
+    lower[i] = LowerChar(name[i]);
+  }
+  lower[name.size()] = '\0';
+  return std::binary_search(
+      names, names + num, static_cast<const char*>(lower),
+      [](const char* a, const char* b) { return strcmp(a, b) < 0; });
+}
+
+#define NAME_IS_ONE_OF(name, names) NameIsOneOf(name, names, std::size(names))
+
+#ifndef NDEBUG
+#define CHECK_NAME_SET_ORDERING(names) \
+  CheckNameSetOrdering(names, std::size(names))
+void CheckNameSetOrdering(const char* const* names, size_t num) {
+  for (size_t i = 0; i < num; ++i) {
+    for (const char* c = names[i]; *c != '\0'; ++c) {
+      DCHECK_EQ(*c, LowerChar(*c)) << names[i];
+    }
+    if (i > 0) {
+      DCHECK_LT(strcmp(names[i - 1], names[i]), 0) << names[i];
+    }
+  }
+}
+#endif
+
+// Start tags that end foreign content: the current node is popped until it
+// is an HTML element or an integration point, and the tag is then handled
+// as HTML.  HTML Standard section 13.2.6.5.  "font" is handled separately:
+// it ends foreign content only with a color, face or size attribute.
+const char* const kForeignBreakoutStartTags[] = {
+    "b",      "big",    "blockquote", "body",    "br",    "center", "code",
+    "dd",     "div",    "dl",         "dt",      "em",    "embed",  "h1",
+    "h2",     "h3",     "h4",         "h5",      "h6",    "head",   "hr",
+    "i",      "img",    "li",         "listing", "menu",  "meta",   "nobr",
+    "ol",     "p",      "pre",        "ruby",    "s",     "small",  "span",
+    "strike", "strong", "sub",        "sup",     "table", "tt",     "u",
+    "ul",     "var",
+};
+
+const char* const kForeignBreakoutFontAttributes[] = {"color", "face", "size"};
+
+// End tags that end foreign content in the same way.
+const char* const kForeignBreakoutEndTags[] = {"br", "p"};
+
+// SVG elements that are HTML integration points.
+const char* const kSvgHtmlIntegrationPoints[] = {"desc", "foreignobject",
+                                                 "title"};
+
+// MathML elements that are MathML text integration points.
+const char* const kMathMlTextIntegrationPoints[] = {"mi", "mn", "mo", "ms",
+                                                    "mtext"};
+
+// Start tags that stay MathML inside a MathML text integration point.
+const char* const kMathMlTextIntegrationPointExceptions[] = {"malignmark",
+                                                             "mglyph"};
+
+// Values of the encoding attribute that make a MathML annotation-xml element
+// an HTML integration point.
+const char* const kAnnotationXmlHtmlEncodings[] = {"application/xhtml+xml",
+                                                   "text/html"};
+
+// The following sets apply when an end tag handled by the HTML rules has to
+// walk past an SVG or MathML element (HTML Standard section 13.2.6.4.7, "in
+// body" end tags).
+
+// End tags that never pop elements in that case: </body> and </html> only
+// switch the insertion mode, </head> is ignored, and </form> takes the form
+// out of the stack without closing what is above it.
+const char* const kEndTagsThatDoNotPop[] = {"body", "form", "head", "html"};
+
+// Formatting elements.  Their end tag closes the elements above them only
+// when no special element lies in between (the adoption agency algorithm
+// leaves the current node in place otherwise).
+const char* const kFormattingElements[] = {
+    "a",    "b", "big",   "code",   "em",     "font", "i",
+    "nobr", "s", "small", "strike", "strong", "tt",   "u",
+};
+
+// End tags that close the matching element when it is in scope, whatever
+// lies above it.  The search for one stops at a scope boundary.
+const char* const kEndTagsClosingInScope[] = {
+    "address", "applet",  "article",  "aside",      "blockquote", "button",
+    "center",  "dd",      "details",  "dialog",     "dir",        "div",
+    "dl",      "dt",      "fieldset", "figcaption", "figure",     "footer",
+    "h1",      "h2",      "h3",       "h4",         "h5",         "h6",
+    "header",  "hgroup",  "li",       "listing",    "main",       "marquee",
+    "menu",    "nav",     "object",   "ol",         "pre",        "search",
+    "section", "summary", "ul",
+};
+
+// HTML elements that bound the default scope; the MathML and SVG
+// integration points and annotation-xml bound it too.
+const char* const kScopeBoundaries[] = {
+    "applet", "caption", "html",     "marquee", "object",
+    "table",  "td",      "template", "th",
+};
+
+// Further boundaries of the list item scope, used for </li>.
+const char* const kListItemScopeBoundaries[] = {"ol", "ul"};
+
+// End tags of the table and select family, whose handling depends on
+// insertion modes the parser does not track; they keep the parser's
+// long-standing matching.
+const char* const kTableFamilyEndTags[] = {
+    "caption", "col", "colgroup", "optgroup", "option", "select", "table",
+    "tbody",   "td",  "template", "tfoot",    "th",     "thead",  "tr",
+};
+
+// HTML elements in the parser's 'special' category.
+const char* const kSpecialHtmlElements[] = {
+    "address",    "applet",   "area",       "article",  "aside",   "base",
+    "basefont",   "bgsound",  "blockquote", "body",     "br",      "button",
+    "caption",    "center",   "col",        "colgroup", "dd",      "details",
+    "dir",        "div",      "dl",         "dt",       "embed",   "fieldset",
+    "figcaption", "figure",   "footer",     "form",     "frame",   "frameset",
+    "h1",         "h2",       "h3",         "h4",       "h5",      "h6",
+    "head",       "header",   "hgroup",     "hr",       "html",    "iframe",
+    "img",        "input",    "keygen",     "li",       "link",    "listing",
+    "main",       "marquee",  "menu",       "meta",     "nav",     "noembed",
+    "noframes",   "noscript", "object",     "ol",       "p",       "param",
+    "plaintext",  "pre",      "script",     "search",   "section", "select",
+    "source",     "style",    "summary",    "table",    "tbody",   "td",
+    "template",   "textarea", "tfoot",      "th",       "thead",   "title",
+    "tr",         "track",    "ul",         "wbr",      "xmp",
+};
+
+bool IsForeignBreakoutStartTag(const HtmlElement& element) {
+  StringPiece name = element.name_str();
+  if (NAME_IS_ONE_OF(name, kForeignBreakoutStartTags)) {
+    return true;
+  }
+  if (StringCaseEqual(name, "font")) {
+    for (const auto& attr : element.attributes()) {
+      if (NAME_IS_ONE_OF(attr.name_str(), kForeignBreakoutFontAttributes)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 // TODO(jmarantz): support multi-byte encodings
@@ -157,6 +312,20 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
   CHECK_KEYWORD_SET_ORDERING(kNonBriefTerminatedTags);
   CHECK_KEYWORD_SET_ORDERING(kLiteralTags);
   CHECK_KEYWORD_SET_ORDERING(kSometimesLiteralTags);
+  CHECK_NAME_SET_ORDERING(kForeignBreakoutStartTags);
+  CHECK_NAME_SET_ORDERING(kForeignBreakoutFontAttributes);
+  CHECK_NAME_SET_ORDERING(kForeignBreakoutEndTags);
+  CHECK_NAME_SET_ORDERING(kSvgHtmlIntegrationPoints);
+  CHECK_NAME_SET_ORDERING(kMathMlTextIntegrationPoints);
+  CHECK_NAME_SET_ORDERING(kMathMlTextIntegrationPointExceptions);
+  CHECK_NAME_SET_ORDERING(kAnnotationXmlHtmlEncodings);
+  CHECK_NAME_SET_ORDERING(kEndTagsThatDoNotPop);
+  CHECK_NAME_SET_ORDERING(kFormattingElements);
+  CHECK_NAME_SET_ORDERING(kEndTagsClosingInScope);
+  CHECK_NAME_SET_ORDERING(kScopeBoundaries);
+  CHECK_NAME_SET_ORDERING(kListItemScopeBoundaries);
+  CHECK_NAME_SET_ORDERING(kTableFamilyEndTags);
+  CHECK_NAME_SET_ORDERING(kSpecialHtmlElements);
 #endif
 }
 
@@ -534,47 +703,54 @@ void HtmlLexer::EvalCdataEnd2(char c) {
   }
 }
 
+// This returns true if 'c' following a </script, </style, etc. ends the tag
+// name: for script it gets us out of either script parsing or an escaping
+// level, for the other literal tags out of the literal.
+static bool CanEndTag(char c) {
+  return (c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == ' ' ||
+          c == '/' || c == '>');
+}
+
 // Handle the case where a literal tag (style, iframe) was started.
 // This is of lexical significance because we ignore all the special
-// characters until we see "</style>" or "</iframe>", or similar for
-// other tags.
+// characters until we see "</style" or "</iframe", or similar for
+// other tags, followed by a character that ends the tag name.
 void HtmlLexer::EvalLiteralTag(char c) {
-  // Look explicitly for </style, etc.> in the literal buffer.
-  // TODO(jmarantz): check for whitespace in unexpected places.
-  if (c == '>') {
-    // expecting "</x>" for tag x.
+  // Look explicitly for </style, etc. in the literal buffer.  As in the HTML5
+  // RAWTEXT and RCDATA end tag name states, white space or '/' after the name
+  // ends the tag just like '>' does, so "</style >" and "</style/>" close the
+  // element too.
+  if (CanEndTag(c) && !literal_.empty()) {
+    // expecting "</x" for tag x, followed by c.
     // Chromium source lacks CHECK_GT
     html_parse_->message_handler()->Check(
         literal_close_.size() > 3,
         "literal_close_.size() <= 3");  // NOLINT
-    if (literal_.size() < literal_close_.size()) {
-      // Not enough bytes accumulated to contain the close tag yet.  Bail
-      // out before the subtraction below can underflow (size_t wraparound
-      // followed by implementation-defined conversion to int).
-      return;
-    }
-    int literal_minus_close_size =
-        static_cast<int>(literal_.size() - literal_close_.size());
-    if ((literal_minus_close_size >= 0) &&
-        StringCaseEqual(literal_.c_str() + literal_minus_close_size,
-                        literal_close_)) {
+    // 'c' stands in for the '>' of literal_close_, so match just the "</x".
+    StringPiece prev_fragment(literal_);
+    prev_fragment.remove_suffix(1);
+    StringPiece close_tag_name(literal_close_);
+    close_tag_name.remove_suffix(1);
+    if (StringCaseEndsWith(prev_fragment, close_tag_name)) {
       // The literal actually starts after the "<style>", and we will
       // also let it finish before, so chop it off.
-      literal_.resize(literal_minus_close_size);
+      literal_.resize(prev_fragment.size() - close_tag_name.size());
       EmitLiteral();
       token_.clear();
       // Transform "</style>" into "style" to form close tag.
       token_.append(literal_close_.c_str() + 2, literal_close_.size() - 3);
       EmitTagClose(HtmlElement::EXPLICIT_CLOSE);
+      // As for </script, anything between the tag name and the '>' is
+      // parsed like attributes and thrown away.
+      if (c == '/') {
+        discard_until_start_state_for_error_recovery_ = true;
+        state_ = TAG_BRIEF_CLOSE;
+      } else if (c != '>') {
+        discard_until_start_state_for_error_recovery_ = true;
+        state_ = TAG_ATTRIBUTE;
+      }
     }
   }
-}
-
-// This returns true if 'c' following a </script should get us out of either
-// script parsing or escaping level.
-static bool CanEndTag(char c) {
-  return (c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == ' ' ||
-          c == '/' || c == '>');
 }
 
 bool HtmlLexer::IsScriptHtmlCommentClosing(char c) const {
@@ -688,6 +864,32 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
 
   DCHECK(element_ != nullptr);
   DCHECK(token_.empty());
+
+  // Inside inline SVG or MathML, a start tag either creates another element
+  // in the same namespace, or, for the tags listed in
+  // kForeignBreakoutStartTags, ends the foreign content and is handled as
+  // HTML.  Inside integration points HTML rules apply again.
+  bool html_rules = StartTagUsesHtmlRules(*element_);
+  if (!html_rules && IsForeignBreakoutStartTag(*element_)) {
+    PopForeignElementsForBreakout();
+    element_->set_parent(Parent());
+    html_rules = true;
+  }
+  ElementNamespace ns = ElementNamespace::kHtml;
+  if (!html_rules) {
+    ns = CurrentInfo().ns;
+  } else if (StringCaseEqual(element_->name_str(), "svg")) {
+    ns = ElementNamespace::kSvg;
+  } else if (StringCaseEqual(element_->name_str(), "math")) {
+    ns = ElementNamespace::kMathMl;
+  }
+  if (ns != ElementNamespace::kHtml) {
+    // An SVG or MathML element is never the HTML element of the same name:
+    // its content is markup, it is not void, and filters must not handle it
+    // as HTML.
+    element_->set_name(html_parse_->MakeKeywordlessName(element_->name_str()));
+  }
+
   HtmlName next_tag = element_->name();
 
   // Look for elements that are implicitly closed by an open for this type.
@@ -695,13 +897,15 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
 
   // Continue popping off auto-close elements as needed to handle cases like
   // IClosedByOpenTr in html_parse_test.cc: "<tr><i>a<tr>b".  The first the <i>
-  // needs to be auto-closed, then the <tr>.
-  for (HtmlElement* open_element = Parent(); open_element != nullptr;) {
+  // needs to be auto-closed, then the <tr>.  Foreign content has no such
+  // implied end tags.
+  for (HtmlElement* open_element = html_rules ? Parent() : nullptr;
+       open_element != nullptr;) {
     // TODO(jmarantz): this is a hack -- we should make a more elegant
     // structure of open/new tag combinations that we should auto-close.
     HtmlName::Keyword open_keyword = open_element->keyword();
     if (HtmlKeywords::IsAutoClose(open_keyword, next_keyword)) {
-      element_stack_.pop_back();
+      TruncateStack(element_stack_.size() - 1);
       CloseElement(open_element, HtmlElement::AUTO_CLOSE);
 
       // Having automatically closed the element that was open on the stack,
@@ -731,7 +935,7 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
     skip_parsing_ = true;
   }
 
-  element_stack_.push_back(element_);
+  PushElement(element_, MakeOpenElementInfo(*element_, ns));
   if (IsLiteralTag(element_->keyword())) {
     state_ =
         (element_->keyword() == HtmlName::kScript) ? SCRIPT_TAG : LITERAL_TAG;
@@ -790,7 +994,8 @@ void HtmlLexer::StartParse(const StringPiece& id,
   attr_quote_ = HtmlElement::NO_QUOTE;
   state_ = START;
   element_stack_.clear();
-  element_stack_.push_back(static_cast<HtmlElement*>(nullptr));
+  open_element_info_.clear();
+  PushElement(nullptr, OpenElementInfo());
   element_ = nullptr;
   token_.clear();
   attr_name_.clear();
@@ -1219,7 +1424,7 @@ HtmlElement* HtmlLexer::PopElement() {
   HtmlElement* element = nullptr;
   if (!element_stack_.empty()) {
     element = element_stack_.back();
-    element_stack_.pop_back();
+    TruncateStack(element_stack_.size() - 1);
   }
   return element;
 }
@@ -1231,22 +1436,144 @@ void HtmlLexer::CloseElement(HtmlElement* element, HtmlElement::Style style) {
   }
 }
 
+void HtmlLexer::PushElement(HtmlElement* element, const OpenElementInfo& info) {
+  element_stack_.push_back(element);
+  open_element_info_.push_back(info);
+}
+
+void HtmlLexer::TruncateStack(size_t size) {
+  DCHECK_EQ(element_stack_.size(), open_element_info_.size());
+  element_stack_.resize(size);
+  open_element_info_.resize(size);
+}
+
+const HtmlLexer::OpenElementInfo& HtmlLexer::CurrentInfo() const {
+  DCHECK_EQ(element_stack_.size(), open_element_info_.size());
+  static const OpenElementInfo kHtmlInfo;
+  return open_element_info_.empty() ? kHtmlInfo : open_element_info_.back();
+}
+
+bool HtmlLexer::InForeignContent() const {
+  return CurrentInfo().ns != ElementNamespace::kHtml;
+}
+
+// HTML Standard section 13.2.6, the tree construction dispatcher, for a
+// start tag.
+bool HtmlLexer::StartTagUsesHtmlRules(const HtmlElement& element) const {
+  const OpenElementInfo& current = CurrentInfo();
+  if (current.ns == ElementNamespace::kHtml || current.html_integration_point) {
+    return true;
+  }
+  StringPiece name = element.name_str();
+  if (current.mathml_text_integration_point &&
+      !NAME_IS_ONE_OF(name, kMathMlTextIntegrationPointExceptions)) {
+    return true;
+  }
+  // <svg> directly inside a MathML annotation-xml element.
+  return current.annotation_xml && StringCaseEqual(name, "svg");
+}
+
+void HtmlLexer::PopForeignElementsForBreakout() {
+  while (static_cast<int>(element_stack_.size()) > kStartStack) {
+    const OpenElementInfo& current = CurrentInfo();
+    if (current.ns == ElementNamespace::kHtml ||
+        current.html_integration_point ||
+        current.mathml_text_integration_point) {
+      break;
+    }
+    HtmlElement* element = element_stack_.back();
+    TruncateStack(element_stack_.size() - 1);
+    // There is no end tag in the source, so none is written out.
+    CloseElement(element, HtmlElement::UNCLOSED);
+  }
+}
+
+HtmlLexer::OpenElementInfo HtmlLexer::MakeOpenElementInfo(
+    const HtmlElement& element, ElementNamespace ns) {
+  OpenElementInfo info;
+  info.ns = ns;
+  StringPiece name = element.name_str();
+  if (ns == ElementNamespace::kSvg) {
+    info.html_integration_point =
+        NAME_IS_ONE_OF(name, kSvgHtmlIntegrationPoints);
+    info.special = info.html_integration_point;
+  } else if (ns == ElementNamespace::kMathMl) {
+    info.mathml_text_integration_point =
+        NAME_IS_ONE_OF(name, kMathMlTextIntegrationPoints);
+    info.annotation_xml = StringCaseEqual(name, "annotation-xml");
+    if (info.annotation_xml) {
+      for (const auto& attr : element.attributes()) {
+        if (StringCaseEqual(attr.name_str(), "encoding")) {
+          const char* value = attr.DecodedValueOrNull();
+          info.html_integration_point =
+              (value != nullptr &&
+               NAME_IS_ONE_OF(value, kAnnotationXmlHtmlEncodings));
+          // Only the first attribute of a name counts.
+          break;
+        }
+      }
+    }
+    info.special = info.annotation_xml || info.mathml_text_integration_point;
+  }
+  return info;
+}
+
 HtmlElement* HtmlLexer::PopElementMatchingTag(const StringPiece& tag) {
-  HtmlElement* element = nullptr;
+  if (InForeignContent()) {
+    if (NAME_IS_ONE_OF(tag, kForeignBreakoutEndTags)) {
+      // </br> and </p> end foreign content, then are handled as HTML below.
+      PopForeignElementsForBreakout();
+    } else {
+      // HTML Standard section 13.2.6.5, "any other end tag": close the
+      // nearest open element of that name, walking down through foreign
+      // elements; on reaching an HTML element, continue with the HTML rules
+      // below.
+      for (int i = element_stack_.size() - 1; i >= kStartStack; --i) {
+        if (StringCaseEqual(element_stack_[i]->name_str(), tag)) {
+          return PopElementsDownTo(i);
+        }
+        if (i - 1 >= kStartStack &&
+            open_element_info_[i - 1].ns == ElementNamespace::kHtml) {
+          break;
+        }
+      }
+    }
+  }
 
   HtmlName::Keyword keyword = HtmlName::Lookup(tag);
-  int close_index = element_stack_.size();
+
+  // Set once the search has walked past an SVG or MathML element.  From then
+  // on the end tag follows the HTML Standard's "in body" rules for it more
+  // closely (see the name sets above); a search that crosses no foreign
+  // content keeps the parser's long-standing behaviour.
+  bool crossed_foreign = false;
+  bool crossed_special_html = false;
+  bool do_not_pop = NAME_IS_ONE_OF(tag, kEndTagsThatDoNotPop);
+  bool formatting = NAME_IS_ONE_OF(tag, kFormattingElements);
+  bool closes_in_scope = NAME_IS_ONE_OF(tag, kEndTagsClosingInScope);
+  bool table_family = NAME_IS_ONE_OF(tag, kTableFamilyEndTags);
+  bool list_item = StringCaseEqual(tag, "li");
 
   // Search the stack from top to bottom.
   for (int i = element_stack_.size() - 1; i >= kStartStack; --i) {
-    element = element_stack_[i];
+    HtmlElement* element = element_stack_[i];
 
-    if (StringCaseEqual(element->name_str(), tag)) {
+    if (open_element_info_[i].ns != ElementNamespace::kHtml) {
+      // An HTML end tag never closes an SVG or MathML element, and does not
+      // reach past an integration point.
+      if (open_element_info_[i].special) {
+        return nullptr;
+      }
+      crossed_foreign = true;
+    } else if (StringCaseEqual(element->name_str(), tag)) {
       // In tag-matching we will do case-insensitive comparisons, despite
       // the fact that we have a keywords enum.  Note that the symbol
       // table is case sensitive.
-      close_index = i;
-      break;
+      if (crossed_foreign &&
+          (do_not_pop || (formatting && crossed_special_html))) {
+        return nullptr;
+      }
+      return PopElementsDownTo(i);
     } else if (HtmlKeywords::IsContained(keyword, element->keyword())) {
       // Stop when we get to an 'owner' of this element.  Consider
       // <tr><table></tr></table>.  When hitting the </tr> we start
@@ -1256,35 +1583,49 @@ HtmlElement* HtmlLexer::PopElementMatchingTag(const StringPiece& tag) {
       // matching open-tag for the </tr> inside the <table>.  See
       // HtmlAnnotationTest.StrayCloseTrInTable in html_parse_test.cc.
       return nullptr;
-    }
-  }
-
-  if (close_index == static_cast<int>(element_stack_.size())) {
-    element = nullptr;
-  } else {
-    element = element_stack_[close_index];
-
-    // Emit warnings for the tags we are skipping.  We have to do
-    // this in reverse order so that we maintain stack discipline.
-    //
-    // Note that the element at close_index does not get closed here,
-    // but gets returned and closed at the call-site.
-    for (int j = element_stack_.size() - 1; j > close_index; --j) {
-      HtmlElement* skipped = element_stack_[j];
-      // In fact, should we actually perform this optimization ourselves
-      // in a filter to omit closing tags that can be inferred?
-      if (!HtmlKeywords::IsOptionallyClosedTag(skipped->keyword())) {
-        html_parse_->Info(id_.c_str(), skipped->begin_line_number(),
-                          "Unclosed element `%s'",
-                          CEscape(skipped->name_str()).c_str());
+    } else if (crossed_foreign &&
+               NAME_IS_ONE_OF(element->name_str(), kSpecialHtmlElements)) {
+      // Past foreign content, a special element ends the search for an
+      // ordinary end tag, and is remembered for a formatting one.  An end
+      // tag with in-scope rules stops at a scope boundary.
+      crossed_special_html = true;
+      if (closes_in_scope) {
+        StringPiece name = element->name_str();
+        if (NAME_IS_ONE_OF(name, kScopeBoundaries) ||
+            (list_item && NAME_IS_ONE_OF(name, kListItemScopeBoundaries))) {
+          return nullptr;
+        }
+      } else if (!formatting && !table_family && !do_not_pop) {
+        return nullptr;
       }
-      // Before closing the skipped element, pop it off the stack.  Otherwise,
-      // the parent redundancy check in HtmlParse::AddEvent will fail.
-      element_stack_.resize(j);
-      CloseElement(skipped, HtmlElement::UNCLOSED);
     }
-    element_stack_.resize(close_index);
   }
+  return nullptr;
+}
+
+HtmlElement* HtmlLexer::PopElementsDownTo(int close_index) {
+  HtmlElement* element = element_stack_[close_index];
+
+  // Emit warnings for the tags we are skipping.  We have to do
+  // this in reverse order so that we maintain stack discipline.
+  //
+  // Note that the element at close_index does not get closed here,
+  // but gets returned and closed at the call-site.
+  for (int j = element_stack_.size() - 1; j > close_index; --j) {
+    HtmlElement* skipped = element_stack_[j];
+    // In fact, should we actually perform this optimization ourselves
+    // in a filter to omit closing tags that can be inferred?
+    if (!HtmlKeywords::IsOptionallyClosedTag(skipped->keyword())) {
+      html_parse_->Info(id_.c_str(), skipped->begin_line_number(),
+                        "Unclosed element `%s'",
+                        CEscape(skipped->name_str()).c_str());
+    }
+    // Before closing the skipped element, pop it off the stack.  Otherwise,
+    // the parent redundancy check in HtmlParse::AddEvent will fail.
+    TruncateStack(j);
+    CloseElement(skipped, HtmlElement::UNCLOSED);
+  }
+  TruncateStack(close_index);
   return element;
 }
 

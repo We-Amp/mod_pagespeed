@@ -19,6 +19,7 @@
 
 #include "net/instaweb/rewriter/public/js_outline_filter.h"
 
+#include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -141,6 +142,13 @@ bool JsOutlineFilter::WriteResource(const GoogleString& content,
 // Create file with script content and remove that element from DOM.
 void JsOutlineFilter::OutlineScript(HtmlElement* inline_element,
                                     const GoogleString& content) {
+  // Leave the script inline wherever a policy governs scripts.
+  if (driver()->content_security_policy().HasDirectiveOrDefaultSrc(
+          CspDirective::kScriptSrc)) {
+    driver()->InsertDebugComment(
+        "Avoiding outlining inline script with CSP present", inline_element);
+    return;
+  }
   if (driver()->IsRewritable(inline_element)) {
     // Create script file from content.
     MessageHandler* handler = driver()->message_handler();

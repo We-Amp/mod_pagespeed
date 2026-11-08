@@ -29,10 +29,13 @@
 
 #include "gtest/gtest.h"
 #include "net/instaweb/rewriter/public/process_context.h"
+#include "pagespeed/envoy/envoy_admin_fetch.h"
 #include "pagespeed/envoy/envoy_rewrite_driver_factory.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
 #include "pagespeed/envoy/envoy_server_context.h"
 #include "pagespeed/envoy/header_utils.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/system/system_server_context.h"
 #include "pagespeed/system/system_thread_system.h"
 #include "source/common/stats/isolated_store_impl.h"
@@ -207,6 +210,106 @@ TEST_F(HttpFilterTest, InPlaceLookupServesOnlyGetAndHead) {
   EXPECT_EQ(1u, wait_for_posted_callback());
   fake_dispatcher.runAllPendingCallbacks();
   EXPECT_EQ(1, server_context_->rewrite_stats()->ipro_not_in_cache()->Get());
+}
+
+// Completes an admin fetch the way an AdminSite handler does.
+void CompleteAdminFetch(AsyncFetch* fetch, const char* body) {
+  NullMessageHandler handler;
+  fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  fetch->Write(body, &handler);
+  fetch->Done(true);
+}
+
+// An admin fetch completed on the request's own worker thread replies at
+// once, as it always did.
+TEST_F(HttpFilterTest, AdminReplyOnDispatcherThreadIsSentDirectly) {
+  EXPECT_CALL(decoder_callbacks_, dispatcher()).Times(::testing::AnyNumber());
+  EXPECT_CALL(decoder_callbacks_,
+              sendLocalReply(Envoy::Http::Code::OK, "own-thread reply",
+                             ::testing::_, ::testing::_, ::testing::_))
+      .Times(1);
+  auto* fetch = new EnvoyAdminFetch(server_context_, filter_.get());
+  CompleteAdminFetch(fetch, "own-thread reply");
+}
+
+// An admin fetch completed on another thread (a fetcher, cache or scheduler
+// thread) never writes the reply there: the reply is posted to the request's
+// dispatcher and sent when that callback runs.
+TEST_F(HttpFilterTest, AdminReplyFromOtherThreadIsPostedToDispatcher) {
+  testing::FakeDispatcher fake_dispatcher;
+  ON_CALL(decoder_callbacks_, dispatcher())
+      .WillByDefault(::testing::ReturnRef(fake_dispatcher));
+  EXPECT_CALL(decoder_callbacks_, dispatcher()).Times(::testing::AnyNumber());
+  EXPECT_CALL(fake_dispatcher, isThreadSafe()).Times(::testing::AnyNumber());
+  EXPECT_CALL(fake_dispatcher, post(::testing::_))
+      .Times(::testing::AnyNumber());
+
+  auto* fetch = new EnvoyAdminFetch(server_context_, filter_.get());
+  {
+    // Nothing may be sent from the completing thread.
+    EXPECT_CALL(decoder_callbacks_, sendLocalReply(::testing::_, ::testing::_,
+                                                   ::testing::_, ::testing::_,
+                                                   ::testing::_))
+        .Times(0);
+    std::thread completer([fetch]() {
+      CompleteAdminFetch(fetch, "posted reply");
+    });
+    completer.join();
+    ::testing::Mock::VerifyAndClearExpectations(&decoder_callbacks_);
+  }
+  ASSERT_EQ(1u, fake_dispatcher.pendingCallbackCount());
+
+  EXPECT_CALL(decoder_callbacks_,
+              sendLocalReply(Envoy::Http::Code::OK, "posted reply",
+                             ::testing::_, ::testing::_, ::testing::_))
+      .Times(1);
+  EXPECT_CALL(decoder_callbacks_, dispatcher()).Times(::testing::AnyNumber());
+  fake_dispatcher.runAllPendingCallbacks();
+}
+
+// A reply that completes after the filter is gone, or that was posted before
+// the filter went away, is dropped without touching the filter.
+TEST_F(HttpFilterTest, AdminReplyAfterFilterDestroyedIsDropped) {
+  testing::FakeDispatcher fake_dispatcher;
+  ON_CALL(decoder_callbacks_, dispatcher())
+      .WillByDefault(::testing::ReturnRef(fake_dispatcher));
+  EXPECT_CALL(decoder_callbacks_, dispatcher()).Times(::testing::AnyNumber());
+  EXPECT_CALL(fake_dispatcher, isThreadSafe()).Times(::testing::AnyNumber());
+  EXPECT_CALL(fake_dispatcher, post(::testing::_))
+      .Times(::testing::AnyNumber());
+  EXPECT_CALL(decoder_callbacks_, sendLocalReply(::testing::_, ::testing::_,
+                                                 ::testing::_, ::testing::_,
+                                                 ::testing::_))
+      .Times(0);
+
+  auto new_filter = [&]() {
+    auto filter = std::make_unique<Envoy::Http::HttpPageSpeedDecoderFilter>(
+        config_, server_context_, nullptr /* proxy_fetch_factory */);
+    filter->setDecoderFilterCallbacks(decoder_callbacks_);
+    return filter;
+  };
+
+  // The filter is destroyed before the fetch completes.
+  auto early_filter = new_filter();
+  auto* early_fetch = new EnvoyAdminFetch(server_context_, early_filter.get());
+  early_filter.reset();
+  std::thread late_completer([early_fetch]() {
+    CompleteAdminFetch(early_fetch, "reply after the filter is gone");
+  });
+  late_completer.join();
+
+  // The fetch completes and posts its reply, then the filter is destroyed
+  // before the posted reply runs.
+  auto racing_filter = new_filter();
+  auto* racing_fetch =
+      new EnvoyAdminFetch(server_context_, racing_filter.get());
+  std::thread racing_completer([racing_fetch]() {
+    CompleteAdminFetch(racing_fetch, "reply racing the filter");
+  });
+  racing_completer.join();
+  racing_filter.reset();
+
+  fake_dispatcher.runAllPendingCallbacks();
 }
 
 }  // namespace

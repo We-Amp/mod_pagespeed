@@ -56,8 +56,8 @@ enum class DaemonServeNotifyKind {
 
 // One notification, queued.  Owns COPIES of everything the three shared
 // notify functions read across the thread boundary -- the request's url,
-// hostname and scheme (those three DaemonServeRequest fields are borrowing
-// StringPieces), the two option-context halves, and the handful of decision
+// hostname, scheme and site (those four DaemonServeRequest fields are
+// borrowing StringPieces), the two option-context halves, and the handful of decision
 // scalars -- and NEVER a DaemonServeDecision: the one reconstituted in
 // Run() carries scalars only, its body an empty StringPiece by construction,
 // so nothing borrowed from the dead reader can be touched.
@@ -71,7 +71,7 @@ class DaemonServeNotify : public Function {
   // socket path is copied.
   DaemonServeNotify(DaemonServeNotifyKind kind, const DaemonAbi* abi,
                     StringPiece socket_path, StringPiece url,
-                    StringPiece hostname, StringPiece scheme,
+                    StringPiece hostname, StringPiece scheme, StringPiece site,
                     const DaemonServeDecision& decision,
                     StringPiece option_context, StringPiece option_signature,
                     Variable* notified, Variable* notify_failed);
@@ -89,6 +89,7 @@ class DaemonServeNotify : public Function {
   GoogleString url_;
   GoogleString hostname_;
   GoogleString scheme_;
+  GoogleString site_;
   // The only decision fields the three shared functions read (verified
   // against daemon_serve_arm.cc: no other field, and never `body`).
   DaemonServeVerdict verdict_;

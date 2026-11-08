@@ -1,0 +1,59 @@
+rules_foreign_cc 0.16.0: keep each PATH directory once in Windows build scripts.
+
+On Windows the build script exports PATH as the action's PATH followed by the
+C++ toolchain's PATH, and the toolchain PATH repeats directories the action
+PATH already holds (twice, on a hosted windows-2022 runner). There the result
+is about 8,700 characters. cmd.exe treats a PATH longer than 8191 characters
+as unset, so the nested `cmd.exe` that CMake's Ninja generator writes for a
+custom command (libavif's static-library merge, for one) is "not recognized"
+and the build fails.
+
+This patch appends, for Windows targets only, a few lines to the environment
+prelude that keep the first occurrence of each PATH directory (compared without
+case, doubled slashes or a trailing slash) in the original order, then fail
+with a clear message if the PATH is still longer than 7500 characters in
+Windows form. On that runner the PATH drops to about 4,700 characters.
+
+--- a/foreign_cc/private/framework.bzl
++++ b/foreign_cc/private/framework.bzl
+@@ -398,8 +398,40 @@
+         env.update({"PATH": _normalize_path(linker_path) + ":" + env.get("PATH")})
+ 
+     env_snippet.extend(["export {}=\"{}\"".format(key, escape_dquote_bash(val)) for key, val in env.items()])
++
++    if targets_windows(ctx, None):
++        env_snippet.extend(_WINDOWS_PATH_DEDUPE)
+ 
+     return env_snippet
++
++# The PATH built above is the action's PATH followed by the cc toolchain's
++# PATH, which repeats directories the action PATH already holds. cmd.exe
++# treats a PATH longer than 8191 characters as unset, so a nested `cmd.exe`
++# in a CMake custom command is then not found. Keep each directory once
++# (compared without case, doubled slashes or a trailing slash), and fail
++# loudly if the PATH is still long. These lines avoid the `export`, `##` and
++# `$$` forms that the script conversion rewrites.
++_WINDOWS_PATH_DEDUPE = [
++    "__rfcc_out=",
++    "__rfcc_seen='|'",
++    "IFS=: read -r -a __rfcc_dirs <<< \"$PATH\"",
++    "for __rfcc_d in \"${__rfcc_dirs[@]}\"; do",
++    "  [ -n \"$__rfcc_d\" ] || continue",
++    "  __rfcc_k=\"${__rfcc_d,,}\"",
++    "  while [[ \"$__rfcc_k\" == *//* ]]; do __rfcc_k=\"${__rfcc_k//\\/\\//\\/}\"; done",
++    "  [ \"$__rfcc_k\" = / ] || __rfcc_k=\"${__rfcc_k%/}\"",
++    "  case \"$__rfcc_seen\" in *\"|$__rfcc_k|\"*) continue ;; esac",
++    "  __rfcc_seen=\"$__rfcc_seen$__rfcc_k|\"",
++    "  __rfcc_out=\"${__rfcc_out:+$__rfcc_out:}$__rfcc_d\"",
++    "done",
++    "PATH=\"$__rfcc_out\"",
++    "__rfcc_wpath=\"$(cygpath -w -p \"$PATH\" 2>/dev/null || printf '%s' \"$PATH\")\"",
++    "if [ \"${#__rfcc_wpath}\" -gt 7500 ]; then",
++    "  echo \"rules_foreign_cc: the build PATH is ${#__rfcc_wpath} characters in Windows form (limit 7500); cmd.exe treats a PATH over 8191 characters as unset\" >&2",
++    "  exit 1",
++    "fi",
++    "unset __rfcc_out __rfcc_seen __rfcc_dirs __rfcc_d __rfcc_k __rfcc_wpath",
++]
+ 
+ def _use_short_paths(ctx):
+     """Returns True if the build should use shortened paths on Windows."""

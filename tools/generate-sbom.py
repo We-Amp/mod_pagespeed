@@ -172,6 +172,12 @@ CPP_DEPS = [
     {"name": "nginx", "version": {"literal": "1.30.6"}, "license": "BSD-2-Clause",
      "holder": "Nginx, Inc. / F5", "repo": None,
      "download": "https://nginx.org/", "purl_version": None},
+    # PCRE2, compiled from the pinned upstream release tarball and linked
+    # statically into that nginx. Keep lockstep with PCRE2_VERSION in
+    # install/nginx/build_module_in_container.sh (the pin the binary is built from).
+    {"name": "pcre2", "version": {"literal": "10.49"}, "license": "BSD-3-Clause",
+     "holder": "Philip Hazel; University of Cambridge; Zoltan Herczeg", "repo": "PCRE2Project/pcre2",
+     "purl_version": "pcre2-10.49"},
 ]
 
 # Source-only package standing for the Envoy filter port (pagespeed/envoy/).

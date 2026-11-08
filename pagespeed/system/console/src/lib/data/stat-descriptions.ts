@@ -52,6 +52,25 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   ipro_not_rewritable:
     "In-place requests the server could not optimize, either because the URL is already known to be unoptimizable or because the lookup failed; the origin bytes are served unchanged.",
 
+  daemon_html_evaluated:
+    "HTML responses the HTML cache report classified; nothing is stored or served because of it. Not seen: on Apache, headers set by output filters that run after the report; on nginx built from its config file, expires and header directives.",
+  daemon_html_would_store:
+    "HTML responses the policy would store if storing were on. Inside the evaluated count.",
+  daemon_html_would_store_no_notify:
+    "Would-store responses that forbid transformation, so the optimizer would not be told about them. Inside the would-store count.",
+  daemon_html_would_store_bytes:
+    "Total body bytes of the responses the policy would store.",
+  daemon_html_refused:
+    "HTML responses the policy would not store. The refused-by-reason counters add up to this.",
+  daemon_html_refused_other:
+    "Refusals for a reason this module has no counter for: an optimizer library newer than the module.",
+  daemon_html_unavailable:
+    "HTML responses under the report that nothing could classify: no optimizer configured, an optimizer library older than the policy, or a server without the report (IIS, Envoy).",
+  daemon_html_classify_failed:
+    "HTML responses the optimizer library rejected as a malformed call. Expected to stay at zero.",
+  daemon_html_log_dropped:
+    "Decision lines not written: the per-second limit, the daily cap, or a file that could not be written. The counters still count these responses.",
+
   ipro_daemon_served:
     "In-place requests answered with an optimized variant from the optimizer worker's shared cache, including not-modified revalidations. This is the worker's hit count for optimizer output.",
   ipro_daemon_served_original:
@@ -704,6 +723,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
  */
 export const STAT_FAMILY_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> =
   [
+  ["daemon_html_refused_", "HTML responses the policy would not store, for the reason this counter names."],
     [
       "ipro_",
       "In-place optimization: requests for a stylesheet, script or image that are optimized and served under their original URL instead of a rewritten one. This family tracks whether such a request was answered from the optimized cache, missed it, or could not be optimized at all.",

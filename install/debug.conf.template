@@ -144,6 +144,15 @@ ModPagespeedLoadFromFile \
     Options +FollowSymLinks
 </Directory>
 
+# The flatten size limit is configuration only (not settable per request);
+# these directories give the flatten_css_imports tests a small limit.
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/flatten_limit_tiny" >
+    ModPagespeedCssFlattenMaxBytes 5
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/flatten_limit_medium" >
+    ModPagespeedCssFlattenMaxBytes 50
+</Directory>
+
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/compressed/" >
     # Files in this directory are already compressed so always add
     # the right header.

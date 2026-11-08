@@ -102,6 +102,10 @@ Environment Variables:
   PAGESPEED_DAEMON_LANE   0 (default) leaves the optimizer worker lane out;
                           1 provides it when it can; require fails the run
                           when it cannot be provided
+  PAGESPEED_SECONDARY_LANE
+                          0 (default) leaves the secondary-port servers out;
+                          1 provides them when it can; require fails the run
+                          when they cannot be provided
 EOF
 }
 
@@ -181,6 +185,25 @@ NGINX_REDIRECT_ORIGIN_PORT="${NGINX_REDIRECT_ORIGIN_PORT:-$((NGINX_PORT + 10017)
 # parsed, so --port=N moves it too.
 NGINX_HANDLER_ACL_PORT="${NGINX_HANDLER_ACL_PORT:-$((NGINX_PORT + 10016))}"
 
+# The secondary-port servers (lane fixtures secondary_vhosts and
+# experiment_framework) follow the port base (8080 + 10015 = 18095 at the
+# default).  Resolved after the arguments are parsed, so --port=N moves them too.
+NGINX_SECONDARY_PORT="${NGINX_SECONDARY_PORT:-$((NGINX_PORT + 10015))}"
+
+# The two listeners behind the server-block cache keyspace tests follow the
+# port base (8080 + 10014 and + 10013 = 18094 and 18093 at the default).
+# Resolved after the arguments are parsed, so --port=N moves them too.
+NGINX_SITE_PORT_A="${NGINX_SITE_PORT_A:-$((NGINX_PORT + 10014))}"
+NGINX_SITE_PORT_B="${NGINX_SITE_PORT_B:-$((NGINX_PORT + 10013))}"
+
+# Lane fixture daemon_arm: the two listeners behind the optimizer-worker site
+# tests (8080 + 10012 and + 10011 = 18092 and 18091 at the default), and the
+# worker's management API on loopback (+ 10010 = 18090).  Resolved after the
+# arguments are parsed, so --port=N moves them too.
+NGINX_DAEMON_SITE_PORT_A="${NGINX_DAEMON_SITE_PORT_A:-$((NGINX_PORT + 10012))}"
+NGINX_DAEMON_SITE_PORT_B="${NGINX_DAEMON_SITE_PORT_B:-$((NGINX_PORT + 10011))}"
+NGINX_DAEMON_API_PORT="${NGINX_DAEMON_API_PORT:-$((NGINX_PORT + 10010))}"
+
 # Configuration
 NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
 MODULE_PATH="${MODULE_PATH:-$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
@@ -215,8 +238,28 @@ DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
 DAEMON_VOLUME="$DAEMON_CACHE_ROOT/cache"
 DAEMON_PID="$NGINX_CONFIG_DIR/daemon_worker.pid"
 DAEMON_LOG="$NGINX_CONFIG_DIR/daemon_worker.log"
+# Restarts the worker with the same arguments (written by start_daemon_worker,
+# run by the site tests).
+DAEMON_RESTART="$NGINX_CONFIG_DIR/restart_daemon_worker.sh"
 # Set once the worker answers on its socket; the config writer reads it.
 DAEMON_READY=""
+
+# Lane fixtures "secondary_vhosts" and "experiment_framework": the name-based
+# servers the Apache lane has on its secondary port.
+#
+# PAGESPEED_SECONDARY_LANE: 0 (default) leaves them out, so the cases that need
+# them skip; 1 provides them when it can and skips otherwise; require provides
+# them or fails the run.
+#
+# With the lane on, system/test_cache_purge.py's
+# TestCachePurgeWithPageSpeedOffInVhost (4 cases) checks that a purge applies
+# under a location with pagespeed settings of its own; for cache.flush that is
+# nginx/test_nginx_cache.py's TestCacheFlushUnderLocation, on every run.
+SECONDARY_LANE="${PAGESPEED_SECONDARY_LANE:-0}"
+SECONDARY_TEMPLATE="$SCRIPT_DIR/nginx_secondary_vhosts.conf.in"
+SECONDARY_COMMON="$NGINX_CONFIG_DIR/secondary_common.inc"
+# Set once the lane is prepared; the config writer reads it.
+SECONDARY_READY=""
 
 # TLS configuration
 TLS_CERT_DIR="$NGINX_CONFIG_DIR/certs"
@@ -345,21 +388,28 @@ setup_test_content() {
     # Copy test content
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_example" ]; then
         rm -rf "$DOC_ROOT/mod_pagespeed_example"
-        cp -r "$PROJECT_ROOT/install/mod_pagespeed_example" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_example" "$DOC_ROOT/"
     else
         log_warn "mod_pagespeed_example not found in install/"
     fi
 
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_test" ]; then
         rm -rf "$DOC_ROOT/mod_pagespeed_test"
-        cp -r "$PROJECT_ROOT/install/mod_pagespeed_test" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_test" "$DOC_ROOT/"
+        # The purge/ and cache_flush/ trees at the document root, which the
+        # tests write into (lane fixture doc_root_scratch).
+        local tree
+        for tree in purge cache_flush; do
+            rm -rf "$DOC_ROOT/$tree"
+            cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_test/$tree" "$DOC_ROOT/$tree"
+        done
     else
         log_warn "mod_pagespeed_test not found in install/"
     fi
 
     if [ -d "$PROJECT_ROOT/install/do_not_modify" ]; then
         rm -rf "$DOC_ROOT/do_not_modify"
-        cp -r "$PROJECT_ROOT/install/do_not_modify" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/do_not_modify" "$DOC_ROOT/"
     fi
 
     # Create a simple index.html if nothing exists
@@ -611,6 +661,15 @@ EOF
             add_header Cache-Control "no-cache" always;
         }
 
+        # Inputs a rewritten resource must not grow more cacheable than.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
+        location ~ /ipro/cc200p/ {
+            add_header Cache-Control "private, max-age=200" always;
+        }
+        location ~ /ipro/cc200ns/ {
+            add_header Cache-Control "no-store, max-age=200" always;
+        }
+
         # Resources behind HTTP Basic auth (user1) are served but never
         # cached, optimized or given a shared-cache lifetime.  Matches
         # Apache's debug.conf.template auth/ block.
@@ -625,6 +684,14 @@ EOF
         # stand-in for Apache's imagebeacon.example.com test vhost.
         location = /mod_pagespeed_example/prioritize_critical_images.html {
             pagespeed CriticalImagesBeaconEnabled true;
+        }
+
+        # automatic/test_rewrite_css.py::test_rewrite_css_images inlines a
+        # small image into CSS; a request can only lower the threshold, so
+        # the page gets it from the configuration.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
+        location = /mod_pagespeed_example/rewrite_css_images.html {
+            pagespeed CssImageInlineMaxBytes 2048;
         }
 
         # Script-variable option probe (test_nginx_script_variables.py): the
@@ -661,6 +728,35 @@ EOF
             add_header X-Test-Order yes;
         }
 
+        # Rewritten HTML: the module writes one Cache-Control line, and it
+        # keeps the private and no-store that add_header states.  With
+        # ModifyCachingHeaders off every line stays as the operator set it.
+        location = /mod_pagespeed_test/filter_order_cc/no_store.html {
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/private.html {
+            add_header Cache-Control "private";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/both.html {
+            add_header Cache-Control "private, no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/lines.html {
+            add_header Cache-Control "private, max-age=600";
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/public.html {
+            add_header Cache-Control "public, max-age=600";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/no_store_long_html_cache.html {
+            pagespeed MaxHtmlCacheTimeMs 60000;
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/keep_all.html {
+            pagespeed ModifyCachingHeaders off;
+            add_header Cache-Control "public, max-age=600";
+            add_header Cache-Control "no-store";
+        }
+
         # The charset directive's decision must survive on rewritten HTML.
         location ^~ /mod_pagespeed_test/filter_order_charset/ {
             charset utf-8;
@@ -689,6 +785,19 @@ EOF
             add_header X-Test-Order yes;
             pagespeed AddResourceHeader X-Test-Order yes;
         }
+
+        # ModifyCachingHeaders off: the page keeps the operator's caching
+        # headers, and a .pagespeed. resource keeps the module's own (the
+        # long-lived ones on a hash match, the short private ones on the
+        # fallback path), the same as under caching_headers_on/.
+        location ^~ /mod_pagespeed_test/caching_headers_off/ {
+            pagespeed ModifyCachingHeaders off;
+        }
+        location = /mod_pagespeed_test/caching_headers_off/index.html {
+            pagespeed ModifyCachingHeaders off;
+            add_header Cache-Control "private, max-age=3000";
+        }
+        location ^~ /mod_pagespeed_test/caching_headers_on/ { }
 
         # proxy_pass probe: a HEAD on a proxied location must not poison
         # the keepalive connection (the GET after it must succeed).
@@ -724,6 +833,17 @@ EOF
             root $DOC_ROOT/mod_pagespeed_test/redirected/named_root;
         }
 
+        # The flatten size limit is configuration only (not settable per
+        # request); these locations give the flatten_css_imports tests a
+        # small limit.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
+        location ^~ /mod_pagespeed_test/flatten_limit_tiny/ {
+            pagespeed CssFlattenMaxBytes 5;
+        }
+        location ^~ /mod_pagespeed_test/flatten_limit_medium/ {
+            pagespeed CssFlattenMaxBytes 50;
+        }
+
         # Lane fixture option_response_headers: option response headers set
         # by the server configure the response and never reach the client.
         location = /mod_pagespeed_test/option_headers/off.html {
@@ -743,6 +863,13 @@ EOF
         # nested/ pages are matched by the nested location, page.html by
         # the enclosing location directly; ?ps_if=1 additionally switches
         # the request into the if block's configuration.
+        # A location with pagespeed settings of its own, the same as the
+        # server's: a cache flush applies under it as it does at server
+        # scope (nginx/test_nginx_cache.py TestCacheFlushUnderLocation).
+        location ^~ /mod_pagespeed_test/location_options/ {
+            pagespeed RewriteLevel CoreFilters;
+        }
+
         location ^~ /mod_pagespeed_test/location_inherit/ {
             pagespeed off;
             location ~ ^/mod_pagespeed_test/location_inherit/nested/ { }
@@ -819,6 +946,125 @@ EOF
 EOF
     fi
 
+    # Cache keyspaces of server blocks (system/test_site_cache_identity.py and
+    # nginx/test_nginx_site_cache_identity.py):
+    # name-based servers on two listeners, each with its own document root
+    # holding a stylesheet only that root has.  site.example.test is served by
+    # one block per listener; shared.example.test likewise, with one explicit
+    # CacheFragment in both; shard-page.example.com shards to names it serves
+    # itself; cdn-page.example.com maps its resources to cdn.example.com,
+    # which another block serves.  The last three load their stylesheets from
+    # their roots, since nothing resolves those names.  After the main server
+    # block, so the statistics log name above keeps its number.
+    if [ "$NO_MODULE" = false ]; then
+        local site_root="$NGINX_CONFIG_DIR/site_identity" site_dir
+        for site_dir in a b c; do
+            mkdir -p "$site_root/$site_dir"
+            printf '.site-%s-only {\n  color: #ff0000;\n}\n' "$site_dir" \
+                > "$site_root/$site_dir/style.css"
+        done
+        printf '<html><head><link rel="stylesheet" href="style.css"></head><body><p>page</p></body></html>\n' \
+            > "$site_root/a/page.html"
+        printf '<html><head><base href="http://base-b.example.test/"><link rel="stylesheet" href="style.css"></head><body><p>page</p></body></html>\n' \
+            > "$site_root/a/base-page.html"
+        local site_common='pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed EnableFilters rewrite_css;
+        pagespeed InPlaceResourceOptimization on;
+        expires 1h;
+        location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" { add_header "" ""; }'
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name site.example.test www.site.example.test;
+        root $site_root/a;
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_B;
+        server_name site.example.test www.site.example.test;
+        root $site_root/b;
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name shared.example.test;
+        root $site_root/a;
+        pagespeed CacheFragment site-identity-shared;
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_B;
+        server_name shared.example.test;
+        root $site_root/b;
+        pagespeed CacheFragment site-identity-shared;
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name shard-page.example.com shard-1.example.com shard-2.example.com;
+        root $site_root/a;
+        pagespeed ShardDomain shard-page.example.com shard-1.example.com,shard-2.example.com;
+        pagespeed LoadFromFile "http://shard-page.example.com/" "$site_root/a/";
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name cdn-page.example.com;
+        root $site_root/a;
+        pagespeed MapRewriteDomain cdn.example.com cdn-page.example.com;
+        pagespeed LoadFromFile "http://cdn-page.example.com/" "$site_root/a/";
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name base-a.example.test;
+        root $site_root/a;
+        pagespeed Domain base-b.example.test;
+        pagespeed LoadFromFile "http://base-b.example.test/" "$site_root/a/";
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_B;
+        server_name base-b.example.test;
+        root $site_root/b;
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name cdn.example.com;
+        root $site_root/c;
+        pagespeed LoadFromFile "http://cdn.example.com/" "$site_root/c/";
+        $site_common
+    }
+
+EOF
+    fi
+
+    # Lane fixture self_fetch_access: the self-fetch-access.example.com server
+    # system/test_self_fetch_access.py talks to, on the main port. The location
+    # install/mod_pagespeed_test/self_fetch_access/local_only/ admits local
+    # clients only, the shape of an operator's address rule.
+    if [ "$NO_MODULE" = false ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name self-fetch-access.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel CoreFilters;
+
+        location ^~ /mod_pagespeed_test/self_fetch_access/local_only/ {
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
+        }
+    }
+
+EOF
+    fi
+
     # Lane fixtures rule_packs and rule_pack_log: the name-based servers
     # system/test_rule_packs.py talks to, on the main port (server_name picks
     # the block; the main block above stays the default server). The rule_packs
@@ -826,6 +1072,39 @@ EOF
     # install/mod_pagespeed_test/rule_packs/, and no other filter runs. The pack
     # lists the first two hosts; the third is not in it. The decision log goes to
     # LogDir (generate_nginx_config above), in packs/<pack id>/.
+    if [ -n "$DAEMON_READY" ]; then
+        local html_host
+        for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only; do
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name ${html_host%%:*};
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel CoreFilters;
+        pagespeed DaemonHtmlCache ${html_host##*:};
+        pagespeed DaemonSocketPath $DAEMON_SOCKET;
+        pagespeed DaemonVolumePath $DAEMON_VOLUME;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        # An upstream's 404 HTML page, which nginx passes on as it came.
+        location = /daemon_html/upstream404.html {
+            proxy_pass http://127.0.0.1:$NGINX_PORT/daemon_html/absent.html;
+            proxy_set_header Host daemon-html-off.example.com;
+        }
+        location = /daemon_html/expires.html { expires 600s; }
+        location = /daemon_html/addheader.html { add_header X-Lane-Added 1; }
+        location = /daemon_html/private.html { add_header Cache-Control "private, no-store"; }
+        location = /daemon_html/setcookie.html { add_header Set-Cookie "lane=1"; }
+        location = /daemon_html/varycookie.html { add_header Vary Cookie; }
+    }
+
+EOF
+        done
+    fi
+
     if [ "$NO_MODULE" = false ]; then
         local pack_host pack_mode
         for pack_host in rulepacks.example.com:enforce rulepacks-report.example.com:report rulepacks-unlisted.example.com:enforce; do
@@ -876,7 +1155,84 @@ $(daemon_directives)
         }
     }
 
+    # Lane fixture daemon_arm, origin caching headers: an application origin
+    # (each image with its own Cache-Control) proxied by a server that sets
+    # its own caching headers for browsers
+    # (nginx/test_nginx_daemon_origin_caching.py).
+    server {
+        listen $NGINX_PORT;
+        server_name daemon-origin-src.example.com;
+        root $NGINX_CONFIG_DIR/www;
+        pagespeed off;
+        location = /daemon_origin/private.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "private, max-age=600";
+        }
+        location = /daemon_origin/nostore.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "no-store";
+        }
+        location = /daemon_origin/public.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "public, max-age=600";
+        }
+        location = /daemon_origin/short.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "public, max-age=15";
+        }
+    }
+    server {
+        listen $NGINX_PORT;
+        server_name daemon-origin.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed InPlaceResourceOptimization on;
+        pagespeed DaemonSocketPath $DAEMON_SOCKET;
+        pagespeed DaemonVolumePath $DAEMON_VOLUME;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location /daemon_origin/ {
+            proxy_pass http://127.0.0.1:$NGINX_PORT;
+            proxy_set_header Host daemon-origin-src.example.com;
+            expires 1h;
+        }
+    }
+
 EOF
+            # Lane fixture daemon_arm, nginx/test_nginx_daemon_site.py: one
+            # server block on each of two listeners, each the only block
+            # there, in front of the one worker.  Each document root holds
+            # stylesheets with a rule only that root has; /loc/ in the first
+            # block sets a location-level CacheFragment.
+            local daemon_site_dir
+            for daemon_site_dir in a b; do
+                local daemon_site_port=$NGINX_DAEMON_SITE_PORT_A
+                [ "$daemon_site_dir" = b ] && daemon_site_port=$NGINX_DAEMON_SITE_PORT_B
+                cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$daemon_site_port;
+        server_name daemon-$daemon_site_dir.example.test;
+        root $NGINX_CONFIG_DIR/www/daemon_site/$daemon_site_dir;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed InPlaceResourceOptimization on;
+        pagespeed DaemonSocketPath $DAEMON_SOCKET;
+        pagespeed DaemonVolumePath $DAEMON_VOLUME;
+        expires 1h;
+
+        location ^~ /loc/ {
+            pagespeed CacheFragment daemon-site-location;
+            expires 1h;
+        }
+        location /pagespeed_statistics { }
+    }
+
+EOF
+            done
         fi
 
         # Lane fixture rule_pack_signing: RulePackRequireSigned on with the
@@ -1007,6 +1363,35 @@ EOF
             add_header X-Test-Order yes;
         }
 
+        # Rewritten HTML: the module writes one Cache-Control line, and it
+        # keeps the private and no-store that add_header states.  With
+        # ModifyCachingHeaders off every line stays as the operator set it.
+        location = /mod_pagespeed_test/filter_order_cc/no_store.html {
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/private.html {
+            add_header Cache-Control "private";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/both.html {
+            add_header Cache-Control "private, no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/lines.html {
+            add_header Cache-Control "private, max-age=600";
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/public.html {
+            add_header Cache-Control "public, max-age=600";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/no_store_long_html_cache.html {
+            pagespeed MaxHtmlCacheTimeMs 60000;
+            add_header Cache-Control "no-store";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/keep_all.html {
+            pagespeed ModifyCachingHeaders off;
+            add_header Cache-Control "public, max-age=600";
+            add_header Cache-Control "no-store";
+        }
+
         # The charset directive's decision must survive on rewritten HTML.
         location ^~ /mod_pagespeed_test/filter_order_charset/ {
             charset utf-8;
@@ -1033,6 +1418,16 @@ EOF
             add_header X-Test-Order yes;
             pagespeed AddResourceHeader X-Test-Order yes;
         }
+
+        # ModifyCachingHeaders off (mirror of the HTTP block).
+        location ^~ /mod_pagespeed_test/caching_headers_off/ {
+            pagespeed ModifyCachingHeaders off;
+        }
+        location = /mod_pagespeed_test/caching_headers_off/index.html {
+            pagespeed ModifyCachingHeaders off;
+            add_header Cache-Control "private, max-age=3000";
+        }
+        location ^~ /mod_pagespeed_test/caching_headers_on/ { }
 
         # proxy_pass probe (mirror of the HTTP block).
         location ^~ /mod_pagespeed_test/proxied/ {
@@ -1077,6 +1472,10 @@ EOF
     }
 
 EOF
+    fi
+
+    if [ -n "$SECONDARY_READY" ]; then
+        write_secondary_servers
     fi
 
     # Close the http block
@@ -1280,8 +1679,33 @@ start_daemon_worker() {
     nohup "$DAEMON_ARTIFACT_DIR/factory_worker" \
         --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \
         --cache-size 536870912 --log-level info \
+        --api-port "$NGINX_DAEMON_API_PORT" --api-no-auth \
         > "$DAEMON_LOG" 2>&1 &
     echo $! > "$DAEMON_PID"
+    # The same start, as a script the site tests run to restart the worker:
+    # it stops only the process the pid file names, and only while that is
+    # still this lane's worker.
+    cat > "$DAEMON_RESTART" << EOF
+#!/bin/bash
+set -u
+pid="\$(cat "$DAEMON_PID" 2>/dev/null)"
+if [ -n "\$pid" ] && tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null | grep -q factory_worker; then
+    kill -TERM "\$pid"
+    for i in \$(seq 1 100); do [ -d "/proc/\$pid" ] || break; sleep 0.1; done
+    [ -d "/proc/\$pid" ] && kill -KILL "\$pid"
+fi
+rm -f "$DAEMON_SOCKET"
+nohup "$DAEMON_ARTIFACT_DIR/factory_worker" \\
+    --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \\
+    --cache-size 536870912 --log-level info \\
+    --api-port "$NGINX_DAEMON_API_PORT" --api-no-auth \\
+    >> "$DAEMON_LOG" 2>&1 < /dev/null &
+echo \$! > "$DAEMON_PID"
+for i in \$(seq 1 100); do [ -S "$DAEMON_SOCKET" ] && exit 0; sleep 0.2; done
+echo "the optimizer worker did not open its socket again" >&2
+exit 1
+EOF
+    chmod +x "$DAEMON_RESTART"
     local i
     for i in $(seq 1 100); do
         # The module reads the volume size the worker publishes while it
@@ -1306,7 +1730,25 @@ start_daemon_worker() {
 # Lane fixture "daemon_arm": the content the daemon cases fetch. It lives
 # outside /mod_pagespeed_test, whose responses carry an extra header the
 # daemon cannot reproduce on a stored copy.
+# Lane fixture "daemon_html_report": the pages test_daemon_html_report.py fetches.
+write_daemon_html_content() {
+    local dir="$1" sudo_cmd="$2" name
+    $sudo_cmd mkdir -p "$dir"
+    for name in plain cookie query secret expires addheader private setcookie varycookie; do
+        printf '<!doctype html><html><head><title>%s</title></head><body><p>%s</p></body></html>\n' "$name" "$name" \
+            | $sudo_cmd tee "$dir/$name.html" > /dev/null
+    done
+    printf '<!doctype html><html><head><meta name="csrf-token" content="value"><title>p</title></head><body></body></html>\n' \
+        | $sudo_cmd tee "$dir/personal.html" > /dev/null
+    {
+        printf '<!doctype html><html><head><title>l</title></head><body>\n'
+        head -c 70000 /dev/zero | tr '\0' 'x'
+        printf '\n<meta name="csrf-token" content="past the window"></body></html>\n'
+    } | $sudo_cmd tee "$dir/large.html" > /dev/null
+}
+
 write_daemon_content() {
+    write_daemon_html_content "$NGINX_CONFIG_DIR/www/daemon_html" ""
     local dir="$NGINX_CONFIG_DIR/www/daemon_lane"
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -1329,6 +1771,23 @@ write_daemon_content() {
     # The photo the image cases fetch: wider than a phone, so the worker has a
     # device class to size it for, and small enough to optimize quickly.
     cp "$PROJECT_ROOT/install/mod_pagespeed_example/images/Puzzle.jpg" "$dir/lane.jpg"
+    # nginx/test_nginx_daemon_image_variants.py: copies of the photo, one
+    # fresh name per attempt.
+    local n
+    for n in 1 2 3 4 5; do
+        cp "$dir/lane.jpg" "$dir/lane-$n.jpg"
+    done
+    # nginx/test_nginx_daemon_site.py: each root's stylesheets carry a rule
+    # only that root has.
+    local site name
+    for site in a b; do
+        rm -rf "$NGINX_CONFIG_DIR/www/daemon_site/$site"
+        mkdir -p "$NGINX_CONFIG_DIR/www/daemon_site/$site/loc"
+        for name in named.css port.css restart.css after.css plain.css loc/plain.css; do
+            printf '.daemon-site-%s-only {\n  color: #ff0000;\n}\n' "$site" \
+                > "$NGINX_CONFIG_DIR/www/daemon_site/$site/$name"
+        done
+    done
 }
 
 # The daemon directives of a server block: nothing where the worker is not up.
@@ -1352,6 +1811,112 @@ daemon_directives() {
 EOF
 }
 
+# The lane could not be provided: an error in require mode, a skip otherwise.
+secondary_unavailable() {
+    if [ "$SECONDARY_LANE" = "require" ]; then
+        log_error "$1 (PAGESPEED_SECONDARY_LANE=require)"
+        exit 1
+    fi
+    log_warn "$1; secondary-port servers not provided"
+}
+
+# The document trees and cache directories the secondary-port servers name.
+prepare_secondary_lane() {
+    case "$SECONDARY_LANE" in
+        0)
+            log_info "Secondary-port servers disabled (PAGESPEED_SECONDARY_LANE=0)"
+            return 0
+            ;;
+        1|require) ;;
+        *) log_error "PAGESPEED_SECONDARY_LANE must be 0, 1 or require"; exit 1 ;;
+    esac
+    if [ ! -f "$SECONDARY_TEMPLATE" ]; then
+        secondary_unavailable "$SECONDARY_TEMPLATE not found"
+        return 0
+    fi
+    local cache
+    # The cache directories the servers name, from the quoted "@@CACHE@@..."
+    # values only: the header comment mentions the placeholder too, and is not
+    # a path.
+    while IFS= read -r cache; do
+        mkdir -p "${cache/@@CACHE@@/$NGINX_CACHE_DIR}"
+    done < <(grep -v '^[[:space:]]*#' "$SECONDARY_TEMPLATE" \
+             | grep -o '"@@CACHE@@[^"]*"' | tr -d '"' | sort -u)
+    SECONDARY_READY=1
+}
+
+# Appends the secondary-port servers to the configuration. The first is the
+# port's default server. The settings below are what an Apache vhost inherits
+# from the lane's server-wide configuration.
+write_secondary_servers() {
+    cat > "$SECONDARY_COMMON" << EOF
+pagespeed on;
+pagespeed RewriteLevel CoreFilters;
+pagespeed InPlaceResourceOptimization on;
+pagespeed FetchHttps enable,allow_self_signed;
+location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
+    gzip off;
+}
+EOF
+    cat >> "$NGINX_CONFIG_FILE" << EOF
+    server_names_hash_bucket_size 128;
+    server_names_hash_max_size 4096;
+
+    server {
+        listen $NGINX_SECONDARY_PORT default_server;
+        server_name ipro.example.com;
+        include $SECONDARY_COMMON;
+        add_header X-Test-Vhost "ipro.example.com" always;
+        root $NGINX_CONFIG_DIR/www;
+        pagespeed FileCachePath ${NGINX_CACHE_DIR}_secondary;
+        pagespeed BlockingRewriteKey psatest;
+        # The .htaccess files of these two directories, on the Apache lane.
+        location ^~ /mod_pagespeed_test/ipro/nocache/ {
+            add_header X-Test-Vhost "ipro.example.com" always;
+            add_header Cache-Control no-cache;
+        }
+        location ^~ /mod_pagespeed_test/ipro/no-cache-control-header/ {
+            pagespeed ImplicitCacheTtlMs 333000;
+        }
+    }
+
+EOF
+    sed -e "s#@@PORT@@#$NGINX_SECONDARY_PORT#g" \
+        -e "s#@@DOC_ROOT@@#$NGINX_CONFIG_DIR/www#g" \
+        -e "s#@@CACHE@@#$NGINX_CACHE_DIR#g" \
+        -e "s#@@COMMON@@#$SECONDARY_COMMON#g" \
+        "$SECONDARY_TEMPLATE" >> "$NGINX_CONFIG_FILE"
+}
+
+# The source tree's untracked entries and empty directories (git does not list
+# the latter), so that a lane-on run can be checked to leave the tree as it
+# found it.
+source_tree_entries() {
+    {
+        git -C "$PROJECT_ROOT" -c safe.directory="$PROJECT_ROOT" status --porcelain \
+            --untracked-files=all 2>/dev/null | grep '^??' || true
+        find "$PROJECT_ROOT" -mindepth 1 -maxdepth 3 -type d -empty \
+            -not -path "$PROJECT_ROOT/.git*" 2>/dev/null
+    } | sort
+}
+
+check_source_tree() {
+    local new
+    new=$(comm -13 <(printf '%s\n' "$SOURCE_TREE_BEFORE") <(source_tree_entries))
+    if [ -n "$new" ]; then
+        log_error "The run left new entries in the source tree:"
+        printf '%s\n' "$new" | sed 's/^/  /' >&2
+        return 1
+    fi
+    log_info "The run left no new entries in the source tree"
+}
+
+# True when the secondary port's default server answers as itself.
+secondary_answers() {
+    curl -s --max-time 5 -o /dev/null -D - "http://localhost:$NGINX_SECONDARY_PORT/" 2>/dev/null \
+        | grep -qi '^X-Test-Vhost: ipro.example.com'
+}
+
 # Setup NGINX
 setup_nginx() {
     log_step "Setting up NGINX with PageSpeed..."
@@ -1368,8 +1933,20 @@ setup_nginx() {
     if [ -n "$DAEMON_READY" ]; then
         write_daemon_content
     fi
+    if [ "$NO_MODULE" = false ]; then
+        prepare_secondary_lane
+    fi
     generate_nginx_config
-    start_nginx || return 1
+    if [ -n "$SECONDARY_READY" ]; then
+        if ! start_nginx || ! secondary_answers; then
+            secondary_unavailable "the secondary-port servers did not come up"
+            SECONDARY_READY=""
+            generate_nginx_config
+            start_nginx || return 1
+        fi
+    else
+        start_nginx || return 1
+    fi
 
     log_info "NGINX is running with PageSpeed"
 }
@@ -1396,13 +1973,26 @@ run_tests() {
     export PAGESPEED_REDIRECT_ORIGIN_LOG="$NGINX_LOG_DIR/redirect_origin.access.log"
     # Where the handler access-rule tests reach the restricted server block.
     export PAGESPEED_HANDLER_ACL_PORT="$NGINX_HANDLER_ACL_PORT"
+    # Where the server-block cache keyspace tests reach their two listeners.
+    export PAGESPEED_SITE_PORT_A="$NGINX_SITE_PORT_A"
+    export PAGESPEED_SITE_PORT_B="$NGINX_SITE_PORT_B"
     # Where the rulepacks*.example.com servers listen (lane fixture
     # rule_packs), and the LogDir holding the rule-pack decision log (lane
     # fixture rule_pack_log).
     export PAGESPEED_RULE_PACKS_PORT="$NGINX_PORT"
+    # Where the self-fetch-access.example.com server listens (lane fixture
+    # self_fetch_access).
+    export PAGESPEED_SELF_FETCH_ACCESS_PORT="$NGINX_PORT"
     export PAGESPEED_RULE_PACK_LOG_DIR="$NGINX_LOG_DIR"
     # The optimizer worker's notification socket (lane fixture daemon_arm).
     export PAGESPEED_DAEMON_SOCKET="$DAEMON_SOCKET"
+    # Lane fixture daemon_arm, nginx/test_nginx_daemon_site.py: the two
+    # single-block listeners, the worker's management API, and the script
+    # that restarts the worker.
+    export PAGESPEED_DAEMON_SITE_PORT_A="$NGINX_DAEMON_SITE_PORT_A"
+    export PAGESPEED_DAEMON_SITE_PORT_B="$NGINX_DAEMON_SITE_PORT_B"
+    export PAGESPEED_DAEMON_API="127.0.0.1:$NGINX_DAEMON_API_PORT"
+    export PAGESPEED_DAEMON_RESTART="$DAEMON_RESTART"
 
     # Lane fixtures this lane provides (test/system/conftest.py
     # KNOWN_LANE_FIXTURES): cache_flush -- PAGESPEED_CACHE_DIR above is the
@@ -1419,9 +2009,23 @@ run_tests() {
     else
         local daemon_fixture=""
         if [ -n "$DAEMON_READY" ]; then
-            daemon_fixture=",daemon_arm"
+            daemon_fixture=",daemon_arm,daemon_html_report"
         fi
-        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi${daemon_fixture}}"
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi,self_fetch_access${daemon_fixture}}"
+    fi
+
+    # doc_root_scratch -- the runner-owned document root and its purge/ and
+    # cache_flush/ trees (setup_test_content), on every run.
+    export PAGESPEED_DOC_ROOT="$NGINX_CONFIG_DIR/www"
+    PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:+$PAGESPEED_LANE_FIXTURES,}doc_root_scratch"
+
+    # secondary_vhosts, experiment_framework -- the secondary-port servers,
+    # only where the secondary lane is on (prepare_secondary_lane).
+    if [ -n "$SECONDARY_READY" ]; then
+        export PAGESPEED_SECONDARY_HOST="${PAGESPEED_SECONDARY_HOST:-localhost}"
+        export PAGESPEED_SECONDARY_PORT="$NGINX_SECONDARY_PORT"
+        export PAGESPEED_SECONDARY_CACHE_DIR="${NGINX_CACHE_DIR}_secondary"
+        PAGESPEED_LANE_FIXTURES="$PAGESPEED_LANE_FIXTURES,secondary_vhosts,experiment_framework"
     fi
 
     # HTTPS configuration for TLS tests
@@ -1482,7 +2086,12 @@ run_tests() {
 
     # Run pytest
     log_info "Running: python3 -m pytest ${PYTEST_ARGS[*]}"
-    python3 -m pytest "${PYTEST_ARGS[@]}"
+    local rc=0
+    python3 -m pytest "${PYTEST_ARGS[@]}" || rc=$?
+    if [ -n "${SOURCE_TREE_BEFORE+set}" ] && ! check_source_tree && [ "$rc" -eq 0 ]; then
+        rc=1
+    fi
+    return "$rc"
 }
 
 # Cleanup on exit
@@ -1533,6 +2142,11 @@ main() {
 
     # Setup cleanup trap
     trap cleanup EXIT
+
+    # A lane-on run must leave the source tree as it found it (run_tests).
+    if [ "$SECONDARY_LANE" != "0" ]; then
+        SOURCE_TREE_BEFORE=$(source_tree_entries)
+    fi
 
     # Setup NGINX
     setup_nginx

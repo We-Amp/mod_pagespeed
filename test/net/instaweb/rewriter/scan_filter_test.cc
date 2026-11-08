@@ -86,6 +86,46 @@ TEST_F(ScanFilterTest, RefsBeforeBase) {
   EXPECT_TRUE(rewrite_driver()->refs_before_base());
 }
 
+TEST_F(ScanFilterTest, LongestBase) {
+  // A base of exactly max_url_size() is still adopted.
+  const char kTestName[] = "longest_base";
+  GoogleString new_base = "http://example.com/?";
+  new_base.append(options()->max_url_size() - new_base.size(), 'a');
+  ValidateNoChanges(kTestName, StrCat("<head>"
+                                      "<base href=\"",
+                                      new_base,
+                                      "\">"
+                                      "</head>"));
+  EXPECT_STREQ(new_base, rewrite_driver()->base_url().Spec());
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+TEST_F(ScanFilterTest, TooLongBase) {
+  // A base longer than max_url_size() is not adopted: the base stays the URL
+  // and the page is flagged so that relative references are left alone.
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  const char kTestName[] = "too_long_base";
+  GoogleString new_base = "http://example.com/?";
+  new_base.append(options()->max_url_size() + 1 - new_base.size(), 'a');
+  ValidateExpected(kTestName,
+                   StrCat("<head>"
+                          "<base href=\"",
+                          new_base,
+                          "\">"
+                          "</head>"),
+                   StrCat("<head>"
+                          "<base href=\"",
+                          new_base,
+                          "\">"
+                          "<!--The base URL is too long, "
+                          "proceeding conservatively.-->"
+                          "</head>"));
+  EXPECT_STREQ(StrCat(kTestDomain, kTestName, ".html"),
+               rewrite_driver()->base_url().Spec());
+  EXPECT_TRUE(rewrite_driver()->other_base_problem());
+}
+
 TEST_F(ScanFilterTest, NoCharset) {
   // Check that the charset is empty if we don't set it in any way.
   const char kTestName[] = "no_charset";
@@ -245,6 +285,61 @@ TEST_F(ScanFilterTest, CspParseOff) {
       GoogleUrl("https://www.example.org/foo.png"), CspDirective::kImgSrc));
   EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
       GoogleUrl("http://www.example.org/foo.png"), CspDirective::kImgSrc));
+}
+
+// Only so many policies are kept. They all have to agree, so past the limit
+// nothing is permitted any more.
+TEST_F(ScanFilterTest, CspTooManyPolicies) {
+  const GoogleUrl image("https://www.example.com/foo.png");
+  GoogleString policies = "img-src *";
+  for (size_t i = 1; i < RewriteDriver::kMaxCspPolicies; ++i) {
+    StrAppend(&policies, ",img-src *");
+  }
+  ValidateNoChanges(
+      "csp_at_limit",
+      StrCat("<meta http-equiv=\"Content-Security-Policy\" content=\"",
+             policies, "\">"));
+  EXPECT_EQ(RewriteDriver::kMaxCspPolicies,
+            rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_TRUE(
+      rewrite_driver()->IsLoadPermittedByCsp(image, CspDirective::kImgSrc));
+  EXPECT_TRUE(
+      rewrite_driver()->content_security_policy().PermitsInlineScript());
+
+  for (int i = 0; i < 1000; ++i) {
+    StrAppend(&policies, ",img-src *");
+  }
+  ValidateNoChanges(
+      "csp_past_limit",
+      StrCat("<meta http-equiv=\"Content-Security-Policy\" content=\"",
+             policies, "\">"));
+  EXPECT_EQ(RewriteDriver::kMaxCspPolicies + 1,
+            rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_FALSE(
+      rewrite_driver()->IsLoadPermittedByCsp(image, CspDirective::kImgSrc));
+  EXPECT_FALSE(
+      rewrite_driver()->content_security_policy().PermitsInlineScript());
+}
+
+// The limit is per document, however the policies are spread over headers and
+// <meta> tags. One of those we dropped might have had a base-uri.
+TEST_F(ScanFilterTest, CspTooManyPoliciesManyTags) {
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy", "img-src *");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  GoogleString html;
+  for (int i = 0; i < 1000; ++i) {
+    StrAppend(&html,
+              "<meta http-equiv=\"Content-Security-Policy\" "
+              "content=\"img-src *\">");
+  }
+  StrAppend(&html, "<base href=\"http://example.com/index.html\">");
+  ValidateNoChanges("csp_many_tags", html);
+  EXPECT_EQ(RewriteDriver::kMaxCspPolicies + 1,
+            rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_TRUE(rewrite_driver()->other_base_problem());
 }
 
 TEST_F(ScanFilterTest, CspBase1) {

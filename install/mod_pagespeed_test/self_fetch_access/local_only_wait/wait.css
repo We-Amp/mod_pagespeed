@@ -1,0 +1,4 @@
+/* Self-fetch access test: held for local clients, optimized responses awaited. */
+.sfa-wait-marker   {
+    color :   #00ffff ;
+}

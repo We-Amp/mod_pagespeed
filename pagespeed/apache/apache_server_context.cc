@@ -104,6 +104,14 @@ bool ApacheServerContext::RunDaemonStartupCheck() {
   return ok;
 }
 
+DaemonHtmlReporter* ApacheServerContext::daemon_html_reporter() {
+  std::call_once(daemon_html_reporter_once_, [this] {
+    daemon_html_reporter_ = std::make_unique<DaemonHtmlReporter>(
+        statistics(), timer(), global_config()->log_dir(), message_handler());
+  });
+  return daemon_html_reporter_.get();
+}
+
 ApacheConfig* ApacheServerContext::global_config() {
   return ApacheConfig::DynamicCast(global_options());
 }
@@ -324,6 +332,45 @@ ConfiguredHostNames ApacheConfiguredHostNames(
     }
   }
   return names;
+}
+
+void AppendApacheSiteIdentity(
+    const server_rec* server, const server_rec* main_server,
+    const std::set<const server_rec*>& stated_server_names,
+    SiteIdentity* identity) {
+  if (server == nullptr) {
+    return;
+  }
+  ConfiguredHostNames names =
+      ApacheConfiguredHostNames(server, main_server, stated_server_names);
+  if (!names.primary.empty()) {
+    identity->names.push_back(names.primary);
+  }
+  identity->names.insert(identity->names.end(), names.aliases.begin(),
+                         names.aliases.end());
+  if (server->wild_names != nullptr) {
+    const char* const* wild =
+        reinterpret_cast<const char* const*>(server->wild_names->elts);
+    for (int i = 0; i < server->wild_names->nelts; ++i) {
+      if (wild[i] != nullptr) {
+        identity->names.push_back(wild[i]);
+      }
+    }
+  }
+  for (const server_addr_rec* addr = server->addrs; addr != nullptr;
+       addr = addr->next) {
+    if (addr->host_addr == nullptr) {
+      continue;
+    }
+    char ip[64];
+    if (apr_sockaddr_ip_getbuf(ip, sizeof(ip), addr->host_addr) !=
+        APR_SUCCESS) {
+      continue;
+    }
+    const bool v6 = addr->host_addr->family != APR_INET;
+    identity->listen_addresses.push_back(StrCat(
+        v6 ? "[" : "", ip, v6 ? "]:" : ":", IntegerToString(addr->host_port)));
+  }
 }
 
 }  // namespace net_instaweb

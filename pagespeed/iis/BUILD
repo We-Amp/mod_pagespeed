@@ -170,10 +170,13 @@ cc_library(
         ":iis_entity_chunk",
         ":iis_global_constants",
         ":iis_admin_path_match",
+        ":iis_inplace_url_agreement",
         ":iis_ip_string",
         ":iis_local_request",
         ":iis_proxy_fetch_completion",
+        ":iis_self_fetch",
         ":iis_unclaimed_ref",
+        ":iis_url_port",
         ":iis_zerocopy_serve",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
@@ -191,6 +194,7 @@ cc_library(
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:site_cache_fragment",
         "//pagespeed/system:system_windows",
         "@re2//:re2",
         "@zlib_ng//:zlib-ng",
@@ -302,6 +306,33 @@ cc_library(
     ],
 )
 
+# The IIS reading of the in-place URL agreement: the path IIS routes a
+# request on against the module's parse of its URL.  Free of the IIS headers
+# so it can be unit-tested on any platform.
+cc_library(
+    name = "iis_inplace_url_agreement",
+    srcs = ["iis_inplace_url_agreement.cc"],
+    hdrs = ["iis_inplace_url_agreement.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:inplace_url_agreement",
+    ],
+)
+
+# Drops the port from the request URL's authority (IPv6-literal aware), split
+# out of iis_http_module.cpp so it can be unit-tested without the IIS headers.
+cc_library(
+    name = "iis_url_port",
+    srcs = ["iis_url_port.cc"],
+    hdrs = ["iis_url_port.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # The "is this request local" decision for the admin-style pages (forwarding
 # headers, TreatProxiedRequestsAsLocal, *Domains), split out of
 # iis_http_module.cpp so it can be unit-tested without the IIS headers.
@@ -311,6 +342,23 @@ cc_library(
     hdrs = ["iis_local_request.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Recognises the module's own fetches (fetch marker in the User-Agent and a
+# peer that is this server) and relabels their client address, so IIS address
+# restrictions never treat them as local. Split out so it is unit-tested
+# without IIS. Windows-only (winsock2 types).
+cc_library(
+    name = "iis_self_fetch",
+    srcs = ["iis_self_fetch.cc"],
+    hdrs = ["iis_self_fetch.h"],
+    defines = ["_WINSOCKAPI_"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb:net_instaweb_lib",
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )

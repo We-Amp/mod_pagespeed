@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/daemon_serve_arm.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -36,8 +37,10 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_health.h"
+#include "pagespeed/system/daemon_notify_params.h"
 #include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/siphash.h"
+#include "pagespeed/system/site_cache_fragment.h"
 
 namespace net_instaweb {
 
@@ -646,12 +649,14 @@ void DaemonServeReader::Release() {
 int DaemonServeReader::ReadBest(const DaemonServeRequest& request,
                                 uint32_t mask) {
   Release();
-  GoogleString url, hostname, scheme;
+  GoogleString url, hostname, scheme, site;
   request.url.CopyToString(&url);
   request.hostname.CopyToString(&hostname);
   request.scheme.CopyToString(&scheme);
-  const int status = abi_->CacheReadBest(cache_, url.c_str(), hostname.c_str(),
-                                         scheme.c_str(), mask, &result_);
+  request.site.CopyToString(&site);
+  const int status =
+      abi_->CacheReadBestSite(cache_, url.c_str(), hostname.c_str(),
+                              scheme.c_str(), site.c_str(), mask, &result_);
   if (status != kPsOk) {
     // The peer does not hand back a result it did not produce; make sure of
     // it rather than inherit the assumption.
@@ -663,13 +668,14 @@ int DaemonServeReader::ReadBest(const DaemonServeRequest& request,
 int DaemonServeReader::ReadById(const DaemonServeRequest& request,
                                 uint8_t alternate_id) {
   Release();
-  GoogleString url, hostname, scheme;
+  GoogleString url, hostname, scheme, site;
   request.url.CopyToString(&url);
   request.hostname.CopyToString(&hostname);
   request.scheme.CopyToString(&scheme);
-  const int status =
-      abi_->CacheReadAlternate(cache_, url.c_str(), hostname.c_str(),
-                               scheme.c_str(), alternate_id, &result_);
+  request.site.CopyToString(&site);
+  const int status = abi_->CacheReadAlternateSite(
+      cache_, url.c_str(), hostname.c_str(), scheme.c_str(), site.c_str(),
+      alternate_id, &result_);
   if (status != kPsOk) {
     result_ = nullptr;
   }
@@ -818,6 +824,9 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   decision->alternate_id = ServeAlternateIdForMask(stored_mask);
   decision->worker_processed = abi_->ReadIsWorkerProcessed(result_) != 0;
   decision->origin_content_length = abi_->ReadOriginContentLength(result_);
+  decision->encoded_origin_known =
+      abi_->ReadEncodedOriginLength(result_, &decision->encoded_origin_length);
+  if (!decision->encoded_origin_known) decision->encoded_origin_length = 0;
   decision->ps_content_type = content_type;
 
   const char* origin_ct = abi_->ReadOriginContentType(result_);
@@ -927,6 +936,27 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   cc_input.cache_scope = kPsCacheScopeShared;
   cc_input.effective_max_age = freshness.effective_max_age;
   cc_input.origin_max_age = freshness_input.origin_max_age;
+  // AN IMAGE MADE FOR ANOTHER DEVICE IS A STAND-IN, not this client's answer,
+  // so a cache downstream may not keep it for the entry's whole lifetime: it
+  // would go on handing it out long after the client's own variant is written.
+  // The bytes are stored under this client's `Vary` key, so `Vary` cannot help.
+  // Both fields are capped because the peer emits `origin_max_age` as `max-age`
+  // beside `s-maxage` when the origin sent one.  `Age` stays truthful: a cache
+  // that honors it treats an old entry's stand-in as stale on arrival, which
+  // is the safe direction.  The format axis is left out: the bytes are the
+  // same picture, and a format the worker never produces would otherwise
+  // shorten the lifetime for every client asking for it.
+  if (negotiated && content_type == kPsContentImage &&
+      ServeMaskWithOriginalFormat(
+          ServeMaskWithIdentityEncoding(decision->stored_mask)) !=
+          ServeMaskWithOriginalFormat(
+              ServeMaskWithIdentityEncoding(decision->selection_mask))) {
+    decision->device_fallback_lifetime = true;
+    cc_input.effective_max_age =
+        std::min(cc_input.effective_max_age, kServeDeviceFallbackMaxAgeSeconds);
+    cc_input.origin_max_age =
+        std::min(cc_input.origin_max_age, kServeDeviceFallbackMaxAgeSeconds);
+  }
   cc_input.content_type = content_type;
   cc_input.origin_cc_flags = freshness_input.origin_cc_flags;
   cc_input.synthesize_swr = 0;
@@ -1046,6 +1076,13 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   if (abi_ == nullptr || cache_ == nullptr) {
     decision.reason = daemon_serve_reason::kSubstrateUnavailable;
     decision.serve_class = kPsServeClassOriginalSkew;
+    return decision;
+  }
+
+  // The site, before any read: an entry is served only under the site that
+  // admitted the request, and without one there is no keyspace to read.
+  if (!IsSiteId(request.site)) {
+    decision.reason = daemon_serve_reason::kNoSiteId;
     return decision;
   }
 
@@ -1314,8 +1351,8 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
       decision.renotify_original_only =
           heal_limiter_ != nullptr && !decision.vary_accept_origin_declared &&
           heal_limiter_->AdmitAskKey(
-              heal_limiter_->UrlKey(request.scheme, request.hostname,
-                                    request.url),
+              heal_limiter_->UrlKey(request.site, request.scheme,
+                                    request.hostname, request.url),
               now_seconds);
     }
   }
@@ -1374,6 +1411,33 @@ void DaemonServeStats::RecordHit(int content_type, uint64_t original_bytes,
   // The host-aware recorder where the optimizer has one; otherwise -- an
   // empty host, or an optimizer from before per-host serve savings -- the
   // hit is recorded exactly as the host-less form records it.  Never both.
+  if (!host.empty() &&
+      abi_->ServeStatsRecordHitForHost(handle_, content_type, original_bytes,
+                                       optimized_bytes, mask, host)) {
+    return;
+  }
+  abi_->ServeStatsRecordHit(handle_, content_type, original_bytes,
+                            optimized_bytes, mask);
+}
+
+void DaemonServeStats::RecordHitSplit(int content_type, uint64_t original_bytes,
+                                      uint64_t encoded_origin_bytes,
+                                      uint64_t optimized_bytes, uint32_t mask,
+                                      StringPiece host) {
+  if (abi_ == nullptr || cache_path_.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!EnsureOpenLocked()) {
+    return;
+  }
+  // The split recorder where the optimizer has one; otherwise the recording
+  // is the host form's, never both.
+  if (abi_->ServeStatsRecordHitSplit(handle_, content_type, original_bytes,
+                                     encoded_origin_bytes, optimized_bytes,
+                                     mask, host)) {
+    return;
+  }
   if (!host.empty() &&
       abi_->ServeStatsRecordHitForHost(handle_, content_type, original_bytes,
                                        optimized_bytes, mask, host)) {
@@ -1460,33 +1524,31 @@ bool DaemonServeFallbackRenotify(const DaemonAbi& abi, StringPiece socket_path,
     return false;
   }
 
-  GoogleString socket, url, hostname, scheme, context, signature;
-  socket_path.CopyToString(&socket);
-  request.url.CopyToString(&url);
-  request.hostname.CopyToString(&hostname);
-  request.scheme.CopyToString(&scheme);
-
-  PsNotifyParams params;
-  abi.NotifyParamsInit(&params);
-  params.url = url.c_str();
-  params.hostname = hostname.c_str();
-  params.scheme = scheme.c_str();
-  params.content_type = decision.ps_content_type;
+  ModuleNotifyInput notify;
+  notify.url = request.url;
+  notify.hostname = request.hostname;
+  notify.scheme = request.scheme;
+  notify.site = request.site;
+  notify.content_type = decision.ps_content_type;
   // THE RAW CLIENT MASK, as the classifier answered -- the same value the
   // record arm notifies at and the peer's own front end sends.  The worker
   // normalizes for dedup, so the normalization this arm applies at selection
   // time would only hide what the client actually advertised.
-  params.mask = decision.client_mask;
-  params.agent_request = 0;
-  params.option_context = CStrOrNull(option_context, &context);
-  params.option_context_length = option_context.size();
-  params.option_signature = CStrOrNull(option_signature, &signature);
+  notify.mask = decision.client_mask;
+  notify.option_context = option_context;
+  notify.option_signature = option_signature;
+  ModuleNotifyParams built;
+  if (!BuildModuleNotifyParams(abi, notify, &built)) {
+    return false;
+  }
+  GoogleString socket;
+  socket_path.CopyToString(&socket);
   // Fire and forget: the peer answers nothing, and a delivery failure costs
   // this request its convergence and nothing else.  No retry -- the next
   // fallback hit asks again.  A failure is not silent, though: it moves the
   // failure counter, so a dead socket is distinguishable from a quiet family
   // at rollout (see the declaration for why a suppression moves neither).
-  if (abi.NotifyWorker(socket.c_str(), &params) == kPsOk) {
+  if (abi.NotifyWorker(socket.c_str(), &built.params()) == kPsOk) {
     if (notified != nullptr) {
       notified->Add(1);
     }
@@ -1521,28 +1583,26 @@ bool DaemonServeOriginRefreshedNotify(
     return false;
   }
 
-  GoogleString socket, url, hostname, scheme, context, signature;
-  socket_path.CopyToString(&socket);
-  request.url.CopyToString(&url);
-  request.hostname.CopyToString(&hostname);
-  request.scheme.CopyToString(&scheme);
-
-  PsNotifyParams params;
-  abi.NotifyParamsInit(&params);
-  params.url = url.c_str();
-  params.hostname = hostname.c_str();
-  params.scheme = scheme.c_str();
-  params.content_type = decision.ps_content_type;
+  ModuleNotifyInput notify;
+  notify.url = request.url;
+  notify.hostname = request.hostname;
+  notify.scheme = request.scheme;
+  notify.site = request.site;
+  notify.content_type = decision.ps_content_type;
   // THE SENTINEL MASK, not a capability vector: this notification carries no
   // variant request at all -- it is the "the origin was re-fetched fresh,
   // the stored variants may be stale" event, and the worker reads the value
   // by name.  A mask a classifier could produce would be dedup-processed as
   // an ordinary notification and would not purge anything.
-  params.mask = kOriginRefreshedSentinel;
-  params.agent_request = 0;
-  params.option_context = CStrOrNull(option_context, &context);
-  params.option_context_length = option_context.size();
-  params.option_signature = CStrOrNull(option_signature, &signature);
+  notify.mask = kOriginRefreshedSentinel;
+  notify.option_context = option_context;
+  notify.option_signature = option_signature;
+  ModuleNotifyParams built;
+  if (!BuildModuleNotifyParams(abi, notify, &built)) {
+    return false;
+  }
+  GoogleString socket;
+  socket_path.CopyToString(&socket);
   // Fire and forget, once, no retry -- the same discipline as the fallback
   // re-notify, and the same failure accounting: a suppression moved neither
   // counter to get here, a send moves `notified`, and a failure moves
@@ -1550,7 +1610,7 @@ bool DaemonServeOriginRefreshedNotify(
   // rather than as a quiet substrate.  The worker rate-limits the sentinel
   // per URL, so re-asking on the next age-expired fall-through is absorbed
   // rather than amplified.
-  if (abi.NotifyWorker(socket.c_str(), &params) == kPsOk) {
+  if (abi.NotifyWorker(socket.c_str(), &built.params()) == kPsOk) {
     if (notified != nullptr) {
       notified->Add(1);
     }
@@ -1593,7 +1653,8 @@ uint64 DaemonHealNotifyLimiter::Hash(StringPiece key) const {
   return hash.Finish();
 }
 
-uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece scheme, StringPiece hostname,
+uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece site, StringPiece scheme,
+                                       StringPiece hostname,
                                        StringPiece url) const {
   // The host as the cache key has it: a port split off (the last colon,
   // when only digits follow; after the bracket for a bracketed address),
@@ -1631,6 +1692,10 @@ uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece scheme, StringPiece hostname,
   }
 
   SipHash24 hash(key0_, key1_);
+  // The site first, at its fixed length or empty, so it cannot run into the
+  // scheme.
+  hash.Update(site.data(), site.size());
+  hash.Update("\n", 1);
   hash.Update(scheme.data(), scheme.size());
   hash.Update("://", 3);
   for (char c : host) {
@@ -1724,16 +1789,17 @@ bool DaemonServeReader::LostOptimizedCopy(const DaemonServeRequest& request,
   // served so on every request, and the read below must not be per request.
   // This memo sees every such URL, lost or not, and can only cause an extra
   // look, never refuse one for another URL's sake.
-  const uint64 url_key =
-      heal_limiter_->UrlKey(request.scheme, request.hostname, request.url);
+  const uint64 url_key = heal_limiter_->UrlKey(request.site, request.scheme,
+                                               request.hostname, request.url);
   if (!heal_limiter_->ShouldLookKey(url_key, now_seconds)) {
     return false;
   }
 
-  GoogleString url, hostname, scheme;
+  GoogleString url, hostname, scheme, site;
   request.url.CopyToString(&url);
   request.hostname.CopyToString(&hostname);
   request.scheme.CopyToString(&scheme);
+  request.site.CopyToString(&site);
   // The best copy for this client IF it accepted gzip: with no identity
   // copy in the entry that is the optimizer's gzip copy, at whichever
   // viewport, density and Save-Data it was written for.  An INDEPENDENT
@@ -1744,8 +1810,9 @@ bool DaemonServeReader::LostOptimizedCopy(const DaemonServeRequest& request,
        ~(kPsMaskTransferEncodingBits << kPsMaskTransferEncodingShift)) |
       (kPsTransferEncodingGzip << kPsMaskTransferEncodingShift);
   void* probe = nullptr;
-  const int probe_status = abi_->CacheReadBest(
-      cache_, url.c_str(), hostname.c_str(), scheme.c_str(), gzip_mask, &probe);
+  const int probe_status =
+      abi_->CacheReadBestSite(cache_, url.c_str(), hostname.c_str(),
+                              scheme.c_str(), site.c_str(), gzip_mask, &probe);
   if (probe_status != kPsOk || probe == nullptr) {
     if (probe_status == kPsErrNotFound && no_worker_copy_seen != nullptr) {
       *no_worker_copy_seen = true;
@@ -1812,28 +1879,26 @@ bool DaemonServeLostCopyNotify(const DaemonAbi& abi, StringPiece socket_path,
     return false;
   }
 
-  GoogleString socket, url, hostname, scheme, context, signature;
-  socket_path.CopyToString(&socket);
-  request.url.CopyToString(&url);
-  request.hostname.CopyToString(&hostname);
-  request.scheme.CopyToString(&scheme);
-
-  PsNotifyParams params;
-  abi.NotifyParamsInit(&params);
-  params.url = url.c_str();
-  params.hostname = hostname.c_str();
-  params.scheme = scheme.c_str();
-  params.content_type = decision.ps_content_type;
+  ModuleNotifyInput notify;
+  notify.url = request.url;
+  notify.hostname = request.hostname;
+  notify.scheme = request.scheme;
+  notify.site = request.site;
+  notify.content_type = decision.ps_content_type;
   // THE RAW CLIENT MASK, as the fallback re-notify sends it: an ordinary
   // capability vector, so the worker handles this exactly as it handles a
   // repeat notification for the URL -- which is what it is.
-  params.mask = decision.client_mask;
-  params.agent_request = 0;
-  params.option_context = CStrOrNull(option_context, &context);
-  params.option_context_length = option_context.size();
-  params.option_signature = CStrOrNull(option_signature, &signature);
+  notify.mask = decision.client_mask;
+  notify.option_context = option_context;
+  notify.option_signature = option_signature;
+  ModuleNotifyParams built;
+  if (!BuildModuleNotifyParams(abi, notify, &built)) {
+    return false;
+  }
+  GoogleString socket;
+  socket_path.CopyToString(&socket);
   // Fire and forget, once.  The next admitted look asks again.
-  if (abi.NotifyWorker(socket.c_str(), &params) == kPsOk) {
+  if (abi.NotifyWorker(socket.c_str(), &built.params()) == kPsOk) {
     if (notified != nullptr) {
       notified->Add(1);
     }
@@ -1872,6 +1937,9 @@ void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type) {
 void RecordDaemonServeCounters(RewriteStats* stats,
                                const DaemonServeDecision& decision) {
   if (stats == nullptr) return;
+  if (decision.reason == daemon_serve_reason::kNoSiteId) {
+    stats->daemon_serve_declined_no_site()->Add(1);
+  }
   if (decision.verdict == DaemonServeVerdict::kServeOptimized) {
     stats->ipro_daemon_served()->Add(1);
     RecordDaemonServedClass(stats, decision.ps_content_type);

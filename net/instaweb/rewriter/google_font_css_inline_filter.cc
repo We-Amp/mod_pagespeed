@@ -192,7 +192,7 @@ void GoogleFontCssInlineFilter::ResetAndExplainReason(const char* reason,
     // Note that since we only call this after a success of
     // GoogleFontServiceInputResource::Make, this will only be adding comments
     // near font links, and not anything else.
-    driver()->InsertComment(reason);
+    driver()->InsertDebugCommentHere(reason);
   }
 }
 

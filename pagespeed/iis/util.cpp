@@ -26,3 +26,13 @@ std::string ws2s(const std::wstring& s)
 	WideCharToMultiByte(CP_ACP, 0, s.c_str(), slength, &r[0], len, 0, 0);
 	return r;
 }
+
+std::string ws2utf8(const std::wstring& s)
+{
+	if (s.empty()) return std::string();
+	int len = WideCharToMultiByte(CP_UTF8, 0, s.data(), (int)s.length(), 0, 0, 0, 0);
+	if (len <= 0) return std::string();
+	std::string r(len, '\0');
+	WideCharToMultiByte(CP_UTF8, 0, s.data(), (int)s.length(), &r[0], len, 0, 0);
+	return r;
+}

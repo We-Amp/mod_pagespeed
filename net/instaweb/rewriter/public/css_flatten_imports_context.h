@@ -42,6 +42,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "third_party/css_parser/src/webutil/css/parser.h"
 
 namespace net_instaweb {
 
@@ -67,10 +68,20 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     if (hierarchy_->media().empty()) {
       suffix = "all";
     } else {
-      suffix = hierarchy_->media()[0];
-      for (int i = 1, n = hierarchy_->media().size(); i < n; ++i) {
-        StrAppend(&suffix, "_", hierarchy_->media()[i]);
+      // Prefix each medium with its length so that distinct media lists can
+      // never produce the same key, whatever characters the media contain.
+      for (const GoogleString& medium : hierarchy_->media()) {
+        StrAppend(&suffix, IntegerToString(medium.size()), ":", medium);
       }
+    }
+    // When URLs are trimmed, the flattened text depends on the origin and
+    // directory they are trimmed relative to, so importers elsewhere must
+    // not share it.
+    if (TrimsUrls()) {
+      const GoogleString trim_base =
+          hierarchy_->css_trim_url().AllExceptLeaf().as_string();
+      StrAppend(&suffix, "|trim", IntegerToString(trim_base.size()), ":",
+                trim_base);
     }
     return suffix;
   }
@@ -79,6 +90,12 @@ class CssFlattenImportsContext : public SingleRewriteContext {
                      const OutputResourcePtr& output_resource) override {
     input_resource_ = input_resource;
     output_resource_ = output_resource;
+
+    if (!hierarchy_->ReserveInputBytes(
+            input_resource->ExtractUncompressedContents().size())) {
+      RewriteDone(kRewriteFailed, 0);
+      return;
+    }
 
     // We have to fix relative URLs in the CSS as they break if used in a
     // CSS file that itself was loaded via a relative path from the base
@@ -97,10 +114,7 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     StringWriter writer(hierarchy_->input_contents_backing_store());
     // See RewriteDriver::ResolveCssUrls about why we disable trimming in
     // proxy mode. We also disable it if trimming is not enabled.
-    if (driver->server_context()->url_namer()->ProxyMode() ==
-            UrlNamer::ProxyExtent::kFull ||
-        !driver->options()->trim_urls_in_css() ||
-        !driver->options()->Enabled(RewriteOptions::kLeftTrimUrls)) {
+    if (!TrimsUrls()) {
       transformer.set_trim_urls(false);
     }
     if (CssTagScanner::TransformUrls(
@@ -144,6 +158,7 @@ class CssFlattenImportsContext : public SingleRewriteContext {
 
     // Propagate any info on images from child rewrites.
     CssImageRewriter::InheritChildImageInfo(this);
+    CssImageRewriter::InheritChildInlinedImageBytes(this);
 
     // Roll up the rewritten CSS(s) regardless of success or failure.
     // Failure means we can't flatten it for some reason, such as incompatible
@@ -184,14 +199,33 @@ class CssFlattenImportsContext : public SingleRewriteContext {
       // input and minified contents to this result; the minified because we
       // know that cached values are minified (we only cache minified contents),
       // the input because we will need that to generate the stylesheet from
-      // when RollUpStylesheets is eventually called.
+      // when RollUpStylesheets is eventually called. The result is a piece
+      // of the top-level CSS's flattened result, so account for it before
+      // copying and parsing it: once the pieces reach the flattening limit
+      // the top level cannot be flattened and there is no point in loading
+      // any more of them.
       if (hierarchy_->minified_contents().empty()) {
-        hierarchy_->set_minified_contents(output_partition(0)->inlined_data());
+        const GoogleString& flattened = output_partition(0)->inlined_data();
+        if (!hierarchy_->ReserveFlattenedBytes(flattened.size())) {
+          return;
+        }
+        hierarchy_->set_minified_contents(flattened);
         hierarchy_->set_input_contents(hierarchy_->minified_contents());
         // Parse() will compute flattening_succeeded_, which needs to be
         // restored.  See
         // https://github.com/apache/incubator-pagespeed-mod/issues/1092
         hierarchy_->Parse();
+        // A nested CSS that was flattened has had its @charset and @import
+        // rules removed (see CssHierarchy::RollUpContents), so their presence
+        // in a cached result means flattening failed when it was first
+        // cached; without this the @imports would be dropped when the
+        // stylesheets are rolled up. As in RollUpStylesheets, the failure
+        // was counted back then so neither statistic nor reason is recorded.
+        const Css::Stylesheet* stylesheet = hierarchy_->stylesheet();
+        if (stylesheet != nullptr && (!stylesheet->charsets().empty() ||
+                                      !stylesheet->imports().empty())) {
+          hierarchy_->set_flattening_succeeded(false);
+        }
       }
     } else {
       // Something has gone wrong earlier. It could be that the resource is
@@ -209,6 +243,16 @@ class CssFlattenImportsContext : public SingleRewriteContext {
   OutputResourceKind kind() const override { return kRewrittenResource; }
 
  private:
+  // See RewriteDriver::ResolveCssUrls about why trimming is disabled in
+  // proxy mode. It is also disabled if trimming is not enabled.
+  bool TrimsUrls() const {
+    RewriteDriver* driver = Driver();
+    return driver->server_context()->url_namer()->ProxyMode() !=
+               UrlNamer::ProxyExtent::kFull &&
+           driver->options()->trim_urls_in_css() &&
+           driver->options()->Enabled(RewriteOptions::kLeftTrimUrls);
+  }
+
   CssFilter* filter_;
   CssFilter::Context* rewriter_;
   CssHierarchy* hierarchy_;

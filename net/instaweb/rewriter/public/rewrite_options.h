@@ -281,6 +281,15 @@ class RewriteOptions {
     kRulePackModeEnforce,
   };
 
+  // What the module does with HTML responses on the optimizer daemon path.
+  // Off (the default) does nothing. Report-only classifies each HTML response
+  // and reports whether the HTML cache policy would store it: nothing is
+  // stored, nothing is served, and the response is not changed.
+  enum DaemonHtmlCacheMode {
+    kDaemonHtmlCacheOff,
+    kDaemonHtmlCacheReportOnly,
+  };
+
   // Any new Option added should have a corresponding name here that must be
   // passed in when Add*Property is called in AddProperties(). You must also
   // update the LookupOptionByNameTest method in rewrite_options_test.cc. If
@@ -313,10 +322,13 @@ class RewriteOptions {
   static const char kCssImageInlineMaxBytes[];
   static const char kCssInlineMaxBytes[];
   static const char kCssOutlineMinBytes[];
+  static const char kCssParseMaxBytes[];
   static const char kCssPreserveURLs[];
+  static const char kDebugOutputMaxBytes[];
   static const char kDefaultCacheHtml[];
   static const char kDisableBackgroundFetchesForBots[];
   static const char kDisableRewriteOnNoTransform[];
+  static const char kDocumentImageInlineMaxBytes[];
   static const char kDomainRewriteCookies[];
   static const char kDomainRewriteHyperlinks[];
   static const char kDomainShardCount[];
@@ -444,6 +456,8 @@ class RewriteOptions {
   static const char kRewriteUncacheableResources[];
   static const char kRulePackFile[];
   static const char kRulePackMode[];
+  static const char kDaemonHtmlCache[];
+  static const char kDaemonHtmlMaxBytes[];
   static const char kRulePackRequireSigned[];
   static const char kRulePackTrustKey[];
   static const char kRunningExperiment[];
@@ -459,6 +473,7 @@ class RewriteOptions {
   static const char kUseExperimentalJsMinifier[];
   static const char kUseFallbackPropertyCacheValues[];
   static const char kUseImageScanlineApi[];
+  static const char kDetectHydratedPages[];
   static const char kExposeVersionInHeaders[];
   static const char kXModPagespeedHeaderValue[];
   static const char kXPsaBlockingRewrite[];
@@ -635,7 +650,7 @@ class RewriteOptions {
   // what bytes a client receives, and leave it when the change is invisible to
   // output.  Either way, decide explicitly; the failure mode of forgetting is
   // silent stale content, not an error.
-  static constexpr int kOptionsVersion = 15;
+  static constexpr int kOptionsVersion = 16;
 
   // Number of bytes used for signature hashing.
   static constexpr int kHashBytes = 20;
@@ -857,6 +872,9 @@ class RewriteOptions {
   static const int64 kDefaultCssImageInlineMaxBytes;
   static const int64 kDefaultCssInlineMaxBytes;
   static const int64 kDefaultCssOutlineMinBytes;
+  static const int64 kDefaultCssParseMaxBytes;
+  static const int64 kDefaultDebugOutputMaxBytes;
+  static const int64 kDefaultDocumentImageInlineMaxBytes;
   static const int64 kDefaultGoogleFontCssInlineMaxBytes;
   static const int64 kDefaultImageInlineMaxBytes;
   static const int64 kDefaultJsInlineMaxBytes;
@@ -1426,6 +1444,7 @@ class RewriteOptions {
   void ForbidFilters(const FilterSet& filter_set);
   // Clear all explicitly enabled and disabled filters. Some filters may still
   // be enabled by the rewrite level and HtmlWriterFilter will be enabled.
+  // Forbidden filters stay forbidden.
   void ClearFilters();
 
   // Induces a filter to be considered enabled by turning on the AllFilters
@@ -1558,6 +1577,8 @@ class RewriteOptions {
   static bool ParseFromString(StringPiece value_string,
                               LazyloadImagesMode* value);
   static bool ParseFromString(StringPiece value_string, RulePackMode* value);
+  static bool ParseFromString(StringPiece value_string,
+                              DaemonHtmlCacheMode* value);
   static bool ParseFromString(StringPiece value_string, int* value) {
     return StringToInt(value_string, value);
   }
@@ -1643,6 +1664,12 @@ class RewriteOptions {
   void set_css_flatten_max_bytes(int64 x) {
     set_option(x, &css_flatten_max_bytes_);
   }
+  // The largest stylesheet, in bytes, that the CSS rewriter parses: a larger
+  // one is passed through unmodified. A value <= 0 means no bound.
+  int64 css_parse_max_bytes() const { return css_parse_max_bytes_.value(); }
+  void set_css_parse_max_bytes(int64 x) {
+    set_option(x, &css_parse_max_bytes_);
+  }
   bool cache_small_images_unrewritten() const {
     return cache_small_images_unrewritten_.value();
   }
@@ -1666,6 +1693,29 @@ class RewriteOptions {
   }
   // The larger of ImageInlineMaxBytes and CssImageInlineMaxBytes.
   int64 MaxImageInlineMaxBytes() const;
+  // The most image bytes inlined into one document (an HTML page, or a
+  // stylesheet with the HTML styles inlined into it), however many images.
+  int64 document_image_inline_max_bytes() const {
+    return document_image_inline_max_bytes_.value();
+  }
+  void set_document_image_inline_max_bytes(int64 x) {
+    set_option(x, &document_image_inline_max_bytes_);
+  }
+  // The most bytes of debug comments written into one document; zero or less
+  // means no limit.
+  int64 debug_output_max_bytes() const {
+    return debug_output_max_bytes_.value();
+  }
+  void set_debug_output_max_bytes(int64 x) {
+    set_option(x, &debug_output_max_bytes_);
+  }
+  // For options built from a request: replaces each size threshold that this
+  // object sets above the value in `ceiling` (the configured options the
+  // request is merged onto) with that value, and likewise a negative one, or
+  // a zero CssFlattenMaxBytes (unlimited) under a positive ceiling. A request
+  // may make the server inline or flatten less, never more than its
+  // configuration allows.
+  void LimitSizeThresholdsTo(const RewriteOptions& ceiling);
   int64 css_inline_max_bytes() const { return css_inline_max_bytes_.value(); }
   void set_css_inline_max_bytes(int64 x) {
     set_option(x, &css_inline_max_bytes_);
@@ -1813,6 +1863,13 @@ class RewriteOptions {
   // Returns true if the contents actually changed, false if the incoming
   // purge_set was identical to purge_set already in this.
   bool UpdateCachePurgeSet(const CopyOnWrite<PurgeSet>& purge_set)
+      LOCKS_EXCLUDED(cache_purge_mutex_.get());
+
+  // Returns the PurgeSet (the cache invalidation timestamp and the purged
+  // URLs), shared rather than copied.  An options copy made from this instance
+  // keeps the PurgeSet of the moment it was made; passing this to the copy's
+  // UpdateCachePurgeSet gives it the purges and flushes recorded here since.
+  CopyOnWrite<PurgeSet> purge_set() const
       LOCKS_EXCLUDED(cache_purge_mutex_.get());
 
   // Generates a human-readable view of the PurgeSet, including timestamps
@@ -2566,6 +2623,15 @@ class RewriteOptions {
   }
   const GoogleString& x_header_value() const { return x_header_value_.value(); }
 
+  // Server-wide switch (DetectHydratedPages, process scope only, default on):
+  // whether a page that a client-side framework will hydrate keeps its
+  // stylesheet and script URLs and its inline styles. The per-document outcome depends on the
+  // response alone and is not part of any cache key.
+  bool detect_hydrated_pages() const { return detect_hydrated_pages_.value(); }
+  void set_detect_hydrated_pages(bool x) {
+    set_option(x, &detect_hydrated_pages_);
+  }
+
   // Server-wide opt-in (ExposeVersionInHeaders, process scope only): the
   // generic PageSpeed header value becomes the product version.
   bool expose_version_in_headers() const {
@@ -2794,6 +2860,17 @@ class RewriteOptions {
   static constexpr size_t kMaxRulePackFiles = 8;
   RulePackMode rule_pack_mode() const { return rule_pack_mode_.value(); }
   void set_rule_pack_mode(RulePackMode x) { set_option(x, &rule_pack_mode_); }
+
+  DaemonHtmlCacheMode daemon_html_cache() const {
+    return daemon_html_cache_.value();
+  }
+  void set_daemon_html_cache(DaemonHtmlCacheMode x) {
+    set_option(x, &daemon_html_cache_);
+  }
+  int64 daemon_html_max_bytes() const { return daemon_html_max_bytes_.value(); }
+  void set_daemon_html_max_bytes(int64 x) {
+    set_option(x, &daemon_html_max_bytes_);
+  }
   // Whether the rule_packs filter refuses a pack that is not signed with a
   // key listed by RulePackTrustKey.
   bool rule_pack_require_signed() const {
@@ -3430,6 +3507,8 @@ class RewriteOptions {
   // EffectiveXHeaderValue().
   Option<GoogleString> x_header_value_;
 
+  // Process scope. See detect_hydrated_pages().
+  Option<bool> detect_hydrated_pages_;
   // Process scope. See expose_version_in_headers().
   Option<bool> expose_version_in_headers_;
 
@@ -3744,6 +3823,7 @@ class RewriteOptions {
   static GoogleString ToString(RewriteLevel x);
   static GoogleString ToString(LazyloadImagesMode x);
   static GoogleString ToString(RulePackMode x);
+  static GoogleString ToString(DaemonHtmlCacheMode x);
   static GoogleString ToString(const ResourceCategorySet& x);
   static GoogleString ToString(const BeaconUrl& beacon_url);
   static GoogleString ToString(const MobTheme& mob_theme);
@@ -3839,6 +3919,7 @@ class RewriteOptions {
 
   std::unique_ptr<ThreadSystem::RWLock> cache_purge_mutex_;
   Option<int64> css_flatten_max_bytes_;
+  Option<int64> css_parse_max_bytes_;
   Option<bool> cache_small_images_unrewritten_;
   Option<bool> no_transform_optimized_images_;
 
@@ -3847,6 +3928,8 @@ class RewriteOptions {
   Option<int64> css_image_inline_max_bytes_;
   Option<int64> css_inline_max_bytes_;
   Option<int64> css_outline_min_bytes_;
+  Option<int64> document_image_inline_max_bytes_;
+  Option<int64> debug_output_max_bytes_;
   Option<int64> google_font_css_inline_max_bytes_;
 
   // Preserve URL options
@@ -4324,6 +4407,8 @@ class RewriteOptions {
   // replaces whatever was inherited).
   bool rule_pack_files_set_here_ = false;
   Option<RulePackMode> rule_pack_mode_;
+  Option<DaemonHtmlCacheMode> daemon_html_cache_;
+  Option<int64> daemon_html_max_bytes_;
   Option<bool> rule_pack_require_signed_;
   // Sorted by key id. Not an Option: merged key by key, not part of the
   // options signature (like custom_fetch_headers_).

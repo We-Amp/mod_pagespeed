@@ -8,7 +8,7 @@ permissions:
 jobs:
   event-guard:
     name: Event guard (refuses merge_group, unexpected events, refs and actors)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse events, refs and actors this pipeline must never run on
         env:
@@ -35,7 +35,7 @@ jobs:
   relay:
     needs: event-guard
     if: ${{ needs.event-guard.result != 'failure' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo relay
   vendor:
@@ -57,6 +57,6 @@ jobs:
     steps:
       - run: echo report
   notice:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo hosted jobs need no edge

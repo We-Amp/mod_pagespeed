@@ -7,6 +7,13 @@
 # counts from the start of the latest attempt, so a re-run is not stale. Called
 # by sweep-queued.yml (hourly). Hosted: it must keep working exactly when the
 # fleet does not. The job holds actions: write and nothing else.
+#
+# The runner-health job reads the ci.yml runs of the last hours for
+# infrastructure failures of the IIS system tests and keeps one issue per
+# runner, asking for a drain after the second (tools/ci/runner_health.sh,
+# docs/ci/pipelines.md, "IIS infrastructure failures"). It holds actions:
+# read, checks: read and issues: write, and runs none of a pull request's
+# code (this file is called pinned to master, on master's tree).
 
 name: pipeline-sweep
 
@@ -24,7 +31,8 @@ permissions: {}
 jobs:
   sweep:
     name: Cancel runs that wait for a runner
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -48,3 +56,27 @@ jobs:
             args+=(--dry-run)
           fi
           bash tools/ci/sweep-queued-runs.sh "${args[@]}"
+
+  runner-health:
+    name: Runner health (IIS infrastructure failures)
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test the runner-health record
+        run: bash tools/ci/test_runner_health.sh
+
+      - name: Record infrastructure failures per runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: bash tools/ci/runner_health.sh

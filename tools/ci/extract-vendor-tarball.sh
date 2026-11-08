@@ -259,10 +259,14 @@ fetch_from_hub() {
 
   for attempt in $(seq 1 "$FETCH_RETRIES"); do
     log "Fetching ${BASENAME} from the CI hub, attempt ${attempt}/${FETCH_RETRIES}..."
-    # Best-effort sidecar fetch first (don't fail the attempt if it's absent --
-    # older vendor runs predate the sidecar). --ignore-missing-args keeps rsync
-    # from erroring when the sidecar doesn't exist on the source.
-    rsync -a --ignore-missing-args -e "ssh ${SSH_OPTS}" \
+    # Best-effort sidecar fetch first. An absent sidecar (older vendor runs
+    # predate it) makes rsync exit non-zero, which `|| true` tolerates. Do NOT
+    # add --ignore-missing-args: some rsync implementations (macOS openrsync)
+    # reject it, which made every sidecar fetch fail and skipped the digest
+    # check. Clear any earlier attempt's sidecar first so a failed fetch can
+    # never leave a stale or partial one to be verified against.
+    rm -f "${dest_path}.sha256"
+    rsync -a -e "ssh ${SSH_OPTS}" \
       "${REMOTE_PATH}.sha256" "${dest_path}.sha256" >/dev/null 2>&1 || true
 
     if rsync -a -e "ssh ${SSH_OPTS}" "$REMOTE_PATH" "$dest_path"; then

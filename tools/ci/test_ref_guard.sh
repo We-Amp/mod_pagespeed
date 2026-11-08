@@ -82,14 +82,14 @@ expect ok "check: dispatch master + tag"       check refs/heads/master workflow_
 expect no "check: dispatch master + side tag"  check refs/heads/master workflow_dispatch v9.9.9
 expect no "check: dispatch ci-dev branch"    check refs/heads/ci-dev workflow_dispatch v1.0.0
 expect no "check: dispatch empty tag"        check refs/heads/master workflow_dispatch ""
-expect ok "check: schedule on master"          check refs/heads/master schedule
+expect no "check: schedule on master, no rehearsal" check refs/heads/master schedule
 
 # Event allowlist: a release pipeline refuses every event but its own triggers.
 evcheck() { # evcheck EVENT ALLOWED
   ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME="$1" GITHUB_SHA="$main_sha" ALLOWED_EVENTS="$2"
     unset INPUT_TAG; ref_guard_check )
 }
-expect ok "events: unset list allows any"    evcheck schedule ""
+expect ok "events: unset list allows any"    evcheck push ""
 expect ok "events: push allowed"             evcheck push "push workflow_dispatch"
 expect no "events: pull_request refused"     evcheck pull_request "push workflow_dispatch"
 expect no "events: schedule refused"         evcheck schedule "push workflow_dispatch"
@@ -126,6 +126,65 @@ expect_out "ref=refs/tags/v1.0.0 sha=$v100 " "outputs: tag push -> pushed ref"  
 expect_out "ref=refs/heads/master sha=$(git rev-parse master) " "outputs: non-dispatch master -> master" outs refs/heads/master schedule
 
 expect no "outputs: moved tag (sha differs)" outs refs/tags/v1.0.0 push "" "$v110"
+
+# Candidate mode: a dispatch on master may name a tag that does not exist yet.
+# The throwaway repository is its own "origin", so the remote tag lookup runs
+# against real refs: module-v1.0.0 exists, module-v1.2.0 does not.
+git remote add origin "$tmp"
+cand() { # cand REF EVENT TAG DRY_RUN CAND_SHA [GITHUB_SHA]
+  ( export GITHUB_REF="$1" GITHUB_EVENT_NAME="$2" INPUT_TAG="$3" INPUT_DRY_RUN="$4" CANDIDATE=true \
+      CANDIDATE_SHA="$5" GITHUB_SHA="${6:-$5}" ALLOWED_TAG_GLOB='module-v*' ALLOWED_EVENTS='push workflow_dispatch'
+    ref_guard_check ); }
+expect ok "candidate: final version"                cand refs/heads/master workflow_dispatch module-v1.2.0 true "$main_sha"
+expect ok "candidate: release candidate version"    cand refs/heads/master workflow_dispatch module-v1.2.0-rc.1 true "$main_sha"
+expect no "candidate: dispatch on a tag ref"        cand refs/tags/module-v1.0.0 workflow_dispatch module-v1.2.0 true "$main_sha"
+expect no "candidate: dispatch on another branch"   cand refs/heads/ci-dev workflow_dispatch module-v1.2.0 true "$main_sha"
+expect no "candidate: tag push"                     cand refs/heads/master push module-v1.2.0 true "$main_sha"
+expect no "candidate: dry_run false"                cand refs/heads/master workflow_dispatch module-v1.2.0 false "$main_sha"
+expect no "candidate: dry_run empty"                cand refs/heads/master workflow_dispatch module-v1.2.0 "" "$main_sha"
+expect no "candidate: tag already on the remote"    cand refs/heads/master workflow_dispatch module-v1.0.0 true "$main_sha"
+expect no "candidate: sha is not the run's commit"  cand refs/heads/master workflow_dispatch module-v1.2.0 true "$(git rev-parse master~1)" "$main_sha"
+expect no "candidate: sha empty"                    cand refs/heads/master workflow_dispatch module-v1.2.0 true "" "$main_sha"
+expect no "candidate: sha abbreviated"              cand refs/heads/master workflow_dispatch module-v1.2.0 true "${main_sha:0:12}" "${main_sha:0:12}"
+expect no "candidate: sha upper case"               cand refs/heads/master workflow_dispatch module-v1.2.0 true "$(printf '%s' "$main_sha" | tr a-f A-F)"
+expect no "candidate: pre-release version"          cand refs/heads/master workflow_dispatch module-v1.2.0-pre.1 true "$main_sha"
+expect no "candidate: rehearsal version"            cand refs/heads/master workflow_dispatch module-v1.2.0-rehearsal.1 true "$main_sha"
+expect no "candidate: tag outside the glob"         cand refs/heads/master workflow_dispatch v1.2.0 true "$main_sha"
+expect no "candidate: tag with an option"           cand refs/heads/master workflow_dispatch --all true "$main_sha"
+expect no "candidate: empty tag"                    cand refs/heads/master workflow_dispatch "" true "$main_sha"
+expect no "candidate: sha off master"               cand refs/heads/master workflow_dispatch module-v1.2.0 true "$side"
+# A candidate flag that is not exactly "true" leaves the ordinary rules in force.
+expect no "candidate off: absent tag still refused" \
+  bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG=module-v1.2.0 GITHUB_SHA="$2" ALLOWED_TAG_GLOB="module-v*" CANDIDATE=false; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+candouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG=module-v1.2.0 CANDIDATE=true \
+    CANDIDATE_SHA="$main_sha" GITHUB_SHA="${1:-$main_sha}"; ref_guard_outputs ); }
+expect_out "ref=$main_sha sha=$main_sha " "outputs: candidate -> the commit itself" candouts
+expect no "outputs: candidate commit differs from the run" bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG=module-v1.2.0 CANDIDATE=true CANDIDATE_SHA="$2" GITHUB_SHA="$3"; ref_guard_outputs' _ "$HERE/ref_guard.sh" "$main_sha" "$side"
+
+# Rehearsal mode: a schedule or a dispatch on master runs with no tag at all.
+reh() { # reh REF EVENT TAG DRY_RUN [CANDIDATE] [GITHUB_SHA] [EVENTS]
+  ( export GITHUB_REF="$1" GITHUB_EVENT_NAME="$2" INPUT_TAG="$3" INPUT_DRY_RUN="$4" REHEARSAL=true \
+      CANDIDATE="${5:-false}" GITHUB_SHA="${6:-$main_sha}" ALLOWED_TAG_GLOB='module-v*' \
+      ALLOWED_EVENTS="${7:-push workflow_dispatch schedule}"
+    ref_guard_check ); }
+expect ok "rehearsal: schedule on master"                    reh refs/heads/master schedule "" true
+expect ok "rehearsal: dispatch on master"                    reh refs/heads/master workflow_dispatch "" true
+expect no "rehearsal: on a tag ref"                          reh refs/tags/module-v1.0.0 workflow_dispatch "" true
+expect no "rehearsal: on another branch"                     reh refs/heads/ci-dev workflow_dispatch "" true
+expect no "rehearsal: tag push"                              reh refs/heads/master push "" true
+expect no "rehearsal: with candidate=true"                   reh refs/heads/master workflow_dispatch "" true true
+expect no "rehearsal: with a tag"                            reh refs/heads/master workflow_dispatch module-v1.2.0 true
+expect no "rehearsal: dry_run false"                         reh refs/heads/master workflow_dispatch "" false
+expect no "rehearsal: dry_run empty"                         reh refs/heads/master schedule "" ""
+expect no "rehearsal: commit off master"                     reh refs/heads/master schedule "" true false "$side"
+expect no "rehearsal: schedule not in the allowed events"    reh refs/heads/master schedule "" true false "$main_sha" 'push workflow_dispatch'
+# A schedule is a rehearsal and nothing else.
+expect no "schedule without rehearsal"                       bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule GITHUB_SHA="$2" ALLOWED_TAG_GLOB="module-v*" ALLOWED_EVENTS="push workflow_dispatch schedule"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+expect no "schedule with rehearsal=false"                    bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*" ALLOWED_EVENTS="push workflow_dispatch schedule"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+# A rehearsal flag that is not exactly "true" leaves the ordinary rules in force.
+expect no "rehearsal off: master dispatch with no tag"       bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG= GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+rehouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule INPUT_TAG="" REHEARSAL=true GITHUB_SHA="${1:-$main_sha}"; ref_guard_outputs ); }
+expect_out "ref=$main_sha sha=$main_sha " "outputs: rehearsal -> the commit itself" rehouts
 
 [ "$fail" = 0 ] && echo "ref_guard self-test: all passed"
 exit "$fail"

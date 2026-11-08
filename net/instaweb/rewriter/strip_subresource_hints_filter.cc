@@ -84,13 +84,18 @@ bool StripSubresourceHintsFilter::ShouldStrip(HtmlElement* element) {
   //   <link rel=preload as=image href=...>  unless preserve images
   //
   // Don't strip other kinds of rel=preload hints, because we don't change
-  // their urls, so existing ones are still valid.
+  // their urls, so existing ones are still valid. On a hydrated page script
+  // and stylesheet urls stay, so only image preloads go: images are still
+  // rewritten there, and a kept hint would fetch the original as well.
+  // Removing one leaves the framework's tree intact (React 19 renders image
+  // preloads inside its root, but does not hydrate them).
   if (remove_any_ && !delete_element_ &&
       element->keyword() == HtmlName::kLink) {
+    const bool hydrated = driver_->is_hydrated_document();
     const char* rel_value = element->AttributeValue(HtmlName::kRel);
     if (rel_value != nullptr) {
       if (StringCaseEqual(rel_value, "subresource")) {
-        return true;
+        return !hydrated;
       } else if (StringCaseEqual(rel_value, "modulepreload")) {
         // Only module script elements are rewritten, never import
         // specifiers, so most modulepreload hints (one per imported chunk)
@@ -99,7 +104,7 @@ bool StripSubresourceHintsFilter::ShouldStrip(HtmlElement* element) {
         // (e.g. worker) aren't rewritten.
         const char* as_value = element->AttributeValue(HtmlName::kAs);
         const char* href = element->AttributeValue(HtmlName::kHref);
-        if (!remove_script_ || href == nullptr ||
+        if (hydrated || !remove_script_ || href == nullptr ||
             (as_value != nullptr && !StringCaseEqual(as_value, "script"))) {
           return false;
         }
@@ -113,8 +118,10 @@ bool StripSubresourceHintsFilter::ShouldStrip(HtmlElement* element) {
       } else if (StringCaseEqual(rel_value, "preload")) {
         const char* as_value = element->AttributeValue(HtmlName::kAs);
         if (as_value != nullptr) {
-          return ((remove_script_ && StringCaseEqual(as_value, "script")) ||
-                  (remove_style_ && StringCaseEqual(as_value, "style")) ||
+          return ((!hydrated && remove_script_ &&
+                   StringCaseEqual(as_value, "script")) ||
+                  (!hydrated && remove_style_ &&
+                   StringCaseEqual(as_value, "style")) ||
                   (remove_image_ && StringCaseEqual(as_value, "image")));
         }
       }

@@ -16,6 +16,8 @@
 # its libc/libstdc++ floor matches the target:
 #   el9   -> almalinux:9      (glibc 2.34, gcc-toolset-13)
 #   noble -> ubuntu:24.04     (glibc 2.39, g++-13 + clang)
+#   resolute -> ubuntu:26.04  (glibc 2.43, clang + libstdc++-13 objects,
+#                              nginx glue built by the default gcc-15)
 #
 # It reproduces the proven Phase A/B recipe (journal "Phase A CLOSED" + "Phase B
 # CLOSED"): bazel build of the .so target to force the full PSOL object graph,
@@ -55,9 +57,48 @@
 #                       else nproc).
 
 set -euo pipefail
+
+# dnf with retries, for the throwaway EL containers: a short mirror or
+# metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
+# error, a 5xx) is waited out, anything else (a missing package, a conflict,
+# a dependency error) fails on the first attempt. Up to 3 tries, with
+# `dnf clean metadata` and a growing pause between them; a lasting outage
+# still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# is spliced into container commands with declare -f, so it runs in the
+# container's shell.
+dnf_retry() {
+  local attempt rc out err
+  out="$(mktemp)" && err="$(mktemp)" || return 1
+  for attempt in 1 2 3; do
+    rc=0
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
+    cat "$err" >&2
+    if [ "$rc" -eq 0 ]; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return "$rc"
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::dnf $1 failed on a repository or network error (attempt $attempt of 3), retrying" >&2
+      dnf clean metadata >/dev/null 2>&1 || true
+      sleep $((attempt * ${DNF_RETRY_SLEEP_UNIT:-10}))
+    fi
+  done
+  echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
+  rm -f "$out" "$err"
+  return "$rc"
+}
 if [ "${VERBOSE:-}" ]; then set -x; fi
 
-DISTRO="${1:?usage: $0 <noble|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
+DISTRO="${1:?usage: $0 <noble|resolute|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
 shift || true
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
@@ -108,7 +149,10 @@ case "${DISTRO}" in
             DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
   jammy)    DEF_NGINX_VER="1.18.0"
             DEF_NGINX_SHA256="4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99" ;;
-  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|focal|el9|el10|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
+  # sha256 captured from nginx.org/download/nginx-1.28.3.tar.gz 2026-11-01.
+  resolute) DEF_NGINX_VER="1.28.3"
+            DEF_NGINX_SHA256="2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918" ;;
+  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|resolute|focal|el9|el10|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
 esac
 NGINX_SRC_VERSION="${NGINX_SRC_VERSION:-${DEF_NGINX_VER}}"
 # Resolve the sha256 to verify against. If the caller pinned NGINX_SRC_SHA256
@@ -121,6 +165,24 @@ if [ -z "${NGINX_SRC_SHA256:-}" ]; then
   else
     echo "ERROR: NGINX_SRC_VERSION overridden to ${NGINX_SRC_VERSION} but no NGINX_SRC_SHA256 set;" >&2
     echo "       refusing to download an unverified nginx tarball (supply-chain pin)." >&2
+    exit 1
+  fi
+fi
+
+# PCRE2 for the sidecar's nginx (focal only). The bundled nginx is built
+# against this pinned upstream release, compiled from source and linked
+# statically (nginx --with-pcre=<dir> --with-pcre-jit), so it needs no PCRE
+# library on the host and does not freeze the old PCRE2 of the build base.
+# sha256 of pcre2-10.49.tar.gz from github.com/PCRE2Project/pcre2/releases,
+# 2026-11-06, signature verified against the release key of Nicholas Wilson
+# (A95536204A3BB489715231282A98E77EB6F24CA8).
+PCRE2_VERSION="${PCRE2_VERSION:-10.49}"
+PCRE2_SHA256_DEFAULT="929f0b20e62879252a15886b06c89f1edef61a363cbd5826fb041080a5e557ae"
+if [ -z "${PCRE2_SHA256:-}" ]; then
+  if [ "${PCRE2_VERSION}" = "10.49" ]; then
+    PCRE2_SHA256="${PCRE2_SHA256_DEFAULT}"
+  else
+    echo "ERROR: PCRE2_VERSION overridden to ${PCRE2_VERSION} but no PCRE2_SHA256 set (supply-chain pin)." >&2
     exit 1
   fi
 fi
@@ -214,7 +276,7 @@ esac
 # runtime), but it detects the drift on the first request and degrades the module
 # to pass-through + one ALERT log instead of silently hanging the worker.
 case "${DISTRO}" in
-  noble|jammy|el9|el10) NGX_SRC_MODE="distro" ;;
+  noble|resolute|jammy|el9|el10) NGX_SRC_MODE="distro" ;;
   *)                    NGX_SRC_MODE="vanilla" ;;
 esac
 NGX_SRC_MODE="${NGX_SRC_MODE_OVERRIDE:-${NGX_SRC_MODE}}"
@@ -300,6 +362,24 @@ install_deps_noble() {
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
+}
+
+install_deps_resolute() {
+  # ubuntu:26.04: the noble recipe. Bazel objects: apt clang against libstdc++-13,
+  # the paths --config=clang-libstdcxx13 hardcodes, so g++-13 is installed by name
+  # because the default g++ is 15. Unlike noble, the nginx glue is compiled by the
+  # default gcc-15, and the release load and runtime gates are what prove that mix.
+  # libpcre3 is gone; nginx uses PCRE2.
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg lsb-release \
+    build-essential g++-13 gcc-13 \
+    clang lld llvm \
+    zlib1g-dev libpcre2-dev libssl-dev \
+    python3 unzip zip gperf bison flex nasm \
+    dpkg-dev fakeroot >/dev/null
   install_bazelisk
 }
 
@@ -394,10 +474,11 @@ install_deps_focal() {
   # NOT emit the __isoc23_* GLIBC_2.38 redirects that the noble (glibc 2.39) base
   # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
   # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
-  # it needs no newer glibc than 2.31. The matched nginx of the pair also links
-  # libpcre.so.3 (libpcre3), so the pair's hosts are Debian 11/12 and Ubuntu
-  # 20.04 to 24.04 (later releases dropped libpcre3; Enterprise Linux and Amazon
-  # Linux never had it under that name).
+  # it needs no newer glibc than 2.31. The matched nginx of the pair is built
+  # against the pinned PCRE2 release (PCRE2_VERSION), built from source and
+  # linked statically (--with-pcre, steps 2a and 6), so it needs no PCRE library
+  # on the host. libpcre2-dev is installed only for the pcre2.h that the Bazel
+  # half of the module build includes; libpcre3-dev is NOT installed.
   # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
   # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
   # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
@@ -407,7 +488,7 @@ install_deps_focal() {
   apt-get install -y --no-install-recommends \
     ca-certificates curl wget gnupg lsb-release software-properties-common \
     build-essential \
-    zlib1g-dev libpcre3-dev libssl-dev \
+    zlib1g-dev libpcre2-dev libssl-dev \
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
@@ -436,7 +517,7 @@ install_deps_el9() {
   # perl: libaom's cmake configure hard-requires it (RTCD/asm generation). On el9
   # it arrives transitively anyway; pin it explicitly so a slimmer future base
   # image can't regress the aom build (el10's base did exactly that).
-  dnf install -y --allowerasing --setopt=install_weak_deps=False \
+  dnf_retry install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget \
     gcc-toolset-13 \
     clang lld llvm \
@@ -450,7 +531,7 @@ install_deps_el9() {
   if [ "$(uname -m)" = "x86_64" ]; then
     dnf config-manager --set-enabled crb 2>/dev/null \
       || dnf config-manager --enable crb 2>/dev/null || true
-    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+    dnf_retry install -y --setopt=install_weak_deps=False nasm >/dev/null
   fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
@@ -463,7 +544,7 @@ install_deps_el10() {
   # pcre1). gperf/bison/flex + some -devel live in CRB on el10, so enable it first.
   # Mirrors install_deps_el9 with the -13->-15 / pcre->pcre2 / CRB substitutions
   # proven by build_apache_el10_in_container.sh.
-  dnf install -y --setopt=install_weak_deps=False dnf-plugins-core >/dev/null
+  dnf_retry install -y --setopt=install_weak_deps=False dnf-plugins-core >/dev/null
   dnf config-manager --set-enabled crb 2>/dev/null \
     || dnf config-manager --enable crb 2>/dev/null || true
   # gnupg2 is REQUIRED on el10 (NOT optional): the AlmaLinux nginx.spec %prep runs
@@ -477,7 +558,7 @@ install_deps_el10() {
   # libaom", aom_configure.cmake) — the almalinux:10 base image, unlike el9,
   # ships NO perl even transitively; r20 attempt 4d el10 leg failed exactly
   # there. Verified installable in a real almalinux:10 container (perl 5.40).
-  dnf install -y --allowerasing --setopt=install_weak_deps=False \
+  dnf_retry install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget gnupg2 \
     gcc-toolset-15 \
     clang lld llvm \
@@ -488,7 +569,7 @@ install_deps_el10() {
   # bazel/libaom.bzl); EL packages nasm for x86_64 only, and aarch64 aom uses
   # GNU as, so gate by arch.
   if [ "$(uname -m)" = "x86_64" ]; then
-    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+    dnf_retry install -y --setopt=install_weak_deps=False nasm >/dev/null
   fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
@@ -742,6 +823,7 @@ if [ "${SKIP_DEPS:-}" != "1" ]; then
   echo "==> installing build deps (${DISTRO})"
   case "${DISTRO}" in
     noble)    install_deps_noble ;;
+    resolute) install_deps_resolute ;;
     focal)    install_deps_focal ;;
     el9)      install_deps_el9 ;;
     el10)     install_deps_el10 ;;
@@ -763,6 +845,26 @@ fi
 #           +include dirs and the libstdc++ -L must be redirected to the toolset.
 # ---------------------------------------------------------------------------
 cd "${SRCDIR}"
+
+# libaom's configure test greps `nasm -hf` for "-Ox", and nasm 3 (ubuntu:26.04)
+# no longer prints it there. So on this leg assemble a real file with -Ox instead:
+# if nasm refuses, the build stops here; if it works, libaom's help-text gate is
+# switched off in this leg's own vendored copy only.
+if [ "${DISTRO}" = "resolute" ] && [ "$(uname -m)" = "x86_64" ] && [ -f vendor/aom/build/cmake/aom_optimization.cmake ]; then
+  NASM_PROBE="$(mktemp -d)"
+  printf 'bits 64\nglobal probe\nsection .text\nprobe:\n  mov eax, 0\n  ret\n' > "${NASM_PROBE}/probe.asm"
+  if ! nasm -Ox -f elf64 -o "${NASM_PROBE}/probe.o" "${NASM_PROBE}/probe.asm" || [ ! -s "${NASM_PROBE}/probe.o" ]; then
+    echo "ERROR: nasm cannot assemble with -Ox, which libaom requires" >&2
+    exit 1
+  fi
+  rm -rf "${NASM_PROBE}"
+  grep -q 'MATCHES "-Ox"' vendor/aom/build/cmake/aom_optimization.cmake || {
+    echo "ERROR: libaom's nasm test has changed; review this workaround" >&2
+    exit 1
+  }
+  chmod u+w vendor/aom/build/cmake/aom_optimization.cmake
+  sed -i 's/MATCHES "-Ox"/MATCHES ".*"/' vendor/aom/build/cmake/aom_optimization.cmake
+fi
 
 # Base flags. This mirrors the proven `--config=ci` recipe the rest of the
 # release build uses (pagespeed.bazelrc: ci = vendored + clang-libstdcxx13 +
@@ -851,12 +953,12 @@ if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}
   # x86_64, so the build_nginx_rpm.sh pin holds. Pin the EXACT stock candidate the
   # smoke (and customers) run. repoquery %{version} is already epoch-free; NVR selects.
   NGX_RPM_ARCH="$(rpm --eval '%{_arch}')"
-  NGX_PKG_VER="$(dnf repoquery --latest-limit 1 --qf '%{version}-%{release}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
-  NGINX_SRC_VERSION="$(dnf repoquery --latest-limit 1 --qf '%{version}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
+  NGX_PKG_VER="$(dnf_retry repoquery --latest-limit 1 --qf '%{version}-%{release}' "nginx.${NGX_RPM_ARCH}" | head -1)"
+  NGINX_SRC_VERSION="$(dnf_retry repoquery --latest-limit 1 --qf '%{version}' "nginx.${NGX_RPM_ARCH}" | head -1)"
   [ -n "${NGX_PKG_VER}" ] && [ -n "${NGINX_SRC_VERSION}" ] || { echo "ERROR: cannot determine stock nginx candidate version on ${DISTRO}" >&2; exit 1; }
   echo "==> dnf download --source nginx-${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on ${DISTRO}"
   mkdir -p "${NGX_BUILD_DIR}/srpm"
-  dnf download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
+  dnf_retry download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
   NGX_SRPM="$(ls "${NGX_BUILD_DIR}/srpm/"*.src.rpm 2>/dev/null | head -1)"
   [ -n "${NGX_SRPM}" ] || { echo "ERROR: dnf download --source produced no .src.rpm under ${NGX_BUILD_DIR}/srpm" >&2; exit 1; }
   # Supply-chain gate: the SRPM must carry a verified GPG signature, not just a
@@ -914,6 +1016,16 @@ else
     || { echo "ERROR: nginx tarball sha256 mismatch (got $(sha256sum "${NGX_TARBALL}" | awk '{print $1}'), expected ${NGINX_SRC_SHA256})" >&2; exit 1; }
   tar -xzf "${NGX_TARBALL}" -C "${NGX_BUILD_DIR}"
 fi
+NGX_PCRE_ARGS=()
+if [ "${DISTRO}" = "focal" ]; then
+  PCRE2_TARBALL="${NGX_BUILD_DIR}/pcre2-${PCRE2_VERSION}.tar.gz"
+  wget -qO "${PCRE2_TARBALL}" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
+  echo "==> verifying pcre2 tarball sha256 (${PCRE2_SHA256})"
+  echo "${PCRE2_SHA256}  ${PCRE2_TARBALL}" | sha256sum -c - \
+    || { echo "ERROR: pcre2 tarball sha256 mismatch (got $(sha256sum "${PCRE2_TARBALL}" | awk '{print $1}'), expected ${PCRE2_SHA256})" >&2; exit 1; }
+  tar -xzf "${PCRE2_TARBALL}" -C "${NGX_BUILD_DIR}"
+  NGX_PCRE_ARGS=( --with-pcre="${NGX_BUILD_DIR}/pcre2-${PCRE2_VERSION}" --with-pcre-jit )
+fi
 # First configure WITHOUT the module: generates objs/ngx_auto_config.h with the
 # SAME feature flags the runtime stock nginx uses (mirrors docker/Dockerfile +
 # the step-6 make-modules configure). The module add is deferred to step 6
@@ -935,6 +1047,7 @@ fi
   PATH="${NGX_PRECFG_PATH}" ./configure \
     --with-compat \
     "${NGX_HTTP_MODULES[@]}" \
+    ${NGX_PCRE_ARGS[@]+"${NGX_PCRE_ARGS[@]}"} \
     --with-threads
 )
 [ -f "${NGX_SRC}/objs/ngx_auto_config.h" ] || {
@@ -1251,6 +1364,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     --add-dynamic-module="${SRCDIR}/pagespeed/nginx"
     --with-compat
     "${NGX_HTTP_MODULES[@]}"
+    ${NGX_PCRE_ARGS[@]+"${NGX_PCRE_ARGS[@]}"}
     --with-threads
     --with-cc-opt="${CC_OPT}"
   )
@@ -1297,6 +1411,13 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
       -e 's#[$][(]LINK[)] -o objs/ngx_pagespeed[.]so#g++-13 -o objs/ngx_pagespeed.so#' \
       -e 's# -lstdc++##g' \
       objs/Makefile
+    # The nginx binary of the pair builds the pinned PCRE2 from source
+    # (--with-pcre, above) and links it statically. Fail the build if the
+    # Makefile would link a host PCRE2 instead.
+    if grep -q -- '-lpcre' objs/Makefile; then
+      echo "ERROR: objs/Makefile links a host PCRE library; the pinned PCRE2 source build was not used" >&2
+      exit 1
+    fi
   elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
     # Link the module .so with clang++ (matches the clang-compiled object graph;
     # the only C++23 driver available on the old-glibc targets). We must STATIC-

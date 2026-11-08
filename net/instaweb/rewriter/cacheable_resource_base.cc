@@ -55,6 +55,12 @@ const char kRecentUncacheableMiss[] = "_recent_uncacheable_miss";
 const char kRecentUncacheableFailure[] = "_recent_uncacheable_failure";
 const char kMissSuffix[] = "_miss";
 
+// Appended to a resource's cache key to remember, for the usual failure
+// lifetime, that the module's own fetch of a resource was not answered with
+// a usable response while the resource's own entry was stored otherwise.
+// The entry under the resource's key is left in place.
+const char kFetchedInputFailureSuffix[] = "#pagespeed-fetched-input-failure";
+
 }  // namespace
 
 // Shared base class for fetch callbacks, used by both LoadAndCallback and
@@ -87,6 +93,12 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
 
   // Set this to true if implementing a kLoadEvenIfNotCacheable policy.
   void set_no_cache_ok(bool x) { no_cache_ok_ = x; }
+
+  // Where a failure of this fetch is remembered, instead of under the
+  // resource's own cache key.
+  void set_failure_cache_key(const GoogleString& key) {
+    failure_cache_key_ = key;
+  }
 
  protected:
   // The two derived classes differ in how they provide the
@@ -181,8 +193,11 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
     }
 
     AsyncFetch* fetch = this;
+    // A stale entry of any kind may be revalidated: a 304 to this request
+    // says the stored body is what any client gets.  Only an entry the module
+    // fetched itself may stand in for a failed fetch.
     if (rewrite_options_->serve_stale_if_fetch_error() &&
-        !fallback_value_.Empty()) {
+        !fallback_value_.Empty() && fallback_value_.IsFetchedInput()) {
       // Use a stale value if the fetch from the backend fails.
       fallback_fetch_ = new FallbackSharedAsyncFetch(this, &fallback_value_,
                                                      message_handler_);
@@ -234,14 +249,20 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
       // But we must be careful in the mod_pagespeed ipro flow,
       // where we must avoid storing any resource obtained with a
       // Cookie.  For now we don't implement this.
-      http_cache()->Put(resource_->cache_key(), driver_->CacheFragment(),
-                        RequestHeaders::Properties(),
-                        request_context()->options(), value, message_handler_);
+      //
+      // This fetch carries no client credentials and is answered as for any
+      // client, so the entry is marked as the module's own fetch: only such
+      // entries are used as inputs of an optimization.
+      http_cache()->PutFetchedInput(
+          resource_->cache_key(), driver_->CacheFragment(),
+          RequestHeaders::Properties(), request_context()->options(), value,
+          message_handler_);
       return true;
     } else {
-      http_cache()->RememberFailure(resource_->cache_key(),
-                                    driver_->CacheFragment(), fetch_status,
-                                    message_handler_);
+      http_cache()->RememberFailure(
+          failure_cache_key_.empty() ? resource_->cache_key()
+                                     : failure_cache_key_,
+          driver_->CacheFragment(), fetch_status, message_handler_);
       return false;
     }
   }
@@ -259,6 +280,9 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
   // If this is true, loading of non-cacheable resources will succeed.
   // Used to implement kLoadEvenIfNotCacheable.
   bool no_cache_ok_;
+
+  // If non-empty, a failure is remembered under this key.
+  GoogleString failure_cache_key_;
 
   // These 2 are set only once we get to StartFetch
   UrlAsyncFetcher* fetcher_;
@@ -413,13 +437,27 @@ class CacheableResourceBase::LoadHttpCacheCallback
   ~LoadHttpCacheCallback() override;
   void Done(HTTPCache::FindResult find_result) override;
 
+  // Makes this callback look up the remembered failure of the module's own
+  // fetch (FetchedInputFailureKey) rather than the resource itself.
+  void set_fetched_input_failure_lookup() {
+    fetched_input_failure_lookup_ = true;
+  }
+
  private:
-  void LoadAndSaveToCache();
+  // An entry under the resource's key that the module did not fetch itself
+  // is not used: the resource is fetched, unless a recent failure of that
+  // fetch is remembered.
+  void LoadInsteadOfUnfetchedEntry();
+  void FetchedInputFailureLookupDone(HTTPCache::FindResult find_result);
+  void HandleRecentFailure(HTTPCache::FindResult find_result,
+                           const GoogleString& failure_cache_key);
+  void LoadAndSaveToCache(const GoogleString& failure_cache_key);
 
   // protected via resource_callback_->resource().
   CacheableResourceBase* resource_;
   Resource::AsyncCallback* resource_callback_;
   Resource::NotCacheablePolicy not_cacheable_policy_;
+  bool fetched_input_failure_lookup_;
   LoadHttpCacheCallback(const LoadHttpCacheCallback&) = delete;
   LoadHttpCacheCallback& operator=(const LoadHttpCacheCallback&) = delete;
 };
@@ -432,12 +470,18 @@ CacheableResourceBase::LoadHttpCacheCallback::LoadHttpCacheCallback(
                                     request_context),
       resource_(resource),
       resource_callback_(resource_callback),
-      not_cacheable_policy_(not_cacheable_policy) {}
+      not_cacheable_policy_(not_cacheable_policy),
+      fetched_input_failure_lookup_(false) {}
 
 CacheableResourceBase::LoadHttpCacheCallback::~LoadHttpCacheCallback() {}
 
 void CacheableResourceBase::LoadHttpCacheCallback::Done(
     HTTPCache::FindResult find_result) {
+  if (fetched_input_failure_lookup_) {
+    FetchedInputFailureLookupDone(find_result);
+    delete this;
+    return;
+  }
   MessageHandler* handler = resource_->message_handler();
 
   // Note, we pass lock_failure==false to the resource callbacks
@@ -448,6 +492,13 @@ void CacheableResourceBase::LoadHttpCacheCallback::Done(
   // should not delete it if they fail to lock.
   switch (find_result.status) {
     case HTTPCache::kFound:
+      if (!http_value()->IsFetchedInput()) {
+        // Stored from a response served to some client, or before entries
+        // were marked: not an input until the module fetches it itself.
+        resource_->misses_->Add(1);
+        LoadInsteadOfUnfetchedEntry();
+        break;
+      }
       resource_->hits_->Add(1);
       resource_->Link(http_value(), handler);
       resource_->response_headers()->CopyFrom(*response_headers());
@@ -461,43 +512,78 @@ void CacheableResourceBase::LoadHttpCacheCallback::Done(
                                true /* resource_ok */);
       break;
     case HTTPCache::kRecentFailure:
-      // We may need to retry even if we have a cached failure if:
-      // a) The user wants uncacheable resources, and that's the failure we
-      //    recorded.
-      // b) The fetch is user-facing and the "failure" is actually us
-      //    load-shedding in the past.
-      if ((not_cacheable_policy_ == Resource::kLoadEvenIfNotCacheable &&
-           (find_result.failure_details == kFetchStatusUncacheable200 ||
-            find_result.failure_details == kFetchStatusUncacheableError ||
-            find_result.failure_details == kFetchStatusEmpty)) ||
-          (!resource_->is_background_fetch() &&
-           find_result.failure_details == kFetchStatusDropped)) {
-        resource_->recent_uncacheables_miss_->Add(1);
-        LoadAndSaveToCache();
-      } else {
-        if (find_result.failure_details == kFetchStatusUncacheable200 ||
-            find_result.failure_details == kFetchStatusUncacheableError) {
-          resource_->recent_uncacheables_failure_->Add(1);
-        } else {
-          resource_->recent_fetch_failures_->Add(1);
-        }
-        resource_->set_fetch_response_status(find_result.failure_details);
-        resource_callback_->Done(false /* lock_failure */,
-                                 false /* resource_ok */);
-      }
+      HandleRecentFailure(find_result, GoogleString());
       break;
     case HTTPCache::kNotFound:
       resource_->misses_->Add(1);
       // If not, load it asynchronously.
       // Link the fallback value which can be used if the fetch fails.
       resource_->LinkFallbackValue(fallback_http_value());
-      LoadAndSaveToCache();
+      if (!fallback_http_value()->Empty() &&
+          !fallback_http_value()->IsFetchedInput()) {
+        // A stale entry the module did not fetch itself stays in place: a
+        // failure of the module's fetch is remembered under its own key.
+        LoadInsteadOfUnfetchedEntry();
+      } else {
+        LoadAndSaveToCache(GoogleString());
+      }
       break;
   }
   delete this;
 }
 
-void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache() {
+void CacheableResourceBase::LoadHttpCacheCallback::HandleRecentFailure(
+    HTTPCache::FindResult find_result, const GoogleString& failure_cache_key) {
+  // We may need to retry even if we have a cached failure if:
+  // a) The user wants uncacheable resources, and that's the failure we
+  //    recorded.
+  // b) The fetch is user-facing and the "failure" is actually us
+  //    load-shedding in the past.
+  if ((not_cacheable_policy_ == Resource::kLoadEvenIfNotCacheable &&
+       (find_result.failure_details == kFetchStatusUncacheable200 ||
+        find_result.failure_details == kFetchStatusUncacheableError ||
+        find_result.failure_details == kFetchStatusEmpty)) ||
+      (!resource_->is_background_fetch() &&
+       find_result.failure_details == kFetchStatusDropped)) {
+    resource_->recent_uncacheables_miss_->Add(1);
+    LoadAndSaveToCache(failure_cache_key);
+  } else {
+    if (find_result.failure_details == kFetchStatusUncacheable200 ||
+        find_result.failure_details == kFetchStatusUncacheableError) {
+      resource_->recent_uncacheables_failure_->Add(1);
+    } else {
+      resource_->recent_fetch_failures_->Add(1);
+    }
+    resource_->set_fetch_response_status(find_result.failure_details);
+    resource_callback_->Done(false /* lock_failure */, false /* resource_ok */);
+  }
+}
+
+void CacheableResourceBase::LoadHttpCacheCallback::
+    LoadInsteadOfUnfetchedEntry() {
+  LoadHttpCacheCallback* failure_lookup = new LoadHttpCacheCallback(
+      request_context(), not_cacheable_policy_, resource_callback_, resource_);
+  failure_lookup->set_fetched_input_failure_lookup();
+  failure_lookup->set_is_background(resource_->is_background_fetch());
+  resource_->http_cache()->Find(resource_->FetchedInputFailureKey(),
+                                resource_->rewrite_driver()->CacheFragment(),
+                                resource_->message_handler(), failure_lookup);
+}
+
+void CacheableResourceBase::LoadHttpCacheCallback::
+    FetchedInputFailureLookupDone(HTTPCache::FindResult find_result) {
+  // A failure is remembered here, never under the resource's own key, so
+  // that the entry stored there stays in place.
+  const GoogleString failure_key = resource_->FetchedInputFailureKey();
+  if (find_result.status == HTTPCache::kRecentFailure) {
+    HandleRecentFailure(find_result, failure_key);
+  } else {
+    LoadAndSaveToCache(failure_key);
+  }
+}
+
+void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache(
+    const GoogleString& failure_cache_key) {
   if (resource_->ShouldSkipBackgroundFetch()) {
     // Note that this isn't really a lock failure, but we treat them the same
     // way.
@@ -514,6 +600,9 @@ void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache() {
       new LoadFetchCallback(resource_callback_, resource_, request_context());
   if (not_cacheable_policy_ == Resource::kLoadEvenIfNotCacheable) {
     cb->set_no_cache_ok(true);
+  }
+  if (!failure_cache_key.empty()) {
+    cb->set_failure_cache_key(failure_cache_key);
   }
   UrlAsyncFetcher* fetcher = resource_->rewrite_driver()->async_fetcher();
   cb->Start(fetcher);
@@ -616,6 +705,10 @@ CacheableResourceBase::CacheableResourceBase(StringPiece stat_prefix,
 }
 
 CacheableResourceBase::~CacheableResourceBase() {}
+
+GoogleString CacheableResourceBase::FetchedInputFailureKey() const {
+  return StrCat(cache_key(), kFetchedInputFailureSuffix);
+}
 
 bool CacheableResourceBase::IsValidAndCacheable() const {
   return IsValidAndCacheableImpl(*response_headers());

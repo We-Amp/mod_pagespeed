@@ -24,6 +24,7 @@
 #ifndef WEBUTIL_CSS_MEDIA_H_
 #define WEBUTIL_CSS_MEDIA_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -142,6 +143,8 @@ class MediaQueries : public std::vector<MediaQuery*> {
   void Clear();
 
   MediaQueries* DeepCopy() const;
+  // Approximate heap memory taken by these queries, and so by each DeepCopy().
+  int64_t ApproximateBytes() const;
   string ToString() const;
 
  private:

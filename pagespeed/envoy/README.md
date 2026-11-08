@@ -1,5 +1,11 @@
 # Envoy filter example
 
+> **Experimental. Not for production.** The Envoy port is built from source
+> only, has no packaged release, and is not covered by the release security
+> statements. Its administrative paths answer every client unless `admin_auth`
+> is enabled. Run it only on a trusted network, behind authentication, and
+> expect no support or security commitment.
+
 This project implements `PageSpeed` as an `Envoy`-filter.
 
 ## Building

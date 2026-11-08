@@ -67,6 +67,22 @@ cc_library(
     ],
 )
 
+# The in-place URL agreement: the server's reading of the request and the
+# module's must name the same path on the same host before a response is
+# looked up or recorded in place.  A pure function over StringPiece, shared by
+# the nginx and Apache ports and unit tested standalone
+# (//test/pagespeed/system:inplace_url_agreement_test).
+cc_library(
+    name = "inplace_url_agreement",
+    srcs = ["inplace_url_agreement.cc"],
+    hdrs = ["inplace_url_agreement.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
 cc_library(
     name = "serve_host_names",
     srcs = ["serve_host_names.cc"],
@@ -74,6 +90,18 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The cache keyspace of a site without a CacheFragment of its own.
+cc_library(
+    name = "site_cache_fragment",
+    srcs = ["site_cache_fragment.cc"],
+    hdrs = ["site_cache_fragment.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@boringssl//:crypto",
     ],
 )
 
@@ -205,22 +233,41 @@ cc_library(
     name = "daemon_record_arm",
     srcs = [
         "daemon_ipro_recorder.cc",
+        "daemon_notify_params.cc",
         "daemon_record_arm.cc",
     ],
     hdrs = [
         "daemon_ipro_recorder.h",
+        "daemon_notify_params.h",
         "daemon_record_arm.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
         ":ipro_recorder",
+        ":site_cache_fragment",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
         # GzipInflater::HasGzipMagicBytes: the recorder's backstop for a
         # capture-time view that missed the origin's own coding.
         "//pagespeed/kernel/util",
+    ],
+)
+
+# DaemonHtmlCache report-only: a bounded read-only capture of an HTML response,
+# classified by the library's policy through the run-time binding, counted and
+# logged. Nothing here stores or serves anything.
+cc_library(
+    name = "daemon_html_report",
+    srcs = ["daemon_html_report.cc"],
+    hdrs = ["daemon_html_report.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_adapter",
+        ":rule_pack_decision_log",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
 
@@ -258,6 +305,7 @@ cc_library(
     deps = [
         ":daemon_adapter",
         ":daemon_record_arm",
+        ":site_cache_fragment",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",

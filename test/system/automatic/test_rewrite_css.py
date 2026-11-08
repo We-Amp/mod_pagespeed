@@ -92,6 +92,7 @@ class TestRewriteCss:
 class TestRewriteCssImages:
     """Tests for CSS with image URL rewriting."""
 
+    @pytest.mark.not_envoy(reason="the Envoy test config has no per-path options to set CssImageInlineMaxBytes for this page")
     def test_rewrite_css_images(self, client: PageSpeedClient, example_root: str):
         """Bash original (rewrite_css_images.sh:15-22):
 
@@ -100,11 +101,14 @@ class TestRewriteCssImages:
             fetch_until $URL 'grep -c url.data:image/png;base64,' 1  # image inlined
             fetch_until $URL 'grep -c rewrite_css_images.css.pagespeed.cf.' 1
             check run_wget_with_args $URL
+
+        A request can only lower CssImageInlineMaxBytes, so the harness
+        configures 2048 for this page (nginx location, Apache Location, IIS
+        path block) instead of the query parameter.
         """
         url = (
             f"{example_root}/rewrite_css_images.html"
             "?PageSpeedFilters=rewrite_css,rewrite_images"
-            "&ModPagespeedCssImageInlineMaxBytes=2048"
         )
         for pattern in (r"url.data:image/png;base64,",
                         r"rewrite_css_images.css.pagespeed.cf."):

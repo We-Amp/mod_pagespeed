@@ -104,6 +104,35 @@ TEST_F(HtmlDetectorTest, BufferedJs) {
   EXPECT_EQ(buf, "\t\t  ");
 }
 
+TEST_F(HtmlDetectorTest, BufferedUpToLimit) {
+  // Exactly kMaxBufferedBytes of whitespace still waits for a decision.
+  const GoogleString blanks(HtmlDetector::kMaxBufferedBytes, ' ');
+  EXPECT_FALSE(html_detector_.ConsiderInput(blanks));
+  EXPECT_FALSE(html_detector_.already_decided());
+  EXPECT_TRUE(html_detector_.ConsiderInput("<html>"));
+  EXPECT_TRUE(html_detector_.probable_html());
+  GoogleString buf;
+  html_detector_.ReleaseBuffered(&buf);
+  EXPECT_EQ(blanks, buf);
+}
+
+TEST_F(HtmlDetectorTest, LongWhitespaceIsNotHtml) {
+  // Whitespace is held only up to the limit.
+  const GoogleString blanks(10000, ' ');
+  size_t buffered = 0;
+  while (!html_detector_.ConsiderInput(blanks)) {
+    buffered += blanks.size();
+    ASSERT_LE(buffered, HtmlDetector::kMaxBufferedBytes);
+  }
+  EXPECT_TRUE(html_detector_.already_decided());
+  EXPECT_FALSE(html_detector_.probable_html());
+  // The input that tipped the balance stays with the caller, like any other
+  // input that leads to a decision.
+  GoogleString buf;
+  html_detector_.ReleaseBuffered(&buf);
+  EXPECT_EQ(buffered, buf.size());
+}
+
 TEST_F(HtmlDetectorTest, ForceDecisionTrue) {
   EXPECT_FALSE(html_detector_.already_decided());
   html_detector_.ForceDecision(true);

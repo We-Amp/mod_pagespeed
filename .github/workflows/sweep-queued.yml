@@ -5,7 +5,8 @@
 # asks for a runner label nothing serves queues for days; the sweep cancels
 # such runs so their checks do not sit pending. The logic lives in
 # tools/ci/sweep-queued-runs.sh, called through pipeline-sweep.yml pinned to
-# master. See docs/ci/pipelines.md.
+# master. The same hourly call keeps the runner-health issues
+# (tools/ci/runner_health.sh). See docs/ci/pipelines.md.
 
 name: Sweep queued runs
 
@@ -28,10 +29,14 @@ permissions: {}
 
 jobs:
   sweep:
-    # The ceiling for the called workflow: cancelling a run needs actions: write.
+    # The ceiling for the called workflow: cancelling a run needs actions:
+    # write; the runner-health job reads check annotations (checks: read) and
+    # keeps the runner-health issues (issues: write).
     permissions:
       contents: read
       actions: write
+      checks: read
+      issues: write
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-sweep.yml@master
     with:
       dry_run: ${{ inputs.dry_run || false }}

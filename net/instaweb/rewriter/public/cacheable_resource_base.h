@@ -96,6 +96,11 @@ class CacheableResourceBase : public Resource {
   // fetch.
   bool ShouldSkipBackgroundFetch() const;
 
+  // The key under which a failure of the module's own fetch of this resource
+  // is remembered when the resource's own key holds an entry the module did
+  // not fetch itself.
+  GoogleString FetchedInputFailureKey() const;
+
  private:
   class FreshenHttpCacheCallback;
   class LoadHttpCacheCallback;

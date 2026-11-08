@@ -61,12 +61,14 @@ class ScanFilter : public EmptyHtmlFilter {
   // into its constituent serialized policies and adds each to the
   // driver's CSP context.
   void AddCspPolicies(StringPiece value);
+  void LatchHydratedDocument();
 
   RewriteDriver* driver_;
   bool seen_any_nodes_;
   bool seen_refs_;
   bool seen_base_;
   bool seen_meta_tag_charset_;
+  bool detect_hydration_ = false;
 };
 
 }  // namespace net_instaweb

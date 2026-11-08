@@ -78,7 +78,8 @@ jobs:
   # twice is better than a night that is lost.
   guard:
     name: Schedule guard
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -181,7 +182,8 @@ jobs:
     name: Nightly full-tier report
     needs: [guard, full]
     if: always() && needs.guard.outputs.skip != 'true' && needs.full.result != 'skipped'
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read

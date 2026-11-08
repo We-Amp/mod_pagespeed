@@ -19,9 +19,9 @@ Windows IIS module implementing PageSpeed optimization as a native IIS HTTP modu
 
 ## IIS Request Pipeline Integration
 
-The module registers request notifications `RQ_SEND_RESPONSE | RQ_BEGIN_REQUEST` and a separate global notification in `RegisterModule` (`dll_main.cc`):
+The module registers request notifications `RQ_SEND_RESPONSE | RQ_RESOLVE_REQUEST_CACHE` and a separate global notification in `RegisterModule` (`dll_main.cc`):
 
-- **`RQ_BEGIN_REQUEST`** (priority `PRIORITY_ALIAS_FIRST`) -- Routes requests: resource fetch, IPRO lookup, admin, beacon, or HTML rewrite. Resource/admin requests are handled immediately; HTML requests set up ProxyFetch.
+- **`RQ_RESOLVE_REQUEST_CACHE`** (priority `PRIORITY_ALIAS_FIRST`) -- Routes requests: resource fetch, IPRO lookup, admin, beacon, or HTML rewrite. Resource/admin requests are handled immediately; HTML requests set up ProxyFetch. This stage runs after IIS authentication and authorization, so nothing is served, from cache or otherwise, before IIS has admitted the request. Do not move serving to an earlier stage.
 - **`RQ_SEND_RESPONSE`** (priority `PRIORITY_ALIAS_LAST`) -- Intercepts origin response. For HTML: captures body, feeds it to ProxyFetch. For IPRO: records response for in-place optimization.
 - **`GL_PRE_BEGIN_REQUEST`** (global, `PRIORITY_ALIAS_FIRST`) -- `MyGlobalModule` preserves `X-PRISTINE-URL` before URL rewrite modules modify the request URL.
 

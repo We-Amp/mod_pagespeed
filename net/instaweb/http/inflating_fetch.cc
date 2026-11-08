@@ -32,7 +32,10 @@
 
 namespace net_instaweb {
 
-InflatingFetch::InflatingFetch(AsyncFetch* fetch) : SharedAsyncFetch(fetch) {
+const int64 InflatingFetch::kMaxInflatedBytes;
+
+InflatingFetch::InflatingFetch(AsyncFetch* fetch)
+    : SharedAsyncFetch(fetch), max_inflated_bytes_(kMaxInflatedBytes) {
   Reset();
 }
 
@@ -89,7 +92,16 @@ bool InflatingFetch::HandleWrite(const StringPiece& sp,
           handler->Message(kWarning, "inflation failure, size=%d", size);
           inflate_failure_ = true;
           break;
+        } else if (size > max_inflated_bytes_ - inflated_bytes_) {
+          // Anything larger is treated like any other broken input.
+          handler->Message(kWarning,
+                           "inflation failure, body inflates to more than %s "
+                           "bytes",
+                           Integer64ToString(max_inflated_bytes_).c_str());
+          inflate_failure_ = true;
+          break;
         } else {
+          inflated_bytes_ += size;
           status =
               SharedAsyncFetch::HandleWrite(StringPiece(buf, size), handler);
         }
@@ -106,13 +118,15 @@ bool InflatingFetch::HandleWrite(const StringPiece& sp,
 bool InflatingFetch::UnGzipValueIfCompressed(const HTTPValue& src,
                                              ResponseHeaders* headers,
                                              HTTPValue* dest,
-                                             MessageHandler* handler) {
+                                             MessageHandler* handler,
+                                             int64 max_inflated_bytes) {
   if (!src.Empty() && headers->IsGzipped()) {
     GoogleString inflated;
     StringWriter inflate_writer(&inflated);
     StringPiece content;
     src.ExtractContents(&content);
-    if (GzipInflater::Inflate(content, GzipInflater::kGzip, &inflate_writer)) {
+    if (GzipInflater::InflateWithLimit(content, GzipInflater::kGzip,
+                                       max_inflated_bytes, &inflate_writer)) {
       if (!headers->HasValue(HttpAttributes::HttpAttributes::kVary,
                              HttpAttributes::kAcceptEncoding)) {
         headers->Add(HttpAttributes::HttpAttributes::kVary,
@@ -221,6 +235,7 @@ void InflatingFetch::Reset() {
   request_checked_for_accept_encoding_ = false;
   compression_desired_ = false;
   inflate_failure_ = false;
+  inflated_bytes_ = 0;
   SharedAsyncFetch::Reset();
 }
 

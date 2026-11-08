@@ -19,7 +19,7 @@ param(
   [string]$RigDir      = $(if (Test-Path 'D:\') { 'D:\iis-asan-rig' } else { 'C:\iis-asan-rig' }),
   [string]$PoolName    = 'PageSpeedAsanStressPool',
   [string]$SiteName    = 'PageSpeedAsanStressSite',
-  [int]$Port           = 18180,
+  [int]$Port           = 18500,
   [int]$Duration       = 600,
   [int]$Concurrency    = 16,
   [string]$CoredumpDir = 'C:\CrashDumps',

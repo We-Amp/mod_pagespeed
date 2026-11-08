@@ -33,9 +33,9 @@ EXPORTS
   ps_cache_config_init
   ps_cache_config_init_sized
   ps_cache_open
-  ps_cache_read_alternate
-  ps_cache_read_best
-  ps_cache_write_original
+  ps_cache_read_alternate_site
+  ps_cache_read_best_site
+  ps_cache_write_original_site
   ps_classify
   ps_classify_content_type
   ps_evaluate_freshness

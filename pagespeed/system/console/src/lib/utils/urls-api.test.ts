@@ -88,6 +88,38 @@ describe("detailHref / parseDetailKey", () => {
   });
 });
 
+const SITE = "0123456789abcdef".repeat(4);
+
+describe("site on an entry key", () => {
+  it("keeps a valid 64-hex site from a list entry on the row key", () => {
+    const rows = buildUrlRows(
+      { urls: [{ url: "/hero.png", hostname: "www.example.test", scheme: "https", site: SITE }] },
+      [],
+      "",
+      DEFAULT_URL_SORT,
+    );
+    expect(rows[0].key).toEqual({ url: "/hero.png", host: "www.example.test", scheme: "https", site: SITE });
+  });
+  it("drops a malformed site and leaves the key unsited", () => {
+    for (const site of ["", "ABCDEF".repeat(11).slice(0, 64), SITE.slice(1), `${SITE}0`, 7, null]) {
+      expect(entryKey("/a", "x.test", "https", site)).toEqual({ url: "/a", host: "x.test", scheme: "https" });
+    }
+  });
+  it("round-trips through the detail route", () => {
+    const key = { url: "/hero.png", host: "www.example.test", scheme: "https", site: SITE } as const;
+    const href = detailHref(key);
+    expect(href).toContain(`site=${SITE}`);
+    expect(parseDetailKey(new URLSearchParams(href.split("?").slice(1).join("?")))).toEqual(key);
+  });
+  it("omits site from the route for an unsited key", () => {
+    const key = { url: "/hero.png", host: "www.example.test", scheme: "https" } as const;
+    expect(detailHref(key)).not.toContain("site=");
+  });
+  it("leaves a pasted URL unsited", () => {
+    expect(entryKeyFromAbsoluteUrl("https://www.example.test/hero.png")).not.toHaveProperty("site");
+  });
+});
+
 describe("entryKeyFromAbsoluteUrl", () => {
   it("splits a full URL into path + query, host and scheme", () => {
     expect(entryKeyFromAbsoluteUrl("https://www.example.test/hero.png?v=2")).toEqual({

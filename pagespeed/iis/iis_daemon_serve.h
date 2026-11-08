@@ -76,8 +76,11 @@ void ComposeIisServeResponse(const DaemonServeDecision& decision,
 
 // The request facts the peer needs, read from the IIS request through the
 // SAME capability reader the record arm uses, so the two arms cannot
-// disagree about what this client asked for.
+// disagree about what this client asked for.  `site` is the request's IIS
+// site (SiteIdFromServerFragment of its server context's fragment); it is
+// borrowed and must outlive the serve.
 void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
+                             const GoogleString& site,
                              DaemonServeRequest* request);
 
 }  // namespace net_instaweb

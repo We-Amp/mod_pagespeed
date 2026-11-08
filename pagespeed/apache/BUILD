@@ -99,6 +99,7 @@ cc_library(
         "apache_mpm_detection.cc",
         "apache_request_context.cc",
         "apache_rewrite_driver_factory.cc",
+        "apache_self_fetch.cc",
         "apache_server_context.cc",
         "apache_slurp.cc",
         "apache_static_asset_path.cc",
@@ -123,12 +124,14 @@ cc_library(
         "apache_mpm_detection.h",
         "apache_request_context.h",
         "apache_rewrite_driver_factory.h",
+        "apache_self_fetch.h",
         "apache_server_context.h",
         "apache_static_asset_path.h",
         "apache_thread_system.h",
         "apache_writer.h",
         "apr_timer.h",
         "header_util.h",
+        "html_flush_window.h",
         "in_place_not_modified_vary_fetch.h",
         "instaweb_context.h",
         "instaweb_handler.h",
@@ -160,13 +163,16 @@ cc_library(
         # binding (and its -ldl) enters the build -- not in the system library
         # every port links.
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/system:inplace_url_agreement",
         # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
         # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",
         "//pagespeed/system:serve_host_names",
+        "//pagespeed/system:site_cache_fragment",
         # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
         # instaweb_context.cc) and the httpd util_filter API; it is no longer
         # for memcached. Declared here because apache_apr no longer pulls it.

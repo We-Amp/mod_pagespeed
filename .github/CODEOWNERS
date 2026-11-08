@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Review ownership for the release and supply-chain surface.
+# These paths request the owner's review. The repository does not require code
+# owner review, so GitHub does not block a merge on it: reviewers treat a diff
+# touching any path listed here as a stop and wait for the owner.
+
+# This file
+/.github/CODEOWNERS @oschaaf
+
+# Release lane: what is built, signed and published
+/.github/workflows/release.yml @oschaaf
+/.github/workflows/pipeline-release-module.yml @oschaaf
+/.github/workflows/pair-rehearsal.yml @oschaaf
+/.github/workflows/release-rehearsal.yml @oschaaf
+/.github/workflows/nginx-org-rebuild.yml @oschaaf
+/tools/ci/release_nginx.sh @oschaaf
+/tools/ci/pair_rehearsal.sh @oschaaf
+/tools/ci/release_adopt.py @oschaaf
+/tools/ci/release_job_graph.py @oschaaf
+
+# Gates that decide what may run on which ref, and what may be released
+/tools/ci/ref_guard.sh @oschaaf
+/tools/ci/check-workflow-shape.sh @oschaaf
+/tools/ci/ci_release_gate.sh @oschaaf
+/tools/ci/rehearsal_fulltier_gate.sh @oschaaf
+/tools/ci/pr_tier_scope.sh @oschaaf
+/tools/ci/docs_only.sh @oschaaf
+
+# Software bill of materials and vulnerability database pin
+/sbom/ @oschaaf
+/tools/sbom/ @oschaaf

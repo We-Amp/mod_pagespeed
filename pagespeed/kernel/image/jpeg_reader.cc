@@ -64,8 +64,29 @@ SkipInputData(j_decompress_ptr cinfo,
 
 METHODDEF(void) TermSource(j_decompress_ptr cinfo) {}
 
+// A progressive JPEG may carry any number of scans, and libjpeg absorbs all
+// of them before it hands out the first scanline or coefficient. Each scan
+// costs a pass over the coefficients of the whole image, so without a limit
+// the decode time grows with the number of scans. libjpeg leaves the limit to
+// the application: encoders emit about ten scans, libjpeg-turbo's fuzzers
+// allow 100 and its TurboJPEG API 500.
+const int kMaxJpegScans = 100;
+
+// Installed as libjpeg's progress monitor, which jpeg_start_decompress() and
+// jpeg_read_coefficients() call before absorbing each piece of input. Raising
+// a libjpeg error takes the ErrorExit() route below.
+METHODDEF(void) LimitScans(j_common_ptr cinfo) {
+  if (cinfo->is_decompressor) {
+    const int scan =
+        reinterpret_cast<j_decompress_ptr>(cinfo)->input_scan_number;
+    if (scan > kMaxJpegScans) {
+      ERREXIT1(cinfo, JERR_BAD_PROG_SCRIPT, scan);
+    }
+  }
+}
+
 // Call this function on a j_decompress_ptr to install a reader that will read
-// from the given string.
+// from the given string, and give up on it after kMaxJpegScans scans.
 void JpegStringReader(j_decompress_ptr cinfo, const void* image_data,
                       size_t image_length) {
   if (cinfo->src == nullptr) {
@@ -82,6 +103,12 @@ void JpegStringReader(j_decompress_ptr cinfo, const void* image_data,
 
   src.bytes_in_buffer = image_length;
   src.next_input_byte = static_cast<const JOCTET*>(image_data);
+
+  if (cinfo->progress == nullptr) {
+    cinfo->progress = (struct jpeg_progress_mgr*)(*cinfo->mem->alloc_small)(
+        (j_common_ptr)cinfo, JPOOL_PERMANENT, sizeof(jpeg_progress_mgr));
+  }
+  cinfo->progress->progress_monitor = LimitScans;
 }
 
 // ErrorExit() is installed as a callback, called on errors

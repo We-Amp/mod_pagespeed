@@ -168,16 +168,18 @@ class CachePutFetch : public SharedAsyncFetch {
       log_record()->SetIsOriginalResourceCacheable(false);
     }
 
-    // Finish fetch.
-    SharedAsyncFetch::HandleDone(success);
-    // Note: SharedAsyncFetch::base_fetch_ and other things that refer to that,
-    // like request_context() cannot be accessed or used any more.
-
-    // Add result to cache.
+    // Add result to cache before finishing the fetch: finishing may start
+    // the module's own fetch of the resource, whose entry must be the one
+    // that stays.
     if (insert_into_cache) {
       cache_->Put(url_, fragment_, req_properties_, http_options_,
                   &cache_value_, handler_);
     }
+
+    // Finish fetch.
+    SharedAsyncFetch::HandleDone(success);
+    // Note: SharedAsyncFetch::base_fetch_ and other things that refer to that,
+    // like request_context() cannot be accessed or used any more.
     // Note: We explicitly do not remember fetch failure, uncacheable nor
     // empty resources here since we still want to proxy those through every
     // time they are requested.
@@ -246,6 +248,34 @@ AsyncFetch* MakeCachePutAndConditionalFetch(const CachePutSettings& settings,
   conditional_fetch->set_num_conditional_refreshes(
       settings.num_conditional_refreshes);
   return conditional_fetch;
+}
+
+// A response stored from the module's own fetch that stated no lifetime of
+// its own carries the one ResponseHeaders::ComputeCaching derived for it: a
+// max-age directive and an Expires (a response that sent its own Expires is
+// not implicitly cacheable).  Served from the cache, it is presented as a
+// recorded response is: without the derived max-age directive, keeping the
+// derived Expires.
+void RemoveDerivedMaxAge(ResponseHeaders* headers) {
+  if (!headers->is_implicitly_cacheable() ||
+      !headers->Has(HttpAttributes::kExpires)) {
+    return;
+  }
+  ConstStringStarVector values;
+  StringVector kept;
+  if (headers->Lookup(HttpAttributes::kCacheControl, &values)) {
+    for (const GoogleString* value : values) {
+      StringPiece directive(*value);
+      TrimWhitespace(&directive);
+      if (!StringCaseStartsWith(directive, "max-age")) {
+        kept.push_back(directive.as_string());
+      }
+    }
+  }
+  headers->RemoveAll(HttpAttributes::kCacheControl);
+  if (!kept.empty()) {
+    headers->Add(HttpAttributes::kCacheControl, JoinCollection(kept, ", "));
+  }
 }
 
 class CacheFindCallback : public HTTPCache::Callback {
@@ -372,6 +402,12 @@ class CacheFindCallback : public HTTPCache::Callback {
       case HTTPCache::kFound: {
         VLOG(1) << "Found in cache: " << url_ << " (" << fragment_ << ")";
         http_value()->ExtractHeaders(response_headers(), handler_);
+        // In-place serving at the origin (no backend fetcher) presents a
+        // module-fetched entry as a recorded one; a proxy stores its own
+        // responses with the derived max-age, so it keeps it.
+        if (fetcher_ == nullptr && http_value()->IsFetchedInput()) {
+          RemoveDerivedMaxAge(response_headers());
+        }
 
         bool is_imminently_expiring = false;
 

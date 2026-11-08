@@ -150,7 +150,7 @@ const char* HttpStatus::GetReasonPhrase(HttpStatus::Code rc) {
     case HttpStatus::kUseProxy:
       return "Use Proxy";
     case HttpStatus::kTemporaryRedirect:
-      return "OK";
+      return "Temporary Redirect";
 
       // 400 range: client errors
     case HttpStatus::kBadRequest:
@@ -201,6 +201,8 @@ const char* HttpStatus::GetReasonPhrase(HttpStatus::Code rc) {
       return "Service Unavailable";
     case HttpStatus::kGatewayTimeout:
       return "Gateway Time-out";
+    case HttpStatus::kHttpVersionNotSupported:
+      return "HTTP Version Not Supported";
 
       // Instaweb proxy failures
     case HttpStatus::kProxyPublisherFailure:

@@ -466,7 +466,16 @@ requests. HTML is never served from the optimizer's cache, so it carries its
 own, shorter list (below). A response whose origin sends a `Vary` on any other
 header is not served from the optimizer's cache at all (see above), so the
 module never replaces a `Vary` the origin chose; the server merges its own
-`Accept-Encoding` into the same field. `Cache-Control` is unaffected.
+`Accept-Encoding` into the same field. `Cache-Control` is unaffected, with one
+exception: while a client's own image variant is not written yet, the variant
+for another device class is served in its place, and that response has a
+lifetime of at most 60 seconds, so a cache does not keep it after the client's
+own variant has landed. On nginx this holds under `expires` and `add_header`
+too: the response goes out with one `Cache-Control` line that keeps every
+directive and shortens each `max-age` and `s-maxage` to 60 seconds or less. A
+configuration that says `private`, `no-store` or `no-cache` is left as it is.
+A client whose own variant is never written, because it would not be smaller
+or would lose quality, stays on this short lifetime and revalidates.
 
 **The recorded original carries no `Vary`.** Before the optimizer has written
 a variant for a URL, and whenever no variant fits the client, the module

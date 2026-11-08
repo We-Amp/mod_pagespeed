@@ -1244,6 +1244,34 @@ TEST_F(HtmlAnnotationTest, ScriptQuirkBriefClose) {
   EXPECT_EQ("+script -script(e) 'Bar'", annotation());
 }
 
+// As for </script, the end tag of the other literal tags is complete as soon
+// as its name is followed by white space or '/', and the rest of the tag is
+// dropped.
+TEST_F(HtmlAnnotationTest, LiteralElementsEndLikeScript) {
+  ValidateExpected("textarea_close_newline", "<textarea>a</textarea\n>c",
+                   "<textarea>a</textarea>c");
+  EXPECT_EQ("+textarea 'a' -textarea(e) 'c'", annotation());
+
+  ResetAnnotation();
+  ValidateExpected("style_close_space", "<style>a{}</STYLE >Bar",
+                   "<style>a{}</style>Bar");
+  EXPECT_EQ("+style 'a{}' -style(e) 'Bar'", annotation());
+
+  ResetAnnotation();
+  ValidateExpected("title_close_slash", "<title>a</title/>Bar",
+                   "<title>a</title>Bar");
+  EXPECT_EQ("+title 'a' -title(e) 'Bar'", annotation());
+
+  ResetAnnotation();
+  ValidateExpected("iframe_close_attr", "<iframe></iframe a=\"foo>\">Bar",
+                   "<iframe></iframe>Bar");
+  EXPECT_EQ("+iframe -iframe(e) 'Bar'", annotation());
+
+  // A longer name is not the end tag.
+  ResetAnnotation();
+  ValidateNoChanges("xmp_close_longer_name", "<xmp></xmpx ></xmp>");
+}
+
 // TODO(jmarantz): fix this case; we lose the stray "=".
 // TEST_F(HtmlAnnotationTest, StrayEq) {
 //   ValidateNoChanges("stray_eq", "<a href='foo.html'=>b</a>");

@@ -147,6 +147,9 @@ CASES = [
     ("1.19.1-pre.2", "2.4.0", True, "skip"),
     # a prerelease that merely starts with the letters is not a dry-run tag
     ("2.5.0-preview.1", "2.4.0", True, "warn"),
+    # the weekly rehearsal: the version is made up from the pin, so the pinned
+    # optimizer's VERSION.txt names its X.Y.Z core and the pair agrees
+    ("2.8.0-rehearsal.3", "2.8.0", True, "pass"),
 ]
 
 BAD_INPUT = ["2.5", "v2.5.0", "2.5.0+r1", "02.5.0", "", "2.5.0-"]

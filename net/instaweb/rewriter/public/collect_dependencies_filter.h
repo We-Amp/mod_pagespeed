@@ -23,6 +23,7 @@
 #include "net/instaweb/rewriter/public/common_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 
 namespace net_instaweb {
@@ -41,6 +42,9 @@ class CollectDependenciesFilter : public CommonFilter {
 
  private:
   class Context;
+
+  // The resource URLs this document already has a dependency candidate for.
+  StringSet urls_seen_;
 
   CollectDependenciesFilter(const CollectDependenciesFilter&) = delete;
   CollectDependenciesFilter& operator=(const CollectDependenciesFilter&) =

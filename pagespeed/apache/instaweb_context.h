@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "net/instaweb/http/public/request_context.h"
+#include "pagespeed/apache/html_flush_window.h"
 #include "pagespeed/automatic/html_detector.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -39,6 +40,7 @@
 namespace net_instaweb {
 
 class ApacheServerContext;
+class GoogleUrl;
 class GzipInflater;
 class QueryParams;
 class RequestHeaders;
@@ -47,6 +49,12 @@ class RewriteDriver;
 class RewriteOptions;
 
 const char kPagespeedOriginalUrl[] = "mod_pagespeed_original_url";
+
+// Saved beside kPagespeedOriginalUrl: whether httpd's reading of the request
+// and the module's name the same resource (see
+// InstawebContext::SaveInPlaceUrlAgreement).
+const char kPagespeedInPlaceUrlAgreement[] =
+    "mod_pagespeed_in_place_url_agreement";
 
 // Generic deleter meant to be used with apr_pool_cleanup_register().
 template <class T>
@@ -66,6 +74,8 @@ apr_status_t apache_cleanup(void* object) {
 // call Finish when we see the EOS bucket.
 //
 // TODO(sligocki): Factor out similarities between this and ProxyFetch.
+class DaemonHtmlCapture;
+
 class InstawebContext {
  public:
   enum ContentEncoding { kNone, kGzip, kDeflate, kOther };
@@ -88,14 +98,23 @@ class InstawebContext {
 
   // True when a FLUSH bucket passed on now would make Apache send the response
   // headers as the origin wrote them while a filter may still edit them: the
-  // rule_packs filter rewrites a Link header when it reaches the end of the
-  // head, so until the parser has seen data (a flush that arrives before the
-  // first body bytes, as a proxied origin's header write produces) the flush
-  // has nothing of ours to flush and is better held back. Only while the
-  // body is undecided: once it is known, a flush is passed on.
+  // page's Vary names are added to them, and the rule_packs filter rewrites a
+  // Link header when it reaches the end of the head. So until the parser has
+  // seen data (a flush that arrives before the first body bytes, as a proxied
+  // origin's header write produces) the flush has nothing of ours to flush
+  // and is better held back. Only while the body is undecided: once it is
+  // known, a flush is passed on.
   bool FlushWouldSendEditableHeaders() const;
 
   apr_bucket_brigade* bucket_brigade() const { return bucket_brigade_; }
+  // DaemonHtmlCache report-only: the capture of this response, or nullptr in
+  // any other mode.  Owned by the request pool.
+  DaemonHtmlCapture* daemon_html_capture() const {
+    return daemon_html_capture_;
+  }
+  void set_daemon_html_capture(DaemonHtmlCapture* capture) {
+    daemon_html_capture_ = capture;
+  }
   ContentEncoding content_encoding() const { return content_encoding_; }
   ApacheServerContext* apache_server_context() { return server_context_; }
   const GoogleString& output() { return output_; }
@@ -106,6 +125,8 @@ class InstawebContext {
 
   bool sent_headers() { return sent_headers_; }
   void set_sent_headers(bool sent) { sent_headers_ = sent; }
+
+  bool populated_headers() const { return populated_headers_; }
 
   // Populated response_headers_ with the request's headers_out table.
   void PopulateHeaders(request_rec* request);
@@ -118,6 +139,33 @@ class InstawebContext {
   // Returns a fetchable URI from a request, using the request pool.
   static const char* MakeRequestUrl(const RewriteOptions& global_options,
                                     request_rec* request);
+
+  // The scheme MakeRequestUrl gives the URL of a request whose target is a
+  // path: httpd's scheme for the request, or a valid X-Forwarded-Proto when
+  // the server respects it.
+  static StringPiece OriginFormScheme(const RewriteOptions& global_options,
+                                      request_rec* request);
+
+  // Records whether httpd and the module read this request alike, beside the
+  // URL MakeRequestUrl saved, and returns it.  In-place optimization keys its
+  // lookups and recordings on `url`, the module's parse of the request line;
+  // httpd matched <Location> and <Directory> and applied its access rules on
+  // its own reading: `request->uri` (normalized, before any module rewrites
+  // it) on `server_host` under `server_scheme` (see OriginFormScheme),
+  // merging runs of slashes when `merge_slashes`.
+  // Called at translate_name time.  A request that follows another -- an
+  // internal redirect or a subrequest -- keeps the verdict of the request its
+  // URL came from, found exactly as MakeRequestUrl finds that URL; the
+  // verdict is computed only for a request that starts a chain.
+  static bool SaveInPlaceUrlAgreement(request_rec* request,
+                                      const GoogleUrl& url,
+                                      StringPiece server_scheme,
+                                      StringPiece server_host,
+                                      bool merge_slashes);
+
+  // The verdict SaveInPlaceUrlAgreement recorded for this request, or for the
+  // request its URL came from.  False when none was recorded.
+  static bool InPlaceUrlAgreed(request_rec* request);
 
   // The device class (phone, tablet, desktop) a page view's property-cache
   // lookup is keyed by, which is also recorded on the driver.
@@ -135,6 +183,9 @@ class InstawebContext {
       const RequestHeaders& request_headers, RewriteDriver* driver);
 
  private:
+  class WindowSink;
+
+  DaemonHtmlCapture* daemon_html_capture_ = nullptr;
   void ComputeContentEncoding(request_rec* request);
   void BlockingPropertyCacheLookup();
   void ProcessBytes(const char* input, int size);
@@ -160,6 +211,8 @@ class InstawebContext {
   std::unique_ptr<RequestHeaders> request_headers_;
   std::unique_ptr<ResponseHeaders> response_headers_;
   bool started_parse_;
+  // Cuts the body into windows and flushes between them.
+  HtmlFlushWindow flush_window_;
   bool sent_headers_;
   bool populated_headers_;
 

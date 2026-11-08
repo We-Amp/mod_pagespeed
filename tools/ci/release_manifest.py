@@ -4,9 +4,11 @@
 """Assemble and verify the asset set of a module release (docs/ci/release.md).
 
   release_manifest.py build  --stage DIR --out DIR --tag TAG --version V
-                             --pkg-version P --source-sha SHA --run-id ID
-                             [--repository R] [--optimizer-tag T]
+                             --pkg-version P --source-sha SHA --run-id ID [--run-attempt N]
+                             [--build-run-id ID --build-run-attempt N] [--repository R] [--optimizer-tag T]
                              [--prerelease true|false] [--profile part-a|part-b|none]
+  release_manifest.py build  ... --profile nginxorg --nginx-version N --nginx-sha256 H
+                             --cells trixie,noble,el9 [--lane-revision R]
   release_manifest.py verify DIR
   release_manifest.py --self-test
 
@@ -25,8 +27,15 @@ they are.
 
 manifest.json (schema 1):
   {schema, tag, version, pkg_version, prerelease, source_sha, run_id,
-   repository, optimizer_tag, files: [{asset, name, sha256, size, kind,
-   component, channel, channel_also, distro, arch}]}
+   build_run_id, build_run_attempt, repository, optimizer_tag,
+   files: [{asset, name, sha256, size, kind, component, channel, channel_also,
+   distro, arch}]}
+  run_id        the run that validated and signed the set
+  build_run_id, build_run_attempt
+                the run (and its attempt) that built the files: this run's
+                run_id and --run-attempt, unless the run adopted the files
+                from a candidate run, whose id and attempt are then given by
+                --build-run-id and --build-run-attempt
   asset         the uploaded name (what SHA256SUMS lists)
   name          the original name (what the packaging produced, '~' kept)
   kind          deb | rpm | tarball | so | zip | msi | json
@@ -35,7 +44,7 @@ manifest.json (schema 1):
                 rpm-ea4 | none (a direct download only)
   channel_also  further channels the same file belongs to (the optimizer
                 RPMs also belong in rpm-el10)
-  distro        suite or release id: a deb suite (noble, bookworm, trixie,
+  distro        suite or release id: a deb suite (noble, resolute, bookworm, trixie,
                 jammy), el8 | el9 | el10, or "any"
   arch          x64 | arm64 | any
 
@@ -43,6 +52,16 @@ manifest.json (schema 1):
 including the Windows installer; `part-a` is the same without the installer
 (the set of a lane that builds none); `none` skips the check (self-test, local
 use).
+
+`--profile nginxorg` is the set of the nginx.org rebuild lane
+(.github/workflows/nginx-org-rebuild.yml): exactly one
+nginx-module-pagespeed-nginxorg package per cell named in --cells, for x64,
+from the artifact asset-nginxorg-x64, and nothing else: a deb for a deb suite,
+an rpm for the cell el9. Each deb version is the bare module version, `-r<N>`,
+`+ngx<nginx version>`, `.R` for a lane revision R > 0, and `~<cell>`; each rpm
+is the bare module version, release `<N>.ngx<nginx version>[.R].el9`, x86_64. The manifest of this profile also carries nginx_version
+and nginx_sha256 (the nginx.org source the set was built from); the schema
+stays 1. The other profiles refuse the artifact asset-nginxorg-x64.
 """
 
 import argparse
@@ -62,6 +81,8 @@ ARTIFACTS = {
     "asset-nginx-x64": ("module", None, "any", ()),
     "asset-nginx-arm64": ("module", None, "any", ()),
     "asset-nginx-el10": ("module", "rpm-el10", "el10", ()),
+    # The nginx.org rebuild lane's packages (profile nginxorg only).
+    "asset-nginxorg-x64": ("module", None, "any", ()),
     "asset-apache-el10": ("module", "rpm-el10", "el10", ()),
     "asset-ea4-el9": ("module", "rpm-ea4", "el9", ()),
     "asset-ea4-el8": ("module", "rpm-ea4", "el8", ()),
@@ -80,7 +101,7 @@ ARTIFACTS = {
 # name as the el9 one. Its uploaded name carries this prefix.
 UNIQUE_PREFIX = {"asset-apache-el10": "el10-"}
 
-SUITES = ("noble", "bookworm", "trixie", "jammy")
+SUITES = ("noble", "bookworm", "trixie", "jammy", "resolute")
 ASSET_CHARS = re.compile(r"^[A-Za-z0-9._+-]+$")
 
 
@@ -176,6 +197,8 @@ def required(pkg_version, prerelease, msi=False):
                     r"^mod-pagespeed-%s-[^.]+\.%s\.rpm$" % (v, rpm_arch)))
         req.append(("apache module " + arch, "asset-linux-" + art,
                     r"^libmod_pagespeed-linux-%s\.so$" % so_arch))
+        req.append(("apache module debug files " + arch, "asset-linux-" + art,
+                    r"^libmod_pagespeed-debug-linux-%s\.tar\.gz$" % so_arch))
         req.append(("nginx tarball " + arch, "asset-linux-" + art,
                     r"^ngx_pagespeed-.*-linux-%s\.tar\.gz$" % tar_arch))
         for suite in SUITES:
@@ -215,6 +238,25 @@ def required(pkg_version, prerelease, msi=False):
         req.append(("windows installer", "asset-windows",
                     r"^pagespeed-iis-%s-win-x64\.msi$" % re.escape(pkg_version.replace("~", "-"))))
     return req
+
+
+# The rpm cells of the nginx.org lane (the deb cells are SUITES).
+NGINXORG_RPM_CELLS = ("el9",)
+
+
+def required_nginxorg(pkg_version, nginx_version, cells, lane_revision):
+    """(description, artifact, regex) for the nginx.org lane's set."""
+    v = re.escape(pkg_version)
+    ngx = re.escape(nginx_version) + (r"\.%d" % lane_revision if lane_revision else "")
+    rules = []
+    for cell in cells:
+        if cell in NGINXORG_RPM_CELLS:
+            rules.append(("nginx.org rpm %s x64" % cell, "asset-nginxorg-x64",
+                          r"^nginx-module-pagespeed-nginxorg-%s-[0-9]+\.ngx%s\.%s\.x86_64\.rpm$" % (v, ngx, re.escape(cell))))
+        else:
+            rules.append(("nginx.org deb %s x64" % cell, "asset-nginxorg-x64",
+                          r"^nginx-module-pagespeed-nginxorg_%s-r[0-9]+\+ngx%s~%s_amd64\.deb$" % (v, ngx, re.escape(cell))))
+    return rules
 
 
 def optional(prerelease):
@@ -271,6 +313,44 @@ def build(args):
         })
     files.sort(key=lambda f: f["asset"].encode())
 
+    nginxorg = args.profile == "nginxorg"
+    if nginxorg:
+        nginx_version = getattr(args, "nginx_version", "") or ""
+        nginx_sha256 = getattr(args, "nginx_sha256", "") or ""
+        cells = [c for c in (getattr(args, "cells", "") or "").split(",") if c]
+        lane_revision = int(getattr(args, "lane_revision", 0) or 0)
+        if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", nginx_version):
+            raise SystemExit("release_manifest: the nginxorg profile needs --nginx-version X.Y.Z")
+        if not re.match(r"^[0-9a-f]{64}$", nginx_sha256):
+            raise SystemExit("release_manifest: the nginxorg profile needs --nginx-sha256 (64 hex digits)")
+        if not cells or len(set(cells)) != len(cells) or not all(c in SUITES or c in NGINXORG_RPM_CELLS for c in cells):
+            raise SystemExit("release_manifest: the nginxorg profile needs --cells, distinct deb suites or el9")
+        if not 0 <= lane_revision <= 99:
+            raise SystemExit("release_manifest: --lane-revision must be 0 to 99")
+        if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", args.pkg_version) or args.pkg_version != args.version:
+            raise SystemExit("release_manifest: the nginxorg profile takes a bare release version")
+        want_tag = "nginxorg-v%s-ngx%s%s" % (args.version, nginx_version,
+                                            "-r%d" % lane_revision if lane_revision else "")
+        if args.tag != want_tag:
+            raise SystemExit("release_manifest: the nginxorg tag must be %s (got %s)" % (want_tag, args.tag))
+        rules = required_nginxorg(args.pkg_version, nginx_version, cells, lane_revision)
+        problems = []
+        for a, _p, n in items:
+            if a != "asset-nginxorg-x64":
+                problems.append("a file outside the lane's artifact: %s/%s" % (a, n))
+            elif not any(re.search(rx, n) for _d, _a, rx in rules):
+                problems.append("unexpected file claimed by no rule: %s/%s" % (a, n))
+        for desc, artifact, rx in rules:
+            hits = [f for f in items if f[0] == artifact and re.search(rx, f[2])]
+            if len(hits) != 1:
+                problems.append("%s: %d files match /%s/" % (desc, len(hits), rx))
+        if problems:
+            for m in problems:
+                print("::error::release_manifest: the nginx.org set is wrong: " + m, file=sys.stderr)
+            raise SystemExit(1)
+    elif any(a == "asset-nginxorg-x64" for a, _p, _n in items) and args.profile != "none":
+        raise SystemExit("release_manifest: asset-nginxorg-x64 belongs to the nginxorg profile only")
+
     if args.profile in ("part-a", "part-b"):
         msi = args.profile == "part-b"
         missing = []
@@ -293,6 +373,7 @@ def build(args):
                 print("::error::release_manifest: incomplete or ambiguous asset set: " + m, file=sys.stderr)
             raise SystemExit(1)
 
+    run_attempt = getattr(args, "run_attempt", "") or os.environ.get("GITHUB_RUN_ATTEMPT", "") or "1"
     manifest = {
         "schema": 1,
         "tag": args.tag,
@@ -301,10 +382,15 @@ def build(args):
         "prerelease": prerelease,
         "source_sha": args.source_sha,
         "run_id": args.run_id,
+        "build_run_id": getattr(args, "build_run_id", "") or args.run_id,
+        "build_run_attempt": getattr(args, "build_run_attempt", "") or run_attempt,
         "repository": args.repository,
         "optimizer_tag": args.optimizer_tag,
         "files": files,
     }
+    if nginxorg:
+        manifest["nginx_version"] = nginx_version
+        manifest["nginx_sha256"] = nginx_sha256
     with open(os.path.join(out, "manifest.json"), "w") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
         fh.write("\n")
@@ -382,10 +468,11 @@ def self_test():
         with open(os.path.join(d, name), "wb") as fh:
             fh.write(body)
 
-    def ns(stage, out, profile="none", pre="false", pkg="1.19.0"):
+    def ns(stage, out, profile="none", pre="false", pkg="1.19.0", **extra):
         return argparse.Namespace(stage=stage, out=out, tag="module-v1.19.0", version="1.19.0",
                                   pkg_version=pkg, source_sha="a" * 40, run_id="1", repository="o/r",
-                                  optimizer_tag="optimizer-v1.19.0", prerelease=pre, profile=profile)
+                                  optimizer_tag="optimizer-v1.19.0", prerelease=pre, profile=profile,
+                                  run_attempt="3", **extra)
 
     try:
         # 1. mapping, collisions and the contract of the output directory
@@ -407,6 +494,10 @@ def self_test():
             fail = 1
         with open(os.path.join(out, "manifest.json")) as fh:
             man = json.load(fh)
+        if (man["run_id"], man.get("build_run_id"), man.get("build_run_attempt")) != ("1", "1", "3"):
+            print("FAIL: a run that builds its own files names itself as the builder: %r"
+                  % ((man["run_id"], man.get("build_run_id"), man.get("build_run_attempt")),))
+            fail = 1
         by = {f["asset"]: f for f in man["files"]}
         deb = by["nginx-module-pagespeed_1.19.0-r1.bookworm_amd64.deb"]
         if deb["name"] != "nginx-module-pagespeed_1.19.0-r1~bookworm_amd64.deb" or deb["distro"] != "bookworm" \
@@ -432,6 +523,16 @@ def self_test():
             print("FAIL: manifest.json is not in SHA256SUMS")
             fail = 1
         verify(out)
+
+        # an adopting run names the candidate as the builder and itself as the run
+        out_a = os.path.join(tmp, "o1a")
+        build(ns(st, out_a, build_run_id="77", build_run_attempt="2"))
+        with open(os.path.join(out_a, "manifest.json")) as fh:
+            man_a = json.load(fh)
+        if (man_a["run_id"], man_a["build_run_id"], man_a["build_run_attempt"]) != ("1", "77", "2"):
+            print("FAIL: an adopting run names the candidate as the builder: %r" % man_a)
+            fail = 1
+        verify(out_a)
 
         # 2. tamper detection
         with open(os.path.join(out, "mod-pagespeed-1.19.0-1.x86_64.rpm"), "ab") as fh:
@@ -473,6 +574,7 @@ def self_test():
             mk(st8, "asset-linux-" + art, "mod-pagespeed_%s-1_%s.deb" % (v, deb_arch))
             mk(st8, "asset-linux-" + art, "mod-pagespeed-%s-1.%s.rpm" % (v, rpm_arch))
             mk(st8, "asset-linux-" + art, "libmod_pagespeed-linux-%s.so" % tar_arch)
+            mk(st8, "asset-linux-" + art, "libmod_pagespeed-debug-linux-%s.tar.gz" % tar_arch)
             mk(st8, "asset-linux-" + art, "ngx_pagespeed-%s-linux-%s.tar.gz" % (v, tar_arch))
             for suite in SUITES:
                 mk(st8, "asset-nginx-" + art, "nginx-module-pagespeed_%s-r1~%s_%s.deb" % (v, suite, deb_arch))
@@ -564,8 +666,123 @@ def self_test():
         expect_exit("cpanel rpms on a pre-release", lambda: build(ns(st8, os.path.join(tmp, "o16"), profile="part-a", pre="true")))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    fail |= self_test_nginxorg()
     if fail == 0:
         print("release_manifest self-test: ok")
+    return fail
+
+
+def self_test_nginxorg():
+    """The nginxorg profile: 0 when every case behaves."""
+    fail = 0
+    tmp = tempfile.mkdtemp(prefix="relmanifest-ngx.")
+
+    def ns(stage, out, cells="trixie,noble", rev=0, ngx="1.30.7", sha="b" * 64, profile="nginxorg",
+           version="2.8.0", tag=None):
+        if tag is None:
+            tag = "nginxorg-v%s-ngx%s%s" % (version, ngx, "-r%d" % rev if rev else "")
+        return argparse.Namespace(stage=stage, out=out, tag=tag, version=version,
+                                  pkg_version=version, source_sha="a" * 40, run_id="1", repository="o/r",
+                                  optimizer_tag="optimizer-v2.8.0", prerelease="false", profile=profile,
+                                  nginx_version=ngx, nginx_sha256=sha, cells=cells, lane_revision=rev)
+
+    def mk(stage, artifact, name, body=b"x"):
+        d = os.path.join(stage, artifact)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "wb") as fh:
+            fh.write(body)
+
+    def refused(label, fn):
+        nonlocal fail
+        try:
+            fn()
+        except SystemExit as e:
+            if e.code not in (None, 0):
+                return
+        print("FAIL: nginxorg: %s: not refused" % label)
+        fail = 1
+
+    try:
+        t = "nginx-module-pagespeed-nginxorg_2.8.0-r0+ngx1.30.7~trixie_amd64.deb"
+        n = "nginx-module-pagespeed-nginxorg_2.8.0-r0+ngx1.30.7~noble_amd64.deb"
+        st = os.path.join(tmp, "ok")
+        mk(st, "asset-nginxorg-x64", t, b"t")
+        mk(st, "asset-nginxorg-x64", n, b"n")
+        out = os.path.join(tmp, "ok-out")
+        build(ns(st, out))
+        with open(os.path.join(out, "manifest.json")) as fh:
+            man = json.load(fh)
+        got = sorted((f["asset"], f["distro"], f["channel"], f["arch"], f["kind"], tuple(f["channel_also"]))
+                     for f in man["files"])
+        want = [(n.replace("~", "."), "noble", "apt", "x64", "deb", ()), (t.replace("~", "."), "trixie", "apt", "x64", "deb", ())]
+        if got != want or man["nginx_version"] != "1.30.7" or man["nginx_sha256"] != "b" * 64 \
+                or man["schema"] != 1 or man["version"] != "2.8.0" or man["pkg_version"] != "2.8.0":
+            print("FAIL: nginxorg: manifest %r" % man)
+            fail = 1
+        verify(out)
+        # a missing cell, an extra file, another artifact, another nginx, a revision mismatch
+        st = os.path.join(tmp, "missing"); mk(st, "asset-nginxorg-x64", t)
+        refused("missing cell", lambda: build(ns(st, os.path.join(tmp, "o1"))))
+        st = os.path.join(tmp, "extra"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-nginxorg-x64", "nginx-module-pagespeed-nginxorg_2.8.0-r0+ngx1.30.6~trixie_amd64.deb")
+        refused("extra package", lambda: build(ns(st, os.path.join(tmp, "o2"))))
+        st = os.path.join(tmp, "other"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-sbom", "x.spdx.json", b"{}")
+        refused("another artifact", lambda: build(ns(st, os.path.join(tmp, "o3"))))
+        st = os.path.join(tmp, "ngx"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        refused("another nginx", lambda: build(ns(st, os.path.join(tmp, "o4"), ngx="1.30.8")))
+        refused("revision the names lack", lambda: build(ns(st, os.path.join(tmp, "o5"), rev=1)))
+        refused("no sha256", lambda: build(ns(st, os.path.join(tmp, "o6"), sha="")))
+        refused("a cell without its package", lambda: build(ns(st, os.path.join(tmp, "o7"), cells="trixie,noble,el9")))
+        refused("unknown cell", lambda: build(ns(st, os.path.join(tmp, "o7c"), cells="trixie,noble,el10")))
+        refused("duplicate cell", lambda: build(ns(st, os.path.join(tmp, "o8"), cells="trixie,trixie")))
+        refused("a tag for another nginx", lambda: build(ns(st, os.path.join(tmp, "o8b"), tag="nginxorg-v2.8.0-ngx1.30.8")))
+        refused("pre-release version", lambda: build(ns(st, os.path.join(tmp, "o9"), version="2.8.0~rc.1")))
+        refused("lane artifact under part-a", lambda: build(ns(st, os.path.join(tmp, "o10"), profile="part-a")))
+        st = os.path.join(tmp, "rev")
+        mk(st, "asset-nginxorg-x64", t.replace("+ngx1.30.7~", "+ngx1.30.7.2~"))
+        mk(st, "asset-nginxorg-x64", n.replace("+ngx1.30.7~", "+ngx1.30.7.2~"))
+        build(ns(st, os.path.join(tmp, "o11"), rev=2))
+        refused("a tag without the revision", lambda: build(ns(st, os.path.join(tmp, "o11b"), rev=2, tag="nginxorg-v2.8.0-ngx1.30.7")))
+        refused("revision names without the revision", lambda: build(ns(st, os.path.join(tmp, "o12"))))
+        st = os.path.join(tmp, "arm"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n.replace("amd64", "arm64"))
+        refused("an arm64 package", lambda: build(ns(st, os.path.join(tmp, "o13"))))
+        # the el9 cell: an rpm in the same artifact
+        r = "nginx-module-pagespeed-nginxorg-2.8.0-0.ngx1.30.7.el9.x86_64.rpm"
+        c3 = "trixie,noble,el9"
+        st = os.path.join(tmp, "el9"); mk(st, "asset-nginxorg-x64", t, b"t"); mk(st, "asset-nginxorg-x64", n, b"n")
+        mk(st, "asset-nginxorg-x64", r, b"r")
+        out = os.path.join(tmp, "el9-out")
+        build(ns(st, out, cells=c3))
+        with open(os.path.join(out, "manifest.json")) as fh:
+            man = json.load(fh)
+        got = [(f["distro"], f["channel"], f["arch"], f["kind"]) for f in man["files"] if f["asset"] == r]
+        if got != [("el9", "rpm-el9", "x64", "rpm")]:
+            print("FAIL: nginxorg: el9 entry %r" % got)
+            fail = 1
+        refused("an rpm without its cell", lambda: build(ns(st, os.path.join(tmp, "o14"))))
+        st = os.path.join(tmp, "el9-missing"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        refused("el9 cell without its rpm", lambda: build(ns(st, os.path.join(tmp, "o15"), cells=c3)))
+        st = os.path.join(tmp, "el9-ngx"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-nginxorg-x64", r.replace("ngx1.30.7", "ngx1.30.6"))
+        refused("an rpm for another nginx", lambda: build(ns(st, os.path.join(tmp, "o16"), cells=c3)))
+        st = os.path.join(tmp, "el9-two"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-nginxorg-x64", r); mk(st, "asset-nginxorg-x64", r.replace("-0.ngx", "-1.ngx"))
+        refused("two el9 rpms", lambda: build(ns(st, os.path.join(tmp, "o17"), cells=c3)))
+        st = os.path.join(tmp, "el9-arm"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-nginxorg-x64", r.replace("x86_64", "aarch64"))
+        refused("an aarch64 rpm", lambda: build(ns(st, os.path.join(tmp, "o18"), cells=c3)))
+        st = os.path.join(tmp, "el9-stock"); mk(st, "asset-nginxorg-x64", t); mk(st, "asset-nginxorg-x64", n)
+        mk(st, "asset-nginxorg-x64", "nginx-module-pagespeed-2.8.0-0.ngx1.30.7.el9.x86_64.rpm")
+        refused("a stock-name rpm", lambda: build(ns(st, os.path.join(tmp, "o19"), cells=c3)))
+        st = os.path.join(tmp, "el9-rev")
+        mk(st, "asset-nginxorg-x64", t.replace("+ngx1.30.7~", "+ngx1.30.7.2~"))
+        mk(st, "asset-nginxorg-x64", n.replace("+ngx1.30.7~", "+ngx1.30.7.2~"))
+        mk(st, "asset-nginxorg-x64", r.replace("ngx1.30.7.el9", "ngx1.30.7.2.el9"))
+        build(ns(st, os.path.join(tmp, "o20"), cells=c3, rev=2))
+        refused("an el9 revision rpm without the revision", lambda: build(ns(st, os.path.join(tmp, "o21"), cells=c3)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return fail
 
 
@@ -582,10 +799,17 @@ def main(argv):
     b.add_argument("--pkg-version", required=True)
     b.add_argument("--source-sha", required=True)
     b.add_argument("--run-id", required=True)
+    b.add_argument("--run-attempt", default="")
+    b.add_argument("--build-run-id", default="")
+    b.add_argument("--build-run-attempt", default="")
     b.add_argument("--repository", default="")
     b.add_argument("--optimizer-tag", default="")
     b.add_argument("--prerelease", choices=("true", "false"), default="false")
-    b.add_argument("--profile", choices=("part-a", "part-b", "none"), default="part-b")
+    b.add_argument("--profile", choices=("part-a", "part-b", "nginxorg", "none"), default="part-b")
+    b.add_argument("--nginx-version", default="")
+    b.add_argument("--nginx-sha256", default="")
+    b.add_argument("--cells", default="")
+    b.add_argument("--lane-revision", type=int, default=0)
     v = sub.add_parser("verify")
     v.add_argument("dir")
     args = p.parse_args(argv[1:])

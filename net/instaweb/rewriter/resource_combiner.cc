@@ -44,6 +44,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/writer.h"
+#include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/url_escaper.h"
 #include "pagespeed/kernel/util/url_multipart_encoder.h"
@@ -194,6 +195,22 @@ bool ResourceCombiner::ResourceCombinable(Resource* /*resource*/,
   return true;
 }
 
+bool ResourceCombiner::HasCombinationContentType(const Resource* resource,
+                                                 GoogleString* failure_reason) {
+  const ContentType* combination_type = CombinationContentType();
+  const ContentType* input_type =
+      resource->response_headers()->DetermineContentType();
+  if (input_type == nullptr || input_type->type() != combination_type->type()) {
+    *failure_reason =
+        StrCat("origin content type ",
+               (input_type == nullptr ? "[missing or unrecognized]"
+                                      : input_type->mime_type()),
+               " is not ", combination_type->mime_type());
+    return false;
+  }
+  return true;
+}
+
 void ResourceCombiner::UpdateResolvedBase() {
   // If the addition of this URL changes the base path,
   // then we will have to recompute the multi-part encoding.
@@ -257,6 +274,15 @@ bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
     return false;
   }
   bool written = true;
+  // Check the inputs' content types here too.
+  for (const ResourcePtr& input : combine_resources) {
+    GoogleString failure_reason;
+    if (!HasCombinationContentType(input.get(), &failure_reason)) {
+      handler->Message(kInfo, "Cannot combine %s: %s",
+                       input->UrlForDebug().c_str(), failure_reason.c_str());
+      return false;
+    }
+  }
   // TODO(sligocki): Write directly to a temp file rather than doing the extra
   // string copy.
   GoogleString combined_contents;

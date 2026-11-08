@@ -95,12 +95,16 @@ const char RewriteOptions::kCssFlattenMaxBytes[] = "CssFlattenMaxBytes";
 const char RewriteOptions::kCssImageInlineMaxBytes[] = "CssImageInlineMaxBytes";
 const char RewriteOptions::kCssInlineMaxBytes[] = "CssInlineMaxBytes";
 const char RewriteOptions::kCssOutlineMinBytes[] = "CssOutlineMinBytes";
+const char RewriteOptions::kCssParseMaxBytes[] = "CssParseMaxBytes";
 const char RewriteOptions::kCssPreserveURLs[] = "CssPreserveURLs";
+const char RewriteOptions::kDebugOutputMaxBytes[] = "DebugOutputMaxBytes";
 const char RewriteOptions::kDefaultCacheHtml[] = "DefaultCacheHtml";
 const char RewriteOptions::kDisableRewriteOnNoTransform[] =
     "DisableRewriteOnNoTransform";
 const char RewriteOptions::kDisableBackgroundFetchesForBots[] =
     "DisableBackgroundFetchesForBots";
+const char RewriteOptions::kDocumentImageInlineMaxBytes[] =
+    "DocumentImageInlineMaxBytes";
 const char RewriteOptions::kDomainRewriteCookies[] = "DomainRewriteCookies";
 const char RewriteOptions::kDomainRewriteHyperlinks[] =
     "DomainRewriteHyperlinks";
@@ -284,6 +288,8 @@ const char RewriteOptions::kRewriteUncacheableResources[] =
     "RewriteUncacheableResources";
 const char RewriteOptions::kRulePackFile[] = "RulePackFile";
 const char RewriteOptions::kRulePackMode[] = "RulePackMode";
+const char RewriteOptions::kDaemonHtmlCache[] = "DaemonHtmlCache";
+const char RewriteOptions::kDaemonHtmlMaxBytes[] = "DaemonHtmlMaxBytes";
 const char RewriteOptions::kRulePackRequireSigned[] = "RulePackRequireSigned";
 const char RewriteOptions::kRulePackTrustKey[] = "RulePackTrustKey";
 const char RewriteOptions::kRunningExperiment[] = "RunExperiment";
@@ -304,6 +310,7 @@ const char RewriteOptions::kUseExperimentalJsMinifier[] =
 const char RewriteOptions::kUseFallbackPropertyCacheValues[] =
     "UseFallbackPropertyCacheValues";
 const char RewriteOptions::kUseImageScanlineApi[] = "UseImageScanlineApi";
+const char RewriteOptions::kDetectHydratedPages[] = "DetectHydratedPages";
 const char RewriteOptions::kExposeVersionInHeaders[] = "ExposeVersionInHeaders";
 const char RewriteOptions::kXModPagespeedHeaderValue[] = "XHeaderValue";
 const char RewriteOptions::kXPsaBlockingRewrite[] = "BlockingRewriteKey";
@@ -435,11 +442,16 @@ const int64 RewriteOptions::kDefaultCssInlineMaxBytes = 2048;
 const int64 RewriteOptions::kDefaultCssFlattenMaxBytes = 1024000;
 const int64 RewriteOptions::kDefaultCssImageInlineMaxBytes = 0;
 const int64 RewriteOptions::kDefaultCssOutlineMinBytes = 3000;
+// Parsing a stylesheet costs many times its size in memory, so the CSS
+// rewriter leaves larger ones alone.
+const int64 RewriteOptions::kDefaultCssParseMaxBytes = 2 << 20;
 // Font Service CSS runs ~6-15K for one or two families and up to ~40K for
 // heavy multi-subset embeds; 48K admits real responses with headroom.
 const int64 RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes =
     static_cast<const int64>(48 * 1024);
 const int64 RewriteOptions::kDefaultImageInlineMaxBytes = 3072;
+const int64 RewriteOptions::kDefaultDocumentImageInlineMaxBytes = 4 << 20;
+const int64 RewriteOptions::kDefaultDebugOutputMaxBytes = 1 << 20;
 const int64 RewriteOptions::kDefaultJsInlineMaxBytes = 2048;
 const int64 RewriteOptions::kDefaultJsOutlineMinBytes = 3000;
 const int64 RewriteOptions::kDefaultProgressiveJpegMinBytes = 10240;
@@ -1364,6 +1376,18 @@ void RewriteOptions::AddProperties() {
   // query param, and it is excluded from the signature below, so neither a
   // config file that still carries it nor a request that smuggles it in can
   // mint a fresh metadata-cache partition.
+  // Server-wide only. The decision it allows is made per response and changes
+  // only which filters run on that HTML, never a resource or its cache entry:
+  // excluded from the signature.
+  AddBaseProperty(
+      true, &RewriteOptions::detect_hydrated_pages_, "dhyd",
+      kDetectHydratedPages, kProcessScopeStrict,
+      "Keep stylesheet and script URLs and inline styles unchanged on pages a "
+      "client-side framework will hydrate. Server-wide only.",
+      true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
   // Server-wide only. It feeds a response header, never cached content or
   // URLs, so enabling it must not move any host to a new metadata-cache
   // partition: excluded from the signature.
@@ -1420,6 +1444,25 @@ void RewriteOptions::AddProperties() {
                   "Mode of the rule_packs filter: report (default) records "
                   "what the rules would do; enforce lets enforcing rules "
                   "change the page.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  // Neither of these changes what the optimizer produces, so they stay out of
+  // the configuration signature: turning the report on must not re-key any
+  // cached work.
+  AddBaseProperty(kDaemonHtmlCacheOff, &RewriteOptions::daemon_html_cache_,
+                  "dhc", kDaemonHtmlCache, kServerScope,
+                  "HTML on the optimizer daemon path: off (default), or "
+                  "report-only, which reports whether each HTML response "
+                  "could be stored and changes nothing else.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(int64{5} * 1024 * 1024,
+                  &RewriteOptions::daemon_html_max_bytes_, "dhmb",
+                  kDaemonHtmlMaxBytes, kServerScope,
+                  "Largest HTML body DaemonHtmlCache considers storable, in "
+                  "bytes. Values above 16 MiB count as 16 MiB.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1985,7 +2028,9 @@ void RewriteOptions::ClearFilters() {
   modified_ = true;
   enabled_filters_.clear();
   disabled_filters_.clear();
-  forbidden_filters_.clear();
+  // Forbidden filters are left alone: a forbid is the operator's limit, not a
+  // filter choice, so resetting the filter choices (as an experiment arm
+  // does) must not lift it.
 
   // Re-enable HtmlWriterFilter by default.
   EnableFilter(kHtmlWriterFilter);
@@ -2630,7 +2675,7 @@ RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName2(
     }
   } else if (StringCaseEqual(name, kLoadFromFileRule) ||
              StringCaseEqual(name, kLoadFromFileRuleMatch)) {
-    bool is_regexp = (name == kLoadFromFileRuleMatch);
+    bool is_regexp = StringCaseEqual(name, kLoadFromFileRuleMatch);
     bool allow;
     if (StringCaseEqual(arg1, "Allow")) {
       allow = true;
@@ -2821,6 +2866,18 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kLazyloadImagesModeJs;
   } else {
     // value_string is not one of "auto"/"native"/"js". Return a parse error.
+    return false;
+  }
+  return true;
+}
+
+bool RewriteOptions::ParseFromString(StringPiece value_string,
+                                     DaemonHtmlCacheMode* value) {
+  if (StringCaseEqual(value_string, "off")) {
+    *value = kDaemonHtmlCacheOff;
+  } else if (StringCaseEqual(value_string, "report-only")) {
+    *value = kDaemonHtmlCacheReportOnly;
+  } else {
     return false;
   }
   return true;
@@ -3070,6 +3127,36 @@ int64 RewriteOptions::MaxImageInlineMaxBytes() const {
   return std::max(ImageInlineMaxBytes(), CssImageInlineMaxBytes());
 }
 
+void RewriteOptions::LimitSizeThresholdsTo(const RewriteOptions& ceiling) {
+  // A request value is replaced by the configured one when it is larger, and
+  // also when it is negative: the inline filters store their threshold in a
+  // size_t, where a negative value becomes the largest size there is. For
+  // CssFlattenMaxBytes any value <= 0 means unlimited, so a request may not
+  // send zero either while the configuration sets a positive bound.
+  auto limit = [](Option<int64>* mine, const Option<int64>& cap,
+                  bool zero_is_unlimited) {
+    if (!mine->was_set()) {
+      return;
+    }
+    const int64 value = mine->value();
+    if (value > cap.value() || value < 0 ||
+        (zero_is_unlimited && value == 0 && cap.value() > 0)) {
+      mine->set(cap.value());
+    }
+  };
+  limit(&image_inline_max_bytes_, ceiling.image_inline_max_bytes_, false);
+  limit(&css_image_inline_max_bytes_, ceiling.css_image_inline_max_bytes_,
+        false);
+  limit(&css_inline_max_bytes_, ceiling.css_inline_max_bytes_, false);
+  limit(&js_inline_max_bytes_, ceiling.js_inline_max_bytes_, false);
+  limit(&google_font_css_inline_max_bytes_,
+        ceiling.google_font_css_inline_max_bytes_, false);
+  limit(&css_flatten_max_bytes_, ceiling.css_flatten_max_bytes_, true);
+  // A zero document budget inlines no image, so it only lowers the bound.
+  limit(&document_image_inline_max_bytes_,
+        ceiling.document_image_inline_max_bytes_, false);
+}
+
 void RewriteOptions::GetEnabledFiltersRequiringScriptExecution(
     RewriteOptions::FilterVector* filters) const {
   for (RewriteOptions::Filter filter : kRequiresScriptExecutionFilterSet) {
@@ -3135,6 +3222,20 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
 #endif
 
   bool modify = src.modified_;
+
+  // Options that already forbid all disabled filters accept no merge that
+  // turns on a filter not on before it, whether through the enabled set, a
+  // higher rewrite level or a dropped preserve option: remember what is on.
+  const bool forbid_all_latched = forbid_all_disabled_filters();
+  FilterSet enabled_before_merge;
+  if (forbid_all_latched) {
+    for (int i = kFirstFilter; i != kEndOfFilters; ++i) {
+      Filter filter = static_cast<Filter>(i);
+      if (Enabled(filter)) {
+        enabled_before_merge.Insert(filter);
+      }
+    }
+  }
 
   DCHECK_EQ(all_options_.size(), src.all_options_.size());
   DCHECK_EQ(initialized_options_, src.initialized_options_);
@@ -3293,6 +3394,19 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   ApplyMergeOverride(override_images, kExtendCacheImages,
                      &image_preserve_urls_);
   ApplyMergeOverride(override_scripts, kExtendCacheScripts, &js_preserve_urls_);
+
+  // Refuse every filter this merge would have turned on. Recording it as
+  // disabled keeps it off, and forbidden, through later merges too.
+  if (forbid_all_latched) {
+    for (int i = kFirstFilter; i != kEndOfFilters; ++i) {
+      Filter filter = static_cast<Filter>(i);
+      if (!enabled_before_merge.IsSet(filter) && Enabled(filter)) {
+        enabled_filters_.Erase(filter);
+        disabled_filters_.Insert(filter);
+        modify = true;
+      }
+    }
+  }
 
   if (modify) {
     Modify();
@@ -3601,6 +3715,16 @@ GoogleString RewriteOptions::ToString(LazyloadImagesMode mode) {
       return "native";
     case kLazyloadImagesModeJs:
       return "js";
+  }
+  return "?";
+}
+
+GoogleString RewriteOptions::ToString(DaemonHtmlCacheMode mode) {
+  switch (mode) {
+    case kDaemonHtmlCacheOff:
+      return "off";
+    case kDaemonHtmlCacheReportOnly:
+      return "report-only";
   }
   return "?";
 }
@@ -4236,12 +4360,19 @@ bool RewriteOptions::SetupExperimentRewriters() {
   // the level. Note that we cannot set the level if 'default' is on because
   // the default level is PassThrough which breaks the idea of 'default'.
   if (!spec->use_default()) {
+    // ForbidAllDisabledFilters forbids the filters disabled at this point;
+    // make those forbids explicit so that clearing the filter choices below
+    // cannot lift them.
+    if (forbid_all_disabled_filters()) {
+      ForbidFilters(disabled_filters_);
+    }
     ClearFilters();
     SetRewriteLevel(spec->rewrite_level());
   }
   EnableFilters(spec->enabled_filters());
   DisableFilters(spec->disabled_filters());
-  // spec doesn't specify forbidden filters so no need to call ForbidFilters().
+  // ClearFilters() keeps the forbidden filters, so the arm's level and
+  // filters cannot enable a filter the configuration forbade.
   // We need these for the experiment to work properly.
   SetRequiredExperimentFilters();
   // Options were already checked during config parsing.
@@ -4750,6 +4881,11 @@ bool RewriteOptions::UpdateCachePurgeSet(
     ret = true;
   }
   return ret;
+}
+
+CopyOnWrite<PurgeSet> RewriteOptions::purge_set() const {
+  ThreadSystem::ScopedReader lock(cache_purge_mutex_.get());
+  return purge_set_;
 }
 
 GoogleString RewriteOptions::PurgeSetString() const {

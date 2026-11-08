@@ -62,6 +62,13 @@ void UrlLeftTrimFilter::StartElementImpl(HtmlElement* element) {
     resource_tag_scanner::ScanElement(element, driver()->options(),
                                       &attributes);
     for (auto& attribute : attributes) {
+      // A hydrating framework looks stylesheets and async scripts up by the URL
+      // it rendered.
+      if ((attribute.category == semantic_type::kStylesheet ||
+           attribute.category == semantic_type::kScript) &&
+          driver()->is_hydrated_document()) {
+        continue;
+      }
       TrimAttribute(attribute.url);
     }
   }

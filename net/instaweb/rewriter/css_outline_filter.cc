@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/css_outline_filter.h"
 
 #include "base/logging.h"
+#include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -128,6 +129,13 @@ bool CssOutlineFilter::WriteResource(const StringPiece& content,
 void CssOutlineFilter::OutlineStyle(HtmlElement* style_element,
                                     const GoogleString& content_str) {
   StringPiece content(content_str);
+  // Leave the style inline wherever a policy governs styles.
+  if (driver()->content_security_policy().HasDirectiveOrDefaultSrc(
+          CspDirective::kStyleSrc)) {
+    driver()->InsertDebugComment(
+        "Avoiding outlining inline style with CSP present", style_element);
+    return;
+  }
   if (driver()->IsRewritable(style_element)) {
     // Create style file from content.
     const char* type = style_element->AttributeValue(HtmlName::kType);

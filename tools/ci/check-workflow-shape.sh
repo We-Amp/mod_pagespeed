@@ -33,8 +33,14 @@
 #       docs/ci/pipelines.md (the FLEET_ENABLED kill switch in its general,
 #       fleet-only or dispatch-only form, or the fleet-iis form that adds
 #       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
-#       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
-#       prefixed by `!cancelled() && needs.<job>.result == 'success' && `.
+#       narrowed by `&& needs.changes.outputs.<name> == 'true'` (and the
+#       job iis-sys-tests-retry of pipeline-pr.yml, alone, by exactly
+#       `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`), or
+#       prefixed by `!cancelled() && needs.<job>.result == 'success' && `
+#       (in the module release lane the prefix may also hold the term
+#       `needs.adopt.outputs.adopted != 'true' && `, which an adopting run
+#       uses to skip the job; without `!cancelled()` that term alone may
+#       precede the guard).
 #       The fleet-only and fleet-iis guards also have a switch form that
 #       tests `!= 'false'` (unset means on). A job routed by the switch
 #       expression carries no guard: it always runs, hosted or on the fleet;
@@ -61,6 +67,32 @@
 #       lane; the fleet-hyperv gates get none). `secrets: inherit`, `secrets[` and
 #       `toJSON(secrets`, and a secret in an expression outside the jobs (a
 #       workflow-level env: block), are refused;
+#   (release-env) in pipeline-release-module.yml: each job with `environment: release`
+#       carries an if: that contains
+#       needs.version.outputs.dry_run == 'false',
+#       needs.version.outputs.candidate != 'true' and
+#       needs.version.outputs.rehearsal != 'true', so a dry run, a candidate
+#       run and a rehearsal (which run on master) never reach the
+#       environment even if its tag policy were loosened;
+#   (adopt-shape) in pipeline-release-module.yml, when it has an `adopt` job:
+#       the jobs whose if: contains needs.adopt.outputs.adopted != 'true' are
+#       exactly the adoptable jobs of `release_adopt.py schema --print` (a new
+#       build job that forgets the condition would rebuild and replace adopted
+#       bytes; a new adoptable job missing from the schema would fail
+#       `validate`); every artifact a job WITHOUT that condition downloads
+#       (download-artifact name or pattern, or a `*_artifact` input of a
+#       called workflow) is one the adopting run holds, that is an artifact
+#       of the re-uploaded set or one that a job without the condition
+#       uploads; and the artifacts the `adopt` job uploads are the
+#       re-uploaded set plus adopt-binding;
+#   (sign-secrets) in pipeline-release-module.yml, when it has an `adopt` job:
+#       in the jobs `windows-sign` and `msi-sign`, every `secrets.<NAME>`
+#       (secrets.GITHUB_TOKEN excepted) sits inside the step named exactly
+#       `Sign`, and each job has exactly one such step. The adoption
+#       pre-checks (the binding hash and the payload hashes) run in earlier
+#       steps of these jobs and must run before any secret is readable; a
+#       secret at job level (env:, with:) or in an earlier step would be
+#       readable by them;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -235,6 +267,176 @@ secret_env_records() {
   ' "$1"
 }
 
+# Jobs with `environment: release` whose if: lacks a required condition, one
+# per line: "<job> <tab> <line>". The if: is the job's 4-space `if:` key on one
+# line, like the other parsers; a job with none is reported too.
+release_env_if_records() {
+  awk -v tab="${TAB}" '
+    function flush() {
+      if (job != "" && env_line > 0 && (!has_dry || !has_cand || !has_reh)) printf "%s%s%d\n", job, tab, env_line
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; has_dry=0; has_cand=0; has_reh=0; next }
+    injobs && /^    environment:[[:space:]]*["\047]?release["\047]?[[:space:]]*$/ { env_line=NR }
+    injobs && /^    if:/ {
+      if (index($0, "needs.version.outputs.dry_run == \047false\047")) has_dry=1
+      if (index($0, "needs.version.outputs.candidate != \047true\047")) has_cand=1
+      if (index($0, "needs.version.outputs.rehearsal != \047true\047")) has_reh=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the adopt-shape rule, one per line, tab separated: "J <job> <gated>"
+# for each job (gated is 1 when its if: contains the adoption condition), "D
+# <job> <name or pattern>" for each artifact a job downloads and "U <job>
+# <name>" for each artifact it uploads. Line-oriented like the other parsers:
+# a job at two spaces, its if: at four, a step at six, a step's with: keys at
+# ten, a called workflow'"'"'s inputs at six. An artifact name with an expression
+# in it is given with the expression replaced by "*".
+adopt_records() {
+  awk -v tab="${TAB}" '
+    function val(v) {
+      sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      while (match(v, /\$\{\{[^}]*\}\}/)) v = substr(v, 1, RSTART - 1) "*" substr(v, RSTART + RLENGTH)
+      return v
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { injobs=0 }
+    injobs && /^  [^[:space:]]/ { job=$1; sub(/:$/, "", job); gated[job]=0; order[++n]=job; step=""; next }
+    !injobs { next }
+    /^    if:/ { if (index($0, "needs.adopt.outputs.adopted != \047true\047")) gated[job]=1; next }
+    /^      - / { step="" }
+    /uses:[[:space:]]*actions\/download-artifact@/ { step="D" }
+    /uses:[[:space:]]*actions\/upload-artifact@/ { step="U" }
+    /^          (name|pattern):/ && step != "" { print step tab job tab val($0); next }
+    /^      [a-z_]+_artifact:/ { print "D" tab job tab val($0) }
+    END { for (i = 1; i <= n; i++) print "J" tab order[i] tab gated[order[i]] }
+  ' "$1"
+}
+
+# Problems with the adoption shape of a workflow file, one per line.
+adopt_shape_problems() { # workflow file
+  local wf="$1" schema recs kind a b gated_jobs adoptable reup j d u pat hit covered r
+  if [ ! -f tools/ci/release_adopt.py ]; then
+    echo "${wf} has an adopt job but tools/ci/release_adopt.py is missing"
+    return 0
+  fi
+  if ! schema="$(python3 -I tools/ci/release_adopt.py schema --print 2>&1)"; then
+    echo "release_adopt.py schema --print failed: $(printf '%s' "${schema}" | tr '\n' ' ')"
+    return 0
+  fi
+  adoptable="$(printf '%s' "${schema}" | python3 -I -c 'import json,sys; print("\n".join(json.load(sys.stdin)["adoptable"]))')"
+  reup="$(printf '%s' "${schema}" | python3 -I -c 'import json,sys; print("\n".join(json.load(sys.stdin)["reuploaded"]))')"
+  recs="$(adopt_records "${wf}")"
+  gated_jobs="$(printf '%s\n' "${recs}" | awk -F"${TAB}" '$1=="J" && $3=="1" {print $2}')"
+  # (a) the gated set is the adoptable group.
+  for j in ${gated_jobs}; do
+    printf '%s\n' "${adoptable}" | grep -qxF -- "${j}" || echo "job '${j}' carries the adoption condition but is not in the adoptable group of release_adopt.py"
+  done
+  for j in ${adoptable}; do
+    printf '%s\n' "${gated_jobs}" | grep -qxF -- "${j}" || echo "job '${j}' is adoptable but its if: lacks needs.adopt.outputs.adopted != 'true'"
+  done
+  # (b) what a job without the condition reads exists in an adopting run.
+  set -f
+  while IFS="${TAB}" read -r kind a b; do
+    [ "${kind}" = D ] || continue
+    printf '%s\n' "${gated_jobs}" | grep -qxF -- "${a}" && continue
+    hit=0
+    case "${b}" in
+      *"*"*)
+        # a pattern: no artifact that only an adoptable job uploads may match it, unless re-uploaded
+        while IFS="${TAB}" read -r u d pat; do
+          [ "${u}" = U ] || continue
+          printf '%s\n' "${gated_jobs}" | grep -qxF -- "${d}" || continue
+          # An upload name with an expression is covered when a re-uploaded
+          # artifact fits it (the shape cannot list its values).
+          covered=0
+          for r in ${reup}; do
+            # shellcheck disable=SC2254  # an upload name with an expression is a glob
+            case "${r}" in ${pat}) covered=1 ;; esac
+          done
+          [ "${covered}" = 0 ] || continue
+          # shellcheck disable=SC2254  # the download pattern is a glob on purpose
+          case "${pat//\*/x}" in ${b}) echo "job '${a}' downloads '${b}', which matches '${pat}' that only the adoptable job '${d}' uploads and the adopting run does not re-upload"; hit=1 ;; esac
+        done <<EOF
+$(printf '%s\n' "${recs}")
+EOF
+        ;;
+      *)
+        printf '%s\n' "${reup}" | grep -qxF -- "${b}" && hit=1
+        if [ "${hit}" = 0 ]; then
+          while IFS="${TAB}" read -r u d pat; do
+            [ "${u}" = U ] || continue
+            printf '%s\n' "${gated_jobs}" | grep -qxF -- "${d}" && continue
+            # shellcheck disable=SC2254  # an upload name with an expression is a glob
+            case "${b}" in ${pat}) hit=1 ;; esac
+          done <<EOF
+$(printf '%s\n' "${recs}")
+EOF
+        fi
+        [ "${hit}" = 1 ] || echo "job '${a}' downloads '${b}', which an adopting run holds neither as a re-uploaded artifact nor from a job it runs"
+        ;;
+    esac
+  done <<EOF
+$(printf '%s\n' "${recs}")
+EOF
+  set +f
+  # (c) the adopt job uploads the re-uploaded set and the binding, nothing else.
+  local ups want
+  ups="$(printf '%s\n' "${recs}" | awk -F"${TAB}" '$1=="U" && $2=="adopt" {print $3}' | LC_ALL=C sort)"
+  want="$(printf '%s\nadopt-binding\n' "${reup}" | LC_ALL=C sort)"
+  [ "${ups}" = "${want}" ] || echo "the adopt job uploads $(printf '%s' "${ups}" | tr '\n' ' '), expected the re-uploaded artifacts of release_adopt.py and adopt-binding"
+}
+
+# Problems with where the signing jobs read secrets, one per line. See the
+# (sign-secrets) rule above: the adoption pre-checks run in earlier steps of
+# windows-sign and msi-sign and must run before any secret is readable, so a
+# secret may appear only inside the one step named exactly `Sign`.
+sign_secret_problems() { # workflow file
+  awk '
+    function flush() {
+      if (job == "") return
+      if (nsign != 1) printf "job \047%s\047 has %d steps named Sign, expected exactly one\n", job, nsign
+      seen[job]=1
+    }
+    function stepname(l, re) { sub(re, "", l); sub(/[[:space:]]+$/, "", l); gsub(/^["\047]|["\047]$/, "", l); return l }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ {
+      flush(); job=$1; sub(/:$/, "", job)
+      if (job != "windows-sign" && job != "msi-sign") job=""
+      nsign=0; insteps=0; step=""; next
+    }
+    job == "" { next }
+    /^    [A-Za-z_-]+:/ { insteps = ($0 ~ /^    steps:/); step="" }
+    insteps && /^      - / {
+      step="@unnamed"
+      if ($0 ~ /^      - name:/) { step=stepname($0, "^      - name:[[:space:]]*"); if (step=="Sign") nsign++ }
+    }
+    insteps && /^        name:/ && step == "@unnamed" { step=stepname($0, "^        name:[[:space:]]*"); if (step=="Sign") nsign++ }
+    {
+      line=$0
+      while (match(line, /secrets\.[A-Za-z_][A-Za-z0-9_]*/)) {
+        name=substr(line, RSTART + 8, RLENGTH - 8)
+        if (name != "GITHUB_TOKEN") {
+          if (!insteps) printf "line %d: job \047%s\047 reads secrets.%s outside its steps\n", NR, job, name
+          else if (step != "Sign") printf "line %d: job \047%s\047 reads secrets.%s outside the step named Sign\n", NR, job, name
+        }
+        line=substr(line, RSTART + RLENGTH)
+      }
+    }
+    END { flush()
+      if (!("windows-sign" in seen)) print "job \047windows-sign\047 is missing"
+      if (!("msi-sign" in seen)) print "job \047msi-sign\047 is missing"
+    }
+  ' "$1"
+}
+
 # Callees of a call job that may be passed secrets. Each is a reusable workflow
 # of this repository whose every job that reads a secret runs on a hosted label
 # (rule g checks that file too). The two fleet-hyperv gates get none.
@@ -332,6 +534,7 @@ is_switch_if() {
 is_fleet_guard() {
   local v="$1" prefix="\${{ (${FLEET_GUARD_BODY}) && needs.changes.outputs." name
   [ "${v}" = "${FLEET_GUARD}" ] && return 0
+  [ "${v}" = "\${{ needs.adopt.outputs.adopted != 'true' && (${FLEET_GUARD_BODY}) }}" ] && return 0
   case "${v}" in
     "${prefix}"*" == 'true' }}")
       name="$(printf '%s' "${v#"${prefix}"}" | sed "s/ == 'true' }}\$//")"
@@ -348,16 +551,18 @@ is_fleet_guard() {
   case "${v}" in
     "${pre}"*"${post}")
       mid="${v#"${pre}"}"; mid="${mid%"${post}"}"
-      printf '%s' "${mid}" | grep -qE "^(needs\.[a-z0-9-]+\.result == 'success' && )+\$" && return 0
+      printf '%s' "${mid}" | grep -qE "^((needs\.[a-z0-9-]+\.result == 'success'|needs\.adopt\.outputs\.adopted != 'true') && )+\$" && return 0
       ;;
   esac
   return 1
 }
 
 # A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
-# `&& needs.changes.outputs.<name> == 'true'`.
-is_iis_narrowed() {
-  local v="$1" g name guards
+# `&& needs.changes.outputs.<name> == 'true'`; in pipeline-pr.yml the job
+# iis-sys-tests-retry alone may instead be narrowed by exactly
+# `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`.
+is_iis_narrowed() { # <if value> <job id>
+  local v="$1" job_name="${2:-}" g name guards
   if [ "${PR_WF}" = 1 ]; then guards=( "${FLEET_IIS_QUEUE_GUARD}" ); else guards=( "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}" ); fi
   for g in "${guards[@]}"; do
     g="${g#\$\{\{ }"; g="${g% \}\}}"
@@ -365,6 +570,10 @@ is_iis_narrowed() {
       "\${{ (${g}) && needs.changes.outputs."*" == 'true' }}")
         name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
         printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+        ;;
+      "\${{ (${g}) && needs.iis-sys-tests.outputs.failure_class == 'infra' }}")
+        # The one retry job, narrowed by the class of the attempt it retries.
+        [ "${PR_WF}" = 1 ] && [ "${job_name}" = "iis-sys-tests-retry" ] && return 0
         ;;
     esac
   done
@@ -496,10 +705,10 @@ EOT
         if is_fleet_iis_route "${val}"; then
           route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
           if [ "${PR_WF}" = 1 ]; then
-            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
               err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis queue guard (FLEET_IIS_ENABLED and the fleet route) verbatim as its if: (rule d)"
             fi
-          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif [ "${PR_WF}" = 1 ]; then
@@ -557,6 +766,30 @@ EOF
   done <<EOF
 $(secret_env_records "${wf}")
 EOF
+  # (release-env) only the module lane has a candidate mode; the nginx.org
+  # lane's release jobs have their own guards.
+  if [ "${base}" = "pipeline-release-module.yml" ]; then
+    while IFS=$'\t' read -r sjob sline; do
+      [ -n "${sjob}" ] || continue
+      err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks needs.version.outputs.dry_run == 'false', needs.version.outputs.candidate != 'true' or needs.version.outputs.rehearsal != 'true' (rule release-env)"
+    done <<EOF
+$(release_env_if_records "${wf}")
+EOF
+  fi
+  if [ "${base}" = "pipeline-release-module.yml" ] && grep -q '^  adopt:[[:space:]]*$' "${wf}"; then
+    while IFS= read -r aprob; do
+      [ -n "${aprob}" ] || continue
+      err "${wf}: ${aprob} (adopt-shape)"
+    done <<EOF
+$(adopt_shape_problems "${wf}")
+EOF
+    while IFS= read -r sprob; do
+      [ -n "${sprob}" ] || continue
+      err "${wf}: ${sprob} (sign-secrets)"
+    done <<EOF
+$(sign_secret_problems "${wf}")
+EOF
+  fi
   while IFS=$'\t' read -r sjob sline; do
     [ -n "${sjob}" ] || continue
     err "${wf}:${sline}: 'secrets: inherit' on '${sjob}': pass secrets one by one (rule g)"
@@ -791,18 +1024,22 @@ done
 # The fleet scope of the PR tier (docs/ci/pipelines.md, "CI_SCOPE") decides
 # whether `vendor`, and with it every fleet job, runs. Its decision script must
 # be read from the default branch, never from the tree under test, and
-# merge_group and workflow_dispatch must never reach it. In pipeline-pr.yml (and
-# any workflow that names the script):
+# workflow_dispatch must never reach it. The docs lane classifier
+# (tools/ci/docs_only.sh) is read by that script, from the default branch
+# too, so no workflow names it. In pipeline-pr.yml (and any workflow that
+# names either script):
 #   - the `changes` job holds exactly one step named FS_STEP, in exactly the
 #     spec form of fs_expected (comment and blank lines aside): no other key,
-#     env key or command, and the inline merge_group|workflow_dispatch branch;
+#     env key or command, and the inline workflow_dispatch branch;
 #   - the step comes right after the merge-queue guard step (so after the
 #     three pinned steps and before the path-filter diff step);
 #   - the `changes` job publishes `fleet` and `heavy` from that step;
 #   - outside that step, no non-comment line names `pr_tier_scope.sh` (the
-#     test script excepted).
+#     test script excepted), and no non-comment line anywhere names
+#     `docs_only.sh` (its test script excepted).
 FS_STEP="Decide the fleet scope"
 FS_PAT='(^|[^_A-Za-z0-9])pr_tier_scope\.sh'
+DO_PAT='docs_only\.sh'
 fs_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
@@ -811,16 +1048,18 @@ fs_expected() {
     '        env:' \
     '          GH_TOKEN: ${{ github.token }}' \
     '          CI_SCOPE: ${{ vars.CI_SCOPE }}' \
+    '          DOCS_LANE: ${{ vars.DOCS_LANE }}' \
     '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
     '          SHA: ${{ github.sha }}' \
     '          BEFORE_SHA: ${{ github.event.before }}' \
+    '          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}' \
     "          FORK_OR_BOT: \${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}" \
     "          PR_FULL: \${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}" \
     '        run: |' \
     '          set -euo pipefail' \
     '          out="${RUNNER_TEMP}/fleet-scope.txt"' \
     '          case "${GITHUB_EVENT_NAME}" in' \
-    "            merge_group|workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
+    "            workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
     '            *)' \
     '              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&' \
     '                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&' \
@@ -837,6 +1076,11 @@ fs_err() { err "${wf}: $1 (fleet-scope)"; }
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
+  # The docs lane classifier is read by pr_tier_scope.sh alone; any workflow
+  # that names it (its test script aside) could run the tree's copy.
+  if sed 's/test_docs_only\.sh//g' "${wf}" | grep -vE '^[[:space:]]*#' | grep -qE "${DO_PAT}"; then
+    err "${wf}: docs_only.sh is named in a workflow; only pr_tier_scope.sh reads it, from the default branch (docs-lane)"
+  fi
   fs_mentions="$(grep -E "${FS_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   qg_mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${fs_mentions}" = "0" ] && [ "${qg_mentions}" = "0" ]; then
@@ -849,7 +1093,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   else
     sblk="$(printf '%s\n' "${job}" | awk -v n="      - name: ${FS_STEP}" '/^      - / { instep = ($0 == n) } instep { print }' | grep -vE '^[[:space:]]*(#|$)' || true)"
     if [ "${sblk}" != "$(fs_expected)" ]; then
-      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; merge_group and workflow_dispatch decided inline)"
+      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; workflow_dispatch decided inline)"
     fi
     # Right after the merge-queue guard step, when the job has one (its own
     # rule reports a missing guard step).
@@ -926,7 +1170,7 @@ lp_expected() {
     '    name: Commit the regenerated lockfile' \
     '    needs: lock-check' \
     "${LOCK_PUSH_IF}" \
-    '    runs-on: ubuntu-latest' \
+    '    runs-on: ubuntu-24.04' \
     '    timeout-minutes: 10' \
     '    permissions:' \
     '      contents: write' \
@@ -1064,6 +1308,9 @@ done
 # workflow_dispatch events and exact refs/heads refs, refs/tags/* and refs/pull/*/merge.
 # pipeline-full.yml also allows pull_request (the caller runs it for the
 # ci:full label) and schedule (the nightly calls it), and no other event.
+# The module release lane and the gates it calls also allow schedule (the
+# weekly rehearsal calls the lane); the lane's ref guard refuses a schedule
+# that is not a rehearsal (tools/ci/ref_guard.sh).
 #   - "Reaches" means a path of needs edges to event-guard along which no job
 #     can run after a failed guard. Job keys (if, needs, runs-on,
 #     continue-on-error, uses) match quoted or with space before the colon.
@@ -1096,7 +1343,7 @@ eg_allowed_for() { # workflow file base name
     pipeline-full.yml) printf '%s' "push workflow_dispatch pull_request schedule" ;;
     pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
     pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
-    gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch" ;;
+    gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch schedule" ;;
     *) printf '%s' "" ;;
   esac
 }
@@ -1115,7 +1362,7 @@ eg_expected() {
   printf '%s\n' \
     '  event-guard:' \
     '    name: Event guard (refuses merge_group, unexpected events, refs and actors)' \
-    '    runs-on: ubuntu-latest' \
+    '    runs-on: ubuntu-24.04' \
     '    steps:' \
     '      - name: Refuse events, refs and actors this pipeline must never run on' \
     '        env:' \
@@ -1270,7 +1517,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     if [ -n "${v}" ] && ! is_hosted_label "${v}"; then printf '%s\n' "${j}"; fi
   done)"
   [ -n "${fleet_jobs}" ] || continue
-  eg_block="$(awk '/^(  )?#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
+  eg_block="$(awk '/^(  )?#/ { next } /^    # pinned to 24\.04: / { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
   if [ -z "${eg_block}" ]; then
     err "${wf}: a fleet pipeline needs the hosted job 'event-guard' (event-guard)"
     continue

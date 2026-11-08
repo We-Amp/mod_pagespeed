@@ -91,6 +91,11 @@ bool CssImageRewriter::RewritesEnabled(int64 image_inline_max_bytes) const {
 bool CssImageRewriter::RewriteImport(RewriteContext* parent,
                                      CssHierarchy* hierarchy,
                                      bool* is_authorized) {
+  if (!parent->PageAllowsNestedContext()) {
+    // The document has no rewrite left, so the stylesheet is left undone.
+    *is_authorized = true;
+    return false;
+  }
   GoogleUrl import_url(hierarchy->url());
   ResourcePtr resource = driver()->CreateInputResource(
       import_url, RewriteDriver::InputRole::kStyle, is_authorized);
@@ -108,6 +113,12 @@ bool CssImageRewriter::RewriteImage(int64 image_inline_max_bytes,
                                     const GoogleUrl& original_url,
                                     RewriteContext* parent, Css::Values* values,
                                     size_t value_index, bool* is_authorized) {
+  if (!parent->PageAllowsNestedContext()) {
+    // The document has no rewrite left, so the stylesheet is left undone;
+    // nothing is created for the image.
+    *is_authorized = true;
+    return true;
+  }
   const RewriteOptions* options = driver()->options();
   ResourcePtr resource = driver()->CreateInputResource(
       original_url, RewriteDriver::InputRole::kImg, is_authorized);
@@ -132,14 +143,15 @@ void CssImageRewriter::RewriteSlot(const ResourceSlotPtr& slot,
   if (options->ImageOptimizationEnabled() || image_inline_max_bytes > 0) {
     // Do not rewrite external resource if preserve_urls is enabled unless
     // we allow preemptive rewriting.
-    if (!slot->preserve_urls() ||
-        options->in_place_preemptive_rewrite_css_images()) {
+    if ((!slot->preserve_urls() ||
+         options->in_place_preemptive_rewrite_css_images()) &&
+        parent->PageAllowsNestedContext()) {
       parent->AddNestedContext(image_rewriter_->MakeNestedRewriteContextForCss(
           image_inline_max_bytes, parent, slot));
     }
   }
 
-  if (driver()->MayCacheExtendImages()) {
+  if (driver()->MayCacheExtendImages() && parent->PageAllowsNestedContext()) {
     parent->AddNestedContext(cache_extender_->MakeNestedContext(parent, slot));
   }
 
@@ -186,6 +198,23 @@ void CssImageRewriter::InheritChildImageInfo(RewriteContext* context) {
   for (auto& entry : child_image_info) {
     *context->mutable_output_partition(0)->add_associated_image_info() =
         entry.second;
+  }
+}
+
+void CssImageRewriter::InheritChildInlinedImageBytes(RewriteContext* context) {
+  if (context->num_output_partitions() != 1) {
+    return;
+  }
+  CachedResult* result = context->mutable_output_partition(0);
+  int64 total = result->inlined_image_bytes();
+  for (int i = 0; i < context->num_nested(); ++i) {
+    const RewriteContext* nested_context = context->nested(i);
+    for (int j = 0; j < nested_context->num_output_partitions(); ++j) {
+      total += nested_context->output_partition(j)->inlined_image_bytes();
+    }
+  }
+  if (total > 0) {
+    result->set_inlined_image_bytes(total);
   }
 }
 
@@ -337,6 +366,10 @@ bool CssImageRewriter::RewriteCss(int64 image_inline_max_bytes,
                     handler);
 
     image_combiner_->RegisterOrReleaseContext();
+
+    // The slot factory only unifies the slots created during the walk above,
+    // so do not let it keep entries once that walk is done.
+    root_context_->slot_factory()->Clear();
   } else {
     handler->Message(kInfo,
                      "Image rewriting and cache extension not enabled, "

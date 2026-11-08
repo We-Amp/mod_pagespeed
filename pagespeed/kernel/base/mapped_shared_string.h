@@ -105,7 +105,13 @@ class MappedSharedString {
   // Construct from an owned SharedString (copies the reference, not the data).
   explicit MappedSharedString(const SharedString& owned);
 
-  // Move constructor and assignment.
+  // Move constructor and assignment.  They are noexcept and never allocate:
+  // the source is left valid but unspecified.  A moved-from mapped string has
+  // a null view and reads as empty (is_mapped() stays true).  A moved-from
+  // owned string keeps its reference to the same data (SharedString has no
+  // move), so it is not necessarily empty, and unique() is false on both
+  // sides while they coexist.  Do not read a moved-from string; assign to it
+  // first.
   MappedSharedString(MappedSharedString&& other) noexcept;
   MappedSharedString& operator=(MappedSharedString&& other) noexcept;
 

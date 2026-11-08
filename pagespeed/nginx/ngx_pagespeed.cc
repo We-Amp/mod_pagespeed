@@ -54,18 +54,19 @@
 #include "net/instaweb/util/public/fallback_property_page.h"
 #include "ngx_admin_path_match.h"
 #include "ngx_base_fetch.h"
+#include "ngx_cache_control_merge.h"
 #include "ngx_caching_headers.h"
 #include "ngx_daemon_record_completion.h"
 #include "ngx_daemon_serve_emit.h"
 #include "ngx_daemon_serve_notify.h"
 #include "ngx_etag_match.h"
 #include "ngx_gzip_setter.h"
-#include "ngx_inplace_url_agreement.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
 #include "ngx_request_body.h"
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
+#include "ngx_self_fetch_label.h"
 #include "ngx_server_context.h"
 #include "ngx_static_asset_path.h"
 #include "ngx_webbotauth_handler.h"
@@ -78,6 +79,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/time_util.h"
+#include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -91,10 +93,12 @@
 #include "pagespeed/system/daemon_ipro_recorder.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/in_place_resource_recorder.h"  // the gate returns it
+#include "pagespeed/system/inplace_url_agreement.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/site_cache_fragment.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -914,6 +918,94 @@ ngx_int_t ps_set_cache_control(ngx_http_request_t* r, char* cache_control) {
   return NGX_OK;
 }
 
+bool ps_get_cache_control(ngx_http_request_t* r, GoogleString* cache_control);
+
+// The name of the never-sent entry that carries a device fallback's
+// `Cache-Control` from the daemon serve to the module's header filter.
+constexpr char kPsFallbackCacheControlKey[] = "X-PageSpeed-Fallback-CC";
+
+ngx_int_t ps_mark_daemon_fallback_cache_control(ngx_http_request_t* r,
+                                                StringPiece cache_control) {
+  ngx_table_elt_t* h =
+      static_cast<ngx_table_elt_t*>(ngx_list_push(&r->headers_out.headers));
+  if (h == nullptr) {
+    return NGX_ERROR;
+  }
+  h->hash = 0;
+  h->key.data =
+      reinterpret_cast<u_char*>(const_cast<char*>(kPsFallbackCacheControlKey));
+  h->key.len = sizeof(kPsFallbackCacheControlKey) - 1;
+  h->lowcase_key = nullptr;
+  char* value = string_piece_to_pool_string(r->pool, cache_control);
+  if (value == nullptr) {
+    return NGX_ERROR;
+  }
+  h->value.data = reinterpret_cast<u_char*>(value);
+  h->value.len = cache_control.size();
+#if defined(nginx_version) && nginx_version >= 1023000
+  h->next = nullptr;
+#endif
+  return NGX_OK;
+}
+
+// Clamps the `Cache-Control` of an image served for another device after
+// `expires` or `add_header` replaced it or added to it, as one line, and
+// drops `Expires`.  The device
+// fallback must not take the configured lifetime: a cache downstream would
+// keep it long after the client's own variant is written.  Called from the
+// module's header filter, which runs after ngx_http_headers_filter; see
+// ps_html_rewrite_fix_headers_filter for why.
+ngx_int_t ps_restore_daemon_fallback_cache_control(ngx_http_request_t* r) {
+  ngx_table_elt_t* header;
+  NgxListIterator it(&(r->headers_out.headers.part));
+  while ((header = it.Next()) != nullptr) {
+    if (header->hash != 0 ||
+        header->key.len != sizeof(kPsFallbackCacheControlKey) - 1 ||
+        header->key.data !=
+            reinterpret_cast<const u_char*>(kPsFallbackCacheControlKey)) {
+      continue;
+    }
+    header->key.len = 0;  // One shot.
+    if (r->headers_out.status != NGX_HTTP_OK &&
+        r->headers_out.status != NGX_HTTP_NOT_MODIFIED &&
+        r->headers_out.status != NGX_HTTP_PARTIAL_CONTENT) {
+      return NGX_OK;
+    }
+    // Only ever a shorter lifetime, as ONE line: every directive the
+    // configuration left is kept and each lifetime is clamped, so a
+    // `max-age` that `add_header` appended after the module's own line cannot
+    // outlive it on a cache that reads the last one.  An operator's
+    // `private`, `no-store` or `no-cache`, or an `Expires` already passed
+    // (`expires -1`, `epoch`, `0`), leaves the response exactly as configured.
+    GoogleString existing;
+    ps_get_cache_control(r, &existing);
+    const ngx_table_elt_t* expires = r->headers_out.expires;
+    const int64 expires_seconds =
+        expires == nullptr ? -1
+                           : static_cast<int64>(ngx_parse_http_time(
+                                 expires->value.data, expires->value.len));
+    const GoogleString line =
+        PsFallbackCacheControl(existing, expires != nullptr, expires_seconds,
+                               static_cast<int64>(ngx_time()));
+    if (line.empty()) {
+      return NGX_OK;
+    }
+    char* value = string_piece_to_pool_string(r->pool, line);
+    if (value == nullptr) {
+      return NGX_OK;  // Left as configured.
+    }
+    if (ps_set_cache_control(r, value) != NGX_OK) {
+      return NGX_ERROR;
+    }
+    if (r->headers_out.expires != nullptr) {
+      r->headers_out.expires->hash = 0;
+      r->headers_out.expires = nullptr;
+    }
+    return NGX_OK;
+  }
+  return NGX_OK;
+}
+
 // Returns false if the header wasn't found.  Otherwise sets cache_control and
 // returns true;
 bool ps_get_cache_control(ngx_http_request_t* r, GoogleString* cache_control) {
@@ -1010,6 +1102,41 @@ void copy_response_headers_from_ngx(const ngx_http_request_t* r,
   headers->ComputeCaching();
 }
 
+namespace {
+
+void copy_origin_caching_headers_from_ngx(const ngx_http_request_t* r,
+                                          ResponseHeaders* headers) {
+  // A response from an upstream (proxy, FastCGI, uwsgi, SCGI, gRPC, or the
+  // proxy cache): the upstream's own header lines, as received.  These are
+  // what proxy_cache judges, and nothing in the header filter chain
+  // (expires, add_header) nor proxy_hide_header touches them.  Copied
+  // whether or not nginx unset a line on its way to the client.
+  if (r->upstream != nullptr &&
+      r->upstream->headers_in.headers.last != nullptr) {
+    const ngx_list_part_t* part = &r->upstream->headers_in.headers.part;
+    const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+    for (ngx_uint_t i = 0; /* void */; i++) {
+      if (i >= part->nelts) {
+        if (part->next == nullptr) {
+          break;
+        }
+        part = part->next;
+        header = static_cast<ngx_table_elt_t*>(part->elts);
+        i = 0;
+      }
+      headers->Add(str_to_string_piece(header[i].key),
+                   str_to_string_piece(header[i].value));
+    }
+    return;
+  }
+  // Any other content handler is the origin itself: its headers as it set
+  // them.  The caller runs ahead of every header filter, so no directive has
+  // acted on them yet.
+  copy_headers_from_table(r->headers_out.headers, headers);
+}
+
+}  // namespace
+
 void copy_request_headers_from_ngx(const ngx_http_request_t* r,
                                    RequestHeaders* headers) {
   // TODO(chaizhenhua): only allow RewriteDriver::kPassThroughRequestAttributes?
@@ -1067,14 +1194,34 @@ ngx_int_t copy_response_headers_to_ngx(
       }
     }  // else we don't preserve any headers.
 
+    // A header that is not valid on the wire is left out of the response.
+    if (name_gs.find('\0') != GoogleString::npos ||
+        value_gs.find('\0') != GoogleString::npos) {
+      ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                    "pagespeed: dropping response header that holds a NUL");
+      continue;
+    }
+
+    // A length that cannot be read is left out; nginx then states the length
+    // it knows, or sends the body chunked.
+    if (StringCaseEqual(name_gs, "Content-Length")) {
+      int64 content_length;
+      if (!pagespeed_headers.FindContentLength(&content_length) ||
+          content_length < 0 ||
+          value_gs.find_first_not_of("0123456789") != GoogleString::npos) {
+        continue;
+      }
+    }
+
+    // The allocation has to hold the len bytes nginx reads.
     ngx_str_t name, value;
     value.len = value_gs.size();
     value.data = reinterpret_cast<u_char*>(
-        string_piece_to_pool_string(r->pool, value_gs.c_str()));
+        string_piece_to_pool_string(r->pool, value_gs));
 
     name.len = name_gs.size();
     name.data = reinterpret_cast<u_char*>(
-        string_piece_to_pool_string(r->pool, name_gs.c_str()));
+        string_piece_to_pool_string(r->pool, name_gs));
 
     // In case string_piece_to_pool_string failed:
     if (name.data == nullptr || value.data == nullptr) {
@@ -1112,12 +1259,13 @@ ngx_int_t copy_response_headers_to_ngx(
       continue;
       // TODO(oschaaf): are there any other headers we should not try to
       // copy here?
-    } else if (STR_EQ_LITERAL(name,
-                              "Connection")) {  // NOLINT(bugprone-branch-clone)
+    } else if (StringCaseEqual(
+                   name_gs,
+                   "Connection")) {  // NOLINT(bugprone-branch-clone)
       continue;
-    } else if (STR_EQ_LITERAL(name, "Keep-Alive")) {
+    } else if (StringCaseEqual(name_gs, "Keep-Alive")) {
       continue;
-    } else if (STR_EQ_LITERAL(name, "Transfer-Encoding")) {
+    } else if (StringCaseEqual(name_gs, "Transfer-Encoding")) {
       continue;
     } else if (STR_EQ_LITERAL(name, "Vary") &&
                ps_vary_lists_accept_encoding(value)) {
@@ -1160,11 +1308,12 @@ ngx_int_t copy_response_headers_to_ngx(
       }
     } else if (STR_EQ_LITERAL(name, "Server")) {
       headers_out->server = header;
-    } else if (STR_EQ_LITERAL(name, "Content-Length")) {
+    } else if (StringCaseEqual(name_gs, "Content-Length")) {
       int64 len;
-      CHECK(pagespeed_headers.FindContentLength(&len));
-      headers_out->content_length_n = len;
-      headers_out->content_length = header;
+      if (pagespeed_headers.FindContentLength(&len)) {
+        headers_out->content_length_n = len;
+        headers_out->content_length = header;
+      }
     } else if (STR_EQ_LITERAL(name, "Content-Encoding")) {
       headers_out->content_encoding = header;
     } else if (STR_EQ_LITERAL(name, "Refresh")) {
@@ -1673,6 +1822,59 @@ ConfiguredHostNames NgxCollectConfiguredHostNames(
   return names;
 }
 
+// What a server{} block is, for its cache keyspace.  Names come from
+// server_names only, so patterns count and the machine's own name never does.
+// CONFIGURATION TIME ONLY: both lists live in the configuration's temporary
+// pool.  The core module keeps no list of a block's addresses; each address
+// lists its blocks instead.
+SiteIdentity NgxCollectSiteIdentity(ngx_conf_t* cf,
+                                    const ngx_http_core_srv_conf_t* cscf) {
+  SiteIdentity identity;
+  const ngx_http_server_name_t* server_names =
+      static_cast<const ngx_http_server_name_t*>(cscf->server_names.elts);
+  for (ngx_uint_t i = 0; i < cscf->server_names.nelts; ++i) {
+    GoogleString name = str_to_string_piece(server_names[i].name).as_string();
+#if (NGX_PCRE)
+    // nginx stores a regular-expression entry without its "~".
+    if (server_names[i].regex != nullptr) {
+      name.insert(0, "~");
+    }
+#endif
+    identity.names.push_back(name);
+  }
+
+  const ngx_http_core_main_conf_t* cmcf =
+      static_cast<ngx_http_core_main_conf_t*>(
+          ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module));
+  if (cmcf->ports == nullptr) {
+    return identity;
+  }
+  const ngx_http_conf_port_t* ports =
+      static_cast<const ngx_http_conf_port_t*>(cmcf->ports->elts);
+  for (ngx_uint_t p = 0; p < cmcf->ports->nelts; ++p) {
+    const ngx_http_conf_addr_t* addrs =
+        static_cast<const ngx_http_conf_addr_t*>(ports[p].addrs.elts);
+    for (ngx_uint_t a = 0; a < ports[p].addrs.nelts; ++a) {
+      ngx_http_core_srv_conf_t* const* servers =
+          static_cast<ngx_http_core_srv_conf_t* const*>(addrs[a].servers.elts);
+      for (ngx_uint_t s = 0; s < addrs[a].servers.nelts; ++s) {
+        if (servers[s] == cscf) {
+          u_char text[NGX_SOCKADDR_STRLEN];
+          // From the address itself: opt.addr_text spellings depend on how
+          // the listen directive was written.
+          size_t len =
+              ngx_sock_ntop(addrs[a].opt.sockaddr, addrs[a].opt.socklen, text,
+                            sizeof(text), 1 /* port */);
+          identity.listen_addresses.push_back(
+              GoogleString(reinterpret_cast<const char*>(text), len));
+          break;
+        }
+      }
+    }
+  }
+  return identity;
+}
+
 }  // namespace
 
 // Called exactly once per server block to merge the main configuration with the
@@ -1682,6 +1884,9 @@ char* ps_merge_srv_conf(ngx_conf_t* cf, void* parent, void* child) {
 
   ps_srv_conf_t* parent_cfg_s = static_cast<ps_srv_conf_t*>(parent);
   ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(child);
+
+  const bool sets_own_fragment =
+      cfg_s->options != nullptr && !cfg_s->options->cache_fragment().empty();
 
   ps_merge_options(parent_cfg_s->options, &cfg_s->options);
 
@@ -1730,6 +1935,27 @@ char* ps_merge_srv_conf(ngx_conf_t* cf, void* parent, void* child) {
   cfg_s->options->CopyScriptLinesTo(ngx_options);
   delete cfg_s->options;
   cfg_s->options = nullptr;
+
+  // A block without a CacheFragment gets its own keyspace.  The value is
+  // withheld from the options payload, so the log is where it can be read.
+  // Locations rebase on these options, so they inherit it.
+  ngx_http_core_srv_conf_t* cscf = static_cast<ngx_http_core_srv_conf_t*>(
+      ngx_http_conf_get_module_srv_conf(cf, ngx_http_core_module));
+  if (ngx_options->cache_fragment().empty()) {
+    ngx_options->set_cache_fragment(
+        DeriveSiteCacheFragment(NgxCollectSiteIdentity(cf, cscf)));
+    ngx_conf_log_error(NGX_LOG_NOTICE, cf, 0,
+                       "pagespeed: server \"%V\" uses cache fragment %s",
+                       &cscf->server_name,
+                       ngx_options->cache_fragment().c_str());
+  } else if (!sets_own_fragment) {
+    ngx_conf_log_error(
+        NGX_LOG_WARN, cf, 0,
+        "pagespeed: server \"%V\" inherits CacheFragment from the http block "
+        "and shares cache entries with every server that does; set one in "
+        "the server block, or remove it, to separate them",
+        &cscf->server_name);
+  }
 
   if (!cfg_s->server_context->global_options()->unplugged()) {
     // Validate FileCachePath
@@ -1942,16 +2168,16 @@ GoogleString ps_determine_url(ngx_http_request_t* r) {
 // applied its access rules and chooses the response on its own reading of
 // that line.  An entry is only right when both readings name the same
 // resource, so a request they read differently is left to the server as it
-// is: no lookup, no recording.  Decided in NgxInPlaceUrlAgrees (unit-tested)
+// is: no lookup, no recording.  Decided in InPlaceUrlAgrees (unit-tested)
 // from the server's normalized URI and the host the module built its URL
 // from, against the path and host of the URL it parsed, with the server
 // block's merge_slashes setting.
 bool ps_in_place_url_agrees(ngx_http_request_t* r, const GoogleUrl& url) {
   const ngx_http_core_srv_conf_t* cscf = static_cast<ngx_http_core_srv_conf_t*>(
       ngx_http_get_module_srv_conf(r, ngx_http_core_module));
-  if (NgxInPlaceUrlAgrees(str_to_string_piece(r->uri), ps_determine_host(r),
-                          url.PathSansQuery(), url.Host(),
-                          cscf->merge_slashes != 0)) {
+  if (InPlaceUrlAgrees(str_to_string_piece(r->uri), ps_determine_host(r),
+                       url.PathSansQuery(), url.Host(),
+                       cscf->merge_slashes != 0)) {
     return true;
   }
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -2231,6 +2457,12 @@ bool ps_determine_options(
     } else {
       *options = directory_options->Clone();
     }
+    // The location's options were rebased on the server's when the
+    // configuration was read, so the cache invalidation state they carry (the
+    // flush timestamp and the purged URLs) is from then.  Purges and flushes
+    // are recorded on the server's options as they happen: take the current
+    // ones, so they apply under every location.
+    (*options)->UpdateCachePurgeSet(global_options->purge_set());
   } else {
     if (*options == nullptr) {
       *options = global_options->Clone();
@@ -2399,6 +2631,12 @@ void ps_release_request_context(void* data) {
     ctx->inflater_ = nullptr;
   }
 
+  if (ctx->daemon_html_capture != nullptr) {
+    ctx->daemon_html_capture->Finish(true /* the body never ended here */);
+    delete ctx->daemon_html_capture;
+    ctx->daemon_html_capture = nullptr;
+  }
+
   if (ctx->driver != nullptr) {
     ctx->driver->Cleanup();
     ctx->driver = nullptr;
@@ -2409,6 +2647,9 @@ void ps_release_request_context(void* data) {
     ctx->recorder->DoneAndSetHeaders(nullptr, false /* incomplete response */);
     ctx->recorder = nullptr;
   }
+
+  delete ctx->origin_caching_headers;
+  ctx->origin_caching_headers = nullptr;
 
   ps_release_base_fetch(ctx);
   delete ctx;
@@ -2687,6 +2928,7 @@ struct PsDaemonServeRequestStrings {
   GoogleString url;
   GoogleString host;
   GoogleString scheme;
+  GoogleString site;
   GoogleString accept;
   GoogleString user_agent;
   GoogleString save_data;
@@ -2703,7 +2945,10 @@ struct PsDaemonServeRequestStrings {
 // stripped, X-Forwarded-Proto honoured -- the SAME source the record key
 // uses), the five capability headers verbatim with absent meaning empty,
 // the client's conditionals verbatim, and the raw Cache-Control and Pragma
-// values, which the arm reads (see ServeRequestForcesRevalidation).
+// values, which the arm reads (see ServeRequestForcesRevalidation).  The site
+// is the one of the server block that admitted the request, from its
+// server-scope fragment (`server_fragment`), never from anything the request
+// says.
 //
 // The headers and the URL come in ALREADY PARSED from the resource handler:
 // re-reading them off the request would be a second RequestHeaders
@@ -2711,11 +2956,13 @@ struct PsDaemonServeRequestStrings {
 // every fall-through.
 void BuildDaemonServeRequest(const RequestHeaders& request_headers,
                              const GoogleUrl& full_url,
+                             const GoogleString& server_fragment,
                              PsDaemonServeRequestStrings* strings,
                              DaemonServeRequest* out) {
   full_url.PathAndLeaf().CopyToString(&strings->url);
   full_url.HostAndPort().CopyToString(&strings->host);
   full_url.Scheme().CopyToString(&strings->scheme);
+  strings->site = SiteIdFromServerFragment(server_fragment);
 
   // LookupJoined, not Lookup1: a comma-split header is several map values,
   // which Lookup1 reports as absent.  For the capability headers
@@ -2738,6 +2985,7 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
   out->url = strings->url;
   out->hostname = strings->host;
   out->scheme = strings->scheme;
+  out->site = strings->site;
   out->accept = strings->accept;
   out->user_agent = strings->user_agent;
   out->save_data = strings->save_data;
@@ -2827,7 +3075,11 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
 
   PsDaemonServeRequestStrings strings;
   DaemonServeRequest serve_request;
-  BuildDaemonServeRequest(request_headers, full_url, &strings, &serve_request);
+  // The block's own server context: ps_merge_srv_conf set its derived
+  // fragment there when the block has none of its own.
+  BuildDaemonServeRequest(request_headers, full_url,
+                          server_context->global_options()->cache_fragment(),
+                          &strings, &serve_request);
   const DaemonServeDecision decision =
       reader->Serve(serve_request, server_context->timer()->NowMs() / 1000);
   // One serve class per consultation, including the fall-through below.
@@ -2969,6 +3221,17 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
 
   if (copy_response_headers_to_ngx(r, response_headers, kDontPreserveHeaders) !=
       NGX_OK) {
+    return NGX_ERROR;
+  }
+  // Only this response.  Every other daemon serve leaves `Cache-Control` to
+  // nginx's headers filter as before.  The field is handed to the module's
+  // own header filter as an entry that is never sent (hash 0), because this
+  // serve answers before the module's request context exists.  An error page
+  // sent in place of this response starts from cleaned headers, so it does
+  // not carry the entry.
+  if (decision.device_fallback_lifetime &&
+      ps_mark_daemon_fallback_cache_control(r, decision.cache_control) !=
+          NGX_OK) {
     return NGX_ERROR;
   }
   if (!decision.not_modified) {
@@ -3200,29 +3463,21 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     ctx->html_rewrite = false;
     ctx->in_place = false;
     ctx->follow_flushes = options->follow_flushes();
-    ctx->preserve_caching_headers = kDontPreserveHeaders;
 
-    // See build_context_for_request() in mod_instaweb.cc
     // TODO(jefftk): Is this the right place to be modifying caching headers for
     // html fetches?  Or should that be done later, in the headers flow for
     // filter mode, rather than here in resource fetch mode?
-    if (!options->modify_caching_headers()) {
-      ctx->preserve_caching_headers = kPreserveAllCachingHeaders;
-    } else if (!options->IsDownstreamCacheIntegrationEnabled()) {
-      // Downstream cache integration is not enabled. Disable original
-      // Cache-Control headers.
-      ctx->preserve_caching_headers = kDontPreserveHeaders;
-    } else if (!pagespeed_resource && !is_an_admin_handler) {
-      ctx->preserve_caching_headers = kPreserveOnlyCacheControl;
-      // Downstream cache integration is enabled. If a rebeaconing key has been
-      // configured and there is a ShouldBeacon header with the correct key,
-      // disable original Cache-Control headers so that the instrumented page is
-      // served out with no-cache.
-      StringPiece should_beacon(request_headers->Lookup1(kPsaShouldBeacon));
-      if (options->MatchesDownstreamCacheRebeaconingKey(should_beacon)) {
-        ctx->preserve_caching_headers = kDontPreserveHeaders;
-      }
-    }
+    NgxCachingHeaderRequest caching_request;
+    caching_request.modify_caching_headers = options->modify_caching_headers();
+    caching_request.downstream_cache_integration =
+        options->IsDownstreamCacheIntegrationEnabled();
+    caching_request.pagespeed_resource = pagespeed_resource;
+    caching_request.admin_handler = is_an_admin_handler;
+    caching_request.rebeaconing_key_matches =
+        options->MatchesDownstreamCacheRebeaconingKey(
+            request_headers->Lookup1(kPsaShouldBeacon));
+    ctx->preserve_caching_headers =
+        NgxPreserveCachingHeadersFor(caching_request);
 
     ctx->recorder = nullptr;
     ctx->daemon_record_pending = false;
@@ -3537,7 +3792,14 @@ void ps_send_to_pagespeed(ngx_http_request_t* r, ps_request_ctx_t* ctx,
         int num_inflated_bytes =
             ctx->inflater_->InflateBytes(buf, kStackBufferSize);
         if (num_inflated_bytes < 0) {
-          cfg_s->handler->Message(kWarning, "Corrupted inflation");
+          // The rest of the response is dropped either way.
+          if (ctx->inflater_->limit_exceeded()) {
+            cfg_s->handler->Message(
+                kWarning, "Compressed HTML inflates to more than %d bytes",
+                static_cast<int>(GzipInflater::kMaxInflatedHtmlBytes));
+          } else {
+            cfg_s->handler->Message(kWarning, "Corrupted inflation");
+          }
         } else if (num_inflated_bytes > 0) {
           ctx->proxy_fetch->Write(StringPiece(buf, num_inflated_bytes),
                                   cfg_s->handler);
@@ -3778,6 +4040,105 @@ static ngx_int_t ps_read_file_buffer(ngx_http_request_t* r, ngx_buf_t* buf) {
 }
 
 namespace html_rewrite {
+
+// DaemonHtmlCache report-only.  A read-only copy of what the response carries
+// at the input of the module's HTML filter, before ps_resource_handler and
+// ps_strip_html_headers change anything.  In any other mode the only thing that
+// runs is the mode check in ps_html_rewrite_header_filter.
+//
+// nginx's headers filter runs expires and add_header together, above this
+// module, so both are part of what the policy reads: an add_header line the
+// cache could not reproduce refuses as headers:<name>, and one that makes the
+// response private, no-store or sets a cookie refuses for that.  Apache reads
+// what mod_expires and mod_headers change at a later filter, to the same end.
+void ps_add_list_to_capture(const ngx_list_t& list,
+                            DaemonHtmlCapture* capture) {
+  const ngx_list_part_t* part = &list.part;
+  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+  for (ngx_uint_t i = 0; /* void */; i++) {
+    if (i >= part->nelts) {
+      if (part->next == nullptr) break;
+      part = part->next;
+      header = static_cast<ngx_table_elt_t*>(part->elts);
+      i = 0;
+    }
+    if (header[i].hash == 0) continue;
+    capture->AddHeader(str_to_string_piece(header[i].key),
+                       str_to_string_piece(header[i].value));
+  }
+}
+
+// Whether the request carries a header of this exact lowercase name.
+bool ps_request_has_header(ngx_http_request_t* r, StringPiece lowercase_name) {
+  const ngx_list_part_t* part = &r->headers_in.headers.part;
+  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+  for (ngx_uint_t i = 0; /* void */; i++) {
+    if (i >= part->nelts) {
+      if (part->next == nullptr) break;
+      part = part->next;
+      header = static_cast<ngx_table_elt_t*>(part->elts);
+      i = 0;
+    }
+    if (StringCaseEqual(str_to_string_piece(header[i].key), lowercase_name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+DaemonHtmlCapture* ps_start_daemon_html_capture(ngx_http_request_t* r,
+                                                NgxServerContext* context) {
+  DaemonAdapter* adapter = context->daemon_adapter();
+  const DaemonAbi* abi = adapter == nullptr ? nullptr : adapter->abi();
+  if (abi == nullptr || !abi->PublishesHtmlStorePolicy()) return nullptr;
+  DaemonHtmlCapture* capture =
+      new DaemonHtmlCapture(context->daemon_html_reporter(), abi,
+                            context->global_options()->daemon_html_max_bytes());
+  capture->SetRequest(str_to_string_piece(r->method_name),
+                      str_to_string_piece(r->unparsed_uri),
+                      str_to_string_piece(r->headers_in.server));
+  if (ps_request_has_header(r, "authorization") ||
+      ps_request_has_header(r, "proxy-authorization")) {
+    capture->set_has_authorization();
+  }
+  if (r->headers_in.user.len != 0) capture->set_authenticated_user();
+  if (ps_request_has_header(r, "cookie") ||
+      ps_request_has_header(r, "cookie2")) {
+    capture->set_has_cookie();
+  }
+  const ngx_list_part_t* part = &r->headers_in.headers.part;
+  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+  for (ngx_uint_t i = 0; /* void */; i++) {
+    if (i >= part->nelts) {
+      if (part->next == nullptr) break;
+      part = part->next;
+      header = static_cast<ngx_table_elt_t*>(part->elts);
+      i = 0;
+    }
+    if (StringCaseEqual(str_to_string_piece(header[i].key), "cache-control")) {
+      capture->AddRequestCacheControl(str_to_string_piece(header[i].value));
+    }
+  }
+
+  capture->set_status(r->headers_out.status);
+  ps_add_list_to_capture(r->headers_out.headers, capture);
+  capture->AddHeader(HttpAttributes::kContentType,
+                     str_to_string_piece(r->headers_out.content_type));
+  // nginx renders these two in its header filter, downstream of here.
+  if (r->headers_out.last_modified_time != -1 &&
+      r->headers_out.last_modified == nullptr) {
+    u_char date[sizeof("Mon, 28 Sep 1970 06:00:00 GMT")];
+    u_char* end = ngx_http_time(date, r->headers_out.last_modified_time);
+    capture->AddHeader(HttpAttributes::kLastModified,
+                       StringPiece(reinterpret_cast<char*>(date), end - date));
+  }
+  if (r->headers_out.content_length_n >= 0 &&
+      r->headers_out.content_length == nullptr) {
+    capture->AddHeader(HttpAttributes::kContentLength,
+                       Integer64ToString(r->headers_out.content_length_n));
+  }
+  return capture;
+}
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
@@ -3824,11 +4185,29 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
     return ngx_http_next_header_filter(r);
   }
 
+  // As on Apache, the report covers a 200 that carries a body: nothing else,
+  // a HEAD included, is captured or counted.
+  const bool daemon_html_report_only =
+      cfg_s->server_context->global_options()->daemon_html_cache() ==
+          RewriteOptions::kDaemonHtmlCacheReportOnly &&
+      r->headers_out.status == NGX_HTTP_OK && r->method != NGX_HTTP_HEAD;
+  std::unique_ptr<DaemonHtmlCapture> daemon_html_capture;
+  if (daemon_html_report_only) {
+    daemon_html_capture.reset(
+        ps_start_daemon_html_capture(r, cfg_s->server_context));
+  }
+
   ngx_int_t rc = ps_resource_handler(r, true /* html rewrite */,
                                      RequestRouting::kResource);
   if (rc != NGX_OK) {
     ctx->html_rewrite = false;
     return ngx_http_next_header_filter(r);
+  }
+
+  if (daemon_html_capture != nullptr) {
+    ctx->daemon_html_capture = daemon_html_capture.release();
+  } else if (daemon_html_report_only) {
+    cfg_s->server_context->daemon_html_reporter()->CountUnavailable();
   }
 
   if (r->headers_out.content_encoding &&
@@ -3854,6 +4233,24 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
         r->headers_out.content_encoding = nullptr;
         ctx->inflater_ = new GzipInflater(inflate_type);
         ctx->inflater_->Init();
+        ctx->inflater_->set_max_inflated_bytes(
+            GzipInflater::kMaxInflatedHtmlBytes);
+      }
+    }
+  }
+
+  // Note the private and no-store the operator or the origin stated, before
+  // the optimization library computes the page's caching headers: the
+  // Cache-Control the module writes on the rewritten page keeps them.
+  ctx->html_cache_control_limits = NgxCacheControlLimits();
+  {
+    ngx_table_elt_t* header;
+    NgxListIterator it(&(r->headers_out.headers.part));
+    while ((header = it.Next()) != nullptr) {
+      if (header->hash != 0 &&
+          STR_CASE_EQ_LITERAL(header->key, "Cache-Control")) {
+        NgxNoteCacheControlLimits(str_to_string_piece(header->value),
+                                  &ctx->html_cache_control_limits);
       }
     }
   }
@@ -3910,6 +4307,20 @@ ngx_int_t ps_html_rewrite_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                  "http pagespeed html rewrite body filter \"%V\"", &r->uri);
 
+  if (ctx->daemon_html_capture != nullptr) {
+    for (ngx_chain_t* cl = in; cl != nullptr; cl = cl->next) {
+      const ngx_buf_t* buf = cl->buf;
+      if (ngx_buf_in_memory(buf)) {
+        ctx->daemon_html_capture->AddBody(reinterpret_cast<char*>(buf->pos),
+                                          buf->last - buf->pos);
+      }
+      if (buf->last_buf) {
+        ctx->daemon_html_capture->set_body_ended();
+        ctx->daemon_html_capture->Finish(r->connection->error != 0);
+      }
+    }
+  }
+
   if (in != nullptr) {
     // Send all input data to the proxy fetch.
     ps_send_to_pagespeed(r, ctx, cfg_s, in);
@@ -3934,6 +4345,39 @@ namespace in_place {
 
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
+
+ngx_http_output_header_filter_pt ngx_http_next_origin_caching_header_filter;
+
+// Takes the origin's caching headers for a response that is about to be
+// recorded.  Installed by ps_install_origin_caching_filter as the FIRST
+// header filter of the chain, whatever the module's position in the filter
+// list (the Bazel-built module's ngx_module_order, the config build's, a
+// static build's), so the headers filter (expires, add_header) and any
+// third-party header filter have not run yet.  Only the main request of a
+// response one of the recorders will see.
+ngx_int_t ps_origin_caching_header_filter(ngx_http_request_t* r) {
+  if (r == r->main) {
+    ps_request_ctx_t* ctx = ps_get_request_context(r);
+    if (ctx != nullptr &&
+        (ctx->daemon_record_pending || ctx->recorder != nullptr)) {
+      ResponseHeaders* origin = new ResponseHeaders();
+      copy_origin_caching_headers_from_ngx(r, origin);
+      delete ctx->origin_caching_headers;
+      ctx->origin_caching_headers = origin;
+    }
+  }
+  return ngx_http_next_origin_caching_header_filter(r);
+}
+
+// Hands the headers ps_origin_caching_header_filter took to the recorder.
+void ps_give_origin_caching_headers(ps_request_ctx_t* ctx,
+                                    IproRecorder* recorder) {
+  if (ctx->origin_caching_headers != nullptr) {
+    recorder->SetOriginCachingHeaders(*ctx->origin_caching_headers);
+    delete ctx->origin_caching_headers;
+    ctx->origin_caching_headers = nullptr;
+  }
+}
 
 // Header filter to support IPRO.
 //
@@ -3973,6 +4417,10 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
       full_url.PathAndLeaf().CopyToString(&record_request.url);
       full_url.HostAndPort().CopyToString(&record_request.hostname);
       full_url.Scheme().CopyToString(&record_request.scheme);
+      // The site of the server block that admitted the request, from its
+      // server-scope fragment; a location's CacheFragment does not move it.
+      record_request.site = SiteIdFromServerFragment(
+          server_context->global_options()->cache_fragment());
 
       RequestHeaders request_headers;
       copy_request_headers_from_ngx(r, &request_headers);
@@ -4032,6 +4480,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
         ctx->daemon_recorder = true;
         ctx->record_body_bytes = 0;
         r->filter_need_in_memory = 1;
+        ps_give_origin_caching_headers(ctx, recorder);
         ResponseHeaders response_headers;
         copy_response_headers_from_ngx(r, &response_headers);
         recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
@@ -4066,6 +4515,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // produce gzipped output.
     //
     // The recorder will do this checking, so pass it the headers.
+    ps_give_origin_caching_headers(ctx, ctx->recorder);
     ResponseHeaders response_headers;
     copy_response_headers_from_ngx(r, &response_headers);
     ctx->recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
@@ -4304,9 +4754,20 @@ void ps_in_place_filter_init() {
   ngx_http_top_body_filter = ps_in_place_body_filter;
 }
 
+// Puts ps_origin_caching_header_filter at the head of the header filter
+// chain.  Called from ps_init_module, which nginx runs once per cycle after
+// every module's postconfiguration has built that cycle's chain (the chain
+// is rebuilt from nginx's own header filter on every configuration load), so
+// nothing is installed ahead of it, and it is installed once per chain.
+void ps_install_origin_caching_filter() {
+  ngx_http_next_origin_caching_header_filter = ngx_http_top_header_filter;
+  ngx_http_top_header_filter = ps_origin_caching_header_filter;
+}
+
 }  // namespace in_place
 
 using in_place::ps_in_place_filter_init;
+using in_place::ps_install_origin_caching_filter;
 
 ngx_int_t send_out_headers_and_body(ngx_http_request_t* r,
                                     const ResponseHeaders& response_headers,
@@ -4477,8 +4938,10 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
 }
 
 void ps_beacon_handler_helper(ngx_http_request_t* r, StringPiece beacon_data) {
+  // nginx reads the %uz conversion as size_t and the %*s width as size_t;
+  // only a plain %d would read an int here.
   ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                "ps_beacon_handler_helper: beacon[%d] %*s", beacon_data.size(),
+                "ps_beacon_handler_helper: beacon[%uz] %*s", beacon_data.size(),
                 beacon_data.size(), beacon_data.data());
 
   StringPiece user_agent;
@@ -4799,6 +5262,22 @@ ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 // Clear a few headers from html responses.
 
 ngx_int_t ps_html_rewrite_fix_headers_filter(ngx_http_request_t* r) {
+  // WHERE THIS RUNS, AND WHY THAT IS AFTER `expires`.  nginx runs header
+  // filters in reverse module-list order.  The dynamic module built with
+  // Bazel is placed by ngx_module_order (ngx_pagespeed_module.cc): ngx_pagespeed
+  // goes immediately before the first of the postpone, ssi, charset, xslt,
+  // image, sub, addition, gunzip, userid and headers filter modules, so it is
+  // listed before ngx_http_headers_filter_module and runs after it.  A module
+  // built from pagespeed/nginx/config takes its place from that file, and only
+  // gets the same order when the file places ngx_pagespeed the same way.  A
+  // daemon serve enters at the top of the chain (ngx_http_send_header), so on
+  // its way down it passes ngx_http_headers_filter (`expires`, `add_header`)
+  // first and this filter after.  Nothing below this module's filters sets
+  // `Cache-Control`: below them are the compressors, the range header filter
+  // and the header writer.
+  if (r == r->main && ps_restore_daemon_fallback_cache_control(r) != NGX_OK) {
+    return NGX_ERROR;
+  }
   ps_request_ctx_t* ctx = ps_get_request_context(r);
   if (r != r->main || ctx == nullptr || !ctx->html_rewrite ||
       ctx->preserve_caching_headers == kPreserveAllCachingHeaders) {
@@ -4806,10 +5285,14 @@ ngx_int_t ps_html_rewrite_fix_headers_filter(ngx_http_request_t* r) {
   }
   if (ctx->preserve_caching_headers == kDontPreserveHeaders) {
     // Don't cache html.  See mod_instaweb:instaweb_fix_headers_filter.
+    // Never more storable than the operator or the origin said: their
+    // private and no-store stay on the one line written here.
     NgxCachingHeaders caching_headers(r);
     ps_set_cache_control(
         r, string_piece_to_pool_string(
-               r->pool, caching_headers.GenerateDisabledCacheControl()));
+               r->pool, NgxKeepCacheControlLimits(
+                            caching_headers.GenerateDisabledCacheControl(),
+                            ctx->html_cache_control_limits)));
   }
 
   // Pagespeed html doesn't need etags: it should never be cached.
@@ -4906,6 +5389,48 @@ void ps_report_abi_mismatch(ngx_http_request_t* r) {
       "hang. Reinstall nginx-module-pagespeed built for your current "
       "nginx, or contact We-Amp.",
       NGINX_VERSION);
+}
+
+// A fetch the module issues to its own server must not pass an access rule
+// by address: it arrives from this server's own address (or over loopback)
+// whoever the original client was, so `allow 127.0.0.1` and the like would
+// admit it.  POST_READ runs before every access rule (and before realip,
+// whose handler is registered ahead of ours), so a recognized self-fetch is
+// relabeled here to a reserved non-local address for the whole request,
+// internal redirects included; the request pool's cleanup puts the real
+// address back.  Recognition takes both the module's User-Agent marker and a
+// peer that is this server, so a remote client cannot use the marker to
+// shed its own address.  See ngx_self_fetch_label.h.
+struct ps_self_fetch_relabel_t {
+  NgxSelfFetchLabel label;
+  NgxSelfFetchSaved<ngx_connection_t> saved;
+};
+
+void ps_self_fetch_restore(void* data) {
+  NgxRestoreSelfFetch(static_cast<ps_self_fetch_relabel_t*>(data)->saved);
+}
+
+ngx_int_t ps_self_fetch_post_read_handler(ngx_http_request_t* r) {
+  if (g_ps_abi_mismatch || r != r->main || !is_pagespeed_subrequest(r)) {
+    return NGX_DECLINED;
+  }
+  ngx_connection_t* c = r->connection;
+  // Resolves the address a wildcard listener accepted the connection on.
+  const struct sockaddr* local =
+      ngx_connection_local_sockaddr(c, nullptr, 0) == NGX_OK ? c->local_sockaddr
+                                                             : nullptr;
+  if (!NgxSelfFetchPeerIsThisServer(c->sockaddr, local)) {
+    return NGX_DECLINED;
+  }
+  ngx_pool_cleanup_t* cln =
+      ngx_pool_cleanup_add(r->pool, sizeof(ps_self_fetch_relabel_t));
+  if (cln == nullptr) {
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+  auto* relabel = static_cast<ps_self_fetch_relabel_t*>(cln->data);
+  NgxRelabelSelfFetch(c, &relabel->label, &relabel->saved);
+  cln->handler = ps_self_fetch_restore;
+  return NGX_DECLINED;
 }
 
 // preaccess_handler should be at generic phase before try_files
@@ -5031,6 +5556,15 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
     }
     *h = ps_preaccess_handler;
 
+    // The module's own fetches present as a non-local client to every access
+    // rule; see ps_self_fetch_post_read_handler.
+    ngx_http_handler_pt* sf_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[NGX_HTTP_POST_READ_PHASE].handlers));
+    if (sf_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *sf_h = ps_self_fetch_post_read_handler;
+
     // Observe-only Web-Bot-Auth classifier, default-off. Runs in
     // the same phase; early-returns NGX_DECLINED unless WebBotAuth is enabled.
     ngx_http_handler_pt* wba_h = static_cast<ngx_http_handler_pt*>(
@@ -5093,6 +5627,8 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   if (cfg_m == nullptr) {
     return NGX_OK;
   }
+
+  ps_install_origin_caching_filter();
 
   const bool initial_cycle =
       (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);

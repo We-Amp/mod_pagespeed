@@ -27,6 +27,26 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 [ -f /var/www/html/big.jpg ] || convert -size 2400x1600 plasma:fractal -quality 95 /var/www/html/big.jpg
+# Same bytes under a URL nothing has asked for yet, for the fallback check.
+cp /var/www/html/big.jpg /var/www/html/fallback.jpg
+cp /var/www/html/big.jpg /var/www/html/fallback-plain.jpg
+cp /var/www/html/big.jpg /var/www/html/fallback-added.jpg
+# SITE=origin-headers (origin-headers.sh): an application origin behind a
+# server that sets its own caching headers for browsers, one image per case,
+# each its own picture.
+if [ "${SITE:-}" = origin-headers ]; then
+  mkdir -p /var/www/oh-origin
+  for name in private nostore public short guard; do
+    convert -size 1200x800 plasma:fractal -quality 92 "/var/www/oh-origin/$name.jpg"
+  done
+  if [ "$SERVER" = apache ]; then
+    a2enmod -q proxy proxy_http headers >/dev/null
+    cp /harness/origin-headers-apache.conf /etc/apache2/sites-enabled/000-default.conf
+    exec apache2ctl -D FOREGROUND
+  fi
+  cp /harness/origin-headers-nginx.conf /etc/nginx/sites-enabled/default
+  exec nginx -g 'daemon off;'
+fi
 # A lifetime longer than the run: the variants inherit the origin's
 # lifetime, and one that lapses mid-run turns a variant serve into an
 # original serve between the direct requests and the cached ones.

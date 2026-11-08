@@ -475,11 +475,9 @@ void ResponsiveImageSecondFilter::EndDocument() {
       driver()->AddAttribute(script, HtmlName::kSrc, responsive_js_url_);
       InsertNodeAtBodyEnd(script);
     } else if (DebugMode()) {
-      HtmlNode* comment_node = driver()->NewCommentNode(
-          nullptr,
+      InsertDebugCommentAtBodyEnd(
           "ResponsiveImageFilter: cannot insert zoom JS as "
           "Content-Security-Policy would disallow it");
-      InsertNodeAtBodyEnd(comment_node);
     }
   }
 }

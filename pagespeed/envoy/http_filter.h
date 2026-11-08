@@ -14,6 +14,7 @@
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/automatic/proxy_fetch.h"
+#include "pagespeed/envoy/envoy_admin_fetch.h"
 #include "pagespeed/envoy/envoy_async_fetch.h"
 #include "pagespeed/envoy/envoy_base_fetch.h"
 #include "pagespeed/envoy/envoy_metrics_collector.h"
@@ -172,6 +173,10 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   void sendReply(net_instaweb::ResponseHeaders* response_headers,
                  std::string body);
 
+  // Called by EnvoyAdminFetch's constructor: the filter holds a reference to
+  // the admin fetch serving this request and detaches it on destruction.
+  void AttachAdminFetch(net_instaweb::EnvoyAdminFetch* fetch);
+
   // Called by EnvoyHtmlRewriter when HTML rewriting completes.
   // Records metrics for the rewrite operation.
   void RecordHtmlRewriteComplete(bool success, bool timeout);
@@ -251,6 +256,8 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   const LowerCaseString headerKey() const;
   const std::string headerValue() const;
   net_instaweb::EnvoyBaseFetch* base_fetch_{nullptr};
+  // The admin fetch serving this request, if any (see AttachAdminFetch).
+  net_instaweb::EnvoyAdminFetch* admin_fetch_{nullptr};
   const net_instaweb::RewriteOptions* options_{nullptr};
   net_instaweb::RewriteDriver* rewrite_driver_{nullptr};
   net_instaweb::InPlaceResourceRecorder* recorder_{nullptr};

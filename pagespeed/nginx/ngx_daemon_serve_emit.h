@@ -88,6 +88,22 @@ PsDaemonServeEmit PsComposeDaemonServeHeaders(
     const DaemonServeDecision& decision, StringPiece request_media_type,
     int64 body_length, bool server_compresses_type, ResponseHeaders* out);
 
+// The one `Cache-Control` line for an image served for another device, built
+// from what nginx's headers filter left on the response (`existing`, every
+// line joined with ", "), or empty to leave the response exactly as it is.
+//
+// SHORTEN ONLY, in every mix of lines.  Every directive is kept, once, in the
+// order it first appears; each `max-age` and `s-maxage` becomes the smallest
+// value stated for it, clamped to kServeDeviceFallbackMaxAgeSeconds; and the
+// only directive ever added is `max-age=60` when no `max-age` was stated.
+// Empty (leave as is) when `existing` is empty, names `private`, `no-store`
+// or `no-cache` (bare or qualified), states a `max-age` or `s-maxage` this
+// function cannot read, or when the response carries an `Expires`
+// (`has_expires`) that is unreadable (`expires_seconds` < 0) or not later
+// than `now_seconds`.  A quoted value is one directive whatever it contains.
+GoogleString PsFallbackCacheControl(StringPiece existing, bool has_expires,
+                                    int64 expires_seconds, int64 now_seconds);
+
 }  // namespace net_instaweb
 
 #endif  // PAGESPEED_NGINX_NGX_DAEMON_SERVE_EMIT_H_

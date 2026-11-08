@@ -78,6 +78,7 @@
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/site_cache_fragment.h"
 #include "util_filter.h"
 
 namespace net_instaweb {
@@ -335,6 +336,27 @@ void InstawebHandler::ComputeCustomOptions() {
       custom_options_->set_running_experiment(false);
     }
   }
+
+  // The request's server record may share its server context with other
+  // records; its cache keyspace is its own.  A CacheFragment set for the
+  // request's directory, or by remote configuration, still wins.
+  const GoogleString* site_fragment =
+      server_context_->apache_factory()->site_cache_fragment(request_->server);
+  if (site_fragment != nullptr) {
+    const RewriteOptions* effective =
+        (custom_options_.get() != nullptr) ? custom_options_.get() : options_;
+    if (effective->cache_fragment() ==
+            server_context_->global_config()->cache_fragment() &&
+        effective->cache_fragment() != *site_fragment) {
+      if (custom_options_.get() == nullptr) {
+        custom_options_.reset(
+            server_context_->apache_factory()->NewRewriteOptions());
+        custom_options_->Merge(*options_);
+      }
+      custom_options_->set_cache_fragment(*site_fragment);
+    }
+  }
+
   if (custom_options_.get() != nullptr) {
     options_ = custom_options_.get();
   }
@@ -485,6 +507,8 @@ void InstawebHandler::AttachInPlaceRecorder(IproRecorder* recorder,
                                             bool rewrite_caching_headers) {
   // See mod_instaweb.cc:mod_pagespeed_register_hooks for why the classic path
   // needs all three filters.
+  ap_add_output_filter(kModPagespeedInPlaceOriginCachingName, recorder,
+                       request_, request_->connection);
   ap_add_output_filter(kModPagespeedInPlaceFilterName, recorder, request_,
                        request_->connection);
   if (rewrite_caching_headers) {
@@ -544,6 +568,7 @@ void InstawebHandler::BuildDaemonRecordRequest(
   stripped_gurl_.PathAndLeaf().CopyToString(&request->url);
   stripped_gurl_.HostAndPort().CopyToString(&request->hostname);
   stripped_gurl_.Scheme().CopyToString(&request->scheme);
+  request->site = DaemonSiteId();
 
   StringPiece accept, user_agent, save_data, accept_encoding, sec_ch_dpr;
   CapabilityHeaders(&accept, &user_agent, &save_data, &accept_encoding,
@@ -579,9 +604,11 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   stripped_gurl_.PathAndLeaf().CopyToString(&daemon_serve_url_);
   stripped_gurl_.HostAndPort().CopyToString(&daemon_serve_host_);
   stripped_gurl_.Scheme().CopyToString(&daemon_serve_scheme_);
+  daemon_serve_site_ = DaemonSiteId();
   request->url = daemon_serve_url_;
   request->hostname = daemon_serve_host_;
   request->scheme = daemon_serve_scheme_;
+  request->site = daemon_serve_site_;
 
   CapabilityHeaders(&request->accept, &request->user_agent, &request->save_data,
                     &request->accept_encoding, &request->sec_ch_dpr);
@@ -595,6 +622,15 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   // drift.
   request->cache_control = RequestHeader(HttpAttributes::kCacheControl);
   request->pragma = RequestHeader(HttpAttributes::kPragma);
+}
+
+GoogleString InstawebHandler::DaemonSiteId() const {
+  const GoogleString* site_fragment =
+      server_context_->apache_factory()->site_cache_fragment(request_->server);
+  return SiteIdFromServerFragment(
+      site_fragment != nullptr
+          ? *site_fragment
+          : server_context_->global_config()->cache_fragment());
 }
 
 // Records ONE serve class against the peer's serve-stats mmap.  A no-op when
@@ -624,15 +660,23 @@ void InstawebHandler::RecordDaemonServeClass(int serve_class) {
 void InstawebHandler::RecordDaemonServeHit(
     const DaemonServeDecision& decision) {
   if (server_context_->daemon_serve_stats() != nullptr) {
-    server_context_->daemon_serve_stats()->RecordHit(
-        decision.ps_content_type, decision.origin_content_length,
-        decision.body.size(), decision.stored_mask,
-        VouchedServeHost(
-            stripped_gurl_.Host(),
-            ApacheConfiguredHostNames(
-                request_->server,
-                server_context_->apache_factory()->main_server(),
-                server_context_->apache_factory()->stated_server_names())));
+    const GoogleString host = VouchedServeHost(
+        stripped_gurl_.Host(),
+        ApacheConfiguredHostNames(
+            request_->server, server_context_->apache_factory()->main_server(),
+            server_context_->apache_factory()->stated_server_names()));
+    if (decision.encoded_origin_known) {
+      // The entry says what the origin bytes come to in the encoding served,
+      // so the saving can be split into the encoding's and the rewrite's.
+      server_context_->daemon_serve_stats()->RecordHitSplit(
+          decision.ps_content_type, decision.origin_content_length,
+          decision.encoded_origin_length, decision.body.size(),
+          decision.stored_mask, host);
+    } else {
+      server_context_->daemon_serve_stats()->RecordHit(
+          decision.ps_content_type, decision.origin_content_length,
+          decision.body.size(), decision.stored_mask, host);
+    }
   }
 }
 
@@ -921,6 +965,21 @@ bool InstawebHandler::HandleAsInPlace() {
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request_,
                   "Request not in-place optimized because: "
                   "request->main != NULL");
+    return handled;
+  }
+
+  // In-place optimization keys its lookups and recordings on the URL the
+  // module parsed from the request line; httpd matched its <Location> and
+  // <Directory> sections, applied its access rules and chooses the response
+  // on its own reading of that line.  An entry is only right when both
+  // readings name the same resource, so a request they read differently is
+  // left to Apache as it is: no lookup, no daemon serve, no recording.
+  // Decided at translate_name time (SaveInPlaceUrlAgreement).
+  if (!InstawebContext::InPlaceUrlAgreed(request_)) {
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request_,
+                  "Request not in-place optimized because: Apache and the "
+                  "module read the request differently: %s",
+                  request_->uri);
     return handled;
   }
 
@@ -1883,6 +1942,19 @@ apr_status_t InstawebHandler::save_url_in_note(
   const char* url = InstawebContext::MakeRequestUrl(
       *server_context->global_options(), request);
   GoogleUrl gurl(url);
+
+  // Saved beside the URL, while request->uri is still httpd's own normalized
+  // reading of the request (no module has rewritten it yet).  httpd merges
+  // runs of slashes unless MergeSlashes is off for this server.
+  const core_server_config* core_config =
+      static_cast<const core_server_config*>(
+          ap_get_core_module_config(request->server->module_config));
+  InstawebContext::SaveInPlaceUrlAgreement(
+      request, gurl,
+      InstawebContext::OriginFormScheme(*server_context->global_options(),
+                                        request),
+      ap_get_server_name_for_url(request),
+      core_config->merge_slashes != AP_CORE_CONFIG_OFF);
 
   bool bypass_mod_rewrite = false;
   if (gurl.IsWebValid()) {

@@ -53,6 +53,7 @@
 #include "net/instaweb/rewriter/public/downstream_cache_purger.h"
 #include "net/instaweb/rewriter/public/file_input_resource.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
+#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
 #include "net/instaweb/rewriter/public/js_outline_filter.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
@@ -113,6 +114,13 @@ namespace {
 
 const int kTestTimeoutMs = 10000;
 const char kDeadlineExceeded[] = "deadline_exceeded";
+
+// Bounds the number of comments one call of InsertDebugComments adds, that is,
+// for each list of debug messages.
+const int kMaxDebugCommentsPerList = 32;
+
+// What a comment adds to the output besides its text: "<!--" and "-->".
+const int64 kCommentDelimiterBytes = 7;
 
 // Provides hook to CacheUrlAsyncFetcher to protect the lifetime of the
 // RewriteDriver which owns fetcher, otherwise, fetcher may be deleted
@@ -228,6 +236,10 @@ RewriteDriver::RewriteDriver(MessageHandler* message_handler,
       xhtml_mimetype_computed_(false),
       xhtml_status_(kXhtmlUnknown),
       num_inline_preview_images_(0),
+      inlined_image_bytes_(0),
+      debug_output_bytes_(0),
+      debug_output_truncated_(false),
+      debug_truncation_noted_(false),
       num_bytes_in_(0),
       debug_filter_(nullptr),
       can_rewrite_resources_(true),
@@ -236,6 +248,8 @@ RewriteDriver::RewriteDriver(MessageHandler* message_handler,
       start_time_ms_(0),
       defer_instrumentation_script_(false),
       is_amp_(false),
+      is_hydrated_document_(false),
+      js_deferral_started_(false),
       downstream_cache_purger_(this)
 // NOTE:  Be sure to clear per-request member variables in Clear()
 {  // NOLINT  -- I want the initializer-list to end with that comment.
@@ -429,6 +443,8 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   html_vary_tokens_added_.clear();
   defer_instrumentation_script_ = false;
   is_amp_ = false;
+  is_hydrated_document_ = false;
+  js_deferral_started_ = false;
   executing_rewrite_tasks_.set_value(false);
   is_lazyload_script_flushed_ = false;
   base_was_set_ = false;
@@ -438,6 +454,11 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   fully_rewrite_on_flush_ = false;
   fast_blocking_rewrite_ = true;
   num_inline_preview_images_ = 0;
+  inlined_image_bytes_ = 0;
+  page_work_budget_.Reset();
+  debug_output_bytes_ = 0;
+  debug_output_truncated_ = false;
+  debug_truncation_noted_ = false;
   num_bytes_in_ = 0;
   flush_early_info_.reset(nullptr);
   can_rewrite_resources_ = true;
@@ -628,24 +649,46 @@ void RewriteDriver::Flush() {
 void RewriteDriver::FlushAsync(Function* callback) {
   DCHECK(request_context_.get() != nullptr);
   TraceLiteral("RewriteDriver::FlushAsync()");
+  flush_requested_ = false;
+
+  // While events are buffered (until AmpDocumentFilter has decided whether
+  // the document is AMP) the filters must not see them, and nothing can be
+  // rendered. The flush still counts as having happened, as the response
+  // headers may already have been sent; the Vary tokens are added now,
+  // because HtmlVaryFilter will not get to run before they are.
+  if (buffer_events()) {
+    HtmlVaryFilter::AddVaryTokens(this);
+    HtmlParse::Flush();
+    flush_occurred_ = true;
+    callback->CallRun();
+    return;
+  }
+
   if (debug_filter_ != nullptr) {
     debug_filter_->StartRender();
   }
-  flush_requested_ = false;
 
   // Figure out which filters should be enabled and whether any enabled filter
   // can modify urls.
   DetermineFiltersBehavior();
 
+  // is_hydrated_document_ is read per filter: ScanFilter comes first and can
+  // set it during this very loop.
   for (auto filter : early_pre_render_filters_) {
-    if (filter->is_enabled()) {
+    if (filter->is_enabled() &&
+        !(is_hydrated_document_ && filter->SkippedOnHydratedPages())) {
       ApplyFilter(filter);
     }
   }
   for (auto filter : pre_render_filters_) {
-    if (filter->is_enabled()) {
+    if (filter->is_enabled() &&
+        !(is_hydrated_document_ && filter->SkippedOnHydratedPages())) {
       ApplyFilter(filter);
     }
+  }
+
+  if (is_hydrated_document_) {
+    HtmlParse::DisableFiltersSkippedOnHydratedPages();
   }
 
   int num_rewrites = rewrites_.size();
@@ -785,7 +828,10 @@ void RewriteDriver::FlushAsyncDone(int num_rewrites, Function* callback) {
     slots_.clear();
     inline_slots_.clear();
     inline_attribute_slots_.clear();
+    // Nothing in this flush window renders any more, so write each srcset
+    // back once with whatever its slots rendered.
     for (const auto& c : srcset_collections_) {
+      c->Commit();
       c->Detach();
     }
     srcset_collections_.clear();
@@ -1169,6 +1215,12 @@ bool RewriteDriver::DecodeUrlGivenOptions(const GoogleUrl& url,
     GoogleUrl gurl_base(url_base);
     for (auto& decoded_url : *decoded_urls) {
       GoogleUrl full_url(gurl_base, decoded_url);
+      // The names we produce are always relative to url_base; reject any
+      // other, as RewriteContext::PrepareFetch does.
+      if (!full_url.IsWebValid() || full_url.Origin() != gurl_base.Origin()) {
+        decoded_urls->clear();
+        return false;
+      }
       decoded_url = full_url.Spec().as_string();
     }
   }
@@ -1201,6 +1253,27 @@ class FilterFetch : public SharedAsyncFetch {
       : SharedAsyncFetch(async_fetch), driver_(driver) {}
   ~FilterFetch() override {}
 
+  // Answers a conditional request for output_resource. Always completes
+  // async_fetch with a 304, with or without caching headers, and never
+  // rebuilds the output. Filters that keep no metadata get a bare 304.
+  static void StartNotModified(RewriteFilter* filter,
+                               const OutputResourcePtr& output_resource,
+                               AsyncFetch* async_fetch,
+                               MessageHandler* handler) {
+    RewriteDriver* driver = filter->driver();
+    FilterFetch* filter_fetch = new FilterFetch(driver, async_fetch);
+    filter_fetch->not_modified_ = true;
+    RewriteContext* context = filter->MakeRewriteContext();
+    if (context == nullptr ||
+        !context->FetchNotModified(output_resource, filter_fetch, handler)) {
+      ResponseHeaders* headers = async_fetch->response_headers();
+      headers->Clear();
+      headers->SetStatusAndReason(HttpStatus::kNotModified);
+      filter_fetch->HeadersComplete();
+      filter_fetch->Done(true);
+    }
+  }
+
   static bool Start(RewriteFilter* filter,
                     const OutputResourcePtr& output_resource,
                     AsyncFetch* async_fetch, MessageHandler* handler) {
@@ -1226,7 +1299,9 @@ class FilterFetch : public SharedAsyncFetch {
  protected:
   void HandleDone(bool success) override {
     RewriteStats* stats = driver_->server_context()->rewrite_stats();
-    if (success) {
+    if (not_modified_) {
+      // A revalidation serves no resource, so it counts as neither.
+    } else if (success) {
       stats->succeeded_filter_resource_fetches()->Add(1);
     } else {
       stats->failed_filter_resource_fetches()->Add(1);
@@ -1238,6 +1313,7 @@ class FilterFetch : public SharedAsyncFetch {
 
  private:
   RewriteDriver* driver_;
+  bool not_modified_ = false;
 };
 
 class CacheCallback : public OptionsAwareHTTPCacheCallback {
@@ -1532,16 +1608,29 @@ bool RewriteDriver::FetchOutputResource(
   // with an If-Modified-Since header.  If this header is present, we should
   // return a 304 Not Modified, since any representation of the resource
   // that's in the browser's cache must be correct.
+  //
+  // Where a rewrite context can say so from metadata alone, the 304 also
+  // carries the Cache-Control the full response would have; see
+  // RewriteContext::FetchNotModified. An internal fetch by a nested driver
+  // never stamps, so it keeps the bare 304.
   bool queued = false;
   ConstStringStarVector values;
   ScopedStatsLoggerUpdate stats_update(server_context_->statistics());
   if (async_fetch->request_headers()->Lookup(HttpAttributes::kIfModifiedSince,
                                              &values)) {
-    async_fetch->response_headers()->SetStatusAndReason(
-        HttpStatus::kNotModified);
-    async_fetch->HeadersComplete();
-    async_fetch->Done(true);
-    queued = false;
+    if (filter != nullptr && !is_nested()) {
+      SetBaseUrlForFetch(output_resource->url());
+      ref_counts_.AddRef(kRefFetchUserFacing);
+      FilterFetch::StartNotModified(filter, output_resource, async_fetch,
+                                    message_handler());
+      queued = true;
+    } else {
+      async_fetch->response_headers()->SetStatusAndReason(
+          HttpStatus::kNotModified);
+      async_fetch->HeadersComplete();
+      async_fetch->Done(true);
+      queued = false;
+    }
   } else {
     SetBaseUrlForFetch(output_resource->url());
     ref_counts_.AddRef(kRefFetchUserFacing);
@@ -1771,6 +1860,11 @@ bool RewriteDriver::StartParseId(const StringPiece& url, const StringPiece& id,
     DCHECK(filters_added_);
     set_buffer_events(true);  // Release buffer when AMPness is discovered.
     base_was_set_ = false;
+    inlined_image_bytes_ = 0;
+    page_work_budget_.Reset();
+    debug_output_bytes_ = 0;
+    debug_output_truncated_ = false;
+    debug_truncation_noted_ = false;
     if (is_url_valid()) {
       base_url_.Reset(google_url());
       SetDecodedUrlFromBase();
@@ -2478,8 +2572,14 @@ void RewriteDriver::InitiateFetch(RewriteContext* rewrite_context) {
   fetch_rewrites_.push_back(rewrite_context);
 }
 
+bool RewriteDriver::SkipJsDeferralOnHydratedPage() const {
+  return !options()->Enabled(RewriteOptions::kDisableJavascript) &&
+         !js_deferral_started_;
+}
+
 bool RewriteDriver::MayCacheExtendCss() const {
-  return options()->Enabled(RewriteOptions::kExtendCacheCss);
+  return options()->Enabled(RewriteOptions::kExtendCacheCss) &&
+         !is_hydrated_document_;
 }
 
 bool RewriteDriver::MayCacheExtendImages() const {
@@ -2491,7 +2591,8 @@ bool RewriteDriver::MayCacheExtendPdfs() const {
 }
 
 bool RewriteDriver::MayCacheExtendScripts() const {
-  return options()->Enabled(RewriteOptions::kExtendCacheScripts);
+  return options()->Enabled(RewriteOptions::kExtendCacheScripts) &&
+         !is_hydrated_document_;
 }
 
 void RewriteDriver::AddRewriteTask(Function* task) {
@@ -2717,6 +2818,17 @@ void RewriteDriver::increment_num_inline_preview_images() {
   ++num_inline_preview_images_;
 }
 
+bool RewriteDriver::ReserveInlinedImageBytes(int64 num_bytes) {
+  const int64 limit = options()->document_image_inline_max_bytes();
+  int64 used = inlined_image_bytes_.load();
+  do {
+    if (num_bytes < 0 || used > limit || num_bytes > limit - used) {
+      return false;
+    }
+  } while (!inlined_image_bytes_.compare_exchange_weak(used, used + num_bytes));
+  return true;
+}
+
 StringPiece RewriteDriver::RefCategoryName(RefCategory cat) {
   switch (cat) {
     case kRefUser:
@@ -2853,13 +2965,93 @@ FlushEarlyInfo* RewriteDriver::flush_early_info() {
   return flush_early_info_.get();
 }
 
+int64 RewriteDriver::DebugOutputBytesRemaining() const {
+  const int64 limit = options()->debug_output_max_bytes();
+  if (limit <= 0) {
+    return -1;
+  }
+  if (debug_output_truncated_.load()) {
+    return 0;
+  }
+  return std::max<int64>(0, limit - debug_output_bytes_.load());
+}
+
+bool RewriteDriver::ReserveDebugOutputBytes(int64 num_bytes) {
+  const int64 limit = options()->debug_output_max_bytes();
+  if (limit <= 0) {
+    return true;
+  }
+  int64 used = debug_output_bytes_.load();
+  while (!debug_output_truncated_.load() && num_bytes <= limit - used) {
+    if (debug_output_bytes_.compare_exchange_weak(used, used + num_bytes)) {
+      return true;
+    }
+  }
+  debug_output_truncated_ = true;
+  return false;
+}
+
+GoogleString RewriteDriver::DebugTruncatedMessage() const {
+  return StrCat("Debug output truncated at ",
+                RewriteOptions::kDebugOutputMaxBytes, "=",
+                Integer64ToString(options()->debug_output_max_bytes()));
+}
+
+HtmlNode* RewriteDriver::InsertBoundedDebugComment(StringPiece escaped,
+                                                   HtmlNode* node) {
+  if (!ReserveDebugOutputBytes(static_cast<int64>(escaped.size()) +
+                               kCommentDelimiterBytes)) {
+    if (!debug_truncation_noted_.exchange(true)) {
+      InsertNodeAfterNode(
+          node, NewCommentNode(node->parent(), DebugTruncatedMessage()));
+    }
+    return nullptr;
+  }
+  HtmlNode* comment_node = NewCommentNode(node->parent(), escaped);
+  InsertNodeAfterNode(node, comment_node);
+  return comment_node;
+}
+
+HtmlNode* RewriteDriver::NewBudgetedDebugCommentNode(StringPiece unescaped) {
+  GoogleString escaped;
+  HtmlKeywords::Escape(unescaped, &escaped);
+  if (!ReserveDebugOutputBytes(static_cast<int64>(escaped.size()) +
+                               kCommentDelimiterBytes)) {
+    if (!debug_truncation_noted_.exchange(true)) {
+      return NewCommentNode(nullptr, DebugTruncatedMessage());
+    }
+    return nullptr;
+  }
+  return NewCommentNode(nullptr, escaped);
+}
+
+bool RewriteDriver::InsertDebugCommentHere(StringPiece unescaped) {
+  GoogleString escaped;
+  HtmlKeywords::Escape(unescaped, &escaped);
+  const int64 size =
+      static_cast<int64>(escaped.size()) + kCommentDelimiterBytes;
+  if (!ReserveDebugOutputBytes(size)) {
+    if (!debug_truncation_noted_.load() &&
+        InsertComment(DebugTruncatedMessage())) {
+      debug_truncation_noted_ = true;
+    }
+    return true;
+  }
+  if (!InsertComment(unescaped)) {
+    // Not placed: give the bytes back so a later attempt can use them.
+    if (options()->debug_output_max_bytes() > 0) {
+      debug_output_bytes_ -= size;
+    }
+    return false;
+  }
+  return true;
+}
+
 void RewriteDriver::InsertDebugComment(StringPiece unescaped, HtmlNode* node) {
   if (DebugMode() && node != nullptr && IsRewritable(node)) {
     GoogleString escaped;
     HtmlKeywords::Escape(unescaped, &escaped);
-
-    HtmlNode* comment_node = NewCommentNode(node->parent(), escaped);
-    InsertNodeAfterNode(node, comment_node);
+    InsertBoundedDebugComment(escaped, node);
   }
 }
 
@@ -2868,14 +3060,23 @@ void RewriteDriver::InsertDebugComments(
     HtmlElement* element) {
   if (DebugMode() && element != nullptr && IsRewritable(element)) {
     HtmlNode* preceding_node = element;
-    for (const auto& unescaped_message : unescaped_messages) {
+    int num_messages = unescaped_messages.size();
+    int num_inserted = std::min(num_messages, kMaxDebugCommentsPerList);
+    for (int i = 0; i < num_inserted; ++i) {
       GoogleString escaped;
-      HtmlKeywords::Escape(unescaped_message, &escaped);
-
+      HtmlKeywords::Escape(unescaped_messages.Get(i), &escaped);
       HtmlNode* comment_node =
-          NewCommentNode(preceding_node->parent(), escaped);
-      InsertNodeAfterNode(preceding_node, comment_node);
+          InsertBoundedDebugComment(escaped, preceding_node);
+      if (comment_node == nullptr) {
+        return;
+      }
       preceding_node = comment_node;
+    }
+    if (num_messages > num_inserted) {
+      InsertBoundedDebugComment(
+          StrCat(IntegerToString(num_messages - num_inserted),
+                 " more debug messages omitted"),
+          preceding_node);
     }
   }
 }
@@ -2885,10 +3086,8 @@ void RewriteDriver::InsertUnauthorizedDomainDebugComment(StringPiece url,
                                                          HtmlElement* element) {
   if (DebugMode() && element != nullptr && IsRewritable(element)) {
     GoogleUrl gurl(url);
-    InsertNodeAfterNode(
-        element,
-        NewCommentNode(element->parent(),
-                       GenerateUnauthorizedDomainDebugComment(gurl, role)));
+    InsertBoundedDebugComment(
+        GenerateUnauthorizedDomainDebugComment(gurl, role), element);
   }
 }
 
@@ -2992,6 +3191,11 @@ bool RewriteDriver::Write(const ResourceVector& inputs,
       CachedResult* cached = output->EnsureCachedResultCreated();
       cached->set_optimizable(true);
       cached->set_url(output->url());  // Note: output->url() will be sharded.
+      GoogleString cache_control =
+          meta_data->LookupJoined(HttpAttributes::kCacheControl);
+      if (!cache_control.empty()) {
+        cached->set_output_cache_control(cache_control);
+      }
     }
   } else {
     // Note that we've already gotten a "could not open file" message;
@@ -3140,8 +3344,10 @@ void RewriteDriver::RunTasksOnRequestThread() {
   scheduler_sequence_.reset(scheduler_->NewSequence());
 }
 
-// ForwardToSequence internally acquires the scheduler mutex; the analyzer
-// cannot determine the lock through the indirection of scheduler_sequence_.
+// ForwardToSequence requires the caller to hold the scheduler mutex and does
+// not acquire it. This method's declaration states that requirement, but the
+// analyzer cannot relate rewrite_mutex() to the scheduler_->mutex() form
+// through the indirection of scheduler_sequence_.
 void RewriteDriver::SwitchToQueuedWorkerPool() NO_THREAD_SAFETY_ANALYSIS {
   scheduler_sequence_->ForwardToSequence(rewrite_worker_);
 }
@@ -3178,6 +3384,17 @@ void RewriteDriver::ClearCspPolicies() {
 void RewriteDriver::AddCspPolicy(std::unique_ptr<CspPolicy> policy) {
   if (policy == nullptr) {
     return;
+  }
+  // The policies all have to agree, so the ones past the limit can't just be
+  // ignored: one that permits nothing stands in for them. Its base-uri makes us
+  // give up on <base> (see ScanFilter), as we can't tell whether the browser
+  // would honor it.
+  const size_t num_policies = csp_context_versions_.back()->policies_size();
+  if (num_policies > kMaxCspPolicies) {
+    return;
+  }
+  if (num_policies == kMaxCspPolicies) {
+    policy = CspPolicy::Parse("default-src 'none'; base-uri 'self'");
   }
   // Copy-on-write: rewrite threads may be reading the current version
   // concurrently, so a published version is never mutated in place.

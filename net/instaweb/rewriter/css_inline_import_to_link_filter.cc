@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -238,6 +239,21 @@ void CssInlineImportToLinkFilter::InlineImportToLinkStyle() {
       ok = CheckConversionOfImportToLink(import, media_attribute, &media.back(),
                                          &style_media_is_determined,
                                          &style_media);
+    }
+
+    // Keep the style when dropping the leading text would expose markup
+    // characters in the rest.
+    if (ok && !parser.Done() &&
+        parser.errors_seen_mask() == Css::Parser::kNoError) {
+      const GoogleString& contents = style_characters_->contents();
+      const size_t offset = parser.CurrentOffset();
+      if (offset <= contents.size() &&
+          CssInlineFilter::MayContainMarkup(
+              StringPiece(contents).substr(0, offset)) &&
+          CssInlineFilter::MayContainMarkup(
+              StringPiece(contents).substr(offset))) {
+        ok = false;
+      }
     }
 
     if (ok && (imports.size() > 0) &&

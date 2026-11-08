@@ -51,6 +51,8 @@ const char kAttrValImage[] = "image";  // <input type="image" src=...>
 
 namespace {
 
+constexpr int kMaxScannedAttributes = 256;
+
 bool IsAttributeValid(HtmlElement::Attribute* attr) {
   return attr != nullptr && !attr->decoding_error();
 }
@@ -241,6 +243,14 @@ semantic_type::Category CategorizeAttribute(
 void ScanElement(HtmlElement* element, const RewriteOptions* options,
                  UrlCategoryVector* attributes) {
   HtmlElement::AttributeList* attrs = element->mutable_attributes();
+  // No real element comes near this limit; one past it is left alone.
+  int num_attributes = 0;
+  for (HtmlElement::AttributeIterator i = attrs->begin(); i != attrs->end();
+       ++i) {
+    if (++num_attributes > kMaxScannedAttributes) {
+      return;
+    }
+  }
   for (HtmlElement::AttributeIterator i = attrs->begin(); i != attrs->end();
        ++i) {
     UrlCategoryPair url_category_pair;

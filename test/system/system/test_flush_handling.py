@@ -84,10 +84,11 @@ class TestOriginHeadersWithoutBodyBytes:
             "origin_cookie=1" in v for v in response.header_values("Set-Cookie")
         ), response.raw_headers
         # The module replaces Cache-Control on HTML by default; the directives
-        # it does not touch (must-revalidate) are what shows the origin's
-        # header was read back rather than dropped.
+        # it does not touch (must-revalidate) and the origin's private, which
+        # it keeps, are what shows the origin's header was read back rather
+        # than dropped.
         assert response.header_values("Cache-Control") == [
-            "max-age=0, no-cache, must-revalidate"
+            "max-age=0, no-cache, must-revalidate, private"
         ], response.raw_headers
         assert len(response.header_values("X-Mod-Pagespeed")) == 1, response.raw_headers
 

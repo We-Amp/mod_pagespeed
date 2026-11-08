@@ -1,3 +1,559 @@
+# mod_pagespeed 2.8.0 Release Notes
+
+**Release date:** 2026-11-05
+**Status:** Stable
+**Packages:** native nginx module packages for Ubuntu 26.04 (with its stock
+nginx). The nginx.org module package `nginx-module-pagespeed-nginxorg`, built for nginx.org's stable nginx (as in the official nginx Docker image), is available for Debian 13, Ubuntu 24.04 and Enterprise Linux 9 (AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64) only, one build per nginx version. Upgrade nginx and the module together: when both are in the repositories, a plain upgrade moves both. If nginx.org publishes a newer nginx first, the upgrade holds nginx back and the module keeps working; to take an nginx security fix before the module build exists, remove the module, upgrade nginx, and reinstall the module when its package is available. In Docker, move the image tag only once the package for that version exists. On Enterprise Linux 9 the package installs a small dnf plugin that holds nginx (and nginx.org's module packages for it) at the version the module is built for until the matching build is available, so a plain `dnf update` takes every other update and `dnf check-update` still lists the pending nginx; to take an nginx security fix first, run `dnf upgrade nginx --allowerasing`, which removes the module package (reinstall it once its build is available). The [nginx install steps](https://modpagespeed.com/docs/installation-module/#native-nginx-module) have the details. The stock packages, including the
+new Ubuntu 26.04 one, ship for amd64 and arm64 on Debian 12 and 13 and Ubuntu
+22.04, 24.04 and 26.04, and for x86_64 and aarch64 on AlmaLinux, RHEL and
+Rocky 9; AlmaLinux, RHEL and Rocky 10 is x86_64 only.
+
+mod_pagespeed 2.8.0 is the current release: the module and the optimizer worker, released together on 2026-11-05 and installed as a matching pair. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version.
+
+## Highlights
+
+- **Security fixes across the nginx, Apache and IIS modules, the optimizer
+  worker and the ASP.NET Core package. We recommend that all sites update.**
+  See Security below.
+- **Native nginx module packages for Ubuntu 26.04, and for nginx.org's stable
+  nginx on Debian 13, Ubuntu 24.04 and Enterprise Linux 9, including amd64
+  Docker images built on the official nginx image pinned to its exact stable
+  version (the Debian-based variant; not alpine, not nginx:latest).**
+- **Server-rendered React, Next.js, Vue, Nuxt and Svelte pages that
+  mod_pagespeed recognizes as hydrated no longer break hydration because of
+  its HTML rewrites.** See Fixed.
+- **One cold start at the update, separate caches per server block, virtual
+  host and IIS site by default, and the server modules and the optimizer
+  updated together.** See Upgrade notes.
+- **On nginx, mod_pagespeed now processes a page after nginx's SSI,
+  sub_filter, charset and addition filters.** See Changed.
+- **The admin console now shows how much of the saving on responses served from the optimizer's cache came from compression applied by mod_pagespeed and how much from its optimization; your web server's own compression on other responses is not counted.**
+
+## Security
+
+This release fixes a large number of security issues in the nginx, Apache and IIS modules, the optimizer worker and the ASP.NET Core package. We recommend that all sites update. Several fixes change what is optimized or cached; the Changed and Upgrade notes sections list what operators will notice.
+
+- **Restricted content no longer reaches other clients.** Content that a server serves only to some clients (signed-in users, local addresses, or addresses an access rule admits) could appear in optimized resources, optimized pages, agent variants or cached responses served to other clients. Optimized output is now built only from content the site serves to any client, and access rules and origin caching restrictions are respected before anything is served from a cache. Affected: 2.7.0 and earlier. Update recommended for all sites, in particular those that restrict parts of a site by address, sign-in or access rules.
+- **Cached content stays with its site and URL.** A request could cause content cached for one site, URL or importing page to be served for another, or change how other pages reference optimized resources. Cached resources are now kept apart per site and per URL. Affected: 2.7.0 and earlier. Update recommended for all sites, in particular servers that host several sites.
+- **Optimizer requests stay on the site's own hosts.** With agent optimization on, a client could make the optimizer fetch from hosts the site does not serve, including internal ones. The optimizer now fetches only from hosts the site serves. Affected: 2.7.0 and earlier. Update recommended for sites with agent optimization on (nginx module and ASP.NET Core package).
+- **Optimized pages keep the page's structure.** In some pages, optimization could change how a browser reads the page's markup, so that text could be read as markup. Optimized pages now keep the structure the browser reads in the original. Affected: 2.7.0 and earlier. Update recommended for all sites, in particular sites that publish content from others.
+- **Requests can no longer exceed the server's configured limits.** Requests could cause the server to work beyond its configured limits or with filters the configuration forbids. Requests now stay within the configured values. Affected: 2.7.0 and earlier. Update recommended for all sites.
+- **Server workers are protected from crafted content.** Crafted content could stop a server worker, make it use memory or CPU far beyond the content's size, or, on nginx, expose worker memory in a response. The work and memory that one page, stylesheet or image can cause are now bounded, with new directives where operators may need to adjust a bound. Affected: 2.7.0 and earlier. Update recommended for all sites.
+
+Discovered by Anthropic's OSS Scanner, as vulnerabilities ANT-2026-0S05PU3F, ANT-2026-14RH9A6G, ANT-2026-1KNB25NP, ANT-2026-1UEL65XQ, ANT-2026-2ENVI6Y8, ANT-2026-2UMXI0CU, ANT-2026-3V8TBV0M, ANT-2026-4DHCDTO1, ANT-2026-63KEF12V, ANT-2026-7WDBOHQE, ANT-2026-8TUUI9SP, ANT-2026-ADRH50SF, ANT-2026-ANJU0AJJ, ANT-2026-AXLAULVI, ANT-2026-CXXZERMM, ANT-2026-E0YS05DA, ANT-2026-F9XA9QZT, ANT-2026-GBL6KS5Z, ANT-2026-GHH8ZRZQ, ANT-2026-GT69ZXBA, ANT-2026-GYB0WEBP, ANT-2026-I04H8ECV, ANT-2026-I99F82VL, ANT-2026-J9104QFK, ANT-2026-JS5S4FY8, ANT-2026-K4FEBWLL, ANT-2026-LUNJX7VG, ANT-2026-MOQVERBF, ANT-2026-N3ZEFVHQ, ANT-2026-NUYS6G5X, ANT-2026-O4L9FD3Y, ANT-2026-O9ZNTSJO, ANT-2026-OF3Q0VK8, ANT-2026-PAJ6XTED, ANT-2026-PQ4KEW95, ANT-2026-Q62IVSHN, ANT-2026-R5383I2X, ANT-2026-RIRYHATG, ANT-2026-SG3VWBO8, ANT-2026-SQJKH8Z4, ANT-2026-UWLNI6WG, ANT-2026-VIQSI8GY, ANT-2026-WOVG5M0P, ANT-2026-WT6VHC24, ANT-2026-XICYWB0G, ANT-2026-XSFSLU2S, ANT-2026-XTE7D2BW, ANT-2026-Y5L4AS94, ANT-2026-ZAY791Q4, and ANT-2026-ZUI2KO6Y. We thank the scanner team for the reports.
+
+The Envoy port is experimental, is not covered by this security update, and must not be exposed to untrusted networks.
+
+## Action required when upgrading
+
+- **One cold start at the update.** This release stores everything under new
+  cache keys, so the caches of the nginx, Apache and IIS modules, the
+  optimizer worker and the ASP.NET Core package start cold once, at the
+  update. Every page, stylesheet, script and image is fetched from the origin
+  once more and optimized again on its first request; expect extra CPU and
+  origin fetches until the caches refill, and some responses go out without
+  optimization until then. Pages with many resources may take a few more
+  views to be fully optimized. No purge is needed when updating: entries
+  stored by earlier versions are not used. On a cluster, update one node at a
+  time. Server blocks and virtual hosts now keep separate optimization caches by default. Sites on one server that should share optimized resources, such as a site and its static or CDN host on separate blocks, need the same explicit `CacheFragment`; share one only between sites you operate together. Nodes that share a cache and
+  list their own names or addresses in `server_name`, `ServerName`, `listen`
+  or `<VirtualHost>` derive different keyspaces; set the same
+  `CacheFragment` for that block on every node to keep sharing. Adding or
+  removing a server name or listen address later starts that block cold
+  again.
+- **Server modules and optimizer.** Update the server modules and the optimizer together: the modules need the optimizer release that ships with them, and in-place optimization stays off with an older one. The server logs why. Update the ASP.NET
+  Core package at the same time: while earlier and current versions share
+  one cache, neither uses the other's entries, so responses are served from
+  the origin or without optimization until every server runs this release.
+  Reload nginx, Apache or IIS after updating the optimizer; until the web
+  server reloads, its notifications to the optimizer are refused and counted,
+  and nothing new is optimized. Serving is not affected.
+- **Before a downgrade.** Flush the module cache (touch `cache.flush` in the
+  `FileCachePath`, or, with `EnableCachePurge on` or a `CacheFlushFilename`
+  set, purge the entire cache from the admin page), and purge the optimizer's
+  cache fully through the cache API (`POST /v1/cache/purge` with
+  `{"scope": "all", "confirm": "purge-all"}`) or stop the worker and remove
+  its cache volume, so that an earlier version does not serve entries stored
+  before the update.
+- **Downstream caches such as a CDN.** Purge them if your site was affected
+  by the issues in the Security section, because responses they stored
+  before the update remain until they expire. Purge cached HTML in any CDN
+  after upgrading if your site serves pages hydrated by a client-side
+  framework (see Fixed).
+- **Resources the server restricts to some clients are no longer
+  optimized.** Resources in locations that require sign-in or admit only
+  some addresses are no longer optimized, and pages no longer inline or
+  combine them; expect lower savings where such resources are linked from
+  open pages. To have a resource optimized, serve it to any client.
+- **`ForbidAllDisabledFilters`.** Where it is on, a filter that is off at a
+  given point, including one the rewrite level leaves out, stays off there:
+  only the scope that sets `ForbidAllDisabledFilters`, or one above it, can
+  enable it. Requests and lower scopes (such as `.htaccess`) can still turn
+  filters off.
+- **Loading from file.** A `LoadFromFileMatch` replacement written with `.`
+  or `..` path segments no longer loads from file; the resource is fetched
+  over HTTP instead. Write such replacements as plain paths.
+- **nginx: images served for another device class.** `expires` and
+  `add_header Cache-Control` no longer give a longer lifetime to an image
+  served for another device class. That response goes out with one
+  `Cache-Control` line, with each `max-age` and `s-maxage` shortened to 60
+  seconds or less. Responses marked `private`, `no-store` or `no-cache`, or
+  with an unreadable lifetime, are left as configured, and all other
+  responses keep the lifetime they had.
+
+## Fixed
+
+_Module (all ports unless named)_
+
+- **Server-rendered React, Next.js, Vue, Nuxt and Svelte pages that
+  mod_pagespeed recognizes as hydrated no longer break hydration because of
+  its HTML rewrites.** On pages it
+  recognizes as hydrated, mod_pagespeed leaves stylesheet and script URLs,
+  inline styles, comments, whitespace and script deferral unchanged and still
+  optimizes images, so CSS and script savings may drop on those pages.
+  Recognition can miss a page; on such a page, disable the filters listed in the
+  [hydrated pages guide](https://modpagespeed.com/docs/hydrated-pages/). A
+  server-wide option, `DetectHydratedPages`, turns recognition off. See
+  Upgrade notes for cached HTML in a CDN.
+- **A fallback image no longer sticks in a shared cache.** While a client's
+  own image variant was being written, the variant served in its place
+  carried the image's full cache lifetime, so a cache such as nginx
+  proxy_cache could keep handing a desktop client a phone-sized image until
+  it expired. Such a response now has a lifetime of at most 60 seconds; the
+  client's own variant keeps the full lifetime. Responses marked private,
+  no-store or no-cache, or with an unreadable lifetime, are left as
+  configured.
+- **A fragment-only reference in CSS, such as `url(#id)` naming an SVG mask,
+  now stays a fragment reference** when a stylesheet is cache-extended,
+  combined, inlined, outlined, reduced to its critical rules or rewritten
+  without being parsed, and when its references are made absolute, also with
+  rewrite domains or shards set. `url()` references inside CSS functions are
+  now resolved like other references.
+- **Fixed a possible crash under heavy fetch load** when many fetches for one
+  host were waiting.
+- **Fixed HTTPS fetches that were scheduled and then failed at once** when
+  the `FetchHttps` setting held only options such as `allow_self_signed`
+  without `enable`; HTTPS is now reported as unsupported in that case, so
+  those resources are skipped instead.
+- **A cache read or write that runs out of memory no longer fails the
+  request.** A read becomes a cache miss and a write a failed write, each
+  with a log line.
+- **The JavaScript minifier now leaves some scripts in legacy multibyte
+  encodings unminified, keeping the original code.**
+- **PageSpeed option values wrapped in more than one layer of quotes are now
+  read correctly.** A value in a query parameter, cookie or header that ends
+  in two or more layers of quotes, such as
+  `PageSpeedFilters=''rewrite_css''`, kept a layer of quotes and was not
+  applied; it is now fully unwrapped. Values with one layer of quotes behave
+  as before.
+- **Status 307 and 505 responses now carry their standard reason phrases.**
+  Where the module sets the reason phrase from the status code, a 307
+  response reported `OK` and a 505 response reported `Internal Server Error`;
+  they now read `Temporary Redirect` and `HTTP Version Not Supported`. A
+  Content-Type merged from a page's meta tag that names no charset no longer
+  ends in a stray `;`.
+- **JSON-LD blocks that hold a very small number are no longer left
+  unchanged on builds that use libc++, such as macOS builds.** A number that
+  underflows to a subnormal value, such as `1e-320`, is now read as on other
+  builds.
+- **nginx: `ModifyCachingHeaders off` no longer changes the caching headers
+  of `.pagespeed.` resources.** Optimized resources are sent with their
+  normal caching headers (long-lived when the hash matches, short and private
+  for the fallback), as with the setting on; HTML keeps the headers you set.
+  The option no longer applies to `.pagespeed.` resources, as on Apache and
+  IIS.
+- **nginx: a cache purge or flush now applies under every `location`.**
+  Under a location with `pagespeed` settings of its own (for example
+  `pagespeed standby;` for the server and `pagespeed on;` in `location /`), a
+  purge, a whole-cache purge from the admin console or a touched
+  `cache.flush` reported success, but the purged content kept being served
+  until the cached entries expired on their own.
+- **Apache: an optimized HTML page now carries the `Vary` names it depends on
+  when the origin flushes the response early.**
+- **IIS: a stylesheet, script or image that the module optimizes in place is
+  no longer kept in IIS's own response caches** (the HTTP.sys kernel cache
+  and the output cache), which could keep serving the original instead of
+  the optimized resource. Other files, and paths excluded from optimization
+  with `Disallow`, keep IIS's caching.
+
+_Optimizer worker and its nginx module_
+
+- **The JavaScript minifier now leaves some scripts in legacy multibyte
+  encodings unminified, keeping the original code.**
+- **A visitor whose browser did not ask for reduced data no longer receives
+  the reduced-quality Save-Data image when the normal image for that screen
+  is not ready yet; it gets a normal image instead.**
+- **An origin refresh signal that arrives while the same page is being
+  optimized is now applied when that work finishes, instead of being
+  dropped.**
+- **Print stylesheets no longer change how the page looks on screen when
+  critical CSS is on.** Rules from a stylesheet or `<style>` element with
+  `media="print"` could be inlined as screen rules, so a print layout that
+  hides the header and footer also hid them on screen. The inlined CSS now
+  keeps each stylesheet's media. A print stylesheet whose media value or
+  content cannot be read safely is left out of the inlined CSS.
+
+_ASP.NET Core package_
+
+- **Plain http sites now get critical CSS from their external
+  stylesheets.** `IHtmlProcessor` gains a `Process` overload that takes the
+  scheme; the existing signature is unchanged.
+- **A separately run optimizer worker now receives notifications from the
+  middleware.** With `Worker.SocketPath` set and `AutoStart` off (the
+  documented sidecar setup), the middleware dropped every notification, so
+  the worker built no optimized variants (images, critical CSS) for the
+  site.
+- **Print stylesheets no longer change how the page looks on screen when
+  critical CSS is on.** See the optimizer worker above.
+
+_Envoy (experimental)_
+
+- **Replies to the administrative pages are now sent from the request's own
+  thread**, so an administrative request no longer stops the proxy.
+- **Touching `cache.flush` in the cache directory flushes the cache, for
+  hosts with `virtual_hosts` options too.** Before, a flush had no effect on
+  a running Envoy.
+
+## Changed
+
+_Module (all ports unless named)_
+
+- **Optimized resources are cached per server block or virtual host by
+  default.** A server block or virtual host without a `CacheFragment` now
+  gets one derived from its server names and listen addresses, and logs it
+  at startup. An optimized resource URL produced by one block and requested
+  through another is now rebuilt by that block, or answered with 404 if it
+  cannot rebuild it. A `CacheFragment` set in the nginx `http` block or for
+  the whole Apache server is still shared by every block that inherits it;
+  startup warns about it. Sharing between blocks and between nodes is
+  covered in Upgrade notes.
+- **Resources the server restricts to some clients are no longer
+  optimized.** A resource in a location that refuses clients without
+  credentials or from other addresses is no longer combined, inlined,
+  minified or optimized in place, for any client; clients the location
+  admits get it as the server serves it. Building an optimized resource, the
+  first time and again after its input expires, makes one extra request to
+  the site, which the server answers as for any client. When the site
+  answers with an error, a stale stored response is served in its place only
+  if the module fetched it itself; otherwise the request fails as the site's
+  response did. If the module cannot fetch the site's own resources (for
+  example, because its fetch configuration is broken), it no longer
+  optimizes them in place.
+- **nginx and Apache: the module's own fetches appear as 224.0.0.0.** The
+  module's fetches of a site's own resources appear as the address 224.0.0.0
+  to access rules and in the access log. Check rules that admit or limit
+  clients by address (allow and deny rules, rate limits and firewall
+  allowlists in the server configuration): resources under a rule that does
+  not admit 224.0.0.0 are not optimized, and a rule that limits clients by
+  address limits the module's fetches. There is no supported way to re-admit
+  the module's fetches.
+- **Scripts and stylesheets need a matching origin type to be optimized.**
+  They are now minified, rewritten and combined only when the origin labels
+  them with a script or stylesheet Content-Type; resources with a missing,
+  unrecognized or different type are left as they are.
+- **Stored originals follow the stricter caching headers.** Storing follows
+  whichever of the origin's and the server's caching headers is stricter: on
+  sites where a server directive sets the caching headers of an origin's
+  responses for browsers, the originals kept for in-place optimization are
+  stored only when both allow it, and expire with the shorter of the two
+  freshness lifetimes; responses still carry the directive's headers.
+  Responses whose origin states no caching are unchanged.
+- **A conditional request for an optimized resource now gets a 304 that
+  carries the same caching headers as the full response**, so browsers that
+  cached it earlier learn its long lifetime after one revalidation, and those
+  that honour `immutable` (desktop Firefox and Safari) stop revalidating it. Resources
+  whose input does not allow long caching, and entries cached before the
+  upgrade, still get a plain 304 until they are optimized again.
+- **Request-supplied size thresholds can only lower the configured ones.**
+  A request that asks for a higher inlining or flattening threshold gets the
+  configured value. `CssFlattenMaxBytes` can no longer be set per request;
+  set it in the server or directory configuration.
+- **Optimized image and stylesheet URLs no longer carry server limits; each
+  server applies its own configured values.** Previously emitted URLs that
+  carried such a value are served with the server's configured values, and
+  any other option such a URL carries is ignored, until the page is
+  regenerated.
+- **A page or stylesheet now inlines at most 4 MiB of images by default.**
+  Images beyond that keep their URL. Set `DocumentImageInlineMaxBytes` to
+  change the limit.
+- **Stylesheet limits.** Stylesheets with very long media lists relative to
+  their size are served unmodified. Stylesheets with more than 100 imports in
+  total, or with more imported CSS than the flattening limit allows for, are
+  no longer flattened. Preload hints may be omitted for stylesheets with very
+  many imports, fonts or image references.
+- **Some inline styles are now left as they were.** Inline styles and
+  stylesheets selected for inlining that contain `<` (for example range media
+  queries) are not minified or inlined. `outline_javascript` and
+  `outline_css` leave inline code in place on pages whose
+  Content-Security-Policy governs scripts or styles.
+- **Input limits.** Compressed HTML that inflates past 64 MiB is cut off:
+  nginx, Apache and IIS stop at that point, log a warning and end the
+  response normally, as they do for a corrupt compressed page, so a
+  downstream cache allowed to store the page can keep the shortened page.
+  Uncompressed pages are unaffected. JPEGs over 16384 pixels a side or 100
+  megapixels, whatever the configured resolution limit, and JPEGs whose
+  structure is far outside what encoders produce, are no longer recompressed
+  or converted to WebP; they are served as they are. A cached compressed
+  body that inflates past `MaxCacheableContentLength`, or 256 MiB at most,
+  stays compressed for a client that does not accept compression, and a
+  fetched body that inflates past 256 MiB fails like a corrupt one.
+- **Page limits.** A page is recognized as AMP only if its `<html>` element
+  comes within about the first 64 KiB; a later one is optimized as an
+  ordinary page, which can fail AMP validation. A page with more than 32
+  Content-Security-Policy policies no longer has its resources optimized; it
+  is still served. A `<base href>` longer than `MaxUrlSize` is not used, and
+  relative URLs on that page are left as they are. Pages with very long
+  leading whitespace are served without optimization; on elements with very
+  many attributes or `srcset` candidates, those parts are left as they are.
+- **On very large pages, some resources are now optimized over the next
+  views instead of the first.** The optimization of one page shares a fixed
+  limit on the input it loads at once and in total and on the rewrites it
+  starts; what is left over keeps its original URL on that view, is not
+  cached as a failure, and is optimized on a later view, since resources
+  already optimized cost nothing. With the debug filter on, such an element
+  carries a comment saying so.
+- **The `debug` filter shows image debug messages only for images optimized
+  while debug was on.** An image optimized while debug was off shows them
+  only after its cached result expires or the cache is flushed; the
+  per-request inlining note still appears.
+- **nginx: mod_pagespeed now processes a page after nginx's SSI, sub_filter,
+  charset and addition filters.** This applies to the packaged module and to
+  builds from the module's `config` file. Stylesheets, scripts and images
+  that SSI includes or sub_filter inserts are now optimized, and the charset
+  directive's choice is kept on rewritten HTML. The other side of the change:
+  sub_filter no longer sees mod_pagespeed's output, so a sub_filter that
+  edited the rewritten page (for example the optimized resource URLs or the
+  script mod_pagespeed adds) no longer matches it. Header modules such as
+  headers-more now run before mod_pagespeed too, so their caching headers on
+  rewritten HTML are replaced exactly like those from `add_header`. `expires`
+  and `add_header` no longer override mod_pagespeed's Cache-Control on
+  rewritten HTML: a rewritten page carries one Cache-Control line,
+  `max-age=0, no-cache`, with no `Expires`, and other Cache-Control values
+  from `add_header`, a header module or the origin are replaced, except that
+  `no-transform` stays on that line (as do `private` and `no-store`). A
+  response marked `Vary: Accept-Encoding` by mod_pagespeed no longer gets a
+  second Vary line from `gzip_vary`. `pagespeed InPlaceSMaxAgeSec` now takes
+  effect: the first time mod_pagespeed serves a resource it has not
+  optimized yet (in-place optimization) and records it itself rather than
+  through an optimizer worker, it adds `s-maxage` (10 seconds by default) to
+  the Cache-Control so shared caches fetch the optimized version soon. It is
+  added when the response states no Cache-Control lifetime, it shortens a
+  longer `s-maxage` to 10 and is added next to a `max-age` above 10 seconds
+  (a `max-age` or `s-maxage` of 10 seconds or less is left alone), and it is
+  never added to a response marked `private`, `no-store`, `no-cache` or
+  `no-transform` or to the answer to a request that carried `Authorization`.
+  Set `pagespeed InPlaceSMaxAgeSec -1;` at http or server level to turn it
+  off. To keep the old caching headers on HTML, set
+  `pagespeed ModifyCachingHeaders off;`: rewriting continues and every
+  Cache-Control line is kept as it was (at http or server level this also
+  turns off the `s-maxage`); `pagespeed off;` in a location also keeps them
+  but turns rewriting off there. There is no option to restore the old
+  filter position itself.
+- **nginx: rewritten HTML keeps `private` and `no-store`.** When
+  `add_header`, a header module or the origin states `private` or `no-store`
+  on the page's Cache-Control header, it stays on the one Cache-Control line
+  mod_pagespeed writes for the rewritten page (for example
+  `max-age=0, no-cache, no-store`), also when `MaxHtmlCacheTimeMs` is raised,
+  so rewritten pages keep the `private` and `no-store` you set.
+  `pagespeed ModifyCachingHeaders off;` keeps every Cache-Control line as it
+  was.
+- **Apache: rewritten HTML keeps `private` and `no-store`.** mod_pagespeed
+  now keeps `private` and `no-store` from any Cache-Control header on the
+  HTML it rewrites, so rewritten pages keep the origin's and the server
+  configuration's private and no-store.
+- **Apache: an HTML page larger than 1 MiB, compressed or not, is flushed
+  through the rewriter every 1 MiB.** A page of 1 MiB or less is unaffected.
+  On a larger page, edits to the response headers from markup after the
+  first 1 MiB are lost, including the `Link` headers that rule packs add, and
+  optimizations that span the page, such as combining, work per window.
+- **Apache: when an HTML response's headers arrive from the origin ahead of
+  its first body byte, they now go out with the first body bytes** rather
+  than at once. A page the origin then sends in one piece arrives with a
+  `Content-Length` where it was chunked before.
+- **The Apache module packages no longer carry debug information**, which
+  makes them smaller to download and install. The debug information is
+  published next to each release, as
+  `libmod_pagespeed-debug-linux-<arch>.tar.gz`, for crash analysis.
+- **IIS: PageSpeed responses now follow the site's IIS access rules.** IIS
+  access rules (IP and Domain Restrictions, Request Filtering, URL
+  Authorization, Windows, Basic or Forms authentication, and URL Rewrite
+  rules that end a request) apply to optimized resources, in-place optimized
+  responses, the admin, statistics and console pages, beacons and static
+  assets as they do to the rest of the site. A site that requires sign-in
+  asks for it on these responses too. Admitted requests are served as before.
+  A URL Rewrite rule that only changes the URL leaves these responses served
+  for the original URL.
+- **IIS: the module's own fetches appear as 224.0.0.0.** The module's
+  fetches of a site's own resources appear as the address 224.0.0.0 to IP
+  and Domain Restrictions and in the IIS request log (c-ip 224.0.0.0). Check
+  rules that admit clients by address: resources under a rule that does not
+  admit 224.0.0.0 are not optimized. There is no supported way to re-admit
+  the module's fetches.
+- **IIS: each site has its own cache.** An IIS site without a `CacheFragment`
+  now gets its own cache keyspace, named by the site's id and name and shared
+  by all of its applications. A site that is renamed, or deleted and created
+  again under a new name, also starts cold. A site deleted and created again
+  under the same name and id keeps its earlier cache; flush the cache when a
+  site is recreated for a different owner.
+
+_Optimizer worker and its nginx module_
+
+- **When the optimizer cannot defer a page's stylesheet, it no longer adds
+  an inline copy of the critical CSS, so the HTML is smaller; first paint
+  still waits for the full stylesheet, as before.** Pages whose stylesheet
+  does not block the first paint keep the inline copy. Inlining with deferral
+  is unchanged where a real render has confirmed the page's above-the-fold
+  CSS (browser analysis). If you set `--no-async-css`, pages no longer get an
+  inline above-the-fold CSS block while stylesheets stay render-blocking;
+  first paint still waits for the stylesheet as before, so check your pages
+  look right, and note that inlining without deferral is no longer
+  available.
+- **A page whose critical CSS contains text that a browser could read as
+  markup is served without the inline critical CSS**, and its stylesheets
+  stay render-blocking. Range media queries are not affected when a space
+  follows each `<`.
+- **XHTML pages (served as application/xhtml+xml) are served without the
+  inline critical CSS block, and their stylesheets stay render-blocking.**
+- **Lazy-loaded images now also get `decoding="async"`, unless the page
+  already sets a decoding attribute; the LCP candidate image and the first
+  iframe are left as they are.**
+- **Fetches for agent-ready copies ask the origin for a compressed response,
+  using less origin bandwidth; requires a curl build with compression
+  support, as standard builds have.**
+- **Image variants are now checked against the original image.** Large noisy
+  photos are no longer smoothed before encoding; their variants keep the
+  original's detail and are larger than before, in some cases much larger,
+  though always smaller than the source. Some noisy photos no longer get
+  an AVIF variant and are served the JPEG variant instead, and when no
+  smaller variant meets the quality bar the original is served. The
+  `--denoise-*` options and their config keys are deprecated and ignored,
+  and the statistics field `content_analysis.denoised` and the metric
+  `pagespeed_images_denoised_total` are deprecated and always 0.
+- **CSS minification keeps `/*! ... */` comments** and comments containing
+  `@license` or `@preserve`.
+- **Cached content is confirmed before other pages use it.**
+  Before the optimizer first uses a cached stylesheet, image or page to
+  build another page's optimized variant or `/llms.txt`, it makes one request
+  for it to confirm that the site serves it to any client, and confirms it
+  again every few minutes. Content it cannot confirm is left out, and a
+  stylesheet left out stays render-blocking. Pages served under a host name
+  the web server has not confirmed for the site can lose more. In the nginx
+  module, that includes every page of a catch-all block such as
+  `server_name _;`: until the name is confirmed, those pages are optimized
+  without other cached files, so they get no critical CSS from external
+  stylesheets and no image dimensions, and their stylesheets keep their
+  `@import` rules. To confirm a name, list it in the server block's
+  `server_name` or in the optimizer's host alias file
+  (`pagespeed-hosts.conf`). Stylesheets that mod_pagespeed passes to the
+  optimizer keep their `@import` rules. For the ASP.NET Core package, see
+  below.
+- **nginx module: agent optimization runs only for confirmed host names.**
+  The synthesized `/llms.txt` and the markdown variant for agents apply
+  only to host names that the server block lists in `server_name` (exact,
+  wildcard or regular-expression names) or that the optimizer's host alias
+  file names. A listed name with a port other than the one nginx itself
+  listens on counts as unlisted, unless the host alias file names that host
+  and port; behind a port mapping or a proxy the port visitors use is not
+  nginx's listen port, so list that host and port in the alias file to keep
+  agent optimization. Under any other name, for example on a catch-all
+  `server_name _;` block or when a site is reached by its address,
+  `/llms.txt` comes from the origin, agents get the normal page, and while
+  agent optimization is on HTML is cached but not optimized. List every name
+  a site is reached by in its `server_name` to keep agent optimization for
+  it. For a reprocess requested through the API, the optimizer builds no
+  markdown variant and no `/llms.txt`, and still optimizes the page itself.
+- **nginx module: the optimizer's own agent fetches appear as 224.0.0.0.**
+  When they arrive from the server's own host, they appear as the client
+  address `224.0.0.0` to `allow` and `deny`, `$remote_addr` and the access
+  log. Check rules that admit clients by address: pages under a rule that
+  does not admit 224.0.0.0 are not included in the agent outputs.
+- **nginx module: responses from the optimizer's cache follow nginx's access
+  rules** (`allow` and `deny`, `auth_basic`, `auth_request` and other access
+  modules), as other responses do. The async-CSS loader script and the Web
+  Bot Auth public counter follow the same rules; in a location that requires
+  credentials, exempt their paths for clients that should reach them. As
+  before, `limit_req` and `limit_conn` count cache hits.
+- **The optimizer keeps the work of each site apart.** A notification can
+  name the site it belongs to, and everything the optimizer stores, reads,
+  deduplicates or purges for it stays within that site. Notifications
+  without a site behave as before. `POST /v1/cache/purge`,
+  `/v1/cache/reprocess`, `/v1/cache/content` and `/v1/cache/urls` take an
+  optional `site`; a purge without one covers every site the optimizer has
+  stored work for, and its response lists the count per site. The optimizer
+  remembers those sites in `pagespeed-sites.conf` beside
+  `pagespeed-hosts.conf`.
+
+_ASP.NET Core package_
+
+- **A response is cached only when the request was anonymous**: no
+  `Authorization` or `Proxy-Authorization` header, no signed-in user, and no
+  authorization requirement on the endpoint (endpoints that allow anonymous
+  access are cached). Pages and assets requested only by signed-in clients
+  are not cached; a page served to a signed-in client is optimized for that
+  response.
+- **Agent optimization applies only to host names listed in the
+  application's `AllowedHosts`.** When `AllowedHosts` is `*` or not set,
+  agents get the normal page, and while agent optimization is on HTML is
+  cached but not optimized; list the site's host names in `AllowedHosts` to
+  keep both. An app whose `AllowedHosts` is `*` (the project template
+  default) or not set uses a stylesheet or image the package cached for
+  a visitor who was not signed in, so its pages keep critical CSS and image
+  dimensions as long as those files are served to visitors who are not
+  signed in; a stylesheet or image cached only for signed-in requests is not
+  used.
+- **ASP.NET Core: the optimizer's agent fetches appear as 224.0.0.0.**
+  Middleware and endpoints after `UsePageSpeed()` see the agent fetches (the
+  agent optimization render and the synthesized `/llms.txt`) with the client
+  address 224.0.0.0, so pages under a rule that does not admit 224.0.0.0 are
+  not included in the agent outputs. Middleware that decides by client
+  address and runs before `UsePageSpeed()` needs `UsePageSpeedAgentFetchLabel()`
+  ahead of it; behind a proxy, call `UseForwardedHeaders()` before both.
+
+## Added
+
+- **The admin console now shows how much of the saving on responses served from the optimizer's cache came from compression applied by mod_pagespeed and how much from its optimization; your web server's own compression on other responses is not counted.** The two parts, plus a share not yet attributed, add up to the total saving. The total now counts HTML that the optimizer makes larger, for example by inlining above-the-fold CSS or adding preload hints; earlier versions counted that as zero, so the total can read lower than before without anything optimizing less. After the update the caches start cold, so the split fills in as pages are re-optimized; until then the console shows the total only.
+- **The nginx module is available for Ubuntu 26.04**, for its stock nginx, in
+  the same `nginx-module-pagespeed` package as on other Ubuntu releases, and
+  the nginx.org module package is now also available for Enterprise Linux 9.
+  See Packages above.
+- **New directive `CssParseMaxBytes`, default 2097152 (2 MiB).** Every filter
+  that parses a stylesheet as a root leaves one larger than this unmodified:
+  an external stylesheet, one inlined in the page, and the top-level
+  stylesheet of an import flattening alike. It is not parsed, rewritten,
+  flattened, combined, summarized for critical CSS or scanned for fonts, and
+  its imports are not fetched. The `style` attribute of an image is covered
+  too: one longer than this is not read for the image's dimensions, so the
+  image is not resized from it. Parsing costs memory many times a
+  stylesheet's size, so an operator who sets a larger value, or zero or less
+  for no limit, accepts that memory cost in every server worker. It is set in
+  the server or directory configuration, not per request.
+- **New directive `DocumentImageInlineMaxBytes`, default 4194304 (4 MiB).**
+  It bounds the image bytes inlined into one page or one stylesheet, images
+  inlined into CSS included. Once the budget is spent, further images keep
+  their URL, with no error and no partial inlining. A request may lower it,
+  never raise it. WeAmp.PageSpeed.AspNetCore accepts the new CssParseMaxBytes and DocumentImageInlineMaxBytes settings.
+- **New directive `DebugOutputMaxBytes`, default 1048576 (1 MiB).** It bounds
+  the bytes of debug comments the `debug` filter writes into one document.
+  Once the budget is spent, no further debug comments are written and one
+  final comment says the output was truncated at the limit. Zero or less
+  means no limit. It is set in the server or location configuration and
+  cannot be changed by a request.
+- **Statistics:** `css_filter_parse_max_bytes_exceeded` counts stylesheets
+  and `style` attributes over `CssParseMaxBytes`, and
+  `rewrite_budget_input_bytes_hits`, `rewrite_budget_input_loads_hits`,
+  `rewrite_budget_contexts_hits` and `rewrite_budget_partition_entries_hits`
+  count how often a page's resources are left for a later view.
+- **For C API embedders:** the C API (PS_API 1.12) gains site identity:
+  `PS_SITE_ID_CHARS`, the `PS_NOTIFY_FLAG_HOST_VOUCHED` and
+  `PS_NOTIFY_FLAG_FROM_MODULE` flags, the `site` and `notify_flags` fields of
+  `ps_notify_params_t`, and `ps_cache_read_best_site`,
+  `ps_cache_read_alternate_site` and `ps_cache_write_original_site`. A caller
+  of `ps_notify_worker_ex` built against an earlier header is still served,
+  without a site, and the library logs that once per process.
+  `ps_html_config_t` gains a `scheme` field: initialize with
+  `ps_html_config_init_auto` and set it to the page's scheme; a config from
+  `ps_html_config_init` keeps reading under `https`.
+
 # mod_pagespeed 2.7.0 Release Notes
 
 **Release date:** 2026-10-31

@@ -266,6 +266,17 @@ TEST_F(CriticalSelectorFilterTest,
                            "<body><div>Stuff</div></body>"));
 }
 
+// Likewise a kept selector whose escape decodes to '<' and a letter.
+TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterKeepsTheLink) {
+  SetResponseWithDefaultHeaders(
+      "c.css", kContentTypeCss,
+      "label[for=\"\\3Cmain\"]{text-decoration:underline}", 100);
+  ValidateNoChanges("escaped_lt_letter",
+                    StrCat("<head>", CssLinkHref("c.css"),
+                           "</head>"
+                           "<body><div>Stuff</div></body>"));
+}
+
 TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {
   // A style-src policy without 'unsafe-inline' would make the browser block
   // the inline <style> blocks this filter swaps in for <link> tags, so the
@@ -1289,6 +1300,24 @@ TEST_F(CriticalSelectorWithRewriteCssFilterTest, ProperlyUsedOptimized) {
              Deferred(link_b),
              "</head>"
              "<body><div>Stuff</div></body>"));
+}
+
+// A fragment-only reference stays as written in critical rules inlined from
+// a stylesheet in another directory, with a rewrite domain set.
+TEST_F(CriticalSelectorFilterTest, FragmentReferenceKeptOnRewriteDomain) {
+  options()->ClearSignatureForTesting();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  ASSERT_TRUE(lawyer->AddRewriteDomainMapping("http://cdn.com", kTestDomain,
+                                              message_handler()));
+  server_context()->ComputeSignature(options());
+  SetResponseWithDefaultHeaders("dir/f.css", kContentTypeCss,
+                                "div { mask: url(#m); }", 100);
+  GoogleString html = StrCat("<head>", CssLinkHref("dir/f.css"),
+                             "</head><body><div>Stuff</div></body>");
+  ValidateExpected("fragment", html,
+                   StrCat("<head><style>div{mask:url(#m)}</style>", JsLoader(),
+                          Deferred(CssLinkHref("dir/f.css")),
+                          "</head><body><div>Stuff</div></body>"));
 }
 
 class CriticalSelectorWithCombinerFilterTest

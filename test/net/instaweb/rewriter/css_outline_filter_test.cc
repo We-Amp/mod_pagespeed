@@ -166,6 +166,51 @@ TEST_F(CssOutlineFilterTest, DoNotOutlineIntegrityStyle) {
                     "<style INTEGRITY=\"sha384-y\">b { color: blue; }</style>");
 }
 
+// A policy that governs styles keeps the style inline; one that does not
+// leaves outlining alone.
+TEST_F(CssOutlineFilterTest, StyleStaysInlineUnderStylePolicy) {
+  SetupOutliner();
+  ValidateNoChanges("style_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"style-src 'self'\">"
+                    "<style>.a { color: red; }</style>");
+  ValidateNoChanges("default_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"default-src 'self'\">"
+                    "<style>.a { color: red; }</style>");
+  ValidateNoChanges("nonce_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"style-src 'nonce-abc'\">"
+                    "<style nonce=\"abc\">.a { color: red; }</style>");
+}
+
+TEST_F(CssOutlineFilterTest, StyleIsOutlinedUnderUnrelatedPolicy) {
+  SetupOutliner();
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src 'self'\">";
+  ValidateExpected("irrelevant_csp",
+                   StrCat(kCsp, "<style>.a { color: red; }</style>"),
+                   StrCat(kCsp, "<link rel=\"stylesheet\" href=\"",
+                          Encode(kTestDomain, "co", "0", "_", "css"), "\">"));
+}
+
+// An SVG or MathML style element is not an HTML style element, so it is not
+// outlined; an HTML style inside an integration point is.
+TEST_F(CssOutlineFilterTest, ForeignStyleIsNotOutlined) {
+  SetupOutliner();
+  ValidateNoChanges("svg_style",
+                    "<svg><style>.a { color: red; }</style></svg>"
+                    "<math><style>.b { color: blue; }</style></math>");
+  ValidateExpected(
+      "foreign_object_style",
+      "<svg><foreignObject><style>.a { color: red; }</style>"
+      "</foreignObject></svg>",
+      StrCat("<svg><foreignObject><link rel=\"stylesheet\" href=\"",
+             Encode(kTestDomain, "co", "0", "_", "css"),
+             "\"></foreignObject></svg>"));
+}
+
 TEST_F(CssOutlineFilterTest, OutlineStyleMD5) {
   SetupOutliner();
   UseMd5Hasher();
@@ -273,6 +318,22 @@ TEST_F(CssOutlineFilterTest, RewriteDomain) {
   GoogleString content;
   ASSERT_TRUE(FetchResourceUrl(expected_url, &content));
   EXPECT_EQ(".a { color: red; }", content);
+}
+
+// Fragment-only references stay as written in a style block outlined onto
+// a rewrite domain.
+TEST_F(CssOutlineFilterTest, FragmentReferenceKeptOnRewriteDomain) {
+  SetupOutliner();
+  AddRewriteDomainMapping("cdn.com", kTestDomain);
+
+  GoogleString expected_url = Encode("http://cdn.com/", "co", "0", "_", "css");
+  ValidateExpected(
+      "fragment", "<style>.m { mask: url(#m) } .n { mask: url('#n') }</style>",
+      StrCat("<link rel=\"stylesheet\" href=\"", expected_url, "\">"));
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(expected_url, &content));
+  EXPECT_EQ(".m { mask: url(#m) } .n { mask: url('#n') }", content);
 }
 
 }  // namespace

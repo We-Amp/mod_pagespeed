@@ -32,9 +32,11 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/packs/signature_format.h"
+#include "pagespeed/kernel/util/copy_on_write.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/message_handler_test_base.h"
@@ -735,6 +737,44 @@ TEST_F(RewriteOptionsTest, MergeCacheInvalidationTimeStampTwoLarger) {
   EXPECT_EQ(22222222, options_.cache_invalidation_timestamp());
 }
 
+// A copy of the options made at configuration time, as a web server makes for
+// a location or directory with settings of its own, does not see a flush or a
+// purge recorded on the source later.  Taking the source's current PurgeSet
+// gives a request's copy both, and leaves its own settings alone.
+TEST_F(RewriteOptionsTest, CopyTakesLaterPurgesFromPurgeSet) {
+  const char kPurged[] = "http://example.com/purged.css";
+  const char kOther[] = "http://example.com/other.css";
+  RewriteOptions server(&thread_system_);
+  server.UpdateCacheInvalidationTimestampMs(1000);
+  std::unique_ptr<RewriteOptions> location(server.Clone());
+  location->set_css_inline_max_bytes(7);
+
+  // A whole-cache flush at 2000 and a purge of one URL at 3000.
+  server.UpdateCacheInvalidationTimestampMs(2000);
+  CopyOnWrite<PurgeSet> purges(server.purge_set());
+  purges.MakeWriteable()->Put(kPurged, 3000);
+  EXPECT_TRUE(server.UpdateCachePurgeSet(purges));
+
+  std::unique_ptr<RewriteOptions> request(location->Clone());
+  EXPECT_EQ(1000, request->cache_invalidation_timestamp());
+  EXPECT_TRUE(request->IsUrlCacheValid(kOther, 1500, true));
+  EXPECT_TRUE(request->IsUrlCacheValid(kPurged, 2500, true));
+
+  EXPECT_TRUE(request->UpdateCachePurgeSet(server.purge_set()));
+  EXPECT_EQ(2000, request->cache_invalidation_timestamp());
+  EXPECT_FALSE(request->IsUrlCacheValid(kOther, 1500, true));
+  EXPECT_TRUE(request->IsUrlCacheValid(kOther, 2500, true));
+  EXPECT_FALSE(request->IsUrlCacheValid(kPurged, 2500, true));
+  EXPECT_TRUE(request->IsUrlCacheValid(kPurged, 3500, true));
+  EXPECT_EQ(7, request->css_inline_max_bytes());
+  EXPECT_EQ(server.PurgeSetString(), request->PurgeSetString());
+
+  // Taking the same PurgeSet again changes nothing.
+  EXPECT_FALSE(request->UpdateCachePurgeSet(server.purge_set()));
+  // The configuration-time copy itself is not modified.
+  EXPECT_EQ(1000, location->cache_invalidation_timestamp());
+}
+
 TEST_F(RewriteOptionsTest, MergeOnlyProcessScopeOptions) {
   RewriteOptions dest(&thread_system_), src(&thread_system_);
   dest.set_image_max_rewrites_at_once(2);
@@ -840,6 +880,175 @@ TEST_F(RewriteOptionsTest, ForbidFilter) {
       RewriteOptions::FilterId(RewriteOptions::kFlattenCssImports)));
 }
 
+// The tests below build options in production order: configuration scopes
+// first, merged the way the server merges them, then the request last.
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledRefusesRequestEnablingLevelOff) {
+  // The configuration forbids all disabled filters at the core level; the
+  // request asks for a filter that is off only because the level leaves it
+  // out, and for one the configuration disabled.
+  RewriteOptions site(&thread_system_), request(&thread_system_),
+      later(&thread_system_);
+  site.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  site.DisableFilter(RewriteOptions::kCombineCss);
+  site.set_forbid_all_disabled_filters(true);
+  NullMessageHandler handler;
+  ASSERT_TRUE(request.AdjustFiltersByCommaSeparatedList(
+      "+remove_comments,+combine_css", &handler));
+  MergeOptions(site, request);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRemoveComments));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kRemoveComments));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
+
+  // The refusal is recorded: a later merge asking again changes nothing.
+  ASSERT_TRUE(
+      later.AdjustFiltersByCommaSeparatedList("+remove_comments", &handler));
+  options_.Merge(later);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRemoveComments));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kRemoveComments));
+}
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledRefusesRequestRaisingLevel) {
+  RewriteOptions site(&thread_system_), request(&thread_system_);
+  site.SetRewriteLevel(RewriteOptions::kPassThrough);
+  site.EnableFilter(RewriteOptions::kRewriteCss);
+  site.set_forbid_all_disabled_filters(true);
+  request.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  MergeOptions(site, request);
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kInlineCss));
+}
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledRefusesRequestDroppingPreserve) {
+  RewriteOptions site(&thread_system_), request(&thread_system_);
+  site.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  site.set_css_preserve_urls(true);
+  site.set_forbid_all_disabled_filters(true);
+  request.set_css_preserve_urls(false);
+  options_.Merge(site);
+  ASSERT_FALSE(options_.Enabled(RewriteOptions::kExtendCacheCss));
+  options_.Merge(request);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kExtendCacheCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kExtendCacheCss));
+}
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledNoscriptRequestEnablesNothing) {
+  // A noscript request turns off filters that need script and asks for the
+  // noscript redirect handler, which was not on: only the first takes.
+  RewriteOptions site(&thread_system_), request(&thread_system_);
+  site.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  site.EnableFilter(RewriteOptions::kDeferJavascript);
+  site.set_forbid_all_disabled_filters(true);
+  request.DisableFiltersRequiringScriptExecution();
+  request.EnableFilter(RewriteOptions::kHandleNoscriptRedirect);
+  MergeOptions(site, request);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDeferJavascript));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kHandleNoscriptRedirect));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kHandleNoscriptRedirect));
+}
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledKeepsSubsetAndSameScopeEnables) {
+  // Directory scopes as Apache merges them: the parent enables three filters
+  // and disables one; the child forbids all disabled filters, disables the
+  // three and enables the fourth again in the same scope; a grandchild tries
+  // to enable the three again; then a request turns one filter off and asks
+  // for the three.
+  NullMessageHandler handler;
+  RewriteOptions parent(&thread_system_), child(&thread_system_),
+      grandchild(&thread_system_), request(&thread_system_);
+  parent.set_forbid_all_disabled_filters(false);
+  parent.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  parent.DisableFilter(RewriteOptions::kInlineCss);
+  ASSERT_TRUE(parent.AdjustFiltersByCommaSeparatedList(
+      "+remove_quotes,+remove_comments,+collapse_whitespace", &handler));
+  child.set_forbid_all_disabled_filters(true);
+  ASSERT_TRUE(child.AdjustFiltersByCommaSeparatedList(
+      "-remove_quotes,-remove_comments,-collapse_whitespace", &handler));
+  child.EnableFilter(RewriteOptions::kInlineCss);
+  grandchild.set_forbid_all_disabled_filters(false);
+  grandchild.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  ASSERT_TRUE(grandchild.AdjustFiltersByCommaSeparatedList(
+      "+remove_quotes,+remove_comments,+collapse_whitespace", &handler));
+
+  RewriteOptions child_dir(&thread_system_), grandchild_dir(&thread_system_);
+  child_dir.Merge(parent);
+  child_dir.Merge(child);
+  EXPECT_TRUE(child_dir.Enabled(RewriteOptions::kInlineCss));
+  EXPECT_FALSE(child_dir.Enabled(RewriteOptions::kRemoveComments));
+  grandchild_dir.Merge(child_dir);
+  grandchild_dir.Merge(grandchild);
+  EXPECT_TRUE(grandchild_dir.forbid_all_disabled_filters());
+  EXPECT_TRUE(grandchild_dir.Enabled(RewriteOptions::kInlineCss));
+  EXPECT_FALSE(grandchild_dir.Enabled(RewriteOptions::kRemoveComments));
+  EXPECT_TRUE(grandchild_dir.Forbidden(RewriteOptions::kRemoveComments));
+
+  ASSERT_TRUE(request.AdjustFiltersByCommaSeparatedList(
+      "-rewrite_css,+remove_quotes,+remove_comments", &handler));
+  options_.Merge(grandchild_dir);
+  options_.Merge(request);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRewriteCss));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRemoveQuotes));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRemoveComments));
+}
+
+TEST_F(RewriteOptionsTest, DisabledButNotForbiddenFilterCanBeRequested) {
+  // Control: without a forbid, a request may still enable a filter that a
+  // scope above it merely disabled.
+  RewriteOptions site(&thread_system_), request(&thread_system_);
+  site.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  site.DisableFilter(RewriteOptions::kCombineCss);
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      request.AdjustFiltersByCommaSeparatedList("+combine_css", &handler));
+  MergeOptions(site, request);
+  EXPECT_FALSE(options_.forbid_all_disabled_filters());
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCssCombinerId));
+}
+
+TEST_F(RewriteOptionsTest, ForbiddenFilterStaysOffInExperimentArm) {
+  // The configuration forbids a filter; an experiment arm with its own level
+  // that would include it, and that names it, is assigned to the request.
+  NullMessageHandler handler;
+  options_.SetRewriteLevel(RewriteOptions::kPassThrough);
+  options_.ForbidFilter(RewriteOptions::kCombineCss);
+  options_.set_running_experiment(true);
+  ASSERT_TRUE(options_.AddExperimentSpec(
+      "id=41;percent=50;level=AllFilters;enable=combine_css", &handler));
+  options_.SetExperimentStateStr("a");
+  EXPECT_EQ(41, options_.experiment_id());
+  EXPECT_EQ(RewriteOptions::kAllFilters, options_.level());
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCssCombinerId));
+}
+
+TEST_F(RewriteOptionsTest, ForbidAllDisabledHoldsInExperimentArm) {
+  // The configuration disables a filter and forbids all disabled filters; an
+  // experiment arm whose level includes it is assigned to the request.
+  NullMessageHandler handler;
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  options_.DisableFilter(RewriteOptions::kInlineCss);
+  options_.set_forbid_all_disabled_filters(true);
+  options_.set_running_experiment(true);
+  ASSERT_TRUE(options_.AddExperimentSpec("id=43;percent=50;level=AllFilters",
+                                         &handler));
+  options_.SetExperimentStateStr("a");
+  EXPECT_EQ(43, options_.experiment_id());
+  EXPECT_EQ(RewriteOptions::kAllFilters, options_.level());
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kInlineCss));
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCssInlineId));
+}
+
 TEST_F(RewriteOptionsTest, ForbidCompoundFilterIds) {
   // "ce" is the compound id shared by the cache-extension filters; it does
   // not resolve to a single filter enum.  It counts as forbidden only once
@@ -900,6 +1109,37 @@ TEST_F(RewriteOptionsTest, RulePacksIsOnlyEverOnByName) {
             RewriteOptions::LookupFilterById("rpk"));
   EXPECT_STREQ("Rule Packs",
                RewriteOptions::FilterName(RewriteOptions::kRulePacks));
+}
+
+TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
+  GoogleString msg;
+  NullMessageHandler handler;
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options_.daemon_html_cache());
+  EXPECT_EQ(5 * 1024 * 1024, options_.daemon_html_max_bytes());
+  const GoogleString signature_before = [this] {
+    RewriteOptions copy(&thread_system_);
+    copy.ComputeSignature();
+    return copy.signature();
+  }();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                                "report-only", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            options_.daemon_html_cache());
+  // The serving modes do not exist yet, so they are configuration errors.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-variants", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlMaxBytes", "1000",
+                                                &msg, &handler));
+  EXPECT_EQ(1000, options_.daemon_html_max_bytes());
+  // Turning the report on does not re-key cached work.
+  options_.ComputeSignature();
+  EXPECT_EQ(signature_before, options_.signature());
 }
 
 TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
@@ -1315,10 +1555,14 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kCssImageInlineMaxBytes,
       RewriteOptions::kCssInlineMaxBytes,
       RewriteOptions::kCssOutlineMinBytes,
+      RewriteOptions::kCssParseMaxBytes,
       RewriteOptions::kCssPreserveURLs,
       RewriteOptions::kDefaultCacheHtml,
+      RewriteOptions::kDebugOutputMaxBytes,
+      RewriteOptions::kDetectHydratedPages,
       RewriteOptions::kDisableBackgroundFetchesForBots,
       RewriteOptions::kDisableRewriteOnNoTransform,
+      RewriteOptions::kDocumentImageInlineMaxBytes,
       RewriteOptions::kDomainRewriteCookies,
       RewriteOptions::kDomainRewriteHyperlinks,
       RewriteOptions::kDomainShardCount,
@@ -1443,6 +1687,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kRewriteUncacheableResources,
       RewriteOptions::kRulePackFile,
       RewriteOptions::kRulePackMode,
+      RewriteOptions::kDaemonHtmlCache,
+      RewriteOptions::kDaemonHtmlMaxBytes,
       RewriteOptions::kRulePackRequireSigned,
       RewriteOptions::kRunningExperiment,
       RewriteOptions::kServeStaleIfFetchError,
@@ -1824,6 +2070,22 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
   EXPECT_TRUE(options_.file_load_policy()->ShouldLoadFromFile(url4, &file_out));
   EXPECT_EQ("/example/images/a.jpeg", file_out);
 
+  // Directive names are matched case-insensitively.
+  EXPECT_EQ(RewriteOptions::kOptionOk, options_.ParseAndSetOptionFromName2(
+                                           "loadfromfilerulematch", "Disallow",
+                                           "\\.css$", &msg, &handler));
+  EXPECT_FALSE(
+      options_.file_load_policy()->ShouldLoadFromFile(url1, &file_out));
+  GoogleUrl url5("http://www.example.com/images/a.gif");
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                "LOADFROMFILERULEMATCH", "Allow", "\\.gif$", &msg, &handler));
+  EXPECT_TRUE(options_.file_load_policy()->ShouldLoadFromFile(url5, &file_out));
+  EXPECT_EQ("/example/images/a.gif", file_out);
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName2(
+                "LoadFromFileRulematch", "Allow", "[a-", &msg, &handler));
+
   // Domain lawyer options.
   std::unique_ptr<RewriteOptions> options2 =
       std::make_unique<RewriteOptions>(&thread_system_);
@@ -1959,12 +2221,12 @@ TEST_F(RewriteOptionsTest, SetOptionFromQuery) {
             options_.SetOptionFromQuery("arghh", ""));
   // Known option with a bad value.
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
-            options_.SetOptionFromQuery(RewriteOptions::kCssFlattenMaxBytes,
+            options_.SetOptionFromQuery(RewriteOptions::kCssInlineMaxBytes,
                                         "nuh-uh"));
   // Known option with a good value.
   EXPECT_EQ(
       RewriteOptions::kOptionOk,
-      options_.SetOptionFromQuery(RewriteOptions::kCssFlattenMaxBytes, "123"));
+      options_.SetOptionFromQuery(RewriteOptions::kCssInlineMaxBytes, "123"));
 }
 
 TEST_F(RewriteOptionsTest, ExperimentSpecTest) {

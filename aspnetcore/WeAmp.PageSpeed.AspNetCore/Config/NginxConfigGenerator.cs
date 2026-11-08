@@ -437,6 +437,7 @@ public class NginxConfigGenerator
     private static readonly HashSet<string> SafeCustomOptionKeys = new(StringComparer.Ordinal)
     {
         "CssInlineMaxBytes", "CssFlattenMaxBytes", "CssImageInlineMaxBytes", "CssOutlineMinBytes",
+        "CssParseMaxBytes", "DocumentImageInlineMaxBytes",
         "GoogleFontCssInlineMaxBytes", "ImageInlineMaxBytes", "ImageMaxRewritesAtOnce",
         "JsInlineMaxBytes", "JsOutlineMinBytes", "ImageRecompressionQuality", "JpegRecompressionQuality",
         "JpegRecompressionQualityForSmallScreens", "JpegQualityForSaveData", "WebpRecompressionQuality",

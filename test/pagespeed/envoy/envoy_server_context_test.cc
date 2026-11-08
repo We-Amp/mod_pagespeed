@@ -37,6 +37,8 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/cache/purge_set.h"
+#include "pagespeed/kernel/util/copy_on_write.h"
 #include "pagespeed/kernel/thread/pthread_thread_system.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/system_thread_system.h"
@@ -227,6 +229,15 @@ TEST_F(EnvoyServerContextVHostTest, FindOptionsForHostExactMatch) {
   EXPECT_EQ(1000, opts->html_rewrite_deadline_ms());
 }
 
+// A virtual host's options are frozen once configured, so requests on any
+// thread can merge them.
+TEST_F(EnvoyServerContextVHostTest, VHostOptionsAreFrozen) {
+  const EnvoyRewriteOptions* opts =
+      server_context_->FindOptionsForHost("api.example.com");
+  ASSERT_NE(nullptr, opts);
+  EXPECT_TRUE(opts->frozen());
+}
+
 // Test FindOptionsForHost with wildcard match.
 TEST_F(EnvoyServerContextVHostTest, FindOptionsForHostWildcardMatch) {
   const EnvoyRewriteOptions* opts =
@@ -275,6 +286,50 @@ TEST_F(EnvoyServerContextVHostTest, GetOptionsForHostNoMatchReturnsGlobal) {
   const RewriteOptions* opts =
       server_context_->GetOptionsForHost("unknown.example.net");
   EXPECT_EQ(server_context_->global_options(), opts);
+}
+
+// A request's copy of per-host options takes the flushes and purges recorded
+// on the server's options after the per-host options were cached, and keeps
+// the host's own settings.
+TEST_F(EnvoyServerContextVHostTest, RequestOptionsTakeLaterFlushAndPurges) {
+  const char kPurged[] = "http://api.example.com/purged.css";
+  const char kOther[] = "http://api.example.com/other.css";
+  RewriteOptions* global = server_context_->global_options();
+  global->UpdateCacheInvalidationTimestampMs(1000);
+  const RewriteOptions* host = server_context_->GetOptionsForHost("api.example.com");
+  ASSERT_NE(global, host);
+
+  // A whole-cache flush at 2000 and a purge of one URL at 3000, after the
+  // host's options were cached.
+  global->UpdateCacheInvalidationTimestampMs(2000);
+  CopyOnWrite<PurgeSet> purges(global->purge_set());
+  purges.MakeWriteable()->Put(kPurged, 3000);
+  global->UpdateCachePurgeSet(purges);
+
+  std::unique_ptr<RewriteOptions> stale(host->Clone());
+  EXPECT_EQ(1000, stale->cache_invalidation_timestamp());
+
+  std::unique_ptr<RewriteOptions> request(
+      server_context_->NewRequestOptions(*host));
+  EXPECT_EQ(2000, request->cache_invalidation_timestamp());
+  EXPECT_FALSE(request->IsUrlCacheValid(kOther, 1500, true));
+  EXPECT_TRUE(request->IsUrlCacheValid(kOther, 2500, true));
+  EXPECT_FALSE(request->IsUrlCacheValid(kPurged, 2500, true));
+  EXPECT_TRUE(request->IsUrlCacheValid(kPurged, 3500, true));
+  EXPECT_EQ(1000, EnvoyRewriteOptions::DynamicCast(request.get())
+                      ->html_rewrite_deadline_ms());
+  // The cached per-host options themselves are not modified.
+  EXPECT_EQ(1000, host->cache_invalidation_timestamp());
+}
+
+// A request's copy of the server's options is a plain copy.
+TEST_F(EnvoyServerContextVHostTest, RequestOptionsFromServerOptions) {
+  RewriteOptions* global = server_context_->global_options();
+  global->UpdateCacheInvalidationTimestampMs(1000);
+  std::unique_ptr<RewriteOptions> request(
+      server_context_->NewRequestOptions(*global));
+  EXPECT_EQ(1000, request->cache_invalidation_timestamp());
+  EXPECT_EQ(global->PurgeSetString(), request->PurgeSetString());
 }
 
 // Test that different hostnames get different merged options.

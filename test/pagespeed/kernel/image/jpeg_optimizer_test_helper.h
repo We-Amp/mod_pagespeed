@@ -41,6 +41,15 @@ bool IsJpegSegmentPresent(const GoogleString& data, int segment);
 // Helper function that returns num of progressive scans for the image.
 int GetNumScansInJpeg(const GoogleString& data);
 
+// Decodes the grayscale JPEG `source` and encodes its pixels again as a
+// progressive JPEG with exactly `num_scans` scans, every one of them carrying
+// entropy-coded data: the DC coefficients at reduced precision and their
+// refinement, then bands of AC coefficients, each sent at reduced precision
+// and refined. `num_scans` must lie in [4, 128]. Returns false if the source
+// cannot be decoded or libjpeg refuses the scan script.
+bool EncodeGrayJpegWithScans(const GoogleString& source, int num_scans,
+                             GoogleString* out);
+
 // Helper function to return the color profile segment marker.
 int GetColorProfileMarker();
 

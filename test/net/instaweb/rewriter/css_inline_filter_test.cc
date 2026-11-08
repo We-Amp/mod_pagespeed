@@ -145,7 +145,7 @@ class CssInlineFilterTest : public RewriteTestBase {
                      "<link rel='stylesheet' href='foo.css'>",
                      "<link rel='stylesheet' href='foo.css'>"
                      "<!--CSS not inlined since it contains "
-                     "style closing tag-->");
+                     "a less-than sign-->");
   }
 
   void TurnOnDebug() {
@@ -248,6 +248,23 @@ TEST_F(CssInlineFilterTest, ShardSubresources) {
       ".p2 { background-image: url('http://shard1.com/b2.png'); }";
   TestInlineCss("http://www.example.com/index.html",
                 "http://www.example.com/baz.css", "", css_in, true, css_out);
+}
+
+// Fragment-only references stay as written in a stylesheet inlined from
+// another directory, with shards set.
+TEST_F(CssInlineFilterTest, FragmentReferenceKeptWithShards) {
+  UseMd5Hasher();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  lawyer->AddShard("www.example.com", "shard1.com,shard2.com",
+                   &message_handler_);
+
+  const GoogleString css_in =
+      ".p1 { mask: url(#m); }"
+      ".p2 { mask: url('#n'); }";
+  const GoogleString css_out = css_in;
+  TestInlineCss("http://www.example.com/index.html",
+                "http://www.example.com/foo/baz.css", "", css_in, true,
+                css_out);
 }
 
 TEST_F(CssInlineFilterTest, DoNotInlineCssWithMediaNotScreen) {
@@ -755,6 +772,19 @@ TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagWithCapitalization) {
 
 TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagWithSpaces) {
   VerifyNoInliningForClosingStyleTag("</style abc>");
+}
+
+// A stylesheet with a tag in it stays external.
+TEST_F(CssInlineFilterTest, NoInliningOfAnyTag) {
+  VerifyNoInliningForClosingStyleTag("td[headers=\"<x\"]{padding:3px}");
+}
+
+TEST_F(CssInlineFilterTest, StylesheetWithoutMarkupIsInlined) {
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, "a>b{margin:0}",
+                                100);
+  ValidateExpected("inlined", "<link rel='stylesheet' href='foo.css'>",
+                   "<style>a>b{margin:0}</style>");
 }
 
 TEST_F(CssInlineFilterTest, DisabledForAmp) {
