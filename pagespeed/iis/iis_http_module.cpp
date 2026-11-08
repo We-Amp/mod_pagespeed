@@ -772,6 +772,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 	}
 
+	// For a request the module steps aside from before it keeps any state for
+	// it.  The send notification never sees such a request, so this is the
+	// only place its answer can be kept out of IIS's response caches: an HTML
+	// page IIS answers plain here (an If-Range request without a Range, a
+	// Range in a unit IIS does not serve, ...) would otherwise be handed by
+	// HTTP.sys or the output cache to every later visitor of the URL, without
+	// the module.  A 206 is never cached, so this costs nothing there.
+	static REQUEST_NOTIFICATION_STATUS LeaveToIisUncached(IHttpContext* pHttpContext)
+	{
+		DisarmResponseCaches(pHttpContext->GetResponse());
+		return RQ_NOTIFICATION_CONTINUE;
+	}
+
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
@@ -796,44 +809,34 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (wstr == nullptr)
 		{
 			log(pHttpContext, "CookedUrl was NULL. Bail!");
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 
 		StringPiece range = StringPiece(pHttpContext->GetRequest()->GetHeader("Range"));
 		if (range.length() > 0) {
 			log(pHttpContext, "Range request. Bail");
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 		StringPiece if_range = StringPiece(pHttpContext->GetRequest()->GetHeader("If-Range"));
 		if (if_range.length() > 0) {
 			log(pHttpContext, "If-Range request. Bail");
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 
 		int url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, 0, nullptr);
 		if (url_len == 0)
 		{
 			log(pHttpContext, "Could not convert url 1");
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 		char *url = (char*)pHttpContext->AllocateRequestMemory(url_len + 32); // we could add https or a port
 		url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, url, url_len, 0, nullptr);
 		if (url_len == 0)
 		{
 			log(pHttpContext, "Could not convert url 2");
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 
-
-		/*size_t url_len;
-		url_len=wcsrtombs(NULL,&wstr,MAX_URL_LEN*2,&state);
-		if (url_len==((size_t) -1))
-		{
-		log(pHttpContext, "Something went wrong with converting. Bail");
-		return RQ_NOTIFICATION_CONTINUE;
-		}
-		char * url = (char*)pHttpContext->AllocateRequestMemory(url_len+7);
-		url_len=wcsrtombs(url,&wstr,MAX_URL_LEN*2,&state);			*/
 
 		log(pHttpContext, "pristine url [%s]", url);
 
@@ -871,7 +874,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		{
 			log(pHttpContext, "Invalid url, bailing out");
 			delete gurl;
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 		StringPiece ua = StringPiece(pHttpContext->GetRequest()->GetHeader("User-Agent"));
 		// check asyncwinhttp.cpp when you need to change this.
@@ -882,10 +885,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		{
 			// The module's own fetch of an input: its answer must never be
 			// kept by IIS's response caches under the public URL.
-			DisarmResponseCaches(pHttpContext->GetResponse());
 			log(pHttpContext, "Pagespeed user agent detected, bailing out");
 			delete gurl;
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 
 
@@ -898,7 +900,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				failed_pc != nullptr ? failed_pc->root_options() : nullptr)) {
 				log(pHttpContext, "OnBeginRequest: Failed to create a request context, bail");
 				FreeUnstoredRequestState(ctx, gurl);
-				return RQ_NOTIFICATION_CONTINUE;
+				return LeaveToIisUncached(pHttpContext);
 			}
 
 			// Local-only diagnostic page. We keep HTTP 200 so anything
@@ -1108,7 +1110,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				innerContext->set_base_fetch(nullptr);
 			}
 			FreeUnstoredRequestState(ctx, gurl);
-			return RQ_NOTIFICATION_CONTINUE;
+			return LeaveToIisUncached(pHttpContext);
 		}
 
 		innerContext->server_context()->FlushCacheIfNecessary();
