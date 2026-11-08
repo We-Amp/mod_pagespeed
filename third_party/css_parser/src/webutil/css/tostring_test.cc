@@ -135,6 +135,85 @@ TEST_F(ToStringTest, EscapeIdentifier) {
   EXPECT_EQ("\\*Hello\\,\\ दुनिया\\!", Css::EscapeIdentifier("*Hello, दुनिया!"));
 }
 
+// An identifier cannot start with a digit, or with '-' followed by a digit,
+// so such a character is written as a hex escape. The escape ends in a space
+// so that a following hex digit is not read as part of it.
+TEST_F(ToStringTest, EscapeIdentifierNameLeadingDigit) {
+  EXPECT_EQ("\\32 xl\\:p-4", Css::EscapeIdentifierName("2xl:p-4"));
+  EXPECT_EQ("\\39 ", Css::EscapeIdentifierName("9"));
+  EXPECT_EQ("\\31 a", Css::EscapeIdentifierName("1a"));
+  EXPECT_EQ("-\\31 x", Css::EscapeIdentifierName("-1x"));
+  // Digits elsewhere are plain ident characters.
+  EXPECT_EQ("a1b", Css::EscapeIdentifierName("a1b"));
+  EXPECT_EQ("x2", Css::EscapeIdentifierName("x2"));
+  EXPECT_EQ("--1x", Css::EscapeIdentifierName("--1x"));
+  EXPECT_EQ("-", Css::EscapeIdentifierName("-"));
+  EXPECT_EQ("", Css::EscapeIdentifierName(""));
+  EXPECT_EQ("\\32 \\.", Css::EscapeIdentifierName("2."));
+  // EscapeIdentifier also writes names that are not identifiers in the
+  // source (property names, keyword values), so it leaves digits alone.
+  EXPECT_EQ("2xl\\:p-4", Css::EscapeIdentifier("2xl:p-4"));
+  EXPECT_EQ("-045F", Css::EscapeIdentifier("-045F"));
+}
+
+// Selectors with escaped characters serialize to an equivalent selector.
+TEST_F(ToStringTest, SelectorEscapesRoundTrip) {
+  struct Case {
+    const char* in;
+    const char* out;
+  };
+  const Case kCases[] = {
+      // Tailwind responsive utilities (leading digit, escaped colon).
+      {".\\32 xl\\:p-4", ".\\32 xl\\:p-4"},
+      {".\\32 xl\\:col-\\(--col-span-2xl\\)",
+       ".\\32 xl\\:col-\\(--col-span-2xl\\)"},
+      {".sm\\:p-4 > .\\32 xl\\:p-4", ".sm\\:p-4 > .\\32 xl\\:p-4"},
+      // A digit after a leading '-'.
+      {".-\\31 x", ".-\\31 x"},
+      // A 6-digit escape is written in its shortest form.
+      {".\\000032 xl", ".\\32 xl"},
+      // The escape is followed by a hex digit: the space must stay.
+      {".\\31 b", ".\\31 b"},
+      {".\\31 0", ".\\31 0"},
+      // An escaped digit that is not the first character needs no escape.
+      {".a\\31 b", ".a1b"},
+      // Escape at the end of the selector.
+      {".foo\\32 ", ".foo2"},
+      {".\\32 ", ".\\32 "},
+      // Id selectors follow the same rule.
+      {"#\\31 23", "#\\31 23"},
+      // An escaped colon alone.
+      {".hover\\:x", ".hover\\:x"},
+  };
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(c.in);
+    // The parser keeps a view of its input, so the input outlives it.
+    const string css = absl::StrFormat("%s {}", c.in);
+    Css::Parser parser(css);
+    std::unique_ptr<Css::Selectors> selectors(parser.ParseSelectors());
+    EXPECT_EQ(Css::Parser::kNoError, parser.errors_seen_mask());
+    if (selectors.get() == nullptr) {
+      ADD_FAILURE() << "not parsed";
+      continue;
+    }
+    EXPECT_EQ(c.out, selectors->ToString());
+  }
+}
+
+// A class or id name that starts with an unescaped digit is not a valid
+// selector; browsers ignore the rule, so the parser reports a selector error.
+TEST_F(ToStringTest, SelectorUnescapedLeadingDigitIsError) {
+  const char* const kCases[] = {".1a", "#123", ".-1x", "a.2xl\\:p-4"};
+  for (const char* in : kCases) {
+    SCOPED_TRACE(in);
+    const string css = absl::StrFormat("%s {}", in);
+    Css::Parser parser(css);
+    std::unique_ptr<Css::Selectors> selectors(parser.ParseSelectors());
+    EXPECT_TRUE(selectors.get() == nullptr);
+    EXPECT_NE(0, parser.errors_seen_mask() & Css::Parser::kSelectorError);
+  }
+}
+
 TEST_F(ToStringTest, CalcAdditionOperator) {
   // Companion to ParserTest.CalcAdditionOperator: the calc() addition
   // operator must round-trip verbatim (not "\+" and not dropped).

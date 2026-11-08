@@ -130,11 +130,17 @@ void AppendEscapedAsciiChar(char c, string* dest) {
       *dest += "\\9 ";
       break;
     default:
-      // All other ASCII chars can just be escaped with a backslash.
-      // TODO(sligocki): Actually [0-9a-fA-F] also cannot be escaped this way
-      // because of ambiguity with Unicode escapes. Fix.
-      dest->push_back('\\');
-      dest->push_back(c);
+      if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+          (c >= 'A' && c <= 'F')) {
+        // A backslash before a hex digit starts a hex escape, so a hex digit
+        // is written as its own hex escape. The space ends the escape, so a
+        // hex digit after it is not read as part of it.
+        absl::StrAppendFormat(dest, "\\%X ", static_cast<unsigned>(c));
+      } else {
+        // All other ASCII chars can just be escaped with a backslash.
+        dest->push_back('\\');
+        dest->push_back(c);
+      }
       break;
   }
 }
@@ -202,6 +208,23 @@ string EscapeIdentifier(CssStringPiece src) {
 string EscapeIdentifier(const UnicodeText& text) {
   // TODO(sligocki): Should we Unicode escape all non-ASCII symbols?
   return EscapeIdentifier(CssStringPiece(text.utf8_data(), text.utf8_length()));
+}
+
+string EscapeIdentifierName(CssStringPiece src) {
+  const int n = src.size();
+  const int digit_pos = (n > 0 && src[0] == '-') ? 1 : 0;
+  if (digit_pos >= n || src[digit_pos] < '0' || src[digit_pos] > '9') {
+    return EscapeIdentifier(src);
+  }
+  string dest = EscapeIdentifier(src.substr(0, digit_pos));
+  AppendEscapedAsciiChar(src[digit_pos], &dest);
+  dest += EscapeIdentifier(src.substr(digit_pos + 1));
+  return dest;
+}
+
+string EscapeIdentifierName(const UnicodeText& text) {
+  return EscapeIdentifierName(
+      CssStringPiece(text.utf8_data(), text.utf8_length()));
 }
 
 template <typename Container>
@@ -327,15 +350,15 @@ string SimpleSelector::ToString() const {
                              Css::EscapeIdentifier(attribute()).c_str(),
                              Css::EscapeString(value()).c_str());
     case CLASS:
-      return absl::StrFormat(".%s", Css::EscapeIdentifier(value()).c_str());
+      return absl::StrFormat(".%s", Css::EscapeIdentifierName(value()).c_str());
     case ID:
-      return absl::StrFormat("#%s", Css::EscapeIdentifier(value()).c_str());
+      return absl::StrFormat("#%s", Css::EscapeIdentifierName(value()).c_str());
     case PSEUDOCLASS: {
-      string result = absl::StrFormat(
-          "%s%s",
-          // pseudoclass_separator() is either ":" or "::".
-          UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
-          Css::EscapeIdentifier(pseudoclass()).c_str());
+      string result =
+          absl::StrFormat("%s%s",
+                          // pseudoclass_separator() is either ":" or "::".
+                          UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
+                          Css::EscapeIdentifier(pseudoclass()).c_str());
       // Functional pseudo-class argument pass-through: the
       // argument text was captured verbatim, re-emit it inside the parens.
       if (has_function_arguments()) {

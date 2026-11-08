@@ -36,6 +36,13 @@ string EscapeUrl(const UnicodeText& src);
 // Escape an identifier so that it will be re-parsed correctly.
 string EscapeIdentifier(CssStringPiece src);
 string EscapeIdentifier(const UnicodeText& src);
+// Like EscapeIdentifier, for a name that must be a complete CSS identifier,
+// such as a class or id name in a selector: a leading digit, or a digit after
+// a leading '-', is written as a hex escape (CSS Syntax 3, section 4.3.9).
+// EscapeIdentifier leaves those digits as they are, because it also writes
+// names the parser accepts that are not identifiers in the source.
+string EscapeIdentifierName(CssStringPiece src);
+string EscapeIdentifierName(const UnicodeText& src);
 
 }  // namespace Css
 

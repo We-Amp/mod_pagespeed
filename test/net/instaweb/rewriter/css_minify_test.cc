@@ -17,9 +17,9 @@
  * under the License.
  */
 
-#include <memory>
-
 #include "net/instaweb/rewriter/public/css_minify.h"
+
+#include <memory>
 
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/string.h"
@@ -299,9 +299,54 @@ TEST_F(CssMinifyTest, CustomPropertiesKeptVerbatim) {
       "--w:calc(var(--gap) + 1px)}",
       minified);
   // Ordinary properties still minify as before.
-  EXPECT_HAS_SUBSTR(".a{margin:var(--gap) 0;width:calc(var(--gap) + 1px);"
-                    "color:#ff0}",
-                    minified);
+  EXPECT_HAS_SUBSTR(
+      ".a{margin:var(--gap) 0;width:calc(var(--gap) + 1px);"
+      "color:#ff0}",
+      minified);
+}
+
+// Class names that start with a digit, such as Tailwind's 2xl: utilities,
+// keep their escape when the stylesheet is minified.
+TEST_F(CssMinifyTest, ClassNameLeadingDigitKeepsEscape) {
+  static const char kCss[] =
+      ".\\32 xl\\:col-\\(--col-span-2xl\\) {\n"
+      "    grid-column: var(--col-span-2xl);\n"
+      "}\n"
+      "\n"
+      ".\\32 xl\\:grid-cols-\\(--grid-cols-2xl\\) {\n"
+      "    grid-template-columns: var(--grid-cols-2xl);\n"
+      "}\n"
+      "@media (min-width: 96rem) { .\\32 xl\\:p-4 { padding: 1rem } }\n"
+      ".-\\31 x, .\\000032 xl, #\\31 23 { color: red }\n";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_EQ(
+      ".\\32 xl\\:col-\\(--col-span-2xl\\){grid-column:var(--col-span-2xl)}"
+      ".\\32 xl\\:grid-cols-\\(--grid-cols-2xl\\)"
+      "{grid-template-columns:var(--grid-cols-2xl)}"
+      "@media (min-width:96rem){.\\32 xl\\:p-4{padding:1rem}}"
+      ".-\\31 x,.\\32 xl,#\\31 23{color:red}",
+      minified);
+}
+
+// A class or id name that starts with an unescaped digit is not valid CSS;
+// the rule's selector is kept as written, and the rest still minifies.
+TEST_F(CssMinifyTest, ClassNameUnescapedLeadingDigitKeptVerbatim) {
+  static const char kCss[] =
+      ".1a { color: red }\n"
+      "#123 , .b { color: blue }\n"
+      ".c { color: #ffff00 }\n";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_EQ(".1a {color:red}#123 , .b {color:#00f}.c{color:#ff0}", minified);
 }
 
 // checking unit is retained for zero value in calc with nested var()
@@ -521,9 +566,8 @@ TEST_F(CssMinifyTest, MediaRegroupingAroundGroupRules) {
   StringWriter writer(&minified);
   CssMinify minify(&writer, &handler_);
   EXPECT_TRUE(minify.ParseStylesheet(kCss));
-  EXPECT_STREQ(
-      "@media screen{.a{top:0}@supports (a:b){.b{left:0}}.c{right:0}}",
-      minified);
+  EXPECT_STREQ("@media screen{.a{top:0}@supports (a:b){.b{left:0}}.c{right:0}}",
+               minified);
 }
 
 TEST_F(CssMinifyTest, MediaBodyStraySemicolon) {

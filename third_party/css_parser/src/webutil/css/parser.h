@@ -556,6 +556,8 @@ class Parser {
   // This method does not skip spaces like most other methods do.
   // See comment above.
   SimpleSelector* ParseSimpleSelector();
+  // True at an unescaped digit, or '-' and an unescaped digit.
+  bool AtDigitLedName() const;
 
   // Checks if the parser stops at a character (or characters) that will
   // legally terminate a SimpleSelectors. The checked characters are not eaten.

@@ -1982,6 +1982,17 @@ SimpleSelector* Parser::ParseAttributeSelector() {
     return nullptr;
 }
 
+// A class or id name is a CSS identifier, which cannot start with an
+// unescaped digit or with '-' and an unescaped digit (CSS Syntax 3, section
+// 4.3.9). Browsers ignore a rule whose selector has such a name, so the
+// parser treats it as a selector error rather than reading it as the name
+// that the escaped form (".\31 a") spells.
+bool Parser::AtDigitLedName() const {
+  const char* p = in_;
+  if (p < end_ && *p == '-') p++;
+  return p < end_ && *p >= '0' && *p <= '9';
+}
+
 SimpleSelector* Parser::ParseSimpleSelector() {
   Tracer trace(__func__, this);
 
@@ -1991,12 +2002,22 @@ SimpleSelector* Parser::ParseSimpleSelector() {
   switch (*in_) {
     case '#': {
       in_++;
+      if (AtDigitLedName()) {
+        ParseIdent();  // Consume the name so that parsing makes progress.
+        ReportParsingError(kSelectorError, "Id name starts with a digit.");
+        break;
+      }
       UnicodeText id = ParseIdent();
       if (!id.empty()) return SimpleSelector::NewId(id);
       break;
     }
     case '.': {
       in_++;
+      if (AtDigitLedName()) {
+        ParseIdent();  // Consume the name so that parsing makes progress.
+        ReportParsingError(kSelectorError, "Class name starts with a digit.");
+        break;
+      }
       UnicodeText classname = ParseIdent();
       if (!classname.empty()) return SimpleSelector::NewClass(classname);
       break;
