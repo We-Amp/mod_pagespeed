@@ -615,7 +615,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
@@ -775,7 +776,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
@@ -838,12 +840,27 @@ jobs:
       # uid 1000 when the runner is root. A root-run server drops its workers
       # to an unprivileged user that cannot write the logs the tests read, so
       # a root runner service hands the workspace to uid 1000 instead.
+      # Under a rootless daemon (tools/ci/container-identity.sh) the runner's
+      # uid inside the container maps to a subordinate id on the host, which
+      # cannot write the checkout; the tests write it in two places only (the
+      # pytest cache and the failure diagnostics), so those two are made
+      # writable. The next job's start hook hands what they leave back to the
+      # runner user.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
           if [ "$u" = 0 ]; then
             u=1000; g=1000
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          else
+            out="$(sh tools/ci/container-identity.sh)" || exit 1
+            eval "$out"
+            if [ "${DOCKER_ROOTLESS}" = 1 ]; then
+              for d in _systest-logs test/system/.pytest_cache; do
+                mkdir -p "${GITHUB_WORKSPACE}/${d}"
+                chmod 1777 "${GITHUB_WORKSPACE}/${d}"
+              done
+            fi
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"
@@ -945,12 +962,27 @@ jobs:
       # uid 1000 when the runner is root. A root-run server drops its workers
       # to an unprivileged user that cannot write the logs the tests read, so
       # a root runner service hands the workspace to uid 1000 instead.
+      # Under a rootless daemon (tools/ci/container-identity.sh) the runner's
+      # uid inside the container maps to a subordinate id on the host, which
+      # cannot write the checkout; the tests write it in two places only (the
+      # pytest cache and the failure diagnostics), so those two are made
+      # writable. The next job's start hook hands what they leave back to the
+      # runner user.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
           if [ "$u" = 0 ]; then
             u=1000; g=1000
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          else
+            out="$(sh tools/ci/container-identity.sh)" || exit 1
+            eval "$out"
+            if [ "${DOCKER_ROOTLESS}" = 1 ]; then
+              for d in _systest-logs test/system/.pytest_cache; do
+                mkdir -p "${GITHUB_WORKSPACE}/${d}"
+                chmod 1777 "${GITHUB_WORKSPACE}/${d}"
+              done
+            fi
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"
@@ -1996,7 +2028,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
