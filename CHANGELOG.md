@@ -7,15 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - TBD
+
 ### Fixed
 
-- The admin console's cache URL detail page no longer reports "not in index" for every URL. The console now passes the cache entry's site on to the optimizer when it looks up a URL's variants and previews. Affected: 2.8.0. Variant previews work with the 2.8.0 optimizer; the variants list needs the matching optimizer release that accepts the site on that lookup.
+- **After a cache flush through `cache.flush`, every server process serves the
+  flushed state.** A server process could keep serving cache entries from before the
+  flush, so a page could switch between results (for example between deferred and
+  render-blocking stylesheets) depending on which process served it. Affected: 2.8.0
+  and earlier.
+- The console's cache URL detail page shows each URL's variants and previews again.
+  Affected: 2.8.0.
+- IIS: visitors could sometimes get a page without optimization from IIS's response
+  caches until the file changed. Those pages are now optimized.
+- IIS: requests that arrive over IPv6 with an IPv6 address as the host (for example
+  `http://[::1]/`) on the default ports are now optimized. Before, they were served
+  without optimization and the admin pages answered 404.
+- IIS: `pagespeed RemoteConfigurationUrl <url>` in `pagespeed.config` now takes
+  effect. See Upgrade notes.
 - **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04.** The nginx
-  bundled with the sidecar packages (`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`)
-  needed `libpcre.so.3`, which those releases no longer ship, so the sidecar
-  failed to start there. The bundled nginx now carries PCRE2 10.49 statically
-  linked and needs no PCRE library on the host, so the `libpcre3` prerequisite
-  is gone. The pair is tested on Debian 11, 12 and 13 and Ubuntu 26.04.
+  bundled with `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux` needed `libpcre.so.3`,
+  which those releases no longer ship. The bundled nginx now carries PCRE2 10.49
+  statically linked and needs no PCRE library on the host, so the `libpcre3`
+  prerequisite is gone. Tested on Debian 11, 12 and 13 and Ubuntu 26.04.
+
+### Changed
+
+- IIS: `UsePerVHostStatistics` and `CreateSharedMemoryMetadataCache` are not
+  supported on IIS. Setting either now logs a warning at configuration load that it
+  has no effect, instead of being accepted silently. Invalid values are still
+  rejected.
+
+### Upgrade Notes
+
+- **IIS: check `pagespeed.config` for a `pagespeed RemoteConfigurationUrl` line
+  before you upgrade.** 2.8.0 and earlier ignored that line silently; only the form
+  without the `pagespeed` prefix worked. From 2.8.1 the module fetches and applies
+  the remote configuration it names. Requests may wait up to
+  `RemoteConfigurationTimeoutMs` (1 second by default) while it is fetched or
+  refreshed, and when a fetch fails the module uses the local configuration, or the
+  last good remote copy. Remove the line if you do not want remote configuration.
+- Install the module and `pagespeed-optimizer` 2.8.1 together. The admin console's
+  list of a URL's variants needs both at 2.8.1.
+- The cache is kept across the upgrade.
 
 ## [2.8.0] - 2026-11-05
 
