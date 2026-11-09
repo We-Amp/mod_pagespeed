@@ -1,5 +1,11 @@
 # mod_pagespeed
 
+[![CI](https://github.com/We-Amp/mod_pagespeed/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/We-Amp/mod_pagespeed/actions/workflows/ci.yml?query=branch%3Amaster)
+[![CodeQL](https://github.com/We-Amp/mod_pagespeed/actions/workflows/codeql.yml/badge.svg?branch=master)](https://github.com/We-Amp/mod_pagespeed/actions/workflows/codeql.yml?query=branch%3Amaster)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/We-Amp/mod_pagespeed/badge)](https://scorecard.dev/viewer/?uri=github.com/We-Amp/mod_pagespeed)
+[![Release](https://img.shields.io/github/v/release/We-Amp/mod_pagespeed?filter=module-v*&label=release)](https://github.com/We-Amp/mod_pagespeed/releases)
+[![License](https://img.shields.io/github/license/We-Amp/mod_pagespeed)](LICENSE)
+
 Web performance optimization middleware that automatically applies 40+
 optimization filters to web pages, including image compression/resizing,
 CSS/JS minification, cache extension, and more.
