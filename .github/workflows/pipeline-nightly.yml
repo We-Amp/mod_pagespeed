@@ -168,6 +168,8 @@ jobs:
         with:
           path: vendor
           key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
+          restore-keys: |
+            mod-pagespeed-vendor-
 
       # tools/vendor-deps.sh clones the git-only dependencies and fills the
       # Bazel repository cache; it needs python3 and git. The repositories are

@@ -131,6 +131,8 @@ jobs:
         with:
           path: vendor
           key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mps-vendor-
 
       - name: Vendor all dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'

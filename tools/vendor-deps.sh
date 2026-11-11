@@ -35,6 +35,51 @@ mkdir -p "$REPO_CACHE"
 
 cd "$REPO_ROOT"
 
+# Runner-local persistent repository cache. The fetch below runs against a
+# throwaway output base, and vendor/ is wiped by a fresh checkout, so without
+# this every run re-downloads every archive. CI_BAZEL_REPO_CACHE names a
+# directory outside the workspace (default $HOME/.cache/mps-bazel-repo; set it
+# to the empty string to disable). It is seeded into vendor/repo-cache before
+# the fetch and new archives are written back after it. Archives are
+# content-addressed and Bazel verifies each against its sha256, so a stale or
+# duplicated entry is harmless. All of it is best effort: a failure here never
+# fails the vendor step.
+LOCAL_REPO_CACHE="${CI_BAZEL_REPO_CACHE-${HOME:+$HOME/.cache/mps-bazel-repo}}"
+
+if [ -n "$LOCAL_REPO_CACHE" ] && [ -d "$LOCAL_REPO_CACHE/content_addressable" ]; then
+    echo "==> Seeding repository cache from the runner-local cache..."
+    bash "$SCRIPT_DIR/ci/prune-bazel-repository-cache.sh" "$LOCAL_REPO_CACHE" 30d 8G || true
+    # Skip in-flight temp files of a concurrent write-back (*.tmp.*).
+    tar -C "$LOCAL_REPO_CACHE" --exclude='*.tmp.*' -cf - content_addressable 2>/dev/null \
+        | tar -C "$REPO_CACHE" -xf - 2>/dev/null || true
+fi
+
+# Copy archives the fetch added back to the runner-local cache. Each file is
+# written under a temporary name in its final directory and renamed into place,
+# so a concurrent job never sees a partial file. Files already present are only
+# touched, which keeps the age-based prune least-recently-used.
+persist_repo_cache() {
+    [ -n "$LOCAL_REPO_CACHE" ] || return 0
+    [ -d "$REPO_CACHE/content_addressable" ] || return 0
+    echo "==> Writing new archives back to the runner-local cache..."
+    local f rel dest n=0
+    while IFS= read -r -d '' f; do
+        rel="${f#"$REPO_CACHE"/}"
+        dest="$LOCAL_REPO_CACHE/$rel"
+        if [ -e "$dest" ]; then
+            touch "$dest" 2>/dev/null || true
+            continue
+        fi
+        mkdir -p "$(dirname "$dest")" 2>/dev/null || continue
+        if cp -p "$f" "$dest.tmp.$$" 2>/dev/null && mv -f "$dest.tmp.$$" "$dest" 2>/dev/null; then
+            n=$((n + 1))
+        else
+            rm -f "$dest.tmp.$$" 2>/dev/null || true
+        fi
+    done < <(find "$REPO_CACHE/content_addressable" -type f -name file -print0)
+    echo "    Archives added: $n"
+}
+
 # Use a temporary output base on the local (case-sensitive) filesystem.
 # This avoids issues with case-insensitive filesystems (e.g., macOS-formatted SSDs)
 # where external archives containing a 'build' dir collide with Bazel's 'BUILD' files.
@@ -186,6 +231,8 @@ bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repo_contents_cache= \
     "${OVERRIDE_FLAGS[@]}" \
     "${PROTOC_FETCH[@]}"
+
+persist_repo_cache || true
 
 # Note: Some dependencies use repository_ctx.download() instead of http_archive
 # (e.g., yq_windows_amd64). These bypass --repository_cache and are NOT vendored.

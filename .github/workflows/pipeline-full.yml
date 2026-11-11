@@ -202,6 +202,8 @@ jobs:
         with:
           path: vendor
           key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mod-pagespeed-vendor-${{ runner.arch }}-
 
       # tools/vendor-deps.sh clones the source-only dependencies over ssh;
       # the repositories are public, so rewrite that to anonymous https for
@@ -1774,6 +1776,8 @@ jobs:
         with:
           path: vendor
           key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mod-pagespeed-vendor-${{ runner.arch }}-
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'
@@ -1901,6 +1905,8 @@ jobs:
         with:
           path: vendor
           key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mod-pagespeed-vendor-${{ runner.arch }}-
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'
@@ -2265,6 +2271,8 @@ jobs:
         with:
           path: vendor
           key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mps-sidecar-vendor-${{ runner.arch }}-
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'
