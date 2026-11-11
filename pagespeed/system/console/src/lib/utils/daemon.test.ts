@@ -3,7 +3,12 @@
 
 import { describe, it, expect } from "vitest";
 import { ApiError } from "$lib/api/client";
+import { ALERT_RULES, type AlertSnapshot } from "$lib/alerts";
+import { availabilityText } from "./overview";
 import {
+  OPTIMIZER_NOT_ANSWERING_FIX,
+  optimizerAbsence,
+  optimizerAbsenceText,
   checkResult,
   cooldownReasonLabel,
   counterRows,
@@ -47,6 +52,129 @@ describe("isDaemonUnavailable", () => {
         new ApiError(501, "{\"error\":\"endpoint_unsupported_by_daemon\"}"),
       ),
     ).toBe("this optimizer version does not provide this panel");
+  });
+});
+
+describe("daemonUnavailableReason", () => {
+  it("a 503 the optimizer sent itself is a refresh without an answer, not 'unreachable'", () => {
+    expect(daemonUnavailableReason(new ApiError(503, "Service Unavailable"))).toBe(
+      "the optimizer did not answer this refresh",
+    );
+    expect(daemonUnavailableReason(new ApiError(503, '{"error":"busy"}'))).toBe(
+      "the optimizer did not answer this refresh",
+    );
+  });
+
+  it("keeps 'unreachable' for the proxy's 502 and for anything it cannot name", () => {
+    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new Error("network down"))).toBe("unreachable");
+  });
+});
+
+describe("optimizerAbsence", () => {
+  const notConfigured = new ApiError(503, "daemon_not_configured");
+  const unreachable = new ApiError(502, "daemon_unreachable");
+  const outdated = new ApiError(501, "endpoint_unsupported_by_daemon");
+  const noLeaf = new ApiError(404, "Unknown admin page: v1/daemon/stats");
+
+  it("names one reason per status", () => {
+    expect(optimizerAbsence(notConfigured, notConfigured)).toBe("not-configured");
+    expect(optimizerAbsence(unreachable, unreachable)).toBe("not-answering");
+    expect(optimizerAbsence(outdated, outdated)).toBe("optimizer-outdated");
+    expect(optimizerAbsence(noLeaf, noLeaf)).toBe("module-unsupported");
+  });
+
+  it("reads the proxy's code from a raw JSON body too", () => {
+    expect(optimizerAbsence(new ApiError(503, '{"error":"daemon_not_configured"}'))).toBe("not-configured");
+  });
+
+  it("a 503 the optimizer sent itself is a refresh without an answer, not a stopped optimizer", () => {
+    const busy = new ApiError(503, "Service Unavailable");
+    expect(optimizerAbsence(busy, busy)).toBe("did-not-answer");
+    expect(optimizerAbsence(busy, unreachable)).toBe("not-answering");
+    expect(optimizerAbsence(notConfigured, busy)).toBe("did-not-answer");
+    expect(optimizerAbsence(noLeaf, busy)).toBe("did-not-answer");
+  });
+
+  it("leaves that disagree: the most telling answer wins, in either order", () => {
+    expect(optimizerAbsence(noLeaf, unreachable)).toBe("not-answering");
+    expect(optimizerAbsence(unreachable, noLeaf)).toBe("not-answering");
+    expect(optimizerAbsence(noLeaf, notConfigured)).toBe("not-configured");
+    expect(optimizerAbsence(outdated, noLeaf)).toBe("optimizer-outdated");
+  });
+
+  it("is null for anything that is not an 'unavailable' answer", () => {
+    expect(optimizerAbsence()).toBeNull();
+    expect(optimizerAbsence(null, null)).toBeNull();
+    expect(optimizerAbsence(new ApiError(500, "boom"), new Error("network down"))).toBeNull();
+    expect(optimizerAbsence(new ApiError(429, "busy"))).toBeNull();
+  });
+
+  it("agrees with isDaemonUnavailable on which statuses count", () => {
+    for (const status of [400, 403, 404, 429, 500, 501, 502, 503, 504]) {
+      const error = new ApiError(status, "x");
+      expect(optimizerAbsence(error) !== null, String(status)).toBe(isDaemonUnavailable(error));
+    }
+  });
+});
+
+describe("optimizerAbsenceText", () => {
+  const kinds = ["not-configured", "not-answering", "did-not-answer", "optimizer-outdated", "module-unsupported"] as const;
+
+  it("titles the three reasons in words", () => {
+    expect(optimizerAbsenceText("not-configured").title).toBe("No optimizer configured");
+    expect(optimizerAbsenceText("not-answering").title).toBe("Optimizer not answering");
+    expect(optimizerAbsenceText("did-not-answer").title).toBe("Optimizer did not answer");
+    expect(optimizerAbsenceText("optimizer-outdated").title).toBe("This build has no optimizer endpoints");
+    expect(optimizerAbsenceText("module-unsupported").title).toBe("This build has no optimizer endpoints");
+  });
+
+  it("never prints a transport status or a reason code", () => {
+    for (const kind of kinds) {
+      const { title, detail } = optimizerAbsenceText(kind);
+      expect(`${title} ${detail}`).not.toMatch(/HTTP|\b\d{3}\b|daemon_|_unsupported/);
+    }
+  });
+
+  it("links to a documentation page under the product site", () => {
+    for (const kind of kinds) {
+      const { doc } = optimizerAbsenceText(kind);
+      if (kind === "did-not-answer") {
+        expect(doc).toBeNull();
+        continue;
+      }
+      expect(doc?.label).not.toBe("");
+      expect(doc?.href).toMatch(/^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+    }
+  });
+
+  it("not configured says what the Overview card says", () => {
+    expect(optimizerAbsenceText("not-configured").detail).toContain(availabilityText("not-configured").detail);
+  });
+
+  it("not answering carries the Overview finding's message, fix and documentation link", () => {
+    const rule = ALERT_RULES.find((r) => r.id === "daemon-unreachable");
+    expect(rule?.fix).toBe(OPTIMIZER_NOT_ANSWERING_FIX);
+    const text = optimizerAbsenceText("not-answering");
+    expect(text.detail).toContain(rule?.message({} as AlertSnapshot, null, []));
+    expect(text.detail).toContain(OPTIMIZER_NOT_ANSWERING_FIX);
+    expect(text.doc?.href).toBe(rule?.doc);
+  });
+
+  it("a refresh without an answer says what the Overview card says, and prescribes nothing", () => {
+    const text = optimizerAbsenceText("did-not-answer");
+    expect(text.detail).toBe(availabilityText("transient").detail);
+    expect(text.detail).not.toContain(OPTIMIZER_NOT_ANSWERING_FIX);
+  });
+
+  it("a module without the endpoints says what the Overview card says", () => {
+    expect(optimizerAbsenceText("module-unsupported").detail).toContain(availabilityText("not-configured").detail);
+  });
+
+  it("an outdated optimizer says what the Overview card says", () => {
+    expect(optimizerAbsenceText("optimizer-outdated").detail).toBe(availabilityText("unsupported").detail);
   });
 });
 
