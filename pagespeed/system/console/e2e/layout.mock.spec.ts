@@ -445,7 +445,7 @@ test.describe("wide windows", () => {
     expect(cardBottom - contentBottom - pad, "the module card is no taller than its content").toBeLessThanOrEqual(1);
   });
 
-  for (const hash of ["#/overview", "#/savings"]) {
+  for (const hash of ["#/overview"]) {
     test(`the two cards of ${hash} sit side by side on a laptop window`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await mockAdmin(page, "pagespeed_admin", perHostReplies());
@@ -802,6 +802,66 @@ test.describe("full-width tables whose columns stay together", () => {
       const b = await box(link);
       expect(b.width, "the URL keeps a readable width").toBeGreaterThanOrEqual(200);
       expect(b.right).toBeLessThanOrEqual(size.width);
+    });
+  }
+});
+
+// Savings on a laptop window: never a short card beside a long one. With a
+// per-host table there are two columns of comparable height; without one
+// the module card and the optimizer card stack, each as wide as the page.
+test.describe("Savings columns", () => {
+  const WIDE = { width: 1440, height: 900 };
+
+  test("whole server: the per-host card fills the column under the module card, within a factor of two of the optimizer card", async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    await pageReady(page);
+    const [module, optimizer, hosts] = await Promise.all(
+      ["savings-module-card", "savings-optimizer-card", "savings-by-host-card"].map((id) => box(page.getByTestId(id))),
+    );
+    // Two columns, their tops level.
+    expect(Math.abs(module.top - optimizer.top)).toBeLessThanOrEqual(1);
+    expect(optimizer.left).toBeGreaterThan(module.right);
+    expect(Math.abs(optimizer.width - module.width)).toBeLessThanOrEqual(1);
+    // The per-host card: the module card's column, one gap below it.
+    expect(Math.abs(hosts.left - module.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(hosts.width - module.width)).toBeLessThanOrEqual(1);
+    expect(hosts.top - module.bottom).toBeGreaterThan(0);
+    expect(hosts.top - module.bottom).toBeLessThanOrEqual(24);
+    const [left, right] = [hosts.bottom - module.top, optimizer.height];
+    expect(Math.max(left, right) / Math.min(left, right), `column heights ${left} and ${right}`).toBeLessThan(2);
+  });
+
+  const withoutPerHostFigures = (): ReturnType<typeof wholeServerReplies> => {
+    const stats = JSON.parse(F.OPT_STATS_PAGE_BYTES) as Record<string, unknown>;
+    delete stats.serve_savings_by_host;
+    return { ...wholeServerReplies(), "v1/daemon/stats": F.ok(stats) };
+  };
+  for (const [name, admin, replies, hash] of [
+    ["a per-host console", "pagespeed_admin", perHostReplies, "#/savings"],
+    ["the whole server with a host selected", "pagespeed_global_admin", wholeServerReplies, "#/savings?lens=static.example.com"],
+    ["an optimizer without per-host figures", "pagespeed_global_admin", withoutPerHostFigures, "#/savings"],
+  ] as const) {
+    test(`${name}: the two cards stack at full width, and the types' bars share a row`, async ({ page }) => {
+      await page.setViewportSize(WIDE);
+      await mockAdmin(page, admin, replies());
+      await openConsole(page, admin, hash);
+      await pageReady(page);
+      await expect(page.getByTestId("savings-by-host-card")).toHaveCount(0);
+      const cards = await page.locator("main .cards > .card").all();
+      expect(cards).toHaveLength(2);
+      const [module, optimizer] = [await box(cards[0]), await box(cards[1])];
+      expect(optimizer.top).toBeGreaterThan(module.bottom);
+      expect(Math.abs(optimizer.left - module.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(optimizer.width - module.width)).toBeLessThanOrEqual(1);
+      const main = await box(page.locator("main .page"));
+      expect(module.width).toBeGreaterThanOrEqual(main.width - 1);
+      // A card this wide lays the three types out across it.
+      const tops = await page.locator('main [data-testid^="savings-split-"].split').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+      expect(tops).toHaveLength(3);
+      expect(new Set(tops).size, `tops ${tops.join(", ")}`).toBe(1);
+      expect(await noHorizontalScroll(page)).toBe(true);
     });
   }
 });
