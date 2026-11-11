@@ -230,7 +230,9 @@
       autoRefresh: poll.autoRefresh,
       intervalMs: 5000,
       onToggle: toggleAutoRefresh,
+      // The optimizer not answering is a notice on this page, so it is part of the answer.
       onRefresh: () => poll.refresh(),
+      failedParts: () => [moduleError, daemonView?.daemon === "unreachable"],
     }}
   />
   <p class="note scope-line" data-testid="savings-scope">{scopeLine}</p>

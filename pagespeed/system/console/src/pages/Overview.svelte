@@ -57,6 +57,7 @@
     overviewVerdict,
     RESPONSE_HEADER_CHECK,
     SAVINGS_RELATION,
+    SERVED_COUNTS_RELATION,
     serveShareJudgement,
     timeBase,
     verdictLevel,
@@ -253,7 +254,9 @@
       autoRefresh: poll.autoRefresh,
       intervalMs: 5000,
       onToggle: toggleAutoRefresh,
+      // The optimizer not answering is a notice on this page, so it is part of the answer.
       onRefresh: () => poll.refresh(),
+      failedParts: () => [moduleError, daemonView?.daemon === "unreachable"],
     }}
   />
   <p class="note scope-line" data-testid="overview-scope">{scopeLine}</p>
@@ -326,6 +329,7 @@
           {:else if !hero}
             <p class="note">The module counted {countText(summary.servedByOptimizer)} responses served optimized.</p>
           {/if}
+          {#if !hero}<p class="note" data-testid="served-counts-relation">{SERVED_COUNTS_RELATION}</p>{/if}
         </div>
         {#if judgement}
           <p class={hero ? "stat-tile-context" : "note"} data-testid="serve-share-judgement">{judgement}</p>

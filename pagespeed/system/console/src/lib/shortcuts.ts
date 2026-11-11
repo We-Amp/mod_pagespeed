@@ -55,7 +55,7 @@ export const GO_TIMEOUT_MS = 1500;
 
 export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; description: string }> = [
   { keys: "?", description: "Show this list" },
-  { keys: "r", description: "Refresh the page's data now (Configuration, About and Support have no live data; Configuration has its own Refresh button)" },
+  { keys: "r", description: "Refresh the page's data now, as the Refresh button does (About and Support have no data to refresh)" },
   { keys: "/", description: "Jump to the page's search box" },
   ...Object.keys(GO_KEYS).map((k) => ({ keys: `g ${k}`, description: `Go to ${GO_NAMES[k]}` })),
   { keys: "Esc", description: "Close this list" },

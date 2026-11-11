@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "./client";
+import { ApiError, UnavailableError } from "./client";
 import {
   DEFAULT_BUSY_RETRY_MS,
   Poller,
@@ -117,6 +117,26 @@ describe("Poller", () => {
     await a;
     expect(p.snapshot.data).toBe(3);
     p.dispose();
+  });
+
+  it("refresh() resolves to how it ended, so a refresh the viewer asked for can say so", async () => {
+    let answer: () => Promise<number> = async () => 1;
+    const p = make(() => answer());
+    expect(await p.refresh()).toBe("ok");
+    answer = async () => {
+      throw new Error("boom");
+    };
+    expect(await p.refresh()).toBe("failed");
+    answer = async () => {
+      throw new ApiError(429, "busy");
+    };
+    expect(await p.refresh()).toBe("busy");
+    answer = async () => {
+      throw new UnavailableError(403, "off", "urls");
+    };
+    expect(await p.refresh()).toBe("off");
+    p.dispose();
+    expect(await p.refresh()).toBe("ok");
   });
 
   it("a failing fetcher backs off and a success resets the interval", async () => {

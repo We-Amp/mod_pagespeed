@@ -53,11 +53,12 @@ describe("ShortcutReader", () => {
     expect(Object.keys(GO_KEYS).sort()).toEqual(["a", "c", "d", "g", "h", "l", "m", "o", "s", "u", "v"]);
   });
 
-  it("the help for 'r' names the pages it does not refresh (Configuration, About, Support have no poller)", () => {
+  it("the help for 'r' names the pages with nothing to refresh, and no longer sends Configuration to a button of its own", () => {
     const refresh = SHORTCUT_HELP.find((h) => h.keys === "r");
-    expect(refresh?.description).toMatch(/configuration/i);
     expect(refresh?.description).toMatch(/about/i);
     expect(refresh?.description).toMatch(/support/i);
+    // Configuration has the shared Refresh button, and "r" refreshes it too.
+    expect(refresh?.description).not.toMatch(/configuration/i);
   });
 });
 

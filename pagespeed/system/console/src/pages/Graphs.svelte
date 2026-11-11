@@ -363,7 +363,7 @@
       onToggle: toggleAutoRefresh,
       onRefresh: () => {
         logRequested = true;
-        void graphs.refresh();
+        return graphs.refresh();
       },
     }}
   >

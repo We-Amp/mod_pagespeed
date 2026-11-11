@@ -115,6 +115,7 @@
       intervalMs: 5000,
       onToggle: toggleAutoRefresh,
       onRefresh: () => poll.refresh(),
+      failedParts: () => [view.healthError, view.statsError],
     }}
   />
   <RefreshNotice error={poll.error} />
