@@ -70,16 +70,55 @@ test.describe("Overview findings", () => {
   test("the optimizer cache not in use is an error and ranks first", async ({ page }) => {
     await open(page, { message_history: F.messageGroups([aclRow(), volumeRow()]) });
     const findings = page.getByTestId("alerts").locator('[data-testid^="alert-"]');
-    // The recent refusal is also a recent warning, so (h) is listed too.
-    await expect(findings).toHaveCount(3);
+    // The recent refusal is this finding's evidence, not a warning listed a second time.
+    await expect(findings).toHaveCount(2);
     await expect(findings.first()).toHaveAttribute("data-testid", "alert-volume-not-opened");
     await expect(findings.first().locator(".level-badge-error")).toBeVisible();
     await expect(findings.first().getByTestId("finding-fix")).toHaveText(
       "Fix: Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
     );
-    await expect(page.getByTestId("health-summary")).toHaveText(
-      "3 findings · 2 need action · 1 warning in the last 15 min",
+    await expect(page.getByTestId("health-summary")).toHaveText("2 findings · 2 need action");
+  });
+
+  test("one cause is one finding, and the log's own line is folded behind the written sentence", async ({ page }) => {
+    const now = Date.now();
+    await open(page, {
+      message_history: F.messageGroups([
+        { level: "warning", template: F.ACL_TEMPLATE, count: 6, recent: 4, last_ms: now - 30_000 },
+        volumeRow(),
+        { level: "warning", template: "Slow origin response for URL", count: 5, recent: 3, last_ms: now - 60_000 },
+      ]),
+    });
+    const all = page.getByTestId("alerts");
+    await expect(all.locator('[data-testid^="alert-"]')).toHaveCount(3);
+    // Each cause once: the admin warning and the refusal are not repeated under "Warnings in the log".
+    const warnings = page.getByTestId("alert-recent-warnings");
+    await expect(warnings).toContainText("3 warnings in the last 15 minutes, of 1 kind, besides those with a finding of their own.");
+    await expect(warnings.getByTestId("finding-details").locator("li")).toHaveText(["×3 Slow origin response for URL"]);
+    await expect(page.getByTestId("health-summary")).toHaveText("3 findings · 2 need action · 3 warnings in the last 15 min");
+    const count = (text: string, needle: string) => text.split(needle).length - 1;
+    const folded = await all.evaluate((el) => {
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll("details").forEach((d) => d.remove());
+      return { outside: clone.textContent ?? "", everything: el.textContent ?? "" };
+    });
+    expect(count(folded.everything, "admin handler")).toBe(0);
+    expect(count(folded.everything, "in-place optimization is OFF")).toBe(1);
+    // No log template in the open: a sentence states the cause.
+    expect(folded.outside).not.toContain("in-place optimization is OFF");
+    expect(folded.outside).not.toContain("Slow origin response");
+    const cache = page.getByTestId("alert-volume-not-opened");
+    await expect(cache.locator(".alert-message")).toHaveText(
+      "The web server is not using the optimizer's cache: the module logged that it and the optimizer are built " +
+        "for different cache directory generations, so it opened nothing.",
     );
+    // The line itself is one activation away, by pointer or keyboard.
+    const line = cache.getByTestId("finding-details").locator("li");
+    await expect(line).toBeHidden();
+    await cache.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(line).toBeVisible();
+    await expect(line).toHaveText(F.VOLUME_TEMPLATE);
   });
 
   test("an old refusal or the start-up race in the log is not the cache finding", async ({ page }) => {
