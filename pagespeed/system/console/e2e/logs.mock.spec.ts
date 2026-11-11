@@ -565,6 +565,66 @@ test.describe("the view controls change the view in place", () => {
     await expect(page).toHaveURL(/#\/logs\?level=debug&source=optimizer$/);
   });
 
+  test("the arrow keys step into and out of the raw stream with the focus on the source", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug&group=0");
+    await ready(page);
+    await markPage(page);
+    const timeline = page.getByTestId("logs-timeline");
+    await expect(timeline).toHaveAttribute("role", "region");
+    await page.getByRole("radio", { name: "Both" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    const optimizer = page.getByRole("radio", { name: "Optimizer" });
+    await expect(optimizer).toBeChecked();
+    await expect(optimizer).toBeFocused();
+    await expect(timeline).toHaveAttribute("role", "log");
+    await expect(page.getByRole("button", { name: "Auto-refresh · 3 s" })).toBeVisible();
+    await expect(page).toHaveURL(/#\/logs\?level=debug&group=0&source=optimizer$/);
+    // Out again, in both directions.
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("radio", { name: "Both" })).toBeFocused();
+    await expect(timeline).toHaveAttribute("role", "region");
+    await expect(page.getByRole("button", { name: "Auto-refresh · 5 s" })).toBeVisible();
+    await page.keyboard.press("ArrowUp");
+    await expect(optimizer).toBeFocused();
+    await expect(timeline).toHaveAttribute("role", "log");
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByRole("radio", { name: "Module" })).toBeFocused();
+    await expect(timeline).toHaveAttribute("role", "region");
+    await expect(page).toHaveURL(/#\/logs\?level=debug&group=0&source=module$/);
+    await expect(pageMark(page)).toHaveCount(1);
+  });
+
+  test("the scroll position survives a Source change and a Group toggle", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 320 });
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug");
+    await ready(page);
+    await expect(page.getByTestId("log-group")).toHaveCount(7);
+    const scrollY = () => page.evaluate(() => window.scrollY);
+    // Scrolled as far as the page still allows with the shortest view (the module's three rows).
+    await page.getByRole("radio", { name: "Module" }).check();
+    const y = await page.evaluate(() => {
+      const top = Math.min(60, document.scrollingElement!.scrollHeight - window.innerHeight);
+      window.scrollTo(0, top);
+      return window.scrollY;
+    });
+    expect(y).toBeGreaterThan(0);
+    await page.getByRole("radio", { name: "Both" }).check();
+    await expect(page.getByTestId("log-group")).toHaveCount(7);
+    expect(await scrollY()).toBe(y);
+    await page.getByRole("radio", { name: "Optimizer" }).check();
+    await expect(page.getByTestId("log-group")).toHaveCount(4);
+    expect(await scrollY()).toBe(y);
+    await page.getByRole("checkbox", { name: "Group repeats" }).uncheck();
+    await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "log");
+    expect(await scrollY()).toBe(y);
+    await page.getByRole("checkbox", { name: "Group repeats" }).check();
+    await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "region");
+    expect(await scrollY()).toBe(y);
+  });
+
   test("changing the view outside the raw stream never reads the module's log from the start again", async ({ page }) => {
     const reads = moduleReads(page);
     await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
