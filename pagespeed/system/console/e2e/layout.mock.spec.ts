@@ -451,7 +451,8 @@ test.describe("wide windows", () => {
       await mockAdmin(page, "pagespeed_admin", perHostReplies());
       await openConsole(page, "pagespeed_admin", hash);
       await pageReady(page);
-      const cards = await page.locator("main .cards > .card").all();
+      // Savings keeps its first card in a column of its own.
+      const cards = await page.locator("main .cards .card").all();
       expect(cards).toHaveLength(2);
       const [a, b] = [await box(cards[0]), await box(cards[1])];
       expect(Math.abs(a.top - b.top)).toBeLessThanOrEqual(1);
@@ -799,6 +800,23 @@ test.describe("full-width tables whose columns stay together", () => {
       expect(b.right).toBeLessThanOrEqual(size.width);
     });
   }
+});
+
+test.describe("column heights", () => {
+  test("Savings' two columns are within a factor of two of each other on a laptop window", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    await pageReady(page);
+    await expect(page.getByTestId("savings-by-host-card")).toBeVisible();
+    const columns = await page.locator("main .cards > *").all();
+    expect(columns).toHaveLength(2);
+    const [left, right] = [await box(columns[0]), await box(columns[1])];
+    expect(Math.abs(left.top - right.top)).toBeLessThanOrEqual(1);
+    expect(right.left).toBeGreaterThan(left.right);
+    const ratio = Math.max(left.height, right.height) / Math.min(left.height, right.height);
+    expect(ratio, `column heights ${left.height} and ${right.height}`).toBeLessThan(2);
+  });
 });
 
 test.describe("card heights", () => {

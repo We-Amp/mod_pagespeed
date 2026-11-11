@@ -366,6 +366,89 @@ test("a type served uncompressed states its saving in optimized bytes", async ({
   await expect(image.locator(".split-figures dd").nth(1)).toHaveText("2 requests");
 });
 
+// The golden optimizer capture, with CSS served both as optimized copies
+// and as stored compressed ones: a bar of two shares.
+function twoShareCssReplies() {
+  const golden = JSON.parse(F.OPT_STATS_PAGE_BYTES) as Record<string, Record<string, unknown>>;
+  return {
+    ...goldenReplies(),
+    "v1/daemon/stats": F.ok({
+      ...golden,
+      serve_savings: {
+        ...golden.serve_savings,
+        css: {
+          by_encoding: { br: { bytes: 50_741, hits: 3 }, gzip: { bytes: 0, hits: 0 }, identity: { bytes: 180_000, hits: 5 } },
+          hits: 8,
+          optimized_bytes: 230_741,
+          original_bytes: 884_736,
+        },
+      },
+    }),
+  };
+}
+
+test("a bar draws each share as a fill of its own, a gap apart", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", twoShareCssReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const shares = page.getByTestId("savings-split-css").locator(".split-bar > .bar-fill");
+  await expect(shares).toHaveCount(2);
+  await expect(shares.nth(0)).toHaveClass(/split-optimized-served/);
+  await expect(shares.nth(1)).toHaveClass(/split-served-encoded/);
+  const [served, encoded] = await shares.evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, fill: getComputedStyle(el).backgroundColor };
+    }),
+  );
+  // Sized by their counts (5 and 3 requests), and never touching.
+  expect(served.width / encoded.width).toBeCloseTo(5 / 3, 1);
+  expect(encoded.left - served.right).toBeGreaterThanOrEqual(2);
+  expect(served.fill).not.toBe(encoded.fill);
+  // No share is a slab in the text colour.
+  const text = await page.getByTestId("savings-split-css").evaluate((el) => getComputedStyle(el).color);
+  expect([served.fill, encoded.fill]).not.toContain(text);
+});
+
+test("the legend of a bar runs along one line: each share's name next to its count", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  for (const key of ["css", "image"]) {
+    const rows = await page
+      .getByTestId(`savings-split-${key}`)
+      .locator(".split-figures > div")
+      .evaluateAll((els) =>
+        els.map((el) => {
+          const name = (el.querySelector("dt") as HTMLElement).getBoundingClientRect();
+          const count = (el.querySelector("dd") as HTMLElement).getBoundingClientRect();
+          return { top: Math.round(el.getBoundingClientRect().top), nameRight: name.right, countLeft: count.left, sameLine: count.top < name.bottom };
+        }),
+      );
+    expect(rows).toHaveLength(3);
+    // One line for the three shares on a wide card...
+    expect(new Set(rows.map((r) => r.top)).size, `${key}: legend lines`).toBe(1);
+    // ...and each count follows its name, not on a line below it.
+    for (const r of rows) {
+      expect(r.sameLine).toBe(true);
+      expect(r.countLeft).toBeGreaterThanOrEqual(r.nameRight);
+    }
+  }
+});
+
+test("on a phone the legend wraps inside its card", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const card = await page.getByTestId("savings-optimizer-card").evaluate((el) => el.getBoundingClientRect().right);
+  const rights = await page
+    .getByTestId("savings-split-css")
+    .locator(".split-figures dt, .split-figures dd")
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().right));
+  expect(rights.length).toBe(6);
+  for (const right of rights) expect(right).toBeLessThanOrEqual(card);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
 test("a type with no traffic says so instead of showing zeroes", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
@@ -386,6 +469,10 @@ test("stamps each card with its own time base", async ({ page }) => {
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   await expect(page.getByTestId("since-module")).toContainText("(web server restart or reload)");
   await expect(page.getByTestId("since-optimizer")).toContainText("(optimizer restart)");
+  // The per-host table left the optimizer card and took its time base along.
+  const hostStamp = page.getByTestId("savings-by-host-card").getByTestId("since-by-host");
+  await expect(hostStamp).toHaveText(await page.getByTestId("since-optimizer").innerText());
+  expect(await hostStamp.getAttribute("title")).toEqual(await page.getByTestId("since-optimizer").getAttribute("title"));
   // Each stamp carries its own base: the module's and the optimizer's
   // start times differ in the goldens, and so do their tooltips.
   const moduleIso = await page.getByTestId("since-module").getAttribute("title");
@@ -438,8 +525,11 @@ test("a two-minute-old optimizer shows warming up, not a percentage", async ({ p
   });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   await expect(page.getByTestId("warming-pill").first()).toContainText("warming up");
-  await expect(page.getByTestId("savings-optimizer-total")).toContainText("—");
-  await expect(page.getByTestId("savings-optimizer-total")).not.toContainText("%");
+  // The missing share is said in words, next to the figure it belongs to.
+  const total = page.getByTestId("savings-optimizer-total");
+  await expect(total.locator(".detail")).toHaveText(/^of [\d.,]+ [KMG]?B; too early for a percentage$/);
+  await expect(total).not.toContainText("%");
+  await expect(total).not.toContainText("—");
   // The module base is days old in the golden; its percentage stays.
   await expect(page.getByTestId("savings-module-total")).toContainText("%");
 });
@@ -522,6 +612,36 @@ test.describe("serve savings per host", () => {
     await expect(table.locator("tbody tr").nth(1)).toContainText("static.example.com");
     await expect(table.locator("tbody tr").nth(1)).toContainText("80%");
     await expect(page.getByTestId("savings-by-host-other")).toHaveCount(0);
+  });
+
+  test("the per-host table is a card of its own under the module card, not a part of the optimizer card", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/stats": F.OPT_STATS_PAGE });
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    const card = page.getByTestId("savings-by-host-card");
+    await expect(card.getByRole("heading", { level: 2 })).toHaveText("Optimizer cache serves by host");
+    await expect(card.getByTestId("savings-by-host")).toBeVisible();
+    await expect(card).toContainText("Measured in transfer bytes");
+    await expect(page.getByTestId("savings-optimizer-card").getByTestId("savings-by-host")).toHaveCount(0);
+    const rect = (id: string) => page.getByTestId(id).evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect);
+    const [module, hosts, optimizer] = await Promise.all(
+      ["savings-module-card", "savings-by-host-card", "savings-optimizer-card"].map(rect),
+    );
+    expect(Math.abs(hosts.left - module.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(hosts.width - module.width)).toBeLessThanOrEqual(1);
+    expect(hosts.top).toBeGreaterThan(module.bottom);
+    expect(optimizer.left).toBeGreaterThan(hosts.right);
+    expect(Math.abs(optimizer.top - module.top)).toBeLessThanOrEqual(1);
+    // The same order for a keyboard and a screen reader.
+    const order = await page.locator("main .cards .card").evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(order).toEqual(["savings-module-card", "savings-by-host-card", "savings-optimizer-card"]);
+  });
+
+  test("no per-host card when the optimizer does not answer", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/health": UNREACHABLE, "v1/daemon/stats": UNREACHABLE });
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    await expect(page.getByTestId("savings-optimizer-unavailable")).toBeVisible();
+    await expect(page.getByTestId("savings-by-host-card")).toHaveCount(0);
   });
 
   test("with a lens, the optimizer card leads with that host's figures", async ({ page }) => {

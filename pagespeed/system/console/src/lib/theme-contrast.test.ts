@@ -417,10 +417,11 @@ describe("forced colours", () => {
   });
 });
 
-// The savings split's stacked bar: each segment fill must stand out from the
-// bar's track (which also shows as the gap between segments) and from the
-// card behind it — the muted per-host card included — and neighbouring
-// segments must differ by 3:1, so the bar reads without relying on hue.
+// The savings split's stacked bar: each share is a .bar-fill whose colour
+// must stand out from the bar's track (which also shows as the gap between
+// two shares) and from the card behind it, the muted per-host card
+// included. Two shares are told apart by that gap, not by their hues: the
+// fills are close in lightness, and a forced palette paints them alike.
 describe("savings split bar", () => {
   const savings = readFileSync(join(SRC, "pages/Savings.svelte"), "utf8");
   const background = (selector: string): string => {
@@ -434,24 +435,26 @@ describe("savings split bar", () => {
   const track = background(".split-bar");
   for (const scheme of ["light", "dark"] as const) {
     const t = tokens[scheme];
-    it(`${scheme}: every segment passes 4.5:1 on the track and the card`, () => {
+    it(`${scheme}: every share passes 4.5:1 on the track and the card`, () => {
       for (const [i, fill] of fills.entries()) {
         for (const bg of [track, "--ps-surface", "--ps-bg-secondary"]) {
           expect(contrastRatio(t[fill], t[bg]), `${order[i]} (${fill}) on ${bg}`).toBeGreaterThanOrEqual(AA);
         }
       }
     });
-    it(`${scheme}: neighbouring segments differ by 3:1`, () => {
-      for (let i = 1; i < fills.length; i++) {
-        expect(
-          contrastRatio(t[fills[i - 1]], t[fills[i]]),
-          `${order[i - 1]} next to ${order[i]}`,
-        ).toBeGreaterThanOrEqual(3);
-      }
+    it(`${scheme}: no share is drawn in the text colour, and no two share a fill`, () => {
+      expect(fills).not.toContain("--ps-text");
+      expect(new Set(fills.map((fill) => t[fill])).size).toBe(fills.length);
     });
   }
-  it("separates segments with a gap in the track colour", () => {
-    expect(savings).toMatch(/\.split-bar\s*\{[^}]*\bgap:/);
+  it("separates two shares with a gap in the track colour", () => {
+    expect(savings).toMatch(/\.split-bar\s*\{[^}]*\bgap:\s*[1-9]/);
+  });
+  it("draws every share as a .bar-fill, the mark the forced-colours rules keep painted", () => {
+    expect(savings).toMatch(/class="bar-fill split-\{seg\.key\}"/);
+    expect(readFileSync(join(SRC, "lib/theme.css"), "utf8")).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*\.bar-fill[^{]*\{[^}]*forced-color-adjust:\s*none/,
+    );
   });
 });
 
