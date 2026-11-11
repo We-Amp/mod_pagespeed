@@ -324,7 +324,7 @@
 <!-- Log text is visitor-influenced: every segment renders as a text node;
      only an http(s) URL that parses becomes a link (linkify.ts). Kept on one
      line: the text keeps its whitespace (pre-wrap). -->
-{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{@const inspect = inspectHrefForLink(segment.href)}{#if inspect !== null}<a class="log-inspect" href={inspect} aria-label={`Inspect ${segment.text}`} title="Inspect this URL" data-testid="log-inspect"></a>{/if}{:else}{segment.text}{/if}{/each}{/snippet}
+{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{@const inspect = inspectHrefForLink(segment.href)}{#if inspect !== null}<a class="log-inspect" href={inspect} aria-label={`Inspect ${segment.text}`} data-testid="log-inspect"></a>{/if}{:else}{segment.text}{/if}{/each}{/snippet}
 
 <div class="page">
   <PageHeader

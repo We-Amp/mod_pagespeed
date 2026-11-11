@@ -886,14 +886,29 @@ test.describe("Logs text filter in the address", () => {
     const inspect = row.getByRole("link", { name: "Inspect https://www.example.test/a.css" });
     await expect(inspect).toHaveAttribute("href", "#/urls/detail?url=%2Fa.css&host=www.example.test&scheme=https");
     await expect(inspect).not.toHaveAttribute("target", "_blank");
+    await expect(inspect).not.toHaveAttribute("title", /.*/);
     // The mark adds no words to the entry: its text is the log's own.
     await expect(row.locator(".log-text")).toHaveText("Fetch of https://www.example.test/a.css failed");
     await inspect.click();
     await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/a.css");
-    await expect(page.getByTestId("url-module-log")).toContainText("1 entry in the module's log names this URL.");
     // And back again: the link on the URL's page shows that entry.
     await page.getByTestId("url-module-log").getByRole("link").click();
     await expect(page.getByTestId("logs-search")).toHaveValue("https://www.example.test/a.css");
     await expect(page.getByTestId("log-group")).toHaveCount(1);
   });
+});
+
+test("a link to the product's documentation in an entry gets no inspect mark", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    config: F.CONFIG_VHOST,
+    message_history: F.plainMessages([
+      { severity: "warning", message: "Restrict access; see https://modpagespeed.com/docs/admin-console/#access-control and https://www.example.test/a.css" },
+    ]),
+  });
+  await openConsole(page, "pagespeed_admin", "#/logs");
+  await ready(page);
+  const row = page.getByTestId("log-group");
+  await expect(row.locator("a.log-link")).toHaveCount(2);
+  await expect(row.getByTestId("log-inspect")).toHaveCount(1);
+  await expect(row.getByTestId("log-inspect")).toHaveAttribute("href", /host=www\.example\.test/);
 });

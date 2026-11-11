@@ -4,16 +4,16 @@
 /**
  * "Inspect a URL": the operator pastes a URL and the console answers why it
  * is, or is not, optimized. The answer has two halves. The module's half
- * (its cache lookup, its log entries naming the URL, the usual reasons)
+ * (its cache lookup, a link to its log entries naming the URL, the usual reasons)
  * stands on every console; the optimizer's half (its record of the URL, a
  * cooldown, its log) is the whole-server console's. Everything here is
  * plain data: the page renders it as text, never as markup.
  */
 
 import { ApiError } from "$lib/api/client";
-import type { CacheEntryKey, CacheEntryResponse, DaemonCooldownEntry, MessagesResponse } from "$lib/api/types";
-import { WEBSITE } from "$lib/data/product-facts-console";
-import { cooldownReasonLabel, errorCode, type OptimizerAbsence } from "./daemon";
+import type { CacheEntryKey, CacheEntryResponse, DaemonCooldownEntry } from "$lib/api/types";
+import { WEBSITE, WEBSITE_HOST } from "$lib/data/product-facts-console";
+import { cooldownReasonLabel, errorCode } from "./daemon";
 import { detailHref, displayUrl, entryKeyFromAbsoluteUrl } from "./urls-api";
 
 // ── The pasted URL ───────────────────────────────────────────────────
@@ -42,10 +42,14 @@ export function logsHrefFor(key: CacheEntryKey, source: "module" | "optimizer"):
   return `#/logs?${params.toString()}`;
 }
 
-/** The inspect page of a URL found in a log line; null when it is not one the console can look up. */
+/**
+ * The inspect page of a URL found in a log line; null when it is not one
+ * the console can look up, or is a page of the product's own website (the
+ * documentation link in a message is never the operator's URL).
+ */
 export function inspectHrefForLink(href: string): string | null {
   const key = entryKeyFromAbsoluteUrl(href);
-  return key === null ? null : detailHref(key);
+  return key === null || key.host === WEBSITE_HOST ? null : detailHref(key);
 }
 
 // ── The module's half ────────────────────────────────────────────────
@@ -92,31 +96,8 @@ export function moduleLookup(settled: PromiseSettledResult<CacheEntryResponse> |
   return lookup("no-answer");
 }
 
-/**
- * How many entries of the module's log name the URL; null when the log
- * could not be read. The match is the Logs page's own text filter
- * (case-insensitive, anywhere in the line), so the link beside the count
- * shows exactly these entries.
- */
-export function logMentions(settled: PromiseSettledResult<MessagesResponse> | undefined, shown: string): number | null {
-  if (settled?.status !== "fulfilled") return null;
-  const list: unknown = settled.value?.messages;
-  if (!Array.isArray(list)) return 0;
-  const needle = shown.toLowerCase();
-  let count = 0;
-  for (const entry of list) {
-    const message: unknown = (entry as { message?: unknown } | null)?.message;
-    if (typeof message === "string" && message.toLowerCase().includes(needle)) count += 1;
-  }
-  return count;
-}
-
-/** The log line of the module's half: "3 entries in the module's log name this URL." */
-export function logMentionsText(count: number | null): string {
-  if (count === null) return "The module's log could not be read.";
-  if (count === 0) return "No entry in the module's log names this URL.";
-  return count === 1 ? "1 entry in the module's log names this URL." : `${count} entries in the module's log name this URL.`;
-}
+/** An answer that cannot change while the page is open: asking again would only repeat it. */
+export const lookupIsFinal = (kind: ModuleLookupKind): boolean => kind === "original-url" || kind === "other-host";
 
 // ── The optimizer's half ─────────────────────────────────────────────
 
@@ -139,19 +120,14 @@ export function cooldownText(entry: DaemonCooldownEntry): string {
 }
 
 /**
- * What a console that cannot show the optimizer's record says about it, in
- * one line: what the whole-server console adds, or that there is no
- * optimizer and the module's answer is the whole answer.
- * `absence`: why the optimizer's health read failed; null when it answered.
+ * What a page that does not show the optimizer's record says about it, in
+ * one line: that there is no optimizer, so the module's answer is the whole
+ * answer (either console), or what the whole-server console adds.
  */
-export function wholeServerLine(absence: OptimizerAbsence | null): { text: string; link: boolean } {
-  if (absence === "not-configured" || absence === "module-unsupported") {
-    return { text: "No optimizer is connected to this server: the module's answer is the whole answer.", link: false };
-  }
-  return {
-    text: "The whole-server console adds the optimizer's record of this URL.",
-    link: true,
-  };
+export function wholeServerLine(noOptimizer: boolean): { text: string; link: boolean } {
+  return noOptimizer
+    ? { text: "No optimizer is connected to this server: the module's answer is the whole answer.", link: false }
+    : { text: "The whole-server console adds the optimizer's record of this URL.", link: true };
 }
 
 // ── The reasons ──────────────────────────────────────────────────────

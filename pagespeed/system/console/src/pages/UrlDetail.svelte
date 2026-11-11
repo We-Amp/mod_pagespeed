@@ -11,13 +11,15 @@
   // - the optimizer's (whole-server console): the entry's variants, their
   //   sizes/quality/freshness and image previews, or that it holds nothing,
   //   and a cooldown;
-  // - the module's (every console): its cache lookup, how many entries of
-  //   its log name the URL, and the usual reasons a URL is not optimized.
+  // - the module's (every console): its cache lookup, a link to the log
+  //   entries that name the URL, and the usual reasons a URL is not
+  //   optimized.
   // A per-host console shows the module's half as the answer and says in
   // one line what the whole-server console adds.
   //
   // One composite poller (health for the version floor, the entry's
-  // alternates, the cooldown list, the module's lookup and its log);
+  // alternates, the cooldown list and the module's lookup; the logs are
+  // linked, never read here);
   // allSettled never rejects, so a failed leaf shows its explanation
   // instead of a stale-data notice — with one exception: a busy (429)
   // alternates answer is rethrown so the poller's busy rule keeps the last
@@ -39,7 +41,6 @@
   import QueuedImage from "$lib/QueuedImage.svelte";
   import ImageDiff from "$lib/ImageDiff.svelte";
   import {
-    cooldownReasonLabel,
     errorCode,
     isDaemonUnavailable,
     normalizeCooldowns,
@@ -57,8 +58,8 @@
   import { detailHref, displayUrl, globalConsoleHref, parseDetailKey } from "$lib/utils/urls-api";
   import {
     cooldownFor,
-    logMentions,
-    logMentionsText,
+    cooldownText,
+    lookupIsFinal,
     logsHrefFor,
     moduleLookup,
     urlReasons,
@@ -97,9 +98,11 @@
   //   later reads settle that slot locally, and the module's half keeps
   //   refreshing;
   // - the module runs one cache lookup at a time: a busy answer keeps the
-  //   last one.
+  //   last one, and an answer that cannot change (an original URL, another
+  //   host's URL) is not asked for again.
   let optimizerRefusal: Error | null = null;
   let lastLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
+  let settledLookup: Promise<CacheEntryResponse> | undefined;
 
   const poll = usePolling(
     () => {
@@ -114,8 +117,7 @@
         api.daemonHealth(),
         refusal !== null ? Promise.reject(refusal) : api.daemonCacheAlternates(key),
         refusal !== null ? Promise.reject(refusal) : api.daemonCooldowns(),
-        api.getCacheEntry(shown),
-        api.getMessages(),
+        settledLookup ?? api.getCacheEntry(shown),
       ] as const).then((results) => {
         const alternates = results[1];
         if (alternates.status === "rejected" && isBusyAnswer(alternates.reason))
@@ -130,8 +132,9 @@
         const lookup = results[3];
         const busy = lookup.status === "rejected" && lookup.reason instanceof Error && isBusyAnswer(lookup.reason);
         if (!busy) lastLookup = lookup;
+        if (lookup.status === "fulfilled" && lookupIsFinal(moduleLookup(lookup).kind)) settledLookup = Promise.resolve(lookup.value);
         updatedAt = Date.now();
-        return { health: results[0], alternates, cooldowns: results[2], lookup: lastLookup ?? lookup, messages: results[4] };
+        return { health: results[0], alternates, cooldowns: results[2], lookup: lastLookup ?? lookup };
       });
     },
     10000,
@@ -184,7 +187,6 @@
 
   // The module's half, and what the page says around it.
   let lookup = $derived(moduleLookup(poll.data?.lookup));
-  let mentions = $derived(logMentions(poll.data?.messages, shown));
   // A URL the optimizer holds nothing for can still be in its cooldown list.
   let listedCooldown = $derived(
     key !== null && poll.data?.cooldowns.status === "fulfilled"
@@ -192,14 +194,22 @@
       : null,
   );
   let reasons = $derived(urlReasons(cooldown ?? listedCooldown));
-  // The reasons follow whenever the optimizer shows no optimized variant.
-  let reasonsShown = $derived(altData === null || status === null || status === "original-only");
+  // The reasons follow whenever nothing here shows the URL optimized: no
+  // optimized variant from the optimizer, no current result from the module.
+  let reasonsShown = $derived(
+    (altData === null || status === null || status === "original-only") && lookup.kind !== "current",
+  );
   let perVhost = $derived(errorCode(altError) === "whole_server_console_only");
+  // A server without an optimizer: an ordinary state, on either console.
+  let noOptimizer = $derived(
+    errorCode(altError) === "daemon_not_configured" ||
+      ["not-configured", "module-unsupported"].includes(optimizerAbsence(healthError) ?? ""),
+  );
   // The optimizer's log is the whole-server console's, and only where an optimizer is connected.
   let optimizerLogShown = $derived(
-    altData !== null || (altError !== null && !perVhost && !isUnavailable(altError) && errorCode(altError) !== "daemon_not_configured"),
+    altData !== null || (altError !== null && !perVhost && !noOptimizer && !isUnavailable(altError)),
   );
-  let wholeServer = $derived(wholeServerLine(optimizerAbsence(healthError)));
+  let wholeServer = $derived(wholeServerLine(noOptimizer));
   // This URL's page on the whole-server console (null when the admin path is renamed).
   let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
@@ -258,7 +268,7 @@
     <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
     {#if altData}
       {@render optimizerRecord()}
-    {:else if altError && !perVhost}
+    {:else if altError && !perVhost && !noOptimizer}
       {@render optimizerNote(altError)}
     {/if}
     {#if optimizerLogShown}
@@ -273,10 +283,7 @@
         <ul class="facts">
           <li data-testid="url-module-lookup">{lookup.text}</li>
           <li data-testid="url-module-log">
-            {logMentionsText(mentions)}
-            {#if mentions !== null && mentions > 0}
-              <a href={logsHrefFor(key, "module")}>Show them in Logs</a>
-            {/if}
+            <a href={logsHrefFor(key, "module")}>Module log entries that name this URL</a>
           </li>
         </ul>
       </section>
@@ -300,7 +307,7 @@
       {/if}
     </div>
 
-    {#if perVhost}
+    {#if perVhost || noOptimizer}
       <p class="note whole-server" data-testid="url-detail-per-vhost">
         {wholeServer.text}
         {#if wholeServer.link && globalHref !== null}
@@ -373,13 +380,7 @@
     </div>
 
     {#if cooldown}
-      {@const reason = cooldownReasonLabel(cooldown.reason)}
-      <p class="cooldown-banner" data-testid="url-detail-cooldown">
-        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{`, ${Math.max(
-              0,
-              Math.round(cooldown.remaining_seconds),
-            )}s remaining`}{/if}.
-      </p>
+      <p class="cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 
     <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->

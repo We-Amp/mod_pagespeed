@@ -3,16 +3,16 @@
 
 import { describe, expect, it } from "vitest";
 import { ApiError, UnavailableError } from "$lib/api/client";
-import type { CacheEntryResponse, DaemonCooldownEntry, MessagesResponse } from "$lib/api/types";
+import { WEBSITE } from "$lib/data/product-facts-console";
+import type { CacheEntryResponse, DaemonCooldownEntry } from "$lib/api/types";
 import {
   INSPECT_INPUT_HELP,
   cooldownFor,
   cooldownText,
   inspectHrefForLink,
   inspectTarget,
-  logMentions,
-  logMentionsText,
   logsHrefFor,
+  lookupIsFinal,
   moduleLookup,
   urlReasons,
   wholeServerLine,
@@ -55,6 +55,8 @@ describe("the pasted URL", () => {
       "#/urls/detail?url=%2Fa.css&host=www.example.test&scheme=https",
     );
     expect(inspectHrefForLink("mailto:someone@example.test")).toBeNull();
+    // The product's own website (the documentation link in a message) is never the operator's URL.
+    expect(inspectHrefForLink(`${WEBSITE}/docs/admin-console/#access-control`)).toBeNull();
     expect(inspectHrefForLink("not a url")).toBeNull();
   });
 });
@@ -92,33 +94,11 @@ describe("the module's half", () => {
     expect(moduleLookup(rejected(new UnavailableError(403, "Forbidden", "/cache?url"))).kind).toBe("no-answer");
   });
 
-  const MESSAGES: MessagesResponse = {
-    messages: [
-      { timestamp: 0, severity: "error", message: "Fetch of https://www.example.test/img/hero.png?v=2 failed" },
-      { timestamp: 0, severity: "info", message: "Rewrote HTTPS://WWW.EXAMPLE.TEST/img/hero.png?v=2.pagespeed.ic.x.png" },
-      { timestamp: 0, severity: "info", message: "Slow origin for https://www.example.test/other.png" },
-      { timestamp: 0, severity: "info", message: 7 as unknown as string },
-    ],
-  };
-
-  it("counts the log entries that name the URL, as the Logs filter matches them", () => {
-    const shown = "https://www.example.test/img/hero.png?v=2";
-    expect(logMentions(fulfilled(MESSAGES), shown)).toBe(2);
-    expect(logMentions(fulfilled({ messages: [] }), shown)).toBe(0);
-    expect(logMentions(fulfilled({ messages: "no" } as unknown as MessagesResponse), shown)).toBe(0);
-  });
-
-  it("a log that could not be read has no count", () => {
-    expect(logMentions(rejected(new UnavailableError(403, "Forbidden", "/message_history")), "x")).toBeNull();
-    expect(logMentions(rejected(new ApiError(500, "boom")), "x")).toBeNull();
-    expect(logMentions(undefined, "x")).toBeNull();
-  });
-
-  it("says the count in words", () => {
-    expect(logMentionsText(0)).toBe("No entry in the module's log names this URL.");
-    expect(logMentionsText(1)).toBe("1 entry in the module's log names this URL.");
-    expect(logMentionsText(12)).toBe("12 entries in the module's log name this URL.");
-    expect(logMentionsText(null)).toBe("The module's log could not be read.");
+  it("an answer that cannot change is final; the others are asked again", () => {
+    expect(["current", "not-current", "original-url", "other-host", "no-answer"].filter((k) => lookupIsFinal(k as never))).toEqual([
+      "original-url",
+      "other-host",
+    ]);
   });
 });
 
@@ -141,18 +121,12 @@ describe("the optimizer's half", () => {
     expect(cooldownText({ remaining_seconds: -3 })).toBe("In cooldown, 0 s remaining.");
   });
 
-  it("a console without the optimizer's record says what the whole-server console adds", () => {
-    expect(wholeServerLine(null)).toMatchObject({ link: true });
-    expect(wholeServerLine("not-answering")).toMatchObject({ link: true });
-    expect(wholeServerLine(null).text).toMatch(/whole-server console adds/);
-  });
-
-  it("a server without an optimizer has nothing more to link to", () => {
-    for (const absence of ["not-configured", "module-unsupported"] as const) {
-      const line = wholeServerLine(absence);
-      expect(line.link).toBe(false);
-      expect(line.text).toMatch(/No optimizer/);
-    }
+  it("a page without the optimizer's record says what the whole-server console adds, or that there is no optimizer", () => {
+    expect(wholeServerLine(false)).toEqual({ text: "The whole-server console adds the optimizer's record of this URL.", link: true });
+    expect(wholeServerLine(true)).toEqual({
+      text: "No optimizer is connected to this server: the module's answer is the whole answer.",
+      link: false,
+    });
   });
 });
 
