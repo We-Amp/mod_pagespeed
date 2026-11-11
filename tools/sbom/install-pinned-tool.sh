@@ -11,8 +11,10 @@
 # Usage: install-pinned-tool.sh <syft|grype> <vX.Y.Z> <bin-dir>
 # Env:   INSTALL_RETRIES   download+verify attempts (default 3)
 #        PINNED_TOOL_BASE  override of https://github.com/anchore (tests)
+#        FETCH_RETRY_*     see tools/ci/fetch_retry.sh (per-download retries)
 #        PINNED_TOOL_OS / PINNED_TOOL_ARCH  override platform (tests)
 set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 <syft|grype> <vX.Y.Z> <bin-dir>" >&2
@@ -44,8 +46,8 @@ attempt=1
 while :; do
   rm -f "$tmp/$tarball" "$tmp/$sums"
   err=""
-  if ! curl -sSfL --retry 2 -o "$tmp/$tarball" "$url/$tarball" \
-     || ! curl -sSfL --retry 2 -o "$tmp/$sums" "$url/$sums"; then
+  if ! bash "$here/../ci/fetch_retry.sh" "$url/$tarball" "$tmp/$tarball" \
+     || ! bash "$here/../ci/fetch_retry.sh" "$url/$sums" "$tmp/$sums"; then
     err="download failed"
   else
     want="$(awk -v f="$tarball" '$2==f || $2=="*"f {print $1; exit}' "$tmp/$sums")"
