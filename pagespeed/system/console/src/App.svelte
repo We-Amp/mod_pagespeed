@@ -121,12 +121,17 @@
   );
 
   // Load the page for the current hash (a new query on the same page loads
-  // it afresh). Only the most recent navigation may show its page -- a
-  // slower load must not replace a later one; the tab title names the page,
-  // and after the first load focus moves to the new page's heading.
+  // it afresh). Every navigation counts, also one to the address the router
+  // last read: a page's own controls rewrite the address in place
+  // (view-address.ts), and following a link back to the earlier address
+  // must still mount the page from it (router.navigations). Only the most
+  // recent navigation may show its page -- a slower load must not replace a
+  // later one; the tab title names the page, and after the first load focus
+  // moves to the new page's heading.
   const loads = new LatestGate();
   let firstLoad = true;
   $effect(() => {
+    void router.navigations;
     const route = router.currentRoute;
     const ticket = loads.begin();
     // Every navigation closes the phone's drawer, however it was made

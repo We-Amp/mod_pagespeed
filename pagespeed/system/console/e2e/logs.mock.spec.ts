@@ -47,7 +47,7 @@ test.describe("the timeline", () => {
     await expect(rows.first()).toContainText("Fetch of https://www.example.test/a.css failed");
     await expect(rows.last()).toContainText("parsed 42 directives");
     await expect(rows.last().locator(".source-badge")).toHaveText("Optimizer");
-    // The source choice is part of the address (the view remounts on it).
+    // The source choice is written into the address.
     await page.getByRole("radio", { name: "Optimizer" }).click();
     await expect(page).toHaveURL(/#\/logs\?level=debug&source=optimizer$/);
     await expect(page.getByRole("radio", { name: "Optimizer" })).toBeChecked();
@@ -123,7 +123,7 @@ test.describe("the timeline", () => {
     await openConsole(page, "pagespeed_admin", "#/logs?level=info");
     await ready(page);
     await expect(page.getByTestId("log-group")).toHaveCount(3);
-    // The toggle is part of the address (the view remounts on it).
+    // The toggle is written into the address.
     await page.getByRole("checkbox", { name: "Group repeats" }).click();
     await expect(page).toHaveURL(/#\/logs\?level=info&group=0$/);
     await expect(page.getByTestId("log-group")).toHaveCount(5);
@@ -496,9 +496,206 @@ test.describe("the raw optimizer stream (source=optimizer, group=0)", () => {
     await ready(page);
     await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "log");
     await page.getByRole("checkbox", { name: "Group repeats" }).click();
+    await expect(page).toHaveURL(/#\/logs\?source=optimizer&level=debug$/);
+    await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "region");
+    await expect(page.getByRole("button", { name: "Auto-refresh · 5 s" })).toBeVisible();
+  });
+});
+
+test.describe("the view controls change the view in place", () => {
+  /** Marks the mounted page, so a later check can tell whether it was mounted afresh. */
+  const markPage = (page: Page) => page.evaluate(() => document.querySelector("main h1")!.setAttribute("data-mark", "1"));
+  const pageMark = (page: Page) => page.locator("main h1[data-mark='1']");
+  const fromStart = (requests: string[]) => requests.filter((url) => !new URL(url).searchParams.has("since")).length;
+  const moduleReads = (page: Page) => {
+    const urls: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/message_history")) urls.push(r.url());
+    });
+    return urls;
+  };
+
+  test("filter text, levels, an expanded row and the focus survive a Source change and a Group toggle", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES_REPEATS));
+    await openConsole(page, "pagespeed_global_admin", "#/logs");
+    await ready(page);
+    await markPage(page);
+    await page.getByRole("checkbox", { name: /^info/ }).check();
+    await page.getByTestId("logs-search").fill("umami");
+    const row = page.getByTestId("log-group").first();
+    await row.getByRole("button", { name: "Show 3 entries" }).click();
+    await expect(row.getByTestId("log-entries").locator("li")).toHaveCount(3);
+
+    const moduleRadio = page.getByRole("radio", { name: "Module" });
+    await moduleRadio.check();
+    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await expect(moduleRadio).toBeFocused();
+    await expect(pageMark(page)).toHaveCount(1);
+    await expect(page.getByTestId("logs-search")).toHaveValue("umami");
+    await expect(page.getByRole("checkbox", { name: /^info/ })).toBeChecked();
+    await expect(row.getByTestId("log-entries").locator("li")).toHaveCount(3);
+
+    const group = page.getByRole("checkbox", { name: "Group repeats" });
+    await group.uncheck();
+    await expect(page).toHaveURL(/#\/logs\?source=module&group=0$/);
+    await expect(group).toBeFocused();
+    await expect(page.getByTestId("log-entries")).toHaveCount(0);
+    await group.check();
+    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await expect(group).toBeFocused();
+    await expect(pageMark(page)).toHaveCount(1);
+    await expect(page.getByTestId("logs-search")).toHaveValue("umami");
+    await expect(page.getByRole("checkbox", { name: /^info/ })).toBeChecked();
+    await expect(row.getByTestId("log-entries").locator("li")).toHaveCount(3);
+  });
+
+  test("the arrow keys step through the sources", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug");
+    await ready(page);
+    await page.getByRole("radio", { name: "Both" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("radio", { name: "Module" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "Module" })).toBeFocused();
+    await expect(page.getByTestId("log-group")).toHaveCount(3);
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("radio", { name: "Optimizer" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "Optimizer" })).toBeFocused();
+    await expect(page.getByTestId("log-group")).toHaveCount(4);
+    await expect(page).toHaveURL(/#\/logs\?level=debug&source=optimizer$/);
+  });
+
+  test("changing the view outside the raw stream never reads the module's log from the start again", async ({ page }) => {
+    const reads = moduleReads(page);
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug");
+    await ready(page);
+    await expect(page.getByTestId("log-group")).toHaveCount(7);
+    await page.getByRole("radio", { name: "Module" }).check();
+    await expect(page.getByTestId("log-group")).toHaveCount(3);
+    await page.getByRole("radio", { name: "Optimizer" }).check();
+    await expect(page.getByTestId("log-group")).toHaveCount(4);
+    await page.getByRole("radio", { name: "Both" }).check();
+    await page.getByRole("checkbox", { name: "Group repeats" }).uncheck();
+    await expect(page).toHaveURL(/#\/logs\?level=debug&group=0$/);
+    await expect(page.getByTestId("log-group")).toHaveCount(7);
+    // The poll that follows continues from the cursor.
+    await page.waitForRequest((r) => r.url().includes("/message_history?since="), { timeout: 10000 });
+    expect(fromStart(reads)).toBe(1);
+  });
+
+  test("entering the raw stream in place polls the optimizer alone every 3 s; leaving it resumes the module's log from its cursor", async ({ page }) => {
+    const reads = moduleReads(page);
+    const mock = await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.logsStream(), F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug");
+    await ready(page);
+    await markPage(page);
+    await expect(page.getByRole("button", { name: "Auto-refresh · 5 s" })).toBeVisible();
+    await page.getByRole("radio", { name: "Optimizer" }).check();
+    const group = page.getByRole("checkbox", { name: "Group repeats" });
+    await group.uncheck();
+    await expect(page).toHaveURL(/#\/logs\?level=debug&source=optimizer&group=0$/);
+    await expect(group).toBeFocused();
+    await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "log");
+    await expect(page.getByRole("button", { name: "Auto-refresh · 3 s" })).toBeVisible();
+    const rows = page.getByTestId("log-group");
+    await expect(rows.first()).toContainText("stream entry 0");
+    // Two optimizer reads in the raw stream, and the module's log is left alone meanwhile.
+    const moduleCalls = mock.calls("message_history");
+    const optimizerCalls = mock.calls("v1/daemon/logs");
+    await expect.poll(() => mock.calls("v1/daemon/logs"), { timeout: 10000 }).toBeGreaterThanOrEqual(optimizerCalls + 2);
+    expect(mock.calls("message_history")).toBeLessThanOrEqual(moduleCalls + 1); // at most a read already in flight
+    const settled = mock.calls("message_history");
+
+    await group.check();
     await expect(page).toHaveURL(/#\/logs\?level=debug&source=optimizer$/);
     await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "region");
     await expect(page.getByRole("button", { name: "Auto-refresh · 5 s" })).toBeVisible();
+    // The module's log is read at once, from where it was left.
+    await expect.poll(() => mock.calls("message_history"), { timeout: 2000 }).toBeGreaterThan(settled);
+    expect(fromStart(reads)).toBe(1);
+    await expect(pageMark(page)).toHaveCount(1);
+    await page.getByRole("radio", { name: "Module" }).check();
+    await expect(rows).toHaveCount(3);
+  });
+
+  test("a link to the raw stream presets every level; entering it with the controls keeps the levels as set", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?source=optimizer&group=0");
+    await ready(page);
+    await expect(page.getByRole("checkbox", { name: /^debug/ })).toBeChecked();
+    await expect(page.getByTestId("log-group")).toHaveCount(4);
+    await openConsole(page, "pagespeed_global_admin", "#/logs");
+    await ready(page);
+    await page.getByRole("radio", { name: "Optimizer" }).check();
+    await page.getByRole("checkbox", { name: "Group repeats" }).uncheck();
+    await expect(page.getByTestId("logs-timeline")).toHaveAttribute("role", "log");
+    await expect(page.getByRole("checkbox", { name: /^warning/ })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: /^debug/ })).not.toBeChecked();
+    await expect(page.getByTestId("log-group")).toHaveCount(2);
+  });
+
+  test("after Source is set to Module, the Logs shortcut opens the page afresh on both", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs");
+    await ready(page);
+    await markPage(page);
+    await page.getByTestId("logs-search").fill("origin");
+    await page.getByRole("radio", { name: "Module" }).check();
+    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await page.locator("main h1").click(); // out of the form controls: shortcuts are off inside them
+    await page.keyboard.press("g");
+    await page.keyboard.press("l");
+    await expect(page).toHaveURL(/#\/logs$/);
+    await ready(page);
+    await expect(page.getByRole("radio", { name: "Both" })).toBeChecked();
+    await expect(pageMark(page)).toHaveCount(0);
+    await expect(page.getByTestId("logs-search")).toHaveValue("");
+    await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeFocused();
+  });
+
+  test("a link followed a second time opens its view again, whatever the controls changed since", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?source=module");
+    await ready(page);
+    await expect(page.getByRole("radio", { name: "Module" })).toBeChecked();
+    await markPage(page);
+    await page.getByRole("radio", { name: "Both" }).check();
+    await expect(page).toHaveURL(/#\/logs$/);
+    await expect(pageMark(page)).toHaveCount(1);
+    // The same address again, as a finding's link or the "g m" shortcut gives it.
+    await page.locator("main h1").click();
+    await page.keyboard.press("g");
+    await page.keyboard.press("m");
+    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await ready(page);
+    await expect(page.getByRole("radio", { name: "Module" })).toBeChecked();
+    await expect(pageMark(page)).toHaveCount(0);
+    await expect(page.getByTestId("log-group")).toHaveCount(2);
+  });
+
+  test("the host lens stays in the address through a Source change and a Group toggle", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?lens=www.example.test");
+    await ready(page);
+    await page.getByRole("radio", { name: "Module" }).check();
+    await expect(page).toHaveURL(/#\/logs\?lens=www\.example\.test&source=module$/);
+    await page.getByRole("checkbox", { name: "Group repeats" }).uncheck();
+    await expect(page).toHaveURL(/#\/logs\?lens=www\.example\.test&source=module&group=0$/);
+    await page.getByRole("radio", { name: "Both" }).check();
+    await expect(page).toHaveURL(/#\/logs\?lens=www\.example\.test&group=0$/);
+    await expect(page.getByTestId("logs-lens")).toContainText("www.example.test");
+  });
+
+  test("a per-host console's Group toggle keeps the rest of its address", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, message_history: F.MESSAGES_REPEATS });
+    await openConsole(page, "pagespeed_admin", "#/logs?source=module&level=info");
+    await ready(page);
+    const group = page.getByRole("checkbox", { name: "Group repeats" });
+    await group.uncheck();
+    await expect(page).toHaveURL(/#\/logs\?source=module&level=info&group=0$/);
+    await expect(group).toBeFocused();
+    await expect(page.getByTestId("log-group")).toHaveCount(5);
   });
 });
 

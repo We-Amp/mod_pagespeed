@@ -10,8 +10,10 @@
   // handler's rule_packs leaf as JSON (rule-packs.ts). The server-rendered
   // page stays as the fallback and for scripts (?raw=1).
   //
-  // Which pack's decision log is loaded is the hash's pack= (a control
-  // navigates, so the page mounts with its one poller, as Logs does); the
+  // Which pack's decision log is loaded is preset by the address's pack=.
+  // The "Log of pack" select then changes it in place: the page stays
+  // mounted, the select keeps the keyboard focus, the choice is written
+  // into the address (view-address.ts) and the poller reads again. The
   // filters on the loaded tail run in the browser. On the whole-server
   // console the host lens narrows the tail's rows to one host.
   //
@@ -33,6 +35,7 @@
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import { formatCount } from "$lib/utils/format";
   import { serverPageHref } from "$lib/utils/nav";
+  import { replaceViewParams } from "$lib/utils/view-address";
   import {
     NO_FILTERS,
     distinctValues,
@@ -47,8 +50,9 @@
   const { api, scope, lens } = useConsole();
 
   const POLL_MS = 5000;
-  // The tail's pack, from the address; null: the server's default (the first loaded pack).
-  const requestedPack = router.params.get("pack") || null;
+  // The tail's pack: preset by the address, then the select's; null: the
+  // server's default (the first loaded pack).
+  let requestedPack = $state(router.params.get("pack") || null);
 
   let updatedAt = $state<number | null>(null);
   const poll = usePolling(async () => {
@@ -85,8 +89,16 @@
   let rawHref = $derived(withQuery(serverPage, { raw: "1", pack: tailPack }));
   let pageHref = $derived(withQuery(serverPage, { pack: tailPack }));
 
+  /** The select: another pack's decision log, in place. */
   function selectTailPack(id: string) {
-    router.navigate(id === "" ? "#/rule-packs" : `#/rule-packs?pack=${encodeURIComponent(id)}`);
+    requestedPack = id === "" ? null : id;
+    replaceViewParams({ pack: requestedPack });
+    poll.invalidate();
+  }
+
+  /** A virtual host's "Show decisions": a navigation, so the page opens at its top with that pack's log. */
+  function openTailPack(id: string) {
+    router.navigate(`#/rule-packs?pack=${encodeURIComponent(id)}`);
   }
 
   function clearFilters() {
@@ -255,7 +267,7 @@
                     <span class="state-badge tone-{pack.state.tone}" title={pack.state.explain}>{pack.state.label}</span>
                     <span class="mono pack-file">{pack.file}</span>
                     {#if pack.id !== null}
-                      <button type="button" class="btn btn-secondary" onclick={() => selectTailPack(pack.id ?? "")} data-testid="rp-vhost-log">Show decisions</button>
+                      <button type="button" class="btn btn-secondary" onclick={() => openTailPack(pack.id ?? "")} data-testid="rp-vhost-log">Show decisions</button>
                     {/if}
                     {#if pack.lastError}<p class="pack-error">Last error: {pack.lastError}</p>{/if}
                   </li>

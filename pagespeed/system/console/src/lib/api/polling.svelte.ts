@@ -17,6 +17,8 @@ export interface PollingControls<T> {
   stop(): void;
   /** The fetcher's inputs changed: drop an answer in flight and fetch again. */
   invalidate(): void;
+  /** Changes the interval from here on (poller.ts, setIntervalMs). */
+  setIntervalMs(intervalMs: number): void;
 }
 
 /**
@@ -69,5 +71,6 @@ export function usePolling<T>(
     start: () => poller.start(),
     stop: () => poller.stop(),
     invalidate: () => poller.invalidate(),
+    setIntervalMs: (intervalMs) => poller.setIntervalMs(intervalMs),
   };
 }
