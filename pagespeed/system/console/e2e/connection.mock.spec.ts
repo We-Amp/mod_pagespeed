@@ -135,6 +135,86 @@ test.describe("Connection", () => {
     await expect(banner).not.toContainText("the figures below are from");
   });
 
+  test("the Overview claims nothing while the server is down: no fresh stamp, no verdict, no green", async ({ page }) => {
+    await page.clock.install();
+    let down = false;
+    await mockAdmin(page, "pagespeed_admin", F.allReplies(), { down: () => down });
+    await openConsole(page, "pagespeed_admin");
+    await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
+
+    const health = page.getByTestId("health-summary");
+    const optimizer = page.getByTestId("optimizer-state");
+    const stamp = page.getByTestId("page-updated");
+    const dotColour = () => optimizer.evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
+    const borderColour = () => health.evaluate((el) => getComputedStyle(el).borderLeftColor);
+
+    // Up: a verdict, a green dot, a fresh stamp.
+    await expect(optimizer).toHaveText("Running");
+    await expect(optimizer).toHaveClass(/state-ok/);
+    await expect(health).not.toContainText("Status unknown");
+    await expect(stamp).toHaveText(/^updated \d s ago$/);
+    const green = await dotColour();
+    const verdictBorder = await borderColour();
+
+    // Down for 20 s: every sample fails, and none of them counts as an update.
+    down = true;
+    await runFor(page, 20_000);
+    await expect(page.getByTestId("connection-banner")).toBeVisible();
+    await expect(stamp).toHaveText(/^refresh overdue · updated \d+ s ago$/);
+    const age = Number(/updated (\d+) s ago/.exec((await stamp.textContent()) ?? "")?.[1]);
+    expect(age).toBeGreaterThanOrEqual(20);
+
+    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).toHaveClass(/health-unknown/);
+    expect(await borderColour()).not.toBe(verdictBorder);
+    await expect(optimizer).toHaveText("Running · last known");
+    await expect(optimizer).not.toHaveClass(/state-ok|state-warn/);
+    expect(await dotColour()).not.toBe(green);
+    // The last figures stay on screen.
+    await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
+
+    // Back: the verdict, the green dot and a fresh stamp return.
+    down = false;
+    await page.getByTestId("connection-banner").getByRole("button", { name: "Retry now" }).click();
+    await expect(page.getByTestId("connection-banner")).toHaveCount(0);
+    await expect(health).not.toContainText("Status unknown");
+    await expect(optimizer).toHaveText("Running");
+    await expect(optimizer).toHaveClass(/state-ok/);
+    expect(await dotColour()).toBe(green);
+    await expect(stamp).toHaveText(/^updated \d s ago$/);
+  });
+
+  test("a console that never reached the server shows no verdict on the Overview", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies(), { down: () => true });
+    await openConsole(page, "pagespeed_admin");
+    await expect(page.getByTestId("connection-banner")).toBeVisible();
+    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown — the server has not answered");
+    await expect(page.getByTestId("page-updated")).toHaveText("updated —");
+  });
+
+  test("a server that answered with an error and then went down still has a last answer", async ({ page }) => {
+    let down = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      { ...F.allReplies(), stats_json: { status: 404, body: "Unknown admin page: stats_json" } },
+      { down: () => down },
+    );
+    await openConsole(page, "pagespeed_admin");
+    const health = page.getByTestId("health-summary");
+    await expect(health).toHaveText("Module statistics unavailable");
+    // No figures were ever read: the stamp has nothing to age.
+    await expect(page.getByTestId("page-updated")).toHaveText("updated —");
+
+    down = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByTestId("connection-banner")).toBeVisible();
+    // The server did answer before it went down, so the line carries that time.
+    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).not.toContainText("has not answered");
+    await expect(page.getByTestId("page-updated")).toHaveText("updated —");
+  });
+
   test("a gateway 5xx on every Overview leaf keeps the banner steady and the Overview backs off", async ({ page }) => {
     await page.clock.install();
     let down = false;

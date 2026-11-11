@@ -49,6 +49,7 @@
     overviewScopeLine,
     sampleOverview,
     toSnapshot,
+    unknownHealth,
     variablesOf,
   } from "$lib/utils/overview";
 
@@ -60,6 +61,9 @@
   let lastModule = $state<StatsResponse | null>(null);
   let daemonView = $state<AlertSnapshot | null>(null);
   let updatedAt = $state<number | null>(null);
+  // When the server last answered the module read at all (an error answer
+  // counts): the stamp is the age of the figures, this is the age of contact.
+  let lastAnswerAt = $state<number | null>(null);
 
   // This mount's first sample is a baseline for rate rules: nothing was
   // sampled while the page was not shown.
@@ -87,8 +91,12 @@
     () =>
       sampleOverview(api).then((sample) => {
         const snap = toSnapshot(sample, daemonView, moduleVersion);
-        updatedAt = sample.at;
-        if (sample.module.ok) lastModule = sample.module.data;
+        // The stamp is the age of the module figures: a sample whose module
+        // read failed does not move it.
+        if (sample.module.ok) {
+          lastModule = sample.module.data;
+          updatedAt = sample.at;
+        }
         if (snap.daemon !== "transient" || daemonView === null) daemonView = snap;
         // The hosts the optimizer served feed the lens (the best-ranked source).
         lens.observe(hostSavingsView(snap.daemonStats?.serve_savings_by_host)?.hosts.map((r) => r.host) ?? [], 0);
@@ -100,6 +108,7 @@
           const status = sample.module.error instanceof ApiError ? sample.module.error.status : null;
           if (isConnectionFailure("/stats_json", status)) throw sample.module.error;
         }
+        lastAnswerAt = sample.at;
         return sample;
       }),
     5000,
@@ -122,6 +131,10 @@
     acknowledged = tracker.acknowledged();
   }
 
+  // The poll fails exactly when the module read lost the connection (see the
+  // fetcher above). What this page last read then says nothing about now:
+  // the health line and the optimizer's dot claim nothing until an answer.
+  let serverDown = $derived(poll.error !== null);
   let moduleError = $derived.by(() => {
     if (poll.error) return poll.error;
     const m = poll.data?.module;
@@ -156,7 +169,11 @@
   let optimizer = $derived(daemonView?.daemon === "ok" ? optimizerStateText(daemonView.health) : null);
   let availability = $derived(daemonView && daemonView.daemon !== "ok" ? availabilityText(daemonView.daemon) : null);
   let serveSavings = $derived(daemonServeSavings(daemonView?.daemonStats ?? null));
-  let health = $derived(healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable, logOff));
+  let health = $derived(
+    serverDown
+      ? unknownHealth(lastAnswerAt)
+      : healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable, logOff),
+  );
 </script>
 
 <div class="page">
@@ -278,7 +295,12 @@
           </p>
         {/if}
         {#if optimizer && daemonView}
-          <p class="state" class:state-ok={optimizer.ok} class:state-warn={!optimizer.ok} data-testid="optimizer-state">{optimizer.word}</p>
+          <p
+            class="state"
+            class:state-ok={optimizer.ok && !serverDown}
+            class:state-warn={!optimizer.ok && !serverDown}
+            data-testid="optimizer-state"
+          >{optimizer.word}{#if serverDown}{" "}· last known{/if}</p>
           {#if optimizer.busy}
             <p class="note" data-testid="optimizer-busy">All worker threads busy.</p>
           {/if}
@@ -324,9 +346,9 @@
         {:else if availability}
           <p
             class="state"
-            class:state-warn={daemonView?.daemon === "unreachable" || daemonView?.daemon === "unsupported"}
+            class:state-warn={!serverDown && (daemonView?.daemon === "unreachable" || daemonView?.daemon === "unsupported")}
             data-testid="optimizer-state"
-          >{availability.word}</p>
+          >{availability.word}{#if serverDown && daemonView?.daemon !== "transient"}{" "}· last known{/if}</p>
           {#if daemonView?.daemon === "unreachable"}
             <EmptyState
               testid="optimizer-empty"

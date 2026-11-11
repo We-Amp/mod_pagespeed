@@ -18,6 +18,7 @@ import {
   overviewScopeLine,
   sampleOverview,
   toSnapshot,
+  unknownHealth,
   variablesOf,
   type OverviewApi,
   type OverviewSample,
@@ -67,6 +68,18 @@ describe("sampleOverview", () => {
     expect(s.module.ok).toBe(false);
     expect(!s.module.ok && s.module.error.message).toBe("HTTP 500: boom");
     expect(!s.daemonStats.ok && s.daemonStats.error.message).toBe("odd");
+  });
+});
+
+describe("unknownHealth", () => {
+  it("claims no verdict and names the time of the last answer", () => {
+    expect(unknownHealth(1_800_000_000_000, () => "10:31:15")).toEqual({
+      text: "Status unknown — last answer 10:31:15",
+      level: "unknown",
+    });
+  });
+  it("says so when the server never answered", () => {
+    expect(unknownHealth(null)).toEqual({ text: "Status unknown — the server has not answered", level: "unknown" });
   });
 });
 
@@ -299,6 +312,15 @@ describe("the message log in the sample", () => {
     expect(getMessageGroups).toHaveBeenCalledWith(900);
     expect(s.messages?.ok).toBe(true);
     expect((await sampleOverview(api())).messages).toBeUndefined();
+  });
+
+  it("sampleOverview leaves the log alone for a page that shows no findings", async () => {
+    const getMessageGroups = vi.fn(async (_w: number) => ({ groups: [] }));
+    const s = await sampleOverview({ ...api(), getMessageGroups }, () => 42, { messages: false });
+    expect(getMessageGroups).not.toHaveBeenCalled();
+    expect(s.messages).toBeUndefined();
+    expect(s.module.ok && s.health.ok && s.daemonStats.ok).toBe(true);
+    expect(toSnapshot(s).messages).toBeUndefined();
   });
 
   it("toSnapshot turns either answer into a digest; no read is no digest", () => {
