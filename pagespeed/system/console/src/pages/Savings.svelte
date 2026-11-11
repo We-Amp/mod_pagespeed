@@ -158,7 +158,25 @@
     }
     return null;
   });
+  // The optimizer's savings per host: its own card on the whole-server
+  // console, beside the optimizer card, while no host lens narrows the page.
+  let hostTable = $derived(
+    scope.isGlobal &&
+      lensHost === null &&
+      daemonView?.daemon === "ok" &&
+      !daemonView.daemonStatsUnsupported &&
+      serveView !== null &&
+      serveView.total !== null &&
+      byHost !== null &&
+      byHost.hosts.length > 0
+      ? byHost
+      : null,
+  );
   let availability = $derived(daemonView && daemonView.daemon !== "ok" ? availabilityText(daemonView.daemon) : null);
+
+  // A share of a counter that restarted minutes ago says nothing yet: the
+  // figure stays, the percentage gives way to these words.
+  const TOO_EARLY = "too early for a percentage";
 
   const NO_TRAFFIC: Record<string, string> = {
     css: "No CSS seen yet.",
@@ -217,7 +235,9 @@
   {#if poll.loading}
     <p class="loading">Loading savings...</p>
   {:else}
-    <div class="cards">
+    <!-- Two columns where the per-host table fills the space under the
+         module card; without it the two cards stack, each as wide as the page. -->
+    <div class="cards" class:paired={hostTable !== null}>
       <section class="card reads-across-container" data-testid="savings-module-card" aria-labelledby="savings-module-heading">
         <h2 id="savings-module-heading">Module rewrites <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if rows && total && summary}
@@ -230,7 +250,7 @@
                   {formatBytes(total.saved)}
                   {#if total.percent !== null}
                     <span class="detail metric-context"
-                      >{moduleSince?.warming ? "—" : formatPercent(total.percent, total.saved)} of {formatBytes(total.original)}</span
+                      >{#if moduleSince?.warming}of {formatBytes(total.original)}; {TOO_EARLY}{:else}{formatPercent(total.percent, total.saved)} of {formatBytes(total.original)}{/if}</span
                     >
                   {/if}
                 </dd>
@@ -280,7 +300,7 @@
       </section>
 
       <section
-        class="card reads-across-container"
+        class="card optimizer-card reads-across-container"
         class:card--muted={!scope.isGlobal && focusRow === null}
         data-testid="savings-optimizer-card"
         aria-labelledby="savings-optimizer-heading"
@@ -337,9 +357,9 @@
                 <dd class="metric-value num" data-testid="savings-optimizer-total">
                   {formatSignedBytes(serveView.total.saved)}
                   <span class="detail metric-context"
-                    >{optimizerSince?.warming ? "—" : formatPercent(serveView.total.percent, serveView.total.saved)} of {formatBytes(
-                      serveView.total.original,
-                    )}</span
+                    >{#if optimizerSince?.warming}of {formatBytes(serveView.total.original)}; {TOO_EARLY}{:else}{formatPercent(serveView.total.percent, serveView.total.saved)} of {formatBytes(
+                        serveView.total.original,
+                      )}{/if}</span
                   >
                 </dd>
               </div>
@@ -366,7 +386,7 @@
                     Optimized-copy hit rate{#if hitRate.mode === "all-in-place"}{" "}<span class="label-qualifier">(of all in-place requests)</span>{/if}
                   </dt>
                   <dd class="metric-value num" data-testid="savings-hit-rate">
-                    {moduleSince?.warming ? "—" : formatPercent(hitRate.percent, hitRate.served)}
+                    {#if moduleSince?.warming}<span class="too-early">Too early for a percentage</span>{:else}{formatPercent(hitRate.percent, hitRate.served)}{/if}
                     <span class="detail metric-context"
                       >{formatCount(hitRate.served)} of {formatCount(hitRate.total)}{hitRate.mode === "optimizable"
                         ? " cacheable resource requests; conditional and HEAD requests count as served"
@@ -411,38 +431,6 @@
                 {/each}
               </tbody>
             </table>
-            {#if scope.isGlobal && lensHost === null && byHost !== null && byHost.hosts.length > 0}
-              <h3 class="subhead">By host</h3>
-              <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
-              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-              <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
-                <table class="breakdown reads-across" data-testid="savings-by-host">
-                  <thead>
-                    <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
-                  </thead>
-                  <tbody>
-                    {#each byHost.hosts as row (row.host)}
-                      <tr>
-                        <td class="host-cell">{row.host}</td>
-                        <td class="num">{formatCount(row.hits)}</td>
-                        <td class="num">{formatSignedBytes(row.saved)}</td>
-                        <td class="num">{formatBytes(row.original)}</td>
-                        <td class="num">{formatPercent(row.percent, row.saved)}</td>
-                      </tr>
-                    {/each}
-                    {#if byHost.other}
-                      <tr data-testid="savings-by-host-other">
-                        <td class="host-cell">Other hosts and serves without a host</td>
-                        <td class="num">{formatCount(byHost.other.hits)}</td>
-                        <td class="num">{formatSignedBytes(byHost.other.saved)}</td>
-                        <td class="num">{formatBytes(byHost.other.original)}</td>
-                        <td class="num">{formatPercent(byHost.other.percent, byHost.other.saved)}</td>
-                      </tr>
-                    {/if}
-                  </tbody>
-                </table>
-              </div>
-            {/if}
             <div class="split-types">
               {#each split as s (s.key)}
                 <div class="split" data-testid="savings-split-{s.key}">
@@ -457,7 +445,7 @@
                     >
                       {#each s.segments as seg (seg.key)}
                         {#if seg.count > 0}
-                          <span class="split-seg split-{seg.key}" style:flex-grow={seg.count}></span>
+                          <span class="bar-fill split-{seg.key}" style:flex-grow={seg.count}></span>
                         {/if}
                       {/each}
                     </div>
@@ -522,6 +510,48 @@
         {/if}
         <p class="more"><a href="#/optimizer?section=cache">Optimizer cache</a></p>
       </section>
+
+      <!-- Last in the document, so the totals come before their breakdown;
+           on a wide window it lies under the module card. -->
+      {#if hostTable}
+        <section class="card reads-across-container" data-testid="savings-by-host-card" aria-labelledby="savings-by-host-heading">
+          <h2 id="savings-by-host-heading">Optimizer cache serves by host</h2>
+          <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
+            <table class="breakdown reads-across" data-testid="savings-by-host">
+              <thead>
+                <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
+              </thead>
+              <tbody>
+                {#each hostTable.hosts as row (row.host)}
+                  <tr>
+                    <td class="host-cell">{row.host}</td>
+                    <td class="num">{formatCount(row.hits)}</td>
+                    <td class="num">{formatSignedBytes(row.saved)}</td>
+                    <td class="num">{formatBytes(row.original)}</td>
+                    <td class="num">{formatPercent(row.percent, row.saved)}</td>
+                  </tr>
+                {/each}
+                {#if hostTable.other}
+                  <tr data-testid="savings-by-host-other">
+                    <td class="host-cell">Other hosts and serves without a host</td>
+                    <td class="num">{formatCount(hostTable.other.hits)}</td>
+                    <td class="num">{formatSignedBytes(hostTable.other.saved)}</td>
+                    <td class="num">{formatBytes(hostTable.other.original)}</td>
+                    <td class="num">{formatPercent(hostTable.other.percent, hostTable.other.saved)}</td>
+                  </tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+          <p class="note">{SAVINGS_QUALIFIER}</p>
+          <p class="since" data-testid="since-by-host" title={optimizerSince?.iso ?? undefined}>
+            {optimizerSince?.text ?? "since restart"} (optimizer restart)
+            {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+          </p>
+        </section>
+      {/if}
     </div>
 
     <section class="card chart-card" data-testid="savings-chart-card" aria-labelledby="savings-chart-heading">
@@ -564,12 +594,23 @@
   }
   .cards {
     display: grid;
-    /* The cards share the full width in equal columns; more cards, more
-       columns. */
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-card-min)), 1fr));
     gap: var(--ps-space-md);
     /* A card keeps its own height, not its tallest neighbour's. */
     align-items: start;
+  }
+  /* With a per-host table: two equal columns once two cards fit side by
+     side, never three. The optimizer card takes the second column over
+     both rows; the first row is as tall as the module card, so the
+     per-host card lies directly under it. */
+  .cards.paired {
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(min(100%, max(var(--ps-card-min), calc(50% - var(--ps-space-md)))), 1fr)
+    );
+    grid-template-rows: auto 1fr;
+  }
+  .cards.paired > .optimizer-card {
+    grid-row: span 2;
   }
   .card {
     min-width: 0;
@@ -627,6 +668,11 @@
     display: block;
     font-weight: 400;
   }
+  /* Words where a figure would be: read as a sentence, not as a headline. */
+  .too-early {
+    font-size: var(--ps-font-size-base);
+    font-weight: 400;
+  }
   .label-qualifier {
     font-weight: 400;
   }
@@ -679,6 +725,7 @@
     color: var(--ps-warning-text);
     border: 1px solid var(--ps-warning);
     border-radius: 999px;
+    white-space: nowrap;
     padding: 0 var(--ps-space-sm);
   }
   .card--muted {
@@ -691,13 +738,19 @@
     gap: var(--ps-space-md);
     margin-top: var(--ps-space-md);
   }
+  /* In a card as wide as the page the types sit side by side. */
+  .cards:not(.paired) .split-types {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-figure-min)), 1fr));
+    column-gap: var(--ps-space-lg);
+  }
   .split h3 {
     font-size: var(--ps-font-size-sm);
     font-weight: 600;
     margin: 0 0 var(--ps-space-xs);
   }
-  /* The track shows only in the gaps, so neighbouring segments separate
-     even when their colours are close. */
+  /* A stacked bar: one .bar-fill per share, sized by its count. The track
+     shows only in the gaps, so two shares read apart whatever their fills:
+     also where the user's palette paints every fill in one colour. */
   .split-bar {
     display: flex;
     gap: 2px;
@@ -707,14 +760,11 @@
     background: var(--ps-surface);
     margin: 0 0 var(--ps-space-xs);
   }
-  .split-seg {
-    min-width: 2px;
-  }
   .split-already-optimal {
     background: var(--ps-split-optimal);
   }
   .split-optimized-served {
-    background: var(--ps-text);
+    background: var(--ps-primary);
   }
   .split-served-encoded {
     background: var(--ps-split-encoded);
@@ -727,19 +777,29 @@
     border-radius: 2px;
     vertical-align: baseline;
   }
+  /* The legend: the three shares on one line where the card is wide enough,
+     each with its swatch, its name and its count. */
   .split-figures {
     margin: 0;
-    display: grid;
-    gap: var(--ps-space-xs);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--ps-space-md);
+    font-size: var(--ps-font-size-xs);
+  }
+  .split-figures > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--ps-space-xs);
+    min-width: 0;
   }
   .split-figures dt {
-    font-size: var(--ps-font-size-xs);
     font-weight: 500;
     color: var(--ps-text-secondary);
+    white-space: nowrap;
   }
   .split-figures dd {
     margin: 0;
-    font-size: var(--ps-font-size-sm);
     color: var(--ps-text);
   }
   .split-summary {
@@ -752,12 +812,6 @@
     margin-bottom: var(--ps-space-md);
     padding-bottom: var(--ps-space-sm);
     border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  .subhead {
-    margin: var(--ps-space-md) 0 var(--ps-space-xs);
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
   }
 
   .table-scroll {

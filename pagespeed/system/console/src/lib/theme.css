@@ -59,9 +59,9 @@
      dimming, so there the card keeps full opacity on a tinted background. */
   --ps-muted-opacity: 1;
 
-  /* Stacked-bar fills for the savings split. Its middle segment uses
-     --ps-text; these two flank it. Each clears 4.5:1 on the card and
-     3:1 against --ps-text, so neighbouring segments read apart. */
+  /* Stacked-bar fills for the savings split, next to --ps-primary for the
+     share that was optimized and served. Each clears 4.5:1 on the card;
+     the bar keeps a gap between two shares, so they read apart. */
   --ps-split-optimal: #78716c;
   --ps-split-encoded: #15803d;
 
@@ -181,8 +181,6 @@
     --ps-surface: #282523;
     --ps-surface-hover: #3d3936;
 
-    /* --ps-text stays this light: the savings bar's middle segment is
-       drawn in it and must stand 3:1 apart from its neighbours. */
     --ps-text: #fafaf9;
     --ps-text-secondary: #bdb7b1;
     --ps-text-inverse: #1c1917;

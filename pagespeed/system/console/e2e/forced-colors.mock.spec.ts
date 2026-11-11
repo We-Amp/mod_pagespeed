@@ -15,8 +15,9 @@
 // Self-contained (support/mock-admin.ts); run after build.sh.
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import * as F from "./support/fixtures";
 import { box, pageReady, wholeServerReplies } from "./support/layout";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC", viewport: { width: 1280, height: 800 } });
 
@@ -87,11 +88,33 @@ async function ringOf(page: Page, element: Locator): Promise<string[]> {
 
 type Scheme = "light" | "dark";
 
-async function open(page: Page, scheme: Scheme, hash: string): Promise<void> {
+type Replies = Partial<Record<Leaf, Responder>>;
+
+async function open(page: Page, scheme: Scheme, hash: string, replies: Replies = wholeServerReplies()): Promise<void> {
   await page.emulateMedia({ forcedColors: "active", colorScheme: scheme });
-  await mockAdmin(page, ADMIN, wholeServerReplies());
+  await mockAdmin(page, ADMIN, replies);
   await openConsole(page, ADMIN, hash);
   await pageReady(page);
+}
+
+/** The whole-server fixtures, with CSS served two ways: a savings bar of two shares. */
+function twoShareReplies(): Replies {
+  const stats = JSON.parse(F.OPT_STATS_PAGE_BYTES) as Record<string, Record<string, unknown>>;
+  return {
+    ...wholeServerReplies(),
+    "v1/daemon/stats": F.ok({
+      ...stats,
+      serve_savings: {
+        ...stats.serve_savings,
+        css: {
+          by_encoding: { br: { bytes: 50_741, hits: 3 }, gzip: { bytes: 0, hits: 0 }, identity: { bytes: 180_000, hits: 5 } },
+          hits: 8,
+          optimized_bytes: 230_741,
+          original_bytes: 884_736,
+        },
+      },
+    }),
+  };
 }
 
 for (const scheme of ["light", "dark"] as const) {
@@ -140,6 +163,28 @@ for (const scheme of ["light", "dark"] as const) {
       await page.mouse.move(0, 0);
       await toggle.blur();
       expect(await fillOf(page, toggle)).not.toBe(on);
+    });
+
+    test("savings bar: every share is painted, and a gap keeps two shares apart", async ({ page }) => {
+      await open(page, scheme, "#/savings", twoShareReplies());
+      const split = page.getByTestId("savings-split-css");
+      const bar = split.locator(".split-bar");
+      const shares = bar.locator(".bar-fill");
+      await expect(shares).toHaveCount(2);
+      const frame = await box(bar);
+      const [first, second] = [await box(shares.nth(0)), await box(shares.nth(1))];
+      const middle = frame.height / 2;
+      const { at } = await painted(page, await bar.screenshot({ animations: "disabled" }), [
+        [(first.left + first.right) / 2 - frame.left, middle],
+        [(first.right + second.left) / 2 - frame.left, middle],
+        [(second.left + second.right) / 2 - frame.left, middle],
+      ]);
+      const [firstFill, gap, secondFill] = at;
+      // The palette paints both shares in one colour: only the gap tells them apart.
+      expect(secondFill).toBe(firstFill);
+      expect(gap).not.toBe(firstFill);
+      // And a share is not the colour of the card it lies on.
+      expect(firstFill).not.toBe(await fillOf(page, split));
     });
 
     test("field: keyboard focus draws a ring around a text field", async ({ page }) => {
