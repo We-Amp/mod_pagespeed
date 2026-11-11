@@ -7,7 +7,14 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole, type Leaf, type Reply, type Responder } from "./support/mock-admin";
+import {
+  mockAdmin,
+  openConsole,
+  type Leaf,
+  type MockOptions,
+  type Reply,
+  type Responder,
+} from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -25,8 +32,8 @@ function replies(extra: Partial<Record<Leaf, Responder>> = {}): Partial<Record<L
   };
 }
 
-async function open(page: Page, extra: Partial<Record<Leaf, Responder>> = {}) {
-  const mock = await mockAdmin(page, ADMIN, replies(extra));
+async function open(page: Page, extra: Partial<Record<Leaf, Responder>> = {}, options: MockOptions = {}) {
+  const mock = await mockAdmin(page, ADMIN, replies(extra), options);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await openConsole(page, ADMIN);
@@ -55,7 +62,11 @@ test.describe("Overview findings", () => {
     const { errors } = await open(page, { message_history: F.messageGroups([aclRow()]) });
     const finding = page.getByTestId("alert-admin-exposed");
     await expect(finding).toContainText("requested from an address other than this server itself");
-    await expect(finding.getByTestId("finding-fix")).toContainText("Require local");
+    await expect(finding.getByTestId("finding-fix")).toHaveText(
+      "Fix: Restrict the admin paths to trusted addresses at the web server, or acknowledge this if the console is " +
+        "public on purpose.",
+    );
+    await expect(finding.getByTestId("snippet-code")).toContainText("Require local");
     await expect(finding.locator(".level-badge-warning")).toHaveText(/warning/i);
     await expect(finding.getByRole("link", { name: "Documentation" })).toHaveAttribute(
       "href",
@@ -79,6 +90,9 @@ test.describe("Overview findings", () => {
     );
     // The sentence, the fix and the folded log line name one cause: the packages.
     await expect(findings.first()).not.toContainText("DaemonVolumePath");
+    // So no path is offered to paste; the access finding below it has its snippet.
+    await expect(findings.first().getByTestId("snippet")).toHaveCount(0);
+    await expect(findings.nth(1).getByTestId("snippet")).toBeVisible();
     await expect(page.getByTestId("findings-summary")).toHaveText("2 findings · 2 need action");
   });
 
@@ -306,6 +320,272 @@ test.describe("Overview findings", () => {
     await open(page, { message_history: F.messageGroups([aclRow(), volumeRow()]) });
     await expect(page.getByTestId("alert-volume-not-opened")).toBeVisible();
     await expect(page.getByRole("button", { name: "Acknowledge Optimizer cache not in use" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1),
+    ).toBe(true);
+  });
+});
+
+// A fix that names a setting comes with the setting to paste, in the web
+// server's own syntax.
+test.describe("Overview findings: a setting to paste", () => {
+  const access = () => ({ message_history: F.messageGroups([aclRow()]) });
+  const APACHE =
+    "<Location /pagespeed_admin>\n    Require local\n</Location>\n" +
+    "<Location /pagespeed_global_admin>\n    Require local\n</Location>";
+  const NGINX =
+    "location = /pagespeed_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+    "location ^~ /pagespeed_admin/ { allow 127.0.0.1; allow ::1; deny all; }\n" +
+    "location = /pagespeed_global_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+    "location ^~ /pagespeed_global_admin/ { allow 127.0.0.1; allow ::1; deny all; }";
+  const IIS = "pagespeed InfoUrlsLocalOnly on";
+  const APACHE_VOLUME = "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache";
+  const NGINX_VOLUME = "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;";
+
+  /**
+   * The access finding and the cache finding in its path form (found from
+   * the counters: 60 requests fell through in 15 minutes, none served), which
+   * offers Apache and nginx only. The page clock is driven by hand.
+   */
+  async function openBoth(page: Page, options: MockOptions = {}) {
+    const start = Date.parse("2026-09-26T10:00:00Z");
+    await page.clock.install({ time: start });
+    const stats: Responder = (call) => ({
+      status: 200,
+      body: {
+        variables: {
+          ...(F.STATS_GLOBAL.body as { variables: Record<string, number> }).variables,
+          process_start_ms: start - 3_600_000,
+          ipro_daemon_served: 100,
+          ipro_daemon_fallthrough_css: 10 + call,
+          ipro_daemon_fallthrough_js: 10,
+          ipro_daemon_fallthrough_image: 10,
+        },
+      },
+    });
+    const health = withBody(F.HEALTH_OK, { uptime_seconds: 3_600 });
+    const daemonStats = withBody(F.DAEMON_STATS, { started_at_ms: start - 3_600_000 });
+    await mockAdmin(
+      page,
+      ADMIN,
+      replies({ stats_json: stats, "v1/daemon/health": health, "v1/daemon/stats": daemonStats, ...access() }),
+      options,
+    );
+    await openConsole(page, ADMIN);
+    await expect(page.getByTestId("module-card")).toBeVisible();
+    for (let i = 0; i < 190 && !(await page.getByTestId("alert-volume-not-opened").isVisible()); i++) {
+      await page.clock.runFor(5_000);
+    }
+    await expect(page.getByTestId("alert-volume-not-opened").getByTestId("snippet")).toBeVisible();
+  }
+
+  /** The clipboard a secure page has; what it was handed is read back with copied(). */
+  async function grantClipboard(page: Page) {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            (window as unknown as { __copied: string }).__copied = text;
+          },
+        },
+      });
+    });
+  }
+  const copied = (page: Page) => page.evaluate(() => (window as unknown as { __copied?: string }).__copied);
+
+  test("no Server header and nothing remembered: the first tab, one tab per server", async ({ page }) => {
+    const { errors } = await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(finding.getByRole("tab")).toHaveText(["Apache", "nginx", "IIS"]);
+    await expect(finding.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    await expect(finding.getByTestId("snippet-code")).toHaveText(APACHE);
+    await expect(page.getByTestId("snippet-detected")).toHaveCount(0);
+    // The panel is named by its selected tab.
+    await expect(finding.getByRole("tabpanel", { name: "Apache" })).toBeVisible();
+    // The findings list is a polite live region; a snippet inside it is not read out when a tab changes.
+    await expect(finding.getByTestId("snippet")).toHaveAttribute("aria-live", "off");
+    expect(
+      await finding.getByTestId("snippet-code").evaluate((el) => el.closest("[aria-live]")?.getAttribute("aria-live")),
+    ).toBe("off");
+    expect(errors).toEqual([]);
+  });
+
+  test("the optimizer not answering names a directive to check, with nothing to paste", async ({ page }) => {
+    await open(page, { "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE, ...access() });
+    const finding = page.getByTestId("alert-daemon-unreachable");
+    await expect(finding.getByTestId("finding-fix")).toContainText("DaemonApiSocketPath");
+    await expect(finding.getByTestId("snippet")).toHaveCount(0);
+    await expect(page.getByTestId("snippet")).toHaveCount(1);
+  });
+
+  test("tabs by mouse and by keyboard", async ({ page }) => {
+    await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    await finding.getByRole("tab", { name: "nginx" }).click();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(NGINX);
+    // Arrow keys move and select, and focus follows; only the selected tab is a tab stop.
+    await finding.getByRole("tab", { name: "nginx" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(finding.getByRole("tab", { name: "IIS" })).toBeFocused();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(IIS);
+    await expect(finding.locator('[role="tab"][tabindex="0"]')).toHaveText("IIS");
+    await page.keyboard.press("ArrowRight");
+    await expect(finding.getByTestId("snippet-code")).toHaveText(APACHE);
+  });
+
+  test("a tab chosen in one finding moves every snippet that has that server", async ({ page }) => {
+    await openBoth(page);
+    const volume = page.getByTestId("alert-volume-not-opened");
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(volume.getByTestId("finding-fix")).toHaveText(
+      "Fix: Point the web server's DaemonVolumePath at the optimizer's cache directory (--cache-dir) followed by /cache.",
+    );
+    await expect(volume.getByRole("tab")).toHaveText(["Apache", "nginx"]);
+    await expect(volume.getByTestId("snippet-code")).toHaveText(APACHE_VOLUME);
+    await volume.getByRole("tab", { name: "nginx" }).click();
+    await expect(volume.getByTestId("snippet-code")).toHaveText(NGINX_VOLUME);
+    await expect(finding.getByRole("tab", { name: "nginx" })).toHaveAttribute("aria-selected", "true");
+    await expect(finding.getByTestId("snippet-code")).toHaveText(NGINX);
+    // A server the other finding does not have: that one falls back to its first tab.
+    await finding.getByRole("tab", { name: "IIS" }).click();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(IIS);
+    await expect(volume.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    // The tab and its focus survive the refreshes that follow.
+    await finding.getByRole("tab", { name: "IIS" }).focus();
+    await page.clock.runFor(10_000);
+    await expect(finding.getByRole("tab", { name: "IIS" })).toBeFocused();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(IIS);
+  });
+
+  test("the Server header preselects its server and says where the choice came from", async ({ page }) => {
+    await open(page, access(), { server: "nginx/1.26.2" });
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(finding.getByRole("tab", { name: "nginx" })).toHaveAttribute("aria-selected", "true");
+    await expect(finding.getByTestId("snippet-detected")).toHaveText("From the Server header: nginx");
+    await expect(finding.getByTestId("snippet-code")).toHaveText(NGINX);
+    // The header is a hint: another tab can still be chosen, and the hint stays in view.
+    await finding.getByRole("tab", { name: "Apache" }).click();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(APACHE);
+    await expect(finding.getByTestId("snippet-detected")).toHaveText("From the Server header: nginx");
+  });
+
+  test("a header that names a proxy, not one of the three servers, preselects nothing", async ({ page }) => {
+    await open(page, access(), { server: "envoy" });
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(finding.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    await expect(finding.getByTestId("snippet-detected")).toHaveCount(0);
+  });
+
+  test("per finding: a detected server it lacks yields to the remembered one it has", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("pagespeed.snippet.dialect", "nginx"));
+    await openBoth(page, { server: "Microsoft-IIS/10.0" });
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(finding.getByRole("tab", { name: "IIS" })).toHaveAttribute("aria-selected", "true");
+    await expect(finding.getByTestId("snippet-detected")).toHaveText("From the Server header: IIS");
+    const volume = page.getByTestId("alert-volume-not-opened");
+    await expect(volume.getByRole("tab", { name: "nginx" })).toHaveAttribute("aria-selected", "true");
+    await expect(volume.getByTestId("snippet-code")).toHaveText(NGINX_VOLUME);
+    await expect(volume.getByTestId("snippet-detected")).toHaveCount(0);
+  });
+
+  test("the chosen tab is remembered across a reload", async ({ page }) => {
+    await open(page, access());
+    await page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "IIS" }).click();
+    expect(await page.evaluate(() => localStorage.getItem("pagespeed.snippet.dialect"))).toBe("iis");
+    await page.reload();
+    await expect(page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "IIS" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByTestId("snippet-detected")).toHaveCount(0);
+  });
+
+  test("a remembered tab yields to the server the header names", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("pagespeed.snippet.dialect", "iis"));
+    await open(page, access(), { server: "Apache/2.4.62 (Debian)" });
+    await expect(page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "Apache" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  test("storage that refuses: the tabs still work for this page view", async ({ page }) => {
+    await page.addInitScript(() => {
+      const refuse = () => {
+        throw new DOMException("blocked", "SecurityError");
+      };
+      Storage.prototype.getItem = refuse;
+      Storage.prototype.setItem = refuse;
+    });
+    const { errors } = await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    await expect(finding.getByTestId("snippet-code")).toHaveText(APACHE);
+    await finding.getByRole("tab", { name: "nginx" }).click();
+    await expect(finding.getByTestId("snippet-code")).toHaveText(NGINX);
+    expect(errors).toEqual([]);
+  });
+
+  test("Copy hands the selected snippet to the clipboard and says Copied in a status region", async ({ page }) => {
+    await grantClipboard(page);
+    const { errors } = await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    const status = finding.getByTestId("snippet-status");
+    await expect(status).toHaveAttribute("role", "status");
+    await expect(status).toHaveText("");
+    await finding.getByRole("tab", { name: "nginx" }).click();
+    await finding.getByRole("button", { name: "Copy" }).click();
+    await expect(status).toHaveText("Copied");
+    // Exactly the lines shown, line breaks included.
+    expect(await copied(page)).toBe(NGINX);
+    expect(await copied(page)).toBe(await finding.getByTestId("snippet-code").textContent());
+    // Choosing another tab clears the word.
+    await finding.getByRole("tab", { name: "Apache" }).click();
+    await expect(status).toHaveText("");
+    expect(errors).toEqual([]);
+  });
+
+  test("a console over plain HTTP has no clipboard: Copy still copies through the selection", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+      document.execCommand = ((command: string) => {
+        (window as unknown as { __copied: string }).__copied = `${command}:${String(getSelection())}`;
+        return true;
+      }) as typeof document.execCommand;
+    });
+    const { errors } = await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    await finding.getByRole("tab", { name: "IIS" }).click();
+    await finding.getByTestId("snippet-copy").click();
+    await expect(finding.getByTestId("snippet-status")).toHaveText("Copied");
+    expect(await copied(page)).toBe(`copy:${IIS}`);
+    expect(await page.evaluate(() => String(getSelection()))).toBe("");
+    expect(errors).toEqual([]);
+  });
+
+  test("the browser refuses to copy: the snippet is selected, and the status says to copy it by hand", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: async () => Promise.reject(new Error("denied")) },
+      });
+      document.execCommand = (() => false) as typeof document.execCommand;
+    });
+    const { errors } = await open(page, access());
+    const finding = page.getByTestId("alert-admin-exposed");
+    await finding.getByRole("tab", { name: "IIS" }).click();
+    await finding.getByTestId("snippet-copy").click();
+    await expect(finding.getByTestId("snippet-status")).toHaveText("Selected: copy it with the keyboard");
+    expect(await page.evaluate(() => String(getSelection()))).toBe(IIS);
+    expect(errors).toEqual([]);
+  });
+
+  test("phone: a snippet wraps inside its finding, with no sideways scrolling", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await open(page, access(), { server: "nginx" });
+    const code = page.getByTestId("alert-admin-exposed").getByTestId("snippet-code");
+    await expect(code).toBeVisible();
+    expect(await code.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     expect(
       await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1),
     ).toBe(true);

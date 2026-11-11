@@ -5,13 +5,15 @@
 
 <script lang="ts">
   // The overview's findings, worst first: what is wrong, the fix, and where
-  // to read more. Log text a finding quotes is folded under "Log lines", after
+  // to read more; a fix that names a setting comes with the setting to
+  // paste. Log text a finding quotes is folded under "Log lines", after
   // the written cause and the fix. Acknowledged findings wait in a collapsed group of their
   // own until their condition clears (alerts.ts). Messages and details may
   // carry message-log text -- visitor-controlled URLs and host names -- so
   // everything here renders as text; the only links are the rule's own
   // route and documentation constants.
   import type { ActiveAlert, AlertSeverity } from "$lib/alerts";
+  import SnippetBlock from "./SnippetBlock.svelte";
 
   let {
     findings,
@@ -40,6 +42,9 @@
               <span class="alert-message">{finding.message}</span>
             </p>
             <p class="finding-fix" data-testid="finding-fix"><span class="fix-label">Fix:</span> {finding.fix}</p>
+            {#if finding.snippets}
+              <SnippetBlock id={finding.id} snippets={finding.snippets} />
+            {/if}
             {#if finding.details.length > 0}
               <details class="finding-log" data-testid="finding-log">
                 <summary>{finding.details.length === 1 ? "Log line" : "Log lines"}</summary>

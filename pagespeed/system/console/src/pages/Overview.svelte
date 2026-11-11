@@ -413,8 +413,9 @@
           >
         </section>
 
-        <section class="card stat-tile" data-testid="tile-optimizer" aria-labelledby="tile-optimizer-label">
-          <h2 class="stat-tile-label" id="tile-optimizer-label">
+        <!-- Named apart from the Optimizer card below: two landmarks, two names. -->
+        <section class="card stat-tile" data-testid="tile-optimizer" aria-label="Optimizer state">
+          <h2 class="stat-tile-label">
             Optimizer <ScopeChip label="whole server" shown={optimizerChip} />
           </h2>
           {@render optimizerState("stat-tile-value", "stat-tile-context")}
