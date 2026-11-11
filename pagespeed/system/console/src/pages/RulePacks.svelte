@@ -53,10 +53,16 @@
   // The tail's pack: preset by the address, then the select's; null: the
   // server's default (the first loaded pack).
   let requestedPack = $state(router.params.get("pack") || null);
+  // The pack the select asked for, until a read for it has answered: while
+  // that read fails, the table below still holds the earlier pack's log,
+  // and the page says so.
+  let pendingPack = $state<string | null>(null);
 
   let updatedAt = $state<number | null>(null);
   const poll = usePolling(async () => {
-    const view = rulePacksView(await api.getRulePacks(requestedPack ?? undefined));
+    const asked = requestedPack;
+    const view = rulePacksView(await api.getRulePacks(asked ?? undefined));
+    if (asked === requestedPack) pendingPack = null;
     lens.observe(view.log.rows.map((r) => r.host), 2);
     updatedAt = Date.now();
     return view;
@@ -92,6 +98,7 @@
   /** The select: another pack's decision log, in place. */
   function selectTailPack(id: string) {
     requestedPack = id === "" ? null : id;
+    pendingPack = requestedPack;
     replaceViewParams({ pack: requestedPack });
     poll.invalidate();
   }
@@ -304,6 +311,12 @@
       </p>
       {#if tailNote}
         <p class="source-note" data-testid="rp-tail-note">{tailNote}</p>
+      {/if}
+      {#if poll.error && pendingPack !== null && pendingPack !== tailPack}
+        <p class="source-note" data-testid="rp-tail-pending">
+          The log of pack {pendingPack} has not been read yet; the decisions below are still those of
+          {tailPack ?? "the first pack"}.
+        </p>
       {/if}
       <div class="controls control-row">
         {#if tailPacks.length > 1}

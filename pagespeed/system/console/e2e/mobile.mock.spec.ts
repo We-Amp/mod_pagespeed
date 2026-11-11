@@ -88,6 +88,28 @@ for (const width of [390, 320, 640]) {
       return places;
     }
 
+    /** Whether Chromium's own accessibility tree leaves the element out because it is inert. */
+    async function inertInAccessibilityTree(page: Page, selector: string): Promise<boolean> {
+      const cdp = await page.context().newCDPSession(page);
+      try {
+        const { root } = await cdp.send("DOM.getDocument");
+        const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+        const { nodes } = await cdp.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+        const node = nodes[0];
+        return node.ignored === true && (node.ignoredReasons ?? []).some((reason) => reason.name === "inertElement");
+      } finally {
+        await cdp.detach();
+      }
+    }
+    async function shiftTabStops(page: Page, presses: number): Promise<string[]> {
+      const places: string[] = [];
+      for (let i = 0; i < presses; i++) {
+        await page.keyboard.press("Shift+Tab");
+        places.push(await focusPlace(page));
+      }
+      return places;
+    }
+
     async function open(page: Page, hash = "#/statistics") {
       await page.setViewportSize({ width, height: 844 });
       await mockAdmin(page, "pagespeed_admin", F.allReplies());
@@ -123,6 +145,75 @@ for (const width of [390, 320, 640]) {
       expect(places).toContain("topbar");
       // The page did not scroll sideways or away under the drawer.
       expect(await page.evaluate(() => document.scrollingElement!.scrollLeft)).toBe(0);
+    });
+
+    test("the accessibility tree leaves out the closed drawer, and the page behind an open one", async ({ page }) => {
+      await open(page);
+      expect(await inertInAccessibilityTree(page, "#console-nav")).toBe(true);
+      expect(await inertInAccessibilityTree(page, "main")).toBe(false);
+      await toggleOf(page).click();
+      await expect(toggleOf(page)).toHaveAttribute("aria-expanded", "true");
+      expect(await inertInAccessibilityTree(page, "#console-nav")).toBe(false);
+      expect(await inertInAccessibilityTree(page, "main")).toBe(true);
+    });
+
+    test("Shift+Tab keeps the same bounds: never into the closed drawer, never behind the open one", async ({ page }) => {
+      await open(page);
+      await page.getByRole("heading", { level: 1, name: "Statistics" }).evaluate((el: HTMLElement) => {
+        el.setAttribute("tabindex", "-1");
+        el.focus();
+      });
+      const closed = await shiftTabStops(page, 8);
+      expect(closed).not.toContain("nav");
+      expect(closed).toContain("topbar");
+      await toggleOf(page).focus();
+      await page.keyboard.press("Enter");
+      await expect(nav(page).getByRole("link", { name: "Statistics", exact: true })).toBeFocused();
+      const opened = await shiftTabStops(page, 40);
+      expect(opened).not.toContain("main");
+      expect(opened).toContain("nav");
+      expect(opened).toContain("topbar");
+    });
+
+    test("with the shortcuts dialog over the open drawer, Escape closes the dialog first, then the drawer", async ({ page }) => {
+      await open(page);
+      await toggleOf(page).click();
+      const current = nav(page).getByRole("link", { name: "Statistics", exact: true });
+      await expect(current).toBeFocused();
+      await page.keyboard.press("?");
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(toggleOf(page)).toHaveAttribute("aria-expanded", "true");
+      await expect(current).toBeFocused();
+      // The shell hears of the dialog's closing through its close event, a
+      // moment after the dialog is gone: press again until the drawer has heard.
+      await expect(async () => {
+        await page.keyboard.press("Escape");
+        await expect(toggleOf(page)).toHaveAttribute("aria-expanded", "false", { timeout: 500 });
+      }).toPass({ timeout: 5000 });
+      await expect(toggleOf(page)).toBeFocused();
+    });
+
+    test("the search shortcut closes an open drawer and reaches the page's search box", async ({ page }) => {
+      await open(page);
+      await toggleOf(page).click();
+      await expect(nav(page).getByRole("link", { name: "Statistics", exact: true })).toBeFocused();
+      await page.keyboard.press("/");
+      await expect(toggleOf(page)).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator("main input[type='text'], main input[type='search']").first()).toBeFocused();
+      await expect(main(page)).not.toHaveAttribute("inert");
+    });
+
+    test("on a page without a search box the search shortcut leaves the open drawer alone", async ({ page }) => {
+      await open(page, "#/about");
+      await toggleOf(page).click();
+      const current = nav(page).locator("a[aria-current='page']");
+      await expect(current).toBeFocused();
+      await page.keyboard.press("/");
+      await expect(toggleOf(page)).toHaveAttribute("aria-expanded", "true");
+      await expect(current).toBeFocused();
     });
 
     test("Escape closes it and returns the focus to the menu button", async ({ page }) => {
@@ -212,6 +303,26 @@ test.describe("the sidebar on a desktop", () => {
     await page.setViewportSize(PHONE);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(nav).toHaveAttribute("inert", "");
+  });
+
+  test("shrinking the window into the drawer layout with the focus in the sidebar moves it to the menu button", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await expect(page.getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible();
+    const link = page.locator("#console-nav").getByRole("link", { name: "Histograms", exact: true });
+    await link.focus();
+    await expect(link).toBeFocused();
+    await page.setViewportSize(PHONE);
+    const toggle = page.getByRole("button", { name: "Toggle menu" });
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // A focus in the page is left where it is.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const search = page.locator("main input[type='text'], main input[type='search']").first();
+    await search.focus();
+    await page.setViewportSize(PHONE);
+    await expect(search).toBeFocused();
   });
 });
 
