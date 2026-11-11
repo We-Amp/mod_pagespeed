@@ -346,7 +346,7 @@ test("a type's saving is stated once, under its bar, and matches the table", asy
   ).toBe(true);
   // The same figures as the per-type table's CSS row.
   const cells = page.getByTestId("savings-optimizer-table").getByRole("row", { name: /^CSS/ }).getByRole("cell");
-  const [saved, original, percent] = await Promise.all([1, 2, 3].map((i) => cells.nth(i).innerText()));
+  const [saved, original, percent] = await Promise.all([0, 1, 2].map((i) => cells.nth(i).innerText()));
   await expect(summary).toContainText(`Saved ${saved} of ${original} (${percent})`);
   // The rows: requests only on "Optimized and served"; bytes sent on "Served compressed".
   const rows = css.locator(".split-figures dd");
@@ -779,9 +779,9 @@ test.describe("serve savings per host", () => {
     // names are not host names count under "Other hosts", so the table
     // still adds up.
     await expect(table.locator("tbody tr").first()).toContainText("www.example.com");
-    await expect(table.locator("tbody tr").first().locator("td").nth(1)).toHaveText("7");
+    await expect(table.locator("tbody tr").first().locator("td").first()).toHaveText("7");
     await expect(page.getByTestId("savings-by-host-other")).toContainText("Other hosts");
-    await expect(page.getByTestId("savings-by-host-other").locator("td").nth(1)).toHaveText("14");
+    await expect(page.getByTestId("savings-by-host-other").locator("td").first()).toHaveText("14");
     await expect(page.locator("main img")).toHaveCount(0);
     await expect(table).not.toContainText("NaN");
     await expect(table).not.toContainText("img");

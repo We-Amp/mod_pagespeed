@@ -61,6 +61,7 @@
   import { inspectHrefForLink } from "$lib/utils/url-inspect";
   import { hostsInText, textNamesHost } from "$lib/utils/host-lens";
   import { replaceViewParams } from "$lib/utils/view-address";
+  import { settledCount } from "$lib/utils/filter-status";
   import {
     EMPTY_LOG_BUFFER,
     countUnseen,
@@ -276,10 +277,17 @@
     }
   }
 
+  // The count, read out once the filters are quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((status) => (countStatus = status));
+  const announceFiltered = () =>
+    announceCount(() => `Showing ${formatCount(filtered.length)} of ${formatCount(sourceEntries.length)} entries`);
+
   /** The text filter, kept in the address in place (no history entry per keystroke). */
   function setText(value: string): void {
     text = value;
     replaceViewParams({ q: value.trim() === "" ? null : value });
+    announceFiltered();
   }
 
   function onLogScroll() {
@@ -463,7 +471,7 @@
         <legend>Level</legend>
         {#each TIMELINE_LEVELS as level (level)}
           <label class="field-check">
-            <input type="checkbox" bind:checked={enabledLevels[level]} />
+            <input type="checkbox" bind:checked={enabledLevels[level]} onchange={announceFiltered} />
             <span class="level-badge level-badge-{level}">{level} ({formatCount(counts[level])})</span>
           </label>
         {/each}
@@ -483,6 +491,7 @@
         oninput={(event) => setText(event.currentTarget.value)}
       />
       <span class="count field-text">Showing {formatCount(filtered.length)} of {formatCount(sourceEntries.length)}</span>
+      <span class="visually-hidden" role="status" data-testid="logs-count-status">{countStatus}</span>
       </div>
     </div>
 
@@ -562,7 +571,7 @@
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="timeline" data-testid="logs-timeline" role="region" aria-label="Log entries" tabindex="0">
         {#each visibleRows as row (row.key)}
-          <div class="log-row log-row--{isKnownTimelineLevel(row.level) ? row.level : 'debug'}" data-testid="log-group" data-source={row.source}>
+          <div class="log-row log-row-{isKnownTimelineLevel(row.level) ? row.level : 'debug'}" data-testid="log-group" data-source={row.source}>
             <div class="log-meta">
               <span class="badge badge-outline source-badge">{row.source === "module" ? "Module" : "Optimizer"}</span>
               <span class="level-badge {levelBadgeClass(row.level)}">{row.level}</span>
@@ -717,19 +726,19 @@
     background: var(--ps-bg-secondary);
   }
 
-  .log-row--fatal {
+  .log-row-fatal {
     border-left-color: var(--ps-severity-fatal-bg);
   }
 
-  .log-row--error {
+  .log-row-error {
     border-left-color: var(--ps-error);
   }
 
-  .log-row--warning {
+  .log-row-warning {
     border-left-color: var(--ps-warning);
   }
 
-  .log-row--info {
+  .log-row-info {
     border-left-color: var(--ps-primary);
   }
 

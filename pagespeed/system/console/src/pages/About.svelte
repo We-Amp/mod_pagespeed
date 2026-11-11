@@ -89,7 +89,7 @@
       {#each OLD_CONSOLE_PAGES as row (row.old)}
         <div class="old-console-row">
           <dt>{row.old}</dt>
-          <dd><a href={row.href} class="legal-link">{row.now}</a></dd>
+          <dd><a href={row.href} class="legal-link old-console-link">{row.now}</a></dd>
         </div>
       {/each}
     </dl>
@@ -149,12 +149,20 @@
   .old-console-row {
     display: flex;
     flex-wrap: wrap;
+    align-items: baseline;
     gap: var(--ps-space-md);
     font-size: var(--ps-font-size-sm);
   }
 
   .old-console-row dt {
     min-width: 10rem;
+  }
+
+  /* Two links one above the other: each at least 24 px tall (WCAG 2.5.8). */
+  .old-console-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
   }
 
   .legal-links {

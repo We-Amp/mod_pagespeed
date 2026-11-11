@@ -184,15 +184,15 @@
           <table class="data">
             <thead>
               <tr>
-                <th>Check</th>
-                <th>Result</th>
+                <th scope="col">Check</th>
+                <th scope="col">Result</th>
               </tr>
             </thead>
             <tbody>
               {#each checks as [name, value] (name)}
                 {@const result = checkResult(value)}
                 <tr>
-                  <td class="name-cell" title={name}>{checkLabel(name)}</td>
+                  <th scope="row" class="name-cell" title={name}>{checkLabel(name)}</th>
                   <td class="check-cell">
                     <span class="check"><span
                       class="status-dot"
@@ -292,10 +292,10 @@
           <table class="data">
             <thead>
               <tr>
-                <th>URL</th>
-                <th>Reason</th>
-                <th class="num">Remaining</th>
-                <th class="num">Duration</th>
+                <th scope="col">URL</th>
+                <th scope="col">Reason</th>
+                <th scope="col" class="num">Remaining</th>
+                <th scope="col" class="num">Duration</th>
               </tr>
             </thead>
             <tbody>
@@ -303,7 +303,7 @@
                    duplicate or absent URLs must not throw. -->
               {#each cooldownEntries as entry, i (i)}
                 <tr>
-                  <td class="name-cell">{entry.url ?? "—"}</td>
+                  <th scope="row" class="name-cell">{entry.url ?? "—"}</th>
                   <td>{entry.reason ?? "—"}</td>
                   <td class="value-cell">{formatDuration(entry.remaining_seconds)}</td>
                   <td class="value-cell">{formatDuration(entry.duration_seconds)}</td>
@@ -428,7 +428,7 @@
           <summary>Raw counters</summary>
           <table class="data-raw">
             <thead>
-              <tr><th>Counter</th><th>Value</th></tr>
+              <tr><th scope="col">Counter</th><th scope="col">Value</th></tr>
             </thead>
             <tbody>
               {#each counterRows(view.stats.serve_savings, "serve_savings") as row (row.name)}

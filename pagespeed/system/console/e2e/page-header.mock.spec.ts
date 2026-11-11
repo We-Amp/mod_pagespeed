@@ -98,7 +98,7 @@ test("Configuration has the shared Refresh button and no auto-refresh; it and r 
   expect(mock.calls("config")).toBe(loaded);
   await refresh.click();
   await expect.poll(() => mock.calls("config")).toBe(loaded + 1);
-  await expect(header.getByRole("status")).toHaveText("Refreshed");
+  await expect(header.getByTestId("refresh-result")).toHaveText("Refreshed");
   await page.locator("main h1").click();
   await page.keyboard.press("r");
   await expect.poll(() => mock.calls("config")).toBe(loaded + 2);
@@ -114,7 +114,7 @@ test("Refresh says what it came to, and a timer's refresh says nothing", async (
   });
   await openConsole(page, "pagespeed_admin", "#/statistics");
   await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
-  const result = page.locator("main .page-header").getByRole("status");
+  const result = page.locator("main .page-header").getByTestId("refresh-result");
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   // Timer refreshes leave the status region alone (no announcement every few seconds).
   const before = mock.calls("stats_json");
@@ -192,7 +192,7 @@ for (const c of PART_CASES) {
     }
     await mockAdmin(page, c.admin, replies);
     await openConsole(page, c.admin, c.hash);
-    const result = page.locator("main .page-header").getByRole("status");
+    const result = page.locator("main .page-header").getByTestId("refresh-result");
     const refresh = page.getByRole("button", { name: "Refresh", exact: true });
     await expect(page.locator("main .loading")).toHaveCount(0);
     await refresh.click();

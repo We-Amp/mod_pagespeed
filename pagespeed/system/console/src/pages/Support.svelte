@@ -141,6 +141,9 @@
     cursor: pointer;
     padding: var(--ps-space-xs);
     border-radius: var(--ps-border-radius);
+    /* At least 24 px square: a pointer target (WCAG 2.5.8). */
+    min-width: 24px;
+    min-height: 24px;
   }
 
   .dismiss:hover {
