@@ -1316,10 +1316,33 @@ test.describe("the findings link", () => {
   });
 });
 
-// A strip of tabs or views scrolls sideways, so it clips whatever an item
-// draws outside its own box. The focus ring of an item is therefore drawn
-// where no ancestor cuts it: whole, on all four sides.
-test.describe("focus rings in a scrolling strip", () => {
+// A strip of tabs or views scrolls sideways, and the sidebar scrolls, so
+// each clips whatever an item draws outside its own box. The focus ring of
+// an item is therefore drawn where no ancestor cuts it: whole, on all four
+// sides.
+test.describe("focus rings inside a scrolling container", () => {
+  /** What cuts the focused element's ring: nothing, when the ring lies inside every clipping ancestor. */
+  const ringCuts = (page: Page) =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const s = getComputedStyle(el);
+      if (s.outlineStyle !== "solid" || parseFloat(s.outlineWidth) !== 2) return [`no ring on ${el.textContent}`];
+      const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
+      const r = el.getBoundingClientRect();
+      const ring = { left: r.left - reach, top: r.top - reach, right: r.right + reach, bottom: r.bottom + reach };
+      const out: string[] = [];
+      for (let a = el.parentElement; a !== null; a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+        const b = a.getBoundingClientRect();
+        // A side counts only where the ancestor clips along that axis.
+        const x = cs.overflowX !== "visible" && (ring.left < b.left - 0.5 || ring.right > b.right + 0.5);
+        const y = cs.overflowY !== "visible" && (ring.top < b.top - 0.5 || ring.bottom > b.bottom + 0.5);
+        if (x || y) out.push(`${el.textContent}: ring cut by ${a.tagName.toLowerCase()}.${a.className}`);
+      }
+      return out;
+    });
+
   for (const [name, hash, role] of [
     ["the Caches tabs", "#/caches", "tab"],
     ["the Table and Graphs views", "#/statistics", "view"],
@@ -1338,28 +1361,45 @@ test.describe("focus rings in a scrolling strip", () => {
       await page.keyboard.press("Tab");
       await expect(items.first()).toBeFocused();
       for (let i = 0; i < count; i++) {
-        const cut = await page.evaluate(() => {
-          const el = document.activeElement as HTMLElement;
-          const s = getComputedStyle(el);
-          if (s.outlineStyle !== "solid" || parseFloat(s.outlineWidth) !== 2) return [`no ring on ${el.textContent}`];
-          const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
-          const r = el.getBoundingClientRect();
-          const ring = { left: r.left - reach, top: r.top - reach, right: r.right + reach, bottom: r.bottom + reach };
-          const out: string[] = [];
-          for (let a = el.parentElement; a !== null; a = a.parentElement) {
-            const cs = getComputedStyle(a);
-            if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
-            const b = a.getBoundingClientRect();
-            if (ring.left < b.left - 0.5 || ring.top < b.top - 0.5 || ring.right > b.right + 0.5 || ring.bottom > b.bottom + 0.5) {
-              out.push(`${el.textContent}: ring cut by ${a.tagName.toLowerCase()}.${a.className}`);
-            }
-          }
-          return out;
-        });
-        expect(cut, `item ${i}`).toEqual([]);
+        expect(await ringCuts(page), `item ${i}`).toEqual([]);
         // The next item: tabs move with the arrow keys, links with Tab.
         await page.keyboard.press(role === "tab" ? "ArrowRight" : "Tab");
       }
     });
+  }
+
+  for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
+    for (const [where, size] of [
+      ["on a desktop", { width: 1280, height: 800 }],
+      ["in the phone drawer", { width: 390, height: 844 }],
+    ] as const) {
+      test(`${admin}, the sidebar's links ${where}: the keyboard's ring is whole`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await mockAdmin(page, admin, admin === "pagespeed_admin" ? perHostReplies() : wholeServerReplies());
+        await openConsole(page, admin, "#/overview");
+        await pageReady(page);
+        const links = page.locator("#console-nav a.nav-item");
+        const count = await links.count();
+        expect(count).toBeGreaterThanOrEqual(10);
+        if (size.width < 600) {
+          // The drawer opens from the keyboard, with the focus on the current page's link.
+          await page.getByRole("button", { name: "Toggle menu" }).focus();
+          await page.keyboard.press("Enter");
+          await expect(page.locator("#console-nav")).toHaveClass(/open/);
+          await expect(links.first()).toBeFocused();
+        } else {
+          await links.first().focus();
+          await page.keyboard.press("Shift+Tab");
+          await page.keyboard.press("Tab");
+          await expect(links.first()).toBeFocused();
+        }
+        // Every link in turn, the current page's (filled) row included.
+        for (let i = 0; i < count; i++) {
+          await expect(links.nth(i)).toBeFocused();
+          expect(await ringCuts(page), `link ${i}`).toEqual([]);
+          await page.keyboard.press("Tab");
+        }
+      });
+    }
   }
 });

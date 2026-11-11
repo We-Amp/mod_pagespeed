@@ -679,6 +679,13 @@
     color: var(--ps-text);
   }
 
+  /* A row spans the sidebar from edge to edge, and the sidebar scrolls, so
+     it clips what a row draws outside its box: the focus ring is drawn
+     inside the row, whole. */
+  .nav-item:focus-visible {
+    outline-offset: -2px;
+  }
+
   .nav-item.active {
     color: var(--ps-primary);
     background: var(--ps-primary-light);
