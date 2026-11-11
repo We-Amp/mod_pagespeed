@@ -90,7 +90,7 @@ for (const scheme of ["light", "dark"] as const) {
       await expectNoViolations(page);
       await openConsole(page, "pagespeed_global_admin", "#/statistics?lens=www.example.test");
       await ready(page);
-      await expect(page.getByTestId("lens-note")).toBeVisible();
+      await expect(page.getByTestId("host-lens-note")).toBeVisible();
       await expectNoViolations(page);
     });
 

@@ -28,7 +28,7 @@ test.describe("Console scope", () => {
     await mockAdmin(page, "renamed_admin", { config: F.CONFIG_GLOBAL, stats_json: F.STATS_GLOBAL, ...daemon });
     await openConsole(page, "renamed_admin", "#/statistics");
     await expect(page.getByText("Aggregate statistics across all virtual hosts (process-wide)")).toBeVisible();
-    await expect(page.locator(".topbar-badge")).toHaveText("Global Admin");
+    await expect(page.getByTestId("console-scope")).toHaveText("Scope: Whole server");
   });
 
   test("the configuration is read once for the whole console", async ({ page }) => {
@@ -91,17 +91,38 @@ test.describe("Scope chips and the console label", () => {
     await expect(page.getByTestId("savings-optimizer-card").locator(".scope-chip")).toHaveText("whole server");
   });
 
-  test("only the whole-server console carries a label in the top bar", async ({ page }) => {
+  test("a per-host console names its host in the top bar", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", perHost());
     await openConsole(page, "pagespeed_admin", "#/overview");
     await expect(page.getByTestId("module-card")).toBeVisible();
-    await expect(page.locator(".topbar-badge")).toHaveCount(0);
+    await expect(page.getByTestId("console-scope")).toHaveText(/^Scope: \S+$/);
+    await expect(page.getByTestId("console-scope")).not.toContainText("Whole server");
     await expect(page.locator(".topbar")).not.toContainText("Admin");
   });
 
-  test("the whole-server console is labelled as such", async ({ page }) => {
+  test("the whole-server console is labelled as such, also under a host filter", async ({ page }) => {
     await mockAdmin(page, "pagespeed_global_admin", wholeServer());
     await openConsole(page, "pagespeed_global_admin", "#/overview");
-    await expect(page.locator(".topbar-badge")).toHaveText("Global Admin");
+    await expect(page.getByTestId("console-scope")).toHaveText("Scope: Whole server");
+    await openConsole(page, "pagespeed_global_admin", "#/savings?lens=www.example.com");
+    await expect(page.getByTestId("console-scope")).toHaveText("Scope: Whole server");
   });
+
+  for (const width of [1440, 768, 390, 320]) {
+    test(`the scope chip is in the bar at ${width} px, or at the head of the drawer`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await mockAdmin(page, "pagespeed_global_admin", wholeServer());
+      await openConsole(page, "pagespeed_global_admin", "#/overview");
+      await expect(page.getByTestId("module-card")).toBeVisible();
+      const chip = page.getByTestId("console-scope");
+      if (width > 430) {
+        await expect(chip).toBeVisible();
+        expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      } else {
+        await expect(chip).toBeHidden();
+        await page.getByRole("button", { name: "Toggle menu" }).click();
+        await expect(page.locator(".drawer-chip")).toHaveText("Whole server");
+      }
+    });
+  }
 });

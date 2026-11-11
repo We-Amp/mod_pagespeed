@@ -2,7 +2,14 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { ConnectionMonitor, NetworkError, isConnectionFailure, type ConnectionView } from "./connection";
+import {
+  ConnectionMonitor,
+  NetworkError,
+  OptimizerPresenceMonitor,
+  isConnectionFailure,
+  optimizerPresence,
+  type ConnectionView,
+} from "./connection";
 
 describe("isConnectionFailure", () => {
   it("no answer at all is a lost connection, on any path", () => {
@@ -104,5 +111,43 @@ describe("ConnectionMonitor", () => {
     m.record("/stats_json", null, 1000);
     m.reset();
     expect(m.view).toEqual({ status: "connected", failures: 0, lastAnsweredAt: null });
+  });
+});
+
+describe("OptimizerPresenceMonitor", () => {
+  const NOT_CONFIGURED = JSON.stringify({ error: "daemon_not_configured" });
+
+  it("is unknown until a daemon leaf answers, then follows the answers", () => {
+    const m = new OptimizerPresenceMonitor();
+    const seen: string[] = [];
+    m.subscribe((p) => seen.push(p));
+    m.record("/stats_json", 200);
+    m.record("/v1/daemon/health", null);
+    m.record("/v1/daemon/health", 502, JSON.stringify({ error: "daemon_unreachable" }));
+    expect(seen).toEqual(["unknown"]);
+    m.record("/v1/daemon/health", 503, NOT_CONFIGURED);
+    m.record("/v1/daemon/stats", 503, NOT_CONFIGURED);
+    expect(seen).toEqual(["unknown", "none"]);
+    m.record("/v1/daemon/health", 200, "{}");
+    expect(seen).toEqual(["unknown", "none", "present"]);
+  });
+
+  it("a 503 without the proxy's code, or a 404 for one entry, says nothing", () => {
+    const m = new OptimizerPresenceMonitor();
+    const seen: string[] = [];
+    m.subscribe((p) => seen.push(p));
+    m.record("/v1/daemon/health", 503, "<html>gateway</html>");
+    m.record("/v1/daemon/cache/alternates?url=x", 404, "{}");
+    expect(seen).toEqual(["unknown"]);
+  });
+
+  it("the connection monitor feeds the shared one", () => {
+    optimizerPresence.reset();
+    const seen: string[] = [];
+    const off = optimizerPresence.subscribe((p) => seen.push(p));
+    new ConnectionMonitor().record("/v1/daemon/health", 503, 0, NOT_CONFIGURED);
+    off();
+    optimizerPresence.reset();
+    expect(seen).toEqual(["unknown", "none"]);
   });
 });

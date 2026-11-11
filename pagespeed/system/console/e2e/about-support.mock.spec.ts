@@ -87,6 +87,14 @@ test.describe("About and Support", () => {
     await expect(page.locator(".topbar-version")).toHaveText(/^v\d+\.\d+\.\d+$/);
   });
 
+  test("the publisher is named on About, not in the top bar beside the connection state", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/about");
+    await expect(page.getByTestId("about-vendor")).toContainText("is published by We-Amp B.V.");
+    await expect(page.getByTestId("about-vendor").getByRole("link", { name: "we-amp.com" })).toHaveAttribute("href", "https://we-amp.com/");
+    await expect(page.locator(".topbar a[href='https://we-amp.com/']")).toHaveCount(0);
+  });
+
   test("Support: one full stop after the vendor, and still dismissible", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin", "#/support");

@@ -110,12 +110,12 @@
   let rows = $derived(vars ? moduleSavingsByType(vars) : null);
   let total = $derived(rows ? moduleSavingsTotal(rows) : null);
   let hitRate = $derived(vars ? optimizedCopyHitRate(vars) : null);
-  let scopeLine = $derived(overviewScopeLine(scope.isGlobal, scope.config));
   let serveView = $derived(serveSavingsView(daemonView?.daemonStats?.serve_savings));
   // Serve savings per host: the lens host on the whole-server console, the
   // console's own host on a per-vhost one (never a lens there).
   let byHost = $derived(hostSavingsView(daemonView?.daemonStats?.serve_savings_by_host));
   let lensHost = $derived(activeLensHost(scope, lens));
+  let scopeLine = $derived(overviewScopeLine(scope.isGlobal, scope.config, lensHost));
   let ownHost = $derived(scope.isGlobal ? null : consoleHostName(scope.host));
   // The lens host's row on the whole-server console; on a per-vhost one the
   // row the module marks for it (or, from an older module, the row of the

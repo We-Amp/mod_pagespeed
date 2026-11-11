@@ -96,12 +96,9 @@ test.describe("the top bar's spacing", () => {
       await openConsole(page, "pagespeed_global_admin", "#/overview");
       await pageReady(page);
       expect(await gap(page, ".topbar-logo-link", ".topbar-subtitle"), "logo to the version line").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-subtitle-link", ".topbar-badge"), "host name to the console label").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-badge", ".shortcuts-button"), "console label to the shortcuts button").toBeCloseTo(ITEM, 0);
-      const line = await page.locator(".topbar-subtitle > *").evaluateAll((els) =>
-        els.slice(1).map((el, i) => el.getBoundingClientRect().left - els[i].getBoundingClientRect().right),
-      );
-      for (const g of line) expect(g, `gaps in the version line: ${line.join(", ")}`).toBeGreaterThanOrEqual(ITEM - 1);
+      expect(await gap(page, ".topbar-subtitle", ".topbar-status"), "version to the connection state").toBeCloseTo(GROUP, 0);
+      expect(await gap(page, ".topbar-status", ".topbar-chip"), "connection state to the scope chip").toBeCloseTo(ITEM, 0);
+      expect(await gap(page, ".topbar-chip", ".shortcuts-button"), "scope chip to the shortcuts button").toBeCloseTo(ITEM, 0);
       const lens = page.getByTestId("host-lens");
       expect(await gap(page, '[data-testid="host-lens"] label', '[data-testid="host-lens"] select'), "Host label to its select").toBeCloseTo(ITEM, 0);
       // The lens ends at the top bar's padding, and that padding is the content's.
@@ -124,7 +121,7 @@ test.describe("the top bar's spacing", () => {
     const wide = (await box(select)).width;
     await page.setViewportSize({ width: 769, height: 800 });
     const parts = await page
-      .locator(".topbar-logo-link, .topbar-subtitle > *, .topbar-badge, .shortcuts-button, .topbar-lens")
+      .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
       .evaluateAll((els) =>
         els
           .filter((el) => el.getClientRects().length > 0)
@@ -137,8 +134,8 @@ test.describe("the top bar's spacing", () => {
       expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
       expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
     }
-    const badge = page.locator(".topbar-badge");
-    expect(await badge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const chip = page.locator(".topbar-chip");
+    expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect((await box(select)).width).toBeCloseTo(wide, 0);
   });
 });

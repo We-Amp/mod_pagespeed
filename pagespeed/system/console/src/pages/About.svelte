@@ -10,7 +10,15 @@
   // asked once: this page does not poll.
   import PageHeader from "$lib/PageHeader.svelte";
   import { useConsole } from "$lib/api/context";
-  import { DOCS_URL, PRIVACY_URL, PRODUCT_NAME, TERMS_URL } from "$lib/data/product-facts-console";
+  import {
+    DOCS_URL,
+    PRIVACY_URL,
+    PRODUCT_NAME,
+    TERMS_URL,
+    VENDOR,
+    VENDOR_HOST,
+    VENDOR_URL,
+  } from "$lib/data/product-facts-console";
   import {
     isDirtyBuild,
     optimizerVersionsStatus,
@@ -89,6 +97,10 @@
 
   <section class="about-section" aria-labelledby="about-legal">
     <h2 class="section-title" id="about-legal">Legal</h2>
+    <p class="note" data-testid="about-vendor">
+      {PRODUCT_NAME} is published by {VENDOR}
+      (<a href={VENDOR_URL} target="_blank" rel="noopener noreferrer" class="legal-link">{VENDOR_HOST}</a>).
+    </p>
     <div class="legal-links">
       <a
         href={PRIVACY_URL}
