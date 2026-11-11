@@ -215,33 +215,20 @@ export function pageWindow(
   };
 }
 
-/** The list's view as the address carries it: page offset, filter text and sort. */
+/** The list's view as the address carries it: page offset and filter text. */
 export interface UrlsView {
   offset: number;
   q: string;
-  sort: UrlSortState;
 }
 
 /** The view an address names; anything missing or malformed is the default. */
-export function urlsViewFromParams(params: URLSearchParams): UrlsView {
-  const offset = Number(params.get("offset"));
-  const sortParam = params.get("sort") ?? "";
-  const sortKey = sortParam.replace(/^-/, "");
-  return {
-    offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
-    q: params.get("q") ?? "",
-    sort: ["url", "host", "variants"].includes(sortKey)
-      ? { key: sortKey as UrlSortKey, asc: !sortParam.startsWith("-") }
-      : DEFAULT_URL_SORT,
-  };
-}
+export const urlsViewFromParams = (params: URLSearchParams): UrlsView => ({
+  offset: Math.max(0, Math.floor(Number(params.get("offset"))) || 0),
+  q: params.get("q") ?? "",
+});
 
 /** The address parameters for a view; a default part is left out. */
-export function urlsViewParams(view: UrlsView): Record<string, string | null> {
-  const { key, asc } = view.sort;
-  return {
-    offset: view.offset > 0 ? String(view.offset) : null,
-    q: view.q === "" ? null : view.q,
-    sort: key === DEFAULT_URL_SORT.key && asc === DEFAULT_URL_SORT.asc ? null : `${asc ? "" : "-"}${key}`,
-  };
-}
+export const urlsViewParams = ({ offset, q }: UrlsView): Record<string, string | null> => ({
+  offset: offset > 0 ? String(offset) : null,
+  q: q || null,
+});

@@ -41,6 +41,7 @@
   import {
     URLS_PAGE_SIZE,
     buildUrlRows,
+    DEFAULT_URL_SORT,
     detailHref,
     globalConsoleUrlsHref,
     nextUrlSortState,
@@ -54,13 +55,13 @@
 
   const { api, scope, lens } = useConsole();
 
-  // The page, filter and sort live in the address too (written in place),
+  // The page and filter live in the address too (written in place),
   // so a URL's page can send the reader back to the same view.
   const linked = urlsViewFromParams(router.params);
   let offset = $state(linked.offset);
   let search = $state(linked.q);
-  let sort = $state<UrlSortState>(linked.sort);
-  const remember = () => replaceViewParams(urlsViewParams({ offset, q: search, sort }));
+  let sort = $state<UrlSortState>(DEFAULT_URL_SORT);
+  const remember = () => replaceViewParams(urlsViewParams({ offset, q: search }));
   let updatedAt = $state<number | null>(null);
   let lensHost = $derived(activeLensHost(scope, lens));
 
@@ -160,7 +161,6 @@
 
   function onsort(key: UrlSortState["key"]) {
     sort = nextUrlSortState(sort, key);
-    remember();
   }
 </script>
 
@@ -183,11 +183,8 @@
         placeholder="Filter this page by URL or host"
         aria-label="Filter this page by URL or host"
         data-testid="urls-search"
-        value={search}
-        oninput={(e) => {
-          search = e.currentTarget.value;
-          remember();
-        }}
+        bind:value={search}
+        oninput={remember}
       />
     {/snippet}
   </PageHeader>

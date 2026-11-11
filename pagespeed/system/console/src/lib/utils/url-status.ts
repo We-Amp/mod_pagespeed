@@ -18,9 +18,20 @@ export type UrlStatus = "complete" | "partial" | "original-only" | "revalidating
  * - `revalidating`   — at least one variant is flagged for revalidation
  * - `null`           — no non-sentinel variants (nothing to classify)
  */
-/** A variant the optimizer made: a modern image format or a compressed encoding. */
+/** The optimizer's "written by the worker" flag (a re-encode, resize or derived copy). */
+const WORKER_PROCESSED = 0x02;
+
+/**
+ * A variant the optimizer made: a modern image format, a compressed
+ * encoding, or anything its worker wrote (a same-format re-encode or
+ * resize, a derived copy).
+ */
 export function isOptimizedVariant(a: DaemonAlternate): boolean {
-  return ["webp", "avif", "svg"].includes(a.format ?? "") || ["gzip", "brotli"].includes(a.encoding ?? "");
+  return (
+    ["webp", "avif", "svg"].includes(a.format ?? "") ||
+    ["gzip", "brotli"].includes(a.encoding ?? "") ||
+    (typeof a.flags === "number" && (a.flags & WORKER_PROCESSED) !== 0)
+  );
 }
 
 export function computeUrlStatus(alternates: DaemonAlternate[]): UrlStatus | null {

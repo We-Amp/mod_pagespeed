@@ -38,6 +38,11 @@ describe("computeUrlStatus", () => {
       computeUrlStatus([{ is_sentinel: true, sentinel_name: "original_content" }, alt({ alternate_id: 9, format: "webp" })]),
     ).toBe("partial");
   });
+  it("counts what the optimizer's worker wrote: a same-format re-encode beside the front end's original", () => {
+    expect(computeUrlStatus([alt({ flags: 0 }), alt({ alternate_id: 1, format: "jpeg", flags: 2 })])).toBe("partial");
+    expect(computeUrlStatus([alt({ flags: 2 })])).toBe("partial");
+    expect(computeUrlStatus([alt({ flags: 1 })])).toBe("original-only");
+  });
   it("classifies image coverage: webp+avif complete, webp alone partial", () => {
     const base = [alt({}), alt({ alternate_id: 1, format: "webp" })];
     expect(computeUrlStatus(base)).toBe("partial");

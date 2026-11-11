@@ -284,20 +284,16 @@ describe("pageWindow", () => {
 });
 
 describe("the list's view in the address", () => {
-  it("round-trips page, filter and sort; defaults stay out of the address", () => {
-    const view = { offset: 50, q: "hero png", sort: { key: "host" as const, asc: false } };
+  it("round-trips page and filter; defaults stay out of the address", () => {
+    const view = { offset: 50, q: "hero png" };
     const params = urlsViewParams(view);
-    expect(params).toEqual({ offset: "50", q: "hero png", sort: "-host" });
+    expect(params).toEqual({ offset: "50", q: "hero png" });
     expect(urlsViewFromParams(new URLSearchParams(params as Record<string, string>))).toEqual(view);
-    expect(urlsViewParams(urlsViewFromParams(new URLSearchParams()))).toEqual({ offset: null, q: null, sort: null });
+    expect(urlsViewParams(urlsViewFromParams(new URLSearchParams()))).toEqual({ offset: null, q: null });
   });
 
-  it("a malformed address is the default view", () => {
-    expect(urlsViewFromParams(new URLSearchParams("offset=-3&sort=size"))).toEqual({
-      offset: 0,
-      q: "",
-      sort: { key: "url", asc: true },
-    });
-    expect(urlsViewFromParams(new URLSearchParams("offset=1.5&sort=variants")).sort).toEqual({ key: "variants", asc: true });
+  it("a malformed offset is the first page", () => {
+    for (const offset of ["-3", "x", ""]) expect(urlsViewFromParams(new URLSearchParams({ offset })).offset).toBe(0);
+    expect(urlsViewFromParams(new URLSearchParams("offset=2.5")).offset).toBe(2);
   });
 });

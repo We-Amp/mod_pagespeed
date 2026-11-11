@@ -17,6 +17,8 @@ import {
   urlReasons,
   urlVerdict,
   wayBack,
+  type ModuleLookup,
+  type UrlVerdictInput,
   wholeServerLine,
 } from "./url-inspect";
 import { toVariantRows } from "./url-detail";
@@ -174,13 +176,30 @@ describe("the verdict", () => {
     const rows = toVariantRows({ alternates });
     return { rows, status: computeUrlStatus(rows.map((r) => r.raw)) };
   };
-  const input = (over: Partial<Parameters<typeof urlVerdict>[0]>) => ({
-    record: null, notInIndex: false, cooldown: null, lookup: "no-answer" as const, ...over,
+  const look = (kind: Parameters<typeof moduleLookup>[0] | ModuleLookup) =>
+    kind !== undefined && "kind" in kind ? kind : moduleLookup(kind);
+  const input = (over: Partial<Omit<UrlVerdictInput, "lookup">> & { lookup?: ModuleLookup }): UrlVerdictInput => ({
+    record: null, notInIndex: false, access: "read", cooldown: null, lookup: look(undefined), ...over,
   });
-  const line = (over: Partial<Parameters<typeof urlVerdict>[0]>) => {
+  const line = (over: Parameters<typeof input>[0]) => {
     const v = urlVerdict(input(over));
     return [v.kind, v.word + v.text];
   };
+  const dump = (partitions: string) =>
+    moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: `Metadata cache key:k\ncache_ok:true\ncan_revalidate:false\n${partitions}\n` }));
+  const OPTIMIZED = dump('partitions:partition {\n  url: "https://www.example.test/a.css.pagespeed.cf.x.css"\n  input {\n    url: "https://www.example.test/a.css"\n  }\n}\n');
+  const KEPT = dump('partitions:partition {\n  optimizable: false\n  input {\n    url: "https://www.example.test/a.css"\n  }\n}\n');
+  const SILENT = dump("partitions is NULL");
+  const NOT_CURRENT = moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: "cache_ok:false\n" }));
+  const ORIGINAL = moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: "Unable to decode resource." }));
+  const OTHER_HOST = moduleLookup(rejected(new ApiError(403, "HTTP 403: URL belongs to another host; use that host's console")));
+
+  it("reads what a current module result did, never an input's url", () => {
+    expect(OPTIMIZED.outcome).toBe("optimized");
+    expect(KEPT.outcome).toBe("kept");
+    expect(SILENT.outcome).toBeNull();
+    expect(KEPT.kind).toBe("current");
+  });
 
   it("an optimized URL names what the most-served variant saves and how it looks", () => {
     const hero = record([
@@ -204,6 +223,15 @@ describe("the verdict", () => {
     );
   });
 
+  it("a re-encode in the origin's own format is optimized, and goes to every browser", () => {
+    const jpeg = record([
+      variant({ size: 45210, original_size: 45210, flags: 0, hit_count: 3 }),
+      variant({ format: "jpeg", flags: 2, size: 30984, original_size: 45210, hit_count: 9 }),
+    ]);
+    expect(jpeg.status).toBe("partial");
+    expect(line({ record: jpeg })[1]).toBe("Optimized. Browsers get 30.3 KB instead of 44.2 KB (-31.5%).");
+  });
+
   it("a compressed text variant names its encoding; without sizes the word stands alone", () => {
     const css = record([
       variant({ content_type: "css", size: 9000, original_size: 9000 }),
@@ -213,18 +241,27 @@ describe("the verdict", () => {
     expect(line({ record: record([variant({ format: "avif" }), variant({ format: "webp" })]) })[1]).toBe("Optimized.");
   });
 
-  it("the module's current result is enough on a console without the optimizer's record", () => {
-    expect(line({ lookup: "current" })).toEqual(["optimized", "Optimized. The module holds a current rewrite result for this URL."]);
+  it("the module's result is optimized only when it says so", () => {
+    expect(line({ access: "not-here", lookup: OPTIMIZED })).toEqual([
+      "optimized",
+      "Optimized. The module holds an optimized result for it.",
+    ]);
+    expect(line({ access: "none", lookup: KEPT })).toEqual(["kept", "Not optimized. The module tried it and kept the original."]);
+    expect(line({ access: "none", lookup: SILENT })).toEqual([
+      "unknown",
+      "Unknown. The module's result does not say.",
+    ]);
   });
 
   it("a cooldown says why the URL waits, in the console's time words", () => {
     expect(line({ notInIndex: true, cooldown: { reason: "processing", remaining_seconds: 125 } })).toEqual([
-      "cooldown",
+      "not-yet",
       "Not optimized yet. In cooldown (Processing), 2 min remaining.",
     ]);
   });
 
-  it("not yet: only originals, nothing but records, no record, or no current result", () => {
+
+  it("not yet: only when the optimizer's record was read, or there is no optimizer", () => {
     expect(line({ record: record([variant({ size: 1 }), variant({ size: 2 })]) })).toEqual([
       "not-yet",
       "Not optimized yet. The optimizer holds no optimized variant of it.",
@@ -232,20 +269,32 @@ describe("the verdict", () => {
     expect(line({ record: record([{ is_sentinel: true, sentinel_name: "content_hash" }]) })[1]).toBe(
       "Not optimized yet. The optimizer holds no optimized variant of it.",
     );
-    expect(line({ notInIndex: true, lookup: "original-url" })[1]).toBe("Not optimized yet. The optimizer has no record of it.");
-    expect(line({ lookup: "not-current" })[1]).toBe("Not optimized yet. The module holds no current rewrite result for this URL.");
+    expect(line({ notInIndex: true, lookup: ORIGINAL })[1]).toBe("Not optimized yet. The optimizer has no record of it.");
+    expect(line({ access: "none", lookup: NOT_CURRENT })[1]).toBe(
+      "Not optimized yet. The module holds no current rewrite result for this URL.",
+    );
   });
 
-  it("anything else is unknown, never a guess", () => {
-    for (const lookup of ["original-url", "other-host", "no-answer"] as const) {
-      expect(line({ lookup })).toEqual(["unknown", "Unknown. Nothing this console reads says whether it is optimized."]);
-    }
+  it("unknown always says why: the record out of reach here, or what the module could not say", () => {
+    expect(line({ access: "not-here", lookup: NOT_CURRENT })).toEqual([
+      "unknown",
+      "Unknown. The optimizer's record is on the whole-server console.",
+    ]);
+    expect(line({ access: "not-answering", lookup: NOT_CURRENT })[1]).toBe("Unknown. The optimizer is not answering.");
+    expect(line({ access: "unreadable", lookup: ORIGINAL })[1]).toBe("Unknown. The optimizer's record could not be read.");
+    expect(line({ access: "none", lookup: ORIGINAL })[1]).toBe(
+      "Unknown. The module's lookup answers only for rewritten URLs, and no optimizer is configured.",
+    );
+    expect(line({ access: "none", lookup: OTHER_HOST })[1]).toBe(
+      "Unknown. This URL belongs to another host; that host's console answers for it.",
+    );
+    expect(line({ access: "none" })[1]).toBe("Unknown. The module gave no lookup result.");
   });
 });
 
 describe("the way back", () => {
   it("returns to the page the reader came from, with its view", () => {
-    expect(wayBack("#/urls?offset=50&sort=-host&q=hero", true)).toEqual({ href: "#/urls?offset=50&sort=-host&q=hero", label: "URLs" });
+    expect(wayBack("#/urls?offset=50&q=hero", true)).toEqual({ href: "#/urls?offset=50&q=hero", label: "URLs" });
     expect(wayBack("#/logs?source=module&level=debug&q=x", false)).toEqual({ href: "#/logs?source=module&level=debug&q=x", label: "Logs" });
     expect(wayBack("#/overview", false)).toEqual({ href: "#/overview", label: "Overview" });
     expect(wayBack("#/optimizer", true)).toEqual({ href: "#/optimizer", label: "Optimizer status" });

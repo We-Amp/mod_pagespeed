@@ -84,8 +84,10 @@
   const { api, scope } = useConsole();
   const key = parseDetailKey(router.params);
   const shown = key === null ? "" : displayUrl(key);
-  // Where the reader came from, as it was when this page opened.
-  const cameFrom = router.previous;
+  // Where the reader came from, as it was when this page opened; kept in
+  // this history entry, so returning here with Back keeps the same way back.
+  const cameFrom: string = history.state?.urlBack ?? router.previous;
+  history.replaceState({ ...history.state, urlBack: cameFrom }, "");
   let back = $derived(wayBack(cameFrom, scope.isGlobal));
   // Every content-leaf image on this page (previews and the diff) loads
   // through this one limiter: never more than the module's two slots.
@@ -199,11 +201,6 @@
       : null,
   );
   let reasons = $derived(urlReasons(cooldown ?? listedCooldown));
-  // The reasons follow whenever nothing here shows the URL optimized: no
-  // optimized variant from the optimizer, no current result from the module.
-  let reasonsShown = $derived(
-    (altData === null || status === null || status === "original-only") && lookup.kind !== "current",
-  );
   let perVhost = $derived(errorCode(altError) === "whole_server_console_only");
   // A server without an optimizer: an ordinary state, on either console.
   let noOptimizer = $derived(
@@ -215,14 +212,27 @@
     altData !== null || (altError !== null && !perVhost && !noOptimizer && !isUnavailable(altError)),
   );
   let wholeServer = $derived(wholeServerLine(noOptimizer));
+  let notInIndex = $derived(errorCode(altError) === "not_in_index");
   let verdict = $derived(
     urlVerdict({
       record: altData === null ? null : { rows, status },
-      notInIndex: errorCode(altError) === "not_in_index",
+      notInIndex,
+      access:
+        altData !== null || notInIndex
+          ? "read"
+          : noOptimizer
+            ? "none"
+            : perVhost
+              ? "not-here"
+              : altError !== null && (isUnavailable(altError) || isDaemonUnavailable(altError))
+                ? "not-answering"
+                : "unreadable",
       cooldown: cooldown ?? listedCooldown,
-      lookup: lookup.kind,
+      lookup,
     }),
   );
+  // The reasons follow whenever the verdict is not "optimized".
+  let reasonsShown = $derived(verdict.kind !== "optimized");
   // This URL's page on the whole-server console (null when the admin path is renamed).
   let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
@@ -250,7 +260,7 @@
 </script>
 
 <div class="page">
-  <p class="back"><a href={back.href} data-testid="url-back"><span aria-hidden="true">←</span> Back to {back.label}</a></p>
+  <p class="note"><a href={back.href} data-testid="url-back"><span aria-hidden="true">←</span> Back to {back.label}</a></p>
   <PageHeader
     title="URL Detail"
     updatedAt={updatedAt}
@@ -289,7 +299,7 @@
     <p
       class="health-strip"
       class:health-strip-ok={verdict.kind === "optimized"}
-      class:health-strip-info={verdict.kind === "not-yet" || verdict.kind === "cooldown"}
+      class:health-strip-info={verdict.kind === "not-yet"}
       data-testid="url-verdict"
       data-kind={verdict.kind}
     ><strong>{verdict.word}</strong>{verdict.text}</p>
@@ -406,7 +416,7 @@
       </div>
     </div>
 
-    {#if cooldown && verdict.kind !== "cooldown"}
+    {#if cooldown && verdict.kind !== "not-yet"}
       <p class="notice notice-warning cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 
@@ -558,11 +568,6 @@
 {/snippet}
 
 <style>
-  .back {
-    margin: 0 0 var(--ps-space-xs);
-    font-size: var(--ps-font-size-sm);
-  }
-
   .previews-section {
     margin-top: var(--ps-space-lg);
   }

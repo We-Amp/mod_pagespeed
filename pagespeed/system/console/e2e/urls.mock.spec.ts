@@ -277,7 +277,7 @@ test("per-vhost console: the index is not shown, and a URL can still be inspecte
   await expect(page.getByTestId("url-reasons")).toBeVisible();
 });
 
-test("the way back from a URL's page returns to the same page of the list, filter and sort", async ({ page }) => {
+test("the way back from a URL's page returns to the same page of the list and filter", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", {
     ...globalReplies(F.URLS_TWO_PAGES),
     "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX,
@@ -286,16 +286,14 @@ test("the way back from a URL's page returns to the same page of the list, filte
   await ready(page);
   await page.getByTestId("urls-next").click();
   await expect(page.getByTestId("urls-pager")).toContainText("3–3 of 3");
-  await page.getByRole("button", { name: "Host" }).click();
   await page.getByTestId("urls-search").fill("app");
   // The view is in the address, written in place.
-  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/urls?offset=2&sort=host&q=app");
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/urls?offset=2&q=app");
   await page.getByRole("link", { name: "http://cdn.example.test/app.js?v=2" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "URL Detail" })).toBeVisible();
   await page.getByRole("link", { name: "Back to URLs" }).click();
   await ready(page);
   await expect(page.getByTestId("urls-search")).toHaveValue("app");
   await expect(page.getByTestId("urls-pager")).toContainText("3–3 of 3");
-  await expect(page.getByRole("columnheader", { name: "Host" })).toHaveAttribute("aria-sort", "ascending");
   await expect(page.getByTestId("urls-table").locator("tbody tr")).toHaveCount(1);
 });
