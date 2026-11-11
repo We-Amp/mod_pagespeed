@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminApiClient, ApiError, REQUEST_TIMEOUT_MS } from "./client";
 import { NetworkError, connection } from "./connection";
+import { detectedDialect, resetDialectForTesting } from "$lib/utils/dialect";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -21,6 +22,22 @@ afterEach(() => {
 });
 
 describe("AdminApiClient", () => {
+  it("remembers which web server answered, from the Server header; an answer without one changes nothing", async () => {
+    resetDialectForTesting();
+    fetchMock.mockResolvedValueOnce(json(200, { variables: {} }));
+    await new AdminApiClient("/a").getStats();
+    expect(detectedDialect()).toBeNull();
+    fetchMock.mockResolvedValueOnce(
+      new Response("{}", { status: 502, headers: { "Content-Type": "application/json", Server: "nginx/1.26.2" } }),
+    );
+    await expect(new AdminApiClient("/b").getStats()).rejects.toBeInstanceOf(ApiError);
+    expect(detectedDialect()).toBe("nginx");
+    fetchMock.mockResolvedValueOnce(json(200, { variables: {} }));
+    await new AdminApiClient("/c").getStats();
+    expect(detectedDialect()).toBe("nginx");
+    resetDialectForTesting();
+  });
+
   it("exposes its base path without a trailing slash", () => {
     expect(new AdminApiClient("/pagespeed_admin/").basePath).toBe("/pagespeed_admin");
   });

@@ -7,7 +7,14 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole, type Leaf, type Reply, type Responder } from "./support/mock-admin";
+import {
+  mockAdmin,
+  openConsole,
+  type Leaf,
+  type MockOptions,
+  type Reply,
+  type Responder,
+} from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -25,8 +32,8 @@ function replies(extra: Partial<Record<Leaf, Responder>> = {}): Partial<Record<L
   };
 }
 
-async function open(page: Page, extra: Partial<Record<Leaf, Responder>> = {}) {
-  const mock = await mockAdmin(page, ADMIN, replies(extra));
+async function open(page: Page, extra: Partial<Record<Leaf, Responder>> = {}, options: MockOptions = {}) {
+  const mock = await mockAdmin(page, ADMIN, replies(extra), options);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await openConsole(page, ADMIN);
@@ -55,7 +62,11 @@ test.describe("Overview findings", () => {
     const { errors } = await open(page, { message_history: F.messageGroups([aclRow()]) });
     const finding = page.getByTestId("alert-admin-exposed");
     await expect(finding).toContainText("requested from an address other than this server itself");
-    await expect(finding.getByTestId("finding-fix")).toContainText("Require local");
+    await expect(finding.getByTestId("finding-fix")).toHaveText(
+      "Fix: Restrict the admin paths to trusted addresses at the web server, or acknowledge this if the console is " +
+        "public on purpose.",
+    );
+    await expect(finding.getByTestId("snippet-code")).toContainText("Require local");
     await expect(finding.locator(".level-badge-warning")).toHaveText(/warning/i);
     await expect(finding.getByRole("link", { name: "Documentation" })).toHaveAttribute(
       "href",
@@ -79,6 +90,9 @@ test.describe("Overview findings", () => {
     );
     // The sentence, the fix and the folded log line name one cause: the packages.
     await expect(findings.first()).not.toContainText("DaemonVolumePath");
+    // So no path is offered to paste; the access finding below it has its snippet.
+    await expect(findings.first().getByTestId("snippet")).toHaveCount(0);
+    await expect(findings.nth(1).getByTestId("snippet")).toBeVisible();
     await expect(page.getByTestId("findings-summary")).toHaveText("2 findings · 2 need action");
   });
 
@@ -311,3 +325,214 @@ test.describe("Overview findings", () => {
     ).toBe(true);
   });
 });
+
+// A fix that names a setting comes with the setting to paste, in the web
+// server's own syntax.
+test.describe("Overview findings: a setting to paste", () => {
+  const unreachable = { "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE };
+  const both = () => ({ ...unreachable, message_history: F.messageGroups([aclRow()]) });
+  const APACHE_SOCKET = "ModPagespeedDaemonApiSocketPath /run/pagespeed-optimizer/api.sock";
+  const NGINX_SOCKET = "pagespeed DaemonApiSocketPath /run/pagespeed-optimizer/api.sock;";
+
+  /** The clipboard a secure page has; what it was handed is read back with copied(). */
+  async function grantClipboard(page: Page) {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            (window as unknown as { __copied: string }).__copied = text;
+          },
+        },
+      });
+    });
+  }
+  const copied = (page: Page) => page.evaluate(() => (window as unknown as { __copied?: string }).__copied);
+  const selected = (page: Page, name: string) =>
+    page.getByRole("tab", { name, exact: true }).and(page.locator('[aria-selected="true"]'));
+
+  test("no Server header and nothing remembered: the first tab, one tab per server that has the setting", async ({ page }) => {
+    const { errors } = await open(page, both());
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await expect(socket.getByRole("tab")).toHaveText(["Apache", "nginx"]);
+    await expect(socket.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    await expect(socket.getByTestId("snippet-code")).toHaveText(APACHE_SOCKET);
+    const access = page.getByTestId("alert-admin-exposed");
+    await expect(access.getByRole("tab")).toHaveText(["Apache", "nginx", "IIS", "Envoy"]);
+    await expect(access.getByTestId("snippet-code")).toHaveText(
+      "<Location /pagespeed_admin>\n    Require local\n</Location>\n" +
+        "<Location /pagespeed_global_admin>\n    Require local\n</Location>",
+    );
+    await expect(page.getByTestId("snippet-detected")).toHaveCount(0);
+    // The panel is named by its selected tab.
+    await expect(socket.getByRole("tabpanel", { name: "Apache" })).toBeVisible();
+    // Findings without a setting in their fix have nothing to paste.
+    await expect(page.getByTestId("snippet")).toHaveCount(2);
+    expect(errors).toEqual([]);
+  });
+
+  test("a tab chosen in one finding moves every snippet, by mouse and by keyboard", async ({ page }) => {
+    await open(page, both());
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    const access = page.getByTestId("alert-admin-exposed");
+    await socket.getByRole("tab", { name: "nginx" }).click();
+    await expect(socket.getByTestId("snippet-code")).toHaveText(NGINX_SOCKET);
+    await expect(access.getByRole("tab", { name: "nginx" })).toHaveAttribute("aria-selected", "true");
+    await expect(access.getByTestId("snippet-code")).toContainText(
+      "location = /pagespeed_admin { allow 127.0.0.1; allow ::1; deny all; }",
+    );
+    // Arrow keys move and select, and focus follows; only the selected tab is a tab stop.
+    await access.getByRole("tab", { name: "nginx" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(access.getByRole("tab", { name: "IIS" })).toBeFocused();
+    await expect(access.getByTestId("snippet-code")).toHaveText("pagespeed InfoUrlsLocalOnly on");
+    await expect(access.locator('[role="tab"][tabindex="0"]')).toHaveText("IIS");
+    await page.keyboard.press("ArrowRight");
+    await expect(access.getByTestId("snippet-code")).toHaveText(
+      'admin_auth:\n  enabled: true\n  allowed_ips:\n    - "127.0.0.1/32"',
+    );
+    // A finding whose setting that server does not have falls back to its first tab.
+    await expect(socket.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    await expect(socket.getByTestId("snippet-code")).toHaveText(APACHE_SOCKET);
+  });
+
+  test("the Server header preselects its server and says so", async ({ page }) => {
+    await open(page, both(), { server: "nginx/1.26.2" });
+    for (const id of ["alert-daemon-unreachable", "alert-admin-exposed"]) {
+      const finding = page.getByTestId(id);
+      await expect(finding.getByRole("tab", { name: "nginx" })).toHaveAttribute("aria-selected", "true");
+      await expect(finding.getByTestId("snippet-detected")).toHaveText("Detected: nginx");
+    }
+    await expect(page.getByTestId("alert-daemon-unreachable").getByTestId("snippet-code")).toHaveText(NGINX_SOCKET);
+    // The header is a hint: another tab can still be chosen, and the hint stays in view.
+    await page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "Apache" }).click();
+    await expect(page.getByTestId("alert-daemon-unreachable").getByTestId("snippet-code")).toHaveText(APACHE_SOCKET);
+    await expect(page.getByTestId("alert-daemon-unreachable").getByTestId("snippet-detected")).toHaveText("Detected: nginx");
+  });
+
+  test("a server the finding has no snippet for is not offered as detected", async ({ page }) => {
+    await open(page, both(), { server: "Microsoft-IIS/10.0" });
+    await expect(selected(page, "IIS")).toHaveCount(1);
+    await expect(page.getByTestId("alert-admin-exposed").getByTestId("snippet-detected")).toHaveText("Detected: IIS");
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await expect(socket.getByRole("tab", { name: "Apache" })).toHaveAttribute("aria-selected", "true");
+    await expect(socket.getByTestId("snippet-detected")).toHaveCount(0);
+  });
+
+  test("the chosen tab is remembered across a reload; a server named by the header comes first", async ({ page }) => {
+    await open(page, both());
+    await page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "IIS" }).click();
+    expect(await page.evaluate(() => localStorage.getItem("pagespeed.snippet.dialect"))).toBe("iis");
+    await page.reload();
+    await expect(page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "IIS" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByTestId("snippet-detected")).toHaveCount(0);
+  });
+
+  test("a remembered tab yields to the server the header names", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("pagespeed.snippet.dialect", "iis"));
+    await open(page, both(), { server: "Apache/2.4.62 (Debian)" });
+    await expect(page.getByTestId("alert-admin-exposed").getByRole("tab", { name: "Apache" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  test("storage that refuses: the tabs still work for this page view", async ({ page }) => {
+    await page.addInitScript(() => {
+      const refuse = () => {
+        throw new DOMException("blocked", "SecurityError");
+      };
+      Storage.prototype.getItem = refuse;
+      Storage.prototype.setItem = refuse;
+    });
+    const { errors } = await open(page, unreachable);
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await expect(socket.getByTestId("snippet-code")).toHaveText(APACHE_SOCKET);
+    await socket.getByRole("tab", { name: "nginx" }).click();
+    await expect(socket.getByTestId("snippet-code")).toHaveText(NGINX_SOCKET);
+    expect(errors).toEqual([]);
+  });
+
+  test("Copy hands the selected snippet to the clipboard and says Copied in a status region", async ({ page }) => {
+    await grantClipboard(page);
+    const { errors } = await open(page, both());
+    const access = page.getByTestId("alert-admin-exposed");
+    const status = access.getByTestId("snippet-status");
+    await expect(status).toHaveAttribute("role", "status");
+    await expect(status).toHaveText("");
+    await access.getByRole("tab", { name: "nginx" }).click();
+    await access.getByRole("button", { name: "Copy" }).click();
+    await expect(status).toHaveText("Copied");
+    // Exactly the lines shown, line breaks included.
+    expect(await copied(page)).toBe(
+      "location = /pagespeed_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location ^~ /pagespeed_admin/ { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location = /pagespeed_global_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location ^~ /pagespeed_global_admin/ { allow 127.0.0.1; allow ::1; deny all; }",
+    );
+    expect(await copied(page)).toBe(await access.getByTestId("snippet-code").textContent());
+    // The other finding did not copy; choosing another tab clears the word.
+    await expect(page.getByTestId("alert-daemon-unreachable").getByTestId("snippet-status")).toHaveText("");
+    await access.getByRole("tab", { name: "Apache" }).click();
+    await expect(status).toHaveText("");
+    expect(errors).toEqual([]);
+  });
+
+  test("a console over plain HTTP has no clipboard: Copy still copies through the selection", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+      document.execCommand = ((command: string) => {
+        (window as unknown as { __copied: string }).__copied = `${command}:${String(getSelection())}`;
+        return true;
+      }) as typeof document.execCommand;
+    });
+    const { errors } = await open(page, unreachable);
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await socket.getByTestId("snippet-copy").click();
+    await expect(socket.getByTestId("snippet-status")).toHaveText("Copied");
+    expect(await copied(page)).toBe(`copy:${APACHE_SOCKET}`);
+    expect(await page.evaluate(() => String(getSelection()))).toBe("");
+    expect(errors).toEqual([]);
+  });
+
+  test("the browser refuses to copy: the snippet is selected, and the status says to copy it by hand", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: async () => Promise.reject(new Error("denied")) },
+      });
+      document.execCommand = (() => false) as typeof document.execCommand;
+    });
+    const { errors } = await open(page, unreachable);
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await socket.getByTestId("snippet-copy").click();
+    await expect(socket.getByTestId("snippet-status")).toHaveText("Selected: copy it with the keyboard");
+    expect(await page.evaluate(() => String(getSelection()))).toBe(APACHE_SOCKET);
+    expect(errors).toEqual([]);
+  });
+
+  test("the snippet and its tab survive a refresh of the findings", async ({ page }) => {
+    await open(page, unreachable);
+    const socket = page.getByTestId("alert-daemon-unreachable");
+    await socket.getByRole("tab", { name: "nginx" }).click();
+    await socket.getByRole("tab", { name: "nginx" }).focus();
+    await page.waitForTimeout(6_000);
+    await expect(socket.getByRole("tab", { name: "nginx" })).toBeFocused();
+    await expect(socket.getByTestId("snippet-code")).toHaveText(NGINX_SOCKET);
+  });
+
+  test("phone: a snippet wraps inside its finding, with no sideways scrolling", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await open(page, both(), { server: "nginx" });
+    const code = page.getByTestId("alert-admin-exposed").getByTestId("snippet-code");
+    await expect(code).toBeVisible();
+    expect(await code.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(
+      await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1),
+    ).toBe(true);
+  });
+});
+

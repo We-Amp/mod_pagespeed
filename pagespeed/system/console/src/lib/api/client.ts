@@ -25,6 +25,7 @@ import type {
   RulePacksResponse,
 } from "./types";
 
+import { noteServer } from "$lib/utils/dialect";
 import { NetworkError, connection } from "./connection";
 import { UNAVAILABLE_STATUSES, leafKey, rememberable, unavailable } from "./unavailable";
 
@@ -131,6 +132,8 @@ export class AdminApiClient {
       connection.record(path, null, Date.now());
       throw new NetworkError();
     }
+    // Which web server answered, as a hint for the configuration snippets.
+    noteServer(response.headers.get("Server"));
     let text: string;
     try {
       // Always try JSON first — the backend may serve JSON with a wrong

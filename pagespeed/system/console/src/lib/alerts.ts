@@ -32,6 +32,7 @@ import type { DaemonHealthResponse, DaemonStatsResponse } from "$lib/api/types";
 import { DOCS } from "$lib/data/product-facts-console";
 import { checkLabel, OPTIMIZER_NOT_ANSWERING, OPTIMIZER_NOT_ANSWERING_FIX } from "$lib/utils/daemon";
 import { memoryAckStore, type AckStore } from "$lib/utils/finding-acks";
+import type { Dialect } from "$lib/utils/dialect";
 import { formatClock } from "$lib/utils/format";
 import { coveredWindowText, EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
 import { WARMUP_MS } from "$lib/utils/since";
@@ -80,6 +81,9 @@ export interface CounterSample {
 
 export type AlertSeverity = "error" | "warning" | "info";
 
+/** The setting a fix names, ready to paste, per web server syntax (only the servers that have it). */
+export type Snippets = Partial<Record<Dialect, string>>;
+
 export interface AlertRule {
   id: string;
   label: string;
@@ -101,6 +105,12 @@ export interface AlertRule {
    * of one finding always describe the same cause.
    */
   fixFor?: (cur: AlertSnapshot, prev: AlertSnapshot | null, history: readonly CounterSample[]) => string | undefined;
+  /**
+   * What `fix` names, to paste: packaged defaults and generic placeholders,
+   * as the product's own configuration files and documentation write them.
+   * They belong to `fix`: a sample whose fix comes from `fixFor` shows none.
+   */
+  snippets?: Snippets;
   /** A console route with the detail, when one exists. */
   link?: string;
   /** A documentation page about it, when one exists. */
@@ -126,6 +136,8 @@ export interface ActiveAlert {
   severity: AlertSeverity;
   message: string;
   fix: string;
+  /** The rule's snippets, when the fix shown is the one they belong to. */
+  snippets?: Snippets;
   link?: string;
   doc?: string;
   details: string[];
@@ -395,6 +407,10 @@ function fallthroughWithoutServes(cur: AlertSnapshot, history: readonly CounterS
   return served === 0 ? fallthrough : 0;
 }
 
+/** The two admin paths as the packaged configurations name them. */
+const ADMIN_PATHS = ["/pagespeed_admin", "/pagespeed_global_admin"] as const;
+const NGINX_LOCAL = "{ allow 127.0.0.1; allow ::1; deny all; }";
+
 export const ALERT_RULES: readonly AlertRule[] = [
   {
     id: "daemon-check-failed",
@@ -457,6 +473,11 @@ export const ALERT_RULES: readonly AlertRule[] = [
     details: (cur) => (loggedGroups(cur, isGenerationRefusal) ?? []).slice(0, 1).map((g) => capText(g.template, 400)),
     // The path fix fits the counters; a logged refusal names the packages, and so does its fix.
     fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) name the same directory.",
+    // The packaged default: the optimizer's cache directory followed by /cache.
+    snippets: {
+      apache: "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache",
+      nginx: "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;",
+    },
     fixFor: (cur) =>
       (loggedGroups(cur, isGenerationRefusal) ?? []).length > 0
         ? "Install module and optimizer packages from the same release, then restart the web server and the optimizer."
@@ -471,6 +492,11 @@ export const ALERT_RULES: readonly AlertRule[] = [
     check: (cur) => (cur.daemon === "transient" ? undefined : cur.daemon === "unreachable"),
     message: () => OPTIMIZER_NOT_ANSWERING,
     fix: OPTIMIZER_NOT_ANSWERING_FIX,
+    // The optimizer's packaged management socket.
+    snippets: {
+      apache: "ModPagespeedDaemonApiSocketPath /run/pagespeed-optimizer/api.sock",
+      nginx: "pagespeed DaemonApiSocketPath /run/pagespeed-optimizer/api.sock;",
+    },
     doc: DOC_DIAGNOSE,
   },
   {
@@ -514,8 +540,16 @@ export const ALERT_RULES: readonly AlertRule[] = [
       }.`;
     },
     fix:
-      "Restrict the admin paths to trusted addresses at the web server (Apache: Require local; nginx: allow " +
-      "127.0.0.1; deny all; IIS: InfoUrlsLocalOnly), or acknowledge this if the console is public on purpose.",
+      "Restrict the admin paths to trusted addresses at the web server, or acknowledge this if the console is " +
+      "public on purpose.",
+    snippets: {
+      apache: ADMIN_PATHS.map((p) => `<Location ${p}>\n    Require local\n</Location>`).join("\n"),
+      nginx: ADMIN_PATHS.map(
+        (p) => `location = ${p} ${NGINX_LOCAL}\nlocation ^~ ${p}/ ${NGINX_LOCAL}`,
+      ).join("\n"),
+      iis: "pagespeed InfoUrlsLocalOnly on",
+      envoy: 'admin_auth:\n  enabled: true\n  allowed_ips:\n    - "127.0.0.1/32"',
+    },
   },
   {
     id: "admin-public",
@@ -756,6 +790,7 @@ interface RuleState {
   lastFired: number;
   message: string;
   fix: string;
+  snippets?: Snippets;
   details: string[];
   count?: number;
   countNoun?: CountNoun;
@@ -781,11 +816,13 @@ export class AlertTracker {
       const result = rule.check(cur, this.prev, this.history);
       const st = this.state.get(rule.id);
       if (result === true) {
+        const fixFor = rule.fixFor?.(cur, this.prev, this.history);
         this.state.set(rule.id, {
           since: st ? st.since : nowMs,
           lastFired: nowMs,
           message: rule.message(cur, this.prev, this.history),
-          fix: rule.fixFor?.(cur, this.prev, this.history) ?? rule.fix,
+          fix: fixFor ?? rule.fix,
+          snippets: fixFor === undefined ? rule.snippets : undefined,
           details: rule.details ? rule.details(cur, this.prev) : [],
           count: rule.count ? rule.count(cur, this.prev) : undefined,
           countNoun: rule.countNoun ? rule.countNoun(cur, this.prev) : undefined,
@@ -860,6 +897,7 @@ export class AlertTracker {
         severity: rule.severity,
         message: st.message,
         fix: st.fix,
+        snippets: st.snippets,
         link: rule.link,
         doc: rule.doc,
         details: st.details,

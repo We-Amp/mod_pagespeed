@@ -102,6 +102,29 @@ for (const scheme of ["light", "dark"] as const) {
       await expectNoViolations(page);
     });
 
+    test("findings with a setting to paste, a tab chosen and copied", async ({ page }) => {
+      await mockAdmin(
+        page,
+        "pagespeed_admin",
+        {
+          ...F.allReplies(),
+          message_history: F.messageGroups([
+            { level: "warning", template: F.ACL_TEMPLATE, count: 1, last_ms: Date.now() - 60_000 },
+          ]),
+        },
+        { server: "nginx/1.26.2" },
+      );
+      await openConsole(page, "pagespeed_admin");
+      await ready(page);
+      const finding = page.getByTestId("alert-admin-exposed");
+      await expect(finding.getByTestId("snippet-detected")).toBeVisible();
+      await expectNoViolations(page);
+      await finding.getByRole("tab", { name: "IIS" }).click();
+      await finding.getByTestId("snippet-copy").click();
+      await expect(finding.getByTestId("snippet-status")).not.toHaveText("");
+      await expectNoViolations(page);
+    });
+
     test("findings, with an acknowledged one", async ({ page }) => {
       const now = Date.now();
       await mockAdmin(page, "pagespeed_admin", {
