@@ -452,3 +452,81 @@ test("the Cache lookup result links to the detail view with path, host and schem
   const link = page.getByRole("link", { name: "Inspect in the optimizer's URL index" });
   await expect(link).toHaveAttribute("href", DETAIL_HASH);
 });
+
+test("the answer comes first, in one plain line, before the evidence", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...globalDetail(F.ALTERNATES_HERO), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
+  await ready(page);
+  const verdict = page.getByTestId("url-verdict");
+  await expect(verdict).toHaveText(
+    "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality.",
+  );
+  await expect(verdict).toHaveAttribute("data-kind", "optimized");
+  const top = async (testid: string) => (await page.getByTestId(testid).boundingBox())?.y ?? 0;
+  expect(await top("url-verdict")).toBeLessThan(await top("variants-table"));
+  expect(await top("url-verdict")).toBeLessThan(await top("url-module"));
+});
+
+test("not optimized yet: no record, or a cooldown said in minutes; the banner does not repeat it", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...globalDetail(F.ALTERNATES_NOT_IN_INDEX), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_global_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Not optimized yet. The optimizer has no record of it.");
+
+  const hero = F.ALTERNATES_HERO.body as { alternates: unknown[] };
+  await mockAdmin(
+    page,
+    "pagespeed_global_admin",
+    globalDetail(F.ok({ ...hero, alternates: hero.alternates.slice(0, 1), cooldown: { reason: "processing", remaining_seconds: 125 } })),
+  );
+  await page.reload();
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText(
+    "Not optimized yet. In cooldown (Processing), 2 min remaining.",
+  );
+  await expect(page.getByTestId("url-detail-status")).toHaveText("Original only");
+  await expect(page.getByTestId("url-detail-cooldown")).toHaveCount(0);
+});
+
+test("another host's URL: the verdict is unknown, and the module is asked once while the page is open", async ({ page }) => {
+  const admin = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OTHER_HOST) });
+  await openConsole(page, "pagespeed_admin", "#/urls/detail?url=%2Fa.css&host=other.example.test&scheme=https");
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Unknown. Nothing this console reads says whether it is optimized.");
+  expect(admin.calls("cache")).toBe(1);
+  for (let i = 0; i < 2; i++) {
+    const health = admin.calls("v1/daemon/health");
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect.poll(() => admin.calls("v1/daemon/health")).toBeGreaterThan(health);
+  }
+  expect(admin.calls("cache")).toBe(1);
+  await expect(page.getByTestId("url-module-lookup")).toHaveText("This URL belongs to another host; that host's console answers for it.");
+});
+
+test("opened directly, the way back is the page the URL lives under on this console", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.ALTERNATES_HERO));
+  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-back")).toHaveText("← Back to URLs");
+  await expect(page.getByTestId("url-back")).toHaveAttribute("href", "#/urls");
+
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByRole("link", { name: "Back to Overview" })).toHaveAttribute("href", "#/overview");
+});
+
+test("from a log search, the way back returns to the same search", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await page.getByTestId("url-module-log").getByRole("link").click();
+  await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+  const logs = new URL(page.url()).hash;
+  await page.goBack();
+  await ready(page);
+  await expect(page.getByTestId("url-back")).toHaveText("← Back to Logs");
+  await page.getByTestId("url-back").click();
+  await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe(logs);
+});

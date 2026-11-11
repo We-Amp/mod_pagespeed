@@ -13,7 +13,13 @@
 import { ApiError } from "$lib/api/client";
 import type { CacheEntryKey, CacheEntryResponse, DaemonCooldownEntry } from "$lib/api/types";
 import { DOCS, WEBSITE_HOST } from "$lib/data/product-facts-console";
+import { routes } from "$lib/routes";
+import { parseHash } from "./hash-route";
 import { cooldownReasonLabel, errorCode, NO_OPTIMIZER_CONFIGURED } from "./daemon";
+import { formatBytes, formatSpan } from "./format";
+import { formatSavingsPercent, qualityTier, qualityTierLabel } from "./quality";
+import type { VariantRow } from "./url-detail";
+import { isOptimizedVariant, type UrlStatus } from "./url-status";
 import { detailHref, displayUrl, entryKeyFromAbsoluteUrl } from "./urls-api";
 
 // ── The pasted URL ───────────────────────────────────────────────────
@@ -50,6 +56,21 @@ export function logsHrefFor(key: CacheEntryKey, source: "module" | "optimizer"):
 export function inspectHrefForLink(href: string): string | null {
   const key = entryKeyFromAbsoluteUrl(href);
   return key === null || key.host === WEBSITE_HOST ? null : detailHref(key);
+}
+
+/**
+ * The way back from a URL's page: the address the reader came from, with
+ * the view it had (a list's page and filter, a Logs search), when that was
+ * another page of the console; otherwise the page it lives under on this
+ * console (URLs, or Overview on a per-host console).
+ */
+export function wayBack(previous: string, isGlobal: boolean): { href: string; label: string } {
+  const detail = routes.find((r) => r.path === "#/urls/detail");
+  const path = previous === "" ? "" : parseHash(previous).path;
+  const from = path === detail?.path ? undefined : routes.find((r) => r.path === path);
+  const href = from !== undefined ? previous : ((isGlobal ? detail?.parent : detail?.parentPerVhost) ?? "#/overview");
+  const route = from ?? routes.find((r) => r.path === href);
+  return { href, label: route?.title ?? route?.label ?? "Overview" };
 }
 
 // ── The module's half ────────────────────────────────────────────────
@@ -109,14 +130,73 @@ export function cooldownFor(cooldowns: readonly DaemonCooldownEntry[], key: Cach
   return null;
 }
 
-/** "In cooldown (Processing), 42 s remaining." A missing reason or time is left out, never guessed. */
+/** "In cooldown (Processing), 2 min remaining." A missing reason or time is left out, never guessed. */
 export function cooldownText(entry: DaemonCooldownEntry): string {
   const reason = cooldownReasonLabel(entry.reason);
   const remaining =
     typeof entry.remaining_seconds === "number" && Number.isFinite(entry.remaining_seconds)
-      ? `, ${Math.max(0, Math.round(entry.remaining_seconds))} s remaining`
+      ? `, ${formatSpan(Math.round(entry.remaining_seconds))} remaining`
       : "";
   return `In cooldown${reason !== null ? ` (${reason})` : ""}${remaining}.`;
+}
+
+// ── The verdict ──────────────────────────────────────────────────────
+
+export type UrlVerdictKind = "optimized" | "not-yet" | "cooldown" | "unknown";
+
+export interface UrlVerdict {
+  kind: UrlVerdictKind;
+  /** The verdict in a word or two, then the sentence that backs it. */
+  word: string;
+  text: string;
+}
+
+export interface UrlVerdictInput {
+  /** The optimizer's record: its variants and their status; null when it sent none. */
+  record: { rows: readonly VariantRow[]; status: UrlStatus | null } | null;
+  /** The optimizer answered that it holds nothing for the URL. */
+  notInIndex: boolean;
+  cooldown: DaemonCooldownEntry | null;
+  lookup: ModuleLookupKind;
+}
+
+/** " Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality." */
+function servedText(rows: readonly VariantRow[]): string {
+  // The most-served optimized variant stands for what browsers get.
+  let best: VariantRow | null = null;
+  for (const row of rows) {
+    if (row.isSentinel || !isOptimizedVariant(row.raw) || row.size === null || !row.originalSize) continue;
+    if (best === null || row.hits > best.hits) best = row;
+  }
+  if (best === null || best.size === null || best.originalSize === null) return "";
+  const f = best.format === "original" ? best.encoding : best.format;
+  const name = f === "webp" ? "WebP" : f === "avif" || f === "svg" ? f.toUpperCase() : f;
+  const q = best.quality === null ? "" : ` Visual score ${best.quality.toFixed(1)}, ${qualityTierLabel(qualityTier(best.quality)).split(":")[0].toLowerCase()}.`;
+  return ` Browsers that accept ${name} get ${formatBytes(best.size)} instead of ${formatBytes(best.originalSize)} (${formatSavingsPercent(best.originalSize, best.size)}).${q}`;
+}
+
+/**
+ * Whether this URL is optimized, in one plain line, from what the page
+ * already read: the optimizer's record, its cooldown list and the
+ * module's lookup. Evidence of optimized variants or a current result
+ * wins; a cooldown says why it is waiting; a record without variants, or
+ * none at all, is "not yet"; anything else is said to be unknown, never
+ * guessed.
+ */
+export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
+  const { record, cooldown, lookup } = input;
+  const status = record?.status ?? null;
+  if (status === "complete" || status === "partial" || status === "revalidating")
+    return { kind: "optimized", word: "Optimized.", text: servedText(record?.rows ?? []) };
+  if (lookup === "current")
+    return { kind: "optimized", word: "Optimized.", text: ` ${LOOKUP_TEXT.current}` };
+  if (cooldown !== null)
+    return { kind: "cooldown", word: "Not optimized yet.", text: ` ${cooldownText(cooldown)}` };
+  const notYet = (why: string): UrlVerdict => ({ kind: "not-yet", word: "Not optimized yet.", text: ` ${why}` });
+  if (record !== null) return notYet("The optimizer holds no optimized variant of it.");
+  if (input.notInIndex) return notYet("The optimizer has no record of it.");
+  if (lookup === "not-current") return notYet(LOOKUP_TEXT[lookup]);
+  return { kind: "unknown", word: "Unknown.", text: " Nothing this console reads says whether it is optimized." };
 }
 
 /**

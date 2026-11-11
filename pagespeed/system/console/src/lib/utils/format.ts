@@ -60,16 +60,19 @@ export function formatCount(n: number | null | undefined): string {
   return countFormat.format(n);
 }
 
+/** A span of time in the console's sentences: "12 s" / "5 min" / "3 h" / "2 d" (rounded down). */
+export function formatSpan(seconds: number): string {
+  const s = Math.floor(Math.max(0, seconds));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h} h` : `${Math.floor(h / 24)} d`;
+}
+
 /** "12 s ago" / "5 min ago" / "3 h ago" / "2 d ago"; pair with formatIsoTitle. */
 export function formatRelative(ms: number, now: number): string {
-  const s = Math.floor(Math.max(0, now - ms) / 1000);
-  if (s < 60) return `${s} s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return m === 1 ? "1 min ago" : `${m} min ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return h === 1 ? "1 h ago" : `${h} h ago`;
-  const d = Math.floor(h / 24);
-  return d === 1 ? "1 d ago" : `${d} d ago`;
+  return `${formatSpan((now - ms) / 1000)} ago`;
 }
 
 /** The ISO string shown as the tooltip behind a relative time. */

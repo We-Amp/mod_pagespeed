@@ -14,15 +14,22 @@ export type UrlStatus = "complete" | "partial" | "original-only" | "revalidating
 /**
  * - `complete`       — full variant coverage (images: modern + AVIF; text: gzip + brotli)
  * - `partial`        — some variants but not the full set
- * - `original-only`  — only the original variant exists
+ * - `original-only`  — only originals, no optimized variant
  * - `revalidating`   — at least one variant is flagged for revalidation
  * - `null`           — no non-sentinel variants (nothing to classify)
  */
+/** A variant the optimizer made: a modern image format or a compressed encoding. */
+export function isOptimizedVariant(a: DaemonAlternate): boolean {
+  return ["webp", "avif", "svg"].includes(a.format ?? "") || ["gzip", "brotli"].includes(a.encoding ?? "");
+}
+
 export function computeUrlStatus(alternates: DaemonAlternate[]): UrlStatus | null {
   const nonSentinels = alternates.filter((a) => a.is_sentinel !== true);
   if (nonSentinels.length === 0) return null;
   if (nonSentinels.some((a) => a.needs_revalidation === true)) return "revalidating";
-  if (nonSentinels.length === 1) return "original-only";
+  // Only originals (the optimizer's real shape keeps the original as a
+  // sentinel, so one optimized variant alone is not "original only").
+  if (!nonSentinels.some(isOptimizedVariant)) return "original-only";
 
   const formats = new Set(nonSentinels.map((a) => a.format));
   const encodings = new Set(nonSentinels.map((a) => a.encoding));

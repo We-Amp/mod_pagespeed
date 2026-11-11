@@ -39,21 +39,28 @@
   import { knownPerVhostScope } from "$lib/utils/config-scope";
   import { MIN_OPTIMIZER_VERSION, optimizerFloor } from "$lib/utils/overview";
   import {
-    DEFAULT_URL_SORT,
     URLS_PAGE_SIZE,
     buildUrlRows,
     detailHref,
     globalConsoleUrlsHref,
     nextUrlSortState,
     pageWindow,
+    urlsViewFromParams,
+    urlsViewParams,
     type UrlSortState,
   } from "$lib/utils/urls-api";
+  import { router } from "$lib/router.svelte";
+  import { replaceViewParams } from "$lib/utils/view-address";
 
   const { api, scope, lens } = useConsole();
 
-  let offset = $state(0);
-  let search = $state("");
-  let sort = $state<UrlSortState>(DEFAULT_URL_SORT);
+  // The page, filter and sort live in the address too (written in place),
+  // so a URL's page can send the reader back to the same view.
+  const linked = urlsViewFromParams(router.params);
+  let offset = $state(linked.offset);
+  let search = $state(linked.q);
+  let sort = $state<UrlSortState>(linked.sort);
+  const remember = () => replaceViewParams(urlsViewParams({ offset, q: search, sort }));
   let updatedAt = $state<number | null>(null);
   let lensHost = $derived(activeLensHost(scope, lens));
 
@@ -96,6 +103,7 @@
   onDestroy(
     lens.onChange(() => {
       offset = 0;
+      remember();
       poll.invalidate();
     }),
   );
@@ -146,11 +154,13 @@
 
   function goToPage(requested: number) {
     offset = Math.max(0, requested);
+    remember();
     poll.invalidate();
   }
 
   function onsort(key: UrlSortState["key"]) {
     sort = nextUrlSortState(sort, key);
+    remember();
   }
 </script>
 
@@ -173,7 +183,11 @@
         placeholder="Filter this page by URL or host"
         aria-label="Filter this page by URL or host"
         data-testid="urls-search"
-        bind:value={search}
+        value={search}
+        oninput={(e) => {
+          search = e.currentTarget.value;
+          remember();
+        }}
       />
     {/snippet}
   </PageHeader>

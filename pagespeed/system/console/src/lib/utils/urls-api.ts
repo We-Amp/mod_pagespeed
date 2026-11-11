@@ -214,3 +214,34 @@ export function pageWindow(
     hasMore: body?.has_more === true,
   };
 }
+
+/** The list's view as the address carries it: page offset, filter text and sort. */
+export interface UrlsView {
+  offset: number;
+  q: string;
+  sort: UrlSortState;
+}
+
+/** The view an address names; anything missing or malformed is the default. */
+export function urlsViewFromParams(params: URLSearchParams): UrlsView {
+  const offset = Number(params.get("offset"));
+  const sortParam = params.get("sort") ?? "";
+  const sortKey = sortParam.replace(/^-/, "");
+  return {
+    offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
+    q: params.get("q") ?? "",
+    sort: ["url", "host", "variants"].includes(sortKey)
+      ? { key: sortKey as UrlSortKey, asc: !sortParam.startsWith("-") }
+      : DEFAULT_URL_SORT,
+  };
+}
+
+/** The address parameters for a view; a default part is left out. */
+export function urlsViewParams(view: UrlsView): Record<string, string | null> {
+  const { key, asc } = view.sort;
+  return {
+    offset: view.offset > 0 ? String(view.offset) : null,
+    q: view.q === "" ? null : view.q,
+    sort: key === DEFAULT_URL_SORT.key && asc === DEFAULT_URL_SORT.asc ? null : `${asc ? "" : "-"}${key}`,
+  };
+}

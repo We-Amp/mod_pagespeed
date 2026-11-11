@@ -29,8 +29,14 @@ describe("computeUrlStatus", () => {
       ]),
     ).toBe("revalidating");
   });
-  it("is original-only with exactly one non-sentinel alternate", () => {
+  it("is original-only while no alternate is an optimized one", () => {
     expect(computeUrlStatus([alt({})])).toBe("original-only");
+    expect(computeUrlStatus([alt({}), alt({ alternate_id: 1, viewport: "mobile" })])).toBe("original-only");
+  });
+  it("one optimized variant beside the original's sentinel is not original-only", () => {
+    expect(
+      computeUrlStatus([{ is_sentinel: true, sentinel_name: "original_content" }, alt({ alternate_id: 9, format: "webp" })]),
+    ).toBe("partial");
   });
   it("classifies image coverage: webp+avif complete, webp alone partial", () => {
     const base = [alt({}), alt({ alternate_id: 1, format: "webp" })];

@@ -15,8 +15,12 @@ import {
   lookupIsFinal,
   moduleLookup,
   urlReasons,
+  urlVerdict,
+  wayBack,
   wholeServerLine,
 } from "./url-inspect";
+import { toVariantRows } from "./url-detail";
+import { computeUrlStatus } from "./url-status";
 
 const KEY = { url: "/img/hero.png?v=2", host: "www.example.test", scheme: "https" } as const;
 const fulfilled = <T>(value: T): PromiseSettledResult<T> => ({ status: "fulfilled", value });
@@ -121,6 +125,11 @@ describe("the optimizer's half", () => {
     expect(cooldownText({ remaining_seconds: -3 })).toBe("In cooldown, 0 s remaining.");
   });
 
+  it("says a long cooldown in minutes or hours, as the console's other sentences do", () => {
+    expect(cooldownText({ reason: "write_failure", remaining_seconds: 125 })).toBe("In cooldown (Write failed), 2 min remaining.");
+    expect(cooldownText({ remaining_seconds: 7300 })).toBe("In cooldown, 2 h remaining.");
+  });
+
   it("a page without the optimizer's record says what the whole-server console adds, or that there is no optimizer", () => {
     expect(wholeServerLine(false)).toEqual({ text: "The whole-server console adds the optimizer's record of this URL.", link: true });
     expect(wholeServerLine(true)).toEqual({
@@ -154,5 +163,98 @@ describe("the reasons", () => {
     expect(reasons[0]).toMatchObject({ id: "original-kept", evidence: "In cooldown (Processing), 42 s remaining." });
     expect(reasons).toHaveLength(4);
     expect(reasons.slice(1).every((r) => r.evidence === null)).toBe(true);
+  });
+});
+
+describe("the verdict", () => {
+  const variant = (over: Record<string, unknown>) => ({
+    is_sentinel: false, format: "original", encoding: "identity", content_type: "image", hit_count: 0, ...over,
+  });
+  const record = (alternates: Record<string, unknown>[]) => {
+    const rows = toVariantRows({ alternates });
+    return { rows, status: computeUrlStatus(rows.map((r) => r.raw)) };
+  };
+  const input = (over: Partial<Parameters<typeof urlVerdict>[0]>) => ({
+    record: null, notInIndex: false, cooldown: null, lookup: "no-answer" as const, ...over,
+  });
+  const line = (over: Partial<Parameters<typeof urlVerdict>[0]>) => {
+    const v = urlVerdict(input(over));
+    return [v.kind, v.word + v.text];
+  };
+
+  it("an optimized URL names what the most-served variant saves and how it looks", () => {
+    const hero = record([
+      variant({ size: 45210, original_size: 45210, hit_count: 128 }),
+      variant({ format: "webp", size: 30984, original_size: 45210, hit_count: 1042, ssimulacra2_score: 92.5 }),
+      variant({ format: "avif", size: 28120, original_size: 45210, hit_count: 88, ssimulacra2_score: 87.1 }),
+    ]);
+    expect(line({ record: hero })).toEqual([
+      "optimized",
+      "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality.",
+    ]);
+  });
+
+  it("the optimizer's real shape: the original is a sentinel, one variant alone is optimized", () => {
+    const real = record([
+      { alternate_id: 12, size: 45210, is_sentinel: true, sentinel_name: "original_content" },
+      variant({ format: "webp", size: 30984, original_size: 45210, hit_count: 13, ssimulacra2_score: 60 }),
+    ]);
+    expect(line({ record: real })[1]).toBe(
+      "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 60.0, acceptable quality.",
+    );
+  });
+
+  it("a compressed text variant names its encoding; without sizes the word stands alone", () => {
+    const css = record([
+      variant({ content_type: "css", size: 9000, original_size: 9000 }),
+      variant({ content_type: "css", encoding: "brotli", size: 2000, original_size: 9000, hit_count: 5 }),
+    ]);
+    expect(line({ record: css })[1]).toBe("Optimized. Browsers that accept brotli get 1.95 KB instead of 8.79 KB (-77.8%).");
+    expect(line({ record: record([variant({ format: "avif" }), variant({ format: "webp" })]) })[1]).toBe("Optimized.");
+  });
+
+  it("the module's current result is enough on a console without the optimizer's record", () => {
+    expect(line({ lookup: "current" })).toEqual(["optimized", "Optimized. The module holds a current rewrite result for this URL."]);
+  });
+
+  it("a cooldown says why the URL waits, in the console's time words", () => {
+    expect(line({ notInIndex: true, cooldown: { reason: "processing", remaining_seconds: 125 } })).toEqual([
+      "cooldown",
+      "Not optimized yet. In cooldown (Processing), 2 min remaining.",
+    ]);
+  });
+
+  it("not yet: only originals, nothing but records, no record, or no current result", () => {
+    expect(line({ record: record([variant({ size: 1 }), variant({ size: 2 })]) })).toEqual([
+      "not-yet",
+      "Not optimized yet. The optimizer holds no optimized variant of it.",
+    ]);
+    expect(line({ record: record([{ is_sentinel: true, sentinel_name: "content_hash" }]) })[1]).toBe(
+      "Not optimized yet. The optimizer holds no optimized variant of it.",
+    );
+    expect(line({ notInIndex: true, lookup: "original-url" })[1]).toBe("Not optimized yet. The optimizer has no record of it.");
+    expect(line({ lookup: "not-current" })[1]).toBe("Not optimized yet. The module holds no current rewrite result for this URL.");
+  });
+
+  it("anything else is unknown, never a guess", () => {
+    for (const lookup of ["original-url", "other-host", "no-answer"] as const) {
+      expect(line({ lookup })).toEqual(["unknown", "Unknown. Nothing this console reads says whether it is optimized."]);
+    }
+  });
+});
+
+describe("the way back", () => {
+  it("returns to the page the reader came from, with its view", () => {
+    expect(wayBack("#/urls?offset=50&sort=-host&q=hero", true)).toEqual({ href: "#/urls?offset=50&sort=-host&q=hero", label: "URLs" });
+    expect(wayBack("#/logs?source=module&level=debug&q=x", false)).toEqual({ href: "#/logs?source=module&level=debug&q=x", label: "Logs" });
+    expect(wayBack("#/overview", false)).toEqual({ href: "#/overview", label: "Overview" });
+    expect(wayBack("#/optimizer", true)).toEqual({ href: "#/optimizer", label: "Optimizer status" });
+  });
+
+  it("opened directly, from another URL's page or an unknown address: the page it lives under on this console", () => {
+    for (const previous of ["", "#/urls/detail?url=%2Fa&host=a.test&scheme=https", "#/nowhere"]) {
+      expect(wayBack(previous, true)).toEqual({ href: "#/urls", label: "URLs" });
+      expect(wayBack(previous, false)).toEqual({ href: "#/overview", label: "Overview" });
+    }
   });
 });

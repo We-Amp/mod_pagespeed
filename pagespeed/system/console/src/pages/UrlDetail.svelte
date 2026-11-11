@@ -63,6 +63,8 @@
     logsHrefFor,
     moduleLookup,
     urlReasons,
+    urlVerdict,
+    wayBack,
     wholeServerLine,
   } from "$lib/utils/url-inspect";
   import type { CacheEntryResponse } from "$lib/api/types";
@@ -82,6 +84,9 @@
   const { api, scope } = useConsole();
   const key = parseDetailKey(router.params);
   const shown = key === null ? "" : displayUrl(key);
+  // Where the reader came from, as it was when this page opened.
+  const cameFrom = router.previous;
+  let back = $derived(wayBack(cameFrom, scope.isGlobal));
   // Every content-leaf image on this page (previews and the diff) loads
   // through this one limiter: never more than the module's two slots.
   const previewLimiter = createLimiter(PREVIEW_CONCURRENCY);
@@ -99,10 +104,10 @@
   //   refreshing;
   // - the module runs one cache lookup at a time: a busy answer keeps the
   //   last one, and an answer that cannot change (an original URL, another
-  //   host's URL) is not asked for again.
+  //   host's URL, which is a refusal) is not asked for again.
   let optimizerRefusal: Error | null = null;
   let lastLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
-  let settledLookup: Promise<CacheEntryResponse> | undefined;
+  let finalLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
 
   const poll = usePolling(
     () => {
@@ -117,7 +122,7 @@
         api.daemonHealth(),
         refusal !== null ? Promise.reject(refusal) : api.daemonCacheAlternates(key),
         refusal !== null ? Promise.reject(refusal) : api.daemonCooldowns(),
-        settledLookup ?? api.getCacheEntry(shown),
+        finalLookup === undefined ? api.getCacheEntry(shown) : null,
       ] as const).then((results) => {
         const alternates = results[1];
         if (alternates.status === "rejected" && isBusyAnswer(alternates.reason))
@@ -129,10 +134,10 @@
         ) {
           optimizerRefusal = alternates.reason;
         }
-        const lookup = results[3];
+        const lookup = finalLookup ?? (results[3] as PromiseSettledResult<CacheEntryResponse>);
         const busy = lookup.status === "rejected" && lookup.reason instanceof Error && isBusyAnswer(lookup.reason);
         if (!busy) lastLookup = lookup;
-        if (lookup.status === "fulfilled" && lookupIsFinal(moduleLookup(lookup).kind)) settledLookup = Promise.resolve(lookup.value);
+        if (lookupIsFinal(moduleLookup(lookup).kind)) finalLookup = lookup;
         updatedAt = Date.now();
         return { health: results[0], alternates, cooldowns: results[2], lookup: lastLookup ?? lookup };
       });
@@ -210,6 +215,14 @@
     altData !== null || (altError !== null && !perVhost && !noOptimizer && !isUnavailable(altError)),
   );
   let wholeServer = $derived(wholeServerLine(noOptimizer));
+  let verdict = $derived(
+    urlVerdict({
+      record: altData === null ? null : { rows, status },
+      notInIndex: errorCode(altError) === "not_in_index",
+      cooldown: cooldown ?? listedCooldown,
+      lookup: lookup.kind,
+    }),
+  );
   // This URL's page on the whole-server console (null when the admin path is renamed).
   let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
@@ -237,6 +250,7 @@
 </script>
 
 <div class="page">
+  <p class="back"><a href={back.href} data-testid="url-back"><span aria-hidden="true">←</span> Back to {back.label}</a></p>
   <PageHeader
     title="URL Detail"
     updatedAt={updatedAt}
@@ -271,6 +285,14 @@
     <p class="loading">Looking up this URL...</p>
   {:else if poll.data}
     <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
+    <!-- The answer first, in words; the evidence follows. -->
+    <p
+      class="health-strip"
+      class:health-strip-ok={verdict.kind === "optimized"}
+      class:health-strip-info={verdict.kind === "not-yet" || verdict.kind === "cooldown"}
+      data-testid="url-verdict"
+      data-kind={verdict.kind}
+    ><strong>{verdict.word}</strong>{verdict.text}</p>
     {#if altData}
       {@render optimizerRecord()}
     {:else if altError && !perVhost && !noOptimizer}
@@ -384,7 +406,7 @@
       </div>
     </div>
 
-    {#if cooldown}
+    {#if cooldown && verdict.kind !== "cooldown"}
       <p class="notice notice-warning cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 
@@ -536,6 +558,11 @@
 {/snippet}
 
 <style>
+  .back {
+    margin: 0 0 var(--ps-space-xs);
+    font-size: var(--ps-font-size-sm);
+  }
+
   .previews-section {
     margin-top: var(--ps-space-lg);
   }
