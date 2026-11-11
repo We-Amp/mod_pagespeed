@@ -258,7 +258,13 @@ for (const scheme of ["light", "dark"] as const) {
 
     test("status dot: the dot before a state word is painted", async ({ page }) => {
       await open(page, scheme, "#/overview");
-      for (const dot of [page.getByTestId("health-dot"), page.getByTestId("optimizer-state").locator(".status-dot")]) {
+      const dots = [
+        page.getByTestId("health-dot"),
+        page.getByTestId("optimizer-state").locator(".status-dot"),
+        // The connection state in the top bar.
+        page.getByTestId("connection-pill").locator(".status-dot"),
+      ];
+      for (const dot of dots) {
         await expect(dot).toBeVisible();
         const b = await box(dot);
         // The dot's centre against a point just left of it, on the surface it sits on.

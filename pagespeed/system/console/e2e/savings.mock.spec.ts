@@ -718,6 +718,13 @@ test.describe("serve savings per host", () => {
     await expect(figures).toContainText("2 responses");
     await expect(page.getByTestId("savings-by-host")).toHaveCount(0);
     await expect(page.getByTestId("lens-note")).toHaveCount(0);
+    await expect(page.getByTestId("host-lens-note")).toHaveCount(0);
+    // The scope line names the filter, and which figures it leaves alone.
+    await expect(page.getByTestId("savings-scope")).toHaveText(
+      "Filtered to static.example.com; figures marked whole server are not filtered",
+    );
+    await page.getByTestId("host-lens").getByRole("combobox", { name: "Host" }).selectOption("");
+    await expect(page.getByTestId("savings-scope")).toHaveText("All virtual hosts (the whole server)");
   });
 
   test("a lens host the optimizer has not served says so", async ({ page }) => {

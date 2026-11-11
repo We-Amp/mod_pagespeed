@@ -174,9 +174,17 @@ describe("theme tokens", () => {
       for (const [fg, bg] of TOPBAR_PAIRS) {
         expect(contrastRatio(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(AA);
       }
-      // The scope badge sits on a 15% white overlay over the band.
-      const badgeBg = mix("#ffffff", 15, t["--ps-topbar-bg"]);
-      expect(contrastRatio(t["--ps-topbar-fg"], badgeBg), "scope badge").toBeGreaterThanOrEqual(AA);
+      // The scope chip sits on a 15% white overlay over the band.
+      expect(css).toMatch(/^\.topbar-chip\s*\{[^}]*background:\s*rgba\(255, 255, 255, 0\.15\)/m);
+      const chipBg = mix("#ffffff", 15, t["--ps-topbar-bg"]);
+      expect(contrastRatio(t[declaredToken(".topbar-chip", "color")], chipBg), "scope chip").toBeGreaterThanOrEqual(AA);
+    });
+    it(`${scheme}: the connection dot is visible on the band`, () => {
+      for (const cls of [".status-dot-bar-ok", ".status-dot-bar-warning"]) {
+        const dot = declaredToken(cls, "background");
+        expect(dot).toMatch(/^--ps-topbar-/);
+        expect(contrastRatio(t[dot], t["--ps-topbar-bg"]), `${cls} (${dot}) on the band`).toBeGreaterThanOrEqual(3);
+      }
     });
     it(`${scheme}: the shared level badges pass AA in both schemes`, () => {
       for (const [fg, bg] of LEVEL_BADGE_PAIRS) {

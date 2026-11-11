@@ -37,12 +37,12 @@ export interface Route {
   component: () => Promise<{ default: Component }>;
 }
 
-/** Navigation groups, in order; the overview stands alone above them. A muted group's heading is quieter. */
-export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string; muted?: boolean }> = [
+/** Navigation groups, in order; the overview stands alone above them. */
+export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string }> = [
   { id: "overview", label: "" },
   { id: "module", label: "Module" },
   { id: "optimizer", label: "Optimizer" },
-  { id: "help", label: "Help", muted: true },
+  { id: "help", label: "Help" },
 ];
 
 /**
