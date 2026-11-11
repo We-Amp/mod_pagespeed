@@ -20,3 +20,6 @@
   auto-refresh off the top bar reads "Paused", after turning it back on it
   reads "Checking…" until the server answers, and the outage banner says how
   to try again instead of promising automatic retries.
+- **The admin console fits a wider system font.** The top bar, the Overview
+  and Savings tables and the Savings legend keep their layout when the
+  operating system's interface font is wider than usual.
