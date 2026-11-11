@@ -601,18 +601,23 @@ test.describe("buttons inside list and table rows", () => {
 });
 
 test.describe("findings", () => {
-  test("a finding's button follows its text, and its log excerpt keeps the text's measure", async ({ page }) => {
+  test("a finding's button follows its text, and its log lines keep the text's measure", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await mockAdmin(page, "pagespeed_global_admin", {
       ...wholeServerReplies(),
       message_history: F.messageGroups([
         { level: "warning", template: F.VOLUME_TEMPLATE, count: 1, recent: 1, last_ms: Date.now() - 60_000 },
+        { level: "warning", template: `Slow origin response for ${"a-long-path-segment/".repeat(12)}`, count: 2, recent: 2, last_ms: Date.now() - 60_000 },
       ]),
     });
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await pageReady(page);
     const findings = page.locator('[data-testid="alerts"] li.finding');
     await expect(findings.first()).toBeVisible();
+    // The log lines are folded; the geometry is pinned with every one of them open.
+    const folds = page.locator('[data-testid="alerts"] details.finding-log');
+    await expect(folds).toHaveCount(2);
+    for (const fold of await folds.all()) await fold.locator("summary").click();
     const cards = await box(page.locator("main .cards"));
     for (const finding of await findings.all()) {
       const row = await box(finding);

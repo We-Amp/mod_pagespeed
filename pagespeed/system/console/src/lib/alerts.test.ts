@@ -505,12 +505,16 @@ describe("findings from the module's message log", () => {
   it("volume-not-opened: a recent cache-generation refusal is an error, ranks first, and names the two settings", () => {
     for (const level of ["warning", "error"] as const) {
       const out = new AlertTracker().evaluate(withLog([group(ACL), group(VOLUME, { level, recent: 1 })]), T1);
-      expect(ids(out), level).toEqual(["volume-not-opened", "admin-exposed", "recent-warnings"]);
+      // The refusal is this finding's evidence: it is not counted again under "Warnings in the log".
+      expect(ids(out), level).toEqual(["volume-not-opened", "admin-exposed"]);
       expect(out[0].severity).toBe("error");
-      expect(out[0].message).toContain(
-        "The web server is not using the optimizer's cache: in-place optimization is OFF: the optimizer worker " +
-          "publishes cache directory generation N",
+      // A written sentence; the module's own line waits in the details.
+      expect(out[0].message).toBe(
+        "The web server is not using the optimizer's cache: the module logged that it and the optimizer are " +
+          "built for different cache directory generations, so it opened nothing.",
       );
+      expect(out[0].message).not.toContain("in-place optimization is OFF");
+      expect(out[0].details).toEqual([VOLUME]);
       expect(out[0].fix).toBe("Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.");
       expect(out[0].doc).toBe("https://modpagespeed.com/1.1/docs/troubleshooting/#how-to-get-more-diagnostic-information");
     }
@@ -580,6 +584,42 @@ describe("findings from the module's message log", () => {
     expect(three[0].message).toBe("3 warnings in the last 15 minutes, of 2 kinds.");
     const oneError = new AlertTracker().evaluate(withLog([group("Fetch of URL failed", { level: "error", recent: 1 })]), T1);
     expect(oneError[0].message).toBe("1 warning or error in the last 15 minutes, of 1 kind.");
+  });
+
+  it("one cause is one finding: a log line with a finding of its own is left out of the warnings", () => {
+    // The admin warning and the cache refusal, both recent, next to an ordinary warning.
+    const out = new AlertTracker().evaluate(
+      withLog([
+        group(ACL, { recent: 4, count: 9 }),
+        group(VOLUME, { level: "error", recent: 2 }),
+        group("Slow origin response for URL", { recent: 3 }),
+      ]),
+      T1,
+    );
+    expect(ids(out)).toEqual(["volume-not-opened", "admin-exposed", "recent-warnings"]);
+    const recent = out[2];
+    expect(recent.count).toBe(3);
+    expect(recent.details).toEqual(["×3 Slow origin response for URL"]);
+    // The log holds more warnings than this finding counts, and it says so.
+    expect(recent.message).toBe("3 warnings in the last 15 minutes, of 1 kind, besides those with a finding of their own.");
+    for (const a of out) {
+      if (a.id !== "admin-exposed") expect(a.details.join("\n"), a.id).not.toContain("admin handler");
+      if (a.id !== "volume-not-opened") expect(a.details.join("\n"), a.id).not.toContain("in-place optimization is OFF");
+    }
+    expect(healthSummary(out, true).text).toBe("3 findings · 2 need action · 3 warnings in the last 15 min");
+  });
+
+  it("one cause is one finding: with nothing else in the log there is no warnings finding at all", () => {
+    const out = new AlertTracker().evaluate(withLog([group(ACL, { recent: 4 }), group(VOLUME, { recent: 1 })]), T1);
+    expect(ids(out)).toEqual(["volume-not-opened", "admin-exposed"]);
+    expect(healthSummary(out, true).text).toBe("2 findings · 2 need action");
+  });
+
+  it("the admin warning stays an ordinary warning on a console that is public by configuration", () => {
+    const out = new AlertTracker().evaluate(withLog([group(PUBLIC_LINE, { level: "info" }), group(ACL, { recent: 2 })]), T1);
+    expect(ids(out)).toEqual(["admin-public", "recent-warnings"]);
+    expect(out[1].count).toBe(2);
+    expect(out[1].message).toBe("2 warnings in the last 15 minutes, of 1 kind.");
   });
 
   it("recent-warnings: details carry template text verbatim (rendered as text by the page)", () => {
