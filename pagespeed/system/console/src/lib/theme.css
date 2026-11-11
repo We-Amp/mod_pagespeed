@@ -483,6 +483,78 @@ table.reads-across {
   color: var(--ps-text-secondary);
 }
 
+/* Shared text and message classes: a page or a component uses these
+ * instead of declaring its own copy. */
+
+/* A section heading inside a page (below the page title). */
+.section-title {
+  margin: 0 0 var(--ps-space-md);
+  font-size: var(--ps-font-size-lg);
+  font-weight: 600;
+  color: var(--ps-text);
+}
+
+/* A sentence of context under a figure, a table or a heading. */
+.note {
+  font-size: var(--ps-font-size-sm);
+  color: var(--ps-text-secondary);
+}
+
+/* Secondary text at the size of its surroundings. */
+.muted {
+  color: var(--ps-text-secondary);
+}
+
+/* A message that stands in for a page's content or sits above it: a failed
+ * load, a warning, something worth knowing. The words carry the state; the
+ * colour is only on the leading rule. Its children stack: an optional
+ * .notice-title, text, and an optional .notice-action (a link or a .btn).
+ * As wide as its text needs, not the window. */
+.notice {
+  max-width: var(--ps-card-max);
+  padding: var(--ps-space-sm) var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-inline-start: 3px solid var(--ps-primary);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-secondary);
+  color: var(--ps-text);
+  font-size: var(--ps-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.notice > * + * {
+  margin-top: var(--ps-space-xs);
+}
+
+.notice-info {
+  border-inline-start-color: var(--ps-primary);
+}
+
+.notice-warning {
+  border-inline-start-color: var(--ps-warning-text);
+}
+
+.notice-error {
+  border-inline-start-color: var(--ps-error);
+}
+
+.notice-title {
+  font-weight: 600;
+}
+
+.notice-action {
+  display: inline-flex;
+  margin-top: var(--ps-space-sm);
+}
+
+/* The filled part of a bar (a histogram bucket, a share of a total). The
+ * page sets its size and may set its fill. */
+.bar-fill {
+  display: block;
+  min-width: 2px;
+  background: var(--ps-primary);
+}
+
 /* Phone tables: rows become label/value cards so no column is off-screen.
  * The header is clipped, not display:none — the columns stay in the
  * accessibility tree (opt-in: a page adds .card-table and data-labels). */
@@ -531,5 +603,38 @@ table.reads-across {
 
   .card-table tr td:last-child {
     border-bottom: none;
+  }
+}
+
+/* Forced colours (Windows contrast themes): the user's palette replaces
+ * every author colour, so a state shown only by a colour or a fill
+ * disappears. This is the console's one forced-colours block. It is keyed
+ * on state attributes and shared classes, never on a page's own selectors,
+ * so it keeps working when a page is restyled. The declarations are
+ * !important because a component's scoped rule is more specific than an
+ * attribute selector, and here the user's palette has to win. */
+@media (forced-colors: active) {
+  /* The current page, the selected tab, a toggle that is on: the
+   * palette's own "selected" pair. */
+  [aria-current="page"],
+  [aria-selected="true"],
+  [aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    border-color: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  [aria-current="page"]:focus-visible,
+  [aria-selected="true"]:focus-visible,
+  [aria-pressed="true"]:focus-visible {
+    outline-color: CanvasText;
+  }
+
+  /* Marks drawn with a background: bars and status dots. */
+  .bar-fill,
+  .status-dot {
+    forced-color-adjust: none;
+    background: CanvasText !important;
   }
 }

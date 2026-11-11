@@ -209,6 +209,63 @@ describe("level badges", () => {
   });
 });
 
+// The shared notice: its text on its own background, and the leading rule
+// that carries the state. The rule is a mark, not text, so it needs 3:1
+// against the notice and against the page and card the notice sits on.
+describe("notices", () => {
+  const declared = (selector: string, property: string): string => {
+    const block = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css);
+    const token = block && new RegExp(`(?:^|[;\\s])${property}:[^;]*var\\((--ps-[\\w-]+)\\)`).exec(block[1]);
+    expect(token, `${selector} ${property} token`).not.toBeNull();
+    return (token as RegExpExecArray)[1];
+  };
+  const background = declared(".notice", "background");
+  const text = declared(".notice", "color");
+  const variants = [".notice", ".notice-info", ".notice-warning", ".notice-error"];
+  const rules = variants.map((v) => declared(v, v === ".notice" ? "border-inline-start" : "border-inline-start-color"));
+  for (const scheme of ["light", "dark"] as const) {
+    const t = tokens[scheme];
+    it(`${scheme}: notice text and links pass AA on the notice`, () => {
+      for (const fg of [text, "--ps-text-secondary", "--ps-primary"]) {
+        expect(contrastRatio(t[fg], t[background]), `${fg} on ${background}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: every notice's leading rule is visible on the notice and around it`, () => {
+      for (const [i, rule] of rules.entries()) {
+        for (const bg of [background, "--ps-bg", "--ps-surface"]) {
+          expect(contrastRatio(t[rule], t[bg]), `${variants[i]} rule (${rule}) on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+  }
+  it("never draws the rule in a status fill colour", () => {
+    // The warning and success fills are too light to see on a light notice;
+    // the rule uses the colours that pass as text.
+    expect(rules).not.toContain("--ps-warning");
+    expect(rules).not.toContain("--ps-success");
+  });
+});
+
+// Forced colours replace author colours at paint time. The marks that
+// survive are declared once, on state attributes and shared classes, so a
+// page restyle cannot drop them (e2e/forced-colors.mock.spec.ts checks the
+// painted result).
+describe("forced colours", () => {
+  it("has one block, in the theme, keyed on state and shared classes", () => {
+    expect(css.match(/@media\s*\(forced-colors:\s*active\)/g)).toHaveLength(1);
+    const block = css.slice(css.search(/@media\s*\(forced-colors:\s*active\)/));
+    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot"]) {
+      expect(block, selector).toContain(selector);
+    }
+  });
+  it("no component declares its own forced-colours rules", () => {
+    const own = svelteFiles(SRC)
+      .filter((f) => /@media[^{]*forced-colors/.test(readFileSync(f, "utf8")))
+      .map((f) => relative(SRC, f));
+    expect(own).toEqual([]);
+  });
+});
+
 // The savings split's stacked bar: each segment fill must stand out from the
 // bar's track (which also shows as the gap between segments) and from the
 // card behind it — the muted per-host card included — and neighbouring
