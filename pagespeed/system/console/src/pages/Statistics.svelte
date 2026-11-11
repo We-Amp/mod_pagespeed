@@ -306,8 +306,10 @@
     color: var(--ps-text-secondary);
   }
 
+  /* A sentence, not an identifier: the text face, not the name's mono. */
   .stat-desc {
     margin-top: 2px;
+    font-family: var(--ps-font-family);
     font-size: var(--ps-font-size-xs);
     color: var(--ps-text-secondary);
   }
