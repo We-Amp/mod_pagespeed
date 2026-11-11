@@ -756,7 +756,6 @@
   }
 
   .loading {
-    color: var(--ps-text-secondary);
     padding: var(--ps-space-md);
   }
 

@@ -4,7 +4,14 @@
 -->
 
 <script lang="ts">
-  import { qualityTier, qualityTierLabel } from "$lib/utils/quality";
+  import { qualityTier, qualityTierLabel, type QualityTier } from "$lib/utils/quality";
+
+  // The tier's tint; the bar fill repeats the tier colour.
+  const TINT: Record<QualityTier, string> = {
+    good: "badge-tint-ok",
+    acceptable: "badge-tint-warning",
+    poor: "badge-tint-error",
+  };
 
   let { score, showLabel = true }: { score: number; showLabel?: boolean } = $props();
 
@@ -16,7 +23,7 @@
 </script>
 
 <span
-  class="quality-badge quality-{tier}"
+  class="badge quality-badge quality-{tier} {TINT[tier]}"
   title={tooltip}
   role="img"
   aria-label="SSIMULACRA2 score {safeScore.toFixed(1)}: {tooltip}"
@@ -32,35 +39,8 @@
 
 <style>
   .quality-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ps-space-xs);
-    padding: 1px var(--ps-space-sm);
-    font-size: var(--ps-font-size-xs);
     font-weight: 500;
-    line-height: 1.5;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    white-space: nowrap;
     cursor: default;
-  }
-  /* Plain text on the tier tint; the tier colour is carried by the border
-     and the bar fill (a status token as text fell below AA on the 12% tint
-     in the light scheme). */
-  .quality-good {
-    background: color-mix(in srgb, var(--ps-success) 12%, var(--ps-bg));
-    color: var(--ps-text);
-    border-color: var(--ps-success);
-  }
-  .quality-acceptable {
-    background: color-mix(in srgb, var(--ps-warning) 12%, var(--ps-bg));
-    color: var(--ps-text);
-    border-color: var(--ps-warning);
-  }
-  .quality-poor {
-    background: color-mix(in srgb, var(--ps-error) 12%, var(--ps-bg));
-    color: var(--ps-text);
-    border-color: var(--ps-error);
   }
   .quality-bar-track {
     display: inline-block;

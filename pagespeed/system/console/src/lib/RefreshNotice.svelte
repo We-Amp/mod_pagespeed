@@ -16,24 +16,23 @@
 </script>
 
 {#if error}
-  <div class="refresh-notice" role="status">
+  <div class="notice notice-warning refresh-notice" role="status">
     <span class="refresh-notice-icon" aria-hidden="true">⚠</span>
     <span>Last refresh failed: {message}. Showing the most recent data.</span>
   </div>
 {/if}
 
 <style>
+  /* The frame and colours are the shared .notice; the icon sits beside the line. */
   .refresh-notice {
     display: flex;
     align-items: center;
     gap: var(--ps-space-sm);
-    padding: var(--ps-space-sm) var(--ps-space-md);
     margin-bottom: var(--ps-space-md);
-    border: 1px solid var(--ps-warning);
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-bg-secondary);
-    color: var(--ps-text);
-    font-size: var(--ps-font-size-sm);
+  }
+
+  .refresh-notice > * + * {
+    margin-top: 0;
   }
 
   .refresh-notice-icon {

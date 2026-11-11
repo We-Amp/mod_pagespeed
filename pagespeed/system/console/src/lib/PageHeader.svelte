@@ -88,8 +88,9 @@
   }
   .page-title h1 {
     margin: 0;
-    font-size: var(--ps-font-size-3xl);
-    font-weight: 600;
+    font-size: var(--ps-type-title-size);
+    font-weight: var(--ps-type-title-weight);
+    letter-spacing: var(--ps-type-title-tracking);
   }
   .page-subtitle {
     margin: var(--ps-space-xs) 0 0;

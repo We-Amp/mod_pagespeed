@@ -175,8 +175,8 @@
         >{group.label} <span class="stat-group-count">{group.rows.length}</span></summary>
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="table-wrapper" role="region" aria-label="{group.label} statistics" tabindex="0">
-          <table>
+        <div class="table-frame" role="region" aria-label="{group.label} statistics" tabindex="0">
+          <table class="data data-dense stat-table">
             <colgroup>
               <col />
               <col class="value-col" />
@@ -229,12 +229,6 @@
     font-size: var(--ps-font-size-sm);
   }
 
-  .table-wrapper {
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-  }
-
   /* Column minimums: 44rem keeps a name and its value together; with
      descriptions shown, 48rem keeps them to two or three lines. */
   .stat-groups {
@@ -250,23 +244,8 @@
 
   /* The value columns have one width in every table, so the "Value"
      header sits at the same place in each table of a column. */
-  table {
-    width: 100%;
+  .stat-table {
     table-layout: fixed;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-    position: sticky;
-    top: 0;
-  }
-
-  td {
-    padding: 3px var(--ps-space-md);
-    line-height: 1.4;
-    border-bottom: 1px solid var(--ps-border-light);
   }
 
   .value-col {
@@ -316,14 +295,6 @@
     color: var(--ps-error);
   }
 
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
-  tbody tr:hover {
-    background: var(--ps-surface-hover);
-  }
-
   .name-cell {
     font-family: var(--ps-font-mono);
     word-break: normal;
@@ -343,7 +314,4 @@
     padding: var(--ps-space-xl);
   }
 
-  .loading {
-    color: var(--ps-text-secondary);
-  }
 </style>
