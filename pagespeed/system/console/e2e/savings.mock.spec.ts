@@ -3,6 +3,7 @@
 
 import { expect, test } from "@playwright/test";
 import { LABEL_INSET, valueAxisFit } from "./support/chart-axis";
+import { widenText } from "./support/layout";
 import { mockAdmin, openConsole } from "./support/mock-admin";
 import * as F from "./support/fixtures";
 import {
@@ -423,6 +424,8 @@ test("the legend of a bar runs along one line: each share's name next to its cou
   await page.setViewportSize({ width: 1920, height: 1080 });
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
+  // With room to spare: also where the system's font is wider.
+  await widenText(page);
   for (const key of ["css", "image"]) {
     const rows = await page
       .getByTestId(`savings-split-${key}`)
@@ -431,16 +434,23 @@ test("the legend of a bar runs along one line: each share's name next to its cou
         els.map((el) => {
           const name = (el.querySelector("dt") as HTMLElement).getBoundingClientRect();
           const count = (el.querySelector("dd") as HTMLElement).getBoundingClientRect();
-          return { top: Math.round(el.getBoundingClientRect().top), nameRight: name.right, countLeft: count.left, sameLine: count.top < name.bottom };
+          return {
+            top: Math.round(el.getBoundingClientRect().top),
+            nameRight: name.right,
+            countLeft: count.left,
+            sameLine: count.top < name.bottom,
+            fits: el.scrollWidth <= el.clientWidth,
+          };
         }),
       );
     expect(rows).toHaveLength(3);
     // One line for the three shares on a wide card...
     expect(new Set(rows.map((r) => r.top)).size, `${key}: legend lines`).toBe(1);
-    // ...and each count follows its name, not on a line below it.
+    // ...and each count follows its name, not on a line below it, nor past its share.
     for (const r of rows) {
       expect(r.sameLine).toBe(true);
       expect(r.countLeft).toBeGreaterThanOrEqual(r.nameRight);
+      expect(r.fits, `${key}: a share's text stays inside it`).toBe(true);
     }
   }
 });

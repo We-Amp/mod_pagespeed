@@ -453,7 +453,7 @@
                       <div>
                         <dt><span class="split-swatch split-{s.segments[0].key}" aria-hidden="true"></span>{s.segments[0].label}</dt>
                         <dd class="num">
-                          {formatCount(s.segments[0].count)} requests{#if s.verdict}{" · "}{formatCount(
+                          <span class="split-count">{formatCount(s.segments[0].count)} requests</span>{#if s.verdict}{" · "}{formatCount(
                               s.verdict.count,
                             )}
                             {s.verdict.count === 1 ? "resource" : "resources"}, {formatBytes(s.verdict.bytes)} original{/if}
@@ -462,13 +462,13 @@
                       <div>
                         <dt><span class="split-swatch split-{s.segments[1].key}" aria-hidden="true"></span>{s.segments[1].label}</dt>
                         <dd class="num">
-                          {formatCount(s.segments[1].count)} requests
+                          <span class="split-count">{formatCount(s.segments[1].count)} requests</span>
                         </dd>
                       </div>
                       <div>
                         <dt><span class="split-swatch split-{s.segments[2].key}" aria-hidden="true"></span>{s.segments[2].label}</dt>
                         <dd class="num">
-                          {formatCount(s.segments[2].count)} requests{#if s.segments[2].bytes > 0}{" · "}{formatBytes(
+                          <span class="split-count">{formatCount(s.segments[2].count)} requests</span>{#if s.segments[2].bytes > 0}{" · "}{formatBytes(
                               s.segments[2].bytes,
                             )} sent{/if}
                         </dd>
@@ -661,14 +661,18 @@
   }
   /* In a very narrow window (a small phone, a desktop window at 400% zoom)
      four columns of figures are wider than their card at the usual size:
-     the tables step down a size and close their columns up, so they stay
-     tables and stay inside the card. */
+     the tables step down a size, set their headings lighter and close their
+     columns up, so they stay tables and stay inside the card, also in a
+     wide system font. */
   @media (max-width: 360px) {
     .breakdown {
       font-size: var(--ps-font-size-xs);
     }
+    .breakdown thead th {
+      font-weight: 500;
+    }
     .breakdown th, .breakdown td {
-      padding-right: var(--ps-space-sm);
+      padding-right: var(--ps-space-xs);
     }
     .breakdown th:last-child, .breakdown td:last-child {
       padding-right: 0;
@@ -721,6 +725,9 @@
   }
   /* The legend: the three shares on one line where the card is wide enough,
      each with its swatch, its name and its count. */
+  .split {
+    container-type: inline-size;
+  }
   .split-figures {
     margin: 0;
     display: flex;
@@ -743,6 +750,20 @@
   .split-figures dd {
     margin: 0;
     color: var(--ps-text);
+  }
+  .split-count {
+    white-space: nowrap;
+  }
+  /* A wide card keeps the three on one line also in a wide system font: a
+     long count wraps beside its name rather than push a share down. */
+  @container (min-width: 46rem) {
+    .split-figures,
+    .split-figures > div {
+      flex-wrap: nowrap;
+    }
+    .split-figures > div {
+      min-width: auto;
+    }
   }
   .split-summary {
     margin: 0 0 var(--ps-space-xs);

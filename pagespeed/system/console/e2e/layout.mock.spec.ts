@@ -111,13 +111,15 @@ test.describe("the top bar's spacing", () => {
   }
 
   // With a host filter on a page that ignores it, the control carries a
-  // "not applied" note: still nothing may be cut short or wrap.
+  // "not applied" note: still nothing may be cut short or wrap, also where
+  // the system's font is wider (widenText).
   const NARROW = [
     { width: 769, hash: "#/overview" },
     { width: 769, hash: "#/statistics?lens=www.example.test" },
     { width: 880, hash: "#/statistics?lens=www.example.test" },
     { width: 901, hash: "#/statistics?lens=www.example.test" },
     { width: 960, hash: "#/statistics?lens=www.example.test" },
+    { width: 1025, hash: "#/statistics?lens=www.example.test" },
   ];
   for (const { width, hash } of NARROW) {
     test(`nothing overlaps or is cut short at ${width} px on ${hash}`, async ({ page }) => {
@@ -127,6 +129,7 @@ test.describe("the top bar's spacing", () => {
       await pageReady(page);
       const select = page.getByTestId("host-lens").locator("select");
       const wide = (await box(select)).width;
+      await widenText(page);
       await page.setViewportSize({ width, height: 800 });
       const label = await box(page.getByTestId("host-lens").locator("label"));
       expect(label.bottom - label.top, "the Host filter label stays on one line").toBeLessThan(24);
@@ -135,6 +138,8 @@ test.describe("the top bar's spacing", () => {
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true);
       if (hash.includes("lens=")) {
         await expect(page.getByRole("combobox", { name: "Host" }).first()).toHaveAccessibleDescription("(not applied on this page)");
+        // Shown beside the control where the bar has room for it.
+        expect((await box(page.getByTestId("host-lens-note"))).width > 1).toBe(width > 1024);
       }
       const parts = await page
         .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
