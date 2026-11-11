@@ -63,7 +63,7 @@ test.describe("Overview findings", () => {
     );
     await expect(finding.getByRole("link", { name: "Documentation" })).toHaveAttribute("rel", "noopener noreferrer");
     await expect(finding.getByRole("link", { name: "Details" })).toHaveAttribute("href", "#/logs?source=module&level=warning");
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding · 1 needs action");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 1 needs action");
     expect(errors).toEqual([]);
   });
 
@@ -77,7 +77,7 @@ test.describe("Overview findings", () => {
     await expect(findings.first().getByTestId("finding-fix")).toHaveText(
       "Fix: Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
     );
-    await expect(page.getByTestId("health-summary")).toHaveText("2 findings · 2 need action");
+    await expect(page.getByTestId("findings-summary")).toHaveText("2 findings · 2 need action");
   });
 
   test("one cause is one finding, and the log's own line is folded behind the written sentence", async ({ page }) => {
@@ -95,7 +95,7 @@ test.describe("Overview findings", () => {
     const warnings = page.getByTestId("alert-recent-warnings");
     await expect(warnings).toContainText("3 warnings in the last 15 minutes, of 1 kind, besides those with a finding of their own.");
     await expect(warnings.getByTestId("finding-details").locator("li")).toHaveText(["×3 Slow origin response for URL"]);
-    await expect(page.getByTestId("health-summary")).toHaveText("3 findings · 2 need action · 3 warnings in the last 15 min");
+    await expect(page.getByTestId("findings-summary")).toHaveText("3 findings · 2 need action · 3 warnings in the last 15 min");
     const count = (text: string, needle: string) => text.split(needle).length - 1;
     const folded = await all.evaluate((el) => {
       const clone = el.cloneNode(true) as HTMLElement;
@@ -138,13 +138,15 @@ test.describe("Overview findings", () => {
     });
     await expect(page.getByTestId("alert-recent-warnings")).toBeVisible();
     await expect(page.getByTestId("alert-volume-not-opened")).toHaveCount(0);
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding · 1 warning in the last 15 min");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 1 warning in the last 15 min");
   });
 
   test("a log that cannot be read is never \"No findings\"", async ({ page }) => {
     await open(page, { message_history: { status: 500, body: { success: false, error: "internal" } } });
-    await expect(page.getByTestId("health-summary")).toHaveText("Findings unavailable — the message log could not be read");
-    await expect(page.getByTestId("health-summary")).toHaveClass(/health-info/);
+    await expect(page.getByTestId("findings-summary")).toHaveText("Findings unavailable — the message log could not be read");
+    // The strip's colour is the verdict's; the findings clause says in words that it has no findings to show.
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*Findings unavailable — the message log could not be read\.$/);
+    await expect(page.getByTestId("findings-mark")).toHaveCount(0);
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 
@@ -152,7 +154,7 @@ test.describe("Overview findings", () => {
     await open(page, { message_history: F.messageGroups([aclRow()]) });
     await page.getByRole("button", { name: "Acknowledge Admin console reachable from the network" }).click();
     await expect(page.getByTestId("alert-admin-exposed")).toHaveCount(0);
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings · 1 acknowledged");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings · 1 acknowledged");
     const group = page.getByTestId("findings-acknowledged");
     await expect(group).toBeVisible();
     await group.locator("summary").click();
@@ -198,7 +200,7 @@ test.describe("Overview findings", () => {
       "×12 Slow origin response for URL",
       "×2 Fetch of URL failed",
     ]);
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding · 14 warnings and errors in the last 15 min");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 14 warnings and errors in the last 15 min");
     await finding.getByRole("link", { name: "Details" }).click();
     await expect(page).toHaveURL(/#\/logs\?source=module&level=warning$/);
   });
@@ -232,7 +234,7 @@ test.describe("Overview findings", () => {
     await expect(page.getByTestId("alert-recent-warnings")).toContainText(
       "1 warning in the last 15 minutes, of 1 kind.",
     );
-    await expect(page.getByTestId("health-summary")).toHaveText(
+    await expect(page.getByTestId("findings-summary")).toHaveText(
       "2 findings · 1 needs action · 1 warning in the last 15 min",
     );
   });
@@ -244,9 +246,9 @@ test.describe("Overview findings", () => {
         { level: "warning", template: "Slow origin response for URL", count: 30, recent: 15, last_ms: now - 60_000 },
       ]),
     });
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding · 15 warnings in the last 15 min");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 15 warnings in the last 15 min");
     await page.getByRole("button", { name: "Acknowledge Warnings in the log" }).click();
-    await expect(page.getByTestId("health-summary")).toHaveText(
+    await expect(page.getByTestId("findings-summary")).toHaveText(
       "No findings · 15 warnings in the last 15 min · 1 acknowledged",
     );
   });
@@ -257,8 +259,13 @@ test.describe("Overview findings", () => {
       stats_json: () => withBody(F.STATS_GLOBAL, { variables: { ...vars, process_start_ms: Date.now() - 3 * 3_600_000 } }),
       "v1/daemon/stats": () => withBody(F.DAEMON_STATS, { started_at_ms: Date.now() - 2 * 3_600_000 }),
     });
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings");
-    await expect(page.getByTestId("findings-since")).toHaveText("Counters: module since 3 h · optimizer since 2 h");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings");
+    // Each source's time base is stated once, in its tile, in the sentence's words.
+    await expect(page.getByTestId("since-module")).toHaveText("since the web server started 3 h ago");
+    await expect(page.getByTestId("since-optimizer")).toHaveText("since the optimizer started 2 h ago");
+    await expect(page.getByTestId("since-module")).toHaveCount(1);
+    await expect(page.getByTestId("since-optimizer")).toHaveCount(1);
+    await expect(page.getByTestId("health-summary")).toContainText("since the optimizer started 2 h ago");
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 
@@ -273,7 +280,7 @@ test.describe("Overview findings", () => {
     const recovered = page.getByTestId("alert-daemon-recovered");
     await expect(recovered).toContainText("did not answer at", { timeout: 12_000 });
     await expect(page.getByTestId("alert-daemon-unreachable")).toHaveCount(0);
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding");
   });
 
   test("a recently started optimizer is an info finding, not an action", async ({ page }) => {
@@ -281,7 +288,7 @@ test.describe("Overview findings", () => {
     const finding = page.getByTestId("alert-optimizer-restarted");
     await expect(finding).toContainText("The optimizer started 2 min ago");
     await expect(finding.locator(".level-badge-info")).toBeVisible();
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding");
   });
 
   test("one log read per sample", async ({ page }) => {

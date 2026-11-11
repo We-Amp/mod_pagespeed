@@ -397,6 +397,68 @@ describe("notices", () => {
   });
 });
 
+// The health strip (a page's opening sentence) and the status dot. The
+// strip's text sits on its own band; its leading rule and the dot are marks
+// that repeat the state in colour, so they need 3:1 against what they sit on.
+describe("health strip and status dot", () => {
+  const declared = (selector: string, property: string): string => {
+    const block = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css);
+    const token = block && new RegExp(`(?:^|[;\\s])${property}:[^;]*var\\((--ps-[\\w-]+)\\)`).exec(block[1]);
+    expect(token, `${selector} ${property} token`).not.toBeNull();
+    return (token as RegExpExecArray)[1];
+  };
+  const band = declared(".health-strip", "background");
+  const text = declared(".health-strip", "color");
+  const levels = [".health-strip", ".health-strip-ok", ".health-strip-info", ".health-strip-warning", ".health-strip-error"];
+  const rules = levels.map((v) => declared(v, v === ".health-strip" ? "border-inline-start" : "border-inline-start-color"));
+  const dotClasses = [".status-dot", ".status-dot-ok", ".status-dot-info", ".status-dot-warning", ".status-dot-error"];
+  const dots = dotClasses.map((v) => declared(v, "background"));
+  for (const scheme of ["light", "dark"] as const) {
+    const t = tokens[scheme];
+    it(`${scheme}: the sentence, its secondary line and a link pass AA on the strip`, () => {
+      for (const fg of [text, "--ps-text-secondary", "--ps-primary"]) {
+        expect(contrastRatio(t[fg], t[band]), `${fg} on ${band}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: every level's leading rule is visible on the strip and on the page`, () => {
+      for (const [i, rule] of rules.entries()) {
+        for (const bg of [band, "--ps-bg"]) {
+          expect(contrastRatio(t[rule], t[bg]), `${levels[i]} rule (${rule}) on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+    it(`${scheme}: every status dot is visible on the strip, the card and the muted card`, () => {
+      const percent = MUTED_OPACITY[scheme] * 100;
+      const muted = mix(t["--ps-bg-secondary"], percent, t["--ps-bg"]);
+      for (const [i, dot] of dots.entries()) {
+        for (const bg of [band, "--ps-surface"]) {
+          expect(contrastRatio(t[dot], t[bg]), `${dotClasses[i]} (${dot}) on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+        expect(contrastRatio(mix(t[dot], percent, t["--ps-bg"]), muted), `${dotClasses[i]} on the muted card`).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+  it("never draws a rule or a dot in a status fill colour", () => {
+    for (const token of [...rules, ...dots]) {
+      expect(token).not.toBe("--ps-warning");
+      expect(token).not.toBe("--ps-success");
+    }
+  });
+  it("the tile's figure is plain text at the hero size, never a link colour", () => {
+    const value = /\.stat-tile-value\s*\{([^}]*)\}/.exec(css);
+    expect(value).not.toBeNull();
+    expect((value as RegExpExecArray)[1]).toContain("color: var(--ps-text);");
+    expect((value as RegExpExecArray)[1]).toContain("font-size: var(--ps-type-hero-metric-size);");
+    expect((value as RegExpExecArray)[1]).toContain("font-variant-numeric: tabular-nums;");
+  });
+  it("the card and the muted card are declared once, in the theme", () => {
+    expect(css.match(/^\.card\s*\{/gm)).toHaveLength(1);
+    expect(css.match(/^\.card-muted\s*\{/gm)).toHaveLength(1);
+    const muted = /^\.card-muted\s*\{([^}]*)\}/m.exec(css);
+    expect((muted as RegExpExecArray)[1]).toContain("dashed");
+  });
+});
+
 // Forced colours replace author colours at paint time. The marks that
 // survive are declared once, on state attributes and shared classes, so a
 // page restyle cannot drop them (e2e/forced-colors.mock.spec.ts checks the
@@ -405,7 +467,7 @@ describe("forced colours", () => {
   it("has one block, in the theme, keyed on state and shared classes", () => {
     expect(css.match(/@media\s*\(forced-colors:\s*active\)/g)).toHaveLength(1);
     const block = css.slice(css.search(/@media\s*\(forced-colors:\s*active\)/));
-    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot"]) {
+    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot", ".health-strip", ".card-muted"]) {
       expect(block, selector).toContain(selector);
     }
   });

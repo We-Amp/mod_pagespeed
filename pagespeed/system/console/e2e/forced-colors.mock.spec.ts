@@ -16,7 +16,7 @@
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { box, pageReady, wholeServerReplies } from "./support/layout";
+import { box, pageReady, perHostReplies, wholeServerReplies } from "./support/layout";
 import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC", viewport: { width: 1280, height: 800 } });
@@ -185,6 +185,56 @@ for (const scheme of ["light", "dark"] as const) {
       expect(gap).not.toBe(firstFill);
       // And a share is not the colour of the card it lies on.
       expect(firstFill).not.toBe(await fillOf(page, split));
+    });
+
+    test("status dot: the dot before a state word is painted", async ({ page }) => {
+      await open(page, scheme, "#/overview");
+      for (const dot of [page.getByTestId("health-dot"), page.getByTestId("optimizer-state").locator(".status-dot")]) {
+        await expect(dot).toBeVisible();
+        const b = await box(dot);
+        // The dot's centre against a point just left of it, on the surface it sits on.
+        const clip = { x: b.left - 4, y: b.top, width: b.width + 4, height: b.height };
+        const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+          [4 + b.width / 2, b.height / 2],
+          [1, b.height / 2],
+        ]);
+        expect(at[0], "the dot differs from its surface").not.toBe(at[1]);
+      }
+    });
+
+    test("health strip: the leading rule is painted", async ({ page }) => {
+      await open(page, scheme, "#/overview");
+      const strip = page.getByTestId("health-strip");
+      const b = await box(strip);
+      // The middle of the 3 px rule against the band right of it.
+      const clip = { x: b.left, y: b.top + b.height / 2 - 2, width: 12, height: 4 };
+      const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+        [1, 2],
+        [9, 2],
+      ]);
+      expect(at[0], "the rule differs from the band").not.toBe(at[1]);
+    });
+
+    test("muted card: the whole-server card on a per-host console keeps its dashed outline, undimmed", async ({ page }) => {
+      await page.emulateMedia({ forcedColors: "active", colorScheme: scheme });
+      await mockAdmin(page, "pagespeed_admin", perHostReplies());
+      await openConsole(page, "pagespeed_admin", "#/overview");
+      await pageReady(page);
+      const card = page.getByTestId("optimizer-card");
+      await expect(card).toHaveClass(/card-muted/);
+      const b = await box(card);
+      // Along the top edge a dashed line alternates between the line and the surface.
+      const clip = { x: b.left + 20, y: b.top, width: 60, height: 1 };
+      const points = Array.from({ length: 60 }, (_, x) => [x, 0] as const);
+      const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), points);
+      expect(new Set(at).size, "a dashed edge shows the line and the gaps").toBeGreaterThanOrEqual(2);
+      // The solid card beside it shows one colour along the same edge.
+      const solid = await box(page.getByTestId("module-card"));
+      const solidClip = { x: solid.left + 20, y: solid.top, width: 60, height: 1 };
+      const edge = await painted(page, await page.screenshot({ clip: solidClip, animations: "disabled" }), points);
+      expect(new Set(edge.at).size, "a solid edge is one colour").toBe(1);
+      // Nothing fades in a forced palette: the card is told apart by the outline alone.
+      expect(Number(await card.evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
     });
 
     test("field: keyboard focus draws a ring around a text field", async ({ page }) => {
