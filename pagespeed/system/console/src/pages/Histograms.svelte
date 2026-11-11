@@ -175,7 +175,7 @@
                   <td class="num-cell">{formatPercent(shares[i].percent)}</td>
                   <td class="num-cell">{formatPercent(shares[i].cumulative)}</td>
                   <td class="bar-cell">
-                    <div class="bar" style="width: {Math.max(2, widths[i])}%"
+                    <div class="bar bar-fill" style="width: {Math.max(2, widths[i])}%"
                     ></div>
                   </td>
                 </tr>
@@ -189,12 +189,6 @@
 </div>
 
 <style>
-  .search-input:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
-
   .histogram-wrapper {
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-border-radius);
@@ -315,11 +309,10 @@
     padding-right: var(--ps-space-md);
   }
 
+  /* A bucket's share: the shared bar fill, at this table's height. */
   .bar {
     height: 16px;
-    background-color: var(--ps-primary, #4285f4);
     border-radius: 2px;
-    min-width: 2px;
   }
 
   .loading {

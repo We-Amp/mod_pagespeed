@@ -134,7 +134,17 @@ for (const scheme of ["light", "dark"] as const) {
       const nav = page.getByRole("navigation", { name: "Console pages" });
       const current = nav.locator('a[aria-current="page"]');
       await expect(current).toHaveCount(1);
-      expect(await fillOf(page, current)).not.toBe(await fillOf(page, nav.locator("a:not([aria-current])").first()));
+      const plain = await fillOf(page, nav.locator("a:not([aria-current])").first());
+      expect(await fillOf(page, current)).not.toBe(plain);
+      // And it carries a bar at its leading edge: neither the row's fill
+      // nor the sidebar's surface, so it shows as a bar and not as a notch.
+      const b = await box(current);
+      const { at } = await painted(page, await current.screenshot({ animations: "disabled" }), [
+        [1, b.height / 2],
+        [6, b.height / 2],
+      ]);
+      expect(at[0], "the bar differs from the row's fill").not.toBe(at[1]);
+      expect(at[0], "the bar differs from the sidebar's surface").not.toBe(plain);
     });
 
     test("tabs: the selected tab is filled, the other tabs are not", async ({ page }) => {
@@ -185,6 +195,65 @@ for (const scheme of ["light", "dark"] as const) {
       expect(gap).not.toBe(firstFill);
       // And a share is not the colour of the card it lies on.
       expect(firstFill).not.toBe(await fillOf(page, split));
+    });
+
+    test("focus on a filled item: the ring is the fill's text colour", async ({ page }) => {
+      // The ring of the current page's link and of the selected tab is
+      // drawn inside the item, on its fill: it is painted in the palette's
+      // text colour for that fill, the one pair sure to contrast.
+      const highlightText = async (): Promise<string> => {
+        const id = "forced-colours-probe";
+        await page.evaluate((id) => {
+          const probe = document.createElement("div");
+          probe.id = id;
+          probe.style.cssText =
+            "position:fixed;left:0;top:0;width:8px;height:8px;z-index:9999;forced-color-adjust:none;background:HighlightText";
+          document.body.append(probe);
+        }, id);
+        const colour = await fillOf(page, page.locator(`#${id}`));
+        await page.evaluate((id) => document.getElementById(id)!.remove(), id);
+        return colour;
+      };
+      // [page, the item, how far inside the item's edge the middle of its ring lies]
+      for (const [hash, item, inset] of [
+        ["#/overview", () => page.getByRole("navigation", { name: "Console pages" }).locator('a[aria-current="page"]'), 1],
+        ["#/caches", () => page.getByRole("tab", { selected: true }), 3],
+      ] as const) {
+        await open(page, scheme, hash);
+        const expected = await highlightText();
+        const el = item();
+        await expect(el).toHaveCount(1);
+        const fill = await fillOf(page, el);
+        expect(expected, "the palette's pair differs").not.toBe(fill);
+        // Reached with the keyboard.
+        await el.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await expect(el).toBeFocused();
+        const b = await box(el);
+        // The 2 px ring inside the item's top, bottom and trailing edges.
+        const { at } = await painted(page, await el.screenshot({ animations: "disabled" }), [
+          [b.width / 2, inset],
+          [b.width / 2, b.height - 1 - inset],
+          [b.width - 1 - inset, b.height / 2],
+        ]);
+        for (const [side, colour] of at.entries()) expect(colour, `${hash}, side ${side}`).toBe(expected);
+      }
+    });
+
+    test("histogram: a bucket's bar is painted", async ({ page }) => {
+      await open(page, scheme, "#/histograms");
+      const bar = page.locator("main .bar-fill").first();
+      await expect(bar).toBeVisible();
+      const b = await box(bar);
+      expect(b.width).toBeGreaterThanOrEqual(2);
+      // The bar's centre against the cell just above it.
+      const clip = { x: b.left, y: b.top - 3, width: b.width, height: b.height + 3 };
+      const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+        [b.width / 2, 3 + b.height / 2],
+        [b.width / 2, 1],
+      ]);
+      expect(at[0], "the bar differs from its cell").not.toBe(at[1]);
     });
 
     test("status dot: the dot before a state word is painted", async ({ page }) => {
@@ -238,19 +307,33 @@ for (const scheme of ["light", "dark"] as const) {
     });
 
     test("field: keyboard focus draws a ring around a text field", async ({ page }) => {
-      // Not met yet: the search fields replace the ring with a border colour
-      // and a shadow, and forced colours drop both. Remove this line with
-      // the change that gives fields the console's outline.
-      test.fail();
-      await open(page, scheme, "#/statistics");
-      const field = page.getByRole("searchbox").first();
-      await expect(field).toBeVisible();
-      const before = await ringOf(page, field);
-      await field.focus();
-      const after = await ringOf(page, field);
-      for (const [side, colour] of after.entries()) {
-        expect(colour, `side ${side}`).not.toBe(before[side]);
+      // An outline is painted in a forced palette; a border colour or a
+      // shadow would not be. The four pages with a field of their own.
+      for (const [hash, selector, tab] of [
+        ["#/statistics", "main input.field", null],
+        ["#/histograms", "main input.field", null],
+        ["#/graphs", "main input.field", null],
+        ["#/caches", "#lookup-url", "Cache Lookup"],
+      ] as const) {
+        await open(page, scheme, hash);
+        if (tab !== null) await page.getByRole("tab", { name: tab }).click();
+        const field = page.locator(selector);
+        await expect(field).toBeVisible();
+        const before = await ringOf(page, field);
+        await field.focus();
+        const after = await ringOf(page, field);
+        for (const [side, colour] of after.entries()) {
+          expect(colour, `${hash}, side ${side}`).not.toBe(before[side]);
+        }
       }
     });
   });
 }
+
+test("the light and the dark forced palettes are two palettes", async ({ page }) => {
+  await open(page, "light", "#/overview");
+  const band = page.getByRole("banner");
+  const light = await fillOf(page, band);
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  expect(await fillOf(page, band)).not.toBe(light);
+});
