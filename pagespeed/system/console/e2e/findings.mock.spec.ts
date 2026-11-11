@@ -144,7 +144,9 @@ test.describe("Overview findings", () => {
   test("a log that cannot be read is never \"No findings\"", async ({ page }) => {
     await open(page, { message_history: { status: 500, body: { success: false, error: "internal" } } });
     await expect(page.getByTestId("findings-summary")).toHaveText("Findings unavailable — the message log could not be read");
-    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-info/);
+    // The strip's colour is the verdict's; the findings clause says in words that it has no findings to show.
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*Findings unavailable — the message log could not be read\.$/);
+    await expect(page.getByTestId("findings-mark")).toHaveCount(0);
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 
@@ -258,7 +260,12 @@ test.describe("Overview findings", () => {
       "v1/daemon/stats": () => withBody(F.DAEMON_STATS, { started_at_ms: Date.now() - 2 * 3_600_000 }),
     });
     await expect(page.getByTestId("findings-summary")).toHaveText("No findings");
-    await expect(page.getByTestId("findings-since")).toHaveText("Counters: module since 3 h · optimizer since 2 h");
+    // Each source's time base is stated once, in its tile, in the sentence's words.
+    await expect(page.getByTestId("since-module")).toHaveText("since the web server started 3 h ago");
+    await expect(page.getByTestId("since-optimizer")).toHaveText("since the optimizer started 2 h ago");
+    await expect(page.getByTestId("since-module")).toHaveCount(1);
+    await expect(page.getByTestId("since-optimizer")).toHaveCount(1);
+    await expect(page.getByTestId("health-summary")).toContainText("since the optimizer started 2 h ago");
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 

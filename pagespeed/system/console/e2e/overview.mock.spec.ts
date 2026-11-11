@@ -233,7 +233,10 @@ test.describe("Overview verdict and tiles", () => {
     await expect(lead).toHaveText("673 KB");
     await expect(page.getByTestId("tile-cache").getByTestId("overview-lead-figure")).toHaveCount(1);
     await expect(page.getByTestId("tile-cache").getByTestId("optimizer-savings")).toContainText("3% of 21.4 MB");
-    await expect(page.getByTestId("tile-cache").getByTestId("savings-qualifier")).toHaveText(
+    // One line of context in the tile; how the figure is measured sits with the by-type table.
+    await expect(page.getByTestId("tile-cache").getByTestId("optimizer-savings").locator("p")).toHaveCount(2);
+    await expect(page.getByTestId("tile-cache").getByTestId("savings-qualifier")).toHaveCount(0);
+    await expect(page.getByTestId("optimizer-card").getByTestId("savings-qualifier")).toHaveText(
       "Measured in transfer bytes, includes compression.",
     );
     // The two figures are related in words, never added up.
@@ -244,8 +247,11 @@ test.describe("Overview verdict and tiles", () => {
     const main = await page.locator("main").innerText();
     expect(main).not.toContain("12.9 MB"); // 12.3 MB + 673 KB
     // Each tile names its own time base.
-    await expect(page.getByTestId("tile-rewriting").getByTestId("since-module")).toContainText("since 1 d");
-    await expect(page.getByTestId("tile-cache").getByTestId("since-optimizer")).toContainText("since 3 h");
+    await expect(page.getByTestId("tile-rewriting").getByTestId("since-module")).toHaveText("since the web server started 1 d ago");
+    await expect(page.getByTestId("tile-cache").getByTestId("since-optimizer")).toHaveText("since the optimizer started 3 h ago");
+    // Once per source: the other module tile does not repeat it.
+    await expect(page.getByTestId("since-module")).toHaveCount(1);
+    await expect(page.getByTestId("tile-fetch-failures").locator(".stat-tile-context")).toHaveCount(0);
     // Below the tiles: both sources by type.
     await expect(page.getByTestId("module-by-type").locator("tbody tr")).toHaveCount(3);
     await expect(page.getByTestId("optimizer-by-type").locator("tbody tr")).toHaveText([/CSS\s*197/, /Images\s*45/]);
@@ -320,10 +326,11 @@ test.describe("Overview verdict and tiles", () => {
     );
     // No share is printed for the warming source, and no bare dash stands in for it.
     const savings = page.getByTestId("optimizer-savings");
-    await expect(savings).toContainText("of 21.4 MB so far");
+    await expect(savings).toContainText("of 21.4 MB so far, since the optimizer started 4 min ago");
     await expect(savings).not.toContainText("%");
     await expect(savings).not.toContainText("—");
-    await expect(page.getByTestId("tile-cache").getByTestId("warming-pill")).toBeVisible();
+    await expect(page.getByTestId("tile-cache").getByTestId("warming-pill")).toHaveCount(1);
+    await expect(page.getByTestId("overview-tiles").getByTestId("warming-pill")).toHaveCount(1);
     await expect(page.getByTestId("tile-rewriting").getByTestId("warming-pill")).toHaveCount(0);
     await expect(page.getByTestId("module-bytes-saved")).toContainText("47% of 26.4 MB");
   });
@@ -363,15 +370,89 @@ test.describe("Overview verdict and tiles", () => {
     await expectNoJunk(page);
   });
 
-  test("findings close the sentence and colour the strip; the word stays the state", async ({ page }) => {
+  test("one signal: the dot and the rule follow the word; findings are marked in words where they are counted", async ({ page }) => {
     await open(page, "pagespeed_global_admin", steady({ "v1/daemon/health": F.HEALTH_CHECK_FAILING }));
-    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .* 1 finding · 1 needs action\.$/);
-    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-error/);
-    await expect(page.getByTestId("health-dot")).toHaveClass(/status-dot-error/);
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .* Error 1 finding · 1 needs action\.$/);
+    // "Working" keeps the working colour: the dot never says something the word does not.
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-ok/);
+    await expect(page.getByTestId("health-dot")).toHaveClass(/status-dot-ok/);
+    await expect(page.getByTestId("health-dot")).not.toHaveClass(/status-dot-(error|warning)/);
+    // The findings' level is a word beside the count, not a colour alone.
+    const mark = page.getByTestId("findings-mark");
+    await expect(mark).toHaveText("Error");
+    await expect(mark).toHaveClass(/level-badge-error/);
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 1 needs action");
+    // The count is a link to the findings: it scrolls there and takes focus, and the page stays.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const link = page.getByTestId("findings-link");
+    await expect(link).toHaveText("1 finding · 1 needs action");
+    await link.click();
+    await expect(page.getByTestId("findings-anchor")).toBeFocused();
+    await expect(page.getByTestId("alert-daemon-check-failed")).toBeInViewport();
+    await expect(page).toHaveURL(/pagespeed_global_admin\/(#\/overview)?$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
     // The findings follow the tiles.
     const tiles = (await page.getByTestId("overview-tiles").boundingBox())!;
     const findings = (await page.getByTestId("alerts").boundingBox())!;
     expect(findings.y).toBeGreaterThanOrEqual(tiles.y + tiles.height);
+  });
+
+  test("right after a web server restart the optimizer's figures still lead: tiles, no first-run steps", async ({ page }) => {
+    // The module's counters are zero again; the optimizer has been serving for hours.
+    await open(page, "pagespeed_global_admin", steady({ stats_json: statsStarted(F.STATS_EMPTY, 20_000) }));
+    await expect(page.getByTestId("health-summary")).toContainText(
+      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. " +
+        "Web server restarted less than a minute ago; the module's figures are not meaningful yet.",
+    );
+    // The page agrees with the sentence: the tiles and the leading figure are there.
+    await expect(page.getByTestId("overview-tiles")).toBeVisible();
+    await expect(page.getByTestId("overview-lead-figure")).toHaveText("673 KB");
+    await expect(page.getByTestId("tile-rewriting").getByTestId("warming-pill")).toBeVisible();
+    // Not a first run: no onboarding, a plain line instead of a table of zeros.
+    await expect(page.getByTestId("overview-empty")).toHaveCount(0);
+    await expect(page.getByTestId("overview-next-steps")).toHaveCount(0);
+    await expect(page.getByTestId("module-nothing-yet")).toHaveText(
+      "The module has rewritten nothing since the web server started less than a minute ago.",
+    );
+    await expectNoJunk(page);
+  });
+
+  test("a failed module read over good figures: status unknown with the reason, and the notice above the stale tiles", async ({ page }) => {
+    let fail = false;
+    const good = statsStarted(F.STATS_GLOBAL, 26 * HOUR);
+    await open(page, "pagespeed_global_admin", steady({
+      stats_json: (call, request) => (fail ? { status: 500, body: { error: "internal" } } : good(call, request)),
+    }));
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. /);
+    await expect(page.locator("main .refresh-notice")).toHaveCount(0);
+    fail = true;
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes("stats_json") && r.status() === 500),
+      page.getByRole("button", { name: "Refresh", exact: true }).click(),
+    ]);
+    const verdict = page.getByTestId("health-summary");
+    await expect(verdict).toHaveText(
+      /^Status unknown\. The module statistics could not be read; the figures are from \d\d:\d\d:\d\d\. Module statistics unavailable\.$/,
+    );
+    // Never "No findings" over figures that were not read, no green, and no figure in the sentence.
+    await expect(verdict).not.toContainText("No findings");
+    await expect(verdict).not.toContainText(/KB|MB/);
+    await expect(page.getByTestId("health-strip")).not.toHaveClass(/health-strip-(ok|info)/);
+    // The last good figures stay, under a notice that says why they are stale.
+    await expect(page.getByTestId("module-bytes-saved")).toContainText("12.3 MB");
+    const notice = page.locator("main .refresh-notice");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toContainText("Last refresh failed");
+    await expect(notice).toContainText("Showing the most recent data");
+    const noticeBox = (await notice.boundingBox())!;
+    const tilesBox = (await page.getByTestId("overview-tiles").boundingBox())!;
+    expect(noticeBox.y + noticeBox.height, "the notice is above the tiles").toBeLessThanOrEqual(tilesBox.y);
+    // It answers again: the verdict and the figures are current, the notice is gone.
+    fail = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(verdict).toContainText(/^Working\. /);
+    await expect(notice).toHaveCount(0);
   });
 
   test("the sentence's figures are not announced on every refresh: only the findings count is a status", async ({ page }) => {
@@ -382,11 +463,27 @@ test.describe("Overview verdict and tiles", () => {
   });
 
   for (const [name, size] of [["desk", { width: 1440, height: 900 }], ["phone", { width: 390, height: 844 }]] as const) {
-    for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
-      test(`${name}, ${admin}: the verdict and the leading figure are in the first viewport`, async ({ page }) => {
+    const consoles = {
+      "whole server": { admin: "pagespeed_global_admin", replies: () => steady() },
+      "per host": {
+        admin: "pagespeed_admin",
+        replies: () => steady({ config: F.CONFIG_VHOST, stats_json: statsStarted(F.STATS_VHOST, 26 * HOUR) }),
+      },
+      "module only": {
+        admin: "pagespeed_admin",
+        replies: () =>
+          steady({
+            config: F.CONFIG_VHOST,
+            stats_json: statsStarted(F.STATS_MODULE_ONLY, 26 * HOUR),
+            "v1/daemon/health": F.NOT_CONFIGURED,
+            "v1/daemon/stats": F.NOT_CONFIGURED,
+          }),
+      },
+    } as const;
+    for (const [consoleName, { admin, replies }] of Object.entries(consoles)) {
+      test(`${name}, ${consoleName}: the verdict and the leading figure are in the first viewport`, async ({ page }) => {
         await page.setViewportSize(size);
-        const perHost = admin === "pagespeed_admin";
-        await open(page, admin, steady(perHost ? { config: F.CONFIG_VHOST, stats_json: statsStarted(F.STATS_VHOST, 26 * HOUR) } : {}));
+        await open(page, admin, replies());
         await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*\d.* since /);
         expect(await inFirstViewport(page, "health-summary")).toBe(true);
         expect(await inFirstViewport(page, "overview-lead-figure")).toBe(true);
@@ -429,8 +526,9 @@ test.describe("Overview time bases and scope", () => {
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await expect(page.getByTestId("module-card").locator(".scope-chip")).toHaveCount(0);
     await expect(page.getByTestId("optimizer-card").locator(".scope-chip")).toHaveCount(0);
-    await expect(page.getByTestId("since-module")).toContainText("(web server restart or reload)");
-    await expect(page.getByTestId("since-optimizer")).toContainText("(optimizer restart)");
+    await expect(page.getByTestId("module-card").getByTestId("since-module")).toHaveCount(0);
+    await expect(page.getByTestId("tile-rewriting").getByTestId("since-module")).toContainText("since the web server started");
+    await expect(page.getByTestId("since-optimizer")).toContainText("since the optimizer started");
   });
 
   test("the per-host console mutes the optimizer card and names the host scope", async ({ page }) => {

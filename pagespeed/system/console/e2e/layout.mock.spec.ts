@@ -925,6 +925,37 @@ test.describe("Overview tiles", () => {
     }
   });
 
+  for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
+    test(`320 px, ${admin}: nothing scrolls sideways, and the by-type rows stay inside their cards`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await mockAdmin(page, admin, admin === "pagespeed_admin" ? perHostReplies() : wholeServerReplies());
+      await openConsole(page, admin, "#/overview");
+      await pageReady(page);
+      await expect(page.getByTestId("module-by-type").locator("tbody tr")).toHaveCount(3);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      expect(await sidewaysScrollers(page)).toEqual([]);
+      for (const id of ["module-card", "optimizer-card"]) {
+        const card = await box(page.getByTestId(id));
+        for (const el of await page.getByTestId(id).locator("tbody tr, p").all()) {
+          expect((await box(el)).right, id).toBeLessThanOrEqual(card.right);
+        }
+      }
+      for (const tile of await tiles(page).all()) {
+        const t = await box(tile);
+        for (const el of await tile.locator("p, a, h2").all()) expect((await box(el)).right).toBeLessThanOrEqual(t.right);
+      }
+    });
+  }
+
+  test("a tile carries one line of context, so the lead tile does not set the row's height", async ({ page }) => {
+    await open(page, 1440, 900);
+    for (const tile of await tiles(page).all()) {
+      expect(await tile.locator(".stat-tile-context").count()).toBeLessThanOrEqual(2);
+    }
+    const row = await box(page.getByTestId("overview-tiles"));
+    expect(row.height, "the row is compact").toBeLessThanOrEqual(240);
+  });
+
   test("the verdict comes first: above the tiles, the findings and the cards", async ({ page }) => {
     await open(page, 1440, 900);
     const strip = await box(page.getByTestId("health-strip"));

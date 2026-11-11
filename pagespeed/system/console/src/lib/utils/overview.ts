@@ -15,7 +15,7 @@ import { MODULE_DOCS } from "$lib/data/product-facts-console";
 import type { ConfigScope } from "$lib/utils/config-scope";
 import { errorCode } from "$lib/utils/daemon";
 import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type MessageDigest } from "$lib/utils/message-groups";
-import { formatBytes, formatCount, formatRelative } from "$lib/utils/format";
+import { formatBytes, formatClock, formatCount, formatRelative } from "$lib/utils/format";
 import type { OptimizedCopyHitRate } from "$lib/utils/savings";
 import { serveSavingsView, type ServeSavingsTotal } from "$lib/utils/serve-savings";
 import { sinceLabel, type SinceLabel } from "$lib/utils/since";
@@ -405,6 +405,11 @@ export interface VerdictInput {
   lastAnswerAt: number | null;
   /** The module figures of this sample; null when that read failed. */
   module: { summary: ModuleSummary; startMs: number | null } | null;
+  /**
+   * Epoch ms of the figures still on the page when this sample's module
+   * read failed (the last good read); null or absent when there are none.
+   */
+  staleFiguresAt?: number | null;
   optimizer: {
     availability: DaemonAvailability;
     /** The optimizer's own state word ("Running", "Status: degraded"); used when it answers. */
@@ -429,11 +434,38 @@ function agoText(startMs: number, at: number): string {
   return at - startMs < 60_000 ? "less than a minute ago" : formatRelative(startMs, at);
 }
 
-/** A source's time base: whether its start is known and believable, and whether it is still warming up. */
-function timeBase(startMs: number | null, at: number): { ago: string | null; warming: boolean } {
+/** The two sources of the overview's figures, as the page names them. */
+export type FigureSource = "module" | "optimizer";
+
+const SOURCE_NAME: Record<FigureSource, string> = { module: "the web server", optimizer: "the optimizer" };
+
+export interface TimeBase {
+  /**
+   * The time base in words, the one form the page uses in the sentence and
+   * in the tiles: "since the web server started 3 h ago", or without an age
+   * when the start is unknown.
+   */
+  text: string;
+  /** "3 h ago"; null when the start is unknown or not believable. */
+  ago: string | null;
+  /** ISO timestamp for a tooltip; null when the start is unknown. */
+  iso: string | null;
+  /** The source started less than WARMUP_MS ago. */
+  warming: boolean;
+}
+
+/**
+ * A source's time base. The module's counters start over when the web
+ * server starts (a restart or a reload); the optimizer's when the optimizer
+ * starts. An absent or unbelievable start (see sinceLabel) has no age and is
+ * never warming.
+ */
+export function timeBase(source: FigureSource, startMs: number | null, at: number): TimeBase {
   const label = sinceLabel(startMs, at);
-  if (label.iso === null || startMs === null) return { ago: null, warming: false };
-  return { ago: agoText(startMs, at), warming: label.warming };
+  const name = SOURCE_NAME[source];
+  if (label.iso === null || startMs === null) return { text: `since ${name} started`, ago: null, iso: null, warming: false };
+  const ago = agoText(startMs, at);
+  return { text: `since ${name} started ${ago}`, ago, iso: label.iso, warming: label.warming };
 }
 
 /**
@@ -445,17 +477,24 @@ export function overviewVerdict(
   timeText: (ms: number) => string = (ms) => new Date(ms).toLocaleTimeString(),
 ): OverviewVerdict {
   const unknown = (text: string): OverviewVerdict => ({ state: "unknown", word: "Status unknown", text, lead: null });
-  if (input.down) return unknown(unknownHealth(input.lastAnswerAt, timeText).text);
-  if (input.module === null) return unknown("Status unknown.");
+  if (input.down) return unknown(`${unknownHealth(input.lastAnswerAt, timeText).text}.`);
+  if (input.module === null) {
+    // The figures still on the page are older than this sample: say from when.
+    const stale = input.staleFiguresAt;
+    return unknown(
+      stale === null || stale === undefined
+        ? "Status unknown."
+        : `Status unknown. The module statistics could not be read; the figures are from ${formatClock(stale)}.`,
+    );
+  }
 
   const { summary } = input.module;
   const { availability, serves } = input.optimizer;
-  const module = timeBase(input.module.startMs, input.at);
-  const optimizer = timeBase(input.optimizer.startMs, input.at);
+  const module = timeBase("module", input.module.startMs, input.at);
+  const optimizer = timeBase("optimizer", input.optimizer.startMs, input.at);
   const answers = availability === "ok";
-  const moduleSince = module.ago === null ? "since the web server last started" : `since the web server started ${module.ago}`;
-  const optimizerSince =
-    optimizer.ago === null ? "since the optimizer last started" : `since the optimizer started ${optimizer.ago}`;
+  const moduleSince = module.text;
+  const optimizerSince = optimizer.text;
   // The optimizer's figures are a source of the sentence on the whole-server console only.
   const optimizerFigures = input.wholeServer && answers && serves !== null;
   const lead: LeadFigure | null = optimizerFigures ? "optimizer" : summary.active && summary.bytesSaved !== null ? "module" : null;
@@ -541,17 +580,28 @@ export function serveShareJudgement(rate: OptimizedCopyHitRate | null, warming: 
 export const SAVINGS_RELATION =
   "Separate from the rewriting figure: these are responses served from the optimizer's cache.";
 
+/** The colour of the strip's rule and dot: "neutral" has none. */
+export type VerdictLevel = "ok" | "info" | "neutral";
+
 /**
- * The colour level of the strip that carries the verdict. Findings that
- * need action or cannot be read set it, as they did for the count line; a
- * healthy count takes the verdict's own: working is healthy, warming up and
- * idle are information, unknown has no colour. `findings` is null while the
- * server is down: nothing is known then.
+ * The colour that repeats the verdict's word on the strip's rule and dot:
+ * working is the ok colour, warming up and idle are information, unknown
+ * has no colour. Findings do not change it: their level is stated with the
+ * findings count, in words.
  */
-export function stripLevel(state: VerdictState, findings: HealthSummary["level"] | null): OverviewHealth["level"] {
-  if (findings === null || state === "unknown") return findings === null || findings === "healthy" ? "unknown" : findings;
-  if (findings !== "healthy") return findings;
-  return state === "working" ? "healthy" : "info";
+export function verdictLevel(state: VerdictState): VerdictLevel {
+  if (state === "working") return "ok";
+  return state === "unknown" ? "neutral" : "info";
+}
+
+/**
+ * The word that marks the findings count when a finding needs action
+ * ("Error", "Warning"), with its level; null when none does.
+ */
+export function findingsMark(level: HealthSummary["level"], needAction: boolean): { level: "error" | "warning"; word: string } | null {
+  if (!needAction) return null;
+  if (level === "error") return { level: "error", word: "Error" };
+  return level === "warning" ? { level: "warning", word: "Warning" } : null;
 }
 
 /** Where the documentation explains how to add the optimizer to a server. */

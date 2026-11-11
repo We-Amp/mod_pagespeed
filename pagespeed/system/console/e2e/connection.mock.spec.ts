@@ -172,10 +172,14 @@ test.describe("Connection", () => {
     await expect(health).toHaveText(/^Status unknown — last answer \d/);
     // No figure from before the outage, and no findings count either.
     await expect(health).not.toContainText(/saved|findings?/);
-    await expect(strip).toHaveClass(/health-strip-unknown/);
+    await expect(strip).not.toHaveClass(/health-strip-(ok|info|warning|error)/);
+    await expect(page.getByTestId("health-dot")).not.toHaveClass(/status-dot-(ok|info|warning|error)/);
     expect(await borderColour()).not.toBe(verdictBorder);
     expect(await stripDotColour()).not.toBe(green);
-    await expect(optimizer).toHaveText("Running · last known");
+    // The value stays the state word; that it is the last known state is a line of context.
+    await expect(optimizer).toHaveText("Running");
+    await expect(page.getByTestId("optimizer-last-known")).toHaveText("Last known state");
+    expect((await optimizer.boundingBox())!.height, "the state word is one line").toBeLessThan(45);
     await expect(dot).not.toHaveClass(/status-dot-ok|status-dot-warning/);
     expect(await dotColour()).not.toBe(green);
     // The last figures stay on screen.
@@ -187,6 +191,7 @@ test.describe("Connection", () => {
     await expect(page.getByTestId("connection-banner")).toHaveCount(0);
     await expect(health).toHaveText(/^Working\. /);
     await expect(optimizer).toHaveText("Running");
+    await expect(page.getByTestId("optimizer-last-known")).toHaveCount(0);
     await expect(dot).toHaveClass(/status-dot-ok/);
     expect(await dotColour()).toBe(green);
     await expect(stamp).toHaveText(/^updated \d s ago$/);
@@ -196,7 +201,7 @@ test.describe("Connection", () => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies(), { down: () => true });
     await openConsole(page, "pagespeed_admin");
     await expect(page.getByTestId("connection-banner")).toBeVisible();
-    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown — the server has not answered");
+    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown — the server has not answered.");
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });
 
@@ -212,7 +217,7 @@ test.describe("Connection", () => {
     const health = page.getByTestId("health-summary");
     // A failed module read states no figure: the state is unknown, and the count line says why.
     await expect(health).toHaveText("Status unknown. Module statistics unavailable.");
-    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-warning/);
+    await expect(page.getByTestId("health-strip")).not.toHaveClass(/health-strip-(ok|info)/);
     // No figures were ever read: the stamp has nothing to age.
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
 

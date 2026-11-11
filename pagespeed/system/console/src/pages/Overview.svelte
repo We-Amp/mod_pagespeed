@@ -37,7 +37,6 @@
   import { moduleSavingsByType, optimizedCopyHitRate } from "$lib/utils/savings";
   import { serveSavingsView } from "$lib/utils/serve-savings";
   import { hostSavingsView } from "$lib/utils/host-savings";
-  import { sinceLabel } from "$lib/utils/since";
   import { globalConsoleHref } from "$lib/utils/urls-api";
   import { scopeChipShown } from "$lib/utils/scope-chip";
   import { activeLensHost } from "$lib/host-lens.svelte";
@@ -46,9 +45,9 @@
     availabilityText,
     countText,
     daemonServeSavings,
-    findingsStampText,
     MIN_OPTIMIZER_VERSION,
     moduleSummary,
+    findingsMark,
     optimizerServes,
     optimizerStateText,
     OPTIMIZER_SETUP_DOC,
@@ -57,7 +56,9 @@
     RESPONSE_HEADER_CHECK,
     SAVINGS_RELATION,
     serveShareJudgement,
-    stripLevel,
+    timeBase,
+    verdictLevel,
+    type TimeBase,
     sampleOverview,
     toSnapshot,
     variablesOf,
@@ -163,11 +164,9 @@
     const v = num(daemonView?.daemonStats ?? null, "started_at_ms");
     return v !== undefined && v > 0 ? v : null;
   });
-  let moduleSince = $derived(sampleAt !== null ? sinceLabel(moduleStart, sampleAt) : null);
-  let optimizerSince = $derived(sampleAt !== null ? sinceLabel(optimizerStart, sampleAt) : null);
-  let findingsStamp = $derived(
-    findingsStampText(moduleSince, daemonView?.daemon === "ok" ? optimizerSince : null),
-  );
+  // One wording for a time base, in the sentence and in the tiles (overview.ts).
+  let moduleBase = $derived(timeBase("module", moduleStart, sampleAt ?? 0));
+  let optimizerBase = $derived(timeBase("optimizer", optimizerStart, sampleAt ?? 0));
   let moduleScopeLabel = $derived<"this host" | "whole server">(scope.isGlobal ? "whole server" : "this host");
   // Neither card follows the host lens: the module's figures cover the
   // console's scope, the optimizer's the whole server.
@@ -179,21 +178,32 @@
   let optimizer = $derived(daemonView?.daemon === "ok" ? optimizerStateText(daemonView.health) : null);
   let availability = $derived(daemonView && daemonView.daemon !== "ok" ? availabilityText(daemonView.daemon) : null);
   let serveSavings = $derived(daemonServeSavings(daemonView?.daemonStats ?? null));
+  // This sample's module read failed (the server answered, or not at all):
+  // the figures on the page, if any, are the last good ones.
+  let moduleStale = $derived(moduleError !== null);
   // The findings' count line; it closes the verdict sentence.
-  let findings = $derived(healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable, logOff));
+  let findings = $derived(healthSummary(alerts, lastModule !== null && !moduleStale, acknowledged, logUnavailable, logOff));
+  // A finding that needs action is marked in words next to the count; the
+  // strip's own colour stays with the verdict's word.
+  let mark = $derived(findingsMark(findings.level, alerts.some((a) => a.severity !== "info")));
   // The module's figures by type, and the optimizer's serves by type (whole server).
   let rows = $derived(vars ? moduleSavingsByType(vars) : null);
   let serveRows = $derived(serveSavingsView(daemonView?.daemonStats?.serve_savings)?.served ?? []);
-  // The tiles need module figures; without them the two cards carry the page.
-  let tiles = $derived(summary !== null && summary.active);
   // The whole-server console leads with the optimizer's transfer savings, in
   // the second tile. A per-host console never states them as this site's:
   // there they stay in the muted whole-server card, and the module's figure leads.
-  let optimizerLeads = $derived(tiles && scope.isGlobal && daemonView?.daemon === "ok" && serveSavings !== null);
+  let optimizerFigures = $derived(scope.isGlobal && daemonView?.daemon === "ok" && serveSavings !== null);
+  // The tiles show whenever there is a figure to lead with: module activity,
+  // or the optimizer's serves right after a web server restart. Without one
+  // (no traffic yet, or no module figures at all) the two cards carry the page.
+  let tiles = $derived(summary !== null && (summary.active || optimizerFigures));
+  let optimizerLeads = $derived(tiles && optimizerFigures);
+  // No traffic in this console's scope: the first-run steps.
+  let idle = $derived(summary !== null && !tiles);
   let cacheTile = $derived(
     optimizerLeads || !(daemonView?.daemon === "not-configured" || summary === null || summary.inPlaceRequests === 0),
   );
-  let judgement = $derived(serveShareJudgement(cacheRate, moduleSince?.warming ?? false));
+  let judgement = $derived(serveShareJudgement(cacheRate, moduleBase.warming));
   // The verdict reads this sample only: a failed module read states no figure.
   let verdict = $derived(
     overviewVerdict({
@@ -201,7 +211,8 @@
       at: sampleAt ?? 0,
       down: serverDown,
       lastAnswerAt,
-      module: summary !== null && moduleError === null ? { summary, startMs: moduleStart } : null,
+      module: summary !== null && !moduleStale ? { summary, startMs: moduleStart } : null,
+      staleFiguresAt: lastModule !== null ? updatedAt : null,
       optimizer: {
         availability: daemonView?.daemon ?? "transient",
         stateWord: optimizer?.word ?? "",
@@ -210,8 +221,16 @@
       },
     }),
   );
-  let level = $derived(stripLevel(verdict.state, serverDown ? null : findings.level));
-  let dot = $derived(level === "healthy" ? "ok" : level);
+  let level = $derived(verdictLevel(verdict.state));
+
+  // The findings count is a link to the findings, which follow the tiles
+  // (two screens down on a phone): it scrolls there and moves focus.
+  let findingsEl = $state<HTMLElement | null>(null);
+  function showFindings(event: MouseEvent): void {
+    event.preventDefault();
+    findingsEl?.scrollIntoView({ block: "start" });
+    findingsEl?.focus({ preventScroll: true });
+  }
 </script>
 
 <div class="page">
@@ -230,49 +249,49 @@
     <p class="loading">Loading overview...</p>
   {:else}
     <!-- The answer first: the state in a word, the figures behind it, the findings' count. -->
-    <div class="health-strip health-strip-{dot}" data-testid="health-strip">
+    <div class="health-strip" class:health-strip-ok={level === "ok"} class:health-strip-info={level === "info"} data-testid="health-strip">
       <p class="verdict" data-testid="health-summary">
-        <span class="status-dot status-dot-{dot}" data-testid="health-dot"></span><strong class="verdict-word"
-          >{verdict.word}</strong
-        >{verdict.text.slice(verdict.word.length)}{#if !serverDown}{" "}<span data-testid="findings-summary" role="status">{findings.text}</span>.{/if}
+        <span
+          class="status-dot"
+          class:status-dot-ok={level === "ok"}
+          class:status-dot-info={level === "info"}
+          data-testid="health-dot"
+        ></span><strong class="verdict-word">{verdict.word}</strong>{verdict.text.slice(verdict.word.length)}{#if !serverDown}{" "}{#if mark}<span
+              class="level-badge level-badge-{mark.level}"
+              data-testid="findings-mark">{mark.word}</span
+            >{" "}{/if}<span data-testid="findings-summary" role="status"
+            >{#if alerts.length > 0}<a href="#/overview" data-testid="findings-link" onclick={showFindings}>{findings.text}</a
+              >{:else}{findings.text}{/if}</span
+          >.{/if}
       </p>
-      {#if alerts.length === 0 && findingsStamp && !serverDown}
-        <p class="strip-meta" data-testid="findings-since">{findingsStamp}</p>
-      {/if}
     </div>
     {#if logOff}
       <UnavailableCard testid="overview-log-unavailable" />
     {/if}
 
-    {#snippet sinceModule(testid: string | undefined)}
-      <p class="stat-tile-context" data-testid={testid} title={moduleSince?.iso ?? undefined}>
-        {moduleSince?.text ?? "since restart"} (web server restart or reload)
-        {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
-      </p>
-    {/snippet}
-
-    {#snippet sinceOptimizer()}
-      <p class="stat-tile-context" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
-        {optimizerSince?.text ?? "since restart"} (optimizer restart)
-        {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
-      </p>
+    <!-- A source's time base, in the page's one wording, with its warming mark. -->
+    {#snippet since(base: TimeBase, testid: string)}
+      <span data-testid={testid} title={base.iso ?? undefined}>{base.text}</span>{#if base.warming}{" "}<span
+          class="warming"
+          data-testid="warming-pill">warming up</span
+        >{/if}
     {/snippet}
 
     <!-- The optimizer's transfer savings: the second tile on the whole-server
-         console, the muted whole-server card on a per-host console. -->
+         console (the leading figure), the muted whole-server card on a per-host console. -->
     {#snippet optimizerSavings(lead: boolean)}
       {#if serveSavings}
         <div data-testid="optimizer-savings">
-          <p class="stat-tile-value" data-testid={lead ? "overview-lead-figure" : undefined}>
+          <p class={lead ? "stat-tile-value" : "metric-value figure"} data-testid={lead ? "overview-lead-figure" : undefined}>
             {formatSignedBytes(serveSavings.saved)}
           </p>
-          <p class="stat-tile-context">
-            {optimizerSince?.warming
-              ? `of ${formatBytes(serveSavings.original)} so far`
+          <p class={lead ? "stat-tile-context" : "note figure-context"}>
+            {optimizerBase.warming
+              ? `of ${formatBytes(serveSavings.original)} so far,`
               : `${formatPercent(serveSavings.percent, serveSavings.saved)} of ${formatBytes(serveSavings.original)}`}
+            {@render since(optimizerBase, "since-optimizer")}
           </p>
         </div>
-        <p class="stat-tile-context" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
       {/if}
     {/snippet}
 
@@ -285,54 +304,63 @@
           {/if}
           {#if cacheRate && cacheRate.percent !== null}
             <p
-              class="stat-tile-context"
+              class={hero ? "stat-tile-context" : "note"}
               title={cacheRate.mode === "optimizable"
                 ? "Share of cacheable resource requests (CSS, JavaScript, images) answered from the optimizer's cache; conditional and HEAD requests count as served"
                 : "Share of all in-place requests answered from the optimizer's cache"}
             >
               {#if !hero}The module counted {countText(summary.servedByOptimizer)} served from the optimizer's cache:{/if}
-              {moduleSince?.warming
+              {moduleBase.warming
                 ? `of ${formatCount(cacheRate.total)}`
                 : `${formatPercent(cacheRate.percent, cacheRate.served)} of ${formatCount(cacheRate.total)}`}
               {cacheRate.mode === "optimizable"
                 ? "cacheable resource requests; conditional and HEAD requests count as served"
-                : "in-place requests"}{moduleSince?.warming ? " so far" : ""}
+                : "in-place requests"}{moduleBase.warming ? " so far" : ""}
             </p>
           {:else if !hero}
-            <p class="stat-tile-context">The module counted {countText(summary.servedByOptimizer)} served from the optimizer's cache.</p>
+            <p class="note">The module counted {countText(summary.servedByOptimizer)} served from the optimizer's cache.</p>
           {/if}
         </div>
         {#if judgement}
-          <p class="stat-tile-context" data-testid="serve-share-judgement">{judgement}</p>
+          <p class={hero ? "stat-tile-context" : "note"} data-testid="serve-share-judgement">{judgement}</p>
         {/if}
       {/if}
     {/snippet}
 
-    <!-- The optimizer's state: the fourth tile, or the optimizer card when there are no tiles. -->
-    {#snippet optimizerState(valueClass: string)}
+    <!-- The optimizer's state: the fourth tile, or the optimizer card when there
+         are no tiles. The value is the state word alone; "last known" is context. -->
+    {#snippet optimizerState(valueClass: string, contextClass: string)}
       {#if optimizer && daemonView}
         <p class={valueClass} data-testid="optimizer-state">
           <span
             class="status-dot"
             class:status-dot-ok={optimizer.ok && !serverDown}
             class:status-dot-warning={!optimizer.ok && !serverDown}
-          ></span>{optimizer.word}{#if serverDown}{" "}· last known{/if}
+          ></span>{optimizer.word}
         </p>
-        <p class="stat-tile-context">Up {formatDuration(daemonView.health?.uptime_seconds)}</p>
+        {#if serverDown}
+          <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
+        {/if}
+        <p class={contextClass}>Up {formatDuration(daemonView.health?.uptime_seconds)}</p>
         {#if optimizer.busy}
-          <p class="stat-tile-context" data-testid="optimizer-busy">All worker threads busy.</p>
+          <p class={contextClass} data-testid="optimizer-busy">All worker threads busy.</p>
         {/if}
       {:else if availability}
         <p class={valueClass} data-testid="optimizer-state">
           <span
             class="status-dot"
             class:status-dot-warning={!serverDown && (daemonView?.daemon === "unreachable" || daemonView?.daemon === "unsupported")}
-          ></span>{availability.word}{#if serverDown && daemonView?.daemon !== "transient"}{" "}· last known{/if}
+          ></span>{availability.word}
         </p>
+        {#if serverDown && daemonView?.daemon !== "transient"}
+          <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
+        {/if}
       {/if}
     {/snippet}
 
     {#if tiles && summary}
+      <!-- Stale figures say so above them, with the reason. -->
+      <RefreshNotice error={moduleError} />
       <div class="stat-tiles" data-testid="overview-tiles">
         <section class="card stat-tile" data-testid="tile-rewriting" aria-labelledby="tile-rewriting-label">
           <h2 class="stat-tile-label" id="tile-rewriting-label">Saved by rewriting</h2>
@@ -340,16 +368,15 @@
             <p class="stat-tile-value" data-testid={optimizerLeads ? undefined : "overview-lead-figure"}>
               {formatBytes(summary.bytesSaved)}
             </p>
-            {#if summary.savedPercent !== null && summary.originalBytes !== null}
-              <p class="stat-tile-context">
-                {moduleSince?.warming
-                  ? `of ${formatBytes(summary.originalBytes)} so far`
+            <p class="stat-tile-context">
+              {#if summary.savedPercent !== null && summary.originalBytes !== null}
+                {moduleBase.warming
+                  ? `of ${formatBytes(summary.originalBytes)} so far,`
                   : `${formatPercent(summary.savedPercent, summary.bytesSaved ?? 0)} of ${formatBytes(summary.originalBytes)}`}
-                of CSS, JavaScript and images
-              </p>
-            {/if}
+              {/if}
+              {@render since(moduleBase, "since-module")}
+            </p>
           </div>
-          {@render sinceModule("since-module")}
           <a class="stat-tile-link" href="#/savings">Savings</a>
         </section>
 
@@ -359,11 +386,9 @@
               <h2 class="stat-tile-label" id="tile-cache-label">Saved on optimizer cache serves</h2>
               {@render optimizerSavings(true)}
               <p class="stat-tile-context" data-testid="savings-relation">{SAVINGS_RELATION}</p>
-              {@render sinceOptimizer()}
             {:else}
               <h2 class="stat-tile-label" id="tile-cache-label">Served from the optimizer's cache</h2>
               {@render servedShare(true)}
-              {@render sinceModule(undefined)}
             {/if}
             <a class="stat-tile-link" href="#/savings" data-testid="module-served-link">Optimizer cache savings</a>
           </section>
@@ -372,7 +397,6 @@
         <section class="card stat-tile" data-testid="tile-fetch-failures" aria-labelledby="tile-failures-label">
           <h2 class="stat-tile-label" id="tile-failures-label">Resource fetch failures</h2>
           <p class="stat-tile-value" data-testid="module-fetch-failures">{countText(summary.fetchFailures)}</p>
-          {@render sinceModule(undefined)}
           <a class="stat-tile-link" href="#/logs?source=module&level=warning" data-testid="module-fetch-failures-link"
             >Module log</a
           >
@@ -382,26 +406,30 @@
           <h2 class="stat-tile-label" id="tile-optimizer-label">
             Optimizer <ScopeChip label="whole server" shown={optimizerChip} />
           </h2>
-          {@render optimizerState("stat-tile-value")}
+          {@render optimizerState("stat-tile-value", "stat-tile-context")}
           <a class="stat-tile-link" href="#/optimizer">Optimizer status</a>
         </section>
       </div>
     {/if}
 
-    <FindingsPanel
-      findings={alerts}
-      {acknowledged}
-      onAcknowledge={acknowledge}
-      onUnacknowledge={unacknowledge}
-    />
+    <div class="findings-anchor" bind:this={findingsEl} tabindex="-1" data-testid="findings-anchor">
+      <FindingsPanel
+        findings={alerts}
+        {acknowledged}
+        onAcknowledge={acknowledge}
+        onUnacknowledge={unacknowledge}
+      />
+    </div>
 
     <div class="cards">
       <section class="card reads-across-container" data-testid="module-card" aria-labelledby="module-heading">
         <h2 id="module-heading">Module <span class="version">{moduleVersion}</span> <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if summary}
-          <RefreshNotice error={moduleError} />
+          {#if !tiles}
+            <RefreshNotice error={moduleError} />
+          {/if}
           {#if summary.active && rows}
-            <table class="breakdown reads-across" data-testid="module-by-type">
+            <table class="breakdown reads-across card-table" data-testid="module-by-type">
               <caption>Saved by rewriting, by type</caption>
               <thead>
                 <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
@@ -409,15 +437,15 @@
               <tbody>
                 {#each rows as row (row.key)}
                   <tr>
-                    <th scope="row">{row.label}</th>
-                    <td class="num">{formatBytes(row.saved)}{#if row.regressed} <span class="note">(no net savings)</span>{/if}</td>
-                    <td class="num">{formatBytes(row.original)}</td>
-                    <td class="num">{moduleSince?.warming ? "warming up" : formatPercent(row.percent, row.saved)}</td>
+                    <th scope="row" data-label="Type">{row.label}</th>
+                    <td class="num" data-label="Saved">{formatBytes(row.saved)}{#if row.regressed} <span class="note">(no net savings)</span>{/if}</td>
+                    <td class="num" data-label="Of original">{formatBytes(row.original)}</td>
+                    <td class="num" data-label="Saved %">{moduleBase.warming ? "warming up" : formatPercent(row.percent, row.saved)}</td>
                   </tr>
                 {/each}
               </tbody>
             </table>
-          {:else}
+          {:else if idle}
             <!-- Nothing counted yet: what to do next, in order. -->
             <EmptyState
               testid="overview-empty"
@@ -433,6 +461,9 @@
               </li>
               <li>Come back here: the figures appear with the first optimized response.</li>
             </ol>
+          {:else}
+            <!-- The optimizer has served; the module's own counters started over. -->
+            <p class="note" data-testid="module-nothing-yet">The module has rewritten nothing {moduleBase.text}.</p>
           {/if}
         {:else if moduleError}
           <LoadError
@@ -463,12 +494,17 @@
           </p>
         {/if}
         {#if !tiles}
-          {@render optimizerState("metric-value state")}
+          {@render optimizerState("metric-value figure", "note")}
         {/if}
         {#if optimizer && daemonView}
           {#if serveSavings && !optimizerLeads}
             <p class="metric-label">Saved on served responses</p>
             {@render optimizerSavings(false)}
+          {:else if !serveSavings}
+            <p class="note">Counters {@render since(optimizerBase, "since-optimizer")}</p>
+          {/if}
+          {#if serveSavings}
+            <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
           {/if}
           {#if optimizerLeads}
             <!-- The module's own count of those serves, with its share. -->
@@ -487,7 +523,7 @@
                     <td class="num" data-label="Responses">{formatCount(row.hits)}</td>
                     <td class="num" data-label="Saved">{formatSignedBytes(row.saved)}</td>
                     <td class="num" data-label="Of original">{formatBytes(row.original)}</td>
-                    <td class="num" data-label="Saved %">{optimizerSince?.warming ? "warming up" : formatPercent(row.percent, row.saved)}</td>
+                    <td class="num" data-label="Saved %">{optimizerBase.warming ? "warming up" : formatPercent(row.percent, row.saved)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -495,9 +531,6 @@
           {/if}
           {#if serveSavings}
             <SavingsSplitLine split={serveSavings.split} />
-          {/if}
-          {#if !optimizerLeads}
-            {@render sinceOptimizer()}
           {/if}
           {#if daemonView.belowFloor}
             <p class="note" data-testid="optimizer-below-floor">
@@ -551,10 +584,29 @@
     font-weight: 600;
   }
 
-  .strip-meta {
-    margin: var(--ps-space-xs) 0 0;
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
+  /* The mark beside the findings count sits on the sentence's line. */
+  .verdict .level-badge {
+    vertical-align: 0.1em;
+  }
+
+  /* The findings follow the tiles; the count in the sentence jumps here,
+     clear of the top bar. */
+  .findings-anchor {
+    scroll-margin-top: calc(var(--ps-topbar-height) + var(--ps-space-md));
+  }
+
+  /* A paragraph in a card keeps the card's rhythm. */
+  .card .note {
+    margin: 0 0 var(--ps-space-sm);
+  }
+
+  .figure {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .figure-context {
+    margin-top: 0;
   }
 
   .stat-tiles {
@@ -632,16 +684,12 @@
     font-weight: 400;
   }
 
-  .state {
-    margin: 0 0 var(--ps-space-xs);
-    overflow-wrap: anywhere;
-  }
-
   /* On a phone the card rows carry their own padding. */
   @media (max-width: 640px) {
     .breakdown.card-table th,
     .breakdown.card-table td {
       padding: var(--ps-space-xs) var(--ps-space-sm);
+      white-space: normal;
     }
   }
 

@@ -19,7 +19,9 @@ import {
   overviewScopeLine,
   overviewVerdict,
   serveShareJudgement,
-  stripLevel,
+  timeBase,
+  verdictLevel,
+  findingsMark,
   sampleOverview,
   toSnapshot,
   unknownHealth,
@@ -534,9 +536,9 @@ describe("overviewVerdict", () => {
 
   it("disconnected: status unknown with the time of the last answer, and no figure from before", () => {
     const v = overviewVerdict(input({ down: true, lastAnswerAt: NOW }), clock);
-    expect(v).toMatchObject({ state: "unknown", word: "Status unknown", text: "Status unknown — last answer 10:25:51", lead: null });
+    expect(v).toMatchObject({ state: "unknown", word: "Status unknown", text: "Status unknown — last answer 10:25:51.", lead: null });
     expect(overviewVerdict(input({ down: true, lastAnswerAt: null }), clock).text).toBe(
-      "Status unknown — the server has not answered",
+      "Status unknown — the server has not answered.",
     );
   });
 
@@ -546,12 +548,40 @@ describe("overviewVerdict", () => {
     expect(v.text).not.toMatch(/\d/);
   });
 
+  it("a failed module read over figures still on the page says why, and from when they are", () => {
+    const at = new Date(2026, 0, 15, 10, 25, 51).getTime();
+    const v = overviewVerdict(input({ module: null, staleFiguresAt: at }));
+    expect(v).toMatchObject({
+      state: "unknown",
+      text: "Status unknown. The module statistics could not be read; the figures are from 10:25:51.",
+      lead: null,
+    });
+    // No figure of either source, only the time of the last good read.
+    expect(v.text).not.toMatch(/KB|MB|242/);
+    expect(overviewVerdict(input({ module: null, staleFiguresAt: null })).text).toBe("Status unknown.");
+  });
+
+  it("right after a web server restart the optimizer's figures still lead: not idle, and no module figure", () => {
+    // The module's counters are all zero again; the optimizer has been serving for hours.
+    const v = overviewVerdict(input({ module: { summary: idle, startMs: NOW - 20_000 } }));
+    expect(v).toMatchObject({ state: "working", lead: "optimizer" });
+    expect(v.text).toBe(
+      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. " +
+        "Web server restarted less than a minute ago; the module's figures are not meaningful yet.",
+    );
+    // Past the warm-up with still nothing rewritten, the optimizer's figures stand alone.
+    expect(overviewVerdict(input({ module: { summary: idle, startMs: NOW - 2 * HOUR } }))).toMatchObject({
+      text: "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago.",
+      lead: "optimizer",
+    });
+  });
+
   it("an unknown or unbelievable start is a restart without an age, and never warming", () => {
     expect(overviewVerdict(input({ module: { summary: active, startMs: null }, optimizer: moduleOnly })).text).toBe(
-      "Working. 281 KB saved by rewriting since the web server last started.",
+      "Working. 281 KB saved by rewriting since the web server started.",
     );
     expect(overviewVerdict(input({ optimizer: optimizer({ startMs: NOW + HOUR }) })).text).toBe(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer last started.",
+      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started.",
     );
   });
 
@@ -603,19 +633,62 @@ describe("serveShareJudgement", () => {
   });
 });
 
-describe("stripLevel", () => {
-  it("findings that need action or cannot be read set the level; a healthy count takes the verdict's", () => {
-    expect(stripLevel("working", "healthy")).toBe("healthy");
-    expect(stripLevel("warming", "healthy")).toBe("info");
-    expect(stripLevel("idle", "healthy")).toBe("info");
-    expect(stripLevel("working", "info")).toBe("info");
-    expect(stripLevel("working", "warning")).toBe("warning");
-    expect(stripLevel("idle", "error")).toBe("error");
+// One wording for a time base, used by the sentence and by the tiles.
+describe("timeBase", () => {
+  const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
+  it("names the source and the age of its start", () => {
+    expect(timeBase("module", NOW - 3 * 3_600_000, NOW)).toMatchObject({
+      text: "since the web server started 3 h ago",
+      ago: "3 h ago",
+      warming: false,
+      iso: new Date(NOW - 3 * 3_600_000).toISOString(),
+    });
+    expect(timeBase("optimizer", NOW - 26 * 3_600_000, NOW).text).toBe("since the optimizer started 1 d ago");
+    expect(timeBase("optimizer", NOW - 30_000, NOW)).toMatchObject({
+      text: "since the optimizer started less than a minute ago",
+      warming: true,
+    });
+    expect(timeBase("module", NOW - 14 * 60_000, NOW)).toMatchObject({ text: "since the web server started 14 min ago", warming: true });
+    expect(timeBase("module", NOW - 15 * 60_000, NOW).warming).toBe(false);
   });
-  it("is never green while the state is unknown", () => {
-    expect(stripLevel("unknown", null)).toBe("unknown");
-    expect(stripLevel("working", null)).toBe("unknown");
-    expect(stripLevel("unknown", "healthy")).toBe("unknown");
-    expect(stripLevel("unknown", "warning")).toBe("warning");
+  it("an unknown or unbelievable start has no age, no tooltip and is never warming", () => {
+    for (const start of [null, 0, -5, NOW + 3_600_000]) {
+      expect(timeBase("module", start, NOW), String(start)).toEqual({
+        text: "since the web server started",
+        ago: null,
+        iso: null,
+        warming: false,
+      });
+    }
+    expect(timeBase("optimizer", null, NOW).text).toBe("since the optimizer started");
+  });
+  it("the sentence uses the same words", () => {
+    const summary = moduleSummary({ css_filter_total_bytes_saved: 2048, css_filter_total_original_bytes: 4096, num_flushes: 1 });
+    const v = overviewVerdict({
+      wholeServer: false,
+      at: NOW,
+      down: false,
+      lastAnswerAt: NOW,
+      module: { summary, startMs: NOW - 3 * 3_600_000 },
+      optimizer: { availability: "not-configured", stateWord: "", serves: null, startMs: null },
+    });
+    expect(v.text).toContain(timeBase("module", NOW - 3 * 3_600_000, NOW).text);
+  });
+});
+
+describe("verdictLevel and findingsMark", () => {
+  it("the strip's colour repeats the verdict's word, whatever the findings", () => {
+    expect(verdictLevel("working")).toBe("ok");
+    expect(verdictLevel("warming")).toBe("info");
+    expect(verdictLevel("idle")).toBe("info");
+    expect(verdictLevel("unknown")).toBe("neutral");
+  });
+  it("findings that need action are marked in a word, by their worst level", () => {
+    expect(findingsMark("error", true)).toEqual({ level: "error", word: "Error" });
+    expect(findingsMark("warning", true)).toEqual({ level: "warning", word: "Warning" });
+    expect(findingsMark("info", false)).toBeNull();
+    expect(findingsMark("healthy", false)).toBeNull();
+    // "Module statistics unavailable" is a warning level without a finding: no mark.
+    expect(findingsMark("warning", false)).toBeNull();
   });
 });
