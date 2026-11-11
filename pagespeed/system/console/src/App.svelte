@@ -93,6 +93,24 @@
   const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
 
   let sidebarOpen = $state(false);
+
+  // At this width (a phone, or a desktop window zoomed to 200% and more) the
+  // sidebar is a drawer; the stylesheet below uses the same breakpoint.
+  // Closed, the drawer is off screen and inert: out of the tab order and
+  // hidden from assistive technology. Open, the page behind it is inert
+  // instead, so Tab stays in the drawer and the top bar.
+  const drawerMedia = window.matchMedia("(max-width: 768px)");
+  let drawerMode = $state(drawerMedia.matches);
+  onMount(() => {
+    const onChange = () => {
+      drawerMode = drawerMedia.matches;
+      if (!drawerMode) sidebarOpen = false;
+    };
+    drawerMedia.addEventListener("change", onChange);
+    return () => drawerMedia.removeEventListener("change", onChange);
+  });
+  let navEl = $state<HTMLElement>();
+  let menuToggle = $state<HTMLButtonElement>();
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
 
@@ -169,7 +187,12 @@
   }
 
   /** The skip link: the user asked for it, so the usual focus ring rules apply. */
-  function focusPageHeading(): void {
+  async function focusPageHeading(): Promise<void> {
+    if (sidebarOpen) {
+      // The page is inert behind an open drawer: close it first.
+      sidebarOpen = false;
+      await tick();
+    }
     pageHeading()?.focus();
   }
 
@@ -181,8 +204,29 @@
     heading.focus();
   }
 
-  function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
+  /** Opens the drawer with the focus on the current page's link. */
+  async function openDrawer(): Promise<void> {
+    sidebarOpen = true;
+    await tick();
+    const link = navEl?.querySelector<HTMLElement>("a[aria-current='page']") ?? navEl?.querySelector<HTMLElement>("a");
+    link?.focus();
+  }
+
+  /**
+   * Closes the drawer. A focus that was inside it, or that a tap on the
+   * backdrop has just taken away, goes back to the menu button, not nowhere.
+   */
+  function closeDrawer(): void {
+    if (!sidebarOpen) return;
+    const active = document.activeElement;
+    const stranded = active === null || active === document.body || (navEl?.contains(active) ?? false);
+    sidebarOpen = false;
+    if (stranded) menuToggle?.focus();
+  }
+
+  function toggleSidebar(): void {
+    if (sidebarOpen) closeDrawer();
+    else void openDrawer();
   }
 
   const shortcuts = new ShortcutReader();
@@ -197,6 +241,12 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (helpOpen) return; // the dialog handles its own keys
+    if (e.key === "Escape" && drawerMode && sidebarOpen) {
+      e.preventDefault();
+      sidebarOpen = false;
+      menuToggle?.focus();
+      return;
+    }
     const action = shortcuts.read(
       { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, editable: isEditable(e.target) },
       Date.now(),
@@ -233,6 +283,7 @@
       aria-label="Toggle menu"
       aria-expanded={sidebarOpen}
       aria-controls="console-nav"
+      bind:this={menuToggle}
     >
       <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
@@ -276,7 +327,14 @@
   </header>
 
   <!-- Sidebar -->
-  <nav class="sidebar" class:open={sidebarOpen} id="console-nav" aria-label="Console pages">
+  <nav
+    class="sidebar"
+    class:open={sidebarOpen}
+    id="console-nav"
+    aria-label="Console pages"
+    inert={drawerMode && !sidebarOpen}
+    bind:this={navEl}
+  >
     <div class="drawer-scope">
       <span class="drawer-chip">{scope.isGlobal ? "Whole server" : scope.host || "This host"}</span>
       {#if scope.isGlobal}
@@ -300,7 +358,7 @@
               aria-current={active ? "page" : undefined}
               aria-keyshortcuts={hint ?? undefined}
               aria-describedby={off ? `nav-off-${route.path.slice(2).replace(/\W+/g, "-")}` : undefined}
-              onclick={() => (sidebarOpen = false)}
+              onclick={closeDrawer}
             >{route.label}</a>
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
             {#if off}
@@ -312,7 +370,7 @@
         <!-- Pages the server renders itself: plain same-tab anchors, no hash route. -->
         {#each SERVER_PAGE_LINKS.filter((l) => l.group === group.id) as link (link.leaf)}
           <li class="nav-row">
-            <a class="nav-item" href={serverPageHref(api.basePath, link.leaf)} onclick={() => (sidebarOpen = false)}>{link.label}</a>
+            <a class="nav-item" href={serverPageHref(api.basePath, link.leaf)} onclick={closeDrawer}>{link.label}</a>
           </li>
         {/each}
       </ul>
@@ -321,11 +379,11 @@
 
   <!-- Backdrop for mobile sidebar -->
   {#if sidebarOpen}
-    <div class="backdrop" onclick={() => (sidebarOpen = false)} role="presentation"></div>
+    <div class="backdrop" onclick={closeDrawer} role="presentation"></div>
   {/if}
 
   <!-- Main content -->
-  <main class="content" id="main" tabindex="-1">
+  <main class="content" id="main" tabindex="-1" inert={drawerMode && sidebarOpen}>
     <ConnectionBanner />
     {#if lensHost !== null && router.currentRoute.hostAware !== true}
       <p class="lens-note" data-testid="lens-note">
@@ -713,7 +771,6 @@
       width: var(--ps-sidebar-width);
       z-index: 20;
       transform: translateX(-100%);
-      transition: transform 0.2s ease;
     }
 
     .topbar-lens {
@@ -753,6 +810,13 @@
       top: var(--ps-topbar-height);
       background: rgba(0, 0, 0, 0.3);
       z-index: 15;
+    }
+  }
+
+  /* The drawer slides only for a reader who has not asked for less motion. */
+  @media (max-width: 768px) and (prefers-reduced-motion: no-preference) {
+    .sidebar {
+      transition: transform 0.2s ease;
     }
   }
 
