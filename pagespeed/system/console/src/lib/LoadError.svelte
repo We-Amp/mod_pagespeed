@@ -80,41 +80,23 @@
 </div>
 
 <style>
-  /* Layout only, until the shared notice styles cover it. Text stays in
-     --ps-text; the colour is on the left border. */
+  /* The frame, the colours and the spacing between children are the shared
+     .notice classes; only what is this component's own is here. */
   .load-error {
-    max-width: var(--ps-card-max);
     margin: var(--ps-space-md) 0;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-left: 3px solid var(--ps-error);
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-bg-secondary);
-    color: var(--ps-text);
-    overflow-wrap: anywhere;
   }
 
-  .load-error p {
-    margin: 0;
+  /* The title reads at body size; the rest keeps the notice's small text. */
+  .load-error .notice-title {
+    font-size: var(--ps-font-size-base);
   }
 
-  .notice-title {
-    font-weight: 600;
-  }
-
-  .load-error-cause,
-  .load-error-details {
-    margin-top: var(--ps-space-xs);
-    font-size: var(--ps-font-size-sm);
-  }
-
-  .load-error .load-error-actions {
+  /* A button and a link side by side. */
+  .load-error-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--ps-space-md);
-    margin-top: var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
   }
 
   .load-error-actions a {
