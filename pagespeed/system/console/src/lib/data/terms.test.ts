@@ -38,12 +38,20 @@ function sourceFiles(dir: string): string[] {
  */
 const QUOTED_LOG_LINE = /export const VOLUME_GENERATION_TEMPLATE =[\s\S]*?;\n/;
 
+/** The text with every match of a pattern removed, again until none is left. */
+function stripAll(text: string, pattern: RegExp): string {
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(pattern, "");
+  } while (text !== previous);
+  return text;
+}
+
 /** A file's copy: its text without comments, so only what can reach the page is read. */
 function copyOf(path: string): string {
-  return readFileSync(path, "utf8")
-    .replace(QUOTED_LOG_LINE, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
+  const text = readFileSync(path, "utf8").replace(QUOTED_LOG_LINE, "");
+  return stripAll(stripAll(text, /<!--[\s\S]*?-->/g), /\/\*[\s\S]*?\*\//g)
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/\s\/\/ .*$/gm, "");
 }

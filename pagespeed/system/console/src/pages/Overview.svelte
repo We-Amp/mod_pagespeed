@@ -640,8 +640,9 @@
   .cards {
     display: grid;
     /* The cards share the full width in equal columns; more cards, more
-       columns. */
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-card-min)), 1fr));
+       columns. A card is never narrower than its by-type table needs
+       (five columns of figures, also in a wide system font). */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
     gap: var(--ps-space-md);
     /* The two cards are of a size: they share one height. */
   }
