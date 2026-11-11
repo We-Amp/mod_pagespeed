@@ -17,6 +17,7 @@
   // never silently added together, plus a live chart accumulated from the
   // poll this page already runs.
   import { usePolling } from "$lib/api/polling.svelte";
+  import LoadError from "$lib/LoadError.svelte";
   import { isConnectionFailure } from "$lib/api/connection";
   import { ApiError } from "$lib/api/client";
   import type { StatsResponse } from "$lib/api/types";
@@ -263,9 +264,12 @@
             </div>
           {/if}
         {:else if moduleError}
-          <p class="error" role="alert" data-testid="savings-module-error">
-            Could not read the module statistics: {moduleError.message}
-          </p>
+          <LoadError
+            error={moduleError}
+            noun="the module statistics"
+            onretry={() => poll.refresh()}
+            testid="savings-module-error"
+          />
         {/if}
         <p class="more"><a href="#/statistics">All statistics</a></p>
       </section>
@@ -659,7 +663,6 @@
   }
   .more a { color: var(--ps-primary); }
   .loading { color: var(--ps-text-secondary); }
-  .error { color: var(--ps-error); }
   .since {
     margin: var(--ps-space-xs) 0 0;
     font-size: var(--ps-font-size-xs);

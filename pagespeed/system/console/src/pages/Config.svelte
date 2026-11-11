@@ -32,10 +32,12 @@
   ];
 
   async function fetchConfig() {
+    // A failure on screen stays until the answer arrives: the notice, and
+    // the focus on its "Try again", survive the retry.
     loading = true;
-    error = null;
     try {
       data = await api.getConfig();
+      error = null;
       updatedAt = Date.now();
     } catch (err) {
       if (isUnavailable(err)) off = true;
@@ -74,10 +76,10 @@
 
   {#if off}
     <UnavailableCard testid="config-unavailable" />
-  {:else if loading && !data}
-    <p class="loading">Loading configuration...</p>
   {:else if error}
     <LoadError {error} noun="the configuration" onretry={fetchConfig} />
+  {:else if loading && !data}
+    <p class="loading">Loading configuration...</p>
   {:else if configText}
     {#if hasEffectiveConfig}
       <Tabs

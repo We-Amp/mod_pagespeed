@@ -9,7 +9,9 @@
   // (role="alert"), with a way to ask again and the transport message folded
   // away. A failed refresh above data already on screen is RefreshNotice's
   // job (polite).
+  import { tick } from "svelte";
   import { DOCS_URL } from "$lib/UnavailableCard.svelte";
+  import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { describeLoadError } from "$lib/utils/load-error";
 
   let {
@@ -29,9 +31,11 @@
 
   let text = $derived(describeLoadError(error, noun));
   let trying = $state(false);
+  let button = $state<HTMLButtonElement | null>(null);
 
   async function retry() {
     if (trying || onretry === null) return;
+    const pressed = button;
     trying = true;
     try {
       await onretry();
@@ -40,15 +44,28 @@
     } finally {
       trying = false;
     }
+    await tick();
+    // The read worked and the page replaced this notice: the button that had
+    // the focus is gone. Hand the focus to the page's heading, as after a
+    // navigation, unless the user has moved it elsewhere meanwhile.
+    if (pressed === null || pressed.isConnected) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const heading =
+      document.querySelector<HTMLElement>("main [data-page-focus]") ?? document.querySelector<HTMLElement>("main h1");
+    if (heading === null) return;
+    if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+    markProgrammaticFocus(heading);
+    heading.focus();
   }
 </script>
 
-<div class="notice notice--error load-error" role="alert" data-testid={testid}>
+<div class="notice notice-error load-error" role="alert" data-testid={testid}>
   <p class="notice-title">{text.title}</p>
-  <p class="notice-body">{text.cause}</p>
-  <p class="notice-actions">
+  <p class="load-error-cause">{text.cause}</p>
+  <p class="load-error-actions">
     {#if onretry !== null}
-      <button type="button" class="btn btn-secondary" aria-disabled={trying} onclick={retry}>
+      <button bind:this={button} type="button" class="btn btn-secondary" aria-disabled={trying} onclick={retry}>
         {trying ? "Trying again..." : "Try again"}
       </button>
     {/if}
@@ -85,13 +102,13 @@
     font-weight: 600;
   }
 
-  .notice-body,
+  .load-error-cause,
   .load-error-details {
     margin-top: var(--ps-space-xs);
     font-size: var(--ps-font-size-sm);
   }
 
-  .load-error .notice-actions {
+  .load-error .load-error-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -100,7 +117,7 @@
     font-size: var(--ps-font-size-sm);
   }
 
-  .notice-actions a {
+  .load-error-actions a {
     color: var(--ps-primary);
   }
 

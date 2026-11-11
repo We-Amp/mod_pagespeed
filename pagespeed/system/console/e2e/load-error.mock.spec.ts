@@ -21,7 +21,7 @@ const unknownPage = (leaf: string): Reply => ({ status: 404, body: { error: `Unk
 const SERVER_ERROR: Reply = { status: 500, body: { error: "boom" } };
 
 const NOT_FOUND = "The server does not know this view.";
-const SERVER = "The server reported an error while answering.";
+const SERVER = "The server, or a proxy in front of it, reported an error while answering.";
 
 interface Case {
   name: string;
@@ -173,6 +173,19 @@ const CASES: Case[] = [
     testid: "module-error",
     loaded: (page) => page.getByTestId("module-bytes-saved"),
   },
+  {
+    name: "Savings, module card",
+    admin: "pagespeed_admin",
+    hash: "#/savings",
+    leaf: "stats_json",
+    failure: unknownPage("stats_json"),
+    recovered: F.STATS_VHOST,
+    title: "Could not load the module statistics.",
+    cause: NOT_FOUND,
+    raw: "HTTP 404: Unknown admin page: stats_json",
+    testid: "savings-module-error",
+    loaded: (page) => page.getByRole("link", { name: "All statistics" }),
+  },
 ];
 
 function repliesFor(c: Case, responder: Responder): Partial<Record<Leaf, Responder>> {
@@ -205,7 +218,7 @@ for (const c of CASES) {
     await expect(notice).toBeVisible();
     await expect(notice).toHaveRole("alert");
     await expect(notice.locator(".notice-title")).toHaveText(c.title);
-    await expect(notice.locator(".notice-body")).toContainText(c.cause);
+    await expect(notice.locator(".load-error-cause")).toContainText(c.cause);
     await expect(notice.getByRole("link", { name: "About the admin console" })).toHaveAttribute("href", DOCS);
 
     // The transport message is folded away, not the page's text.
@@ -222,22 +235,41 @@ for (const c of CASES) {
     await expect.poll(() => mock.calls(c.leaf)).toBeGreaterThan(before);
     await expect(c.loaded(page)).toBeVisible();
     await expect(page.getByTestId(c.testid ?? "load-error")).toHaveCount(0);
+    // The button is gone with the notice: the focus goes to the page's heading, not to the top of the document.
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   });
 }
 
-test("Try again that fails again keeps the explanation", async ({ page }) => {
-  await page.clock.install();
-  const mock = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), stats_json: unknownPage("stats_json") });
-  await openConsole(page, "pagespeed_admin", "#/statistics");
-  const notice = page.getByTestId("load-error");
-  await expect(notice).toBeVisible();
-  const before = mock.calls("stats_json");
-  const button = notice.getByRole("button", { name: "Try again" });
-  await button.click();
-  await expect.poll(() => mock.calls("stats_json")).toBeGreaterThan(before);
-  await expect(notice.locator(".notice-title")).toHaveText("Could not load the statistics.");
-  await expect(button).toBeVisible();
-  await expect(button).toBeFocused();
+for (const c of [
+  { name: "Statistics", hash: "#/statistics", leaf: "stats_json" as Leaf, title: "Could not load the statistics." },
+  // Configuration reads once, not through the poller: the notice must stay mounted while it asks again.
+  { name: "Configuration", hash: "#/configuration", leaf: "config" as Leaf, title: "Could not load the configuration." },
+]) {
+  test(`${c.name}: Try again that fails again keeps the explanation and the focus`, async ({ page }) => {
+    await page.clock.install();
+    const mock = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), [c.leaf]: SERVER_ERROR });
+    await openConsole(page, "pagespeed_admin", c.hash);
+    const notice = page.getByTestId("load-error");
+    await expect(notice).toBeVisible();
+    const before = mock.calls(c.leaf);
+    const button = notice.getByRole("button", { name: "Try again" });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => mock.calls(c.leaf)).toBeGreaterThan(before);
+    await expect(notice.locator(".notice-title")).toHaveText(c.title);
+    await expect(button).toBeVisible();
+    await expect(button).toBeFocused();
+  });
+}
+
+test("a read that wants a sign-in says so", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    histograms: { status: 401, body: { error: "authorization required" } },
+  });
+  await openConsole(page, "pagespeed_admin", "#/histograms");
+  await expect(page.getByTestId("load-error").locator(".load-error-cause")).toContainText("may need a sign-in");
+  expect(await textOutsideDetails(page)).not.toMatch(/HTTP \d{3}/);
 });
 
 test("a refused read names the refusal", async ({ page }) => {
@@ -249,7 +281,7 @@ test("a refused read names the refusal", async ({ page }) => {
   await openConsole(page, "pagespeed_admin", "#/histograms");
   const notice = page.getByTestId("load-error");
   await expect(notice.locator(".notice-title")).toHaveText("Could not load the histograms.");
-  await expect(notice.locator(".notice-body")).toContainText("The server refused this request.");
+  await expect(notice.locator(".load-error-cause")).toContainText("The server refused this request.");
   expect(await textOutsideDetails(page)).not.toMatch(/HTTP \d{3}/);
 });
 

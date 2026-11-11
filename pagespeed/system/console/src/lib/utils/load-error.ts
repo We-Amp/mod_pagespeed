@@ -8,7 +8,15 @@
  */
 
 /** Why the read failed, as far as the answer tells. */
-export type LoadErrorKind = "no-answer" | "not-found" | "refused" | "rejected" | "server" | "unreadable" | "other";
+export type LoadErrorKind =
+  | "no-answer"
+  | "not-found"
+  | "unauthorized"
+  | "refused"
+  | "rejected"
+  | "server"
+  | "unreadable"
+  | "other";
 
 export interface LoadErrorText {
   kind: LoadErrorKind;
@@ -52,7 +60,8 @@ export function loadErrorKind(error: unknown): LoadErrorKind {
   const status = loadErrorStatus(error);
   if (status === null) return "other";
   if (status === 404) return "not-found";
-  if (status === 401 || status === 403) return "refused";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "refused";
   if (status >= 500 && status <= 599) return "server";
   if (status >= 400 && status <= 499) return "rejected";
   // An answer that arrived but could not be read as the expected data.
@@ -64,9 +73,10 @@ const CAUSES: Record<LoadErrorKind, string> = {
   "no-answer": "The server did not answer. It may be stopped or restarting, or the connection to it is down.",
   "not-found":
     "The server does not know this view. The module on this server may be older than this console, or the view is not served at this address.",
+  unauthorized: "The server refused this request. This view may need a sign-in, or be restricted for this address.",
   refused: "The server refused this request. Access to the admin pages may be restricted for this address or this view.",
   rejected: "The server did not accept this request.",
-  server: "The server reported an error while answering. Its error log may say why.",
+  server: "The server, or a proxy in front of it, reported an error while answering. The web server's error log may say why.",
   unreadable:
     "The server answered, but not with the data this view expects. Something between this console and the server may have changed the answer.",
   other: "Something went wrong while loading. The technical details have the message.",

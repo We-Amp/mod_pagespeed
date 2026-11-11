@@ -28,7 +28,7 @@ describe("loadErrorStatus", () => {
 describe("loadErrorKind", () => {
   it.each([
     [404, "not-found"],
-    [401, "refused"],
+    [401, "unauthorized"],
     [403, "refused"],
     [400, "rejected"],
     [410, "rejected"],
