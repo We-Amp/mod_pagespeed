@@ -254,10 +254,13 @@
                             {#each cohort.layers as layer}
                               <div class="layer" style="--depth: {layer.depth}">
                                 <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
-                                <span class="layer-label">{layer.label}</span>
-                                {#if layer.role}
-                                  <span class="layer-role">{formatRole(layer.role)}</span>
-                                {/if}
+                                <!-- The level mark stays beside its layer's name when the row wraps. -->
+                                <span class="layer-name">
+                                  <span class="layer-label">{layer.label}</span>
+                                  {#if layer.role}
+                                    <span class="layer-role">{formatRole(layer.role)}</span>
+                                  {/if}
+                                </span>
                                 {#if layer.prefix}
                                   <span class="layer-prefix">{layer.prefix}</span>
                                 {/if}
@@ -275,10 +278,13 @@
                       {#each layers as layer}
                         <div class="layer" style="--depth: {layer.depth}">
                           <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
-                          <span class="layer-label">{layer.label}</span>
-                          {#if layer.role}
-                            <span class="layer-role">{formatRole(layer.role)}</span>
-                          {/if}
+                          <!-- The level mark stays beside its layer's name when the row wraps. -->
+                          <span class="layer-name">
+                            <span class="layer-label">{layer.label}</span>
+                            {#if layer.role}
+                              <span class="layer-role">{formatRole(layer.role)}</span>
+                            {/if}
+                          </span>
                           {#if layer.prefix}
                             <span class="layer-prefix">{layer.prefix}</span>
                           {/if}
@@ -527,12 +533,6 @@
     width: 100%;
   }
 
-  .form-input:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
-
   .purge-all-row {
     padding-top: var(--ps-space-sm);
     border-top: 1px solid var(--ps-border-light);
@@ -657,10 +657,14 @@
     gap: 0;
   }
 
+  /* A layer's parts share a line where they fit. Where they do not (a
+     narrow or zoomed window), they wrap: the statistic's name moves under
+     the layer's name instead of being cut off at the card's edge. */
   .layer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--ps-space-sm);
+    gap: 0 var(--ps-space-sm);
     padding: var(--ps-space-sm) var(--ps-space-md);
     padding-left: calc(var(--ps-space-md) + var(--depth, 0) * var(--ps-space-lg));
     font-size: var(--ps-font-size-sm);
@@ -706,9 +710,18 @@
     flex-shrink: 0;
   }
 
+  .layer-name {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-sm);
+    min-width: 0;
+  }
+
   .layer-label {
+    min-width: 0;
     font-weight: 500;
     color: var(--ps-text);
+    overflow-wrap: anywhere;
   }
 
   .layer-role {
@@ -718,6 +731,7 @@
     background: var(--ps-primary-light);
     padding: 1px 6px;
     border-radius: 999px;
+    flex-shrink: 0;
   }
 
   .layer-prefix {
@@ -725,6 +739,8 @@
     color: var(--ps-text-secondary);
     font-family: var(--ps-font-mono);
     margin-left: auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   /* ---- Cohort grid (Property Cache) ---- */

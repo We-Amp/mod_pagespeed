@@ -233,8 +233,15 @@
   let findingsEl = $state<HTMLElement | null>(null);
   function showFindings(event: MouseEvent): void {
     event.preventDefault();
-    findingsEl?.scrollIntoView({ block: "start" });
-    findingsEl?.focus({ preventScroll: true });
+    const el = findingsEl;
+    if (el === null) return;
+    el.scrollIntoView({ block: "start" });
+    // The findings take the focus for this jump only: once the focus moves
+    // on they are plain content again, so a click on a finding's text (to
+    // select it) does not focus them.
+    el.tabIndex = -1;
+    el.addEventListener("blur", () => el.removeAttribute("tabindex"), { once: true });
+    el.focus({ preventScroll: true });
   }
 </script>
 
@@ -419,7 +426,7 @@
     <!-- "Why is this URL not optimized?" starts here, on every console. -->
     <InspectUrlForm />
 
-    <div class="findings-anchor" bind:this={findingsEl} tabindex="-1" data-testid="findings-anchor">
+    <div class="findings-anchor" bind:this={findingsEl} data-testid="findings-anchor">
       <FindingsPanel
         findings={alerts}
         {acknowledged}
@@ -600,6 +607,14 @@
      clear of the top bar. */
   .findings-anchor {
     scroll-margin-top: calc(var(--ps-topbar-height) + var(--ps-space-md));
+  }
+
+  /* Focus lands here only from the count's link, by keyboard or pointer:
+     the ring shows where the link went. */
+  .findings-anchor:focus {
+    outline: 2px solid var(--ps-primary);
+    outline-offset: 2px;
+    border-radius: var(--ps-border-radius-lg);
   }
 
   /* A paragraph in a card keeps the card's rhythm. */

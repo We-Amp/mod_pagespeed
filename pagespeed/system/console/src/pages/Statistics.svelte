@@ -220,12 +220,6 @@
 </div>
 
 <style>
-  .search-input:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
-
   .toggle {
     color: var(--ps-text-secondary);
     user-select: none;

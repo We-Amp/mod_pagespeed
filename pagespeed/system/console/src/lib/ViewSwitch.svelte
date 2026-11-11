@@ -48,6 +48,12 @@
     color: var(--ps-text);
     background: var(--ps-surface-hover);
   }
+  /* The strip scrolls sideways, so it clips what its items draw outside
+     its padding box, and an item's last 2 px lie over the strip's rule:
+     the focus ring is drawn inside the item, clear of that rule, whole. */
+  .view-link:focus-visible {
+    outline-offset: -4px;
+  }
   .view-link.current {
     color: var(--ps-primary);
     border-bottom-color: var(--ps-primary);
