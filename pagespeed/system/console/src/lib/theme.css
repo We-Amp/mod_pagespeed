@@ -791,7 +791,8 @@ p.note {
 }
 
 /* A short label on the top bar's band (the console's scope): a light
- * tint over the band, in the band's text colour. */
+ * tint over the band, in the band's text colour. A long host name is cut
+ * short with an ellipsis; the whole name stays its text and its title. */
 .topbar-chip {
   padding: 2px var(--ps-space-sm);
   border-radius: 999px;
@@ -800,7 +801,7 @@ p.note {
   font-size: var(--ps-font-size-xs);
   font-weight: 600;
   white-space: nowrap;
-  flex-shrink: 0;
+  max-width: 14rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

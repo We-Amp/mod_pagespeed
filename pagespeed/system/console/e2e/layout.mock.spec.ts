@@ -118,6 +118,7 @@ test.describe("the top bar's spacing", () => {
     { width: 769, hash: "#/overview" },
     { width: 769, hash: "#/statistics?lens=www.example.test" },
     { width: 880, hash: "#/statistics?lens=www.example.test" },
+    { width: 901, hash: "#/statistics?lens=www.example.test" },
     { width: 960, hash: "#/statistics?lens=www.example.test" },
   ];
   for (const { width, hash } of NARROW) {
@@ -154,6 +155,26 @@ test.describe("the top bar's spacing", () => {
       const chip = page.locator(".topbar-chip");
       expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       expect((await box(select)).width).toBeCloseTo(wide, 0);
+    });
+  }
+
+  for (const width of [1440, 769, 480]) {
+    test(`a long host name is cut short in the scope chip, not past the bar, at ${width} px`, async ({ page }) => {
+      const host = `${"a-very-long-virtual-host-name-".repeat(2)}for-testing.example.test:8080`;
+      await page.setViewportSize({ width, height: 800 });
+      await mockAdmin(page, "pagespeed_admin", {
+        ...perHostReplies(),
+        config: F.ok({ config: "", effective_config: "", scope: "vhost", host }),
+      });
+      await openConsole(page, "pagespeed_admin", "#/overview");
+      await pageReady(page);
+      const chip = page.getByTestId("console-scope");
+      await expect(chip).toHaveAttribute("title", host);
+      await expect(chip).toHaveText(`Scope: ${host}`);
+      expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth), "the chip is ellipsised").toBe(true);
+      const help = await box(page.locator(".shortcuts-button"));
+      expect(help.right, "the shortcuts button stays inside the window").toBeLessThanOrEqual(width);
+      expect(await noHorizontalScroll(page)).toBe(true);
     });
   }
 });

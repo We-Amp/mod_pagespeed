@@ -439,8 +439,11 @@
      console label with the shortcuts button, the host lens) sit
      --ps-space-md apart, items within a group --ps-space-sm, and the bar's
      side padding is the content's, so their edges line up. */
+  /* min-width: the bar never widens the page; its parts give way (the
+     scope chip first) instead. */
   .topbar {
     grid-area: topbar;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: var(--ps-space-md);
