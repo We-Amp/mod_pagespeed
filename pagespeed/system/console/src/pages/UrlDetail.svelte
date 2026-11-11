@@ -63,6 +63,8 @@
     logsHrefFor,
     moduleLookup,
     urlReasons,
+    urlVerdict,
+    wayBack,
     wholeServerLine,
   } from "$lib/utils/url-inspect";
   import type { CacheEntryResponse } from "$lib/api/types";
@@ -82,6 +84,11 @@
   const { api, scope } = useConsole();
   const key = parseDetailKey(router.params);
   const shown = key === null ? "" : displayUrl(key);
+  // Where the reader came from, as it was when this page opened; kept in
+  // this history entry, so returning here with Back keeps the same way back.
+  const cameFrom: string = history.state?.urlBack ?? router.previous;
+  history.replaceState({ ...history.state, urlBack: cameFrom }, "");
+  let back = $derived(wayBack(cameFrom, scope.isGlobal));
   // Every content-leaf image on this page (previews and the diff) loads
   // through this one limiter: never more than the module's two slots.
   const previewLimiter = createLimiter(PREVIEW_CONCURRENCY);
@@ -99,10 +106,10 @@
   //   refreshing;
   // - the module runs one cache lookup at a time: a busy answer keeps the
   //   last one, and an answer that cannot change (an original URL, another
-  //   host's URL) is not asked for again.
+  //   host's URL, which is a refusal) is not asked for again.
   let optimizerRefusal: Error | null = null;
   let lastLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
-  let settledLookup: Promise<CacheEntryResponse> | undefined;
+  let finalLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
 
   const poll = usePolling(
     () => {
@@ -117,7 +124,7 @@
         api.daemonHealth(),
         refusal !== null ? Promise.reject(refusal) : api.daemonCacheAlternates(key),
         refusal !== null ? Promise.reject(refusal) : api.daemonCooldowns(),
-        settledLookup ?? api.getCacheEntry(shown),
+        finalLookup === undefined ? api.getCacheEntry(shown) : null,
       ] as const).then((results) => {
         const alternates = results[1];
         if (alternates.status === "rejected" && isBusyAnswer(alternates.reason))
@@ -129,10 +136,10 @@
         ) {
           optimizerRefusal = alternates.reason;
         }
-        const lookup = results[3];
+        const lookup = finalLookup ?? (results[3] as PromiseSettledResult<CacheEntryResponse>);
         const busy = lookup.status === "rejected" && lookup.reason instanceof Error && isBusyAnswer(lookup.reason);
         if (!busy) lastLookup = lookup;
-        if (lookup.status === "fulfilled" && lookupIsFinal(moduleLookup(lookup).kind)) settledLookup = Promise.resolve(lookup.value);
+        if (lookupIsFinal(moduleLookup(lookup).kind)) finalLookup = lookup;
         updatedAt = Date.now();
         return { health: results[0], alternates, cooldowns: results[2], lookup: lastLookup ?? lookup };
       });
@@ -194,11 +201,6 @@
       : null,
   );
   let reasons = $derived(urlReasons(cooldown ?? listedCooldown));
-  // The reasons follow whenever nothing here shows the URL optimized: no
-  // optimized variant from the optimizer, no current result from the module.
-  let reasonsShown = $derived(
-    (altData === null || status === null || status === "original-only") && lookup.kind !== "current",
-  );
   let perVhost = $derived(errorCode(altError) === "whole_server_console_only");
   // A server without an optimizer: an ordinary state, on either console.
   let noOptimizer = $derived(
@@ -210,6 +212,27 @@
     altData !== null || (altError !== null && !perVhost && !noOptimizer && !isUnavailable(altError)),
   );
   let wholeServer = $derived(wholeServerLine(noOptimizer));
+  let notInIndex = $derived(errorCode(altError) === "not_in_index");
+  let verdict = $derived(
+    urlVerdict({
+      record: altData === null ? null : { rows, status },
+      notInIndex,
+      access:
+        altData !== null || notInIndex
+          ? "read"
+          : noOptimizer
+            ? "none"
+            : perVhost
+              ? "not-here"
+              : ["not-answering", "did-not-answer"].includes(optimizerAbsence(altError) ?? "")
+                ? "not-answering"
+                : "unreadable",
+      cooldown: cooldown ?? listedCooldown,
+      lookup,
+    }),
+  );
+  // The reasons follow whenever the verdict is not "Optimized".
+  let reasonsShown = $derived(verdict.word !== "Optimized.");
   // This URL's page on the whole-server console (null when the admin path is renamed).
   let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
@@ -237,6 +260,7 @@
 </script>
 
 <div class="page">
+  <p class="note"><a href={back.href} data-testid="url-back">Back to {back.label}</a></p>
   <PageHeader
     title="URL Detail"
     updatedAt={updatedAt}
@@ -271,6 +295,13 @@
     <p class="loading">Looking up this URL...</p>
   {:else if poll.data}
     <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
+    <!-- The answer first, in words; the evidence follows. -->
+    <p
+      class="health-strip"
+      class:health-strip-ok={verdict.word === "Optimized."}
+      class:health-strip-info={verdict.word === "Not optimized yet."}
+      data-testid="url-verdict"
+    ><strong>{verdict.word}</strong>{verdict.text}</p>
     {#if altData}
       {@render optimizerRecord()}
     {:else if altError && !perVhost && !noOptimizer}
@@ -384,7 +415,7 @@
       </div>
     </div>
 
-    {#if cooldown}
+    {#if cooldown && verdict.word !== "Not optimized yet."}
       <p class="notice notice-warning cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 

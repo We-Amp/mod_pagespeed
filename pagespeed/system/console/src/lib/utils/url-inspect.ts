@@ -13,7 +13,13 @@
 import { ApiError } from "$lib/api/client";
 import type { CacheEntryKey, CacheEntryResponse, DaemonCooldownEntry } from "$lib/api/types";
 import { DOCS, WEBSITE_HOST } from "$lib/data/product-facts-console";
+import { routes } from "$lib/routes";
+import { parseHash } from "./hash-route";
 import { cooldownReasonLabel, errorCode, NO_OPTIMIZER_CONFIGURED } from "./daemon";
+import { formatBytes, formatSpan } from "./format";
+import { formatSavingsPercent, qualityTier } from "./quality";
+import type { VariantRow } from "./url-detail";
+import { isOptimizedVariant, type UrlStatus } from "./url-status";
 import { detailHref, displayUrl, entryKeyFromAbsoluteUrl } from "./urls-api";
 
 // ── The pasted URL ───────────────────────────────────────────────────
@@ -52,6 +58,20 @@ export function inspectHrefForLink(href: string): string | null {
   return key === null || key.host === WEBSITE_HOST ? null : detailHref(key);
 }
 
+/**
+ * The way back from a URL's page: the address the reader came from, with
+ * the view it had (a list's page and filter, a Logs search), when that was
+ * another page of the console; otherwise the page it lives under on this
+ * console (URLs, or Overview on a per-host console).
+ */
+export function wayBack(previous: string, isGlobal: boolean): { href: string; label: string } {
+  const path = parseHash(previous || "#/").path;
+  const from = path === "#/urls/detail" ? undefined : routes.find((r) => r.path === path);
+  const route = from ?? routes.find((r) => r.path === (isGlobal ? "#/urls" : "#/overview"));
+  // Both fallbacks are routes of the table.
+  return { href: from ? previous : route!.path, label: route!.title ?? route!.label };
+}
+
 // ── The module's half ────────────────────────────────────────────────
 
 export type ModuleLookupKind = "current" | "not-current" | "original-url" | "other-host" | "no-answer";
@@ -60,6 +80,8 @@ export interface ModuleLookup {
   kind: ModuleLookupKind;
   /** One sentence for the operator. */
   text: string;
+  /** What a current result says it did: an optimized rewrite, the original kept, or nothing (null). */
+  outcome?: "optimized" | "kept" | null;
 }
 
 const LOOKUP_TEXT: Record<ModuleLookupKind, string> = {
@@ -90,10 +112,27 @@ export function moduleLookup(settled: PromiseSettledResult<CacheEntryResponse> |
   const body: unknown = settled.value;
   const value = body !== null && typeof body === "object" ? (body as CacheEntryResponse).value : undefined;
   if (typeof value !== "string") return lookup("no-answer");
-  if (/cache_ok:\s*true/.test(value)) return lookup("current");
-  if (/cache_ok:\s*false/.test(value)) return lookup("not-current");
+  // Anchored to its own line: the key line above it carries the URL itself.
+  if (/^cache_ok:\s*true$/m.test(value)) return { ...lookup("current"), outcome: lookupOutcome(value) };
+  if (/^cache_ok:\s*false$/m.test(value)) return lookup("not-current");
   if (/unable to decode resource/i.test(value)) return lookup("original-url");
   return lookup("no-answer");
+}
+
+/**
+ * What a current result's partitions say (their text dump, two-space
+ * indented): a partition with its own rewritten `url` is an optimized
+ * result; one marked `optimizable: false` is the original kept. A result
+ * without partitions, or one that says neither, says nothing either way.
+ * An `input`'s url is indented deeper and never counts.
+ */
+function lookupOutcome(value: string): "optimized" | "kept" | null {
+  let outcome: "optimized" | "kept" | null = null;
+  for (const [, body] of value.matchAll(/partition \{\n([\s\S]*?)\n\}/g)) {
+    if (/^ {2}optimizable: false/m.test(body)) outcome ??= "kept";
+    else if (/^ {2}url: "/m.test(body)) return "optimized";
+  }
+  return outcome;
 }
 
 /** An answer that cannot change while the page is open: asking again would only repeat it. */
@@ -109,14 +148,101 @@ export function cooldownFor(cooldowns: readonly DaemonCooldownEntry[], key: Cach
   return null;
 }
 
-/** "In cooldown (Processing), 42 s remaining." A missing reason or time is left out, never guessed. */
+/** "In cooldown (Processing), 2 min remaining." A missing reason or time is left out, never guessed. */
 export function cooldownText(entry: DaemonCooldownEntry): string {
   const reason = cooldownReasonLabel(entry.reason);
   const remaining =
     typeof entry.remaining_seconds === "number" && Number.isFinite(entry.remaining_seconds)
-      ? `, ${Math.max(0, Math.round(entry.remaining_seconds))} s remaining`
+      ? `, ${formatSpan(Math.round(entry.remaining_seconds))} remaining`
       : "";
   return `In cooldown${reason !== null ? ` (${reason})` : ""}${remaining}.`;
+}
+
+// ── The verdict ──────────────────────────────────────────────────────
+
+/** The verdict in a word or two; the page styles and tests by it. */
+export type UrlVerdictWord = "Optimized." | "Not optimized yet." | "Not optimized." | "Unknown.";
+
+export interface UrlVerdict {
+  word: UrlVerdictWord;
+  /** The sentence that backs the word. */
+  text: string;
+}
+
+/**
+ * The optimizer's record as this page could read it: read (held or "not
+ * in its index"), no optimizer configured, refused on a per-host console,
+ * not answering, or otherwise unreadable (too old, not supported, failed).
+ */
+export type RecordAccess = "read" | "none" | "not-here" | "not-answering" | "unreadable";
+
+export interface UrlVerdictInput {
+  /** The optimizer's record: its variants and their status; null when it sent none. */
+  record: { rows: readonly VariantRow[]; status: UrlStatus | null } | null;
+  /** The optimizer answered that it holds nothing for the URL. */
+  notInIndex: boolean;
+  access: RecordAccess;
+  cooldown: DaemonCooldownEntry | null;
+  lookup: ModuleLookup;
+}
+
+/** " Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality." */
+function servedText(rows: readonly VariantRow[]): string {
+  // The most-served optimized variant stands for what browsers get.
+  let best: VariantRow | null = null;
+  for (const row of rows) {
+    if (row.isSentinel || !isOptimizedVariant(row.raw) || row.size === null || !row.originalSize) continue;
+    if (best === null || row.hits > best.hits) best = row;
+  }
+  // No saving to name when the variant is no smaller.
+  if (best === null || best.size === null || best.originalSize === null || best.size >= best.originalSize) return "";
+  const f = best.format === "original" ? best.encoding : best.format;
+  // A re-encode in the origin's own format goes to every browser.
+  const name = f === "webp" ? "WebP" : f === "avif" || f === "svg" ? f.toUpperCase() : f === "gzip" || f === "brotli" ? f : "";
+  const q = best.quality === null ? "" : ` Visual score ${best.quality.toFixed(1)}, ${qualityTier(best.quality)} quality.`;
+  return ` Browsers${name === "" ? "" : ` that accept ${name}`} get ${formatBytes(best.size)} instead of ${formatBytes(best.originalSize)} (${formatSavingsPercent(best.originalSize, best.size)}).${q}`;
+}
+
+const UNREADABLE = "The optimizer's record could not be read.";
+
+/**
+ * Whether this URL is optimized, in one plain line, from what the page
+ * already read: the optimizer's record, its cooldown list and the
+ * module's lookup. It never claims more than they show: optimized only on
+ * an optimized variant or an optimized module result; "not yet" only when
+ * the optimizer's record was read (or there is none to read); otherwise
+ * unknown, with the reason.
+ */
+export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
+  const { record, cooldown, lookup, access } = input;
+  const status = record?.status ?? null;
+  const say = (word: UrlVerdictWord, text: string): UrlVerdict => ({ word, text: ` ${text}` });
+  if (status === "complete" || status === "partial" || status === "revalidating")
+    return { word: "Optimized.", text: servedText(record!.rows) };
+  if (lookup.outcome === "optimized") return say("Optimized.", "The module's result is optimized.");
+  if (cooldown !== null) return say("Not optimized yet.", cooldownText(cooldown));
+  if (lookup.outcome === "kept") return say("Not optimized.", "The module tried it and kept the original.");
+  // A variant without its content class is one whose metadata could not be read: no evidence either way.
+  if (record !== null)
+    return record.rows.some((r) => !r.isSentinel && r.typeClass === "")
+      ? say("Unknown.", UNREADABLE)
+      : say("Not optimized yet.", "The optimizer holds no optimized variant of it.");
+  if (input.notInIndex) return say("Not optimized yet.", "The optimizer has no record of it.");
+  if (access === "none" && lookup.kind === "not-current") return say("Not optimized yet.", LOOKUP_TEXT["not-current"]);
+  return say(
+    "Unknown.",
+    access === "not-here"
+      ? "The optimizer's record is on the whole-server console."
+      : access === "not-answering"
+        ? "The optimizer is not answering."
+        : access === "unreadable"
+          ? UNREADABLE
+          : lookup.kind === "original-url"
+            ? "The module's lookup answers only for rewritten URLs, and no optimizer is configured."
+            : lookup.kind === "current"
+              ? "The module's result does not say."
+              : LOOKUP_TEXT[lookup.kind === "other-host" ? "other-host" : "no-answer"],
+  );
 }
 
 /**

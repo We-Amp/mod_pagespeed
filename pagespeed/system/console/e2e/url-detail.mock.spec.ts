@@ -169,6 +169,7 @@ test("an unreachable daemon renders the shared empty state", async ({ page }) =>
   await expect(state).toContainText("The optimizer is configured but not answering.");
   // The transport's words stay out of the page.
   await expect(state).not.toContainText(/HTTP \d{3}|daemon_|unreachable/);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Unknown. The optimizer is not answering.");
 });
 
 test("a garbage alternates reply shows no NaN or undefined", async ({ page }) => {
@@ -281,13 +282,35 @@ test("per-vhost console: the module's half is the answer, with one line on what 
   expect(admin.calls("message_history")).toBe(0);
 });
 
-test("a URL the module holds a current result for is not listed with reasons it is not optimized", async ({ page }) => {
-  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+test("a URL the module holds an optimized result for is not listed with reasons it is not optimized", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OPTIMIZED) });
   await openConsole(page, "pagespeed_admin", DETAIL_HASH);
   await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Optimized. The module's result is optimized.");
   await expect(page.getByTestId("url-module-lookup")).toHaveText("The module holds a current rewrite result for this URL.");
   await expect(page.getByTestId("url-reasons")).toHaveCount(0);
   await expect(page.getByTestId("url-detail-per-vhost")).toBeVisible();
+});
+
+test("a current module result proves nothing by itself: kept says not optimized, a silent one says unknown", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_KEPT) });
+  await openConsole(page, "pagespeed_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Not optimized. The module tried it and kept the original.");
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+  await page.reload();
+  await ready(page);
+  // On a per-host console the optimizer's record is out of reach: say so, with the way there.
+  const verdict = page.getByTestId("url-verdict");
+  await expect(verdict).toHaveText("Unknown. The optimizer's record is on the whole-server console.");
+  // The line below the answer links there.
+  await expect(page.getByRole("link", { name: "whole-server console" })).toHaveAttribute(
+    "href",
+    /pagespeed_global_admin\/#\/urls\/detail\?url=%2Fhero\.png/,
+  );
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
 });
 
 test("a per-vhost 403 that arrives before the scope is known is final; the module's half keeps refreshing", async ({ page }) => {
@@ -314,6 +337,9 @@ test("a server without an optimizer: the module's answer is the whole answer, wi
   });
   await openConsole(page, "pagespeed_admin", CSS_HASH);
   await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText(
+    "Unknown. The module's lookup answers only for rewritten URLs, and no optimizer is configured.",
+  );
   await expect(page.getByTestId("url-module-lookup")).toContainText("This is an original URL");
   await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
   await expect(page.getByTestId("url-detail-per-vhost")).toHaveText(
@@ -365,7 +391,7 @@ test("a busy module lookup keeps the last answer", async ({ page }) => {
   let busy = false;
   const admin = await mockAdmin(page, "pagespeed_admin", {
     ...F.allReplies(),
-    cache: (_n, request) => (request.url.searchParams.has("url") ? (busy ? F.BUSY : F.LOOKUP_CURRENT) : F.CACHE_STRUCTURE),
+    cache: (_n, request) => (request.url.searchParams.has("url") ? (busy ? F.BUSY : F.LOOKUP_OPTIMIZED) : F.CACHE_STRUCTURE),
   });
   await openConsole(page, "pagespeed_admin", DETAIL_HASH);
   await ready(page);
@@ -451,4 +477,88 @@ test("the Cache lookup result links to the detail view with path, host and schem
   await page.getByRole("button", { name: "Lookup" }).click();
   const link = page.getByRole("link", { name: "Inspect in the optimizer's URL index" });
   await expect(link).toHaveAttribute("href", DETAIL_HASH);
+});
+
+test("the answer comes first, in one plain line, before the evidence", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...globalDetail(F.ALTERNATES_HERO), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
+  await ready(page);
+  const verdict = page.getByTestId("url-verdict");
+  await expect(verdict).toHaveText(
+    "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality.",
+  );
+  await expect(verdict).toHaveClass(/health-strip-ok/);
+  const top = async (testid: string) => (await page.getByTestId(testid).boundingBox())?.y ?? 0;
+  expect(await top("url-verdict")).toBeLessThan(await top("variants-table"));
+  expect(await top("url-verdict")).toBeLessThan(await top("url-module"));
+});
+
+test("not optimized yet: no record, or a cooldown said in minutes; the banner does not repeat it", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...globalDetail(F.ALTERNATES_NOT_IN_INDEX), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_global_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Not optimized yet. The optimizer has no record of it.");
+
+  const hero = F.ALTERNATES_HERO.body as { alternates: unknown[] };
+  await mockAdmin(
+    page,
+    "pagespeed_global_admin",
+    globalDetail(F.ok({ ...hero, alternates: hero.alternates.slice(0, 1), cooldown: { reason: "processing", remaining_seconds: 125 } })),
+  );
+  await page.reload();
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText(
+    "Not optimized yet. In cooldown (Processing), 2 min remaining.",
+  );
+  await expect(page.getByTestId("url-detail-status")).toHaveText("Original only");
+  await expect(page.getByTestId("url-detail-cooldown")).toHaveCount(0);
+});
+
+test("another host's URL: the verdict is unknown, and the module is asked once while the page is open", async ({ page }) => {
+  // Per host, the record is out of reach first; the reason is that, not the lookup.
+  const admin = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OTHER_HOST) });
+  await openConsole(page, "pagespeed_admin", "#/urls/detail?url=%2Fa.css&host=other.example.test&scheme=https");
+  await ready(page);
+  await expect(page.getByTestId("url-verdict")).toHaveText("Unknown. The optimizer's record is on the whole-server console.");
+  expect(admin.calls("cache")).toBe(1);
+  for (let i = 0; i < 2; i++) {
+    const health = admin.calls("v1/daemon/health");
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect.poll(() => admin.calls("v1/daemon/health")).toBeGreaterThan(health);
+  }
+  expect(admin.calls("cache")).toBe(1);
+  await expect(page.getByTestId("url-module-lookup")).toHaveText("This URL belongs to another host; that host's console answers for it.");
+});
+
+test("opened directly, the way back is the page the URL lives under on this console", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.ALTERNATES_HERO));
+  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-back")).toHaveText(/Back to URLs/);
+  await expect(page.getByTestId("url-back")).toHaveAttribute("href", "#/urls");
+
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByRole("link", { name: "Back to Overview" })).toHaveAttribute("href", "#/overview");
+});
+
+test("from a log search, the way back returns to the same search, also after Back from another page", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  const logs = `#/logs?source=module&level=debug&${CSS_LOGS}`;
+  await openConsole(page, "pagespeed_admin", logs);
+  await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+  await page.evaluate((hash) => (window.location.hash = hash), CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-back")).toHaveText(/Back to Logs/);
+  await expect(page.getByTestId("url-back")).toHaveAttribute("href", logs);
+  // Away to Overview and Back: the way back is still the search it came from.
+  await page.evaluate(() => (window.location.hash = "#/overview"));
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await page.goBack();
+  await ready(page);
+  await expect(page.getByTestId("url-back")).toHaveAttribute("href", logs);
+  await page.getByTestId("url-back").click();
+  await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe(logs);
 });

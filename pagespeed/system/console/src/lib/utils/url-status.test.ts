@@ -29,8 +29,19 @@ describe("computeUrlStatus", () => {
       ]),
     ).toBe("revalidating");
   });
-  it("is original-only with exactly one non-sentinel alternate", () => {
+  it("is original-only while no alternate is an optimized one", () => {
     expect(computeUrlStatus([alt({})])).toBe("original-only");
+    expect(computeUrlStatus([alt({}), alt({ alternate_id: 1, viewport: "mobile" })])).toBe("original-only");
+  });
+  it("one optimized variant beside the original's sentinel is not original-only", () => {
+    expect(
+      computeUrlStatus([{ is_sentinel: true, sentinel_name: "original_content" }, alt({ alternate_id: 9, format: "webp" })]),
+    ).toBe("partial");
+  });
+  it("counts what the optimizer's worker wrote: a same-format re-encode beside the front end's original", () => {
+    expect(computeUrlStatus([alt({ flags: 0 }), alt({ alternate_id: 1, format: "jpeg", flags: 2 })])).toBe("partial");
+    expect(computeUrlStatus([alt({ flags: 2 })])).toBe("partial");
+    expect(computeUrlStatus([alt({ flags: 1 })])).toBe("original-only");
   });
   it("classifies image coverage: webp+avif complete, webp alone partial", () => {
     const base = [alt({}), alt({ alternate_id: 1, format: "webp" })];
