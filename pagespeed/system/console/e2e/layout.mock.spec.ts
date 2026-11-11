@@ -1334,7 +1334,9 @@ test.describe("focus rings inside a scrolling container", () => {
       for (let a = el.parentElement; a !== null; a = a.parentElement) {
         const cs = getComputedStyle(a);
         if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
-        const b = a.getBoundingClientRect();
+        // An ancestor clips at its padding box: what lies over its border is cut too.
+        const o = a.getBoundingClientRect();
+        const b = { left: o.left + a.clientLeft, top: o.top + a.clientTop, right: o.left + a.clientLeft + a.clientWidth, bottom: o.top + a.clientTop + a.clientHeight };
         // A side counts only where the ancestor clips along that axis.
         const x = cs.overflowX !== "visible" && (ring.left < b.left - 0.5 || ring.right > b.right + 0.5);
         const y = cs.overflowY !== "visible" && (ring.top < b.top - 0.5 || ring.bottom > b.bottom + 0.5);

@@ -197,6 +197,50 @@ for (const scheme of ["light", "dark"] as const) {
       expect(firstFill).not.toBe(await fillOf(page, split));
     });
 
+    test("focus on a filled item: the ring is the fill's text colour", async ({ page }) => {
+      // The ring of the current page's link and of the selected tab is
+      // drawn inside the item, on its fill: it is painted in the palette's
+      // text colour for that fill, the one pair sure to contrast.
+      const highlightText = async (): Promise<string> => {
+        const id = "forced-colours-probe";
+        await page.evaluate((id) => {
+          const probe = document.createElement("div");
+          probe.id = id;
+          probe.style.cssText =
+            "position:fixed;left:0;top:0;width:8px;height:8px;z-index:9999;forced-color-adjust:none;background:HighlightText";
+          document.body.append(probe);
+        }, id);
+        const colour = await fillOf(page, page.locator(`#${id}`));
+        await page.evaluate((id) => document.getElementById(id)!.remove(), id);
+        return colour;
+      };
+      // [page, the item, how far inside the item's edge the middle of its ring lies]
+      for (const [hash, item, inset] of [
+        ["#/overview", () => page.getByRole("navigation", { name: "Console pages" }).locator('a[aria-current="page"]'), 1],
+        ["#/caches", () => page.getByRole("tab", { selected: true }), 3],
+      ] as const) {
+        await open(page, scheme, hash);
+        const expected = await highlightText();
+        const el = item();
+        await expect(el).toHaveCount(1);
+        const fill = await fillOf(page, el);
+        expect(expected, "the palette's pair differs").not.toBe(fill);
+        // Reached with the keyboard.
+        await el.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await expect(el).toBeFocused();
+        const b = await box(el);
+        // The 2 px ring inside the item's top, bottom and trailing edges.
+        const { at } = await painted(page, await el.screenshot({ animations: "disabled" }), [
+          [b.width / 2, inset],
+          [b.width / 2, b.height - 1 - inset],
+          [b.width - 1 - inset, b.height / 2],
+        ]);
+        for (const [side, colour] of at.entries()) expect(colour, `${hash}, side ${side}`).toBe(expected);
+      }
+    });
+
     test("histogram: a bucket's bar is painted", async ({ page }) => {
       await open(page, scheme, "#/histograms");
       const bar = page.locator("main .bar-fill").first();

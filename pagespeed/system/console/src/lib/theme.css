@@ -820,10 +820,16 @@ table.reads-across {
     color: HighlightText !important;
   }
 
-  [aria-current="page"]:focus-visible,
-  [aria-selected="true"]:focus-visible,
+  /* A toggle's focus ring lies around it, on the page's surface. The
+   * ring of the current page or the selected tab is drawn inside the
+   * item, on its fill, so it takes the fill's own text colour. */
   [aria-pressed="true"]:focus-visible {
     outline-color: CanvasText;
+  }
+
+  [aria-current="page"]:focus-visible,
+  [aria-selected="true"]:focus-visible {
+    outline-color: HighlightText;
   }
 
   /* A bar that marks the current page (the sidebar's leading edge) is
