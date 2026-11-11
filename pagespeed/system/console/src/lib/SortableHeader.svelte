@@ -33,16 +33,7 @@
 </th>
 
 <style>
-  .sortable {
-    /* A wide table may set --ps-cell-pad-x on its frame to tighten the
-       step between columns; header and cells then still line up. */
-    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
-    border-bottom: 2px solid var(--ps-border);
-    font-weight: 600;
-    text-align: left;
-    white-space: nowrap;
-  }
-
+  /* The cell itself is a table.data header (theme.css). */
   .sortable.right {
     text-align: right;
   }

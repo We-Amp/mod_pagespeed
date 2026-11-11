@@ -132,8 +132,4 @@
     background: var(--ps-bg-secondary);
     color: var(--ps-text);
   }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
 </style>

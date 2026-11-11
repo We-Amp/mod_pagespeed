@@ -38,12 +38,12 @@
   <PageHeader title="About" />
 
   <section class="about-section" aria-labelledby="about-versions">
-    <h2 id="about-versions">Versions</h2>
+    <h2 class="section-title" id="about-versions">Versions</h2>
     <!-- The module and the console ship from one build, so their rows show
          the same stamp: two labels, one source. -->
     <dl class="info-grid">
       <div class="info-item">
-        <dt class="info-label metric-label">Module build</dt>
+        <dt class="metric-label">Module build</dt>
         <dd
           class="info-value metric-value mono-value num"
           class:dirty-value={dirty}
@@ -57,26 +57,26 @@
         </dd>
       </div>
       <div class="info-item">
-        <dt class="info-label metric-label">Optimizer</dt>
+        <dt class="metric-label">Optimizer</dt>
         <dd class="info-value metric-value mono-value num" data-testid="about-optimizer-version">
           {optimizerVersionText(optimizer)}
         </dd>
       </div>
       <div class="info-item">
-        <dt class="info-label metric-label">{PRODUCT_NAME} console build</dt>
+        <dt class="metric-label">{PRODUCT_NAME} console build</dt>
         <dd class="info-value metric-value mono-value num" data-testid="about-console-version">{appVersion}</dd>
       </div>
     </dl>
   </section>
 
   <section class="about-section" aria-labelledby="about-docs">
-    <h2 id="about-docs">Documentation</h2>
+    <h2 class="section-title" id="about-docs">Documentation</h2>
     <p><a href={DOCS_URL} target="_blank" rel="noopener noreferrer" class="legal-link">Admin console documentation</a></p>
   </section>
 
   <section class="about-section" aria-labelledby="about-old-console" data-testid="about-old-console">
-    <h2 id="about-old-console">Coming from the old console?</h2>
-    <p class="old-console-note">Two pages of the earlier admin console have a new place. The others kept their names.</p>
+    <h2 class="section-title" id="about-old-console">Coming from the old console?</h2>
+    <p class="note">Two pages of the earlier admin console have a new place. The others kept their names.</p>
     <dl class="old-console">
       {#each OLD_CONSOLE_PAGES as row (row.old)}
         <div class="old-console-row">
@@ -88,7 +88,7 @@
   </section>
 
   <section class="about-section" aria-labelledby="about-legal">
-    <h2 id="about-legal">Legal</h2>
+    <h2 class="section-title" id="about-legal">Legal</h2>
     <div class="legal-links">
       <a
         href={PRIVACY_URL}
@@ -115,30 +115,6 @@
     margin-bottom: var(--ps-space-xl);
   }
 
-  h2 {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    margin: 0 0 var(--ps-space-md) 0;
-    padding-bottom: var(--ps-space-xs);
-    border-bottom: 1px solid var(--ps-border);
-  }
-
-  .info-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ps-space-lg);
-  }
-
-  .info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .info-value {
-    overflow-wrap: anywhere;
-  }
-
   .dirty-value {
     color: var(--ps-warning-text);
   }
@@ -152,12 +128,6 @@
 
   dd {
     margin: 0;
-  }
-
-  .old-console-note {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
   }
 
   .old-console {

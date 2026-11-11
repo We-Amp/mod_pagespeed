@@ -594,7 +594,7 @@ test("the per-host console mutes the server-wide optimizer card and links on", a
   const note = page.getByTestId("optimizer-scope-note");
   await expect(note).toContainText("Server-wide numbers");
   await expect(note.locator("a")).toHaveAttribute("href", /pagespeed_global_admin\/#\/savings$/);
-  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
   await expect(page.getByTestId("savings-module-card").locator(".scope-chip")).toHaveCount(0);
   await expect(page.getByTestId("savings-optimizer-card").locator(".scope-chip")).toHaveText("whole server");
 });
@@ -609,7 +609,7 @@ for (const scheme of ["light", "dark"] as const) {
       await openConsole(page, "pagespeed_admin", "#/savings");
       const muted = page.getByTestId("savings-optimizer-card");
       const own = page.getByTestId("savings-module-card");
-      await expect(muted).toHaveClass(/card--muted/);
+      await expect(muted).toHaveClass(/card-muted/);
       await expect(muted).toHaveCSS("border-top-style", "dashed");
       await expect(own).toHaveCSS("border-top-style", "solid");
       if (scheme === "dark") {
@@ -746,14 +746,14 @@ test.describe("serve savings per host", () => {
     const own = page.getByTestId("savings-this-host");
     await expect(own).toContainText("static.example.com");
     await expect(own).toContainText("80%");
-    await expect(page.getByTestId("savings-optimizer-card")).not.toHaveClass(/card--muted/);
+    await expect(page.getByTestId("savings-optimizer-card")).not.toHaveClass(/card-muted/);
     await expect(page.getByTestId("host-lens")).toHaveCount(0);
   });
 
   test("a per-vhost console whose host the optimizer has no row for keeps the server-wide note", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), "v1/daemon/stats": F.OPT_STATS_PAGE_PRE_HOSTS });
     await openConsole(page, "pagespeed_admin", "#/savings");
-    await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+    await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
     await expect(page.getByTestId("optimizer-scope-note")).toBeVisible();
     await expect(page.getByTestId("savings-this-host")).toHaveCount(0);
   });
@@ -810,21 +810,21 @@ test("a per-vhost console shows the row the module marks, under that row's own n
   await expect(own).toContainText("Saved by the optimizer's cache for example.test");
   await expect(own).toContainText("75%");
   await expect(own).toContainText("4 responses");
-  await expect(page.getByTestId("savings-optimizer-card")).not.toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).not.toHaveClass(/card-muted/);
   await expect(page.getByTestId("savings-host-none")).toHaveCount(0);
 });
 
 test("a marked block without that row stays muted and names the site", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, "v1/daemon/stats": F.OPT_STATS_SITE_NO_ROW });
   await openConsole(page, "pagespeed_admin", "#/savings");
-  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
   await expect(page.getByTestId("savings-host-none")).toContainText("No serves recorded for example.test");
 });
 
 test("a block marked with no site stays muted and names none", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, "v1/daemon/stats": F.OPT_STATS_SITE_NONE });
   await openConsole(page, "pagespeed_admin", "#/savings");
-  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
   await expect(page.getByTestId("optimizer-scope-note")).toBeVisible();
   await expect(page.getByTestId("savings-this-host")).toHaveCount(0);
   await expect(page.getByTestId("savings-optimizer-card")).not.toContainText("www.example.test");
@@ -838,7 +838,7 @@ test("an unusable marker never falls back to matching the console's name", async
   });
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, "v1/daemon/stats": F.OPT_STATS_SITE_UNUSABLE });
   await openConsole(page, "pagespeed_admin", "#/savings");
-  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
   await expect(page.getByTestId("savings-this-host")).toHaveCount(0);
   await expect(page.locator("main img")).toHaveCount(0);
   expect(dialogs).toEqual([]);
@@ -847,7 +847,7 @@ test("an unusable marker never falls back to matching the console's name", async
 test("against a module that sends every site's rows, a per-vhost console matches by name only", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, "v1/daemon/stats": F.OPT_STATS_PAGE });
   await openConsole(page, "pagespeed_admin", "#/savings");
-  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card--muted/);
+  await expect(page.getByTestId("savings-optimizer-card")).toHaveClass(/card-muted/);
   await expect(page.getByTestId("savings-host-none")).toContainText("No serves recorded for www.example.test");
   await expect(page.getByTestId("savings-optimizer-card")).not.toContainText("static.example.com");
 });

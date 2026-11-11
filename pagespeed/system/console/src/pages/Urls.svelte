@@ -178,7 +178,7 @@
   </PageHeader>
 
   {#if lensHost !== null}
-    <p class="lens-scope" data-testid="urls-lens">{TERMS.hostFilter}: URLs of {lensHost} only.</p>
+    <p class="note" data-testid="urls-lens">{TERMS.hostFilter}: URLs of {lensHost} only.</p>
   {/if}
 
   <!-- A URL goes straight to its page: the list below shows one page of the index at a time. -->
@@ -190,7 +190,7 @@
     {#if errorCode(urlsError) === "whole_server_console_only"}
       <div class="empty-state" data-testid="urls-per-vhost">
         <p class="empty-title">Whole-server console only</p>
-        <p class="empty-description">
+        <p class="empty-detail">
           The URL index is shared by every virtual host on this server, so
           this per-host console does not show it.
           {#if globalHref !== null}
@@ -203,7 +203,7 @@
     {:else if urlsError instanceof ApiError && (urlsError.status === 404 || urlsError.status === 501)}
       <div class="empty-state" data-testid="urls-no-support">
         <p class="empty-title">The URL index is not available here</p>
-        <p class="empty-description">
+        <p class="empty-detail">
           {#if urlsError.status === 404}
             This module version cannot show the optimizer's cached-URL
             index; the rest of the console works as before.
@@ -219,7 +219,7 @@
     {:else if isDaemonUnavailable(urlsError)}
       <div class="empty-state" data-testid="urls-unreachable">
         <p class="empty-title">{optimizerUnavailableNote(urlsError).title}</p>
-        <p class="empty-description">{optimizerUnavailableNote(urlsError).detail}</p>
+        <p class="empty-detail">{optimizerUnavailableNote(urlsError).detail}</p>
       </div>
     {:else}
       <LoadError error={urlsError} noun="the URL list" onretry={() => poll.refresh()} />
@@ -228,15 +228,15 @@
     {#if pageCount === 0}
       <div class="empty-state" data-testid="urls-empty">
         <p class="empty-title">No URLs recorded yet</p>
-        <p class="empty-description">
+        <p class="empty-detail">
           The optimizer records URLs here as it optimizes them.
         </p>
       </div>
     {:else}
       <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="table-wrapper reads-across-container" role="region" aria-label="URL index" tabindex="0">
-        <table data-testid="urls-table" class="card-table reads-across">
+      <div class="table-frame reads-across-container" role="region" aria-label="URL index" tabindex="0">
+        <table data-testid="urls-table" class="data card-table reads-across">
           <thead>
             <tr>
               <SortableHeader label="URL" active={sort.key === "url"} ascending={sort.asc} onsort={() => onsort("url")} />
@@ -260,7 +260,7 @@
                 <td class="num" data-label="Variants">{formatCount(row.variants)}</td>
                 <td data-label="Cooldown">
                   {#if row.cooldown}
-                    <span class="cooldown-badge">{cooldownReasonLabel(row.cooldown.reason) ?? "In cooldown"}</span>
+                    <span class="badge badge-tint-warning">{cooldownReasonLabel(row.cooldown.reason) ?? "In cooldown"}</span>
                   {:else}
                     —
                   {/if}
@@ -271,7 +271,7 @@
         </table>
       </div>
       {#if rows.length === 0}
-        <p class="empty" data-testid="urls-no-match">No URLs on this page match the filter.</p>
+        <p class="muted no-match" data-testid="urls-no-match">No URLs on this page match the filter.</p>
       {/if}
       <div class="pager control-group" data-testid="urls-pager">
         <button class="btn btn-secondary" data-testid="urls-prev" disabled={offset === 0} onclick={() => goToPage(offset - URLS_PAGE_SIZE)}>Previous</button>
@@ -280,7 +280,7 @@
         </span>
         <button class="btn btn-secondary" data-testid="urls-next" disabled={!win.hasMore} onclick={() => goToPage(nextOffset)}>Next</button>
       </div>
-      <p class="section-note" data-testid="urls-filter-note">
+      <p class="note" data-testid="urls-filter-note">
         Filtering and sorting cover the current page of the index only.
       </p>
     {/if}
@@ -288,100 +288,14 @@
 </div>
 
 <style>
-  .lens-scope {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  .section-note {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  .table-wrapper {
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-  }
-
-  table {
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-    position: sticky;
-    top: 0;
-  }
-
-  th {
-    text-align: left;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
-  }
-
-  td {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  /* The URL cell is a row header for screen readers; it looks like a cell. */
-  tbody th {
-    font-weight: normal;
-    white-space: normal;
-    background: transparent;
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
-  tbody tr:hover {
-    background: var(--ps-surface-hover);
-  }
-
-  .empty {
-    text-align: center;
-    color: var(--ps-text-secondary);
+  .no-match {
     padding: var(--ps-space-md);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
-
-  .empty-state {
     text-align: center;
-    padding: var(--ps-space-xl) var(--ps-space-lg);
-    border: 1px dashed var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .empty-title {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-description {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-    line-height: 1.5;
   }
 
   .url-cell {
     font-family: var(--ps-font-mono);
-    font-weight: normal;
     word-break: break-all;
-    white-space: normal;
   }
 
   /* A URL keeps its own width up to a maximum and wraps within it, so the
@@ -410,20 +324,6 @@
   .url-note {
     color: var(--ps-text-secondary);
     font-size: var(--ps-font-size-xs);
-  }
-
-  td.num {
-    text-align: right;
-    font-family: var(--ps-font-mono);
-  }
-
-  .cooldown-badge {
-    display: inline-block;
-    padding: 1px var(--ps-space-sm);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-xs);
-    background: color-mix(in srgb, var(--ps-warning) 15%, var(--ps-bg));
-    color: var(--ps-warning-text);
   }
 
   .pager {

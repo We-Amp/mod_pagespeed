@@ -18,7 +18,7 @@ import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type Messag
 import { formatBytes, formatClock, formatCount, formatRelative } from "$lib/utils/format";
 import type { OptimizedCopyHitRate } from "$lib/utils/savings";
 import { serveSavingsView, type ServeSavingsTotal } from "$lib/utils/serve-savings";
-import { sinceLabel, type SinceLabel } from "$lib/utils/since";
+import { sinceLabel } from "$lib/utils/since";
 
 export type Fetched<T> = { ok: true; data: T } | { ok: false; error: Error };
 
@@ -349,14 +349,6 @@ export function overviewScopeLine(isGlobal: boolean, cfg: ConfigScope | null): s
   if (global) return "All virtual hosts (the whole server)";
   const host = cfg?.host ? ` (${cfg.host})` : "";
   return `This virtual host${host}: separate from other hosts only when per-virtual-host statistics are enabled`;
-}
-
-/** "Counters: module since 3 h · optimizer since 2 min": what the numbers on this page cover. */
-export function findingsStampText(moduleSince: SinceLabel | null, optimizerSince: SinceLabel | null): string {
-  const parts: string[] = [];
-  if (moduleSince !== null) parts.push(`module ${moduleSince.text}`);
-  if (optimizerSince !== null) parts.push(`optimizer ${optimizerSince.text}`);
-  return parts.length === 0 ? "" : `Counters: ${parts.join(" · ")}`;
 }
 
 /**

@@ -62,37 +62,29 @@ function mix(tint: string, percent: number, base: string): string {
   return `#${a.map((v, i) => Math.round(v * p + b[i] * (1 - p)).toString(16).padStart(2, "0")).join("")}`;
 }
 
-// Every category badge class (FormatBadge, QualityBadge, ContentClassBadge):
-// its text is the plain text token; the category colour lives on the 12%
-// color-mix tint over --ps-bg (and the border). The pairing must hold AA in
-// both schemes — a status token as the text colour did not (the tint is too
-// close to it in the light scheme).
-const BADGE_CLASSES = [
-  "format-webp",
-  "format-avif",
-  "format-jpeg",
-  "format-png",
-  "quality-good",
-  "quality-acceptable",
-  "quality-poor",
-  "class-photo",
-  "class-screenshot",
-  "class-illustration",
-  "class-noisy",
-] as const;
-const BADGE_TINTS: Record<(typeof BADGE_CLASSES)[number], string> = {
-  "format-webp": "--ps-primary",
-  "format-avif": "--ps-secondary",
-  "format-jpeg": "--ps-warning",
-  "format-png": "--ps-success",
-  "quality-good": "--ps-success",
-  "quality-acceptable": "--ps-warning",
-  "quality-poor": "--ps-error",
-  "class-photo": "--ps-warning",
-  "class-screenshot": "--ps-primary",
-  "class-illustration": "--ps-success",
-  "class-noisy": "--ps-error",
-};
+// Every tinted badge (FormatBadge, QualityBadge, ContentClassBadge, and the
+// pages' category and state tags): its text is the plain text token; the
+// colour lives on a 12% color-mix tint over the card (and on the border).
+// The pairing must hold AA in both schemes -- a status token as the text
+// colour did not (the tint is too close to it in the light scheme).
+const BADGE_TINTS = {
+  "badge-tint-primary": "--ps-primary",
+  "badge-tint-secondary": "--ps-secondary",
+  "badge-tint-ok": "--ps-success",
+  "badge-tint-warning": "--ps-warning",
+  "badge-tint-error": "--ps-error",
+} as const;
+const BADGE_CLASSES = Object.keys(BADGE_TINTS) as (keyof typeof BADGE_TINTS)[];
+// The filled badges: a state worth seeing from afar.
+const BADGE_SOLID = [".badge-solid-ok", ".badge-solid-warning", ".badge-solid-error"];
+
+/** The token a theme rule's property takes, from its block in theme.css. */
+function declaredToken(selector: string, property: string): string {
+  const block = new RegExp(`^\\${selector}\\s*\\{([^}]*)\\}`, "m").exec(css);
+  const token = block && new RegExp(`(?:^|[;\\s])${property}:\\s*var\\((--ps-[\\w-]+)\\)`).exec(block[1]);
+  expect(token, `${selector} ${property} token`).not.toBeNull();
+  return (token as RegExpExecArray)[1];
+}
 
 // --ps-muted-opacity per scheme: the first declaration is the light value,
 // the second the dark override.
@@ -211,8 +203,22 @@ describe("theme tokens", () => {
     it(`${scheme}: badge text passes AA on its colour-mix tint`, () => {
       for (const cls of BADGE_CLASSES) {
         const tint = BADGE_TINTS[cls];
-        const bg = mix(t[tint], 12, t["--ps-bg"]);
+        const bg = mix(t[tint], 12, t["--ps-surface"]);
         expect(contrastRatio(t["--ps-text"], bg), `.${cls}: --ps-text on 12% ${tint}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: a filled badge's text passes AA on its fill`, () => {
+      for (const cls of BADGE_SOLID) {
+        const [fg, bg] = [declaredToken(cls, "color"), declaredToken(cls, "background")];
+        expect(contrastRatio(t[fg], t[bg]), `${cls}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: a neutral or outlined badge's text passes AA where it sits`, () => {
+      const neutral = [declaredToken(".badge", "color"), declaredToken(".badge", "background")];
+      expect(contrastRatio(t[neutral[0]], t[neutral[1]]), ".badge").toBeGreaterThanOrEqual(AA);
+      const outline = declaredToken(".badge-outline-warning", "color");
+      for (const bg of SURFACES) {
+        expect(contrastRatio(t[outline], t[bg]), `.badge-outline-warning on ${bg}`).toBeGreaterThanOrEqual(AA);
       }
     });
   }
@@ -546,18 +552,21 @@ describe("components", () => {
   it("never hard-code a hex colour as a background colour: it must go through a theme token", () => {
     expect(offenders(/(^|[^-])background(-color)?:\s*#[0-9a-fA-F]{3,8}\b/m)).toEqual([]);
   });
-  it("gives every category badge class the plain text colour on its tint", () => {
-    // Binds the badge components to the pairings BADGE_TINTS checks above.
-    const found = new Set<string>();
-    for (const file of ["lib/FormatBadge.svelte", "lib/QualityBadge.svelte", "lib/ContentClassBadge.svelte"]) {
-      const css = readFileSync(join(SRC, file), "utf8");
-      for (const cls of BADGE_CLASSES) {
-        const block = new RegExp(`\\.${cls}(?:\\s*,\\s*\\.[\\w-]+)*\\s*\\{([^}]*)\\}`).exec(css);
-        if (block === null) continue; // another component's class
-        found.add(cls);
-        expect(block[1], `${file} .${cls}`).toContain("color: var(--ps-text);");
-      }
+  it("gives every tinted badge the plain text colour, its tint mixed over the card", () => {
+    // Binds the theme's tint classes to the pairings BADGE_TINTS checks above.
+    for (const cls of BADGE_CLASSES) {
+      const block = new RegExp(`^\\.${cls}\\s*\\{([^}]*)\\}`, "m").exec(css);
+      expect(block, cls).not.toBeNull();
+      const body = (block as RegExpExecArray)[1];
+      expect(body, cls).toContain("color: var(--ps-text);");
+      expect(body, cls).toContain(`color-mix(in srgb, var(${BADGE_TINTS[cls]}) 12%, var(--ps-surface))`);
     }
-    expect(found.size).toBe(BADGE_CLASSES.length); // no class silently dropped
+    // The badge components declare no colours of their own: they pick a tint.
+    for (const file of ["lib/FormatBadge.svelte", "lib/QualityBadge.svelte", "lib/ContentClassBadge.svelte"]) {
+      const source = readFileSync(join(SRC, file), "utf8");
+      expect(source, file).toMatch(/badge-tint-/);
+      const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(source)?.[1] ?? "";
+      expect(style, file).not.toMatch(/color-mix|(^|[^-])color:|border-color:/m);
+    }
   });
 });

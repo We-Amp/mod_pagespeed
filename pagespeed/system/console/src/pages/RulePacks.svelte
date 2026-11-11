@@ -45,8 +45,17 @@
     tailPackOptions,
     tailStatusText,
     withQuery,
+    type PackTone,
     type RulePacksView,
   } from "$lib/utils/rule-packs";
+
+  // A pack's state as a badge: a fill for the states that need a look.
+  const BADGE: Record<PackTone, string> = {
+    success: "badge-solid-ok",
+    warning: "badge-solid-warning",
+    error: "badge-solid-error",
+    neutral: "",
+  };
 
   const { api, scope, lens } = useConsole();
 
@@ -134,7 +143,7 @@
   >
   </PageHeader>
 
-  <p class="scope-note" data-testid="rp-scope-note">
+  <p class="note" data-testid="rp-scope-note">
     {#if scope.isGlobal}
       The rule packs of the whole-server configuration, and the decisions every virtual host logged.
     {:else}
@@ -153,8 +162,8 @@
     <RefreshNotice error={poll.error} />
 
     <section class="block" aria-labelledby="rp-config-heading" data-testid="rp-config">
-      <h2 id="rp-config-heading">Configuration</h2>
-      <div class="info-grid info-grid--panel">
+      <h2 class="section-title" id="rp-config-heading">Configuration</h2>
+      <div class="info-grid card">
         <div class="info-item">
           <span class="metric-label">Rule pack filter</span>
           <span class="metric-value" data-testid="rp-filter-enabled">{view.filterEnabled ? "on" : "off"}</span>
@@ -183,9 +192,9 @@
     </section>
 
     <section class="block" aria-labelledby="rp-packs-heading" data-testid="rp-packs">
-      <h2 id="rp-packs-heading">Packs</h2>
+      <h2 class="section-title" id="rp-packs-heading">Packs</h2>
       {#if view.vhosts.length > 0 && view.packs.length === 0}
-        <p class="source-note" data-testid="rp-per-vhost-only">
+        <p class="notice source-note" data-testid="rp-per-vhost-only">
           No rule pack is configured for the server as a whole; {view.vhosts.length === 1 ? "one virtual host configures its own" : `${view.vhosts.length} virtual hosts configure their own`}, listed below.
         </p>
       {:else if view.noneConfigured}
@@ -197,13 +206,13 @@
             : "RulePackFile is not set. Set it to a pack file and enable the rule pack filter to use rule packs."}
         />
       {:else if view.notLoadedYet}
-        <p class="source-note" data-testid="rp-not-loaded-yet">
+        <p class="notice source-note" data-testid="rp-not-loaded-yet">
           This server process has not read its rule pack {view.files.length === 1 ? "file" : "files"} yet. The
           packs appear here once it has; the page asks again every few seconds.
         </p>
       {/if}
       {#if view.overlapWarnings.length > 0}
-        <ul class="warnings" data-testid="rp-overlap-warnings" aria-label="Overlap warnings">
+        <ul class="notice notice-warning warnings" data-testid="rp-overlap-warnings" aria-label="Overlap warnings">
           {#each view.overlapWarnings as warning, i (i)}
             <li>{warning}</li>
           {/each}
@@ -212,22 +221,22 @@
       {#if view.packs.length > 0}
         <ol class="pack-list">
           {#each view.packs as pack, i (i)}
-            <li class="pack-card" data-testid="rp-pack" data-state={pack.rawState} data-pack-id={pack.id ?? ""}>
+            <li class="card pack-card" data-testid="rp-pack" data-state={pack.rawState} data-pack-id={pack.id ?? ""}>
               <div class="pack-head">
                 <span class="pack-pos">#{pack.position + 1}</span>
                 <span class="pack-id mono">{pack.id ?? "(no pack read)"}</span>
                 {#if pack.version}<span class="pack-version mono">{pack.version}</span>{/if}
-                <span class="state-badge tone-{pack.state.tone}" title={pack.state.explain}>{pack.state.label}</span>
+                <span class="badge state-badge {BADGE[pack.state.tone]}" title={pack.state.explain}>{pack.state.label}</span>
               </div>
               <p class="pack-file mono">{pack.file}</p>
               {#if pack.state.explain && pack.state.tone !== "success"}
                 <p class="pack-explain">{pack.state.explain}</p>
               {/if}
               {#if pack.lastError}
-                <p class="pack-error" data-testid="rp-pack-error">Last error: {pack.lastError}</p>
+                <p class="notice notice-error pack-error" data-testid="rp-pack-error">Last error: {pack.lastError}</p>
               {/if}
               {#if pack.warnings.length > 0}
-                <ul class="warnings" data-testid="rp-pack-warnings" aria-label="Warnings for {pack.id ?? pack.file}">
+                <ul class="notice notice-warning warnings" data-testid="rp-pack-warnings" aria-label="Warnings for {pack.id ?? pack.file}">
                   {#each pack.warnings as warning, w (w)}
                     <li>{warning}</li>
                   {/each}
@@ -257,27 +266,27 @@
 
     {#if view.vhosts.length > 0}
       <section class="block" aria-labelledby="rp-vhosts-heading" data-testid="rp-vhosts">
-        <h2 id="rp-vhosts-heading">Virtual hosts</h2>
+        <h2 class="section-title" id="rp-vhosts-heading">Virtual hosts</h2>
         <ul class="vhost-list">
           {#each view.vhosts as vhost, v (v)}
-            <li class="pack-card" data-testid="rp-vhost" data-host={vhost.host}>
+            <li class="card pack-card" data-testid="rp-vhost" data-host={vhost.host}>
               <div class="pack-head">
                 <span class="pack-id mono">{vhost.host}</span>
                 <span class="pack-version mono">{vhost.mode || "—"}</span>
-                <span class="state-badge tone-{vhost.filterEnabled ? 'success' : 'neutral'}">filter {vhost.filterEnabled ? "on" : "off"}</span>
-                {#if vhost.requireSigned}<span class="state-badge tone-neutral">signed packs only</span>{/if}
+                <span class="badge state-badge {vhost.filterEnabled ? BADGE.success : ''}">filter {vhost.filterEnabled ? "on" : "off"}</span>
+                {#if vhost.requireSigned}<span class="badge state-badge">signed packs only</span>{/if}
               </div>
               <ul class="vhost-packs">
                 {#each vhost.packs as pack, i (i)}
                   <li data-testid="rp-vhost-pack" data-state={pack.rawState} data-pack-id={pack.id ?? ""}>
                     <span class="pack-id mono">{pack.id ?? "(no pack read)"}</span>
                     {#if pack.version}<span class="pack-version mono">{pack.version}</span>{/if}
-                    <span class="state-badge tone-{pack.state.tone}" title={pack.state.explain}>{pack.state.label}</span>
+                    <span class="badge state-badge {BADGE[pack.state.tone]}" title={pack.state.explain}>{pack.state.label}</span>
                     <span class="mono pack-file">{pack.file}</span>
                     {#if pack.id !== null}
                       <button type="button" class="btn btn-secondary" onclick={() => openTailPack(pack.id ?? "")} data-testid="rp-vhost-log">Show decisions</button>
                     {/if}
-                    {#if pack.lastError}<p class="pack-error">Last error: {pack.lastError}</p>{/if}
+                    {#if pack.lastError}<p class="notice notice-error pack-error">Last error: {pack.lastError}</p>{/if}
                   </li>
                 {/each}
               </ul>
@@ -288,14 +297,14 @@
     {/if}
 
     <section class="block" aria-labelledby="rp-counters-heading" data-testid="rp-counters">
-      <h2 id="rp-counters-heading">Counters</h2>
+      <h2 class="section-title" id="rp-counters-heading">Counters</h2>
       {#if view.counters === null}
-        <p class="empty">This server reports no rule pack counters.</p>
+        <p class="muted">This server reports no rule pack counters.</p>
       {:else}
-        <p class="section-note">Counted across {scope.isGlobal ? "the server" : "the server (not per pack)"}; the decision log below breaks decisions down per pack.</p>
+        <p class="note">Counted across {scope.isGlobal ? "the server" : "the server (not per pack)"}; the decision log below breaks decisions down per pack.</p>
         <div class="tiles">
           {#each view.counters as counter (counter.name)}
-            <div class="tile" data-testid="rp-counter" data-counter={counter.name}>
+            <div class="card tile" data-testid="rp-counter" data-counter={counter.name}>
               <span class="metric-label mono">{counter.name.replace(/^rule_pack_/, "")}</span>
               <span class="metric-value num">{formatCount(counter.value)}</span>
             </div>
@@ -305,16 +314,16 @@
     </section>
 
     <section class="block" aria-labelledby="rp-tail-heading" data-testid="rp-tail">
-      <h2 id="rp-tail-heading">Decisions</h2>
-      <p class="section-note">
+      <h2 class="section-title" id="rp-tail-heading">Decisions</h2>
+      <p class="note">
         {#if view.log.date}The latest decisions of {view.log.date} (UTC), newest first{:else}The latest decisions, newest first{/if}{view.log.limit > 0 ? `, at most ${formatCount(view.log.limit)}` : ""}.
         <a href={rawHref} data-testid="rp-raw-log">Raw log</a>
       </p>
       {#if tailNote}
-        <p class="source-note" data-testid="rp-tail-note">{tailNote}</p>
+        <p class="notice source-note" data-testid="rp-tail-note">{tailNote}</p>
       {/if}
       {#if poll.error && pendingPack !== null && pendingPack !== tailPack}
-        <p class="source-note" data-testid="rp-tail-pending">
+        <p class="notice source-note" data-testid="rp-tail-pending">
           The log of pack {pendingPack} has not been read yet; the decisions below are still those of
           {tailPack ?? "the first pack"}.
         </p>
@@ -371,7 +380,7 @@
         </div>
       </div>
       {#if lensHost !== null}
-        <p class="section-note" data-testid="rp-lens">{TERMS.hostFilter}: decisions for {lensHost}.</p>
+        <p class="note" data-testid="rp-lens">{TERMS.hostFilter}: decisions for {lensHost}.</p>
       {/if}
 
       {#if tailRows.length === 0 && tailNote === null}
@@ -381,8 +390,8 @@
       {:else if shown.length > 0}
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="table-wrapper" role="region" aria-label="Decision log" tabindex="0">
-          <table data-testid="rp-decisions">
+        <div class="table-frame" role="region" aria-label="Decision log" tabindex="0">
+          <table class="data" data-testid="rp-decisions">
             <thead>
               <tr>
                 <th scope="col">Time (UTC)</th>
@@ -415,59 +424,22 @@
 </div>
 
 <style>
-  .scope-note,
-  .section-note,
-  .source-note {
+  .source-note,
+  .warnings,
+  .pack-error {
     margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
   }
 
-  .source-note {
-    padding: var(--ps-space-xs) var(--ps-space-sm);
-    border-left: 3px solid var(--ps-border);
-    background: var(--ps-bg-secondary);
-  }
-
-  .loading,
-  .empty {
-    color: var(--ps-text-secondary);
+  .warnings {
+    padding-left: 1.6em;
   }
 
   .block {
     margin-bottom: var(--ps-space-xl);
   }
 
-  h2 {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    margin: 0 0 var(--ps-space-md) 0;
-    padding-bottom: var(--ps-space-xs);
-    border-bottom: 1px solid var(--ps-border);
-  }
-
   .mono {
     font-family: var(--ps-font-mono);
-  }
-
-  .info-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ps-space-lg);
-  }
-
-  .info-grid--panel {
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
   }
 
   .info-wide {
@@ -481,14 +453,6 @@
     overflow-wrap: anywhere;
   }
 
-  .warnings {
-    margin: 0 0 var(--ps-space-sm);
-    padding: var(--ps-space-xs) var(--ps-space-sm) var(--ps-space-xs) 1.6em;
-    border-left: 3px solid var(--ps-warning);
-    background: var(--ps-bg-secondary);
-    font-size: var(--ps-font-size-sm);
-  }
-
   .pack-list {
     list-style: none;
     margin: 0;
@@ -496,14 +460,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-card-max)), 1fr));
     gap: var(--ps-space-md);
-  }
-
-  .pack-card {
-    min-width: 0;
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
   }
 
   .pack-head {
@@ -541,40 +497,9 @@
     color: var(--ps-text-secondary);
   }
 
-  .pack-error {
-    margin: 0 0 var(--ps-space-xs);
-    padding: var(--ps-space-xs) var(--ps-space-sm);
-    border-left: 3px solid var(--ps-error);
-    font-size: var(--ps-font-size-sm);
-    overflow-wrap: anywhere;
-  }
-
-  .state-badge {
+  /* In a pack's head the state sits at the far end. */
+  .pack-head .state-badge {
     margin-left: auto;
-    padding: 2px var(--ps-space-sm);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
-    font-weight: 700;
-  }
-
-  .tone-success {
-    background: var(--ps-success-text);
-    color: var(--ps-text-inverse);
-  }
-
-  .tone-warning {
-    background: var(--ps-warning);
-    color: var(--ps-warning-contrast-text);
-  }
-
-  .tone-error {
-    background: var(--ps-error);
-    color: var(--ps-text-inverse);
-  }
-
-  .tone-neutral {
-    background: var(--ps-bg-tertiary);
-    color: var(--ps-text-secondary);
   }
 
   .facts {
@@ -605,10 +530,6 @@
     flex-direction: column;
     gap: 2px;
     min-width: 9em;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-bg-secondary);
   }
 
   .controls {
@@ -621,42 +542,6 @@
 
   .count {
     font-size: var(--ps-font-size-xs);
-  }
-
-  .table-wrapper {
-    width: 0;
-    min-width: 100%;
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-  }
-
-  th {
-    text-align: left;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
-  }
-
-  td {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border-light);
-    vertical-align: top;
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
   }
 
   .nowrap {
