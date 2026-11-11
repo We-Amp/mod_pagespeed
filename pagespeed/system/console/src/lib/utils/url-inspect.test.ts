@@ -15,8 +15,14 @@ import {
   lookupIsFinal,
   moduleLookup,
   urlReasons,
+  urlVerdict,
+  wayBack,
+  type ModuleLookup,
+  type UrlVerdictInput,
   wholeServerLine,
 } from "./url-inspect";
+import { toVariantRows } from "./url-detail";
+import { computeUrlStatus } from "./url-status";
 
 const KEY = { url: "/img/hero.png?v=2", host: "www.example.test", scheme: "https" } as const;
 const fulfilled = <T>(value: T): PromiseSettledResult<T> => ({ status: "fulfilled", value });
@@ -121,6 +127,11 @@ describe("the optimizer's half", () => {
     expect(cooldownText({ remaining_seconds: -3 })).toBe("In cooldown, 0 s remaining.");
   });
 
+  it("says a long cooldown in minutes or hours, as the console's other sentences do", () => {
+    expect(cooldownText({ reason: "write_failure", remaining_seconds: 125 })).toBe("In cooldown (Write failed), 2 min remaining.");
+    expect(cooldownText({ remaining_seconds: 7300 })).toBe("In cooldown, 2 h remaining.");
+  });
+
   it("a page without the optimizer's record says what the whole-server console adds, or that there is no optimizer", () => {
     expect(wholeServerLine(false)).toEqual({ text: "The whole-server console adds the optimizer's record of this URL.", link: true });
     expect(wholeServerLine(true)).toEqual({
@@ -154,5 +165,167 @@ describe("the reasons", () => {
     expect(reasons[0]).toMatchObject({ id: "original-kept", evidence: "In cooldown (Processing), 42 s remaining." });
     expect(reasons).toHaveLength(4);
     expect(reasons.slice(1).every((r) => r.evidence === null)).toBe(true);
+  });
+});
+
+describe("the verdict", () => {
+  const variant = (over: Record<string, unknown>) => ({
+    is_sentinel: false, format: "original", encoding: "identity", content_type: "image", hit_count: 0, ...over,
+  });
+  const record = (alternates: Record<string, unknown>[]) => {
+    const rows = toVariantRows({ alternates });
+    return { rows, status: computeUrlStatus(rows.map((r) => r.raw)) };
+  };
+  const look = (kind: Parameters<typeof moduleLookup>[0] | ModuleLookup) =>
+    kind !== undefined && "kind" in kind ? kind : moduleLookup(kind);
+  const input = (over: Partial<Omit<UrlVerdictInput, "lookup">> & { lookup?: ModuleLookup }): UrlVerdictInput => ({
+    record: null, notInIndex: false, access: "read", cooldown: null, lookup: look(undefined), ...over,
+  });
+  const line = (over: Parameters<typeof input>[0]) => {
+    const v = urlVerdict(input(over));
+    const kind = { "Optimized.": "optimized", "Not optimized yet.": "not-yet", "Not optimized.": "kept", "Unknown.": "unknown" }[v.word];
+    return [kind, v.word + v.text];
+  };
+  const dump = (partitions: string) =>
+    moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: `Metadata cache key:k\ncache_ok:true\ncan_revalidate:false\n${partitions}\n` }));
+  const OPTIMIZED = dump('partitions:partition {\n  url: "https://www.example.test/a.css.pagespeed.cf.x.css"\n  input {\n    url: "https://www.example.test/a.css"\n  }\n}\n');
+  const KEPT = dump('partitions:partition {\n  optimizable: false\n  input {\n    url: "https://www.example.test/a.css"\n  }\n}\n');
+  const SILENT = dump("partitions is NULL");
+  const NOT_CURRENT = moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: "cache_ok:false\n" }));
+  const ORIGINAL = moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: "Unable to decode resource." }));
+  const OTHER_HOST = moduleLookup(rejected(new ApiError(403, "HTTP 403: URL belongs to another host; use that host's console")));
+
+  it("reads what a current module result did, never an input's url", () => {
+    expect(OPTIMIZED.outcome).toBe("optimized");
+    expect(KEPT.outcome).toBe("kept");
+    expect(SILENT.outcome).toBeNull();
+    expect(KEPT.kind).toBe("current");
+  });
+
+  it("a URL that spells cache_ok:true does not make a stale entry current", () => {
+    const stale = moduleLookup(
+      fulfilled<CacheEntryResponse>({
+        url: "",
+        value: 'Metadata cache key:rname/cf/https://www.example.test/x?cache_ok:true@_\ncache_ok:false\ncan_revalidate:false\npartitions:partition {\n  url: "https://www.example.test/x.pagespeed.cf.a.css"\n}\n',
+      }),
+    );
+    expect(stale.kind).toBe("not-current");
+    expect(line({ access: "none", lookup: stale })[0]).toBe("not-yet");
+  });
+
+  it("a variant whose metadata could not be read is no evidence either way", () => {
+    const fallback = record([variant({ size: 45210, flags: 0, content_type: "" })]);
+    expect(line({ record: fallback })).toEqual(["unknown", "Unknown. The optimizer's record could not be read."]);
+  });
+
+  it("a worker variant that is no smaller names no saving", () => {
+    const same = record([variant({ format: "jpeg", flags: 2, size: 45210, original_size: 45210, hit_count: 4 })]);
+    expect(line({ record: same })).toEqual(["optimized", "Optimized."]);
+  });
+
+  it("an optimized URL names what the most-served variant saves and how it looks", () => {
+    const hero = record([
+      variant({ size: 45210, original_size: 45210, hit_count: 128 }),
+      variant({ format: "webp", size: 30984, original_size: 45210, hit_count: 1042, ssimulacra2_score: 92.5 }),
+      variant({ format: "avif", size: 28120, original_size: 45210, hit_count: 88, ssimulacra2_score: 87.1 }),
+    ]);
+    expect(line({ record: hero })).toEqual([
+      "optimized",
+      "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality.",
+    ]);
+  });
+
+  it("the optimizer's real shape: the original is a sentinel, one variant alone is optimized", () => {
+    const real = record([
+      { alternate_id: 12, size: 45210, is_sentinel: true, sentinel_name: "original_content" },
+      variant({ format: "webp", size: 30984, original_size: 45210, hit_count: 13, ssimulacra2_score: 60 }),
+    ]);
+    expect(line({ record: real })[1]).toBe(
+      "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 60.0, acceptable quality.",
+    );
+  });
+
+  it("a re-encode in the origin's own format is optimized, and goes to every browser", () => {
+    const jpeg = record([
+      variant({ size: 45210, original_size: 45210, flags: 0, hit_count: 3 }),
+      variant({ format: "jpeg", flags: 2, size: 30984, original_size: 45210, hit_count: 9 }),
+    ]);
+    expect(jpeg.status).toBe("partial");
+    expect(line({ record: jpeg })[1]).toBe("Optimized. Browsers get 30.3 KB instead of 44.2 KB (-31.5%).");
+  });
+
+  it("a compressed text variant names its encoding; without sizes the word stands alone", () => {
+    const css = record([
+      variant({ content_type: "css", size: 9000, original_size: 9000 }),
+      variant({ content_type: "css", encoding: "brotli", size: 2000, original_size: 9000, hit_count: 5 }),
+    ]);
+    expect(line({ record: css })[1]).toBe("Optimized. Browsers that accept brotli get 1.95 KB instead of 8.79 KB (-77.8%).");
+    expect(line({ record: record([variant({ format: "avif" }), variant({ format: "webp" })]) })[1]).toBe("Optimized.");
+  });
+
+  it("the module's result is optimized only when it says so", () => {
+    expect(line({ access: "not-here", lookup: OPTIMIZED })).toEqual([
+      "optimized",
+      "Optimized. The module's result is optimized.",
+    ]);
+    expect(line({ access: "none", lookup: KEPT })).toEqual(["kept", "Not optimized. The module tried it and kept the original."]);
+    expect(line({ access: "none", lookup: SILENT })).toEqual([
+      "unknown",
+      "Unknown. The module's result does not say.",
+    ]);
+  });
+
+  it("a cooldown says why the URL waits, in the console's time words", () => {
+    expect(line({ notInIndex: true, cooldown: { reason: "processing", remaining_seconds: 125 } })).toEqual([
+      "not-yet",
+      "Not optimized yet. In cooldown (Processing), 2 min remaining.",
+    ]);
+  });
+
+
+  it("not yet: only when the optimizer's record was read, or there is no optimizer", () => {
+    expect(line({ record: record([variant({ size: 1 }), variant({ size: 2 })]) })).toEqual([
+      "not-yet",
+      "Not optimized yet. The optimizer holds no optimized variant of it.",
+    ]);
+    expect(line({ record: record([{ is_sentinel: true, sentinel_name: "content_hash" }]) })[1]).toBe(
+      "Not optimized yet. The optimizer holds no optimized variant of it.",
+    );
+    expect(line({ notInIndex: true, lookup: ORIGINAL })[1]).toBe("Not optimized yet. The optimizer has no record of it.");
+    expect(line({ access: "none", lookup: NOT_CURRENT })[1]).toBe(
+      "Not optimized yet. The module holds no current rewrite result for this URL.",
+    );
+  });
+
+  it("unknown always says why: the record out of reach here, or what the module could not say", () => {
+    expect(line({ access: "not-here", lookup: NOT_CURRENT })).toEqual([
+      "unknown",
+      "Unknown. The optimizer's record is on the whole-server console.",
+    ]);
+    expect(line({ access: "not-answering", lookup: NOT_CURRENT })[1]).toBe("Unknown. The optimizer is not answering.");
+    expect(line({ access: "unreadable", lookup: ORIGINAL })[1]).toBe("Unknown. The optimizer's record could not be read.");
+    expect(line({ access: "none", lookup: ORIGINAL })[1]).toBe(
+      "Unknown. The module's lookup answers only for rewritten URLs, and no optimizer is configured.",
+    );
+    expect(line({ access: "none", lookup: OTHER_HOST })[1]).toBe(
+      "Unknown. This URL belongs to another host; that host's console answers for it.",
+    );
+    expect(line({ access: "none" })[1]).toBe("Unknown. The module gave no lookup result.");
+  });
+});
+
+describe("the way back", () => {
+  it("returns to the page the reader came from, with its view", () => {
+    expect(wayBack("#/urls?offset=50&q=hero", true)).toEqual({ href: "#/urls?offset=50&q=hero", label: "URLs" });
+    expect(wayBack("#/logs?source=module&level=debug&q=x", false)).toEqual({ href: "#/logs?source=module&level=debug&q=x", label: "Logs" });
+    expect(wayBack("#/overview", false)).toEqual({ href: "#/overview", label: "Overview" });
+    expect(wayBack("#/optimizer", true)).toEqual({ href: "#/optimizer", label: "Optimizer status" });
+  });
+
+  it("opened directly, from another URL's page or an unknown address: the page it lives under on this console", () => {
+    for (const previous of ["", "#/urls/detail?url=%2Fa&host=a.test&scheme=https", "#/nowhere"]) {
+      expect(wayBack(previous, true)).toEqual({ href: "#/urls", label: "URLs" });
+      expect(wayBack(previous, false)).toEqual({ href: "#/overview", label: "Overview" });
+    }
   });
 });

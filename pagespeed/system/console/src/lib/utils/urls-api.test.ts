@@ -16,6 +16,8 @@ import {
   nextUrlSortState,
   pageWindow,
   parseDetailKey,
+  urlsViewFromParams,
+  urlsViewParams,
 } from "./urls-api";
 
 // The daemon's shape: `url` is the recorded path + query, never absolute.
@@ -278,5 +280,20 @@ describe("pageWindow", () => {
       hasMore: false,
     });
     expect(pageWindow(undefined, 0, 0).total).toBeNull();
+  });
+});
+
+describe("the list's view in the address", () => {
+  it("round-trips page and filter; defaults stay out of the address", () => {
+    const view = { offset: 50, q: "hero png" };
+    const params = urlsViewParams(view);
+    expect(params).toEqual({ offset: "50", q: "hero png" });
+    expect(urlsViewFromParams(new URLSearchParams(params as Record<string, string>))).toEqual(view);
+    expect(urlsViewParams(urlsViewFromParams(new URLSearchParams()))).toEqual({ offset: null, q: null });
+  });
+
+  it("a malformed offset is the first page", () => {
+    for (const offset of ["-3", "x", ""]) expect(urlsViewFromParams(new URLSearchParams({ offset })).offset).toBe(0);
+    expect(urlsViewFromParams(new URLSearchParams("offset=2.5")).offset).toBe(2);
   });
 });
