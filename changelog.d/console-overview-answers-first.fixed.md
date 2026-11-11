@@ -16,3 +16,7 @@
   after typing stops, table headers carry their scope and row headers name the
   row, the Savings tables are named, and small controls meet the 24 px target
   size. The accessibility checks now cover WCAG 2.2 AA.
+- **A paused admin console no longer claims to be connected.** With
+  auto-refresh off the top bar reads "Paused", after turning it back on it
+  reads "Checking…" until the server answers, and the outage banner says how
+  to try again instead of promising automatic retries.
