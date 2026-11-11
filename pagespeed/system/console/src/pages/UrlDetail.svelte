@@ -4,15 +4,27 @@
 -->
 
 <script lang="ts">
-  // URL Detail: what the optimizer holds for one cached entry (path + host
-  // + scheme) — its variants, their sizes/quality/freshness, and image
-  // previews. Hidden route, reached from the URLs page and from the Cache
-  // lookup. One composite poller (health for the version floor + the
-  // entry's alternates); allSettled never rejects, so a failed leaf shows
-  // its explanation instead of a stale-data notice — with one exception: a
-  // busy (429) alternates answer is rethrown so the poller's busy rule
-  // keeps the last view (the table and the previews stay) instead of
-  // blanking the page until the next poll.
+  // URL Detail: the answer to "what happened to this URL?" (path + host +
+  // scheme), on every console. Hidden route, reached from "Inspect a URL"
+  // on Overview and URLs, from the URLs list, a log line and the Cache
+  // lookup. The answer has two halves:
+  // - the optimizer's (whole-server console): the entry's variants, their
+  //   sizes/quality/freshness and image previews, or that it holds nothing,
+  //   and a cooldown;
+  // - the module's (every console): its cache lookup, a link to the log
+  //   entries that name the URL, and the usual reasons a URL is not
+  //   optimized.
+  // A per-host console shows the module's half as the answer and says in
+  // one line what the whole-server console adds.
+  //
+  // One composite poller (health for the version floor, the entry's
+  // alternates, the cooldown list and the module's lookup; the logs are
+  // linked, never read here);
+  // allSettled never rejects, so a failed leaf shows its explanation
+  // instead of a stale-data notice — with one exception: a busy (429)
+  // alternates answer is rethrown so the poller's busy rule keeps the last
+  // view (the table and the previews stay) instead of blanking the page
+  // until the next poll.
   import { usePolling } from "$lib/api/polling.svelte";
   import { isBusyAnswer } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
@@ -20,6 +32,7 @@
   import { ApiError, isUnavailable } from "$lib/api/client";
   import UnavailableCard from "$lib/UnavailableCard.svelte";
   import LoadError from "$lib/LoadError.svelte";
+  import InspectUrlForm from "$lib/InspectUrlForm.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import SortableHeader from "$lib/SortableHeader.svelte";
   import FormatBadge from "$lib/FormatBadge.svelte";
@@ -28,9 +41,10 @@
   import QueuedImage from "$lib/QueuedImage.svelte";
   import ImageDiff from "$lib/ImageDiff.svelte";
   import {
-    cooldownReasonLabel,
     errorCode,
     isDaemonUnavailable,
+    normalizeCooldowns,
+    optimizerAbsence,
     optimizerUnavailableNote,
     wholeServerConsoleOnlyError,
   } from "$lib/utils/daemon";
@@ -41,7 +55,17 @@
   import { findMatchingOriginal, formatSavingsPercent } from "$lib/utils/quality";
   import { createLimiter, PREVIEW_CONCURRENCY } from "$lib/utils/image-queue";
   import type { DiffMode } from "$lib/utils/image-diff";
-  import { displayUrl, globalConsoleUrlsHref, parseDetailKey } from "$lib/utils/urls-api";
+  import { detailHref, displayUrl, globalConsoleHref, parseDetailKey } from "$lib/utils/urls-api";
+  import {
+    cooldownFor,
+    cooldownText,
+    lookupIsFinal,
+    logsHrefFor,
+    moduleLookup,
+    urlReasons,
+    wholeServerLine,
+  } from "$lib/utils/url-inspect";
+  import type { CacheEntryResponse } from "$lib/api/types";
   import {
     DEFAULT_VARIANT_SORT,
     nextVariantSortState,
@@ -68,46 +92,62 @@
   // sizes, not pixel dimensions).
   let dims = $state<Record<string, string>>({});
 
+  // Per-read bookkeeping, kept by the fetcher itself (never an $effect):
+  // - a real refusal of the optimizer's record (403 before /config settled
+  //   the scope, or the leaf turned off) is final for this page's lifetime:
+  //   later reads settle that slot locally, and the module's half keeps
+  //   refreshing;
+  // - the module runs one cache lookup at a time: a busy answer keeps the
+  //   last one, and an answer that cannot change (an original URL, another
+  //   host's URL) is not asked for again.
+  let optimizerRefusal: Error | null = null;
+  let lastLookup: PromiseSettledResult<CacheEntryResponse> | undefined;
+  let settledLookup: Promise<CacheEntryResponse> | undefined;
+
   const poll = usePolling(
-    () =>
-      key === null
-        ? Promise.resolve(null)
-        : Promise.allSettled([
-            api.daemonHealth(),
-            // cache/alternates is whole-server only (403
-            // whole_server_console_only on a per-vhost console). Once
-            // /config has settled the scope, asking again would only
-            // reproduce the same 403 -- skip the request and settle this
-            // slot locally instead.
-            knownPerVhostScope(scope.config, scope.isGlobal)
-              ? Promise.reject(wholeServerConsoleOnlyError())
-              : api.daemonCacheAlternates(key),
-          ]).then((results) => {
-            const alternates = results[1];
-            if (alternates.status === "rejected" && isBusyAnswer(alternates.reason))
-              throw alternates.reason;
-            // A real 403 reached before /config settled the scope (the
-            // race on first load): terminal for this page's lifetime --
-            // one poller, its own stop(), never a second mechanism -- so
-            // it never asks again.
-            if (
-              alternates.status === "rejected" &&
-              alternates.reason instanceof Error &&
-              (errorCode(alternates.reason) === "whole_server_console_only" || isUnavailable(alternates.reason))
-            ) {
-              poll.stop();
-            }
-            updatedAt = Date.now();
-            return results;
-          }),
+    () => {
+      if (key === null) return Promise.resolve(null);
+      // The optimizer's record and its cooldown list are whole-server only
+      // (403 whole_server_console_only on a per-vhost console). Once
+      // /config has settled the scope, asking again would only reproduce
+      // the same 403 -- skip the requests and settle the slots locally.
+      const perVhost = knownPerVhostScope(scope.config, scope.isGlobal);
+      const refusal = optimizerRefusal ?? (perVhost ? wholeServerConsoleOnlyError() : null);
+      return Promise.allSettled([
+        api.daemonHealth(),
+        refusal !== null ? Promise.reject(refusal) : api.daemonCacheAlternates(key),
+        refusal !== null ? Promise.reject(refusal) : api.daemonCooldowns(),
+        settledLookup ?? api.getCacheEntry(shown),
+      ] as const).then((results) => {
+        const alternates = results[1];
+        if (alternates.status === "rejected" && isBusyAnswer(alternates.reason))
+          throw alternates.reason;
+        if (
+          alternates.status === "rejected" &&
+          alternates.reason instanceof Error &&
+          (errorCode(alternates.reason) === "whole_server_console_only" || isUnavailable(alternates.reason))
+        ) {
+          optimizerRefusal = alternates.reason;
+        }
+        const lookup = results[3];
+        const busy = lookup.status === "rejected" && lookup.reason instanceof Error && isBusyAnswer(lookup.reason);
+        if (!busy) lastLookup = lookup;
+        if (lookup.status === "fulfilled" && lookupIsFinal(moduleLookup(lookup).kind)) settledLookup = Promise.resolve(lookup.value);
+        updatedAt = Date.now();
+        return { health: results[0], alternates, cooldowns: results[2], lookup: lastLookup ?? lookup };
+      });
+    },
     10000,
   );
   if (key === null) poll.stop(); // the misuse state never polls
 
   let healthData = $derived(
-    poll.data?.[0]?.status === "fulfilled" ? poll.data[0].value : null,
+    poll.data?.health.status === "fulfilled" ? poll.data.health.value : null,
   );
-  let altResult = $derived(poll.data?.[1]);
+  let healthError = $derived<Error | null>(
+    poll.data?.health.status === "rejected" && poll.data.health.reason instanceof Error ? poll.data.health.reason : null,
+  );
+  let altResult = $derived(poll.data?.alternates);
   let altData = $derived(altResult?.status === "fulfilled" ? altResult.value : null);
   let altError = $derived<Error | null>(
     altResult?.status === "rejected" ? altResult.reason : null,
@@ -144,7 +184,34 @@
       ? altData.cooldown
       : null,
   );
-  let globalHref = $derived(globalConsoleUrlsHref(api.basePath));
+
+  // The module's half, and what the page says around it.
+  let lookup = $derived(moduleLookup(poll.data?.lookup));
+  // A URL the optimizer holds nothing for can still be in its cooldown list.
+  let listedCooldown = $derived(
+    key !== null && poll.data?.cooldowns.status === "fulfilled"
+      ? cooldownFor(normalizeCooldowns(poll.data.cooldowns.value), key)
+      : null,
+  );
+  let reasons = $derived(urlReasons(cooldown ?? listedCooldown));
+  // The reasons follow whenever nothing here shows the URL optimized: no
+  // optimized variant from the optimizer, no current result from the module.
+  let reasonsShown = $derived(
+    (altData === null || status === null || status === "original-only") && lookup.kind !== "current",
+  );
+  let perVhost = $derived(errorCode(altError) === "whole_server_console_only");
+  // A server without an optimizer: an ordinary state, on either console.
+  let noOptimizer = $derived(
+    errorCode(altError) === "daemon_not_configured" ||
+      ["not-configured", "module-unsupported"].includes(optimizerAbsence(healthError) ?? ""),
+  );
+  // The optimizer's log is the whole-server console's, and only where an optimizer is connected.
+  let optimizerLogShown = $derived(
+    altData !== null || (altError !== null && !perVhost && !noOptimizer && !isUnavailable(altError)),
+  );
+  let wholeServer = $derived(wholeServerLine(noOptimizer));
+  // This URL's page on the whole-server console (null when the admin path is renamed).
+  let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
   function onsort(sortKey: VariantSortState["key"]) {
     sort = nextVariantSortState(sort, sortKey);
@@ -194,21 +261,74 @@
         the <a href="#/urls">URLs page</a> or the Cache page's lookup.
       </p>
     </div>
+    <InspectUrlForm />
   {:else if poll.loading}
-    <p class="loading">Loading the cached variants...</p>
-  {:else if altError && !altData}
-    {#if errorCode(altError) === "whole_server_console_only"}
-      <div class="empty-state" data-testid="url-detail-per-vhost">
-        <p class="empty-title">Whole-server console only</p>
-        <p class="empty-description">
-          The URL index is shared by every virtual host on this server, so
-          this per-host console does not show it.
-          {#if globalHref !== null}
-            View it on the <a href={globalHref}>whole-server console</a>.
-          {/if}
-        </p>
-      </div>
-    {:else if isUnavailable(altError)}
+    <p class="loading">Looking up this URL...</p>
+  {:else if poll.data}
+    <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
+    {#if altData}
+      {@render optimizerRecord()}
+    {:else if altError && !perVhost && !noOptimizer}
+      {@render optimizerNote(altError)}
+    {/if}
+    {#if optimizerLogShown}
+      <p class="note optimizer-log" data-testid="url-optimizer-log">
+        <a href={logsHrefFor(key, "optimizer")}>Optimizer log entries that name this URL</a>
+      </p>
+    {/if}
+
+    <div class="answer">
+      <section class="card" data-testid="url-module" aria-labelledby="url-module-heading">
+        <h2 id="url-module-heading">The module's answer</h2>
+        <ul class="facts">
+          <li data-testid="url-module-lookup">{lookup.text}</li>
+          <li data-testid="url-module-log">
+            <a href={logsHrefFor(key, "module")}>Module log entries that name this URL</a>
+          </li>
+        </ul>
+      </section>
+
+      {#if reasonsShown}
+        <section class="card" aria-labelledby="url-reasons-heading">
+          <h2 id="url-reasons-heading">Usual reasons a URL is not optimized</h2>
+          <ul class="reasons" data-testid="url-reasons">
+            {#each reasons as reason (reason.id)}
+              <li data-testid="url-reason-{reason.id}">
+                <strong>{reason.title}.</strong>
+                {#if reason.evidence !== null}
+                  <strong data-testid="url-reason-evidence">{reason.evidence}</strong>
+                {/if}
+                {reason.text}
+                <a href={reason.doc.href} target="_blank" rel="noopener noreferrer">{reason.doc.label}</a>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    </div>
+
+    {#if perVhost || noOptimizer}
+      <p class="note whole-server" data-testid="url-detail-per-vhost">
+        {wholeServer.text}
+        {#if wholeServer.link && globalHref !== null}
+          Open this URL on the <a href={globalHref}>whole-server console</a>.
+        {/if}
+      </p>
+    {/if}
+
+    {#if altData}
+      <details class="raw" data-testid="url-detail-raw">
+        <summary>Raw metadata</summary>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <pre class="raw-pre" role="region" aria-label="Raw metadata" tabindex="0">{JSON.stringify(altData, null, 2)}</pre>
+      </details>
+    {/if}
+  {/if}
+</div>
+
+<!-- Why the optimizer's record of the URL is not shown (the whole-server console's half). -->
+{#snippet optimizerNote(altError: Error)}
+    {#if isUnavailable(altError)}
       <UnavailableCard testid="url-detail-unavailable" />
     {:else if belowFloor && altError instanceof ApiError && (altError.status === 404 || altError.status === 501)}
       <div class="empty-state" data-testid="url-detail-below-floor">
@@ -244,8 +364,10 @@
     {:else}
       <LoadError error={altError} noun="this URL's variants" onretry={() => poll.refresh()} />
     {/if}
-  {:else if altData}
-    <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
+{/snippet}
+
+<!-- What the optimizer holds for the URL: its variants and their previews. -->
+{#snippet optimizerRecord()}
     <div class="info-grid">
       <div class="info-item">
         <span class="info-label">Status</span>
@@ -258,13 +380,7 @@
     </div>
 
     {#if cooldown}
-      {@const reason = cooldownReasonLabel(cooldown.reason)}
-      <p class="cooldown-banner" data-testid="url-detail-cooldown">
-        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{`, ${Math.max(
-              0,
-              Math.round(cooldown.remaining_seconds),
-            )}s remaining`}{/if}.
-      </p>
+      <p class="cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 
     <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
@@ -412,13 +528,7 @@
       </section>
     {/if}
 
-    <details class="raw" data-testid="url-detail-raw">
-      <summary>Raw metadata</summary>
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <pre class="raw-pre" role="region" aria-label="Raw metadata" tabindex="0">{JSON.stringify(altData, null, 2)}</pre>
-    </details>
-  {/if}
-</div>
+{/snippet}
 
 <style>
   .previews-section {
@@ -533,6 +643,34 @@
 
   .raw {
     margin-top: var(--ps-space-sm);
+  }
+
+  /* The module's answer and the reasons: side by side where there is room. */
+  .answer {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-card-min)), 1fr));
+    align-items: start;
+    gap: var(--ps-space-md);
+    margin-top: var(--ps-space-md);
+  }
+
+  .facts,
+  .reasons {
+    margin: 0;
+    padding-left: var(--ps-space-lg);
+    font-size: var(--ps-font-size-sm);
+    line-height: 1.5;
+  }
+
+  .facts li + li,
+  .reasons li + li {
+    margin-top: var(--ps-space-sm);
+  }
+
+
+  .whole-server,
+  .optimizer-log {
+    margin-top: var(--ps-space-md);
   }
 
   .detail-url {

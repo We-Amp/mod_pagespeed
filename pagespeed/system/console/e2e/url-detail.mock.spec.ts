@@ -46,7 +46,7 @@ test("a cooldown banner separates its reason and remaining time", async ({ page 
   );
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing), 42s remaining.");
+  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing), 42 s remaining.");
 });
 
 test("renders the variants, badges and image previews", async ({ page }) => {
@@ -171,15 +171,6 @@ test("an unreachable daemon renders the shared empty state", async ({ page }) =>
   await expect(state).not.toContainText(/HTTP \d{3}|daemon_|unreachable/);
 });
 
-test("an unconfigured daemon transport renders the shared empty state", async ({ page }) => {
-  await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.NOT_CONFIGURED));
-  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
-  await ready(page);
-  const state = page.getByTestId("url-detail-unreachable");
-  await expect(state.locator(".empty-title")).toHaveText("No optimizer configured");
-  await expect(state).toContainText("No optimizer is configured for this server; the module optimizes on its own.");
-});
-
 test("a garbage alternates reply shows no NaN or undefined", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.ALTERNATES_MALFORMED));
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
@@ -190,15 +181,201 @@ test("a garbage alternates reply shows no NaN or undefined", async ({ page }) =>
   await expect(page.locator("main")).not.toContainText("undefined");
 });
 
-test("per-vhost console explains the scope and links to the whole-server console", async ({ page }) => {
-  await mockAdmin(page, "pagespeed_admin", F.allReplies());
-  await openConsole(page, "pagespeed_admin", DETAIL_HASH);
+// ── Inspect a URL: the module's half on every console ────────────────
+
+// https://www.example.test/a.css: MESSAGES names it once ("Fetch of ... failed").
+const CSS_HASH = "#/urls/detail?url=%2Fa.css&host=www.example.test&scheme=https";
+const CSS_LOGS = "q=https%3A%2F%2Fwww.example.test%2Fa.css";
+
+test("whole-server console, a URL the optimizer does not hold: both halves and the reasons", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalDetail(F.ALTERNATES_NOT_IN_INDEX),
+    cache: F.cacheWithLookup(),
+  });
+  await openConsole(page, "pagespeed_global_admin", CSS_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-per-vhost")).toBeVisible();
+  await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/a.css");
+  await expect(page.getByTestId("url-detail-not-found")).toContainText("Not in the optimizer's index");
+  // The module's half: its lookup in words, and its log entries as a link.
+  await expect(page.getByTestId("url-module-lookup")).toContainText("This is an original URL");
+  await expect(page.getByTestId("url-module-log").getByRole("link")).toHaveAttribute(
+    "href",
+    `#/logs?source=module&level=debug&${CSS_LOGS}`,
+  );
+  await expect(page.getByTestId("url-optimizer-log").getByRole("link")).toHaveAttribute(
+    "href",
+    `#/logs?source=optimizer&level=debug&${CSS_LOGS}`,
+  );
+  // The reasons: four, each with a documentation link, none with evidence.
+  const reasons = page.getByTestId("url-reasons").getByRole("listitem");
+  await expect(reasons).toHaveCount(4);
+  for (const item of await reasons.all()) {
+    await expect(item.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/docs\//);
+  }
+  await expect(page.getByTestId("url-reason-evidence")).toHaveCount(0);
+  // Nothing whole-server to point at: this is that console.
+  await expect(page.getByTestId("url-detail-per-vhost")).toHaveCount(0);
+  await expect(page.getByRole("navigation").locator("a[aria-current='page']")).toHaveText(/URLs/);
+});
+
+test("a URL in cooldown that the optimizer does not hold: the cooldown leads the reasons", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalDetail(F.ALTERNATES_NOT_IN_INDEX),
+    cache: F.cacheWithLookup(),
+    "v1/daemon/cooldowns": F.ok({
+      cooldowns: [
+        { url: "/a.css", hostname: "other.example.test", scheme: "https", reason: "write_failure", remaining_seconds: 9 },
+        { url: "/a.css", hostname: "www.example.test", scheme: "https", reason: "processing", remaining_seconds: 42 },
+      ],
+    }),
+  });
+  await openConsole(page, "pagespeed_global_admin", CSS_HASH);
+  await ready(page);
+  const first = page.getByTestId("url-reasons").getByRole("listitem").first();
+  await expect(first).toHaveAttribute("data-testid", "url-reason-original-kept");
+  await expect(first.getByTestId("url-reason-evidence")).toHaveText("In cooldown (Processing), 42 s remaining.");
+});
+
+test("an optimized URL shows the module's half too, without the reasons", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...globalDetail(F.ALTERNATES_HERO), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+  await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-detail-status")).toHaveText("Complete");
+  await expect(page.getByTestId("url-module-lookup")).toHaveText("The module holds a current rewrite result for this URL.");
+  await expect(page.getByTestId("url-module-log").getByRole("link")).toHaveText("Module log entries that name this URL");
+  await expect(page.getByTestId("url-reasons")).toHaveCount(0);
+});
+
+test("per-vhost console: the module's half is the answer, with one line on what the whole-server console adds", async ({ page }) => {
+  const admin = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toContainText("This is an original URL");
+  await expect(page.getByTestId("url-module-log").getByRole("link")).toHaveAttribute(
+    "href",
+    `#/logs?source=module&level=debug&${CSS_LOGS}`,
+  );
+  await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByTestId("url-detail-per-vhost")).toContainText("The whole-server console adds the optimizer's record of this URL");
   await expect(page.getByRole("link", { name: "whole-server console" })).toHaveAttribute(
     "href",
-    "/pagespeed_global_admin/#/urls",
+    "/pagespeed_global_admin/#/urls/detail?url=%2Fa.css&host=www.example.test&scheme=https",
   );
+  // No optimizer data on a per-vhost console: nothing is asked, nothing is shown.
+  await expect(page.getByTestId("url-optimizer-log")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("Not in the optimizer's index");
+  // The sidebar has no URLs entry here; the page lives under Overview, where its input is.
+  await expect(page.getByRole("navigation").locator("a[aria-current='page']")).toHaveText(/Overview/);
+  // The page keeps refreshing; once the scope is known the optimizer's
+  // record is not requested (at most the one read that raced it). The
+  // lookup's answer for an original URL cannot change, so it is asked once;
+  // the module's log is linked, never read from here.
+  await expect(page.getByRole("button", { name: /Auto-refresh · \d+ s/ })).toHaveAttribute("aria-pressed", "true");
+  const asked = admin.calls("v1/daemon/cache/alternates");
+  const read = admin.calls("v1/daemon/health");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect.poll(() => admin.calls("v1/daemon/health")).toBeGreaterThan(read);
+  expect(admin.calls("v1/daemon/cache/alternates")).toBe(asked);
+  expect(asked).toBeLessThanOrEqual(1);
+  expect(admin.calls("cache")).toBe(1);
+  expect(admin.calls("message_history")).toBe(0);
+});
+
+test("a URL the module holds a current result for is not listed with reasons it is not optimized", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_CURRENT) });
+  await openConsole(page, "pagespeed_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toHaveText("The module holds a current rewrite result for this URL.");
+  await expect(page.getByTestId("url-reasons")).toHaveCount(0);
+  await expect(page.getByTestId("url-detail-per-vhost")).toBeVisible();
+});
+
+test("a per-vhost 403 that arrives before the scope is known is final; the module's half keeps refreshing", async ({ page }) => {
+  // A renamed admin path looks whole-server until /config answers: the first read asks the optimizer.
+  const admin = await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() }, { delayMs: { config: 600 } });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+  const asked = admin.calls("v1/daemon/cache/alternates");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+  expect(admin.calls("v1/daemon/cache/alternates")).toBe(asked);
+  expect(asked).toBeLessThanOrEqual(1);
+});
+
+test("a server without an optimizer: the module's answer is the whole answer, with nowhere else to send the reader", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    cache: F.cacheWithLookup(),
+    "v1/daemon/health": F.NOT_CONFIGURED,
+    "v1/daemon/stats": F.NOT_CONFIGURED,
+    "v1/daemon/cooldowns": F.NOT_CONFIGURED,
+  });
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toContainText("This is an original URL");
+  await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByTestId("url-detail-per-vhost")).toHaveText(
+    "No optimizer is configured for this server; the module optimizes on its own. The module's answer is the whole answer.",
+  );
+  await expect(page.getByRole("link", { name: "whole-server console" })).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText(/unreachable|HTTP [45]\d\d/);
+});
+
+test("whole-server console without an optimizer: no link to an optimizer log that does not exist", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalDetail(F.NOT_CONFIGURED),
+    cache: F.cacheWithLookup(),
+    "v1/daemon/health": F.NOT_CONFIGURED,
+    "v1/daemon/cooldowns": F.NOT_CONFIGURED,
+  });
+  await openConsole(page, "pagespeed_global_admin", CSS_HASH);
+  await ready(page);
+  // The same sentence as on a per-vhost console, and nothing that reads as a fault.
+  await expect(page.getByTestId("url-detail-per-vhost")).toHaveText(
+    "No optimizer is configured for this server; the module optimizes on its own. The module's answer is the whole answer.",
+  );
+  await expect(page.getByTestId("url-detail-unreachable")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText(/HTTP [45]\d\d|unreachable/);
+  await expect(page.getByTestId("url-optimizer-log")).toHaveCount(0);
+  await expect(page.getByTestId("url-module-lookup")).toBeVisible();
+  await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
+});
+
+test("the module's refusals are said in words: another host's URL, a lookup that does not answer", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OTHER_HOST) });
+  await openConsole(page, "pagespeed_admin", "#/urls/detail?url=%2Fa.css&host=other.example.test&scheme=https");
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toHaveText(
+    "This URL belongs to another host; that host's console answers for it.",
+  );
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+
+  // The structure where a lookup answer was expected: no result is invented.
+  await mockAdmin(page, "pagespeed_admin", F.allReplies());
+  await openConsole(page, "pagespeed_admin", CSS_HASH);
+  await page.reload();
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toHaveText("The module gave no lookup result.");
+  await expect(page.locator("main")).not.toContainText(/HTTP [45]\d\d|NaN|undefined/);
+});
+
+test("a busy module lookup keeps the last answer", async ({ page }) => {
+  let busy = false;
+  const admin = await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    cache: (_n, request) => (request.url.searchParams.has("url") ? (busy ? F.BUSY : F.LOOKUP_CURRENT) : F.CACHE_STRUCTURE),
+  });
+  await openConsole(page, "pagespeed_admin", DETAIL_HASH);
+  await ready(page);
+  await expect(page.getByTestId("url-module-lookup")).toContainText("holds a current rewrite result");
+  await expect(page.getByTestId("url-reasons")).toHaveCount(0);
+  busy = true;
+  const before = admin.calls("cache");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect.poll(() => admin.calls("cache")).toBeGreaterThan(before);
+  await expect(page.getByTestId("url-module-lookup")).toContainText("holds a current rewrite result");
 });
 
 test("missing or invalid entry parameters never issue a request", async ({ page }) => {
@@ -211,6 +388,8 @@ test("missing or invalid entry parameters never issue a request", async ({ page 
     await openConsole(page, "pagespeed_global_admin", hash);
     await ready(page);
     await expect(page.getByTestId("url-detail-misuse")).toBeVisible();
+    // The way forward is on the page: the input that leads here.
+    await expect(page.getByTestId("inspect-url")).toBeVisible();
     // Nothing to refresh without a URL: the header offers no auto-refresh,
     // no manual refresh and no update stamp.
     await expect(page.getByRole("button", { name: /Auto-refresh · \d+ s/ })).toHaveCount(0);

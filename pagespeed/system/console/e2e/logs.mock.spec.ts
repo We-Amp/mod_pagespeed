@@ -206,7 +206,7 @@ test.describe("links and inert text", () => {
     await openConsole(page, "pagespeed_global_admin", "#/logs?level=debug");
     await ready(page);
     for (const href of ["https://www.example.test/a.css", "https://www.example.test/heavy.png"]) {
-      const link = page.getByRole("link", { name: href });
+      const link = page.getByRole("link", { name: href, exact: true });
       await expect(link).toHaveAttribute("href", href);
       await expect(link).toHaveAttribute("target", "_blank");
       await expect(link).toHaveAttribute("rel", /noopener/);
@@ -227,9 +227,11 @@ test.describe("links and inert text", () => {
     await expect(list).toContainText("<img src=x onerror=alert(1)> javascript:alert(2) data:text/html,<b>x</b>");
     await expect(list.locator("img")).toHaveCount(0);
     await expect(list.locator("b")).toHaveCount(0);
-    await expect(list.locator("a")).toHaveCount(1);
-    await expect(list.locator("a")).toHaveAttribute("href", "https://ok.test/a");
-    await expect(list.locator("a")).not.toHaveAttribute("onmouseover", /.*/);
+    // One URL: its link, and the mark that opens its page in the console.
+    await expect(list.locator("a")).toHaveCount(2);
+    await expect(list.locator("a.log-link")).toHaveAttribute("href", "https://ok.test/a");
+    await expect(list.locator("a.log-link")).not.toHaveAttribute("onmouseover", /.*/);
+    await expect(list.locator("a.log-inspect")).toHaveAttribute("href", "#/urls/detail?url=%2Fa&host=ok.test&scheme=https");
     expect(dialogs).toEqual([]);
   });
 
@@ -554,7 +556,7 @@ test.describe("the view controls change the view in place", () => {
 
     const moduleRadio = page.getByRole("radio", { name: "Module" });
     await moduleRadio.check();
-    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await expect(page).toHaveURL(/#\/logs\?q=umami&source=module$/);
     await expect(moduleRadio).toBeFocused();
     await expect(pageMark(page)).toHaveCount(1);
     await expect(page.getByTestId("logs-search")).toHaveValue("umami");
@@ -563,11 +565,11 @@ test.describe("the view controls change the view in place", () => {
 
     const group = page.getByRole("checkbox", { name: "Group repeats" });
     await group.uncheck();
-    await expect(page).toHaveURL(/#\/logs\?source=module&group=0$/);
+    await expect(page).toHaveURL(/#\/logs\?q=umami&source=module&group=0$/);
     await expect(group).toBeFocused();
     await expect(page.getByTestId("log-entries")).toHaveCount(0);
     await group.check();
-    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await expect(page).toHaveURL(/#\/logs\?q=umami&source=module$/);
     await expect(group).toBeFocused();
     await expect(pageMark(page)).toHaveCount(1);
     await expect(page.getByTestId("logs-search")).toHaveValue("umami");
@@ -728,7 +730,7 @@ test.describe("the view controls change the view in place", () => {
     await markPage(page);
     await page.getByTestId("logs-search").fill("origin");
     await page.getByRole("radio", { name: "Module" }).check();
-    await expect(page).toHaveURL(/#\/logs\?source=module$/);
+    await expect(page).toHaveURL(/#\/logs\?q=origin&source=module$/);
     await page.locator("main h1").click(); // out of the form controls: shortcuts are off inside them
     await page.keyboard.press("g");
     await page.keyboard.press("l");
@@ -831,4 +833,82 @@ test.describe("phone", () => {
     expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(await page.getByTestId("logs-timeline").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   });
+});
+
+// The text filter is part of the address (`q=`), so "the entries that name
+// this URL" is a link; a URL in an entry leads to its page in the console.
+test.describe("Logs text filter in the address", () => {
+  const Q = "q=https%3A%2F%2Fwww.example.test%2Fa.css";
+
+  test("q= presets the filter, on both consoles", async ({ page }) => {
+    for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
+      await mockAdmin(page, admin, admin === "pagespeed_admin" ? { ...F.allReplies() } : globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+      await openConsole(page, admin, `#/logs?source=module&level=debug&${Q}`);
+      await ready(page);
+      await expect(page.getByTestId("logs-search")).toHaveValue("https://www.example.test/a.css");
+      await expect(page.getByTestId("log-group")).toHaveCount(1);
+      await expect(page.getByTestId("log-group")).toContainText("Fetch of https://www.example.test/a.css failed");
+    }
+  });
+
+  test("typing writes q= in place and clearing removes it; the level links keep it", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.LOGS_LEVELS, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=error");
+    await ready(page);
+    const entries = await page.evaluate(() => history.length);
+    const search = page.getByTestId("logs-search");
+    await search.fill("no such text");
+    await expect(page).toHaveURL(/#\/logs\?level=error&q=no\+such\+text$/);
+    await expect(search).toBeFocused();
+    // No history entry per keystroke.
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    // "Show all levels" stays on this text.
+    await expect(page.getByTestId("logs-none-match").getByRole("link")).toHaveAttribute("href", /[?&]q=no\+such\+text/);
+    await search.fill("");
+    await expect(page).toHaveURL(/#\/logs\?level=error$/);
+    // A reload shows the same view.
+    await search.fill("a.css");
+    await page.reload();
+    await ready(page);
+    await expect(page.getByTestId("logs-search")).toHaveValue("a.css");
+    await expect(page.getByTestId("log-group")).toHaveCount(1);
+  });
+
+  test("a URL in an entry links to the URL and to its page in the console", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+    await openConsole(page, "pagespeed_admin", `#/logs?level=debug&${Q}`);
+    await ready(page);
+    const row = page.getByTestId("log-group");
+    await expect(row.getByRole("link", { name: "https://www.example.test/a.css", exact: true })).toHaveAttribute(
+      "href",
+      "https://www.example.test/a.css",
+    );
+    const inspect = row.getByRole("link", { name: "Inspect https://www.example.test/a.css" });
+    await expect(inspect).toHaveAttribute("href", "#/urls/detail?url=%2Fa.css&host=www.example.test&scheme=https");
+    await expect(inspect).not.toHaveAttribute("target", "_blank");
+    await expect(inspect).not.toHaveAttribute("title", /.*/);
+    // The mark adds no words to the entry: its text is the log's own.
+    await expect(row.locator(".log-text")).toHaveText("Fetch of https://www.example.test/a.css failed");
+    await inspect.click();
+    await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/a.css");
+    // And back again: the link on the URL's page shows that entry.
+    await page.getByTestId("url-module-log").getByRole("link").click();
+    await expect(page.getByTestId("logs-search")).toHaveValue("https://www.example.test/a.css");
+    await expect(page.getByTestId("log-group")).toHaveCount(1);
+  });
+});
+
+test("a link to the product's documentation in an entry gets no inspect mark", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    config: F.CONFIG_VHOST,
+    message_history: F.plainMessages([
+      { severity: "warning", message: "Restrict access; see https://modpagespeed.com/docs/admin-console/#access-control and https://www.example.test/a.css" },
+    ]),
+  });
+  await openConsole(page, "pagespeed_admin", "#/logs");
+  await ready(page);
+  const row = page.getByTestId("log-group");
+  await expect(row.locator("a.log-link")).toHaveCount(2);
+  await expect(row.getByTestId("log-inspect")).toHaveCount(1);
+  await expect(row.getByTestId("log-inspect")).toHaveAttribute("href", /host=www\.example\.test/);
 });
