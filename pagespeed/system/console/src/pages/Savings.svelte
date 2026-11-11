@@ -46,8 +46,10 @@
     notYetOptimized,
     optimizedCopyHitRate,
     savingsSplit,
+    servedOptimizedText,
     splitSummaryText,
   } from "$lib/utils/savings";
+  import { TERMS } from "$lib/data/terms";
   import { SAVINGS_QUALIFIER, serveSavingsView } from "$lib/utils/serve-savings";
   import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
@@ -190,8 +192,8 @@
   }
 
   const CHART_LABELS: Record<string, string> = {
-    "module.bytes_saved": "Module rewrites",
-    "optimizer.bytes_saved": "Optimizer cache serves",
+    "module.bytes_saved": TERMS.savedByRewriting,
+    "optimizer.bytes_saved": TERMS.savedByOptimizerCache,
   };
 
   function latestSeriesValue(data: ReadonlyArray<number | null>): string {
@@ -245,7 +247,7 @@
           {#if summary.active || total.saved > 0}
             <dl class="figures">
               <div class="figure">
-                <dt class="metric-label">Bytes saved by rewriting</dt>
+                <dt class="metric-label">{TERMS.savedByRewriting}</dt>
                 <dd class="metric-value num" data-testid="savings-module-total">
                   {formatBytes(total.saved)}
                   {#if total.percent !== null}
@@ -308,7 +310,7 @@
         <h2 id="savings-optimizer-heading">Optimizer cache serves <ScopeChip label="whole server" shown={optimizerChip} /></h2>
         {#if !scope.isGlobal && focusRow === null}
           <p class="note" data-testid="optimizer-scope-note">
-            Server-wide numbers — the per-host view is on the
+            Server-wide numbers. The per-host view is on the
             {#if wholeServerHref}<a href={wholeServerHref}>whole-server console</a>{:else}whole-server console{/if}.
           </p>
         {/if}
@@ -321,7 +323,7 @@
             {:else}
               <dl class="figures">
                 <div class="figure">
-                  <dt class="metric-label">Saved on responses served for {focusRow.host} <ScopeChip label="this host" /></dt>
+                  <dt class="metric-label">{TERMS.savedByOptimizerCache} for {focusRow.host} <ScopeChip label="this host" /></dt>
                   <dd class="metric-value num">
                     {formatBytes(focusRow.saved)}
                     <span class="detail metric-context"
@@ -353,7 +355,7 @@
             <h3 class="window-heading" data-testid="window-heading-optimizer">Optimizer counters (since optimizer restart)</h3>
             <dl class="figures">
               <div class="figure">
-                <dt class="metric-label">Saved on served responses</dt>
+                <dt class="metric-label">{TERMS.savedByOptimizerCache}</dt>
                 <dd class="metric-value num" data-testid="savings-optimizer-total">
                   {formatSignedBytes(serveView.total.saved)}
                   <span class="detail metric-context"
@@ -377,20 +379,11 @@
               <h3 class="window-heading" data-testid="window-heading-module">Module counters (since web server restart or reload)</h3>
               <dl class="figures">
                 <div class="figure">
-                  <dt
-                    class="metric-label"
-                    title={hitRate.mode === "optimizable"
-                      ? "Share of cacheable resource requests (CSS, JavaScript, images) answered from the optimizer's cache; conditional and HEAD requests count as served"
-                      : "Share of all in-place requests answered from the optimizer's cache"}
-                  >
-                    Optimized-copy hit rate{#if hitRate.mode === "all-in-place"}{" "}<span class="label-qualifier">(of all in-place requests)</span>{/if}
-                  </dt>
+                  <dt class="metric-label" title={servedOptimizedText(hitRate.mode).tooltip}>{TERMS.servedOptimized}</dt>
                   <dd class="metric-value num" data-testid="savings-hit-rate">
                     {#if moduleSince?.warming}<span class="too-early">Too early for a percentage</span>{:else}{formatPercent(hitRate.percent, hitRate.served)}{/if}
                     <span class="detail metric-context"
-                      >{formatCount(hitRate.served)} of {formatCount(hitRate.total)}{hitRate.mode === "optimizable"
-                        ? " cacheable resource requests; conditional and HEAD requests count as served"
-                        : " in-place requests"}</span
+                      >{formatCount(hitRate.served)} of {formatCount(hitRate.total)} {servedOptimizedText(hitRate.mode).of}</span
                     >
                   </dd>
                 </div>
@@ -515,10 +508,10 @@
            on a wide window it lies under the module card. -->
       {#if hostTable}
         <section class="card reads-across-container" data-testid="savings-by-host-card" aria-labelledby="savings-by-host-heading">
-          <h2 id="savings-by-host-heading">Optimizer cache serves by host</h2>
+          <h2 id="savings-by-host-heading">{TERMS.savedByOptimizerCache}, by host</h2>
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
+          <div class="table-scroll" role="region" aria-label="Hosts table" tabindex="0">
             <table class="breakdown reads-across" data-testid="savings-by-host">
               <thead>
                 <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
@@ -671,9 +664,6 @@
   /* Words where a figure would be: read as a sentence, not as a headline. */
   .too-early {
     font-size: var(--ps-font-size-base);
-    font-weight: 400;
-  }
-  .label-qualifier {
     font-weight: 400;
   }
   .breakdown {

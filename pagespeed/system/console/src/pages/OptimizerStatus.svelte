@@ -25,6 +25,7 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import {
+    checkLabel,
     checkResult,
     counterRows,
     daemonUnavailableReason,
@@ -40,6 +41,7 @@
   import { SAVINGS_QUALIFIER, serveSavingsView, splitCells } from "$lib/utils/serve-savings";
   import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import { SPLIT_TEXT } from "$lib/data/split-text";
+  import { TERMS } from "$lib/data/terms";
   import { hostSavingsView } from "$lib/utils/host-savings";
 
   const { api, lens } = useConsole();
@@ -186,7 +188,7 @@
               {#each checks as [name, value] (name)}
                 {@const result = checkResult(value)}
                 <tr>
-                  <td class="name-cell">{name}</td>
+                  <td class="name-cell" title={name}>{checkLabel(name)}</td>
                   <td class="check-cell">
                     <span class="check" class:check-pass={result.pass === true} class:check-fail={result.pass === false}>{result.text}</span>
                   </td>
@@ -331,18 +333,18 @@
         </div>
       </div>
 
-      <h3 id="serve-savings-heading">Serve savings</h3>
+      <h3 id="serve-savings-heading">{TERMS.savedByOptimizerCache}</h3>
       <p class="section-note" data-testid="serve-savings-source">
         Recorded by this web server's module each time it serves an optimized
         response from the optimizer's cache. {SAVINGS_QUALIFIER}
       </p>
       {#if savings === null}
-        <p class="empty" data-testid="serve-savings-absent">This optimizer version reports no serve savings.</p>
+        <p class="empty" data-testid="serve-savings-absent">This optimizer version does not report what its cache saved.</p>
       {:else}
         {#if savings.served.length > 0}
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="table-wrapper" role="region" aria-label="Serve savings" tabindex="0">
+          <div class="table-wrapper" role="region" aria-label={TERMS.savedByOptimizerCache} tabindex="0">
             <table data-testid="serve-savings-table" aria-labelledby="serve-savings-heading">
               <thead>
                 <tr>

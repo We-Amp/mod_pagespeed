@@ -108,8 +108,11 @@ test("the lens is remembered across a reload; a page without per-host data says 
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible();
   await expect(lensSelect(page)).toHaveValue("example.test");
-  await expect(page.getByTestId("lens-note")).toContainText("example.test");
-  await expect(page.getByTestId("lens-note")).toContainText("whole server");
+  await expect(page.getByTestId("lens-note")).toHaveText(
+    "Host filter example.test: this page has no per-host figures, so it shows the whole server.",
+  );
+  // The control and the note use one name for it.
+  await expect(page.getByTestId("host-lens").locator("label")).toHaveText("Host filter");
   await lensSelect(page).selectOption("");
   await expect(page.getByTestId("lens-note")).toHaveCount(0);
   await expect(page).toHaveURL(/#\/statistics$/);

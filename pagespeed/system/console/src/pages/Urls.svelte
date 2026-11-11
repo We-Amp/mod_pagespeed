@@ -18,6 +18,7 @@
   import { onDestroy } from "svelte";
   import { usePolling } from "$lib/api/polling.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import { isBusyAnswer } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
   import { ApiError, isUnavailable } from "$lib/api/client";
@@ -28,9 +29,9 @@
   import { formatCount } from "$lib/utils/format";
   import {
     cooldownReasonLabel,
-    daemonUnavailableReason,
     errorCode,
     isDaemonUnavailable,
+    optimizerUnavailableNote,
     normalizeCooldowns,
     wholeServerConsoleOnlyError,
   } from "$lib/utils/daemon";
@@ -176,7 +177,7 @@
   </PageHeader>
 
   {#if lensHost !== null}
-    <p class="lens-scope" data-testid="urls-lens">URLs of {lensHost} only (host lens).</p>
+    <p class="lens-scope" data-testid="urls-lens">{TERMS.hostFilter}: URLs of {lensHost} only.</p>
   {/if}
 
   {#if poll.loading}
@@ -213,12 +214,8 @@
       </div>
     {:else if isDaemonUnavailable(urlsError)}
       <div class="empty-state" data-testid="urls-unreachable">
-        <p class="empty-title">Optimizer unreachable</p>
-        <p class="empty-reason">{daemonUnavailableReason(urlsError)}</p>
-        <p class="empty-description">
-          The module could not reach the optimizer worker
-          ({urlsError.message}). The page populates once it answers.
-        </p>
+        <p class="empty-title">{optimizerUnavailableNote(urlsError).title}</p>
+        <p class="empty-description">{optimizerUnavailableNote(urlsError).detail}</p>
       </div>
     {:else}
       <LoadError error={urlsError} noun="the URL list" onretry={() => poll.refresh()} />
@@ -366,12 +363,6 @@
   .empty-title {
     font-size: var(--ps-font-size-lg);
     font-weight: 600;
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-reason {
-    font-size: var(--ps-font-size-sm);
     color: var(--ps-text-secondary);
     margin-bottom: var(--ps-space-sm);
   }

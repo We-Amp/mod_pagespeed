@@ -30,8 +30,27 @@ export const CONSOLE_TITLE = `${PRODUCT_DISPLAY_NAME} Admin Console`;
 export const VENDOR_HOST = new URL(VENDOR_URL).host;
 export const WEBSITE_HOST = new URL(WEBSITE).host;
 
-/** The admin console's page in the product documentation. */
-export const DOCS_URL = `${WEBSITE}/docs/admin-console/`;
+/** The one base of every documentation link the console shows. */
+export const DOCS_BASE = `${WEBSITE}/docs`;
 
-/** The module's documentation (finding links point at its pages). */
-export const MODULE_DOCS = `${WEBSITE}/1.1/docs`;
+/**
+ * The documentation pages and sections the console links to: every link
+ * comes from this table, so they share one base and are checked in one place.
+ */
+export const DOCS = {
+  /** The admin console's own page. */
+  console: `${DOCS_BASE}/admin-console/`,
+  /** Who may open the admin pages. */
+  access: `${DOCS_BASE}/admin-console/#access-control`,
+  /** The module's message log. */
+  messages: `${DOCS_BASE}/admin-console/#message-history`,
+  /** What the Optimizer status page shows. */
+  optimizerStatus: `${DOCS_BASE}/admin-console/#optimizer-daemon-panels`,
+  /** How to add the optimizer to a server. */
+  optimizerSetup: `${DOCS_BASE}/configuration/#area-optimizer-worker`,
+  /** How to get more diagnostic information. */
+  diagnose: `${DOCS_BASE}/troubleshooting/#how-to-get-more-diagnostic-information`,
+} as const;
+
+/** The admin console's page in the product documentation. */
+export const DOCS_URL = DOCS.console;

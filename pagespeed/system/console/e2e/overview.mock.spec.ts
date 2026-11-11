@@ -42,7 +42,8 @@ test.describe("Overview", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
     await expect(page.locator(".nav-item").first()).toHaveText("Overview");
     await expect(page.locator(".nav-item").nth(1)).toHaveText("Savings");
-    await expect(page.locator(".nav-item").nth(2)).toHaveText("Statistics");
+    await expect(page.locator(".nav-item").nth(2)).toHaveText("Logs");
+    await expect(page.locator(".nav-item").nth(3)).toHaveText("Statistics");
     expect(errors).toEqual([]);
   });
 
@@ -63,7 +64,7 @@ test.describe("Overview", () => {
     await expect(page.getByTestId("overview-scope")).toContainText("This virtual host (www.example.test:80)");
     await expect(page.getByTestId("module-bytes-saved")).toContainText("281 KB");
     await expect(page.getByTestId("module-served")).toHaveText(/^7/);
-    await expect(page.getByTestId("module-served")).toContainText("of 1,651 in-place requests");
+    await expect(page.getByTestId("module-served")).toContainText("of 1,651 requests of every type");
     await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
     await expectNoJunk(page);
   });
@@ -161,7 +162,7 @@ test.describe("Overview", () => {
   test("all worker threads busy is a note, not a start-up state", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy({ "v1/daemon/health": F.HEALTH_BUSY }));
     await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
-    await expect(page.getByTestId("optimizer-busy")).toHaveText("All worker threads busy.");
+    await expect(page.getByTestId("optimizer-busy")).toHaveText("All optimizer threads busy.");
   });
 
   test("module statistics unavailable: an error, and the optimizer card still renders", async ({ page }) => {
@@ -293,7 +294,7 @@ test.describe("Overview verdict and tiles", () => {
     await expect(card.getByTestId("optimizer-savings")).toContainText("673 KB");
     await expect(card.getByTestId("optimizer-scope-note")).toContainText("Server-wide numbers");
     // This site's own count of serves from the optimizer's cache is a tile, with how to read a low share.
-    await expect(page.getByTestId("tile-cache").getByTestId("module-served")).toContainText("of 1,651 in-place requests");
+    await expect(page.getByTestId("tile-cache").getByTestId("module-served")).toContainText("of 1,651 requests of every type");
     await expect(page.getByTestId("serve-share-judgement")).toHaveText(
       "Normal when most requests are pages: the optimizer's cache answers CSS, JavaScript and images.",
     );
@@ -315,7 +316,7 @@ test.describe("Overview verdict and tiles", () => {
     await expect(page.getByTestId("tile-optimizer").getByTestId("optimizer-state")).toHaveText("Not configured");
     const add = page.getByTestId("add-optimizer");
     await expect(add).toHaveText("Add the optimizer");
-    await expect(add).toHaveAttribute("href", "https://modpagespeed.com/1.1/docs/configuration/#area-optimizer-worker");
+    await expect(add).toHaveAttribute("href", "https://modpagespeed.com/docs/configuration/#area-optimizer-worker");
     await expect(add).toHaveAttribute("rel", "noopener noreferrer");
   });
 
@@ -433,8 +434,10 @@ test.describe("Overview verdict and tiles", () => {
     ]);
     const verdict = page.getByTestId("health-summary");
     await expect(verdict).toHaveText(
-      /^Status unknown\. The module statistics could not be read; the figures are from \d\d:\d\d:\d\d\. Module statistics unavailable\.$/,
+      /^Status unknown\. The module statistics could not be read; the figures are from \d\d:\d\d:\d\d\.$/,
     );
+    // Said once: the findings count does not repeat that the statistics are unavailable.
+    await expect(verdict).not.toContainText("Module statistics unavailable");
     // Never "No findings" over figures that were not read, no green, and no figure in the sentence.
     await expect(verdict).not.toContainText("No findings");
     await expect(verdict).not.toContainText(/KB|MB/);
@@ -506,13 +509,14 @@ test.describe("Overview time bases and scope", () => {
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     const served = page.getByTestId("module-served");
     await expect(served).toContainText("%");
-    // The same counter caveat as the Savings page: the rate leans upward.
-    await expect(served).toContainText(
-      "cacheable resource requests; conditional and HEAD requests count as served",
-    );
+    // What the share is a share of, in plain words; the counter caveat (the
+    // rate leans upward) stays one hover away, as on the Savings page.
+    await expect(served).toContainText("requests for CSS, JavaScript and images");
+    await expect(served).not.toContainText(/cacheable|in-place|HEAD/);
     await expect(served.locator("[title]")).toHaveAttribute(
       "title",
-      "Share of cacheable resource requests (CSS, JavaScript, images) answered from the optimizer's cache; conditional and HEAD requests count as served",
+      "Requests for CSS, JavaScript and images that were answered with an optimized copy from the optimizer's cache. " +
+        "Conditional and HEAD requests count as served.",
     );
     await expect(served.getByRole("link")).toHaveCount(0);
     const link = page.getByTestId("module-served-link");
@@ -608,7 +612,7 @@ test.describe("Overview alerts", () => {
     for (const admin of ["pagespeed_admin", "pagespeed_global_admin"] as const) {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await open(page, admin, healthy({ "v1/daemon/health": F.HEALTH_CHECK_FAILING }));
-      await expect(page.getByTestId("alert-daemon-check-failed")).toContainText("cache_open");
+      await expect(page.getByTestId("alert-daemon-check-failed")).toContainText("Cache opened");
     }
   });
 

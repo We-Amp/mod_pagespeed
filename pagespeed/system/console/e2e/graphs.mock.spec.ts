@@ -344,7 +344,7 @@ test.describe("the default charts", () => {
     await openConsole(page, "pagespeed_admin", "#/graphs");
     await expect.poll(() => mock.calls("stats_json"), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
     const hidden = page.getByTestId("curated-hidden");
-    await expect(hidden).toContainText("Optimizer serve savings");
+    await expect(hidden).toContainText("Saved by the optimizer's cache");
     await expect(hidden).toContainText("Optimizer jobs in progress");
     await expect(page.getByTestId("curated-requests")).toBeVisible();
   });
@@ -416,7 +416,7 @@ test.describe("the default charts", () => {
     });
     await openConsole(page, "pagespeed_global_admin", "#/graphs?lens=www.example.com");
     await expect(page.getByTestId("curated-lens-note")).toContainText("www.example.com");
-    await expect(page.getByRole("heading", { name: "Optimizer serve savings — www.example.com" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — www.example.com" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("lens-note")).toHaveCount(0);
   });
 
@@ -428,7 +428,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_PAGE,
     });
     await openConsole(page, "pagespeed_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Optimizer serve savings — static.example.com" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — static.example.com" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("host-lens")).toHaveCount(0);
   });
 
@@ -441,7 +441,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_SITE_ROW,
     });
     await openConsole(page, "pagespeed_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Optimizer serve savings — example.test" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — example.test" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("curated-whole-server-note")).toHaveCount(0);
   });
 
@@ -453,7 +453,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_SITE_NONE,
     });
     await openConsole(page, "pagespeed_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Optimizer serve savings", exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("curated-optimizer_saved")).not.toContainText("www.example.test");
     await expect(page.getByTestId("curated-whole-server-note")).toHaveText("The optimizer savings chart covers the whole server.");
   });
@@ -466,7 +466,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_PAGE,
     });
     await openConsole(page, "pagespeed_global_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Optimizer serve savings", exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("curated-whole-server-note")).toHaveCount(0);
   });
 
@@ -496,19 +496,19 @@ test.describe("the default charts", () => {
     };
     await poll();
     await poll();
-    await expect(chart.getByRole("heading", { name: "Optimizer serve savings — www.example.com" })).toBeVisible();
+    await expect(chart.getByRole("heading", { name: "Saved by the optimizer's cache — www.example.com" })).toBeVisible();
     await expect(chart.getByTestId("curated-latest")).toHaveText("0 B/s");
 
     await page.getByTestId("host-lens").getByRole("combobox", { name: "Host" }).selectOption("");
     // The host's history is not drawn under the whole server's title.
-    await expect(page.getByTestId("curated-hidden")).toContainText("Optimizer serve savings");
+    await expect(page.getByTestId("curated-hidden")).toContainText("Saved by the optimizer's cache");
     await expect(chart).toHaveCount(0);
     // One sample for the whole server: still no rate, never a spike.
     await poll();
     await expect(chart).toHaveCount(0);
     // The second whole-server sample starts the series again.
     await poll();
-    await expect(chart.getByRole("heading", { name: "Optimizer serve savings", exact: true })).toBeVisible();
+    await expect(chart.getByRole("heading", { name: "Saved by the optimizer's cache", exact: true })).toBeVisible();
     await expect(chart.getByTestId("curated-latest")).toHaveText("0 B/s");
   });
 

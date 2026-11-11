@@ -107,7 +107,21 @@ test("an unreachable daemon renders the shared empty state", async ({ page }) =>
   await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.UNREACHABLE));
   await openConsole(page, "pagespeed_global_admin", "#/urls");
   await ready(page);
-  await expect(page.getByTestId("urls-unreachable")).toContainText("unreachable");
+  const state = page.getByTestId("urls-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("Optimizer not answering");
+  await expect(state).toContainText("The optimizer is configured but not answering.");
+  // The transport's words stay out of the page.
+  await expect(state).not.toContainText(/HTTP \d{3}|daemon_|unreachable/);
+});
+
+test("an optimizer that answers 503 itself is not called unreachable", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalReplies({ status: 503, body: { error: "busy" } }));
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await ready(page);
+  const state = page.getByTestId("urls-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("Optimizer did not answer");
+  await expect(state).toContainText("The optimizer did not answer this refresh; the next refresh tries again.");
+  await expect(state).not.toContainText(/unreachable/i);
 });
 
 test("an empty index says so", async ({ page }) => {

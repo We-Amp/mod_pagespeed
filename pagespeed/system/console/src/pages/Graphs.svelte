@@ -49,6 +49,7 @@
   import type { DaemonStatsResponse } from "$lib/api/types";
   import EmptyState from "$lib/EmptyState.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import { router } from "$lib/router.svelte";
   import {
     CURATED_GROUP,
@@ -432,7 +433,7 @@
   {#if !showAll}
     {#if lensHost !== null}
       <p class="note" data-testid="curated-lens-note">
-        The optimizer savings chart follows the host lens ({lensHost}); the module's charts cover the whole server.
+        {TERMS.hostFilter} {lensHost}: the optimizer savings chart shows this host; the module's charts cover the whole server.
       </p>
     {/if}
     {#if !scope.isGlobal && focusHost === null && curated !== null && curated.shown.some((c) => c.id === "optimizer_saved")}

@@ -110,7 +110,7 @@ for (const [name, reply, reason, title, says] of [
       await expect(state.getByRole("link")).toHaveCount(0);
       await expect(state).not.toContainText("Start the optimizer service");
     } else {
-      await expect(state.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+      await expect(state.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/docs\/[a-z-]+\/#[a-z-]+$/);
     }
     // The transport's words stay out of the page.
     await expect(page.locator("main")).not.toContainText(/HTTP \d{3}|daemon_|endpoint_unsupported|Unknown admin page/);

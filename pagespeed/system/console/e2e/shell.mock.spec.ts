@@ -56,15 +56,16 @@ test.describe("Console shell", () => {
     await expect(page.getByRole("main")).toBeVisible();
   });
 
-  test("groups the navigation into module, optimizer and help pages", async ({ page }) => {
+  test("groups the navigation into module, optimizer and help pages, with Logs in the first group", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin");
     const nav = page.getByRole("navigation", { name: "Console pages" });
-    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings"]);
+    // Logs holds the module's messages too: it is not filed under the optimizer.
+    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "Logs"]);
     await expect(nav.getByRole("list", { name: "Module" }).getByRole("link")).toHaveText([
       "Statistics", "Histograms", "Caches", "Configuration", "Rule packs",
     ]);
-    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status", "Logs"]);
+    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status"]);
     await expect(nav.getByRole("list", { name: "Help" }).getByRole("link")).toHaveText(["Support", "About"]);
     await expect(page.locator(".nav-item")).toHaveCount(11);
   });
@@ -76,8 +77,8 @@ test.describe("Console shell", () => {
     });
     await openConsole(page, "pagespeed_global_admin");
     const nav = page.getByRole("navigation", { name: "Console pages" });
-    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "URLs"]);
-    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status", "Logs"]);
+    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "URLs", "Logs"]);
+    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status"]);
     await expect(page.locator(".nav-item")).toHaveCount(12);
   });
 
