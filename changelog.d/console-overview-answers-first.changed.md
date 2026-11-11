@@ -18,3 +18,13 @@
   of the menu, health checks have plain names, and an optimizer that does not
   answer is described the same way everywhere. The About page maps the old
   console's page names to the new ones.
+- **Admin console pages share one look.** Tables, cards, badges, notes and
+  headings are styled the same on every page, and body text is a steady
+  14 px.
+- **The admin console top bar shows connection and scope.** A pill reads
+  "Connected" or "Reconnecting…", a chip names the scope (whole server or the
+  host), and with no optimizer configured its menu group is muted and marked
+  "not configured".
+- **The auto-refresh control says whether it is on or off**, a pause is
+  remembered across reloads, and a refresh you ask for reports whether it
+  worked: "Refreshed", "Partly refreshed", "Server busy" or "Refresh failed".

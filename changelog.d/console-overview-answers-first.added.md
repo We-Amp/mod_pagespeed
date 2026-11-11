@@ -8,3 +8,7 @@
   configuration setting shows it for Apache, nginx or IIS, with a copy button.
   The tab follows the web server named in the response's Server header and
   remembers your choice.
+- **URL detail opens with a verdict.** One line says whether the URL is
+  optimized, not optimized yet, in cooldown or unknown, and says why when it
+  cannot tell. A "Back to …" link returns to the list, log filter or page you
+  came from.
