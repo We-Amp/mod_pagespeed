@@ -527,12 +527,6 @@
     width: 100%;
   }
 
-  .form-input:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
-
   .purge-all-row {
     padding-top: var(--ps-space-sm);
     border-top: 1px solid var(--ps-border-light);
@@ -657,10 +651,14 @@
     gap: 0;
   }
 
+  /* A layer's parts share a line where they fit. Where they do not (a
+     narrow or zoomed window), they wrap: the statistic's name moves under
+     the layer's name instead of being cut off at the card's edge. */
   .layer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--ps-space-sm);
+    gap: 0 var(--ps-space-sm);
     padding: var(--ps-space-sm) var(--ps-space-md);
     padding-left: calc(var(--ps-space-md) + var(--depth, 0) * var(--ps-space-lg));
     font-size: var(--ps-font-size-sm);
@@ -707,8 +705,10 @@
   }
 
   .layer-label {
+    min-width: 0;
     font-weight: 500;
     color: var(--ps-text);
+    overflow-wrap: anywhere;
   }
 
   .layer-role {
@@ -725,6 +725,8 @@
     color: var(--ps-text-secondary);
     font-family: var(--ps-font-mono);
     margin-left: auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   /* ---- Cohort grid (Property Cache) ---- */

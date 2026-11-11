@@ -826,6 +826,13 @@ table.reads-across {
     outline-color: CanvasText;
   }
 
+  /* A hint drawn over the current page's row (the sidebar's shortcut
+   * keys) joins the row's pair, without a backplate of its own. */
+  [aria-current="page"] + [aria-hidden="true"] {
+    forced-color-adjust: none;
+    color: HighlightText !important;
+  }
+
   /* Marks drawn with a background: bars and status dots. */
   .bar-fill,
   .status-dot {

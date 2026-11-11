@@ -660,6 +660,7 @@
 
   .nav-item {
     display: block;
+    position: relative;
     width: 100%;
     padding: var(--ps-space-sm) var(--ps-space-lg);
     background: none;
@@ -682,6 +683,18 @@
     color: var(--ps-primary);
     background: var(--ps-primary-light);
     font-weight: 500;
+  }
+
+  /* The current page is marked by a shape as well as a colour: a bar at
+     the row's leading edge, in the row's text colour. It is drawn inside
+     the link, so the highlight still spans the row from edge to edge. */
+  .nav-item.active::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 3px;
+    background: currentColor;
   }
 
   .skip-link {

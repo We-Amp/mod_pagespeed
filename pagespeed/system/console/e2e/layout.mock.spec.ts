@@ -5,9 +5,12 @@
 // toolbars, and how pages use a wide window. Self-contained
 // (support/mock-admin.ts); run after build.sh.
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import * as RP from "./support/rule-packs-fixtures";
+import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 import { box, noHorizontalScroll, pageReady, perHostReplies, scrollTo, sidewaysScrollers, viewport, wholeServerReplies, widenText } from "./support/layout";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
@@ -573,6 +576,17 @@ test.describe("the sidebar's rows", () => {
       expect(hint.right).toBeLessThanOrEqual(area.right);
       await expect.poll(() => link.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     }
+    // The current page also carries a 3 px bar at the row's leading edge,
+    // drawn inside the link: a mark by shape, which costs the row no width.
+    const bar = await page.locator(".nav-item.active").evaluate((el) => {
+      const s = getComputedStyle(el, "::before");
+      return { width: parseFloat(s.width), height: parseFloat(s.height), left: parseFloat(s.left), row: el.getBoundingClientRect().height };
+    });
+    expect(bar.width).toBe(3);
+    expect(bar.left).toBe(0);
+    expect(Math.abs(bar.height - bar.row)).toBeLessThanOrEqual(1);
+    const plain = await page.locator(".nav-item", { hasText: "Histograms" }).evaluate((el) => getComputedStyle(el, "::before").content);
+    expect(plain, "only the current page has the bar").toBe("none");
     // The hint is not part of the link's name and is hidden from assistive technology.
     await expect(page.getByRole("link", { name: "Statistics", exact: true })).toBeVisible();
     await expect(page.locator(".nav-key").first()).toHaveAttribute("aria-hidden", "true");
@@ -995,6 +1009,270 @@ test.describe("tables fit their frame on a desktop", () => {
         await widenText(page);
         expect(await sidewaysScrollers(page), `${hash}: wrappers that scroll sideways`).toEqual([]);
       }
+    });
+  }
+});
+
+// A window 320 CSS px wide is a 1280 px window at 400% zoom. Every page
+// reflows into it: the document never scrolls sideways, and no text is cut
+// off where it cannot be scrolled to. The pages are opened with data of a
+// real size (a captured statistics reply of some 320 counters, ten
+// histograms, the cache structure of a running server), because a page that
+// only shows a refusal reflows trivially.
+test.describe("a 320 px window", () => {
+  const RIG = fileURLToPath(new URL("../test-fixtures/rig/", import.meta.url));
+  const rig = (name: string): unknown => JSON.parse(readFileSync(`${RIG}${name}.json`, "utf8"));
+  type Replies = Partial<Record<Leaf, Responder>>;
+
+  // The captures of one running server: the whole-server console gets the
+  // whole-server captures, the per-host console its own (and, like a real
+  // one, the refusals of the whole-server pages). Leaves without a capture
+  // of that scope use the other scope's (same shape) or the spec fixtures.
+  const consoles: ReadonlyArray<{ admin: "pagespeed_global_admin" | "pagespeed_admin"; replies: () => Replies }> = [
+    {
+      admin: "pagespeed_global_admin",
+      replies: () => ({
+        ...wholeServerReplies(),
+        config: F.ok(rig("config.global")),
+        stats_json: F.ok(rig("stats_json.global")),
+        histograms: F.ok(rig("histograms.vhost-a")),
+        cache: F.ok(rig("cache.vhost-a")),
+        rule_packs: RP.GLOBAL_TWO,
+        "v1/daemon/health": F.ok(rig("daemon_health.global")),
+        "v1/daemon/stats": F.ok(rig("daemon_stats.global")),
+        "v1/daemon/cooldowns": F.ok(rig("daemon_cooldowns.global")),
+        "v1/daemon/cache/urls": F.ok(rig("daemon_cache_urls.global")),
+        "v1/daemon/logs": F.ok(rig("daemon_logs.global")),
+      }),
+    },
+    {
+      admin: "pagespeed_admin",
+      replies: () => ({
+        ...perHostReplies(),
+        config: F.ok({ ...(rig("config.vhost-a") as Record<string, unknown>), host: "site-a.test:80" }),
+        stats_json: F.ok(rig("stats_json.vhost-a")),
+        histograms: F.ok(rig("histograms.vhost-a")),
+        cache: F.ok(rig("cache.vhost-a")),
+        rule_packs: RP.ONE,
+        "v1/daemon/health": F.ok(rig("daemon_health.global")),
+        "v1/daemon/stats": F.ok(rig("daemon_stats.vhost-a")),
+      }),
+    },
+  ];
+
+  const ROUTES = [
+    "#/overview",
+    "#/savings",
+    "#/urls",
+    "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https",
+    "#/statistics",
+    "#/graphs",
+    "#/graphs?counters=all",
+    "#/histograms",
+    "#/caches",
+    "#/configuration",
+    "#/rule-packs",
+    "#/optimizer",
+    "#/logs",
+    "#/support",
+    "#/about",
+  ];
+
+  const open = async (page: Page, admin: (typeof consoles)[number]["admin"], replies: Replies, hash: string) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await mockAdmin(page, admin, replies);
+    await openConsole(page, admin, hash);
+    await pageReady(page);
+  };
+
+  /** How far the document scrolls sideways (0 when it does not). */
+  const sidewaysScroll = (page: Page) =>
+    page.evaluate(() => document.scrollingElement!.scrollWidth - document.scrollingElement!.clientWidth);
+
+  for (const { admin, replies } of consoles) {
+    for (const hash of ROUTES) {
+      test(`${admin} ${hash}: the page does not scroll sideways`, async ({ page }) => {
+        await open(page, admin, replies(), hash);
+        expect(await sidewaysScroll(page)).toBe(0);
+        // Nor at the end of a long page.
+        await scrollTo(page, 1);
+        expect(await sidewaysScroll(page)).toBe(0);
+      });
+    }
+  }
+
+  test("Statistics shows the whole fixture, so the reflow is of a real page", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/statistics");
+    await expect(page.locator("main")).toContainText(/of 3\d\d variables/);
+  });
+
+  for (const { admin, replies } of consoles) {
+    test(`${admin} Savings: the by-type tables stay inside their cards, figures on one line`, async ({ page }) => {
+      await open(page, admin, replies(), "#/savings");
+      // With room to spare: also where the system's font is wider.
+      await widenText(page);
+      const tables = admin === "pagespeed_global_admin" ? ["savings-module-table", "savings-optimizer-table"] : ["savings-module-table"];
+      for (const id of tables) {
+        const table = page.getByTestId(id);
+        await expect(table).toBeVisible();
+        const inner = await table.locator("xpath=ancestor::section[1]").evaluate((card) => {
+          const r = card.getBoundingClientRect();
+          const s = getComputedStyle(card);
+          return r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight);
+        });
+        expect((await box(table)).right, id).toBeLessThanOrEqual(inner + 0.5);
+        // Still a table: a row's cells share one line, and a figure keeps its unit beside it.
+        const row = table.locator("tbody tr").first();
+        const cells = await Promise.all((await row.locator("td").all()).map((c) => box(c)));
+        expect(cells.length).toBe(4);
+        for (const c of cells) expect(Math.abs(c.top - cells[0].top)).toBeLessThanOrEqual(1);
+        expect(await row.locator("td").nth(1).evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
+      }
+      expect(await sidewaysScroll(page)).toBe(0);
+    });
+  }
+
+  test("Graphs: every chart is whole, one to a row", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/graphs");
+    const main = await box(page.locator("main"));
+    const cards = await page.locator("main .charts > *").all();
+    expect(cards.length).toBeGreaterThan(0);
+    let previousBottom = -Infinity;
+    for (const card of cards) {
+      const c = await box(card);
+      expect(c.right, "a chart ends inside the page").toBeLessThanOrEqual(main.right);
+      expect(c.top, "one chart per row").toBeGreaterThanOrEqual(previousBottom);
+      previousBottom = c.bottom;
+      for (const drawing of await card.locator("canvas, svg").all()) {
+        expect((await box(drawing)).right, "a chart's drawing ends inside its card").toBeLessThanOrEqual(c.right);
+      }
+    }
+  });
+
+  test("Caches: a layer's name and its statistic's name are shown whole, inside their card", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/caches");
+    await expect(page.locator(".layer").first()).toBeVisible();
+    // Each run of text in a layer row, as painted, against the row and the
+    // card that clips it (a card hides what overflows it, with no way to
+    // scroll there).
+    const cut = await page.locator("main").evaluate((main) => {
+      const out: string[] = [];
+      for (const row of main.querySelectorAll<HTMLElement>(".layer")) {
+        const card = row.closest<HTMLElement>(".cache-card")!.getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        for (const part of row.querySelectorAll<HTMLElement>("span")) {
+          const range = document.createRange();
+          range.selectNodeContents(part);
+          for (const r of range.getClientRects()) {
+            if (r.right > rowBox.right + 0.5 || r.left < rowBox.left - 0.5 || r.right > card.right + 0.5) {
+              out.push(`${part.className} "${part.textContent}" (${r.left.toFixed(1)}..${r.right.toFixed(1)}, row ..${rowBox.right.toFixed(1)}, card ..${card.right.toFixed(1)})`);
+            }
+          }
+        }
+      }
+      return out;
+    });
+    expect(cut).toEqual([]);
+    // The fixture has the rows that were cut: a statistic's name on every stats layer.
+    await expect(page.locator(".layer-prefix", { hasText: "file_cache_small" }).first()).toBeVisible();
+  });
+
+  test("the shortcut list opens at its top, with the focus on its title", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 256 });
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await pageReady(page);
+    await page.keyboard.press("?");
+    const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(dialog).toBeVisible();
+    // The list is longer than the window, so it scrolls: it must start at the top.
+    expect(await dialog.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(0);
+    const title = dialog.getByRole("heading", { name: "Keyboard shortcuts" });
+    await expect(title).toBeFocused();
+    await expect(title).toBeInViewport();
+    // Close is the next stop, and Escape still returns to the page.
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+});
+
+// A text field that has the keyboard's focus shows the console's ring: a
+// 2 px outline, which a forced palette also paints. No page replaces it
+// with a border colour or a shadow.
+test.describe("focused fields", () => {
+  for (const [hash, name, selector, tab] of [
+    ["#/statistics", "search", "main input.field", null],
+    ["#/histograms", "filter", "main input.field", null],
+    ["#/graphs", "counter search", "main input.field", null],
+    ["#/graphs", "time range", "main select.field", null],
+    ["#/caches", "URL to look up", "#lookup-url", "Cache Lookup"],
+  ] as const) {
+    test(`${hash}: the ${name} field shows the focus ring`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      if (tab !== null) await page.getByRole("tab", { name: tab }).click();
+      const field = page.locator(selector);
+      await expect(field).toHaveCount(1);
+      await expect(field).toBeVisible();
+      // Reached with the keyboard: Tab from the control before it.
+      await field.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(field).toBeFocused();
+      const ring = await field.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: parseFloat(s.outlineWidth), offset: parseFloat(s.outlineOffset), shadow: s.boxShadow };
+      });
+      expect(ring).toEqual({ style: "solid", width: 2, offset: 2, shadow: "none" });
+      // The ring is the accent colour, not the field's resting border.
+      const colours = await field.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const probe = document.createElement("span");
+        probe.style.color = "var(--ps-primary)";
+        document.body.append(probe);
+        const accent = getComputedStyle(probe).color;
+        probe.remove();
+        return { outline: s.outlineColor, accent };
+      });
+      expect(colours.outline).toBe(colours.accent);
+    });
+  }
+});
+
+// The findings count in Overview's verdict is a link that moves the focus
+// to the findings. Where the focus went is shown, however the link was used.
+test.describe("the findings link", () => {
+  for (const how of ["keyboard", "pointer"] as const) {
+    test(`by ${how}: the findings show the focus ring`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await mockAdmin(page, "pagespeed_global_admin", { ...wholeServerReplies(), "v1/daemon/health": F.HEALTH_CHECK_FAILING });
+      await openConsole(page, "pagespeed_global_admin", "#/overview");
+      await pageReady(page);
+      const link = page.getByTestId("findings-link");
+      if (how === "keyboard") {
+        await link.focus();
+        await page.keyboard.press("Enter");
+      } else {
+        await link.click();
+      }
+      const anchor = page.getByTestId("findings-anchor");
+      await expect(anchor).toBeFocused();
+      const ring = await anchor.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: parseFloat(s.outlineWidth) };
+      });
+      expect(ring).toEqual({ style: "solid", width: 2 });
+      // The ring lies inside the page: it is not cut off at the window's edge.
+      const a = await box(anchor);
+      const { width } = await viewport(page);
+      expect(a.left - 4).toBeGreaterThanOrEqual(0);
+      expect(a.right + 4).toBeLessThanOrEqual(width);
+      expect(await noHorizontalScroll(page)).toBe(true);
     });
   }
 });

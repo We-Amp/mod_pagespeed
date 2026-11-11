@@ -602,6 +602,14 @@
     scroll-margin-top: calc(var(--ps-topbar-height) + var(--ps-space-md));
   }
 
+  /* Focus lands here from the count's link, by keyboard or pointer: the
+     ring shows where the link went. */
+  .findings-anchor:focus {
+    outline: 2px solid var(--ps-primary);
+    outline-offset: 2px;
+    border-radius: var(--ps-border-radius-lg);
+  }
+
   /* A paragraph in a card keeps the card's rhythm. */
   .card .note {
     margin: 0 0 var(--ps-space-sm);

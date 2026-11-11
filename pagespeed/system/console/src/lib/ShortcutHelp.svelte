@@ -12,10 +12,12 @@
   // open.
   import { useConsole } from "$lib/api/context";
   import { SHORTCUT_HELP } from "$lib/shortcuts";
+  import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { optimizerVersionsStatus, optimizerVersionText, type OptimizerVersionsStatus } from "$lib/utils/versions";
 
   let { open, onclose }: { open: boolean; onclose: () => void } = $props();
   let dialog: HTMLDialogElement | undefined = $state();
+  let title: HTMLHeadingElement | undefined = $state();
 
   const { api } = useConsole();
   const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
@@ -33,7 +35,18 @@
 
   $effect(() => {
     if (dialog === undefined) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // The browser focuses the first control, which is Close, the last
+      // thing in the dialog: in a short window the list would open scrolled
+      // to its end. Focus goes to the title instead, so the dialog opens at
+      // the top and is read from there; Close is the next Tab stop.
+      if (title !== undefined) {
+        markProgrammaticFocus(title);
+        title.focus({ preventScroll: true });
+      }
+      dialog.scrollTop = 0;
+    }
     if (!open && dialog.open) dialog.close();
   });
 
@@ -56,7 +69,7 @@
 </script>
 
 <dialog bind:this={dialog} class="shortcut-help" aria-labelledby="shortcut-help-title" onclose={onclose} onkeydown={trapTab}>
-  <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+  <h2 id="shortcut-help-title" tabindex="-1" bind:this={title}>Keyboard shortcuts</h2>
   <dl>
     {#each SHORTCUT_HELP as item (item.keys)}
       <div class="row">

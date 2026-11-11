@@ -586,12 +586,14 @@
     max-width: 100%;
   }
   /* Charts share the full width, at most three to a row: a wide window
-     makes them larger (their height follows their width), not flatter. */
+     makes them larger (their height follows their width), not flatter. A
+     chart is never wider than the page, so a narrow or zoomed window shows
+     one chart per row, whole. */
   .charts {
     display: grid;
     grid-template-columns: repeat(
       auto-fit,
-      minmax(max(320px, calc((100% - 2 * var(--ps-space-md)) / 3)), 1fr)
+      minmax(min(100%, max(320px, calc((100% - 2 * var(--ps-space-md)) / 3))), 1fr)
     );
     gap: var(--ps-space-md);
   }
@@ -628,11 +630,6 @@
     color: var(--ps-text-secondary);
   }
   .loading { color: var(--ps-text-secondary); }
-  .control:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
   .control-label {
     color: var(--ps-text-secondary);
   }

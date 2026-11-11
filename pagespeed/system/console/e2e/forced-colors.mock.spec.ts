@@ -135,6 +135,13 @@ for (const scheme of ["light", "dark"] as const) {
       const current = nav.locator('a[aria-current="page"]');
       await expect(current).toHaveCount(1);
       expect(await fillOf(page, current)).not.toBe(await fillOf(page, nav.locator("a:not([aria-current])").first()));
+      // And it carries a bar at its leading edge, in the colour of its text.
+      const b = await box(current);
+      const { at } = await painted(page, await current.screenshot({ animations: "disabled" }), [
+        [1, b.height / 2],
+        [6, b.height / 2],
+      ]);
+      expect(at[0], "the bar differs from the row's fill").not.toBe(at[1]);
     });
 
     test("tabs: the selected tab is filled, the other tabs are not", async ({ page }) => {
@@ -185,6 +192,21 @@ for (const scheme of ["light", "dark"] as const) {
       expect(gap).not.toBe(firstFill);
       // And a share is not the colour of the card it lies on.
       expect(firstFill).not.toBe(await fillOf(page, split));
+    });
+
+    test("histogram: a bucket's bar is painted", async ({ page }) => {
+      await open(page, scheme, "#/histograms");
+      const bar = page.locator("main .bar-fill").first();
+      await expect(bar).toBeVisible();
+      const b = await box(bar);
+      expect(b.width).toBeGreaterThanOrEqual(2);
+      // The bar's centre against the cell just above it.
+      const clip = { x: b.left, y: b.top - 3, width: b.width, height: b.height + 3 };
+      const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+        [b.width / 2, 3 + b.height / 2],
+        [b.width / 2, 1],
+      ]);
+      expect(at[0], "the bar differs from its cell").not.toBe(at[1]);
     });
 
     test("status dot: the dot before a state word is painted", async ({ page }) => {
@@ -238,19 +260,33 @@ for (const scheme of ["light", "dark"] as const) {
     });
 
     test("field: keyboard focus draws a ring around a text field", async ({ page }) => {
-      // Not met yet: the search fields replace the ring with a border colour
-      // and a shadow, and forced colours drop both. Remove this line with
-      // the change that gives fields the console's outline.
-      test.fail();
-      await open(page, scheme, "#/statistics");
-      const field = page.getByRole("searchbox").first();
-      await expect(field).toBeVisible();
-      const before = await ringOf(page, field);
-      await field.focus();
-      const after = await ringOf(page, field);
-      for (const [side, colour] of after.entries()) {
-        expect(colour, `side ${side}`).not.toBe(before[side]);
+      // An outline is painted in a forced palette; a border colour or a
+      // shadow would not be. The four pages with a field of their own.
+      for (const [hash, selector, tab] of [
+        ["#/statistics", "main input.field", null],
+        ["#/histograms", "main input.field", null],
+        ["#/graphs", "main input.field", null],
+        ["#/caches", "#lookup-url", "Cache Lookup"],
+      ] as const) {
+        await open(page, scheme, hash);
+        if (tab !== null) await page.getByRole("tab", { name: tab }).click();
+        const field = page.locator(selector);
+        await expect(field).toBeVisible();
+        const before = await ringOf(page, field);
+        await field.focus();
+        const after = await ringOf(page, field);
+        for (const [side, colour] of after.entries()) {
+          expect(colour, `${hash}, side ${side}`).not.toBe(before[side]);
+        }
       }
     });
   });
 }
+
+test("the light and the dark forced palettes are two palettes", async ({ page }) => {
+  await open(page, "light", "#/overview");
+  const band = page.getByRole("banner");
+  const light = await fillOf(page, band);
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  expect(await fillOf(page, band)).not.toBe(light);
+});

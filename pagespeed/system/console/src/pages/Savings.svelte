@@ -687,6 +687,21 @@
     color: var(--ps-text-secondary);
     font-weight: 600;
   }
+  /* In a very narrow window (a small phone, a desktop window at 400% zoom)
+     four columns of figures are wider than their card at the usual size:
+     the tables step down a size and close their columns up, so they stay
+     tables and stay inside the card. */
+  @media (max-width: 360px) {
+    .breakdown {
+      font-size: var(--ps-font-size-xs);
+    }
+    .breakdown th, .breakdown td {
+      padding-right: var(--ps-space-sm);
+    }
+    .breakdown th:last-child, .breakdown td:last-child {
+      padding-right: 0;
+    }
+  }
   .window-heading {
     margin: 0 0 var(--ps-space-xs);
     font-size: var(--ps-font-size-sm);
