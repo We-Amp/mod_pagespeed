@@ -39,15 +39,15 @@
 
 {#if view}
   <section class="daemon-section" id="optimizer-html-cache" aria-labelledby="optimizer-html-cache-heading">
-    <h2 id="optimizer-html-cache-heading">{text.heading}</h2>
+    <h2 id="optimizer-html-cache-heading" class="section-title">{text.heading}</h2>
     {#if view.state === "off"}
-      <p class="empty" data-testid="html-cache-off">{text.off}</p>
+      <p class="note" data-testid="html-cache-off">{text.off}</p>
     {:else if view.state === "waiting"}
-      <p class="empty" data-testid="html-cache-waiting">{text.waiting}</p>
+      <p class="note" data-testid="html-cache-waiting">{text.waiting}</p>
     {:else if view.state === "unavailable"}
-      <p class="empty" data-testid="html-cache-unavailable">{text.unavailable}</p>
+      <p class="note" data-testid="html-cache-unavailable">{text.unavailable}</p>
     {:else}
-      <p>{text.intro}</p>
+      <p class="note">{text.intro}</p>
       <ul data-testid="html-cache-totals">
         <li>{text.evaluated}: {formatCount(view.evaluated)}</li>
         <li>{text.wouldStore}: {formatCount(view.wouldStore)}{#if view.wouldStorePercent !== null} ({view.wouldStorePercent}%){/if}</li>

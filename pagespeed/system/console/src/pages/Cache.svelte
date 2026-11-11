@@ -223,7 +223,7 @@
         {#if cacheStructure.loading}
           <p class="loading">Loading cache structure...</p>
         {:else if cacheStructure.error && !cacheStructure.data}
-          <LoadError message={cacheStructure.error.message} />
+          <LoadError error={cacheStructure.error} noun="the cache structure" onretry={() => cacheStructure.refresh()} />
         {:else if caches}
           <RefreshNotice error={cacheStructure.error} />
           <div class="cache-list">

@@ -10,7 +10,7 @@
 
 import { ApiError } from "$lib/api/client";
 import type { DaemonHealthResponse, DaemonStatsResponse, StatsResponse } from "$lib/api/types";
-import type { AlertSnapshot, DaemonAvailability } from "$lib/alerts";
+import type { AlertSnapshot, DaemonAvailability, HealthSummary } from "$lib/alerts";
 import type { ConfigScope } from "$lib/utils/config-scope";
 import { errorCode } from "$lib/utils/daemon";
 import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type MessageDigest } from "$lib/utils/message-groups";
@@ -44,9 +44,21 @@ function settle<T>(r: PromiseSettledResult<T>): Fetched<T> {
   return { ok: false, error: reason instanceof Error ? reason : new Error(String(reason)) };
 }
 
+export interface SampleOptions {
+  /** Read the message log too (the default). A page that shows no findings passes false. */
+  messages?: boolean;
+}
+
 /** Take one sample. Never rejects: each read's failure is carried in the sample. */
-export async function sampleOverview(api: OverviewApi, now: () => number = Date.now): Promise<OverviewSample> {
-  const log = api.getMessageGroups !== undefined ? api.getMessageGroups(MESSAGE_WINDOW_SECONDS) : null;
+export async function sampleOverview(
+  api: OverviewApi,
+  now: () => number = Date.now,
+  options: SampleOptions = {},
+): Promise<OverviewSample> {
+  const log =
+    options.messages !== false && api.getMessageGroups !== undefined
+      ? api.getMessageGroups(MESSAGE_WINDOW_SECONDS)
+      : null;
   const [module, health, daemonStats, messages] = await Promise.allSettled([
     api.getStats(),
     api.daemonHealth(),
@@ -269,6 +281,31 @@ export function availabilityText(a: DaemonAvailability): { word: string; detail:
     case "transient":
       return { word: "Checking", detail: "The optimizer did not answer this refresh; the next refresh tries again." };
   }
+}
+
+/** The health line's levels, plus "unknown": no colour, because nothing is known. */
+export interface OverviewHealth {
+  text: string;
+  level: HealthSummary["level"] | "unknown";
+}
+
+/**
+ * The health line while the server is not answering. What the page last
+ * read says nothing about now, so the line claims nothing: it names the time
+ * of the server's last answer to the module read (an error answer counts)
+ * instead of a verdict.
+ */
+export function unknownHealth(
+  lastAnsweredAt: number | null,
+  timeText: (ms: number) => string = (ms) => new Date(ms).toLocaleTimeString(),
+): OverviewHealth {
+  return {
+    text:
+      lastAnsweredAt === null
+        ? "Status unknown — the server has not answered"
+        : `Status unknown — last answer ${timeText(lastAnsweredAt)}`,
+    level: "unknown",
+  };
 }
 
 /** How much of an unrecognised status string the card will show. */

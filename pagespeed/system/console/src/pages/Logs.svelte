@@ -321,7 +321,7 @@
   {:else if isUnavailable(poll.error)}
     <UnavailableCard testid="logs-unavailable" />
   {:else if poll.error && allEntries.length === 0}
-    <LoadError message={poll.error.message} />
+    <LoadError error={poll.error} noun="the logs" onretry={() => poll.refresh()} />
   {:else}
     <RefreshNotice error={poll.error} />
 

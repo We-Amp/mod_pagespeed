@@ -77,13 +77,13 @@ export function isBusyAnswer(error: Error): boolean {
 }
 
 // Looked up at call time, so tests that fake the global timers are honoured.
-const realClock: PollerClock = {
+export const realClock: PollerClock = {
   setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
   now: () => Date.now(),
 };
 
-function documentVisibility(): VisibilitySource | null {
+export function documentVisibility(): VisibilitySource | null {
   if (typeof document === "undefined") return null;
   return {
     hidden: () => document.visibilityState === "hidden",

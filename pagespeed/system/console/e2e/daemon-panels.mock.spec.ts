@@ -74,7 +74,7 @@ test.describe("Daemon panels", () => {
       "v1/daemon/stats": F.UNSUPPORTED,
     });
     await openConsole(page, "pagespeed_admin", "#/daemon/cache");
-    await expect(page.getByTestId("daemon-unreachable")).toBeVisible();
+    await expect(page.getByTestId("statistics-unavailable")).toBeVisible();
     await expect(page.getByTestId("serve-savings-raw")).toHaveCount(0);
   });
 

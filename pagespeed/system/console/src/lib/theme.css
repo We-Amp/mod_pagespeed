@@ -65,8 +65,19 @@
   --ps-split-optimal: #78716c;
   --ps-split-encoded: #15803d;
 
+  /* Chart series, in drawing order. None is a status colour: a line that
+     is red or amber would read as a verdict. Each clears 3:1 on the card
+     and on the muted card, and every pair stays apart for red-green
+     colour-blind readers too (pinned in theme-contrast.test.ts). */
+  --ps-chart-1: #1d4ed8;
+  --ps-chart-2: #92400e;
+  --ps-chart-3: #0891b2;
+  --ps-chart-4: #44403c;
+  /* Grid lines: lighter than the data. */
+  --ps-chart-grid: #e7e5e4;
+
   /* Typography */
-  --ps-font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --ps-font-family: system-ui, -apple-system, sans-serif;
   --ps-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --ps-font-size-xs: 0.75rem;
   --ps-font-size-sm: 0.875rem;
@@ -75,6 +86,30 @@
   --ps-font-size-xl: 1.25rem;
   --ps-font-size-2xl: 1.5rem;
   --ps-font-size-3xl: 2rem;
+
+  /* Type roles: what a piece of text is, not how big it happens to be. A
+     page picks a role; the sizes are decided here, once. The title sets
+     the scale: with a 1.5rem title the matching set is section 1rem,
+     card title 0.875rem, metric 1.25rem and hero metric 2rem. */
+  --ps-type-title-size: 2rem;
+  --ps-type-title-weight: 600;
+  --ps-type-title-tracking: 0;
+  --ps-type-section-size: 1.125rem;
+  --ps-type-section-weight: 600;
+  /* A sub-section heading and a card's title. */
+  --ps-type-card-title-size: 1rem;
+  --ps-type-card-title-weight: 600;
+  --ps-type-body-size: 0.875rem;
+  --ps-type-body-leading: 1.45;
+  /* Labels and meta text; a group label is the same size, heavier, in capitals. */
+  --ps-type-label-size: 0.75rem;
+  --ps-type-label-weight: 500;
+  --ps-type-group-label-weight: 600;
+  --ps-type-metric-size: 1.5rem;
+  --ps-type-metric-weight: 600;
+  /* A page's leading figure: larger than a metric, smaller than the title. */
+  --ps-type-hero-metric-size: 1.75rem;
+  --ps-type-hero-metric-weight: 600;
 
   /* Spacing */
   --ps-space-xs: 0.25rem;
@@ -136,25 +171,37 @@
     --ps-warning-text: #fdd663;
     --ps-success-text: #81c995;
 
-    --ps-bg: #1c1917;
-    --ps-bg-secondary: #292524;
-    --ps-bg-tertiary: #44403c;
-    --ps-surface: #292524;
-    --ps-surface-hover: #44403c;
+    /* Planes, darkest first, each a visible step above the one before:
+       the page; the sidebar, zebra rows and the muted card; the card; a
+       header band and the row dividers; a hovered row or control; the
+       frame around a card or table. */
+    --ps-bg: #100e0d;
+    --ps-bg-secondary: #1d1a18;
+    --ps-bg-tertiary: #34302d;
+    --ps-surface: #282523;
+    --ps-surface-hover: #3d3936;
 
+    /* --ps-text stays this light: the savings bar's middle segment is
+       drawn in it and must stand 3:1 apart from its neighbours. */
     --ps-text: #fafaf9;
-    --ps-text-secondary: #d6d3d1;
+    --ps-text-secondary: #bdb7b1;
     --ps-text-inverse: #1c1917;
 
-    --ps-border: #44403c;
-    --ps-border-light: #292524;
+    --ps-border: #4c4743;
+    --ps-border-light: #34302d;
 
-    /* The card background equals the surface here, so the dimming carries
-       the muting; at 0.8 every text colour on the card stays above 4.5:1. */
+    /* The muted card is a step darker than a card and dimmed as well; at
+       0.8 every text colour on it stays above 4.5:1. */
     --ps-muted-opacity: 0.8;
 
     --ps-split-optimal: #948e89;
     --ps-split-encoded: #22a352;
+
+    --ps-chart-1: #93c5fd;
+    --ps-chart-2: #5eead4;
+    --ps-chart-3: #fdba74;
+    --ps-chart-4: #facc15;
+    --ps-chart-grid: #34302d;
 
     /* On-image labels (the diff view's Original/Optimized chips): a fixed
        dark scrim behind white text, the same in both schemes. */
@@ -186,6 +233,8 @@ body {
   background: var(--ps-bg);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Checkboxes, radio buttons and range sliders take the accent. */
+  accent-color: var(--ps-primary);
 }
 
 #app {
@@ -224,15 +273,15 @@ a {
 
 /* One type scale for numbers: metric cards and KV panels share these. */
 .metric-value {
-  font-size: var(--ps-font-size-2xl);
-  font-weight: 600;
+  font-size: var(--ps-type-metric-size);
+  font-weight: var(--ps-type-metric-weight);
   font-variant-numeric: tabular-nums;
   color: var(--ps-text);
 }
 
 .metric-label {
-  font-size: var(--ps-font-size-xs);
-  font-weight: 500;
+  font-size: var(--ps-type-label-size);
+  font-weight: var(--ps-type-label-weight);
   color: var(--ps-text-secondary);
 }
 
@@ -483,6 +532,78 @@ table.reads-across {
   color: var(--ps-text-secondary);
 }
 
+/* Shared text and message classes: a page or a component uses these
+ * instead of declaring its own copy. */
+
+/* A section heading inside a page (below the page title). */
+.section-title {
+  margin: 0 0 var(--ps-space-md);
+  font-size: var(--ps-font-size-lg);
+  font-weight: 600;
+  color: var(--ps-text);
+}
+
+/* A sentence of context under a figure, a table or a heading. */
+.note {
+  font-size: var(--ps-font-size-sm);
+  color: var(--ps-text-secondary);
+}
+
+/* Secondary text at the size of its surroundings. */
+.muted {
+  color: var(--ps-text-secondary);
+}
+
+/* A message that stands in for a page's content or sits above it: a failed
+ * load, a warning, something worth knowing. The words carry the state; the
+ * colour is only on the leading rule. Its children stack: an optional
+ * .notice-title, text, and an optional .notice-action (a link or a .btn).
+ * As wide as its text needs, not the window. */
+.notice {
+  max-width: var(--ps-card-max);
+  padding: var(--ps-space-sm) var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-inline-start: 3px solid var(--ps-primary);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-secondary);
+  color: var(--ps-text);
+  font-size: var(--ps-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.notice > * + * {
+  margin-top: var(--ps-space-xs);
+}
+
+.notice-info {
+  border-inline-start-color: var(--ps-primary);
+}
+
+.notice-warning {
+  border-inline-start-color: var(--ps-warning-text);
+}
+
+.notice-error {
+  border-inline-start-color: var(--ps-error);
+}
+
+.notice-title {
+  font-weight: 600;
+}
+
+.notice-action {
+  display: inline-flex;
+  margin-top: var(--ps-space-sm);
+}
+
+/* The filled part of a bar (a histogram bucket, a share of a total). The
+ * page sets its size and may set its fill. */
+.bar-fill {
+  display: block;
+  min-width: 2px;
+  background: var(--ps-primary);
+}
+
 /* Phone tables: rows become label/value cards so no column is off-screen.
  * The header is clipped, not display:none — the columns stay in the
  * accessibility tree (opt-in: a page adds .card-table and data-labels). */
@@ -531,5 +652,38 @@ table.reads-across {
 
   .card-table tr td:last-child {
     border-bottom: none;
+  }
+}
+
+/* Forced colours (Windows contrast themes): the user's palette replaces
+ * every author colour, so a state shown only by a colour or a fill
+ * disappears. This is the console's one forced-colours block. It is keyed
+ * on state attributes and shared classes, never on a page's own selectors,
+ * so it keeps working when a page is restyled. The declarations are
+ * !important because a component's scoped rule is more specific than an
+ * attribute selector, and here the user's palette has to win. */
+@media (forced-colors: active) {
+  /* The current page, the selected tab, a toggle that is on: the
+   * palette's own "selected" pair. */
+  [aria-current="page"],
+  [aria-selected="true"],
+  [aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    border-color: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  [aria-current="page"]:focus-visible,
+  [aria-selected="true"]:focus-visible,
+  [aria-pressed="true"]:focus-visible {
+    outline-color: CanvasText;
+  }
+
+  /* Marks drawn with a background: bars and status dots. */
+  .bar-fill,
+  .status-dot {
+    forced-color-adjust: none;
+    background: CanvasText !important;
   }
 }

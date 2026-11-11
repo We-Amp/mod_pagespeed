@@ -37,7 +37,7 @@ test.describe("Polling", () => {
       stats_json: () => (failing ? F.MODULE_FAILURE : F.STATS_VHOST),
     });
     await openConsole(page, "pagespeed_admin", "#/statistics");
-    await expect(page.getByText("statistics unavailable")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("Could not load the statistics.");
     // Two minutes: a fixed five-second cadence would ask 25 times; backing
     // off (5, 10, 20, 40, 60 s) asks 5 times.
     await runFor(page, 120_000);
@@ -73,7 +73,23 @@ test.describe("Polling", () => {
     expect(asked).toBeGreaterThanOrEqual(3);
     expect(asked).toBeLessThanOrEqual(7);
     await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
-    await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
+    // The last view stays, marked as what it is.
+    await expect(page.getByTestId("optimizer-state")).toHaveText("Running · last known");
+  });
+
+  test("the savings page never reads the message log", async ({ page }) => {
+    await page.clock.install();
+    const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/savings");
+    await expect(page.getByRole("heading", { level: 1, name: "Savings" })).toBeVisible();
+    await expect(page.getByText(/^updated /)).toBeVisible();
+    const before = mock.calls("stats_json");
+    await runFor(page, 30_000);
+    // It kept sampling the figures it shows...
+    expect(mock.calls("stats_json")).toBeGreaterThanOrEqual(before + 4);
+    expect(mock.calls("v1/daemon/stats")).toBeGreaterThanOrEqual(4);
+    // ...and not the log it never shows.
+    expect(mock.calls("message_history")).toBe(0);
   });
 
   test("a hidden tab makes no requests and refreshes at once when shown", async ({ page }) => {

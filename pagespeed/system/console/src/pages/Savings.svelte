@@ -17,6 +17,7 @@
   // never silently added together, plus a live chart accumulated from the
   // poll this page already runs.
   import { usePolling } from "$lib/api/polling.svelte";
+  import LoadError from "$lib/LoadError.svelte";
   import { isConnectionFailure } from "$lib/api/connection";
   import { ApiError } from "$lib/api/client";
   import type { StatsResponse } from "$lib/api/types";
@@ -67,12 +68,17 @@
   // Per-sample bookkeeping runs inside the fetcher, not in an $effect (same
   // contract as the Overview page): each sample appends to the live series
   // and throws exactly when the module read itself lost the connection.
+  // This page shows no findings, so its sample leaves the message log alone.
   const poll = usePolling(
     () =>
-      sampleOverview(api).then((sample) => {
+      sampleOverview(api, Date.now, { messages: false }).then((sample) => {
         const snap = toSnapshot(sample, daemonView);
-        updatedAt = sample.at;
-        if (sample.module.ok) lastModule = sample.module.data;
+        // The stamp is the age of the module figures: a sample whose module
+        // read failed does not move it.
+        if (sample.module.ok) {
+          lastModule = sample.module.data;
+          updatedAt = sample.at;
+        }
         if (snap.daemon !== "transient" || daemonView === null) daemonView = snap;
         // The hosts the optimizer served feed the lens (the best-ranked source).
         lens.observe(hostSavingsView(snap.daemonStats?.serve_savings_by_host)?.hosts.map((r) => r.host) ?? [], 0);
@@ -263,9 +269,12 @@
             </div>
           {/if}
         {:else if moduleError}
-          <p class="error" role="alert" data-testid="savings-module-error">
-            Could not read the module statistics: {moduleError.message}
-          </p>
+          <LoadError
+            error={moduleError}
+            noun="the module statistics"
+            onretry={() => poll.refresh()}
+            testid="savings-module-error"
+          />
         {/if}
         <p class="more"><a href="#/statistics">All statistics</a></p>
       </section>
@@ -659,7 +668,6 @@
   }
   .more a { color: var(--ps-primary); }
   .loading { color: var(--ps-text-secondary); }
-  .error { color: var(--ps-error); }
   .since {
     margin: var(--ps-space-xs) 0 0;
     font-size: var(--ps-font-size-xs);

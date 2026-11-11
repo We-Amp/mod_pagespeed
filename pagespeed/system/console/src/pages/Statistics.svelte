@@ -158,7 +158,7 @@
   {#if stats.loading}
     <p class="loading">Loading statistics...</p>
   {:else if stats.error && !stats.data}
-    <LoadError message={stats.error.message} />
+    <LoadError error={stats.error} noun="the statistics" onretry={() => stats.refresh()} />
   {:else}
     <RefreshNotice error={stats.error} />
 
@@ -306,8 +306,10 @@
     color: var(--ps-text-secondary);
   }
 
+  /* A sentence, not an identifier: the text face, not the name's mono. */
   .stat-desc {
     margin-top: 2px;
+    font-family: var(--ps-font-family);
     font-size: var(--ps-font-size-xs);
     color: var(--ps-text-secondary);
   }

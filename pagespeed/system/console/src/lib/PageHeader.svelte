@@ -3,6 +3,7 @@
 
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { clock } from "./now.svelte";
   import { formatIsoTitle } from "./utils/format";
   import { updatedText } from "./utils/page-header";
 
@@ -64,11 +65,12 @@
             <path d="M13.5 2.5v2.6h-2.6" />
           </svg>
         </button>
+        <!-- The stamp counts once a second: keep it outside any live region. -->
         <span
           class="page-updated field-text"
           data-testid="page-updated"
           title={updatedAt === null ? undefined : formatIsoTitle(updatedAt)}
-        >{updatedText(updatedAt, Date.now(), refresh.autoRefresh)}</span>
+        >{updatedText(updatedAt, clock.now, refresh.autoRefresh, refresh.intervalMs)}</span>
         </div>
       {/if}
     </div>

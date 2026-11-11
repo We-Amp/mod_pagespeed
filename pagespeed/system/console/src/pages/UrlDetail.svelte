@@ -246,7 +246,7 @@
         </p>
       </div>
     {:else}
-      <LoadError message={altError.message} />
+      <LoadError error={altError} noun="this URL's variants" onretry={() => poll.refresh()} />
     {/if}
   {:else if altData}
     <p class="detail-url" data-testid="url-detail-url"><code>{shown}</code></p>
