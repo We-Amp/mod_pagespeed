@@ -7,7 +7,7 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, openConsole, type Leaf, type MockRequest, type Reply } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -81,19 +81,85 @@ test("a section link from another page moves focus to that section's heading", a
   await expect(page.getByRole("heading", { level: 2, name: "Cache", exact: true })).toBeFocused();
 });
 
-test("no optimizer at all: one explanation for the whole page", async ({ page }) => {
+const NO_LEAF: Reply = { status: 404, body: { error: "Unknown admin page: v1/daemon" } };
+
+for (const [name, reply, reason, title, says] of [
+  ["not configured (503)", F.NOT_CONFIGURED, "not-configured", "No optimizer configured", "the module optimizes on its own"],
+  ["not answering (502)", F.UNREACHABLE, "not-answering", "Optimizer not answering", "Start the optimizer service"],
+  ["an optimizer without the endpoints (501)", F.UNSUPPORTED, "optimizer-outdated", "This build has no optimizer endpoints", "Update the optimizer package"],
+  ["a module without the endpoints (404)", NO_LEAF, "module-unsupported", "This build has no optimizer endpoints", "does not serve the optimizer's status"],
+] as const) {
+  test(`no optimizer, ${name}: one explanation in words, and no empty sections`, async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", {
+      ...F.allReplies(),
+      "v1/daemon/health": reply,
+      "v1/daemon/stats": reply,
+      "v1/daemon/cooldowns": reply,
+    });
+    await openConsole(page, "pagespeed_admin", "#/optimizer");
+    await ready(page);
+    await expect(page.getByTestId("optimizer-absent")).toHaveAttribute("data-reason", reason);
+    const state = page.getByTestId("daemon-unreachable");
+    await expect(state).toHaveCount(1);
+    await expect(state.locator(".empty-title")).toHaveText(title);
+    await expect(state).toContainText(says);
+    await expect(state.locator("p")).toHaveCount(2);
+    await expect(state.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+    // The transport's words stay out of the page.
+    await expect(page.locator("main")).not.toContainText(/HTTP \d{3}|daemon_|endpoint_unsupported|Unknown admin page/);
+    // No heading with nothing under it, and no report about a cache nothing fills.
+    await expect(page.locator("main h2, main h3")).toHaveCount(0);
+    await expect(page.locator("#optimizer-html-cache")).toHaveCount(0);
+    await expect(page.getByTestId("health-unavailable")).toHaveCount(0);
+    await expect(page.getByTestId("cache-unavailable")).toHaveCount(0);
+  });
+}
+
+test("leaves that disagree: the one that names a configured optimizer decides", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": NO_LEAF });
+  await openConsole(page, "pagespeed_admin", "#/optimizer");
+  await ready(page);
+  await expect(page.getByTestId("optimizer-absent")).toHaveAttribute("data-reason", "not-answering");
+});
+
+test("the sections come back when the optimizer answers again", async ({ page }) => {
+  let up = false;
+  const all = F.allReplies();
+  const live = (leaf: Leaf) => (call: number, request: MockRequest): Reply => {
+    const answer = all[leaf]!;
+    return up ? (typeof answer === "function" ? answer(call, request) : answer) : F.UNREACHABLE;
+  };
   await mockAdmin(page, "pagespeed_admin", {
-    ...F.allReplies(),
-    "v1/daemon/health": F.UNREACHABLE,
-    "v1/daemon/stats": F.UNREACHABLE,
-    "v1/daemon/cooldowns": F.UNREACHABLE,
+    ...all,
+    "v1/daemon/health": live("v1/daemon/health"),
+    "v1/daemon/stats": live("v1/daemon/stats"),
+    "v1/daemon/cooldowns": live("v1/daemon/cooldowns"),
   });
   await openConsole(page, "pagespeed_admin", "#/optimizer");
   await ready(page);
-  await expect(page.getByTestId("daemon-unreachable")).toHaveCount(1);
-  await expect(page.getByTestId("daemon-unreachable")).toContainText("unreachable");
-  await expect(page.getByTestId("health-unavailable")).toHaveCount(0);
-  await expect(page.getByTestId("cache-unavailable")).toHaveCount(0);
+  await expect(page.getByTestId("optimizer-absent")).toBeVisible();
+  up = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Health", exact: true })).toBeVisible();
+  await expect(page.locator(".status-badge")).toHaveText("ok");
+  await expect(page.getByTestId("optimizer-absent")).toHaveCount(0);
+});
+
+test("the HTML cache report reads as one more section of the page", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", F.allReplies());
+  await openConsole(page, "pagespeed_admin", "#/optimizer");
+  await ready(page);
+  const size = (el: Element) => getComputedStyle(el).fontSize;
+  const panel = page.locator("#optimizer-html-cache");
+  const heading = panel.getByRole("heading", { level: 2 });
+  await expect(heading).toBeVisible();
+  const sibling = await page.getByRole("heading", { level: 2, name: "Cache", exact: true }).evaluate(size);
+  expect(await heading.evaluate(size)).toBe(sibling);
+  // Its sentences are notes, the size of the page's other notes, not body text.
+  const note = await page.getByTestId("serve-savings-source").evaluate(size);
+  const sentences = panel.locator("p");
+  expect(await sentences.count()).toBeGreaterThan(0);
+  for (const p of await sentences.all()) expect(await p.evaluate(size)).toBe(note);
 });
 
 test("health answers and statistics do not: each section says what it has", async ({ page }) => {

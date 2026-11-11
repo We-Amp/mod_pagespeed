@@ -10,13 +10,16 @@
   // Each section renders from its own read. An unavailable read (404: this
   // module serves no daemon endpoints; 501: this optimizer lacks the
   // endpoint; 502: unreachable; 503: not configured) is a normal operating
-  // state rendered as an explanation, never an error. The retired Daemon
+  // state rendered as an explanation, never an error. When no read answers,
+  // the page is that one explanation, named by its reason (daemon.ts), and
+  // no section is drawn. The retired Daemon
   // Status, Daemon Back-pressure and Daemon Cache pages redirect here with a
   // section= parameter (redirects.ts).
   import { tick } from "svelte";
   import { usePolling } from "$lib/api/polling.svelte";
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
+  import EmptyState from "$lib/EmptyState.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import HtmlCachePanel from "$lib/HtmlCachePanel.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
@@ -29,6 +32,8 @@
     isDaemonUnavailable,
     normalizeCooldowns,
     objectEntries,
+    optimizerAbsence,
+    optimizerAbsenceText,
   } from "$lib/utils/daemon";
   import { formatBytes, formatCount, formatDuration, formatPercent, formatSignedBytes } from "$lib/utils/format";
   import { foldStatus, optimizerSection, sampleStatus, statusView, type StatusSample } from "$lib/utils/optimizer-status";
@@ -72,6 +77,9 @@
 
   let view = $derived(statusView(poll.data ?? null));
   let statsUnavailable = $derived(view.statsError !== null && isDaemonUnavailable(view.statsError));
+  // No leaf answered and each says "no optimizer here": the one reason the page gives.
+  let absence = $derived(view.allUnavailable ? optimizerAbsence(view.healthError, view.statsError) : null);
+  let absenceText = $derived(absence === null ? null : optimizerAbsenceText(absence));
 
   type BadgeColor = "success" | "warning" | "neutral";
   let statusColor = $derived.by((): BadgeColor => {
@@ -109,19 +117,16 @@
   />
   <RefreshNotice error={poll.error} />
 
-  {#if view.allUnavailable && view.unavailableError}
-    <div class="empty-state" data-testid="daemon-unreachable">
-      <p class="empty-title">Optimizer unreachable</p>
-      <p class="empty-reason">{daemonUnavailableReason(view.unavailableError)}</p>
-      <p class="empty-description">
-        The module could not reach the optimizer worker ({view.unavailableError.message}).
-        The worker may be stopped or not configured, or this build does not
-        serve the optimizer endpoints; the module keeps serving without it.
-        This page populates once the worker is reachable.
-      </p>
+  {#if absence !== null && absenceText !== null}
+    <div data-testid="optimizer-absent" data-reason={absence}>
+      <EmptyState
+        testid="daemon-unreachable"
+        title={absenceText.title}
+        detail={absenceText.detail}
+        action={absenceText.doc}
+      />
     </div>
-  {/if}
-
+  {:else}
   <div class="daemon-sections">
   <section class="daemon-section" id="optimizer-health" aria-labelledby="optimizer-health-heading">
     <h2 id="optimizer-health-heading" data-page-focus={section === "health" ? "" : undefined}>Health</h2>
@@ -299,14 +304,11 @@
       {/if}
     {:else if view.statsError && !view.allUnavailable}
       {#if statsUnavailable}
-        <div class="empty-state" data-testid="daemon-unreachable">
-          <p class="empty-title">Optimizer unreachable</p>
-          <p class="empty-reason">{daemonUnavailableReason(view.statsError)}</p>
-          <p class="empty-description">
-            The module could not read the optimizer's statistics ({view.statsError.message}).
-            The load and cache sections populate once it answers.
-          </p>
-        </div>
+        <EmptyState
+          testid="daemon-unreachable"
+          title="Statistics are not available: {daemonUnavailableReason(view.statsError)}."
+          detail="The load and cache sections fill in once the optimizer answers this read."
+        />
       {:else}
         <LoadError error={view.statsError} noun="the optimizer's statistics" onretry={() => poll.refresh()} />
       {/if}
@@ -431,6 +433,7 @@
   </section>
   <HtmlCachePanel />
   </div>
+  {/if}
 </div>
 
 <style>
@@ -631,34 +634,6 @@
 
   .loading {
     color: var(--ps-text-secondary);
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: var(--ps-space-xl) var(--ps-space-lg);
-    margin-bottom: var(--ps-space-lg);
-    border: 1px dashed var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .empty-title {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-reason {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-description {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-    line-height: 1.5;
   }
 
   .raw {

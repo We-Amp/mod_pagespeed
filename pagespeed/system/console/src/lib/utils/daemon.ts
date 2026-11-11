@@ -12,6 +12,7 @@
  */
 
 import { ApiError } from "$lib/api/client";
+import { MODULE_DOCS } from "$lib/data/product-facts-console";
 import type {
   DaemonCooldownEntry,
   DaemonCooldownsResponse,
@@ -70,8 +71,8 @@ export function wholeServerConsoleOnlyError(): ApiError {
 }
 
 /**
- * Operator-facing sentence for why a daemon panel has nothing to show,
- * shown under the "Optimizer unreachable" heading. Maps the daemon proxy's
+ * Operator-facing words for why one daemon panel has nothing to show
+ * ("Health is not available: ..."). Maps the daemon proxy's
  * three reason codes; anything else (including a genuine transport
  * failure/timeout) defaults to "unreachable".
  */
@@ -84,6 +85,101 @@ export function daemonUnavailableReason(error: Error | null): string {
     case "daemon_unreachable":
     default:
       return "unreachable";
+  }
+}
+
+/**
+ * Why a console has no optimizer to show, when no status leaf answered:
+ * - `not-answering`: one is configured and the module could not reach it
+ *   (502, or a 503 that is not the proxy's own "not configured");
+ * - `not-configured`: none is configured here (the proxy's 503);
+ * - `optimizer-outdated`: the optimizer lacks the status endpoints (501);
+ * - `module-unsupported`: this module build serves no optimizer endpoints (404).
+ */
+export type OptimizerAbsence = "not-configured" | "not-answering" | "optimizer-outdated" | "module-unsupported";
+
+function absenceOf(error: Error | null): OptimizerAbsence | null {
+  if (!(error instanceof ApiError)) return null;
+  switch (error.status) {
+    case 502:
+      return "not-answering";
+    case 503:
+      return errorCode(error) === "daemon_not_configured" ? "not-configured" : "not-answering";
+    case 501:
+      return "optimizer-outdated";
+    case 404:
+      return "module-unsupported";
+    default:
+      return null;
+  }
+}
+
+/** Most telling first: a leaf that names a configured optimizer outranks one that names none. */
+const ABSENCE_ORDER: readonly OptimizerAbsence[] = [
+  "not-answering",
+  "not-configured",
+  "optimizer-outdated",
+  "module-unsupported",
+];
+
+/**
+ * The one reason a page gives when every status leaf is unavailable. The
+ * leaves normally agree; when they do not, the most telling answer wins.
+ * null when no error is an "unavailable" answer (see isDaemonUnavailable).
+ */
+export function optimizerAbsence(...errors: Array<Error | null>): OptimizerAbsence | null {
+  const found = errors.map(absenceOf);
+  return ABSENCE_ORDER.find((kind) => found.includes(kind)) ?? null;
+}
+
+/** What to do about an optimizer that is configured but not answering; the Overview finding gives the same fix. */
+export const OPTIMIZER_NOT_ANSWERING_FIX =
+  "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.";
+
+export interface OptimizerAbsenceText {
+  title: string;
+  detail: string;
+  /** A fixed documentation link, never a value from an endpoint. */
+  doc: { label: string; href: string };
+}
+
+/** The Optimizer status page's whole-page explanation: a title in words, one paragraph, one documentation link. */
+export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceText {
+  switch (kind) {
+    case "not-configured":
+      return {
+        title: "No optimizer configured",
+        detail:
+          "No optimizer worker is configured for this server; the module optimizes on its own. " +
+          "This page shows the worker's health, load and cache once one is configured.",
+        doc: { label: "Configuring the optimizer worker", href: `${MODULE_DOCS}/configuration/#area-optimizer-worker` },
+      };
+    case "not-answering":
+      return {
+        title: "Optimizer not answering",
+        detail:
+          "The optimizer worker is configured but not answering. The module keeps serving pages without it. " +
+          OPTIMIZER_NOT_ANSWERING_FIX,
+        doc: {
+          label: "Troubleshooting",
+          href: `${MODULE_DOCS}/troubleshooting/#how-to-get-more-diagnostic-information`,
+        },
+      };
+    case "optimizer-outdated":
+      return {
+        title: "This build has no optimizer endpoints",
+        detail:
+          "This optimizer version does not provide the status this console reads. Update the optimizer package.",
+        doc: { label: "About the optimizer status page", href: `${MODULE_DOCS}/admin-console/#optimizer-daemon-panels` },
+      };
+    case "module-unsupported":
+      return {
+        title: "This build has no optimizer endpoints",
+        detail:
+          "This web server's module does not serve the optimizer's status, so this page has nothing to show. " +
+          "The module optimizes on its own.",
+        doc: { label: "About the optimizer status page", href: `${MODULE_DOCS}/admin-console/#optimizer-daemon-panels` },
+      };
   }
 }
 
