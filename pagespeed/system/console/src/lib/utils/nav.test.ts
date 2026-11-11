@@ -27,6 +27,25 @@ describe("the sidebar", () => {
   });
 });
 
+describe("isNavActive", () => {
+  it("a URL's page lives under URLs on the whole-server console and under Overview on a per-vhost one", () => {
+    const entry = (path: string) => routes.find((r) => r.path === path)!;
+    expect(isNavActive(entry("#/urls"), "#/urls/detail", routes, true)).toBe(true);
+    expect(isNavActive(entry("#/overview"), "#/urls/detail", routes, true)).toBe(false);
+    expect(isNavActive(entry("#/overview"), "#/urls/detail", routes, false)).toBe(true);
+    expect(isNavActive(entry("#/urls"), "#/urls/detail", routes, false)).toBe(false);
+    // A page with one parent keeps it on both consoles.
+    expect(isNavActive(entry("#/statistics"), "#/graphs", routes, false)).toBe(true);
+  });
+
+  it("a per-vhost parent is an entry that console's sidebar shows", () => {
+    for (const r of routes.filter((x) => x.parentPerVhost !== undefined)) {
+      const parent = routes.find((p) => p.path === r.parentPerVhost);
+      expect(parent !== undefined && parent.hidden !== true && parent.globalOnly !== true, r.path).toBe(true);
+    }
+  });
+});
+
 describe("server-rendered page links", () => {
   it("Rule packs is a native console page after Configuration, no longer a link out", () => {
     expect(SERVER_PAGE_LINKS).toEqual([]);

@@ -20,6 +20,8 @@ export interface Route {
   hidden?: boolean;
   /** The sidebar entry this page lives under (a hidden page's parent is marked current). */
   parent?: string;
+  /** The entry it lives under on a per-vhost console, where `parent` has no sidebar entry. */
+  parentPerVhost?: string;
   /** Sidebar entry only on the whole-server console (the page itself still
    * loads on a per-vhost console and explains the scope there). */
   globalOnly?: boolean;
@@ -90,8 +92,10 @@ export const routes: Route[] = [
     icon: "link",
     group: "overview",
     hidden: true,
-    globalOnly: true,
+    // On every console: a per-vhost console answers with the module's half,
+    // and reaches the page from "Inspect a URL" on Overview.
     parent: "#/urls",
+    parentPerVhost: "#/overview",
     hostAware: true,
     component: () => import("../pages/UrlDetail.svelte"),
   },

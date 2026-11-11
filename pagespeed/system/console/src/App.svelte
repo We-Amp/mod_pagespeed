@@ -367,7 +367,7 @@
       <ul class="nav-list" aria-labelledby={group.label ? `nav-group-${group.id}` : undefined}>
         {#each routes.filter((r) => r.group === group.id && r.hidden !== true && (r.globalOnly !== true || scope.isGlobal)) as route (route.path)}
           {@const hint = navKeyHint(route.path)}
-          {@const active = isNavActive(route, router.path, routes)}
+          {@const active = isNavActive(route, router.path, routes, scope.isGlobal)}
           {@const off = isOff(route)}
           <li class="nav-row">
             <a

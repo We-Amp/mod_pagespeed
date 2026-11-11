@@ -18,8 +18,13 @@
   // "Jump to newest" that counts what arrived since, the restart/gap/shed
   // markers inline, and a 3-second poll of the optimizer's ring alone.
   //
-  // The view (source, grouping) is preset by the address when the page
-  // mounts. The Source and Group repeats controls then change it in place:
+  // The view (source, grouping, the text filter `q=`) is preset by the
+  // address when the page mounts; the text filter writes itself back, so a
+  // link to "the entries that name this URL" can be shared. A URL in an
+  // entry links to the URL and, by the mark after it, to its page in this
+  // console; the mark is drawn by the stylesheet, so the entry's text stays
+  // the log's own (to read, to select and to copy).
+  // The Source and Group repeats controls then change it in place:
   // the page stays mounted with its one poller, so the filter text, the
   // levels, the expanded rows, the scroll position and the keyboard focus
   // stay where they are, and the choice is written into the address
@@ -53,6 +58,7 @@
   import { TERMS } from "$lib/data/terms";
   import { formatCount, formatIsoTitle } from "$lib/utils/format";
   import { linkSegments } from "$lib/utils/linkify";
+  import { inspectHrefForLink } from "$lib/utils/url-inspect";
   import { hostsInText, textNamesHost } from "$lib/utils/host-lens";
   import { replaceViewParams } from "$lib/utils/view-address";
   import {
@@ -204,7 +210,7 @@
   const levelParam = router.params.get("level");
   const levelKnown = isKnownTimelineLevel(levelParam);
   let enabledLevels = $state(timelineLevelFilter(linkedRaw && levelParam === null ? "debug" : levelParam));
-  let text = $state("");
+  let text = $state(router.params.get("q") ?? "");
   let expanded = $state<Record<string, boolean>>({});
 
   let perVhost = $derived(optimizerOff || knownPerVhostScope(scope.config, scope.isGlobal));
@@ -237,6 +243,7 @@
   function levelHref(level: string): string {
     const params = new URLSearchParams({ source, level });
     if (!grouped) params.set("group", "0");
+    if (text.trim() !== "") params.set("q", text);
     return `#/logs?${params.toString()}`;
   }
 
@@ -267,6 +274,12 @@
     } else {
       poll.invalidate();
     }
+  }
+
+  /** The text filter, kept in the address in place (no history entry per keystroke). */
+  function setText(value: string): void {
+    text = value;
+    replaceViewParams({ q: value.trim() === "" ? null : value });
   }
 
   function onLogScroll() {
@@ -311,7 +324,7 @@
 <!-- Log text is visitor-influenced: every segment renders as a text node;
      only an http(s) URL that parses becomes a link (linkify.ts). Kept on one
      line: the text keeps its whitespace (pre-wrap). -->
-{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{:else}{segment.text}{/if}{/each}{/snippet}
+{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{@const inspect = inspectHrefForLink(segment.href)}{#if inspect !== null}<a class="log-inspect" href={inspect} aria-label={`Inspect ${segment.text}`} title="Inspect this URL" data-testid="log-inspect"></a>{/if}{:else}{segment.text}{/if}{/each}{/snippet}
 
 <div class="page">
   <PageHeader
@@ -462,7 +475,8 @@
         placeholder="Filter the entries"
         aria-label="Filter the entries"
         data-testid="logs-search"
-        bind:value={text}
+        value={text}
+        oninput={(event) => setText(event.currentTarget.value)}
       />
       <span class="count field-text">Showing {formatCount(filtered.length)} of {formatCount(sourceEntries.length)}</span>
       </div>
@@ -768,8 +782,20 @@
     min-width: 0;
   }
 
-  .log-link {
+  .log-link,
+  .log-inspect {
     color: var(--ps-primary);
+  }
+
+  /* The way to the URL's page in this console: a mark after the URL, with
+     room to hit it. */
+  .log-inspect {
+    margin-left: var(--ps-space-xs);
+    font-size: var(--ps-font-size-xs);
+  }
+
+  .log-inspect::after {
+    content: "inspect";
   }
 
   .log-expand {

@@ -245,3 +245,34 @@ test("a row opens the entry's detail view, carrying its site to the lookups", as
   expect(sites.length).toBeGreaterThan(0);
   expect(sites.every((s) => s === F.HERO_SITE)).toBe(true);
 });
+
+// The list shows one page of the index; a URL the operator already has goes
+// straight to its page.
+test("Inspect a URL opens the URL's page, whether or not it is on this page of the index", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalReplies(F.URLS_TWO_PAGES),
+    cache: F.cacheWithLookup(),
+    "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await ready(page);
+  // The filter stays the page's search box; the inspect input is its own, labelled control.
+  await expect(page.getByTestId("urls-search")).toBeVisible();
+  const input = page.getByRole("searchbox", { name: "Inspect a URL" });
+  await input.fill("https://www.example.test/never-listed.jpg");
+  await input.press("Enter");
+  await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/never-listed.jpg");
+  await expect(page.getByTestId("url-detail-not-found")).toBeVisible();
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+});
+
+test("per-vhost console: the index is not shown, and a URL can still be inspected", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", "#/urls");
+  await ready(page);
+  await expect(page.getByTestId("urls-per-vhost")).toBeVisible();
+  await page.getByTestId("inspect-url").fill("https://www.example.test/a.css");
+  await page.getByTestId("inspect-url").press("Enter");
+  await expect(page.getByTestId("url-module-lookup")).toBeVisible();
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+});
