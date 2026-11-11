@@ -68,12 +68,17 @@
   // Per-sample bookkeeping runs inside the fetcher, not in an $effect (same
   // contract as the Overview page): each sample appends to the live series
   // and throws exactly when the module read itself lost the connection.
+  // This page shows no findings, so its sample leaves the message log alone.
   const poll = usePolling(
     () =>
-      sampleOverview(api).then((sample) => {
+      sampleOverview(api, Date.now, { messages: false }).then((sample) => {
         const snap = toSnapshot(sample, daemonView);
-        updatedAt = sample.at;
-        if (sample.module.ok) lastModule = sample.module.data;
+        // The stamp is the age of the module figures: a sample whose module
+        // read failed does not move it.
+        if (sample.module.ok) {
+          lastModule = sample.module.data;
+          updatedAt = sample.at;
+        }
         if (snap.daemon !== "transient" || daemonView === null) daemonView = snap;
         // The hosts the optimizer served feed the lens (the best-ranked source).
         lens.observe(hostSavingsView(snap.daemonStats?.serve_savings_by_host)?.hosts.map((r) => r.host) ?? [], 0);

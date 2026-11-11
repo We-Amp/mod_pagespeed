@@ -58,6 +58,28 @@ for (const route of ROUTES) {
   });
 }
 
+test("the stamp counts the seconds, also while auto-refresh is paused", async ({ page }) => {
+  await page.clock.install();
+  const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
+  await openConsole(page, "pagespeed_admin", "#/statistics");
+  const stamp = page.getByTestId("page-updated");
+  await expect(stamp).toHaveText(/^updated \d s ago$/);
+  await page.getByRole("button", { name: /Auto-refresh · \d+ s/ }).click();
+  await expect(stamp).toHaveText(/^paused · updated \d+ s ago$/);
+  const age = async () => Number(/updated (\d+) s ago/.exec((await stamp.textContent()) ?? "")?.[1]);
+  const start = await age();
+  const calls = mock.calls("stats_json");
+
+  await page.clock.runFor(7_000);
+  await expect.poll(age).toBeGreaterThanOrEqual(start + 7);
+  await page.clock.runFor(60_000);
+  await expect(stamp).toHaveText(/^paused · updated 1 min ago$/);
+  // Counting is not refreshing: nothing was asked meanwhile.
+  expect(mock.calls("stats_json")).toBe(calls);
+  // The stamp is not announced: it sits in no live region.
+  expect(await stamp.evaluate((el) => el.closest("[aria-live], [role=status], [role=alert], [role=log]") === null)).toBe(true);
+});
+
 test("Configuration keeps its manual refresh, and it still refetches", async ({ page }) => {
   const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
   await openConsole(page, "pagespeed_admin", "#/configuration");
