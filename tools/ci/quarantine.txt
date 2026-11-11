@@ -5,4 +5,3 @@
 # out; moving it needs the reason written in the issue first.
 #
 # <workflow file>|<job id>|<job name>|<tracking issue>|<expires YYYY-MM-DD>
-pipeline-full.yml|win-appverif|Windows AppVerif|656|2026-11-20

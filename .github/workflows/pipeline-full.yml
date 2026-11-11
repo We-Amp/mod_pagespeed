@@ -1479,16 +1479,10 @@ jobs:
   # by windows-build. This job needs a host with the IIS role, administrator
   # rights and the Windows SDK debugging tools, and cannot run on a hosted
   # runner, so a fork or Dependabot pull request skips it.
-  #
-  # Report-only until 2026-11-20 (issue #656, tools/ci/quarantine.txt): a
-  # failure shows on the job but does not fail the run or the CI gate. The
-  # nightly-red report still lists it, the release lane's gate still requires
-  # it, and CI goes red once the expiry passes (tools/ci/check_quarantine.py).
   win-appverif:
     permissions:
       contents: read
     name: Windows AppVerif
-    continue-on-error: true
     needs: windows-build
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}

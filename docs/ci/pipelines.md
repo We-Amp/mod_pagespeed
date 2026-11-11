@@ -864,7 +864,7 @@ not read the file: a quarantined job that the release requires must still
 pass at the release commit. The nightly-red issue reads the run's job list,
 so a report-only job's failure in the nightly is still reported.
 
-As of 2026-11-06: `full / Windows AppVerif`, until 2026-11-20 (issue #656).
+As of 2026-11-11: no job is report-only.
 
 ## The tidy sweep
 
