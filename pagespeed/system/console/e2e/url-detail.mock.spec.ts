@@ -46,7 +46,7 @@ test("a cooldown banner separates its reason and remaining time", async ({ page 
   );
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing) — 42s remaining.");
+  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing), 42s remaining.");
 });
 
 test("renders the variants, badges and image previews", async ({ page }) => {
@@ -164,14 +164,20 @@ test("an unreachable daemon renders the shared empty state", async ({ page }) =>
   await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.UNREACHABLE));
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-unreachable")).toContainText("unreachable");
+  const state = page.getByTestId("url-detail-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("Optimizer not answering");
+  await expect(state).toContainText("The optimizer is configured but not answering.");
+  // The transport's words stay out of the page.
+  await expect(state).not.toContainText(/HTTP \d{3}|daemon_|unreachable/);
 });
 
 test("an unconfigured daemon transport renders the shared empty state", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", globalDetail(F.NOT_CONFIGURED));
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-unreachable")).toContainText("not configured");
+  const state = page.getByTestId("url-detail-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("No optimizer configured");
+  await expect(state).toContainText("No optimizer is configured for this server; the module optimizes on its own.");
 });
 
 test("a garbage alternates reply shows no NaN or undefined", async ({ page }) => {

@@ -11,9 +11,9 @@
 import { ApiError } from "$lib/api/client";
 import type { DaemonHealthResponse, DaemonStatsResponse, StatsResponse } from "$lib/api/types";
 import type { AlertSnapshot, DaemonAvailability, HealthSummary } from "$lib/alerts";
-import { MODULE_DOCS } from "$lib/data/product-facts-console";
+import { DOCS } from "$lib/data/product-facts-console";
 import type { ConfigScope } from "$lib/utils/config-scope";
-import { errorCode } from "$lib/utils/daemon";
+import { errorCode, NO_OPTIMIZER_CONFIGURED, OPTIMIZER_NOT_ANSWERING } from "$lib/utils/daemon";
 import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type MessageDigest } from "$lib/utils/message-groups";
 import { formatBytes, formatClock, formatCount, formatRelative } from "$lib/utils/format";
 import type { OptimizedCopyHitRate } from "$lib/utils/savings";
@@ -269,12 +269,12 @@ export function availabilityText(a: DaemonAvailability): { word: string; detail:
     case "not-configured":
       return {
         word: "Not configured",
-        detail: "No optimizer worker is configured for this server; the module optimizes on its own.",
+        detail: NO_OPTIMIZER_CONFIGURED,
       };
     case "unreachable":
       return {
-        word: "Unreachable",
-        detail: "The optimizer worker is configured but not answering; the module keeps serving pages without it.",
+        word: "Not answering",
+        detail: OPTIMIZER_NOT_ANSWERING,
       };
     case "unsupported":
       return {
@@ -305,8 +305,8 @@ export function unknownHealth(
   return {
     text:
       lastAnsweredAt === null
-        ? "Status unknown — the server has not answered"
-        : `Status unknown — last answer ${timeText(lastAnsweredAt)}`,
+        ? "Status unknown. The server has not answered"
+        : `Status unknown. Last answer ${timeText(lastAnsweredAt)}`,
     level: "unknown",
   };
 }
@@ -605,7 +605,7 @@ export function findingsMark(level: HealthSummary["level"], needAction: boolean)
 }
 
 /** Where the documentation explains how to add the optimizer to a server. */
-export const OPTIMIZER_SETUP_DOC = `${MODULE_DOCS}/configuration/#area-optimizer-worker`;
+export const OPTIMIZER_SETUP_DOC = DOCS.optimizerSetup;
 
 /** The first-run check: the module's own response header on a page it handled (a generic host; the reader fills in theirs). */
 export const RESPONSE_HEADER_CHECK = "curl -sI http://example.com/ | grep -i -E 'x-mod-pagespeed|x-page-speed'";

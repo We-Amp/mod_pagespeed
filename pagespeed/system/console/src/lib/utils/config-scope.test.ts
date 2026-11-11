@@ -25,7 +25,7 @@ describe("statisticsScopeLine", () => {
   });
   it("names the vhost for a per-vhost console", () => {
     expect(statisticsScopeLine(false)).toBe(
-      "Statistics of this virtual host — separate from other hosts only " +
+      "Statistics of this virtual host. They are separate from other hosts only " +
       "when per-virtual-host statistics are enabled");
   });
 });
@@ -78,7 +78,7 @@ describe("knownPerVhostScope", () => {
 describe("statisticsScopeLine with a host", () => {
   it("names the host of a per-vhost console", () => {
     expect(statisticsScopeLine(false, "www.example.test")).toBe(
-      "Statistics of this virtual host (www.example.test) — separate from other hosts only " +
+      "Statistics of this virtual host (www.example.test). They are separate from other hosts only " +
       "when per-virtual-host statistics are enabled");
   });
   it("ignores the host on the global console", () => {

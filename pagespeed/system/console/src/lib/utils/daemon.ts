@@ -12,7 +12,7 @@
  */
 
 import { ApiError } from "$lib/api/client";
-import { MODULE_DOCS } from "$lib/data/product-facts-console";
+import { DOCS } from "$lib/data/product-facts-console";
 import type {
   DaemonCooldownEntry,
   DaemonCooldownsResponse,
@@ -74,7 +74,7 @@ export function wholeServerConsoleOnlyError(): ApiError {
  * Operator-facing words for why one daemon panel has nothing to show
  * ("Health is not available: ..."). Maps the daemon proxy's
  * three reason codes and a 503 the optimizer sent itself; anything else
- * (including a genuine transport failure/timeout) defaults to "unreachable".
+ * (including a genuine transport failure/timeout) reads as not answering.
  */
 export function daemonUnavailableReason(error: Error | null): string {
   switch (errorCode(error)) {
@@ -83,10 +83,10 @@ export function daemonUnavailableReason(error: Error | null): string {
     case "endpoint_unsupported_by_daemon":
       return "this optimizer version does not provide this panel";
     case "daemon_unreachable":
-      return "unreachable";
+      return "the optimizer is not answering";
     default:
       // A 503 the optimizer sent itself: it is running, and the next refresh asks again.
-      return absenceOf(error) === "did-not-answer" ? "the optimizer did not answer this refresh" : "unreachable";
+      return absenceOf(error) === "did-not-answer" ? "the optimizer did not answer this refresh" : "the optimizer is not answering";
   }
 }
 
@@ -141,12 +141,16 @@ export function optimizerAbsence(...errors: Array<Error | null>): OptimizerAbsen
   return ABSENCE_ORDER.find((kind) => found.includes(kind)) ?? null;
 }
 
+/** An optimizer that is configured but not answering; the Overview finding says the same sentence. */
+export const OPTIMIZER_NOT_ANSWERING =
+  "The optimizer is configured but not answering. The module keeps serving pages without it.";
+
 /** What to do about an optimizer that is configured but not answering; the Overview finding gives the same fix. */
 export const OPTIMIZER_NOT_ANSWERING_FIX =
   "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.";
 
-/** No optimizer worker here; the Overview card says the same sentence. */
-const NO_OPTIMIZER_CONFIGURED = "No optimizer worker is configured for this server; the module optimizes on its own.";
+/** No optimizer here; the Overview card says the same sentence. */
+export const NO_OPTIMIZER_CONFIGURED = "No optimizer is configured for this server; the module optimizes on its own.";
 
 export interface OptimizerAbsenceText {
   title: string;
@@ -163,19 +167,16 @@ export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceTe
         title: "No optimizer configured",
         detail:
           `${NO_OPTIMIZER_CONFIGURED} ` +
-          "This page shows the worker's health, load and cache once one is configured.",
-        doc: { label: "Configuring the optimizer worker", href: `${MODULE_DOCS}/configuration/#area-optimizer-worker` },
+          "This page shows the optimizer's health, load and cache once one is configured.",
+        doc: { label: "Setting up the optimizer", href: DOCS.optimizerSetup },
       };
     case "not-answering":
       return {
         title: "Optimizer not answering",
         detail:
-          "The optimizer worker is configured but not answering. The module keeps serving pages without it. " +
+          `${OPTIMIZER_NOT_ANSWERING} ` +
           OPTIMIZER_NOT_ANSWERING_FIX,
-        doc: {
-          label: "Troubleshooting",
-          href: `${MODULE_DOCS}/troubleshooting/#how-to-get-more-diagnostic-information`,
-        },
+        doc: { label: "Troubleshooting", href: DOCS.diagnose },
       };
     case "did-not-answer":
       return {
@@ -188,13 +189,13 @@ export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceTe
         title: "This build has no optimizer endpoints",
         detail:
           "This optimizer version does not provide the status this console reads. Update the optimizer package.",
-        doc: { label: "About the optimizer status page", href: `${MODULE_DOCS}/admin-console/#optimizer-daemon-panels` },
+        doc: { label: "About the optimizer status page", href: DOCS.optimizerStatus },
       };
     case "module-unsupported":
       return {
         title: "This build has no optimizer endpoints",
         detail: `This web server's module does not serve the optimizer's status. ${NO_OPTIMIZER_CONFIGURED}`,
-        doc: { label: "About the optimizer status page", href: `${MODULE_DOCS}/admin-console/#optimizer-daemon-panels` },
+        doc: { label: "About the optimizer status page", href: DOCS.optimizerStatus },
       };
   }
 }
@@ -276,6 +277,57 @@ export function counterRows(
     }
   }
   return rows;
+}
+
+/**
+ * Why a page that needs the optimizer has nothing to show, for a page that
+ * is not the Optimizer status page: a title and one sentence that agree
+ * with each other and with that page. Only for an "unavailable" answer
+ * (see isDaemonUnavailable); anything else reads as not answering.
+ */
+export function optimizerUnavailableNote(error: Error | null): { title: string; detail: string } {
+  switch (absenceOf(error)) {
+    case "not-configured":
+      return { title: "No optimizer configured", detail: NO_OPTIMIZER_CONFIGURED };
+    case "did-not-answer":
+      return {
+        title: "Optimizer did not answer",
+        detail: "The optimizer did not answer this refresh; the next refresh tries again.",
+      };
+    case "optimizer-outdated":
+      return {
+        title: "Optimizer version too old",
+        detail: "This optimizer version does not provide this data. Update the optimizer package.",
+      };
+    case "module-unsupported":
+      return {
+        title: "Not available on this web server",
+        detail: "This web server's module does not serve the optimizer's data.",
+      };
+    default:
+      return {
+        title: "Optimizer not answering",
+        detail: "The optimizer is configured but not answering. Its data appears here once it answers.",
+      };
+  }
+}
+
+/** Plain names for the optimizer's health checks; the id stays available as a tooltip. */
+const CHECK_LABELS: Record<string, string> = {
+  cache_configured: "Cache directory configured",
+  cache_open: "Cache opened",
+};
+
+/**
+ * A health check's name as a reader sees it: the plain name of a check the
+ * console knows, else the id with its underscores as spaces. The optimizer
+ * is untrusted, so an unknown id is shown as text only.
+ */
+export function checkLabel(id: string): string {
+  const known = Object.hasOwn(CHECK_LABELS, id) ? CHECK_LABELS[id] : undefined;
+  if (known !== undefined) return known;
+  const words = id.replace(/_+/g, " ").trim();
+  return words === "" ? id : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** One health check's result as a sysadmin reads it. */

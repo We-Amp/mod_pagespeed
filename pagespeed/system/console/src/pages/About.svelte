@@ -18,6 +18,12 @@
     type OptimizerVersionsStatus,
   } from "$lib/utils/versions";
 
+  // Where the pages of the earlier console went: its name, and the page that holds it now.
+  const OLD_CONSOLE_PAGES: ReadonlyArray<{ old: string; now: string; href: string }> = [
+    { old: "Console (graphs)", now: "Statistics, Graphs view", href: "#/graphs" },
+    { old: "Message History", now: "Logs, Module source", href: "#/logs?source=module" },
+  ];
+
   const { api } = useConsole();
   const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
   const dirty = isDirtyBuild(appVersion);
@@ -66,6 +72,19 @@
   <section class="about-section" aria-labelledby="about-docs">
     <h2 id="about-docs">Documentation</h2>
     <p><a href={DOCS_URL} target="_blank" rel="noopener noreferrer" class="legal-link">Admin console documentation</a></p>
+  </section>
+
+  <section class="about-section" aria-labelledby="about-old-console" data-testid="about-old-console">
+    <h2 id="about-old-console">Coming from the old console?</h2>
+    <p class="old-console-note">Two pages of the earlier admin console have a new place. The others kept their names.</p>
+    <dl class="old-console">
+      {#each OLD_CONSOLE_PAGES as row (row.old)}
+        <div class="old-console-row">
+          <dt>{row.old}</dt>
+          <dd><a href={row.href} class="legal-link">{row.now}</a></dd>
+        </div>
+      {/each}
+    </dl>
   </section>
 
   <section class="about-section" aria-labelledby="about-legal">
@@ -133,6 +152,27 @@
 
   dd {
     margin: 0;
+  }
+
+  .old-console-note {
+    margin: 0 0 var(--ps-space-sm);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text-secondary);
+  }
+
+  .old-console {
+    margin: 0;
+  }
+
+  .old-console-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ps-space-md);
+    font-size: var(--ps-font-size-sm);
+  }
+
+  .old-console-row dt {
+    min-width: 10rem;
   }
 
   .legal-links {

@@ -169,7 +169,9 @@ test.describe("Connection", () => {
     const age = Number(/updated (\d+) s ago/.exec((await stamp.textContent()) ?? "")?.[1]);
     expect(age).toBeGreaterThanOrEqual(20);
 
-    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).toHaveText(/^Status unknown\. Last answer \d/);
+    // The banner and the verdict say it; no third notice repeats it above the tiles.
+    await expect(page.locator("main .refresh-notice")).toHaveCount(0);
     // No figure from before the outage, and no findings count either.
     await expect(health).not.toContainText(/saved|findings?/);
     await expect(strip).not.toHaveClass(/health-strip-(ok|info|warning|error)/);
@@ -202,7 +204,7 @@ test.describe("Connection", () => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies(), { down: () => true });
     await openConsole(page, "pagespeed_admin");
     await expect(page.getByTestId("connection-banner")).toBeVisible();
-    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown — the server has not answered.");
+    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown. The server has not answered.");
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });
 
@@ -226,7 +228,7 @@ test.describe("Connection", () => {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByTestId("connection-banner")).toBeVisible();
     // The server did answer before it went down, so the line carries that time.
-    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).toHaveText(/^Status unknown\. Last answer \d/);
     await expect(health).not.toContainText("has not answered");
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });

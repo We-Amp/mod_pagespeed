@@ -9,6 +9,7 @@ import {
   OPTIMIZER_NOT_ANSWERING_FIX,
   optimizerAbsence,
   optimizerAbsenceText,
+  checkLabel,
   checkResult,
   cooldownReasonLabel,
   counterRows,
@@ -18,6 +19,7 @@ import {
   isDaemonUnavailable,
   normalizeCooldowns,
   objectEntries,
+  optimizerUnavailableNote,
   wholeServerConsoleOnlyError,
 } from "./daemon";
 
@@ -65,11 +67,11 @@ describe("daemonUnavailableReason", () => {
     );
   });
 
-  it("keeps 'unreachable' for the proxy's 502 and for anything it cannot name", () => {
-    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new Error("network down"))).toBe("unreachable");
+  it("says not answering for the proxy's 502 and for anything it cannot name", () => {
+    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new Error("network down"))).toBe("the optimizer is not answering");
   });
 });
 
@@ -146,7 +148,7 @@ describe("optimizerAbsenceText", () => {
         continue;
       }
       expect(doc?.label).not.toBe("");
-      expect(doc?.href).toMatch(/^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+      expect(doc?.href).toMatch(/^https:\/\/[a-z.]+\/docs\/[a-z-]+\/#[a-z-]+$/);
     }
   });
 
@@ -279,6 +281,52 @@ describe("counterRows", () => {
 
   it("treats an absent block as no rows", () => {
     expect(counterRows(undefined)).toEqual([]);
+  });
+});
+
+describe("optimizerUnavailableNote", () => {
+  const note = (status: number, body = "") => optimizerUnavailableNote(new ApiError(status, body));
+
+  it("gives a title and a sentence that say the same thing", () => {
+    expect(note(502, '{"error":"daemon_unreachable"}')).toEqual({
+      title: "Optimizer not answering",
+      detail: "The optimizer is configured but not answering. Its data appears here once it answers.",
+    });
+    // A 503 the optimizer sent itself: it is running, so nothing calls it unreachable.
+    const busy = note(503, "busy");
+    expect(busy.title).toBe("Optimizer did not answer");
+    expect(busy.detail).toBe("The optimizer did not answer this refresh; the next refresh tries again.");
+    expect(`${busy.title} ${busy.detail}`).not.toMatch(/unreachable/i);
+  });
+
+  it("tells a missing optimizer, an old one and an old module apart", () => {
+    expect(note(503, '{"error":"daemon_not_configured"}').title).toBe("No optimizer configured");
+    expect(note(501, '{"error":"endpoint_unsupported_by_daemon"}').detail).toMatch(/Update the optimizer package/);
+    expect(note(404).detail).toBe("This web server's module does not serve the optimizer's data.");
+  });
+
+  it("reads anything else as not answering, and never prints the error", () => {
+    for (const error of [null, new Error("boom"), new ApiError(500, "HTTP 500: stack trace")]) {
+      const text = optimizerUnavailableNote(error);
+      expect(text.title).toBe("Optimizer not answering");
+      expect(text.detail).not.toMatch(/HTTP|boom|stack/);
+    }
+  });
+});
+
+describe("checkLabel", () => {
+  it("names the checks the console knows in plain words", () => {
+    expect(checkLabel("cache_configured")).toBe("Cache directory configured");
+    expect(checkLabel("cache_open")).toBe("Cache opened");
+  });
+
+  it("reads an unknown id as words, and never as a property of the table", () => {
+    expect(checkLabel("chrome_running")).toBe("Chrome running");
+    expect(checkLabel("a")).toBe("A");
+    expect(checkLabel("constructor")).toBe("Constructor");
+    expect(checkLabel("__proto__")).toBe("Proto");
+    expect(checkLabel("")).toBe("");
+    expect(checkLabel("___")).toBe("___");
   });
 });
 

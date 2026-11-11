@@ -10,12 +10,13 @@ const labels = (group: NavGroup, isGlobal: boolean) =>
 
 describe("the sidebar", () => {
   it("lists the primary pages by group, plus Support and About", () => {
-    expect(labels("overview", true)).toEqual(["Overview", "Savings", "URLs"]);
+    // Logs holds the module's messages too, so it sits with the pages every reader starts from.
+    expect(labels("overview", true)).toEqual(["Overview", "Savings", "URLs", "Logs"]);
     expect(labels("module", true)).toEqual(["Statistics", "Histograms", "Caches", "Configuration", "Rule packs"]);
-    expect(labels("optimizer", true)).toEqual(["Status", "Logs"]);
-    expect(labels("optimizer", false)).toEqual(["Status", "Logs"]);
+    expect(labels("optimizer", true)).toEqual(["Status"]);
+    expect(labels("optimizer", false)).toEqual(["Status"]);
     expect(labels("help", true)).toEqual(["Support", "About"]);
-    expect(labels("overview", false)).toEqual(["Overview", "Savings"]);
+    expect(labels("overview", false)).toEqual(["Overview", "Savings", "Logs"]);
   });
 
   it("every hidden page names a visible parent", () => {

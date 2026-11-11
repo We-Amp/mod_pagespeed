@@ -49,7 +49,8 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import { knownPerVhostScope } from "$lib/utils/config-scope";
-  import { daemonUnavailableReason, errorCode, isDaemonUnavailable, wholeServerConsoleOnlyError } from "$lib/utils/daemon";
+  import { errorCode, isDaemonUnavailable, optimizerUnavailableNote, wholeServerConsoleOnlyError } from "$lib/utils/daemon";
+  import { TERMS } from "$lib/data/terms";
   import { formatCount, formatIsoTitle } from "$lib/utils/format";
   import { linkSegments } from "$lib/utils/linkify";
   import { hostsInText, textNamesHost } from "$lib/utils/host-lens";
@@ -328,6 +329,8 @@
     {#if raw}
       The optimizer's own recent log, oldest to newest; the list follows
       the newest entry until you scroll up.
+    {:else if perVhost}
+      The module's messages (every virtual host of this server), newest first.
     {:else}
       The module's messages (every virtual host of this server) and the
       optimizer's own recent log, newest first.
@@ -336,7 +339,7 @@
 
   {#if lensHost !== null}
     <p class="filter-note" data-testid="logs-lens">
-      Entries that name {lensHost} (host lens); entries that name no host are hidden while the lens is on.
+      {TERMS.hostFilter}: entries that name {lensHost}. Entries that name no host are hidden while the filter is on.
     </p>
   {/if}
 
@@ -395,8 +398,7 @@
         </p>
       {:else if isDaemonUnavailable(optimizerError)}
         <p class="source-note" data-testid="logs-unreachable">
-          The optimizer's log: optimizer unreachable ({daemonUnavailableReason(optimizerError)}).
-          Its entries appear here once it answers.
+          The optimizer's log is not shown. {optimizerUnavailableNote(optimizerError).detail}
         </p>
       {:else}
         <p class="source-note" data-testid="logs-optimizer-error">The optimizer's log could not be read: {optimizerError.message}</p>

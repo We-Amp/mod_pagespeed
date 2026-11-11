@@ -73,7 +73,7 @@ describe("ALERT_RULES", () => {
       expect(["error", "warning", "info"]).toContain(rule.severity);
       expect(["rate", "state"]).toContain(rule.kind);
       expect(rule.fix.length, rule.id).toBeGreaterThan(0);
-      if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/1\.1\/docs\//);
+      if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/docs\//);
     }
     expect(seen.size).toBe(17);
   });
@@ -180,7 +180,7 @@ describe("AlertTracker", () => {
       T0,
     );
     expect(ids(out)).toEqual(["daemon-check-failed"]);
-    expect(out[0].message).toBe("Optimizer health check failing: cache_open.");
+    expect(out[0].message).toBe("Optimizer health check failing: Cache opened.");
     expect(out[0].link).toBe("#/optimizer");
   });
 
@@ -373,7 +373,7 @@ describe("healthSummary", () => {
 
   it("never says 'No findings' when the message log could not be read", () => {
     expect(healthSummary([], true, [], true)).toEqual({
-      text: "Findings unavailable — the message log could not be read",
+      text: "Findings unavailable: the message log could not be read",
       level: "info",
     });
     expect(healthSummary([], false, [], true)).toEqual({ text: "Module statistics unavailable", level: "warning" });
@@ -425,7 +425,7 @@ describe("findings from the module's message log", () => {
       `An admin page was requested from an address other than this server itself (last at ${formatClock(T1 - 60_000)}).`,
     );
     expect(out[0].fix).toContain("Require local");
-    expect(out[0].doc).toBe("https://modpagespeed.com/1.1/docs/admin-console/#access-control");
+    expect(out[0].doc).toBe("https://modpagespeed.com/docs/admin-console/#access-control");
     expect(out[0].link).toBe("#/logs?source=module&level=warning");
     expect(out[0].details).toEqual([]);
   });
@@ -502,7 +502,7 @@ describe("findings from the module's message log", () => {
     expect(ids(t.evaluate(withLog([group(ACL)]), T1 + 15_000))).toEqual(["admin-exposed"]);
   });
 
-  it("volume-not-opened: a recent cache-generation refusal is an error, ranks first, and names the two settings", () => {
+  it("volume-not-opened: a recent cache-generation refusal is an error, ranks first, and its fix names the packages", () => {
     for (const level of ["warning", "error"] as const) {
       const out = new AlertTracker().evaluate(withLog([group(ACL), group(VOLUME, { level, recent: 1 })]), T1);
       // The refusal is this finding's evidence: it is not counted again under "Warnings in the log".
@@ -510,13 +510,17 @@ describe("findings from the module's message log", () => {
       expect(out[0].severity).toBe("error");
       // A written sentence; the module's own line waits in the details.
       expect(out[0].message).toBe(
-        "The web server is not using the optimizer's cache: the module logged that it and the optimizer are " +
-          "built for different cache directory generations, so it opened nothing.",
+        "The web server is not using the optimizer's cache: the module logged that the module and optimizer " +
+          "packages use different cache layouts, so it opened nothing.",
       );
       expect(out[0].message).not.toContain("in-place optimization is OFF");
       expect(out[0].details).toEqual([VOLUME]);
-      expect(out[0].fix).toBe("Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.");
-      expect(out[0].doc).toBe("https://modpagespeed.com/1.1/docs/troubleshooting/#how-to-get-more-diagnostic-information");
+      // The fix answers the cause the sentence names: the packages, not a path.
+      expect(out[0].fix).toBe(
+        "Install module and optimizer packages from the same release, then restart the web server and the optimizer.",
+      );
+      expect(out[0].fix).not.toContain("DaemonVolumePath");
+      expect(out[0].doc).toBe("https://modpagespeed.com/docs/troubleshooting/#how-to-get-more-diagnostic-information");
     }
   });
 
@@ -792,6 +796,10 @@ describe("volume-not-opened from the counters", () => {
     expect(ids(out)).toEqual(["volume-not-opened"]);
     expect(out[0].message).toBe(
       "The optimizer is answering, but none of the last 50 CSS, JavaScript and image requests was served from its cache.",
+    );
+    // Nothing in the log names the packages: the two paths are what to check.
+    expect(out[0].fix).toBe(
+      "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) name the same directory.",
     );
   });
 

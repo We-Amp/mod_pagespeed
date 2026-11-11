@@ -263,6 +263,10 @@ test.describe("the optimizer's log as a source", () => {
     await openConsole(page, "pagespeed_admin", "#/logs?level=error");
     await ready(page);
     await expect(page.getByTestId("logs-per-vhost")).toBeVisible();
+    // The subtitle follows the scope: it does not promise the optimizer's log the note below says is elsewhere.
+    await expect(page.getByTestId("logs-scope-note")).toHaveText(
+      "The module's messages (every virtual host of this server), newest first.",
+    );
     await expect(page.getByRole("link", { name: "whole-server console" })).toHaveAttribute(
       "href",
       "/pagespeed_global_admin/#/logs?level=error",
@@ -313,11 +317,33 @@ test.describe("the optimizer's log as a source", () => {
     await expect(state).not.toContainText(/\d+\.\d+\.\d+/);
   });
 
+  test("whole-server console: the subtitle names both sources", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.logsStream(), F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs");
+    await ready(page);
+    await expect(page.getByTestId("logs-scope-note")).toHaveText(
+      "The module's messages (every virtual host of this server) and the optimizer's own recent log, newest first.",
+    );
+  });
+
+  test("an optimizer that answers 503 itself is not called unreachable", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", globalReplies({ status: 503, body: { error: "busy" } }, F.MESSAGES));
+    await openConsole(page, "pagespeed_global_admin", "#/logs?level=info");
+    await ready(page);
+    const note = page.getByTestId("logs-unreachable");
+    await expect(note).toHaveText(
+      "The optimizer's log is not shown. The optimizer did not answer this refresh; the next refresh tries again.",
+    );
+    await expect(note).not.toContainText(/unreachable/i);
+  });
+
   test("an unreachable optimizer is a note; the module's messages are unaffected", async ({ page }) => {
     await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.UNREACHABLE, F.MESSAGES));
     await openConsole(page, "pagespeed_global_admin", "#/logs?level=info");
     await ready(page);
-    await expect(page.getByTestId("logs-unreachable")).toContainText("unreachable");
+    await expect(page.getByTestId("logs-unreachable")).toHaveText(
+      "The optimizer's log is not shown. The optimizer is configured but not answering. Its data appears here once it answers.",
+    );
     await expect(page.getByText("CycloneCache enabled", { exact: false })).toBeVisible();
   });
 
@@ -486,7 +512,7 @@ test.describe("the raw optimizer stream (source=optimizer, group=0)", () => {
     await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.UNREACHABLE));
     await openConsole(page, "pagespeed_global_admin", RAW);
     await ready(page);
-    await expect(page.getByTestId("logs-unreachable")).toContainText("unreachable");
+    await expect(page.getByTestId("logs-unreachable")).toContainText("configured but not answering");
     await expect(page.getByText("Nothing has been logged")).toHaveCount(0);
   });
 

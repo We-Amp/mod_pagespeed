@@ -29,9 +29,9 @@
   import ImageDiff from "$lib/ImageDiff.svelte";
   import {
     cooldownReasonLabel,
-    daemonUnavailableReason,
     errorCode,
     isDaemonUnavailable,
+    optimizerUnavailableNote,
     wholeServerConsoleOnlyError,
   } from "$lib/utils/daemon";
   import { formatBytes, formatCount, formatIsoTitle, formatRelative } from "$lib/utils/format";
@@ -238,12 +238,8 @@
       {/if}
     {:else if isDaemonUnavailable(altError)}
       <div class="empty-state" data-testid="url-detail-unreachable">
-        <p class="empty-title">Optimizer unreachable</p>
-        <p class="empty-reason">{daemonUnavailableReason(altError)}</p>
-        <p class="empty-description">
-          The module could not reach the optimizer worker
-          ({altError.message}). The page populates once it answers.
-        </p>
+        <p class="empty-title">{optimizerUnavailableNote(altError).title}</p>
+        <p class="empty-description">{optimizerUnavailableNote(altError).detail}</p>
       </div>
     {:else}
       <LoadError error={altError} noun="this URL's variants" onretry={() => poll.refresh()} />
@@ -264,7 +260,7 @@
     {#if cooldown}
       {@const reason = cooldownReasonLabel(cooldown.reason)}
       <p class="cooldown-banner" data-testid="url-detail-cooldown">
-        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{` — ${Math.max(
+        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{`, ${Math.max(
               0,
               Math.round(cooldown.remaining_seconds),
             )}s remaining`}{/if}.
@@ -525,12 +521,6 @@
   .empty-title {
     font-size: var(--ps-font-size-lg);
     font-weight: 600;
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-reason {
-    font-size: var(--ps-font-size-sm);
     color: var(--ps-text-secondary);
     margin-bottom: var(--ps-space-sm);
   }

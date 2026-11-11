@@ -10,7 +10,7 @@
   // away. A failed refresh above data already on screen is RefreshNotice's
   // job (polite).
   import { tick } from "svelte";
-  import { DOCS_URL } from "$lib/UnavailableCard.svelte";
+  import { DOCS_URL } from "$lib/data/product-facts-console";
   import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { describeLoadError } from "$lib/utils/load-error";
 

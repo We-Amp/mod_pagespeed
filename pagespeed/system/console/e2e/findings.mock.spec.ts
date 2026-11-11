@@ -59,7 +59,7 @@ test.describe("Overview findings", () => {
     await expect(finding.locator(".level-badge-warning")).toHaveText(/warning/i);
     await expect(finding.getByRole("link", { name: "Documentation" })).toHaveAttribute(
       "href",
-      "https://modpagespeed.com/1.1/docs/admin-console/#access-control",
+      "https://modpagespeed.com/docs/admin-console/#access-control",
     );
     await expect(finding.getByRole("link", { name: "Documentation" })).toHaveAttribute("rel", "noopener noreferrer");
     await expect(finding.getByRole("link", { name: "Details" })).toHaveAttribute("href", "#/logs?source=module&level=warning");
@@ -75,8 +75,10 @@ test.describe("Overview findings", () => {
     await expect(findings.first()).toHaveAttribute("data-testid", "alert-volume-not-opened");
     await expect(findings.first().locator(".level-badge-error")).toBeVisible();
     await expect(findings.first().getByTestId("finding-fix")).toHaveText(
-      "Fix: Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
+      "Fix: Install module and optimizer packages from the same release, then restart the web server and the optimizer.",
     );
+    // The sentence, the fix and the folded log line name one cause: the packages.
+    await expect(findings.first()).not.toContainText("DaemonVolumePath");
     await expect(page.getByTestId("findings-summary")).toHaveText("2 findings · 2 need action");
   });
 
@@ -109,8 +111,8 @@ test.describe("Overview findings", () => {
     expect(folded.outside).not.toContain("Slow origin response");
     const cache = page.getByTestId("alert-volume-not-opened");
     await expect(cache.locator(".alert-message")).toHaveText(
-      "The web server is not using the optimizer's cache: the module logged that it and the optimizer are built " +
-        "for different cache directory generations, so it opened nothing.",
+      "The web server is not using the optimizer's cache: the module logged that the module and optimizer " +
+        "packages use different cache layouts, so it opened nothing.",
     );
     // The line itself is one activation away, by pointer or keyboard.
     const line = cache.getByTestId("finding-details").locator("li");
@@ -143,9 +145,9 @@ test.describe("Overview findings", () => {
 
   test("a log that cannot be read is never \"No findings\"", async ({ page }) => {
     await open(page, { message_history: { status: 500, body: { success: false, error: "internal" } } });
-    await expect(page.getByTestId("findings-summary")).toHaveText("Findings unavailable — the message log could not be read");
+    await expect(page.getByTestId("findings-summary")).toHaveText("Findings unavailable: the message log could not be read");
     // The strip's colour is the verdict's; the findings clause says in words that it has no findings to show.
-    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*Findings unavailable — the message log could not be read\.$/);
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*Findings unavailable: the message log could not be read\.$/);
     await expect(page.getByTestId("findings-mark")).toHaveCount(0);
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });

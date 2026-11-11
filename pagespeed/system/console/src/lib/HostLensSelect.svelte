@@ -15,11 +15,13 @@
     onselect: (value: string) => void;
   }
 
+  import { TERMS } from "$lib/data/terms";
+
   let { id, testid, host, options, onselect }: Props = $props();
 </script>
 
 <span class="host-lens" data-testid={testid}>
-  <label for={id}>Host</label>
+  <label for={id}>{TERMS.hostFilter}</label>
   <select {id} value={host ?? ""} onchange={(e) => onselect(e.currentTarget.value)}>
     <option value="">All hosts</option>
     {#each options as option (option)}
