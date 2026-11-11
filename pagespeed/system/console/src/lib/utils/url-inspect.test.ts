@@ -201,6 +201,27 @@ describe("the verdict", () => {
     expect(KEPT.kind).toBe("current");
   });
 
+  it("a URL that spells cache_ok:true does not make a stale entry current", () => {
+    const stale = moduleLookup(
+      fulfilled<CacheEntryResponse>({
+        url: "",
+        value: 'Metadata cache key:rname/cf/https://www.example.test/x?cache_ok:true@_\ncache_ok:false\ncan_revalidate:false\npartitions:partition {\n  url: "https://www.example.test/x.pagespeed.cf.a.css"\n}\n',
+      }),
+    );
+    expect(stale.kind).toBe("not-current");
+    expect(line({ access: "none", lookup: stale })[0]).toBe("not-yet");
+  });
+
+  it("a variant whose metadata could not be read is no evidence either way", () => {
+    const fallback = record([variant({ size: 45210, flags: 0, content_type: "" })]);
+    expect(line({ record: fallback })).toEqual(["unknown", "Unknown. The optimizer's record could not be read."]);
+  });
+
+  it("a worker variant that is no smaller names no saving", () => {
+    const same = record([variant({ format: "jpeg", flags: 2, size: 45210, original_size: 45210, hit_count: 4 })]);
+    expect(line({ record: same })).toEqual(["optimized", "Optimized."]);
+  });
+
   it("an optimized URL names what the most-served variant saves and how it looks", () => {
     const hero = record([
       variant({ size: 45210, original_size: 45210, hit_count: 128 }),

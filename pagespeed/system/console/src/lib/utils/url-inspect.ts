@@ -111,8 +111,9 @@ export function moduleLookup(settled: PromiseSettledResult<CacheEntryResponse> |
   const body: unknown = settled.value;
   const value = body !== null && typeof body === "object" ? (body as CacheEntryResponse).value : undefined;
   if (typeof value !== "string") return lookup("no-answer");
-  if (/cache_ok:\s*true/.test(value)) return { ...lookup("current"), outcome: lookupOutcome(value) };
-  if (/cache_ok:\s*false/.test(value)) return lookup("not-current");
+  // Anchored to its own line: the key line above it carries the URL itself.
+  if (/^cache_ok:\s*true$/m.test(value)) return { ...lookup("current"), outcome: lookupOutcome(value) };
+  if (/^cache_ok:\s*false$/m.test(value)) return lookup("not-current");
   if (/unable to decode resource/i.test(value)) return lookup("original-url");
   return lookup("no-answer");
 }
@@ -192,7 +193,8 @@ function servedText(rows: readonly VariantRow[]): string {
     if (row.isSentinel || !isOptimizedVariant(row.raw) || row.size === null || !row.originalSize) continue;
     if (best === null || row.hits > best.hits) best = row;
   }
-  if (best === null || best.size === null || best.originalSize === null) return "";
+  // No saving to name when the variant is no smaller.
+  if (best === null || best.size === null || best.originalSize === null || best.size >= best.originalSize) return "";
   const f = best.format === "original" ? best.encoding : best.format;
   // A re-encode in the origin's own format goes to every browser.
   const name = f === "webp" ? "WebP" : f === "avif" || f === "svg" ? f.toUpperCase() : f === "gzip" || f === "brotli" ? f : "";
@@ -200,6 +202,7 @@ function servedText(rows: readonly VariantRow[]): string {
   return ` Browsers${name === "" ? "" : ` that accept ${name}`} get ${formatBytes(best.size)} instead of ${formatBytes(best.originalSize)} (${formatSavingsPercent(best.originalSize, best.size)}).${q}`;
 }
 
+const UNREADABLE = "The optimizer's record could not be read.";
 const WORD: Record<UrlVerdictKind, string> = {
   optimized: "Optimized.",
   "not-yet": "Not optimized yet.",
@@ -224,7 +227,11 @@ export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
   if (lookup.outcome === "optimized") return say("optimized", "The module holds an optimized result for it.");
   if (cooldown !== null) return say("not-yet", cooldownText(cooldown));
   if (lookup.outcome === "kept") return say("kept", "The module tried it and kept the original.");
-  if (record !== null) return say("not-yet", "The optimizer holds no optimized variant of it.");
+  // A variant without its content class is one whose metadata could not be read: no evidence either way.
+  if (record !== null)
+    return record.rows.some((r) => !r.isSentinel && r.typeClass === "")
+      ? say("unknown", UNREADABLE)
+      : say("not-yet", "The optimizer holds no optimized variant of it.");
   if (input.notInIndex) return say("not-yet", "The optimizer has no record of it.");
   if (access === "none" && lookup.kind === "not-current") return say("not-yet", LOOKUP_TEXT["not-current"]);
   return say(
@@ -234,7 +241,7 @@ export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
       : access === "not-answering"
         ? "The optimizer is not answering."
         : access === "unreadable"
-          ? "The optimizer's record could not be read."
+          ? UNREADABLE
           : lookup.kind === "original-url"
             ? "The module's lookup answers only for rewritten URLs, and no optimizer is configured."
             : lookup.kind === "current"
