@@ -184,6 +184,20 @@ test("health answers and statistics do not: each section says what it has", asyn
   await expect(page.getByTestId("cache-unavailable")).toBeVisible();
 });
 
+test("health answers and statistics get the optimizer's own 503: a refresh without an answer, not 'unreachable'", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    config: F.CONFIG_VHOST,
+    "v1/daemon/health": F.HEALTH_OK,
+    "v1/daemon/stats": { status: 503, body: { error: "busy" } },
+  });
+  await openConsole(page, "pagespeed_admin", "#/optimizer");
+  await ready(page);
+  await expect(page.locator(".status-badge")).toHaveText("ok");
+  const state = page.getByTestId("daemon-unreachable");
+  await expect(state).toContainText("Statistics are not available: the optimizer did not answer this refresh.");
+  await expect(state).not.toContainText("unreachable");
+});
+
 test("statistics answer and health does not: the health section says so", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, "v1/daemon/stats": F.DAEMON_STATS });
   await openConsole(page, "pagespeed_admin", "#/optimizer");

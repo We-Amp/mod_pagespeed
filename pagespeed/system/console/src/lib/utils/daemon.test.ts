@@ -55,6 +55,24 @@ describe("isDaemonUnavailable", () => {
   });
 });
 
+describe("daemonUnavailableReason", () => {
+  it("a 503 the optimizer sent itself is a refresh without an answer, not 'unreachable'", () => {
+    expect(daemonUnavailableReason(new ApiError(503, "Service Unavailable"))).toBe(
+      "the optimizer did not answer this refresh",
+    );
+    expect(daemonUnavailableReason(new ApiError(503, '{"error":"busy"}'))).toBe(
+      "the optimizer did not answer this refresh",
+    );
+  });
+
+  it("keeps 'unreachable' for the proxy's 502 and for anything it cannot name", () => {
+    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("unreachable");
+    expect(daemonUnavailableReason(new Error("network down"))).toBe("unreachable");
+  });
+});
+
 describe("optimizerAbsence", () => {
   const notConfigured = new ApiError(503, "daemon_not_configured");
   const unreachable = new ApiError(502, "daemon_unreachable");
