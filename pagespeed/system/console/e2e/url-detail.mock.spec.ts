@@ -286,7 +286,7 @@ test("a URL the module holds an optimized result for is not listed with reasons 
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OPTIMIZED) });
   await openConsole(page, "pagespeed_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-verdict")).toHaveText("Optimized. The module holds an optimized result for it.");
+  await expect(page.getByTestId("url-verdict")).toHaveText("Optimized. The module's result is optimized.");
   await expect(page.getByTestId("url-module-lookup")).toHaveText("The module holds a current rewrite result for this URL.");
   await expect(page.getByTestId("url-reasons")).toHaveCount(0);
   await expect(page.getByTestId("url-detail-per-vhost")).toBeVisible();
@@ -487,7 +487,7 @@ test("the answer comes first, in one plain line, before the evidence", async ({ 
   await expect(verdict).toHaveText(
     "Optimized. Browsers that accept WebP get 30.3 KB instead of 44.2 KB (-31.5%). Visual score 92.5, good quality.",
   );
-  await expect(verdict).toHaveAttribute("data-kind", "optimized");
+  await expect(verdict).toHaveClass(/health-strip-ok/);
   const top = async (testid: string) => (await page.getByTestId(testid).boundingBox())?.y ?? 0;
   expect(await top("url-verdict")).toBeLessThan(await top("variants-table"));
   expect(await top("url-verdict")).toBeLessThan(await top("url-module"));

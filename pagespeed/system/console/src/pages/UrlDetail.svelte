@@ -224,15 +224,15 @@
             ? "none"
             : perVhost
               ? "not-here"
-              : altError !== null && (isUnavailable(altError) || isDaemonUnavailable(altError))
+              : ["not-answering", "did-not-answer"].includes(optimizerAbsence(altError) ?? "")
                 ? "not-answering"
                 : "unreadable",
       cooldown: cooldown ?? listedCooldown,
       lookup,
     }),
   );
-  // The reasons follow whenever the verdict is not "optimized".
-  let reasonsShown = $derived(verdict.kind !== "optimized");
+  // The reasons follow whenever the verdict is not "Optimized".
+  let reasonsShown = $derived(verdict.word !== "Optimized.");
   // This URL's page on the whole-server console (null when the admin path is renamed).
   let globalHref = $derived(key === null ? null : globalConsoleHref(api.basePath, detailHref(key)));
 
@@ -260,7 +260,7 @@
 </script>
 
 <div class="page">
-  <p class="note"><a href={back.href} data-testid="url-back"><span aria-hidden="true">←</span> Back to {back.label}</a></p>
+  <p class="note"><a href={back.href} data-testid="url-back">Back to {back.label}</a></p>
   <PageHeader
     title="URL Detail"
     updatedAt={updatedAt}
@@ -298,10 +298,9 @@
     <!-- The answer first, in words; the evidence follows. -->
     <p
       class="health-strip"
-      class:health-strip-ok={verdict.kind === "optimized"}
-      class:health-strip-info={verdict.kind === "not-yet"}
+      class:health-strip-ok={verdict.word === "Optimized."}
+      class:health-strip-info={verdict.word === "Not optimized yet."}
       data-testid="url-verdict"
-      data-kind={verdict.kind}
     ><strong>{verdict.word}</strong>{verdict.text}</p>
     {#if altData}
       {@render optimizerRecord()}
@@ -416,7 +415,7 @@
       </div>
     </div>
 
-    {#if cooldown && verdict.kind !== "not-yet"}
+    {#if cooldown && verdict.word !== "Not optimized yet."}
       <p class="notice notice-warning cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 

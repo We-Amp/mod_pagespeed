@@ -183,7 +183,8 @@ describe("the verdict", () => {
   });
   const line = (over: Parameters<typeof input>[0]) => {
     const v = urlVerdict(input(over));
-    return [v.kind, v.word + v.text];
+    const kind = { "Optimized.": "optimized", "Not optimized yet.": "not-yet", "Not optimized.": "kept", "Unknown.": "unknown" }[v.word];
+    return [kind, v.word + v.text];
   };
   const dump = (partitions: string) =>
     moduleLookup(fulfilled<CacheEntryResponse>({ url: "", value: `Metadata cache key:k\ncache_ok:true\ncan_revalidate:false\n${partitions}\n` }));
@@ -265,7 +266,7 @@ describe("the verdict", () => {
   it("the module's result is optimized only when it says so", () => {
     expect(line({ access: "not-here", lookup: OPTIMIZED })).toEqual([
       "optimized",
-      "Optimized. The module holds an optimized result for it.",
+      "Optimized. The module's result is optimized.",
     ]);
     expect(line({ access: "none", lookup: KEPT })).toEqual(["kept", "Not optimized. The module tried it and kept the original."]);
     expect(line({ access: "none", lookup: SILENT })).toEqual([

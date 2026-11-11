@@ -68,7 +68,8 @@ export function wayBack(previous: string, isGlobal: boolean): { href: string; la
   const path = parseHash(previous || "#/").path;
   const from = path === "#/urls/detail" ? undefined : routes.find((r) => r.path === path);
   const route = from ?? routes.find((r) => r.path === (isGlobal ? "#/urls" : "#/overview"));
-  return { href: from ? previous : (route?.path ?? "#/overview"), label: route?.title ?? route?.label ?? "Overview" };
+  // Both fallbacks are routes of the table.
+  return { href: from ? previous : route!.path, label: route!.title ?? route!.label };
 }
 
 // ── The module's half ────────────────────────────────────────────────
@@ -159,12 +160,12 @@ export function cooldownText(entry: DaemonCooldownEntry): string {
 
 // ── The verdict ──────────────────────────────────────────────────────
 
-export type UrlVerdictKind = "optimized" | "not-yet" | "kept" | "unknown";
+/** The verdict in a word or two; the page styles and tests by it. */
+export type UrlVerdictWord = "Optimized." | "Not optimized yet." | "Not optimized." | "Unknown.";
 
 export interface UrlVerdict {
-  kind: UrlVerdictKind;
-  /** The verdict in a word or two, then the sentence that backs it. */
-  word: string;
+  word: UrlVerdictWord;
+  /** The sentence that backs the word. */
   text: string;
 }
 
@@ -203,12 +204,6 @@ function servedText(rows: readonly VariantRow[]): string {
 }
 
 const UNREADABLE = "The optimizer's record could not be read.";
-const WORD: Record<UrlVerdictKind, string> = {
-  optimized: "Optimized.",
-  "not-yet": "Not optimized yet.",
-  kept: "Not optimized.",
-  unknown: "Unknown.",
-};
 
 /**
  * Whether this URL is optimized, in one plain line, from what the page
@@ -221,21 +216,21 @@ const WORD: Record<UrlVerdictKind, string> = {
 export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
   const { record, cooldown, lookup, access } = input;
   const status = record?.status ?? null;
-  const say = (kind: UrlVerdictKind, text: string): UrlVerdict => ({ kind, word: WORD[kind], text: ` ${text}` });
+  const say = (word: UrlVerdictWord, text: string): UrlVerdict => ({ word, text: ` ${text}` });
   if (status === "complete" || status === "partial" || status === "revalidating")
-    return { ...say("optimized", ""), text: servedText(record?.rows ?? []) };
-  if (lookup.outcome === "optimized") return say("optimized", "The module holds an optimized result for it.");
-  if (cooldown !== null) return say("not-yet", cooldownText(cooldown));
-  if (lookup.outcome === "kept") return say("kept", "The module tried it and kept the original.");
+    return { word: "Optimized.", text: servedText(record!.rows) };
+  if (lookup.outcome === "optimized") return say("Optimized.", "The module's result is optimized.");
+  if (cooldown !== null) return say("Not optimized yet.", cooldownText(cooldown));
+  if (lookup.outcome === "kept") return say("Not optimized.", "The module tried it and kept the original.");
   // A variant without its content class is one whose metadata could not be read: no evidence either way.
   if (record !== null)
     return record.rows.some((r) => !r.isSentinel && r.typeClass === "")
-      ? say("unknown", UNREADABLE)
-      : say("not-yet", "The optimizer holds no optimized variant of it.");
-  if (input.notInIndex) return say("not-yet", "The optimizer has no record of it.");
-  if (access === "none" && lookup.kind === "not-current") return say("not-yet", LOOKUP_TEXT["not-current"]);
+      ? say("Unknown.", UNREADABLE)
+      : say("Not optimized yet.", "The optimizer holds no optimized variant of it.");
+  if (input.notInIndex) return say("Not optimized yet.", "The optimizer has no record of it.");
+  if (access === "none" && lookup.kind === "not-current") return say("Not optimized yet.", LOOKUP_TEXT["not-current"]);
   return say(
-    "unknown",
+    "Unknown.",
     access === "not-here"
       ? "The optimizer's record is on the whole-server console."
       : access === "not-answering"
