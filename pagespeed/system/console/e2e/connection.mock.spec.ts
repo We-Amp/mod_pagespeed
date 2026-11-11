@@ -29,7 +29,7 @@ test.describe("Connection", () => {
     });
     await openConsole(page, "pagespeed_admin", "#/statistics");
     await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
 
     down = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -38,14 +38,14 @@ test.describe("Connection", () => {
     await expect(banner).toHaveAttribute("role", "alert");
     await expect(banner).toContainText("Cannot reach the server.");
     await expect(banner).toContainText("the figures below are from");
-    await expect(page.getByTestId("connection-state")).toHaveText("reconnecting");
+    await expect(page.getByTestId("connection-state")).toHaveText("Reconnecting…");
     await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
     await expect(page.getByText("Last refresh failed: cannot reach the server.")).toBeVisible();
 
     down = false;
     await banner.getByRole("button", { name: "Retry now" }).click();
     await expect(banner).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
     await expect(page.getByText("Last refresh failed")).toHaveCount(0);
   });
 
@@ -92,13 +92,13 @@ test.describe("Connection", () => {
       { down: () => outage },
     );
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
 
     outage = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     const banner = page.getByTestId("connection-banner");
     await expect(banner).toBeVisible();
-    await expect(page.getByTestId("connection-state")).toHaveText("reconnecting");
+    await expect(page.getByTestId("connection-state")).toHaveText("Reconnecting…");
 
     // The server is back, but the optimizer's own health check is still
     // failing on its own terms -- a plain 5xx, not one of the proxy's
@@ -107,7 +107,7 @@ test.describe("Connection", () => {
     daemonOwnFailure = true;
     await banner.getByRole("button", { name: "Retry now" }).click();
     await expect(banner).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
   });
 
   test("an unreachable optimizer is a panel state, not a lost connection", async ({ page }) => {
@@ -115,7 +115,7 @@ test.describe("Connection", () => {
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
     await expect(page.getByTestId("daemon-unreachable")).toBeVisible();
     await expect(page.getByTestId("connection-banner")).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
   });
 
   test("a gateway error in front of the module counts as a lost connection", async ({ page }) => {
@@ -257,14 +257,14 @@ test.describe("Connection", () => {
     // gateway's own 504.
     await runFor(page, 5_000);
     await expect(banner).toBeVisible();
-    await expect(state).toHaveText("reconnecting");
+    await expect(state).toHaveText("Reconnecting…");
     const figuresAtFirstCycle = await banner.textContent();
 
     // A second cycle: no flicker back to "connected" from the daemon
     // leaves' own 504s, and the same pinned time.
     await runFor(page, 5_000);
     await expect(banner).toBeVisible();
-    await expect(state).toHaveText("reconnecting");
+    await expect(state).toHaveText("Reconnecting…");
     expect(await banner.textContent()).toBe(figuresAtFirstCycle);
 
     // A fixed five-second cadence would have asked the module leaf about
@@ -274,4 +274,39 @@ test.describe("Connection", () => {
     expect(asked).toBeGreaterThanOrEqual(3);
     expect(asked).toBeLessThanOrEqual(7);
   });
+});
+
+test.describe("the connection pill", () => {
+  for (const width of [1440, 390, 320]) {
+    test(`a dot and a word in a polite status, at ${width} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      let down = false;
+      await mockAdmin(page, "pagespeed_admin", {
+        config: F.CONFIG_VHOST,
+        stats_json: () => (down ? NETWORK_ERROR : F.STATS_VHOST),
+      });
+      await openConsole(page, "pagespeed_admin", "#/statistics");
+      await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+      const pill = page.getByTestId("connection-pill");
+      const dot = pill.locator(".status-dot");
+      await expect(pill).toHaveAttribute("role", "status");
+      await expect(dot).toBeVisible();
+      await expect(dot).toHaveClass(/status-dot-bar-ok/);
+      // The word names the state at every width; a phone shows only the dot.
+      await expect(pill).toHaveText("Connected");
+      const wordWidth = await page.getByTestId("connection-state").evaluate((el) => el.getBoundingClientRect().width);
+      expect(wordWidth > 2).toBe(width > 768);
+
+      down = true;
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect(dot).toHaveClass(/status-dot-bar-warning/);
+      await expect(pill).toHaveText("Reconnecting…");
+      if (width <= 768) {
+        // The drawer's head says it in full.
+        await page.getByRole("button", { name: "Toggle menu" }).click();
+        await expect(page.getByTestId("drawer-connection")).toBeVisible();
+        await expect(page.getByTestId("drawer-connection")).toHaveText("Reconnecting…");
+      }
+    });
+  }
 });

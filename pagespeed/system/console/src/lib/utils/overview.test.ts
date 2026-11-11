@@ -301,6 +301,15 @@ describe("texts", () => {
       "This virtual host: separate from other hosts only when per-virtual-host statistics are enabled",
     );
   });
+
+  it("overviewScopeLine names the host filter on the whole server, and only there", () => {
+    expect(overviewScopeLine(true, null, "www.example.com")).toBe(
+      "Filtered to www.example.com; figures marked whole server are not filtered",
+    );
+    expect(overviewScopeLine(false, { scope: "vhost", host: "" }, "www.example.com")).toBe(
+      "This virtual host: separate from other hosts only when per-virtual-host statistics are enabled",
+    );
+  });
 });
 
 describe("the message log in the sample", () => {

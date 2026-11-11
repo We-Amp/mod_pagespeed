@@ -96,12 +96,9 @@ test.describe("the top bar's spacing", () => {
       await openConsole(page, "pagespeed_global_admin", "#/overview");
       await pageReady(page);
       expect(await gap(page, ".topbar-logo-link", ".topbar-subtitle"), "logo to the version line").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-subtitle-link", ".topbar-badge"), "host name to the console label").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-badge", ".shortcuts-button"), "console label to the shortcuts button").toBeCloseTo(ITEM, 0);
-      const line = await page.locator(".topbar-subtitle > *").evaluateAll((els) =>
-        els.slice(1).map((el, i) => el.getBoundingClientRect().left - els[i].getBoundingClientRect().right),
-      );
-      for (const g of line) expect(g, `gaps in the version line: ${line.join(", ")}`).toBeGreaterThanOrEqual(ITEM - 1);
+      expect(await gap(page, ".topbar-subtitle", ".topbar-status"), "version to the connection state").toBeCloseTo(GROUP, 0);
+      expect(await gap(page, ".topbar-status", ".topbar-chip"), "connection state to the scope chip").toBeCloseTo(ITEM, 0);
+      expect(await gap(page, ".topbar-chip", ".shortcuts-button"), "scope chip to the shortcuts button").toBeCloseTo(ITEM, 0);
       const lens = page.getByTestId("host-lens");
       expect(await gap(page, '[data-testid="host-lens"] label', '[data-testid="host-lens"] select'), "Host label to its select").toBeCloseTo(ITEM, 0);
       // The lens ends at the top bar's padding, and that padding is the content's.
@@ -115,32 +112,71 @@ test.describe("the top bar's spacing", () => {
     });
   }
 
-  test("nothing overlaps or is cut short at the narrowest desktop width", async ({ page }) => {
-    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
-    await page.setViewportSize({ width: 1440, height: 800 });
-    await openConsole(page, "pagespeed_global_admin", "#/overview");
-    await pageReady(page);
-    const select = page.getByTestId("host-lens").locator("select");
-    const wide = (await box(select)).width;
-    await page.setViewportSize({ width: 769, height: 800 });
-    const parts = await page
-      .locator(".topbar-logo-link, .topbar-subtitle > *, .topbar-badge, .shortcuts-button, .topbar-lens")
-      .evaluateAll((els) =>
-        els
-          .filter((el) => el.getClientRects().length > 0)
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-          }),
-      );
-    for (let i = 1; i < parts.length; i++) {
-      expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
-      expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
-    }
-    const badge = page.locator(".topbar-badge");
-    expect(await badge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect((await box(select)).width).toBeCloseTo(wide, 0);
-  });
+  // With a host filter on a page that ignores it, the control carries a
+  // "not applied" note: still nothing may be cut short or wrap.
+  const NARROW = [
+    { width: 769, hash: "#/overview" },
+    { width: 769, hash: "#/statistics?lens=www.example.test" },
+    { width: 880, hash: "#/statistics?lens=www.example.test" },
+    { width: 901, hash: "#/statistics?lens=www.example.test" },
+    { width: 960, hash: "#/statistics?lens=www.example.test" },
+  ];
+  for (const { width, hash } of NARROW) {
+    test(`nothing overlaps or is cut short at ${width} px on ${hash}`, async ({ page }) => {
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      const select = page.getByTestId("host-lens").locator("select");
+      const wide = (await box(select)).width;
+      await page.setViewportSize({ width, height: 800 });
+      const label = await box(page.getByTestId("host-lens").locator("label"));
+      expect(label.bottom - label.top, "the Host filter label stays on one line").toBeLessThan(24);
+      const bar = await box(page.locator(".topbar"));
+      expect((await box(page.locator(".topbar-lens"))).right, "the host filter stays inside the bar").toBeLessThanOrEqual(bar.right);
+      expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true);
+      if (hash.includes("lens=")) {
+        await expect(page.getByRole("combobox", { name: "Host" }).first()).toHaveAccessibleDescription("(not applied on this page)");
+      }
+      const parts = await page
+        .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
+        .evaluateAll((els) =>
+          els
+            .filter((el) => el.getClientRects().length > 0)
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+            }),
+        );
+      for (let i = 1; i < parts.length; i++) {
+        expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
+        expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
+      }
+      const chip = page.locator(".topbar-chip");
+      expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect((await box(select)).width).toBeCloseTo(wide, 0);
+    });
+  }
+
+  for (const width of [1440, 769, 480]) {
+    test(`a long host name is cut short in the scope chip, not past the bar, at ${width} px`, async ({ page }) => {
+      const host = `${"a-very-long-virtual-host-name-".repeat(2)}for-testing.example.test:8080`;
+      await page.setViewportSize({ width, height: 800 });
+      await mockAdmin(page, "pagespeed_admin", {
+        ...perHostReplies(),
+        config: F.ok({ config: "", effective_config: "", scope: "vhost", host }),
+      });
+      await openConsole(page, "pagespeed_admin", "#/overview");
+      await pageReady(page);
+      const chip = page.getByTestId("console-scope");
+      await expect(chip).toHaveAttribute("title", host);
+      await expect(chip).toHaveText(`Scope: ${host}`);
+      expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth), "the chip is ellipsised").toBe(true);
+      const help = await box(page.locator(".shortcuts-button"));
+      expect(help.right, "the shortcuts button stays inside the window").toBeLessThanOrEqual(width);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  }
 });
 
 interface Item {

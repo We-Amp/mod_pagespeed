@@ -342,10 +342,12 @@ export function countText(n: number | null): string {
 /**
  * Which statistics the overview shows. The configuration's own scope wins;
  * the admin path is the fallback (a renamed global admin path cannot be
- * recognised from the URL).
+ * recognised from the URL). A page that follows the host filter names the
+ * host it is filtered to, and says which figures are not.
  */
-export function overviewScopeLine(isGlobal: boolean, cfg: ConfigScope | null): string {
+export function overviewScopeLine(isGlobal: boolean, cfg: ConfigScope | null, lensHost: string | null = null): string {
   const global = cfg?.scope !== undefined ? cfg.scope === "global" : isGlobal;
+  if (global && lensHost !== null) return `Filtered to ${lensHost}; figures marked whole server are not filtered`;
   if (global) return "All virtual hosts (the whole server)";
   const host = cfg?.host ? ` (${cfg.host})` : "";
   return `This virtual host${host}: separate from other hosts only when per-virtual-host statistics are enabled`;

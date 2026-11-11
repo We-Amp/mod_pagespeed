@@ -36,6 +36,9 @@
   --ps-topbar-fg-muted: #cbd5e1;
   /* The logo's decorative chevron and cursor, tuned against the band. */
   --ps-topbar-accent: #60a5fa;
+  /* The connection dot: the page's status colours are too dark on the band. */
+  --ps-topbar-ok: #86efac;
+  --ps-topbar-warning: #fcd34d;
 
   /* Surfaces */
   --ps-bg: #ffffff;
@@ -211,6 +214,8 @@
     --ps-topbar-fg: #ffffff;
     --ps-topbar-fg-muted: #94a3b8;
     --ps-topbar-accent: #60a5fa;
+    --ps-topbar-ok: #86efac;
+    --ps-topbar-warning: #fcd34d;
   }
 }
 
@@ -774,6 +779,32 @@ p.note {
 
 .status-dot-info {
   background: var(--ps-primary);
+}
+
+/* The same dot on the top bar's band, in the band's own status colours. */
+.status-dot-bar-ok {
+  background: var(--ps-topbar-ok);
+}
+
+.status-dot-bar-warning {
+  background: var(--ps-topbar-warning);
+}
+
+/* A short label on the top bar's band (the console's scope): a light
+ * tint over the band, in the band's text colour. A long host name is cut
+ * short with an ellipsis; the whole name stays its text and its title. */
+.topbar-chip {
+  padding: 2px var(--ps-space-sm);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--ps-topbar-fg);
+  font-size: var(--ps-font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 14rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* A state in one word after its dot, in sentence case ("Ok"). */

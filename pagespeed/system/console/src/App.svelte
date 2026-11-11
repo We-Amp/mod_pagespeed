@@ -6,7 +6,7 @@
 <script lang="ts">
   import { onMount, tick, untrack, type Component } from "svelte";
   import { AdminApiClient } from "$lib/api/client";
-  import { connection, type ConnectionView } from "$lib/api/connection";
+  import { connection, optimizerPresence, type ConnectionView } from "$lib/api/connection";
   import { unavailable } from "$lib/api/unavailable";
   import { provideConsole } from "$lib/api/context";
   import { pollers } from "$lib/api/poller";
@@ -26,16 +26,7 @@
   import { LensFollower, lensAddressRewrite, lensFromParams, lensStorageKey, loadLens, withLens } from "$lib/utils/host-lens";
   import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { moduleTag } from "$lib/utils/versions";
-  import {
-    CONSOLE_TITLE,
-    PRODUCT_DISPLAY_NAME,
-    PRODUCT_NAME,
-    VENDOR,
-    VENDOR_HOST,
-    VENDOR_URL,
-    WEBSITE,
-    WEBSITE_HOST,
-  } from "$lib/data/product-facts-console";
+  import { CONSOLE_TITLE, PRODUCT_DISPLAY_NAME, PRODUCT_NAME, WEBSITE, WEBSITE_HOST } from "$lib/data/product-facts-console";
 
   const { basePath, isGlobal: pathSaysGlobal } = detectBasePath();
   const api = new AdminApiClient(basePath);
@@ -134,6 +125,16 @@
 
   // What the top bar says about the server: answered or not (not a health check).
   let connectionView = $state<ConnectionView>(connection.view);
+  let connected = $derived(connectionView.status === "connected");
+  // The console's scope, in the top bar and at the head of the drawer.
+  let scopeLabel = $derived(scope.isGlobal ? "Whole server" : scope.host || "This host");
+  // A server without an optimizer: its pages stay listed, under a muted heading.
+  let noOptimizer = $state(false);
+  onMount(() =>
+    optimizerPresence.subscribe((p) => {
+      noOptimizer = p === "none";
+    }),
+  );
   onMount(() =>
     connection.subscribe((v) => {
       connectionView = v;
@@ -321,26 +322,22 @@
       </a>
       <span class="topbar-subtitle">
         <span class="topbar-version" title={appVersion}>{moduleTag(appVersion)}</span>
-        <span class="topbar-subtitle-sep" aria-hidden="true">·</span>
-        <span class="topbar-connection" data-testid="connection-state">{connectionView.status === "connected" ? "connected" : "reconnecting"}</span>
-        <span class="topbar-subtitle-sep topbar-vendor" aria-hidden="true">·</span>
-        <a
-          href={VENDOR_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="topbar-subtitle-link topbar-vendor"
-          aria-label="{VENDOR} – visit {VENDOR_HOST}"
-        >{VENDOR_HOST}</a>
       </span>
       <span class="topbar-tools">
-        <!-- Tells the two consoles apart; a per-host console needs no label. -->
-        {#if scope.isGlobal}<span class="topbar-badge">Global Admin</span>{/if}
+        <!-- Whether the server answers: a dot and a word; announced when it
+             changes. On a phone the word is hidden and names the dot. -->
+        <span class="topbar-status" role="status" data-testid="connection-pill">
+          <span class="status-dot" class:status-dot-bar-ok={connected} class:status-dot-bar-warning={!connected}></span>
+          <span class="topbar-status-word" data-testid="connection-state">{connected ? "Connected" : "Reconnecting…"}</span>
+        </span>
+        <!-- Whose figures this console shows: the whole server, or one host. -->
+        <span class="topbar-chip" data-testid="console-scope" title={scopeLabel}><span class="visually-hidden">{"Scope: "}</span>{scopeLabel}</span>
         <button type="button" class="shortcuts-button" onclick={() => (helpOpen = true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
       </span>
     </span>
     {#if scope.isGlobal}
       <span class="topbar-lens">
-        <HostLensSelect id="host-lens-top" testid="host-lens" host={lens.host} options={lens.options} onselect={selectLens} />
+        <HostLensSelect id="host-lens-top" testid="host-lens" host={lens.host} options={lens.options} applied={router.currentRoute.hostAware === true} onselect={selectLens} />
       </span>
     {/if}
   </header>
@@ -355,14 +352,18 @@
     bind:this={navEl}
   >
     <div class="drawer-scope">
-      <span class="drawer-chip">{scope.isGlobal ? "Whole server" : scope.host || "This host"}</span>
+      <span class="drawer-chip">{scopeLabel}</span>
+      <span class="drawer-status" data-testid="drawer-connection"><span class="status-dot" class:status-dot-ok={connected} class:status-dot-warning={!connected}></span>{connected ? "Connected" : "Reconnecting…"}</span>
       {#if scope.isGlobal}
-        <HostLensSelect id="host-lens-drawer" testid="host-lens-drawer" host={lens.host} options={lens.options} onselect={selectLens} />
+        <HostLensSelect id="host-lens-drawer" testid="host-lens-drawer" host={lens.host} options={lens.options} applied={router.currentRoute.hostAware === true} onselect={selectLens} />
       {/if}
     </div>
     {#each NAV_GROUPS as group (group.id)}
       {#if group.label}
-        <p class="nav-group-label" class:nav-group-label--muted={group.muted === true} id="nav-group-{group.id}">{group.label}</p>
+        {@const muted = group.id === "optimizer" && noOptimizer}
+        <p class="nav-group-label" class:nav-group-label-muted={muted} id="nav-group-{group.id}">
+          {group.label}{#if muted}{" "}<span class="nav-group-off" data-testid="nav-optimizer-off">not configured</span>{/if}
+        </p>
       {/if}
       <ul class="nav-list" aria-labelledby={group.label ? `nav-group-${group.id}` : undefined}>
         {#each routes.filter((r) => r.group === group.id && r.hidden !== true && (r.globalOnly !== true || scope.isGlobal)) as route (route.path)}
@@ -382,7 +383,7 @@
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
             {#if off}
               <span class="nav-off" aria-hidden="true">off</span>
-              <span class="sr-only" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
+              <span class="visually-hidden" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
             {:else if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
           </li>
         {/each}
@@ -404,7 +405,8 @@
   <!-- Main content -->
   <main class="content" id="main" tabindex="-1" inert={drawerMode && sidebarOpen}>
     <ConnectionBanner />
-    {#if lensHost !== null && router.currentRoute.hostAware !== true}
+    <!-- On a phone the host filter is in the drawer, so the page says it does not apply; a wider window says so beside the control. -->
+    {#if drawerMode && lensHost !== null && router.currentRoute.hostAware !== true}
       <p class="lens-note" data-testid="lens-note">
         {TERMS.hostFilter} {lensHost}: this page has no per-host figures, so it shows the whole server.
       </p>
@@ -437,8 +439,11 @@
      console label with the shortcuts button, the host lens) sit
      --ps-space-md apart, items within a group --ps-space-sm, and the bar's
      side padding is the content's, so their edges line up. */
+  /* min-width: the bar never widens the page; its parts give way (the
+     scope chip first) instead. */
   .topbar {
     grid-area: topbar;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: var(--ps-space-md);
@@ -513,18 +518,6 @@
     font-weight: 700;
   }
 
-  .topbar-subtitle-link {
-    color: inherit;
-    text-decoration: none;
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.15s;
-  }
-
-  .topbar-subtitle-link:hover,
-  .topbar-subtitle-link:focus-visible {
-    border-bottom-color: currentColor;
-  }
-
   .topbar-tools {
     display: inline-flex;
     align-items: center;
@@ -532,18 +525,14 @@
     min-width: 0;
   }
 
-  .topbar-badge {
+  /* The connection state: the dot carries it in colour, the word in words. */
+  .topbar-status {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
     font-size: var(--ps-font-size-xs);
     font-weight: 600;
-    padding: 2px 8px;
-    border-radius: var(--ps-border-radius);
-    background: rgba(255, 255, 255, 0.15);
-    letter-spacing: 0.02em;
     white-space: nowrap;
-    flex-shrink: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .shortcuts-button {
@@ -625,7 +614,10 @@
     padding-right: calc(var(--ps-space-md) + 3em);
   }
 
+  /* The shortcut hints show while the pointer or the focus is in the
+     sidebar, at the labels' own secondary colour: quiet without dimming. */
   .nav-key {
+    visibility: hidden;
     position: absolute;
     top: 50%;
     right: var(--ps-space-md);
@@ -635,6 +627,11 @@
     color: var(--ps-text-secondary);
     white-space: nowrap;
     pointer-events: none;
+  }
+
+  .sidebar:hover .nav-key,
+  .sidebar:focus-within .nav-key {
+    visibility: visible;
   }
 
   /* A page the server has turned off: still listed, quieter. */
@@ -647,15 +644,6 @@
     color: var(--ps-text-secondary);
     font-style: italic;
     pointer-events: none;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
   }
 
   .nav-item {
@@ -731,10 +719,17 @@
     color: var(--ps-text-secondary);
   }
 
-  .nav-group-label--muted {
+  /* A group whose pages have nothing to show here (no optimizer on this
+     server): the heading is quieter and says why, in the "off" tag's style. */
+  .nav-group-label-muted {
     font-weight: 500;
-    letter-spacing: normal;
+  }
+
+  .nav-group-off {
+    margin-inline-start: var(--ps-space-sm);
+    font-style: italic;
     text-transform: none;
+    letter-spacing: normal;
   }
 
   .content {
@@ -755,15 +750,17 @@
     display: none;
   }
 
-  .loading {
-    padding: var(--ps-space-md);
-  }
-
-  /* On a narrow desktop window the vendor link gives way, so the console
-     label and the host lens keep their full width. */
-  @media (max-width: 960px) {
-    .topbar-vendor {
-      display: none;
+  /* A narrow desktop window has no room for the "not applied" note beside
+     the host filter: the scope chip keeps its width, and the note stays the
+     control's description. */
+  @media (max-width: 900px) {
+    .topbar-lens :global(.lens-off) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
     }
   }
 
@@ -798,6 +795,21 @@
       display: none;
     }
 
+    /* The bar keeps the dot; its word still names it to assistive
+       technology, and the drawer's head says it in full. */
+    .topbar-status-word {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .topbar-status .status-dot {
+      margin: 0;
+    }
+
     /* The drawer: everything below the top bar, from top to bottom. */
     .sidebar {
       position: fixed;
@@ -822,6 +834,11 @@
       gap: var(--ps-space-sm);
       padding: var(--ps-space-sm) var(--ps-space-lg);
       border-bottom: 1px solid var(--ps-border-light);
+    }
+
+    .drawer-status {
+      font-size: var(--ps-font-size-xs);
+      color: var(--ps-text-secondary);
     }
 
     .drawer-chip {
@@ -858,10 +875,10 @@
     }
   }
 
-  /* On the narrowest phones the logo and scope badge can no longer coexist;
-     drop the badge rather than clipping it. */
+  /* On the narrowest phones the logo and the scope chip can no longer
+     coexist: the chip gives way to the drawer's head, which names the scope. */
   @media (max-width: 430px) {
-    .topbar-badge {
+    .topbar-chip {
       display: none;
     }
   }
