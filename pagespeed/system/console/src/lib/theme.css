@@ -786,8 +786,18 @@ p.note {
   background: var(--ps-topbar-ok);
 }
 
+/* Told apart by shape too, for a phone's bar (dot only) and forced
+ * colours: a disc when connected, a ring while reconnecting, a square
+ * while paused. */
 .status-dot-bar-warning {
-  background: var(--ps-topbar-warning);
+  border: 2px solid;
+  border-color: var(--ps-topbar-warning);
+  background: transparent;
+}
+
+.status-dot-bar-paused {
+  border-radius: 1px;
+  background: var(--ps-topbar-fg-muted);
 }
 
 /* A short label on the top bar's band (the console's scope): a light
@@ -1218,6 +1228,11 @@ table.data-raw th {
   .status-dot {
     forced-color-adjust: none;
     background: CanvasText !important;
+  }
+
+  .status-dot-bar-warning {
+    border-color: CanvasText;
+    background: Canvas !important;
   }
 
   /* The health strip's leading rule and the muted card's dashed outline

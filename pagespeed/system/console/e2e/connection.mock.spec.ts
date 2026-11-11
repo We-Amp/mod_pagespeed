@@ -301,6 +301,9 @@ test.describe("the connection pill", () => {
       await page.getByRole("button", { name: "Refresh", exact: true }).click();
       await expect(dot).toHaveClass(/status-dot-bar-warning/);
       await expect(pill).toHaveText("Reconnecting…");
+      // A ring, not a disc: the dot alone tells the states apart by shape.
+      await expect(dot).toHaveCSS("border-top-width", "2px");
+      await expect(dot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       if (width <= 768) {
         // The drawer's head says it in full.
         await page.getByRole("button", { name: "Toggle menu" }).click();
@@ -309,4 +312,42 @@ test.describe("the connection pill", () => {
       }
     });
   }
+});
+
+test.describe("paused auto-refresh", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("pagespeed.console.autoRefresh", "off"));
+  });
+
+  test("the bar says Paused, not Connected: nothing is asking the server", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+    const pill = page.getByTestId("connection-pill");
+    await expect(pill).toHaveText("Paused");
+    await expect(pill.locator(".status-dot")).toHaveClass(/status-dot-bar-paused/);
+    // A square: neither the connected disc nor the reconnecting ring.
+    await expect(pill.locator(".status-dot")).toHaveCSS("border-top-left-radius", "1px");
+    // Turned back on, the bar follows the server again.
+    await page.getByRole("button", { name: /auto-refresh/i }).click();
+    await expect(pill).toHaveText("Connected");
+  });
+
+  test("the server is down at load: the banner says nothing retries until asked, and Retry still works", async ({ page }) => {
+    let down = true;
+    await mockAdmin(page, "pagespeed_admin", {
+      config: () => (down ? NETWORK_ERROR : F.CONFIG_VHOST),
+      stats_json: () => (down ? NETWORK_ERROR : F.STATS_VHOST),
+    });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    const banner = page.getByTestId("connection-banner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("Auto-refresh is paused; refresh to try again");
+    await expect(banner).not.toContainText("keeps trying");
+    await expect(page.getByTestId("connection-pill")).toHaveText("Paused");
+    down = false;
+    await banner.getByRole("button", { name: "Retry now" }).click();
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+  });
 });

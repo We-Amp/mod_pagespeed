@@ -10,6 +10,7 @@
   import { unavailable } from "$lib/api/unavailable";
   import { provideConsole } from "$lib/api/context";
   import { pollers } from "$lib/api/poller";
+  import { autoRefreshOn, onAutoRefreshChange } from "$lib/api/auto-refresh";
   import ConnectionBanner from "$lib/ConnectionBanner.svelte";
   import { HostLens, activeLensHost } from "$lib/host-lens.svelte";
   import { TERMS } from "$lib/data/terms";
@@ -126,6 +127,11 @@
   // What the top bar says about the server: answered or not (not a health check).
   let connectionView = $state<ConnectionView>(connection.view);
   let connected = $derived(connectionView.status === "connected");
+  // Paused auto-refresh asks nothing, so the bar cannot say the server
+  // answers (or that the console keeps trying): it says it is paused.
+  let autoOn = $state(autoRefreshOn());
+  onMount(() => onAutoRefreshChange((on) => (autoOn = on)));
+  let stateWord = $derived(!autoOn ? "Paused" : connected ? "Connected" : "Reconnecting…");
   // The console's scope, in the top bar and at the head of the drawer.
   let scopeLabel = $derived(scope.isGlobal ? "Whole server" : scope.host || "This host");
   // A server without an optimizer: its pages stay listed, under a muted heading.
@@ -327,8 +333,8 @@
         <!-- Whether the server answers: a dot and a word; announced when it
              changes. On a phone the word is hidden and names the dot. -->
         <span class="topbar-status" role="status" data-testid="connection-pill">
-          <span class="status-dot" class:status-dot-bar-ok={connected} class:status-dot-bar-warning={!connected}></span>
-          <span class="topbar-status-word" data-testid="connection-state">{connected ? "Connected" : "Reconnecting…"}</span>
+          <span class="status-dot" class:status-dot-bar-ok={autoOn && connected} class:status-dot-bar-warning={autoOn && !connected} class:status-dot-bar-paused={!autoOn}></span>
+          <span class="topbar-status-word" data-testid="connection-state">{stateWord}</span>
         </span>
         <!-- Whose figures this console shows: the whole server, or one host. -->
         <span class="topbar-chip" data-testid="console-scope" title={scopeLabel}><span class="visually-hidden">{"Scope: "}</span>{scopeLabel}</span>
@@ -353,7 +359,7 @@
   >
     <div class="drawer-scope">
       <span class="drawer-chip">{scopeLabel}</span>
-      <span class="drawer-status" data-testid="drawer-connection"><span class="status-dot" class:status-dot-ok={connected} class:status-dot-warning={!connected}></span>{connected ? "Connected" : "Reconnecting…"}</span>
+      <span class="drawer-status" data-testid="drawer-connection"><span class="status-dot" class:status-dot-ok={autoOn && connected} class:status-dot-warning={autoOn && !connected}></span>{stateWord}</span>
       {#if scope.isGlobal}
         <HostLensSelect id="host-lens-drawer" testid="host-lens-drawer" host={lens.host} options={lens.options} applied={router.currentRoute.hostAware === true} onselect={selectLens} />
       {/if}

@@ -11,6 +11,7 @@
   import { connection, type ConnectionView } from "$lib/api/connection";
   import { pollers } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
+  import { autoRefreshOn, onAutoRefreshChange } from "$lib/api/auto-refresh";
 
   const { api } = useConsole();
 
@@ -22,6 +23,9 @@
       view = v;
     }),
   );
+  // With auto-refresh paused nothing retries by itself: say so.
+  let autoOn = $state(autoRefreshOn());
+  onMount(() => onAutoRefreshChange((on) => (autoOn = on)));
 
   // Every open page's pollers may hit only optimizer endpoints (Optimizer
   // status): a plain 5xx there is neutral for the
@@ -48,7 +52,7 @@
   <div class="connection-banner" role="alert" data-testid="connection-banner">
     <p class="connection-text">
       <strong>Cannot reach the server.</strong>
-      The console keeps trying, less often the longer this lasts{#if view.lastAnsweredAt !== null}; the figures below are from {new Date(view.lastAnsweredAt).toLocaleTimeString()}{/if}.
+      {autoOn ? "The console keeps trying, less often the longer this lasts" : "Auto-refresh is paused; refresh to try again"}{#if view.lastAnsweredAt !== null}; the figures below are from {new Date(view.lastAnsweredAt).toLocaleTimeString()}{/if}.
     </p>
     <button type="button" class="btn btn-primary" onclick={retryNow} disabled={retrying}>
       {retrying ? "Retrying…" : "Retry now"}
