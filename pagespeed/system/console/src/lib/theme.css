@@ -100,7 +100,8 @@
   --ps-type-card-title-size: 1rem;
   --ps-type-card-title-weight: 600;
   --ps-type-body-size: 0.875rem;
-  --ps-type-body-leading: 1.45;
+  /* Whole pixels at 14 px (21 px), so rows and controls keep whole-pixel heights. */
+  --ps-type-body-leading: 1.5;
   /* Labels and meta text; a group label is the same size, heavier, in capitals. */
   --ps-type-label-size: 0.75rem;
   --ps-type-label-weight: 500;
@@ -229,7 +230,7 @@ body {
   font-size: var(--ps-font-size-base);
   color: var(--ps-text);
   background: var(--ps-bg);
-  line-height: 1.5;
+  line-height: var(--ps-type-body-leading);
   -webkit-font-smoothing: antialiased;
   /* Checkboxes, radio buttons and range sliders take the accent. */
   accent-color: var(--ps-primary);
@@ -310,8 +311,7 @@ a {
 
 /* The page area reads at the body size; the shell around it (top bar,
  * drawer, dialogs, the connection banner) keeps the browser's. The line
- * height stays the document's 1.5: whole pixels at 14 px, so controls and
- * rows keep whole-pixel heights. */
+ * height is the document's, the body role's leading. */
 main {
   font-size: var(--ps-type-body-size);
 }
@@ -684,6 +684,7 @@ p.note {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--ps-space-md);
+  margin-bottom: var(--ps-space-md);
 }
 
 @media (min-width: 900px) {
@@ -795,6 +796,11 @@ p.note {
   font-size: var(--ps-type-card-title-size);
   line-height: var(--ps-type-body-leading);
   overflow-wrap: anywhere;
+}
+
+/* A level mark in the sentence (the findings' worst level) sits on its line. */
+.health-strip .level-badge {
+  vertical-align: 0.1em;
 }
 
 .health-strip-ok {

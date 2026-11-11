@@ -24,7 +24,9 @@ function selectors(source: string): string[] {
   for (const [, prelude] of css.matchAll(/([^{}]+)\{/g)) {
     const text = prelude.trim();
     if (text.startsWith("@")) continue;
-    out.push(...text.split(",").map((s) => s.trim().replace(/\s+/g, " ")));
+    // A :global(...) rule reaches every page: judge what it wraps.
+    const unwrapped = text.replace(/:global\(([^)]*)\)/g, "$1");
+    out.push(...unwrapped.split(",").map((s) => s.trim().replace(/\s+/g, " ")).filter((s) => s !== ""));
   }
   return out;
 }
@@ -40,7 +42,30 @@ const pages = readdirSync(PAGES)
 // A rule on a bare table part or heading restyles every one on the page.
 const BARE_ELEMENT = /^(table|thead|tbody|tfoot|tr|th|td|caption|h[1-6])(?![\w-])/;
 // The shared classes and their modifiers.
-const SHARED_CLASS = /\.(card|card-muted|loading|note|notice(?:-[\w-]+)?|badge(?:-[\w-]+)?|section-title|card-title|minor-title|table-frame|info-grid|empty-state)(?![\w-])/;
+const SHARED_CLASS = new RegExp(
+  "\\.(" +
+    [
+      "card",
+      "card-muted",
+      "loading",
+      "note",
+      "notice(?:-[\\w-]+)?",
+      "badge(?:-[\\w-]+)?",
+      "level-badge(?:-[\\w-]+)?",
+      "status-dot(?:-[\\w-]+)?",
+      "status-word",
+      "stat-tiles?(?:-[\\w-]+)?",
+      "health-strip(?:-[\\w-]+)?",
+      "section-title",
+      "card-title",
+      "minor-title",
+      "table-frame(?:-[\\w-]+)?",
+      "data(?:-dense|-inline|-raw)?",
+      "info-grid",
+      "empty-state",
+    ].join("|") +
+    ")(?![\\w-])",
+);
 
 describe("shared component layer", () => {
   it("finds the pages", () => {

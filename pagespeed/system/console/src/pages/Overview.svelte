@@ -594,11 +594,6 @@
     font-weight: 600;
   }
 
-  /* The mark beside the findings count sits on the sentence's line. */
-  .verdict .level-badge {
-    vertical-align: 0.1em;
-  }
-
   /* The findings follow the tiles; the count in the sentence jumps here,
      clear of the top bar. */
   .findings-anchor {
@@ -635,10 +630,6 @@
   }
 
   .scope-line {
-    margin-bottom: var(--ps-space-md);
-  }
-
-  .stat-tiles {
     margin-bottom: var(--ps-space-md);
   }
 

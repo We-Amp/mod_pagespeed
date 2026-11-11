@@ -271,6 +271,22 @@ for (const scheme of ["light", "dark"] as const) {
       }
     });
 
+    test("status dot: a health check's result keeps its dot", async ({ page }) => {
+      await open(page, scheme, "#/optimizer");
+      const dots = page.getByRole("region", { name: "Checks" }).locator(".check .status-dot");
+      expect(await dots.count()).toBeGreaterThan(0);
+      for (const dot of await dots.all()) {
+        await expect(dot).toBeVisible();
+        const b = await box(dot);
+        const clip = { x: b.left - 4, y: b.top, width: b.width + 4, height: b.height };
+        const { at } = await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+          [4 + b.width / 2, b.height / 2],
+          [1, b.height / 2],
+        ]);
+        expect(at[0], "the dot differs from its cell").not.toBe(at[1]);
+      }
+    });
+
     test("health strip: the leading rule is painted", async ({ page }) => {
       await open(page, scheme, "#/overview");
       const strip = page.getByTestId("health-strip");

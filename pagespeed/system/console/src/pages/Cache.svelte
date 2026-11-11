@@ -521,6 +521,11 @@
     border-radius: 3px;
   }
 
+  /* A lookup's answer is a data dump, not a message: it takes the full width. */
+  .result-box {
+    max-width: none;
+  }
+
   .result-title {
     word-break: break-all;
   }

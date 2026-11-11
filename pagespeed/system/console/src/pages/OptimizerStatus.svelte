@@ -209,7 +209,7 @@
 
       {#if browser}
         <h3 class="card-title">Browser analysis</h3>
-        <div class="info-grid">
+        <div class="info-grid card">
           <div class="info-item">
             <span class="info-label metric-label">Enabled</span>
             <span class="info-value metric-value num">{fieldValue(browser.enabled)}</span>
