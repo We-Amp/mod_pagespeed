@@ -8,3 +8,7 @@
   menu button.
 - **Rule packs no longer shows one pack selected while the table still shows
   another** after a failed read; a note names both until the read succeeds.
+- **Every admin console control shows where the keyboard is.** Text fields,
+  selects, tabs and menu links draw a complete focus ring, also in Windows
+  high-contrast mode, where the current page, selected tab and chart bars now
+  stay visible. At 320 px wide (400% zoom) no page scrolls sideways.
