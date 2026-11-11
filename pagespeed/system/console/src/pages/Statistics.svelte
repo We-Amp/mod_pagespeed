@@ -24,6 +24,7 @@
     type SortState,
   } from "$lib/utils/stat-table";
   import { formatCount } from "$lib/utils/format";
+  import { settledCount } from "$lib/utils/filter-status";
   import { statisticsScopeLine } from "$lib/utils/config-scope";
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
@@ -71,6 +72,10 @@
   let totalCount = $derived(
     stats.data?.variables ? Object.keys(stats.data.variables).length : 0,
   );
+
+  // The count, read out once the search box is quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((text) => (countStatus = text));
 
   // A real server reports hundreds of counters: past this many, a family
   // starts collapsed (except the key counters) so the page is not tens of
@@ -130,9 +135,13 @@
         placeholder="Search name or description..."
         aria-label="Search statistics"
         bind:value={search}
-        oninput={() => (groupToggled = {})}
+        oninput={() => {
+          groupToggled = {};
+          announceCount(() => `${entries.length} of ${totalCount} variables`);
+        }}
       />
       <span class="count field-text">{entries.length} of {totalCount} variables</span>
+      <span class="visually-hidden" role="status" data-testid="statistics-count-status">{countStatus}</span>
       </div>
       <div class="control-group">
       <label class="toggle field-check">
@@ -164,7 +173,7 @@
 
     <!-- On a wide window the groups flow into columns; with descriptions
          shown each column needs more room to stay readable. -->
-    <div class="stat-groups" class:stat-groups--described={showDescriptions}>
+    <div class="stat-groups" class:stat-groups-described={showDescriptions}>
     {#each groups as group (group.key)}
       <details class="stat-group" open={groupOpen(group)}>
         <summary
@@ -194,10 +203,12 @@
             <tbody>
               {#each group.rows as entry (entry.name)}
                 <tr>
-                  <td class="name-cell" title={entry.description}>
+                  <th scope="row" class="name-cell" title={entry.description}>
                     {#each nameSegments(entry.name) as part, i (i)}{part}<wbr />{/each}
-                    {#if showDescriptions}<div class="stat-desc">{entry.description}</div>{/if}
-                  </td>
+                    <!-- The row header's name is the counter's name alone (a screen reader
+                         repeats it on every cell); the title carries the description. -->
+                    {#if showDescriptions}<div class="stat-desc" aria-hidden="true">{entry.description}</div>{/if}
+                  </th>
                   <td class="value-cell num">{formatCount(entry.value)}</td>
                   {#if showDelta}
                     <td class="value-cell num delta-cell" class:delta-pos={entry.delta !== null && entry.delta > 0} class:delta-neg={entry.delta !== null && entry.delta < 0}>
@@ -238,7 +249,7 @@
     column-gap: var(--ps-space-lg);
   }
 
-  .stat-groups--described {
+  .stat-groups-described {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 48rem), 1fr));
   }
 

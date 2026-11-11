@@ -263,10 +263,10 @@ describe("the verdict", () => {
     expect(line({ record: record([variant({ format: "avif" }), variant({ format: "webp" })]) })[1]).toBe("Optimized.");
   });
 
-  it("the module's result is optimized only when it says so", () => {
+  it("the module's result counts as optimized only when it says so", () => {
     expect(line({ access: "not-here", lookup: OPTIMIZED })).toEqual([
       "optimized",
-      "Optimized. The module's result is optimized.",
+      "Optimized. The module rewrote it.",
     ]);
     expect(line({ access: "none", lookup: KEPT })).toEqual(["kept", "Not optimized. The module tried it and kept the original."]);
     expect(line({ access: "none", lookup: SILENT })).toEqual([

@@ -305,7 +305,7 @@ test("every row the optimizer reports is listed as text, none folded into other"
   await expect(rows.nth(1)).toContainText("[2001:db8::1]");
   await expect(rows.nth(2)).toContainText("a_b.test");
   await expect(rows.nth(3)).toContainText("10.1.2.3");
-  await expect(page.getByTestId("savings-by-host-other").locator("td").nth(1)).toHaveText("1");
+  await expect(page.getByTestId("savings-by-host-other").locator("td").first()).toHaveText("1");
   await expect(lensSelect(page).locator("option")).toHaveText(["All hosts", "10.1.2.3", "[2001:db8::1]", "a_b.test", "www.example.com"]);
 });
 

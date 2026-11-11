@@ -219,7 +219,7 @@ export function urlVerdict(input: UrlVerdictInput): UrlVerdict {
   const say = (word: UrlVerdictWord, text: string): UrlVerdict => ({ word, text: ` ${text}` });
   if (status === "complete" || status === "partial" || status === "revalidating")
     return { word: "Optimized.", text: servedText(record!.rows) };
-  if (lookup.outcome === "optimized") return say("Optimized.", "The module's result is optimized.");
+  if (lookup.outcome === "optimized") return say("Optimized.", "The module rewrote it.");
   if (cooldown !== null) return say("Not optimized yet.", cooldownText(cooldown));
   if (lookup.outcome === "kept") return say("Not optimized.", "The module tried it and kept the original.");
   // A variant without its content class is one whose metadata could not be read: no evidence either way.

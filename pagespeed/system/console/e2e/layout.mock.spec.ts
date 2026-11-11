@@ -5,13 +5,11 @@
 // toolbars, and how pages use a wide window. Self-contained
 // (support/mock-admin.ts); run after build.sh.
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import * as RP from "./support/rule-packs-fixtures";
 import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 import { box, noHorizontalScroll, pageReady, perHostReplies, scrollTo, sidewaysScrollers, viewport, wholeServerReplies, widenText } from "./support/layout";
+import { rigPerHostReplies, rigWholeServerReplies } from "./support/rig";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -1056,44 +1054,12 @@ test.describe("tables fit their frame on a desktop", () => {
 // histograms, the cache structure of a running server), because a page that
 // only shows a refusal reflows trivially.
 test.describe("a 320 px window", () => {
-  const RIG = fileURLToPath(new URL("../test-fixtures/rig/", import.meta.url));
-  const rig = (name: string): unknown => JSON.parse(readFileSync(`${RIG}${name}.json`, "utf8"));
   type Replies = Partial<Record<Leaf, Responder>>;
 
-  // The captures of one running server: the whole-server console gets the
-  // whole-server captures, the per-host console its own (and, like a real
-  // one, the refusals of the whole-server pages). Leaves without a capture
-  // of that scope use the other scope's (same shape) or the spec fixtures.
+  // The captures of one running server (support/rig.ts).
   const consoles: ReadonlyArray<{ admin: "pagespeed_global_admin" | "pagespeed_admin"; replies: () => Replies }> = [
-    {
-      admin: "pagespeed_global_admin",
-      replies: () => ({
-        ...wholeServerReplies(),
-        config: F.ok(rig("config.global")),
-        stats_json: F.ok(rig("stats_json.global")),
-        histograms: F.ok(rig("histograms.vhost-a")),
-        cache: F.ok(rig("cache.vhost-a")),
-        rule_packs: RP.GLOBAL_TWO,
-        "v1/daemon/health": F.ok(rig("daemon_health.global")),
-        "v1/daemon/stats": F.ok(rig("daemon_stats.global")),
-        "v1/daemon/cooldowns": F.ok(rig("daemon_cooldowns.global")),
-        "v1/daemon/cache/urls": F.ok(rig("daemon_cache_urls.global")),
-        "v1/daemon/logs": F.ok(rig("daemon_logs.global")),
-      }),
-    },
-    {
-      admin: "pagespeed_admin",
-      replies: () => ({
-        ...perHostReplies(),
-        config: F.ok({ ...(rig("config.vhost-a") as Record<string, unknown>), host: "site-a.test:80" }),
-        stats_json: F.ok(rig("stats_json.vhost-a")),
-        histograms: F.ok(rig("histograms.vhost-a")),
-        cache: F.ok(rig("cache.vhost-a")),
-        rule_packs: RP.ONE,
-        "v1/daemon/health": F.ok(rig("daemon_health.global")),
-        "v1/daemon/stats": F.ok(rig("daemon_stats.vhost-a")),
-      }),
-    },
+    { admin: "pagespeed_global_admin", replies: rigWholeServerReplies },
+    { admin: "pagespeed_admin", replies: rigPerHostReplies },
   ];
 
   const ROUTES = [
@@ -1159,10 +1125,10 @@ test.describe("a 320 px window", () => {
         expect((await box(table)).right, id).toBeLessThanOrEqual(inner + 0.5);
         // Still a table: a row's cells share one line, and a figure keeps its unit beside it.
         const row = table.locator("tbody tr").first();
-        const cells = await Promise.all((await row.locator("td").all()).map((c) => box(c)));
+        const cells = await Promise.all((await row.locator("th, td").all()).map((c) => box(c)));
         expect(cells.length).toBe(4);
         for (const c of cells) expect(Math.abs(c.top - cells[0].top)).toBeLessThanOrEqual(1);
-        expect(await row.locator("td").nth(1).evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
+        expect(await row.locator("td").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
       }
       expect(await sidewaysScroll(page)).toBe(0);
     });

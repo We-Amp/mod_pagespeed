@@ -534,7 +534,7 @@
           <details>
             <summary>Raw data</summary>
             <table class="data-raw">
-              <thead><tr><th>Time</th><th>Value</th></tr></thead>
+              <thead><tr><th scope="col">Time</th><th scope="col">Value</th></tr></thead>
               <tbody>
                 {#each chart.timestamps as ts, i (ts)}
                   <tr>
