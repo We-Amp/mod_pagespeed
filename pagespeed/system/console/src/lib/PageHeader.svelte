@@ -4,18 +4,24 @@
 <script lang="ts">
   import { onDestroy, type Snippet } from "svelte";
   import { setAutoRefresh } from "./api/auto-refresh";
-  import { pollers } from "./api/poller";
+  import { pollers, type RefreshOutcome } from "./api/poller";
   import { clock } from "./now.svelte";
   import { formatIsoTitle } from "./utils/format";
-  import { REFRESH_RESULT_MS, refreshResultText, updatedText } from "./utils/page-header";
+  import { REFRESH_RESULT_MS, pageOutcome, refreshResultText, updatedText } from "./utils/page-header";
 
   /** Without `onToggle` the page refreshes only when asked (Configuration). */
   interface RefreshControls {
     autoRefresh?: boolean;
     intervalMs?: number;
     onToggle?: () => void;
-    /** May resolve to the poller's outcome, so a failed refresh is said. */
-    onRefresh: () => unknown;
+    /** Resolves to how the read ended. */
+    onRefresh: () => Promise<RefreshOutcome>;
+    /**
+     * A page that reads several parts and shows each failure in place: its
+     * error states, read after the refresh (pageOutcome), so the header
+     * never says "Refreshed" above an error notice.
+     */
+    failedParts?: () => readonly unknown[];
   }
 
   interface Props {
@@ -34,13 +40,15 @@
   let resultTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function refreshNow(): Promise<void> {
-    if (!refresh) return;
+    // A refresh in flight is answered once (Configuration reads without a poller).
+    if (!refresh || busy) return;
     clearTimeout(resultTimer);
     result = "";
     busy = true;
-    let outcome: unknown;
+    let outcome: RefreshOutcome;
     try {
       outcome = await refresh.onRefresh();
+      if (refresh.failedParts) outcome = pageOutcome(outcome, refresh.failedParts());
     } catch {
       outcome = "failed";
     }

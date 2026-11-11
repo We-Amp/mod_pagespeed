@@ -6,7 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -136,3 +136,66 @@ test("Refresh says what it came to, and a timer's refresh says nothing", async (
   await page.keyboard.press("r");
   await expect(result).toHaveText("Refreshed");
 });
+
+// Pages that read several parts settle their read even when a part fails,
+// and show that part's failure in place: the header then never says
+// "Refreshed" above an error notice.
+interface PartCase {
+  name: string;
+  admin: "pagespeed_admin" | "pagespeed_global_admin";
+  hash: string;
+  replies: Partial<Record<Leaf, Responder>>;
+  leaf: Leaf;
+  broken: Responder;
+  says: string;
+}
+
+const GLOBAL = { ...F.allReplies(), config: F.CONFIG_GLOBAL };
+const PART_CASES: PartCase[] = [
+  { name: "Graphs, statistics failing", admin: "pagespeed_admin", hash: "#/graphs", replies: F.allReplies(),
+    leaf: "stats_json", broken: F.MODULE_FAILURE, says: "Refresh failed" },
+  { name: "Optimizer status, statistics failing", admin: "pagespeed_admin", hash: "#/optimizer", replies: F.allReplies(),
+    leaf: "v1/daemon/stats", broken: F.MODULE_FAILURE, says: "Partly refreshed; see the notice" },
+  { name: "URLs, the list failing", admin: "pagespeed_global_admin", hash: "#/urls",
+    replies: { ...GLOBAL, "v1/daemon/cache/urls": F.URLS_TWO_PAGES },
+    leaf: "v1/daemon/cache/urls", broken: F.MODULE_FAILURE, says: "Refresh failed" },
+  { name: "URL detail, the alternates failing", admin: "pagespeed_global_admin",
+    hash: "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https",
+    replies: { ...GLOBAL, "v1/daemon/cache/alternates": F.ALTERNATES_HERO, "v1/daemon/cache/content": F.CONTENT_HERO },
+    leaf: "v1/daemon/cache/alternates", broken: F.MODULE_FAILURE, says: "Partly refreshed; see the notice" },
+  { name: "Logs, the module's messages failing", admin: "pagespeed_global_admin", hash: "#/logs",
+    replies: { ...GLOBAL, "v1/daemon/logs": F.logsDaemon() },
+    leaf: "message_history", broken: F.MODULE_FAILURE, says: "Partly refreshed; see the notice" },
+  { name: "Overview, the module's statistics failing", admin: "pagespeed_admin", hash: "#/overview", replies: F.allReplies(),
+    leaf: "stats_json", broken: F.MODULE_FAILURE, says: "Partly refreshed; see the notice" },
+  { name: "Overview, the optimizer not answering", admin: "pagespeed_admin", hash: "#/overview", replies: F.allReplies(),
+    leaf: "v1/daemon/health", broken: F.UNREACHABLE, says: "Partly refreshed; see the notice" },
+  { name: "Savings, the module's statistics failing", admin: "pagespeed_admin", hash: "#/savings", replies: F.allReplies(),
+    leaf: "stats_json", broken: F.MODULE_FAILURE, says: "Partly refreshed; see the notice" },
+];
+
+for (const c of PART_CASES) {
+  test(`Refresh is honest when a part fails: ${c.name}`, async ({ page }) => {
+    let broken = false;
+    const healthy = c.replies[c.leaf];
+    const replies: Partial<Record<Leaf, Responder>> = { ...c.replies, [c.leaf]: ((call, request) =>
+      broken
+        ? typeof c.broken === "function" ? c.broken(call, request) : c.broken
+        : typeof healthy === "function" ? healthy(call, request) : healthy) as Responder };
+    if (c.leaf === "v1/daemon/health") {
+      const stats = c.replies["v1/daemon/stats"];
+      replies["v1/daemon/stats"] = ((call, request) =>
+        broken ? F.UNREACHABLE : typeof stats === "function" ? stats(call, request) : stats) as Responder;
+    }
+    await mockAdmin(page, c.admin, replies);
+    await openConsole(page, c.admin, c.hash);
+    const result = page.locator("main .page-header").getByRole("status");
+    const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+    await expect(page.locator("main .loading")).toHaveCount(0);
+    await refresh.click();
+    await expect(result).toHaveText("Refreshed");
+    broken = true;
+    await refresh.click();
+    await expect(result).toHaveText(c.says);
+  });
+}

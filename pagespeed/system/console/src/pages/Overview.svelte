@@ -57,6 +57,7 @@
     overviewVerdict,
     RESPONSE_HEADER_CHECK,
     SAVINGS_RELATION,
+    SERVED_COUNTS_RELATION,
     serveShareJudgement,
     timeBase,
     verdictLevel,
@@ -253,7 +254,9 @@
       autoRefresh: poll.autoRefresh,
       intervalMs: 5000,
       onToggle: toggleAutoRefresh,
+      // The optimizer not answering is a notice on this page, so it is part of the answer.
       onRefresh: () => poll.refresh(),
+      failedParts: () => [moduleError, daemonView?.daemon === "unreachable"],
     }}
   />
   <p class="note scope-line" data-testid="overview-scope">{scopeLine}</p>
@@ -317,15 +320,16 @@
           {#if cacheRate && cacheRate.percent !== null}
             {@const words = servedOptimizedText(cacheRate.mode)}
             <p class={hero ? "stat-tile-context" : "note"} title={words.tooltip}>
-              {#if !hero}The module counted {countText(summary.servedByOptimizer)} responses served optimized, 304 Not Modified answers included:{/if}
+              {#if !hero}The module counted {countText(summary.servedByOptimizer)} responses served optimized:{/if}
               {moduleBase.warming
                 ? `of ${formatCount(cacheRate.total)}`
                 : `${formatPercent(cacheRate.percent, cacheRate.served)} of ${formatCount(cacheRate.total)}`}
               {words.of}{moduleBase.warming ? " so far" : ""}
             </p>
           {:else if !hero}
-            <p class="note">The module counted {countText(summary.servedByOptimizer)} responses served optimized, 304 Not Modified answers included.</p>
+            <p class="note">The module counted {countText(summary.servedByOptimizer)} responses served optimized.</p>
           {/if}
+          {#if !hero}<p class="note" data-testid="served-counts-relation">{SERVED_COUNTS_RELATION}</p>{/if}
         </div>
         {#if judgement}
           <p class={hero ? "stat-tile-context" : "note"} data-testid="serve-share-judgement">{judgement}</p>
@@ -522,8 +526,7 @@
             <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
           {/if}
           {#if optimizerLeads}
-            <!-- The module's own count of those serves, with its share: it also counts
-                 304 answers, which the optimizer's count in the verdict leaves out. -->
+            <!-- The module's own count of those serves, with its share. -->
             {@render servedShare(false)}
           {/if}
           {#if scope.isGlobal && serveRows.length > 0}

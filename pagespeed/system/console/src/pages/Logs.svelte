@@ -335,6 +335,10 @@
       intervalMs,
       onToggle: () => (poll.autoRefresh ? poll.stop() : poll.start()),
       onRefresh: () => poll.refresh(),
+      failedParts: () => [
+        ...(source !== "optimizer" ? [moduleError] : []),
+        ...(source !== "module" ? [optimizerError] : []),
+      ],
     }}
   />
 

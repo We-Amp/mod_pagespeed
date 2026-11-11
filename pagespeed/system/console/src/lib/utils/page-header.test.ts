@@ -2,7 +2,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { refreshResultText, updatedText } from "./page-header";
+import { ApiError, UnavailableError } from "$lib/api/client";
+import { failedRead, pageOutcome, refreshResultText, updatedText } from "./page-header";
 
 describe("updatedText", () => {
   const now = 1_800_000_000_000;
@@ -38,12 +39,36 @@ describe("updatedText", () => {
 });
 
 describe("refreshResultText", () => {
-  it("says how a refresh the viewer asked for ended", () => {
+  it("says Refreshed only for an answer", () => {
     expect(refreshResultText("ok")).toBe("Refreshed");
+    // A leaf the server turned off answered.
+    expect(refreshResultText("off")).toBe("Refreshed");
+    expect(refreshResultText("partial")).toBe("Partly refreshed; see the notice");
     expect(refreshResultText("failed")).toBe("Refresh failed");
     expect(refreshResultText("busy")).toBe("Server busy; not refreshed");
-    // A leaf turned off answered; a page refresh without an outcome is an answer.
-    expect(refreshResultText("off")).toBe("Refreshed");
-    expect(refreshResultText(undefined)).toBe("Refreshed");
+  });
+});
+
+describe("pageOutcome", () => {
+  const boom = new ApiError(500, "Internal Server Error");
+  it("keeps the poller's outcome when nothing on the page failed", () => {
+    expect(pageOutcome("ok", [null, null, false])).toBe("ok");
+    expect(pageOutcome("failed", [null])).toBe("failed");
+    expect(pageOutcome("busy", [boom])).toBe("busy");
+  });
+  it("is partial when some parts failed and failed when all did", () => {
+    expect(pageOutcome("ok", [boom, null])).toBe("partial");
+    expect(pageOutcome("ok", [null, true])).toBe("partial");
+    expect(pageOutcome("ok", [boom, true])).toBe("failed");
+    expect(pageOutcome("ok", [new Error("network")])).toBe("failed");
+  });
+  it("counts a state the server reports on purpose as an answer", () => {
+    expect(failedRead(new UnavailableError(403, "Forbidden", "urls"))).toBe(false);
+    expect(failedRead(new ApiError(503, "no daemon"))).toBe(false);
+    expect(failedRead(new ApiError(404, "not here"))).toBe(false);
+    expect(failedRead(new ApiError(429, "busy"))).toBe(false);
+    // The optimizer not reachable is a failure.
+    expect(failedRead(new ApiError(502, "Bad Gateway"))).toBe(true);
+    expect(failedRead(null)).toBe(false);
   });
 });

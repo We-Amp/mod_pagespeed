@@ -94,8 +94,12 @@ export function documentVisibility(): VisibilitySource | null {
   };
 }
 
-/** How a refresh ended: an answer, "busy" (kept the last view), a failure, or the leaf is turned off. */
-export type RefreshOutcome = "ok" | "busy" | "failed" | "off";
+/**
+ * How a refresh ended: an answer, "busy" (kept the last view), a failure,
+ * or the leaf is turned off. "partial" is never the poller's: a page that
+ * reads several parts reports it when some of them failed.
+ */
+export type RefreshOutcome = "ok" | "busy" | "failed" | "off" | "partial";
 
 export class Poller<T> {
   private state: PollerState<T>;

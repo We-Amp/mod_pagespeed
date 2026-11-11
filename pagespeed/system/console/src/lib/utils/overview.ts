@@ -543,7 +543,7 @@ export function overviewVerdict(
     return working(`${rewriting} Optimizer restarted ${optimizer.ago}; its figures are not meaningful yet.`);
   }
   // The optimizer's own count: full answers whose saving it could measure. The
-  // module counts more (Overview's optimizer card says so), so whose count it is is said.
+  // module counts more (SERVED_COUNTS_RELATION), so whose count it is is said.
   const responses = serves.responses === 1 ? "1 optimized response" : `${formatCount(serves.responses)} optimized responses`;
   const served =
     serves.saved > 0
@@ -569,6 +569,14 @@ export function serveShareJudgement(rate: OptimizedCopyHitRate | null, warming: 
     ? "Normal when most requests are pages: the optimizer's cache answers CSS, JavaScript and images."
     : "A low share for CSS, JavaScript and images; Savings shows what was not served from the cache.";
 }
+
+/**
+ * Why the module's count of serves from the optimizer's cache is higher
+ * than the optimizer's own (the verdict's): the module also counts its
+ * answers to conditional requests, and serves whose saving is not known.
+ */
+export const SERVED_COUNTS_RELATION =
+  'It also counts answers to conditional requests ("not modified"), so its count can be higher than the optimizer\'s.';
 
 /** The one line that relates the two savings figures, which are never added up. */
 export const SAVINGS_RELATION =

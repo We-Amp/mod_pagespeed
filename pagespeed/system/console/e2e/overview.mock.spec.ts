@@ -256,6 +256,13 @@ test.describe("Overview verdict and tiles", () => {
     // Below the tiles: both sources by type.
     await expect(page.getByTestId("module-by-type").locator("tbody tr")).toHaveCount(3);
     await expect(page.getByTestId("optimizer-by-type").locator("tbody tr")).toHaveText([/CSS\s*197/, /Images\s*45/]);
+    // The verdict's count is the optimizer's; the card's is the module's, and it says why the two differ.
+    const card = page.getByTestId("optimizer-card");
+    await expect(card.getByTestId("module-served")).toContainText(/The module counted 3,122 responses served optimized: 26% of 12,006/);
+    await expect(card.getByTestId("served-counts-relation")).toHaveText(
+      'It also counts answers to conditional requests ("not modified"), so its count can be higher than the optimizer\'s.',
+    );
+    await expect(page.getByTestId("tile-cache").getByTestId("served-counts-relation")).toHaveCount(0);
     await expectNoJunk(page);
   });
 
