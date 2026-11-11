@@ -64,11 +64,15 @@ describe("pageOutcome", () => {
   });
   it("counts a state the server reports on purpose as an answer", () => {
     expect(failedRead(new UnavailableError(403, "Forbidden", "urls"))).toBe(false);
-    expect(failedRead(new ApiError(503, "no daemon"))).toBe(false);
+    expect(failedRead(new ApiError(503, "daemon_not_configured"))).toBe(false);
+    expect(failedRead(new ApiError(503, JSON.stringify({ error: "daemon_not_configured" })))).toBe(false);
+    expect(failedRead(new ApiError(501, "endpoint_unsupported_by_daemon"))).toBe(false);
     expect(failedRead(new ApiError(404, "not here"))).toBe(false);
     expect(failedRead(new ApiError(429, "busy"))).toBe(false);
     // The optimizer not reachable is a failure.
     expect(failedRead(new ApiError(502, "Bad Gateway"))).toBe(true);
+    // A 503 that does not say "not configured" is the optimizer not answering.
+    expect(failedRead(new ApiError(503, "Service Unavailable"))).toBe(true);
     expect(failedRead(null)).toBe(false);
   });
 });

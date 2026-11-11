@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-import { isUnavailable } from "$lib/api/client";
+import { ApiError, isUnavailable } from "$lib/api/client";
 import { isBusyAnswer, type RefreshOutcome } from "$lib/api/poller";
-import { errorCode, isDaemonUnavailable } from "./daemon";
+import { errorCode } from "./daemon";
 import { formatRelative } from "./format";
 
 /** A stamp older than this many refresh intervals, with auto-refresh on, is overdue. */
@@ -55,12 +55,18 @@ export function refreshResultText(outcome: RefreshOutcome): string {
  * per-host console, no optimizer configured or a version without the
  * endpoint (lib/utils/daemon.ts), another tab's busy read.
  */
+function optimizerAbsentOnPurpose(error: Error): boolean {
+  if (!(error instanceof ApiError)) return false;
+  return error.status === 404 || error.status === 501 || (error.status === 503 && errorCode(error) === "daemon_not_configured");
+}
+
 export function failedRead(error: unknown): boolean {
   return (
     error instanceof Error &&
     !isUnavailable(error) &&
-    // Not configured or not supported is a state; not reachable (502) is a failure.
-    !(isDaemonUnavailable(error) && (error as { status?: number }).status !== 502) &&
+    // No optimizer configured, or a version without the endpoint, is a
+    // state; not reachable (502) or a plain 503 is a failure.
+    !optimizerAbsentOnPurpose(error) &&
     !isBusyAnswer(error) &&
     errorCode(error) !== "whole_server_console_only"
   );
