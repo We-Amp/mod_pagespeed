@@ -690,3 +690,70 @@ test.describe("Overview alerts", () => {
     await expect(page.getByTestId("alert-origin-misconfiguration")).toHaveCount(0);
   });
 });
+
+// "Why is this URL not optimized?" starts on Overview, on every console: a
+// pasted URL and Enter reach the reasons.
+test.describe("Inspect a URL", () => {
+  const CONSOLES: Array<[string, Admin, Partial<Record<Leaf, Responder>>]> = [
+    ["whole-server console", "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX }],
+    ["per-vhost console", "pagespeed_admin", F.allReplies()],
+    [
+      "module-only server",
+      "pagespeed_admin",
+      {
+        ...F.allReplies(),
+        "v1/daemon/health": F.NOT_CONFIGURED,
+        "v1/daemon/stats": F.NOT_CONFIGURED,
+        "v1/daemon/cooldowns": F.NOT_CONFIGURED,
+      },
+    ],
+  ];
+  for (const [name, admin, replies] of CONSOLES) {
+    test(`${name}: a pasted URL reaches the reasons in two interactions`, async ({ page }) => {
+      await open(page, admin, { ...replies, cache: F.cacheWithLookup() });
+      const input = page.getByRole("searchbox", { name: "Inspect a URL" });
+      await input.fill("  https://www.example.test/a.css ");
+      await input.press("Enter");
+      await expect(page).toHaveURL(/#\/urls\/detail\?url=%2Fa\.css&host=www\.example\.test&scheme=https$/);
+      await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/a.css");
+      await expect(page.getByTestId("url-module-lookup")).toBeVisible();
+      await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
+      // Back returns to Overview.
+      await page.goBack();
+      await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    });
+  }
+
+  test("the button does what Enter does", async ({ page }) => {
+    await open(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+    await page.getByTestId("inspect-url").fill("http://www.example.test/img/hero.png?v=2#top");
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await expect(page.getByTestId("url-detail-url")).toHaveText("http://www.example.test/img/hero.png?v=2");
+  });
+
+  test("text that is not a full URL stays put and says what is expected", async ({ page }) => {
+    const { mock } = await open(page, "pagespeed_admin", F.allReplies());
+    const input = page.getByTestId("inspect-url");
+    const problem = page.getByTestId("inspect-url-problem");
+    await expect(problem).toHaveText("");
+    await input.fill("www.example.test/a.css");
+    await input.press("Enter");
+    await expect(problem).toHaveText("Enter a full URL, starting with http:// or https://.");
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(input).toBeFocused();
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    // Typing again clears the line; an empty box does nothing.
+    await input.fill("");
+    await expect(problem).toHaveText("");
+    await input.press("Enter");
+    await expect(problem).toHaveText("");
+    await expect(page).toHaveURL(/\/pagespeed_admin\/(#\/overview)?$/);
+    // Nothing was looked up.
+    expect(mock.calls("cache")).toBe(0);
+  });
+
+  test("the input is there while the server is not answering, and with findings above it", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", healthy({ "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE }));
+    await expect(page.getByTestId("inspect-url")).toBeVisible();
+  });
+});

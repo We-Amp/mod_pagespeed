@@ -17,12 +17,15 @@ export function navKeyHint(path: string): string | null {
 /**
  * Whether a sidebar entry is the current page: its own route, or a page
  * without an entry of its own that lives under it (Graphs under Statistics,
- * a URL's detail under URLs).
+ * a URL's detail under URLs; under Overview on a per-vhost console, whose
+ * sidebar has no URLs entry).
  */
-export function isNavActive(entry: Route, currentPath: string, all: readonly Route[]): boolean {
+export function isNavActive(entry: Route, currentPath: string, all: readonly Route[], isGlobal = true): boolean {
   if (currentPath === entry.path) return true;
   const current = all.find((r) => r.path === currentPath);
-  return current !== undefined && current.parent === entry.path;
+  if (current === undefined) return false;
+  const parent = isGlobal ? current.parent : (current.parentPerVhost ?? current.parent);
+  return parent === entry.path;
 }
 
 /**

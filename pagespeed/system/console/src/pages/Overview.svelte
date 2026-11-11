@@ -30,6 +30,7 @@
   import LoadError from "$lib/LoadError.svelte";
   import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import FindingsPanel from "$lib/FindingsPanel.svelte";
+  import InspectUrlForm from "$lib/InspectUrlForm.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import ScopeChip from "$lib/ScopeChip.svelte";
@@ -414,6 +415,9 @@
         </section>
       </div>
     {/if}
+
+    <!-- "Why is this URL not optimized?" starts here, on every console. -->
+    <InspectUrlForm />
 
     <div class="findings-anchor" bind:this={findingsEl} tabindex="-1" data-testid="findings-anchor">
       <FindingsPanel

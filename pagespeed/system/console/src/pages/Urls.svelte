@@ -24,6 +24,7 @@
   import { ApiError, isUnavailable } from "$lib/api/client";
   import UnavailableCard from "$lib/UnavailableCard.svelte";
   import LoadError from "$lib/LoadError.svelte";
+  import InspectUrlForm from "$lib/InspectUrlForm.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import SortableHeader from "$lib/SortableHeader.svelte";
   import { formatCount } from "$lib/utils/format";
@@ -179,6 +180,9 @@
   {#if lensHost !== null}
     <p class="lens-scope" data-testid="urls-lens">{TERMS.hostFilter}: URLs of {lensHost} only.</p>
   {/if}
+
+  <!-- A URL goes straight to its page: the list below shows one page of the index at a time. -->
+  <InspectUrlForm />
 
   {#if poll.loading}
     <p class="loading">Loading the URL index...</p>
