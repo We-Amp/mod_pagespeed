@@ -240,7 +240,7 @@ test.describe("Console shell", () => {
   test("a first-load error is announced", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), stats_json: F.MODULE_FAILURE });
     await openConsole(page, "pagespeed_admin", "#/statistics");
-    await expect(page.getByRole("alert")).toContainText("statistics unavailable");
+    await expect(page.getByRole("alert")).toContainText("Could not load the statistics.");
   });
 
   test("a failed first read of the configuration is retried once the connection recovers", async ({ page }) => {

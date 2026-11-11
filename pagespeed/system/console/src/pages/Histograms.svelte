@@ -90,7 +90,7 @@
   {#if histograms.loading}
     <p class="loading">Loading histograms...</p>
   {:else if histograms.error && !histograms.data}
-    <LoadError message={histograms.error.message} />
+    <LoadError error={histograms.error} noun="the histograms" onretry={() => histograms.refresh()} />
   {:else if rows.length === 0}
     <p class="empty">No histogram data available.</p>
   {:else}

@@ -128,7 +128,7 @@
   {:else if isUnavailable(poll.error)}
     <UnavailableCard testid="rule-packs-unavailable" />
   {:else if poll.error && view === null}
-    <LoadError message={poll.error.message} />
+    <LoadError error={poll.error} noun="the rule packs" onretry={() => poll.refresh()} />
   {:else if view !== null}
     <RefreshNotice error={poll.error} />
 

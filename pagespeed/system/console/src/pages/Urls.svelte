@@ -221,7 +221,7 @@
         </p>
       </div>
     {:else}
-      <LoadError message={urlsError.message} />
+      <LoadError error={urlsError} noun="the URL list" onretry={() => poll.refresh()} />
     {/if}
   {:else if urlsData}
     {#if pageCount === 0}

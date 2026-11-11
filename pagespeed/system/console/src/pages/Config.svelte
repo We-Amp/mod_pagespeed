@@ -6,7 +6,8 @@
 <script lang="ts">
   import type { ConfigResponse } from "$lib/api/types";
   import LoadError from "$lib/LoadError.svelte";
-  import UnavailableCard from "$lib/UnavailableCard.svelte";
+  import EmptyState from "$lib/EmptyState.svelte";
+  import UnavailableCard, { DOCS_URL } from "$lib/UnavailableCard.svelte";
   import { isUnavailable } from "$lib/api/client";
   import PageHeader from "$lib/PageHeader.svelte";
   import Tabs from "$lib/Tabs.svelte";
@@ -16,7 +17,7 @@
   const { api } = useConsole();
 
   let data = $state<ConfigResponse | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<Error | string | null>(null);
   let loading = $state(true);
   // The server has turned this view off: said once, not retried.
   let off = $state(false);
@@ -38,7 +39,7 @@
       updatedAt = Date.now();
     } catch (err) {
       if (isUnavailable(err)) off = true;
-      else error = err instanceof Error ? err.message : String(err);
+      else error = err instanceof Error ? err : String(err);
     } finally {
       loading = false;
     }
@@ -76,10 +77,7 @@
   {:else if loading && !data}
     <p class="loading">Loading configuration...</p>
   {:else if error}
-    <div class="error-box">
-      <LoadError message={error} />
-      <button class="btn btn-secondary" onclick={fetchConfig}>Retry</button>
-    </div>
+    <LoadError {error} noun="the configuration" onretry={fetchConfig} />
   {:else if configText}
     {#if hasEffectiveConfig}
       <Tabs
@@ -103,7 +101,12 @@
       </div>
     </div>
   {:else}
-    <p class="empty">No configuration data available.</p>
+    <EmptyState
+      testid="config-empty"
+      title="The server sent no configuration text."
+      detail="The answer arrived, but it was empty. Refresh asks again; if it stays empty, the web server's error log may say why."
+      action={{ label: "About the admin console", href: DOCS_URL }}
+    />
   {/if}
 </div>
 
@@ -127,21 +130,7 @@
     color: var(--ps-text);
   }
 
-  .error-box {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-space-md);
-    padding: var(--ps-space-md);
-    background: var(--ps-bg-secondary);
-    border: 1px solid var(--ps-error);
-    border-radius: var(--ps-border-radius);
-  }
-
   .loading {
-    color: var(--ps-text-secondary);
-  }
-
-  .empty {
     color: var(--ps-text-secondary);
   }
 </style>

@@ -24,6 +24,7 @@
   import type { StatsResponse } from "$lib/api/types";
   import { healthSummary, num, type ActiveAlert, type AlertSnapshot } from "$lib/alerts";
   import EmptyState from "$lib/EmptyState.svelte";
+  import LoadError from "$lib/LoadError.svelte";
   import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import FindingsPanel from "$lib/FindingsPanel.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
@@ -249,9 +250,12 @@
             />
           {/if}
         {:else if moduleError}
-          <p class="error" role="alert" data-testid="module-error">
-            Could not read the module statistics: {moduleError.message}
-          </p>
+          <LoadError
+            error={moduleError}
+            noun="the module statistics"
+            onretry={() => poll.refresh()}
+            testid="module-error"
+          />
         {/if}
         <p class="more"><a href="#/statistics">All statistics</a></p>
       </section>
@@ -461,10 +465,6 @@
 
   .loading {
     color: var(--ps-text-secondary);
-  }
-
-  .error {
-    color: var(--ps-error);
   }
 
   /* Text stays in --ps-text (AA contrast); the colour is on the left border. */
