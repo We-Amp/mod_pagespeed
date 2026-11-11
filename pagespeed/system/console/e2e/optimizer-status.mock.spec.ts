@@ -178,8 +178,9 @@ test("health answers and statistics do not: each section says what it has", asyn
   await openConsole(page, "pagespeed_admin", "#/optimizer");
   await ready(page);
   await expect(page.locator(".status-badge")).toHaveText("ok");
-  await expect(page.getByTestId("daemon-unreachable")).toHaveCount(1);
-  await expect(page.getByTestId("daemon-unreachable")).toContainText("this optimizer version does not provide this panel");
+  await expect(page.getByTestId("statistics-unavailable")).toHaveCount(1);
+  await expect(page.getByTestId("statistics-unavailable")).toContainText("this optimizer version does not provide this panel");
+  await expect(page.getByTestId("daemon-unreachable")).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText(/HTTP \d{3}|endpoint_unsupported/);
   await expect(page.getByTestId("cache-unavailable")).toBeVisible();
 });
@@ -193,7 +194,7 @@ test("health answers and statistics get the optimizer's own 503: a refresh witho
   await openConsole(page, "pagespeed_admin", "#/optimizer");
   await ready(page);
   await expect(page.locator(".status-badge")).toHaveText("ok");
-  const state = page.getByTestId("daemon-unreachable");
+  const state = page.getByTestId("statistics-unavailable");
   await expect(state).toContainText("Statistics are not available: the optimizer did not answer this refresh.");
   await expect(state).not.toContainText("unreachable");
 });

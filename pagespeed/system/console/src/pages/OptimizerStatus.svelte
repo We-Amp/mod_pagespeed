@@ -305,7 +305,7 @@
     {:else if view.statsError && !view.allUnavailable}
       {#if statsUnavailable}
         <EmptyState
-          testid="daemon-unreachable"
+          testid="statistics-unavailable"
           title="Statistics are not available: {daemonUnavailableReason(view.statsError)}."
           detail="The load and cache sections fill in once the optimizer answers this read."
         />
