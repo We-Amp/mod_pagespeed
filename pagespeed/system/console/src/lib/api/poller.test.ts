@@ -284,6 +284,64 @@ describe("Poller", () => {
     p.dispose();
   });
 
+  it("setIntervalMs() schedules the waiting refresh anew, one new interval from now", async () => {
+    const calls: number[] = [];
+    const p = make(async () => calls.push(Date.now()));
+    p.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    p.setIntervalMs(3000);
+    expect(p.snapshot.nextAt).toBe(5000);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(calls).toEqual([0, 5000, 8000, 11000]);
+    p.setIntervalMs(T);
+    await vi.advanceTimersByTimeAsync(2 * T);
+    expect(calls).toEqual([0, 5000, 8000, 11000, 16000, 21000]);
+    p.dispose();
+  });
+
+  it("setIntervalMs() leaves a request in flight alone and applies after it", async () => {
+    const { fetcher, resolve } = pending<number>();
+    const p = make(fetcher);
+    p.start();
+    p.setIntervalMs(3000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    resolve(0, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.snapshot.nextAt).toBe(3000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    p.dispose();
+  });
+
+  it("setIntervalMs() keeps the back-off while failing, and does not start a stopped poller", async () => {
+    const calls: number[] = [];
+    const failing = make(async () => {
+      calls.push(Date.now());
+      throw new Error("down");
+    });
+    failing.start();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toEqual([0, 5000]);
+    failing.setIntervalMs(3000);
+    // Two failures: twice the new interval, from now.
+    expect(failing.snapshot.nextAt).toBe(11_000);
+    failing.dispose();
+
+    const fetcher = vi.fn(async () => 1);
+    const stopped = make(fetcher);
+    stopped.start();
+    await vi.advanceTimersByTimeAsync(0);
+    stopped.stop();
+    stopped.setIntervalMs(3000);
+    await vi.advanceTimersByTimeAsync(3 * T);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(stopped.snapshot.nextAt).toBeNull();
+    stopped.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    stopped.dispose();
+  });
+
   it("dispose() stops everything, unsubscribes and ignores a late answer", async () => {
     const vis = fakeVisibility(false);
     const { fetcher, resolve } = pending<number>();
