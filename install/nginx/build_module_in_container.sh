@@ -401,13 +401,17 @@ TOOLCHAIN_PPA_KEY_FPR="${TOOLCHAIN_PPA_KEY_FPR:-C8EC952E2A0E1FBDC5090F6A2C277A0A
 # the key with FINGERPRINT, as a binary keyring, to OUT; fail when the file
 # does not hold that key.
 pinned_keyring() {
-  local url="$1" fpr="$2" out="$3" tmp
+  local url="$1" fpr="$2" out="$3" tmp imp_err
   tmp="$(mktemp -d)"
-  wget -qO "${tmp}/key.asc" "${url}"
-  GNUPGHOME="${tmp}" gpg --batch --quiet --import "${tmp}/key.asc" 2>/dev/null || true
+  # Bounded retries: a transient fetch failure must not look like a wrong key.
+  # The fingerprint check below still gates the key.
+  wget -qO "${tmp}/key.asc" --tries=5 --waitretry=5 --retry-connrefused \
+    --retry-on-http-error=429,500,502,503,504 "${url}" || true
+  imp_err="$(GNUPGHOME="${tmp}" gpg --batch --quiet --import "${tmp}/key.asc" 2>&1 >/dev/null || true)"
   if ! GNUPGHOME="${tmp}" gpg --batch --with-colons --list-keys "${fpr}" 2>/dev/null \
        | awk -F: '$1=="fpr" { print $10 }' | grep -qx "${fpr}"; then
     echo "ERROR: ${url} does not hold the pinned key ${fpr}; refusing the repository" >&2
+    echo "  fetched $(wc -c < "${tmp}/key.asc" 2>/dev/null || echo 0) bytes; gpg import said: ${imp_err:-<nothing>}" >&2
     rm -rf "${tmp}"
     return 1
   fi
