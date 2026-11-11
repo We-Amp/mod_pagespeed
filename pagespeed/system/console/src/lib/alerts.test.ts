@@ -802,7 +802,7 @@ describe("volume-not-opened from the counters", () => {
     );
     // Nothing in the log names the packages: the two paths are what to check.
     expect(out[0].fix).toBe(
-      "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) name the same directory.",
+      "Point the web server's DaemonVolumePath at the optimizer's cache directory (--cache-dir) followed by /cache.",
     );
     // The path fix comes with the path directive to paste.
     expect(out[0].snippets?.nginx).toBe("pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;");
@@ -928,8 +928,10 @@ describe("ranking and acknowledgement", () => {
 describe("a fix that names a setting comes with the setting to paste", () => {
   // A directive (two or more capitalised words run together) or a command-line flag.
   const NAMES_SETTING = /\b(?:[A-Z][a-z]+){2,}\b|--[a-z][a-z-]+/;
-  // "Nothing to do": the setting is named as the reason, not as something to change.
-  const NOTHING_TO_PASTE = ["admin-public"];
+  // admin-public: "Nothing to do", the setting is named as the reason, not as something to change.
+  // daemon-unreachable: the directive to check; its packaged value is the built-in default, so a
+  // pasted line would change nothing.
+  const NOTHING_TO_PASTE = ["admin-public", "daemon-unreachable"];
   const byId = (id: string) => ALERT_RULES.find((r) => r.id === id)!;
 
   it("every rule whose fix names a setting has snippets", () => {
@@ -944,11 +946,7 @@ describe("a fix that names a setting comes with the setting to paste", () => {
       "admin-public",
     ]);
     // The access rule's fix is a block per server, so its sentence names none of them.
-    expect(ALERT_RULES.filter((r) => r.snippets).map((r) => r.id)).toEqual([
-      "volume-not-opened",
-      "daemon-unreachable",
-      "admin-exposed",
-    ]);
+    expect(ALERT_RULES.filter((r) => r.snippets).map((r) => r.id)).toEqual(["volume-not-opened", "admin-exposed"]);
   });
 
   it("each snippet names the setting in its server's own syntax, with packaged defaults only", () => {
@@ -956,10 +954,7 @@ describe("a fix that names a setting comes with the setting to paste", () => {
       apache: "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache",
       nginx: "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;",
     });
-    expect(byId("daemon-unreachable").snippets).toEqual({
-      apache: "ModPagespeedDaemonApiSocketPath /run/pagespeed-optimizer/api.sock",
-      nginx: "pagespeed DaemonApiSocketPath /run/pagespeed-optimizer/api.sock;",
-    });
+    expect(byId("daemon-unreachable").snippets).toBeUndefined();
     expect(byId("admin-exposed").snippets).toEqual({
       apache:
         "<Location /pagespeed_admin>\n    Require local\n</Location>\n" +
@@ -970,7 +965,6 @@ describe("a fix that names a setting comes with the setting to paste", () => {
         "location = /pagespeed_global_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
         "location ^~ /pagespeed_global_admin/ { allow 127.0.0.1; allow ::1; deny all; }",
       iis: "pagespeed InfoUrlsLocalOnly on",
-      envoy: 'admin_auth:\n  enabled: true\n  allowed_ips:\n    - "127.0.0.1/32"',
     });
   });
 
@@ -985,10 +979,11 @@ describe("a fix that names a setting comes with the setting to paste", () => {
 
   it("a finding carries its rule's snippets", () => {
     const tracker = new AlertTracker();
-    const out = tracker.evaluate(snap({ daemon: "unreachable", health: null, daemonStats: null }), T0);
-    const finding = out.find((a) => a.id === "daemon-unreachable");
-    expect(finding?.snippets).toBe(byId("daemon-unreachable").snippets);
-    expect(out.find((a) => a.id !== "daemon-unreachable" && a.snippets)).toBeUndefined();
+    const out = tracker.evaluate(withLog([group(ACL)]), T1);
+    expect(out.map((a) => a.id)).toEqual(["admin-exposed"]);
+    expect(out[0].snippets).toBe(byId("admin-exposed").snippets);
+    const none = new AlertTracker().evaluate(snap({ daemon: "unreachable", health: null, daemonStats: null }), T0);
+    expect(none.find((a) => a.snippets)).toBeUndefined();
   });
 
   it("the snippets belong to the rule's own fix: a sample whose fix comes from fixFor shows none", () => {

@@ -15,22 +15,28 @@
     chooseDialect,
     detectedDialect,
     onDialectChoice,
-    preferredDialect,
+    pickDialect,
     type Dialect,
   } from "./utils/dialect";
 
   let { id, snippets }: { id: string; snippets: Partial<Record<Dialect, string>> } = $props();
 
   let tabs = $derived(DIALECTS.filter((d) => snippets[d.id] !== undefined));
-  let preferred = $state(preferredDialect());
-  let active = $derived(tabs.find((d) => d.id === preferred) ?? tabs[0]);
+  // Bumped on every choice: the choice lives in a plain module, not in runes.
+  let choices = $state(0);
+  let active = $derived.by(() => {
+    void choices;
+    const id = pickDialect(tabs.map((d) => d.id));
+    return tabs.find((d) => d.id === id);
+  });
+  // Read once, at mount: findings render after the first answers, which carry the header.
   let detected = $derived(tabs.find((d) => d.id === detectedDialect()));
   let status = $state("");
   let code: HTMLElement | undefined = $state();
 
   onDestroy(
     onDialectChoice(() => {
-      preferred = preferredDialect();
+      choices++;
       status = "";
     }),
   );
@@ -40,7 +46,7 @@
     status = "";
     await tick();
     try {
-      await navigator.clipboard.writeText(snippets[active.id] ?? "");
+      await navigator.clipboard.writeText((active && snippets[active.id]) ?? "");
       status = "Copied";
     } catch {
       if (code === undefined) return;
@@ -59,7 +65,8 @@
 </script>
 
 {#if active}
-  <div class="snippet" data-testid="snippet">
+  <!-- Off inside the findings' polite region: a tab change is not read out; "Copied" has its own status. -->
+  <div class="snippet" aria-live="off" data-testid="snippet">
     <Tabs
       {tabs}
       active={active.id}
@@ -79,7 +86,7 @@
         >Copy</button>
         <span role="status" data-testid="snippet-status">{status}</span>
         {#if detected}
-          <span class="muted" data-testid="snippet-detected">Detected: {detected.label}</span>
+          <span class="muted" data-testid="snippet-detected">From the Server header: {detected.label}</span>
         {/if}
       </p>
     </div>

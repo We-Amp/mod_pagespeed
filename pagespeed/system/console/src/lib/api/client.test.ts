@@ -27,9 +27,13 @@ describe("AdminApiClient", () => {
     fetchMock.mockResolvedValueOnce(json(200, { variables: {} }));
     await new AdminApiClient("/a").getStats();
     expect(detectedDialect()).toBeNull();
-    fetchMock.mockResolvedValueOnce(
-      new Response("{}", { status: 502, headers: { "Content-Type": "application/json", Server: "nginx/1.26.2" } }),
-    );
+    const answer = (status: number, server: string) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json", Server: server } });
+    // A gateway error is usually a proxy's answer: its header is not the web server's.
+    fetchMock.mockResolvedValueOnce(answer(502, "Apache"));
+    await expect(new AdminApiClient("/b0").getStats()).rejects.toBeInstanceOf(ApiError);
+    expect(detectedDialect()).toBeNull();
+    fetchMock.mockResolvedValueOnce(answer(500, "nginx/1.26.2"));
     await expect(new AdminApiClient("/b").getStats()).rejects.toBeInstanceOf(ApiError);
     expect(detectedDialect()).toBe("nginx");
     fetchMock.mockResolvedValueOnce(json(200, { variables: {} }));

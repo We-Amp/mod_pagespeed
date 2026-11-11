@@ -472,8 +472,9 @@ export const ALERT_RULES: readonly AlertRule[] = [
     // The module's own line, as logged, behind the written sentence.
     details: (cur) => (loggedGroups(cur, isGenerationRefusal) ?? []).slice(0, 1).map((g) => capText(g.template, 400)),
     // The path fix fits the counters; a logged refusal names the packages, and so does its fix.
-    fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) name the same directory.",
-    // The packaged default: the optimizer's cache directory followed by /cache.
+    fix: "Point the web server's DaemonVolumePath at the optimizer's cache directory (--cache-dir) followed by /cache.",
+    // The packaged default. Apache and nginx only: this cause is found while the
+    // optimizer answers through the module, which the IIS module does not offer.
     snippets: {
       apache: "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache",
       nginx: "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;",
@@ -491,12 +492,8 @@ export const ALERT_RULES: readonly AlertRule[] = [
     link: "#/optimizer",
     check: (cur) => (cur.daemon === "transient" ? undefined : cur.daemon === "unreachable"),
     message: () => OPTIMIZER_NOT_ANSWERING,
+    // No snippet: the packaged socket is the directive's built-in default, so pasting it changes nothing.
     fix: OPTIMIZER_NOT_ANSWERING_FIX,
-    // The optimizer's packaged management socket.
-    snippets: {
-      apache: "ModPagespeedDaemonApiSocketPath /run/pagespeed-optimizer/api.sock",
-      nginx: "pagespeed DaemonApiSocketPath /run/pagespeed-optimizer/api.sock;",
-    },
     doc: DOC_DIAGNOSE,
   },
   {
@@ -548,7 +545,6 @@ export const ALERT_RULES: readonly AlertRule[] = [
         (p) => `location = ${p} ${NGINX_LOCAL}\nlocation ^~ ${p}/ ${NGINX_LOCAL}`,
       ).join("\n"),
       iis: "pagespeed InfoUrlsLocalOnly on",
-      envoy: 'admin_auth:\n  enabled: true\n  allowed_ips:\n    - "127.0.0.1/32"',
     },
   },
   {

@@ -133,7 +133,8 @@ export class AdminApiClient {
       throw new NetworkError();
     }
     // Which web server answered, as a hint for the configuration snippets.
-    noteServer(response.headers.get("Server"));
+    // A gateway error is usually written by a proxy in front, not by it.
+    if (response.status < 502 || response.status > 504) noteServer(response.headers.get("Server"));
     let text: string;
     try {
       // Always try JSON first — the backend may serve JSON with a wrong
