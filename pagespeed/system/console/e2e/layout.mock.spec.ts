@@ -138,9 +138,11 @@ test.describe("the top bar's spacing", () => {
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true);
       if (hash.includes("lens=")) {
         await expect(page.getByRole("combobox", { name: "Host" }).first()).toHaveAccessibleDescription("(not applied on this page)");
-        // Shown beside the control where the bar has room for it.
-        expect((await box(page.getByTestId("host-lens-note"))).width > 1).toBe(width > 1024);
+        // Shown beside the control where the bar has room for it...
+        expect((await box(page.getByTestId("host-lens-note"))).width > 1).toBe(width > 900);
       }
+      // ...before the version line, which gives way first.
+      expect(await page.locator(".topbar-subtitle").isVisible(), "the version line").toBe(width > (hash.includes("lens=") ? 1024 : 900));
       const parts = await page
         .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
         .evaluateAll((els) =>
@@ -1047,6 +1049,42 @@ test.describe("tables fit their frame on a desktop", () => {
         await pageReady(page);
         await widenText(page);
         expect(await sidewaysScrollers(page), `${hash}: wrappers that scroll sideways`).toEqual([]);
+      }
+    });
+  }
+});
+
+// The Overview's two cards share a row only where each is wide enough for
+// its by-type table: across the desktop widths, also in a wider system font,
+// no table runs past its card and the page never scrolls sideways.
+test.describe("the Overview's by-type tables", () => {
+  const consoles = [
+    { admin: "pagespeed_global_admin", replies: rigWholeServerReplies },
+    { admin: "pagespeed_admin", replies: rigPerHostReplies },
+  ] as const;
+  for (const { admin, replies } of consoles) {
+    test(`${admin}: stay inside their cards from 769 to 1440 px`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await mockAdmin(page, admin, replies());
+      await openConsole(page, admin, "#/overview");
+      await pageReady(page);
+      await widenText(page);
+      await expect(page.getByTestId("module-by-type")).toBeVisible();
+      if (admin === "pagespeed_global_admin") await expect(page.getByTestId("optimizer-by-type")).toBeVisible();
+      for (let width = 769; width <= 1440; width += 8) {
+        await page.setViewportSize({ width, height: 800 });
+        const overruns = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>("table.card-table")].flatMap((table) => {
+            const card = table.closest("section")!;
+            const r = card.getBoundingClientRect();
+            const s = getComputedStyle(card);
+            const inner = r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight);
+            const over = table.getBoundingClientRect().right - inner;
+            return over > 0.5 ? [`${table.dataset.testid} +${over.toFixed(1)} px`] : [];
+          }),
+        );
+        expect(overruns, `at ${width} px`).toEqual([]);
+        expect(await noHorizontalScroll(page), `at ${width} px`).toBe(true);
       }
     });
   }

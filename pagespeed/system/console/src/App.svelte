@@ -775,7 +775,7 @@
      the host filter: the scope chip keeps its width, and the note stays the
      control's description. The breakpoints leave room for a system font
      wider than the usual ones. */
-  @media (max-width: 1024px) {
+  @media (max-width: 900px) {
     .topbar-lens :global(.lens-off) {
       position: absolute;
       width: 1px;
@@ -786,8 +786,14 @@
     }
   }
 
-  /* Narrower still, the host filter needs the version's room: the version
-     stays on the About page, as on a phone. */
+  /* Up to 1024 px the note takes the version's room, and up to 900 px the
+     host filter does: the version stays on the About page, as on a phone. */
+  @media (max-width: 1024px) {
+    .topbar:has(:global(.lens-off)) .topbar-subtitle {
+      display: none;
+    }
+  }
+
   @media (max-width: 900px) {
     .topbar:has(.topbar-lens) .topbar-subtitle {
       display: none;
