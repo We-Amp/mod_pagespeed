@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { contrastRatio, themeTokens } from "./utils/contrast";
+import { colorDistance, contrastRatio, themeTokens, type Vision } from "./utils/contrast";
 
 const LIB = fileURLToPath(new URL(".", import.meta.url));
 const SRC = join(LIB, "..");
@@ -94,6 +94,31 @@ const BADGE_TINTS: Record<(typeof BADGE_CLASSES)[number], string> = {
   "class-noisy": "--ps-error",
 };
 
+// --ps-muted-opacity per scheme: the first declaration is the light value,
+// the second the dark override.
+const MUTED_OPACITY = (() => {
+  const values = [...css.matchAll(/--ps-muted-opacity:\s*([\d.]+)\s*;/g)].map((m) => Number(m[1]));
+  return { light: values[0], dark: values[1] ?? values[0] };
+})();
+
+// Dark mode's planes, as pairs that sit next to each other on screen, with
+// the least contrast between them that still reads as two planes. A frame
+// is a line, not an area, so it needs more.
+const DARK_PLANES: ReadonlyArray<readonly [name: string, a: string, b: string, floor: number]> = [
+  ["page and sidebar", "--ps-bg", "--ps-bg-secondary", 1.1],
+  ["page and card", "--ps-bg", "--ps-surface", 1.1],
+  ["card and zebra row", "--ps-surface", "--ps-bg-secondary", 1.1],
+  ["card and header band", "--ps-surface", "--ps-bg-tertiary", 1.1],
+  ["card and row divider", "--ps-surface", "--ps-border-light", 1.1],
+  ["card and hovered row", "--ps-surface", "--ps-surface-hover", 1.1],
+  ["card and frame", "--ps-surface", "--ps-border", 1.4],
+];
+
+const CHART_SERIES = ["--ps-chart-1", "--ps-chart-2", "--ps-chart-3", "--ps-chart-4"];
+const VISIONS: readonly Vision[] = ["normal", "deuteranope", "protanope"];
+// Two thin lines closer than this read as one colour.
+const SERIES_APART = 20;
+
 function svelteFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -109,6 +134,22 @@ describe("contrastRatio", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
     expect(contrastRatio("#a8a29e", "#ffffff")).toBeCloseTo(2.52, 2);
     expect(contrastRatio("#ffffff", "#a8a29e")).toBeCloseTo(2.52, 2);
+  });
+});
+
+describe("colorDistance", () => {
+  it("is the CIE76 distance: 0 for one colour, 100 from black to white", () => {
+    expect(colorDistance("#1d4ed8", "#1d4ed8")).toBe(0);
+    for (const vision of ["normal", "deuteranope", "protanope"] as const) {
+      expect(colorDistance("#000000", "#ffffff", vision)).toBeCloseTo(100, 0);
+    }
+  });
+  it("brings red and green together for a red-green colour-blind reader", () => {
+    const [red, green] = ["#d93025", "#1e8e3e"];
+    const normal = colorDistance(red, green);
+    expect(normal).toBeGreaterThan(80);
+    expect(colorDistance(red, green, "deuteranope")).toBeLessThan(normal / 2);
+    expect(colorDistance(red, green, "protanope")).toBeLessThan(normal / 2);
   });
 });
 
@@ -150,6 +191,23 @@ describe("theme tokens", () => {
         expect(contrastRatio(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(AA);
       }
     });
+    it(`${scheme}: text passes AA on a hovered row or control`, () => {
+      for (const fg of ["--ps-text", "--ps-text-secondary"]) {
+        expect(contrastRatio(t[fg], t["--ps-surface-hover"]), fg).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: the current navigation item's text passes AA on its tint`, () => {
+      expect(contrastRatio(t["--ps-primary"], t["--ps-primary-light"])).toBeGreaterThanOrEqual(AA);
+    });
+    it(`${scheme}: every text token passes AA on the muted card, dimmed as it is drawn`, () => {
+      // The card is --ps-bg-secondary at --ps-muted-opacity over the page,
+      // text and background alike.
+      const percent = MUTED_OPACITY[scheme] * 100;
+      const bg = mix(t["--ps-bg-secondary"], percent, t["--ps-bg"]);
+      for (const fg of TEXT) {
+        expect(contrastRatio(mix(t[fg], percent, t["--ps-bg"]), bg), fg).toBeGreaterThanOrEqual(AA);
+      }
+    });
     it(`${scheme}: badge text passes AA on its colour-mix tint`, () => {
       for (const cls of BADGE_CLASSES) {
         const tint = BADGE_TINTS[cls];
@@ -169,6 +227,99 @@ describe("theme tokens", () => {
     expect(
       contrastRatio(tokens.dark["--ps-topbar-accent"], tokens.dark["--ps-topbar-bg"]),
     ).toBeGreaterThanOrEqual(AA);
+  });
+});
+
+describe("dark planes", () => {
+  const t = tokens.dark;
+  it("dark planes stay apart", () => {
+    for (const [name, a, b, floor] of DARK_PLANES) {
+      expect(contrastRatio(t[a], t[b]), name).toBeGreaterThanOrEqual(floor);
+    }
+  });
+  it("the planes get lighter in one order: page, sidebar, card, band, hover, frame", () => {
+    const order = ["--ps-bg", "--ps-bg-secondary", "--ps-surface", "--ps-bg-tertiary", "--ps-surface-hover", "--ps-border"];
+    const light = order.map((token) => contrastRatio(t[token], "#000000"));
+    expect([...light].sort((x, y) => x - y)).toEqual(light);
+  });
+  it("secondary text is quieter than primary text, on every plane", () => {
+    for (const bg of ["--ps-bg", "--ps-bg-secondary", "--ps-surface", "--ps-bg-tertiary", "--ps-surface-hover"]) {
+      const [primary, secondary] = ["--ps-text", "--ps-text-secondary"].map((fg) => contrastRatio(t[fg], t[bg]));
+      expect(primary / secondary, bg).toBeGreaterThanOrEqual(1.5);
+    }
+  });
+});
+
+// The chart palette. Canvas colours are invisible to the browser checks,
+// so every property a series colour needs is pinned here.
+describe("chart palette", () => {
+  for (const scheme of ["light", "dark"] as const) {
+    const t = tokens[scheme];
+    it(`${scheme}: every series and the grid is a colour the test can read`, () => {
+      for (const token of [...CHART_SERIES, "--ps-chart-grid"]) {
+        expect(t[token], token).toMatch(/^#[0-9a-f]{6}$/i);
+      }
+    });
+    it(`${scheme}: every series passes 3:1 on the card and the muted card`, () => {
+      for (const series of CHART_SERIES) {
+        for (const bg of ["--ps-surface", "--ps-bg-secondary"]) {
+          expect(contrastRatio(t[series], t[bg]), `${series} on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+    it(`${scheme}: every pair of series stays apart, also for red-green colour-blind readers`, () => {
+      for (const vision of VISIONS) {
+        for (const [i, a] of CHART_SERIES.entries()) {
+          for (const b of CHART_SERIES.slice(i + 1)) {
+            expect(colorDistance(t[a], t[b], vision), `${a} and ${b}, ${vision}`).toBeGreaterThanOrEqual(SERIES_APART);
+          }
+        }
+      }
+    });
+    it(`${scheme}: no series can be taken for a status colour`, () => {
+      for (const series of CHART_SERIES) {
+        for (const status of ["--ps-success", "--ps-warning", "--ps-error"]) {
+          expect(colorDistance(t[series], t[status]), `${series} and ${status}`).toBeGreaterThanOrEqual(SERIES_APART);
+        }
+      }
+    });
+    it(`${scheme}: the grid is fainter than every series`, () => {
+      const grid = contrastRatio(t["--ps-chart-grid"], t["--ps-surface"]);
+      for (const series of CHART_SERIES) {
+        expect(grid, series).toBeLessThan(contrastRatio(t[series], t["--ps-surface"]));
+      }
+    });
+  }
+});
+
+describe("type roles", () => {
+  const role = (name: string) => new RegExp(`--ps-type-${name}:\\s*([^;]+);`).exec(css)?.[1];
+  const rem = (name: string) => {
+    const value = role(name);
+    expect(value, name).toMatch(/^[\d.]+rem$/);
+    return parseFloat(value as string);
+  };
+  it("declares a size for every role, in rem", () => {
+    for (const name of ["title", "section", "card-title", "body", "label", "metric", "hero-metric"]) {
+      expect(rem(`${name}-size`), name).toBeGreaterThan(0);
+    }
+  });
+  it("orders the roles: label, body, card title, section, metric", () => {
+    const sizes = ["label", "body", "card-title", "section", "metric"].map((name) => rem(`${name}-size`));
+    expect([...sizes].sort((a, b) => a - b)).toEqual(sizes);
+    expect(rem("hero-metric-size")).toBeGreaterThan(rem("metric-size"));
+    expect(rem("title-size")).toBeGreaterThan(rem("section-size"));
+  });
+  it("body text is 14 px and labels are 12 px", () => {
+    expect(rem("body-size")).toBe(0.875);
+    expect(rem("label-size")).toBe(0.75);
+  });
+  it("the metric classes take their size from the roles", () => {
+    expect(css).toMatch(/\.metric-value\s*\{[^}]*font-size:\s*var\(--ps-type-metric-size\)/);
+    expect(css).toMatch(/\.metric-label\s*\{[^}]*font-size:\s*var\(--ps-type-label-size\)/);
+  });
+  it("the text face is the system's own: no web font is named", () => {
+    expect(css).toMatch(/--ps-font-family:\s*system-ui,/);
   });
 });
 
