@@ -435,6 +435,20 @@ test("the legend of a bar runs along one line: each share's name next to its cou
   }
 });
 
+test("on a laptop window the legend of a bar takes two lines at most", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  for (const key of ["css", "image"]) {
+    const tops = await page
+      .getByTestId(`savings-split-${key}`)
+      .locator(".split-figures > div")
+      .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+    expect(tops).toHaveLength(3);
+    expect(new Set(tops).size, `${key}: legend lines`).toBeLessThanOrEqual(2);
+  }
+});
+
 test("on a phone the legend wraps inside its card", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
@@ -534,6 +548,33 @@ test("a two-minute-old optimizer shows warming up, not a percentage", async ({ p
   await expect(page.getByTestId("savings-module-total")).toContainText("%");
 });
 
+test("a web server restarted minutes ago: the module's shares are a sentence, not a dash", async ({ page }) => {
+  // The realistic rewrite counters next to the golden's own values, with a
+  // module start three minutes old; the optimizer has been up for a day.
+  const golden = JSON.parse(F.STATS_JSON_GLOBAL_BYTES);
+  const variables = { ...(STATS_GLOBAL.body as { variables: Record<string, number> }).variables, ...golden.variables };
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...goldenReplies(),
+    stats_json: () => F.ok({ ...golden, variables: { ...variables, process_start_ms: Date.now() - 3 * 60_000 } }),
+    "v1/daemon/stats": F.optStatsStarted(26 * 3_600_000),
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("since-module").getByTestId("warming-pill")).toContainText("warming up");
+  // The total keeps its figure and its base; the share is said in words.
+  const total = page.getByTestId("savings-module-total");
+  await expect(total.locator(".detail")).toHaveText(/^of [\d.,]+ [KMG]?B; too early for a percentage$/);
+  await expect(total).not.toContainText("%");
+  await expect(total).not.toContainText("—");
+  // The hit rate is counted by the module, so it waits too, and keeps its counts.
+  const rate = page.getByTestId("savings-hit-rate");
+  await expect(rate).toContainText("Too early for a percentage");
+  await expect(rate.locator(".detail")).toHaveText(/^[\d,]+ of [\d,]+ cacheable resource requests/);
+  await expect(rate).not.toContainText("%");
+  await expect(rate).not.toContainText("—");
+  // The optimizer's own base is a day old: its percentage stays.
+  await expect(page.getByTestId("savings-optimizer-total")).toContainText("%");
+});
+
 test("the per-host console mutes the server-wide optimizer card and links on", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", {
     ...goldenReplies(),
@@ -628,13 +669,27 @@ test.describe("serve savings per host", () => {
       ["savings-module-card", "savings-by-host-card", "savings-optimizer-card"].map(rect),
     );
     expect(Math.abs(hosts.left - module.left)).toBeLessThanOrEqual(1);
-    expect(Math.abs(hosts.width - module.width)).toBeLessThanOrEqual(1);
     expect(hosts.top).toBeGreaterThan(module.bottom);
     expect(optimizer.left).toBeGreaterThan(hosts.right);
-    expect(Math.abs(optimizer.top - module.top)).toBeLessThanOrEqual(1);
-    // The same order for a keyboard and a screen reader.
-    const order = await page.locator("main .cards .card").evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
-    expect(order).toEqual(["savings-module-card", "savings-by-host-card", "savings-optimizer-card"]);
+    // In the document the totals come first, their breakdown per host last.
+    const order = await page.locator("main .cards > .card").evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(order).toEqual(["savings-module-card", "savings-optimizer-card", "savings-by-host-card"]);
+  });
+
+  test("phone: the per-host card follows the optimizer card whose total it breaks down", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/stats": F.OPT_STATS_PAGE });
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    const rect = (id: string) => page.getByTestId(id).evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect);
+    const [module, optimizer, hosts] = await Promise.all(
+      ["savings-module-card", "savings-optimizer-card", "savings-by-host-card"].map(rect),
+    );
+    expect(optimizer.top).toBeGreaterThan(module.bottom);
+    expect(hosts.top).toBeGreaterThan(optimizer.bottom);
+    // One gap between the cards, no empty row.
+    expect(optimizer.top - module.bottom).toBeLessThanOrEqual(24);
+    expect(hosts.top - optimizer.bottom).toBeLessThanOrEqual(24);
+    for (const card of [optimizer, hosts]) expect(Math.abs(card.width - module.width)).toBeLessThanOrEqual(1);
   });
 
   test("no per-host card when the optimizer does not answer", async ({ page }) => {

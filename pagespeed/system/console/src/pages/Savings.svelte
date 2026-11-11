@@ -235,9 +235,9 @@
   {#if poll.loading}
     <p class="loading">Loading savings...</p>
   {:else}
-    <div class="cards">
-      <!-- The left column: the module's card, and the optimizer's per-host table when there is one. -->
-      <div class="stack">
+    <!-- Two columns where the per-host table fills the space under the
+         module card; without it the two cards stack, each as wide as the page. -->
+    <div class="cards" class:paired={hostTable !== null}>
       <section class="card reads-across-container" data-testid="savings-module-card" aria-labelledby="savings-module-heading">
         <h2 id="savings-module-heading">Module rewrites <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if rows && total && summary}
@@ -298,49 +298,9 @@
         {/if}
         <p class="more"><a href="#/statistics">All statistics</a></p>
       </section>
-      {#if hostTable}
-        <section class="card reads-across-container" data-testid="savings-by-host-card" aria-labelledby="savings-by-host-heading">
-          <h2 id="savings-by-host-heading">Optimizer cache serves by host</h2>
-          <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
-            <table class="breakdown reads-across" data-testid="savings-by-host">
-              <thead>
-                <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
-              </thead>
-              <tbody>
-                {#each hostTable.hosts as row (row.host)}
-                  <tr>
-                    <td class="host-cell">{row.host}</td>
-                    <td class="num">{formatCount(row.hits)}</td>
-                    <td class="num">{formatSignedBytes(row.saved)}</td>
-                    <td class="num">{formatBytes(row.original)}</td>
-                    <td class="num">{formatPercent(row.percent, row.saved)}</td>
-                  </tr>
-                {/each}
-                {#if hostTable.other}
-                  <tr data-testid="savings-by-host-other">
-                    <td class="host-cell">Other hosts and serves without a host</td>
-                    <td class="num">{formatCount(hostTable.other.hits)}</td>
-                    <td class="num">{formatSignedBytes(hostTable.other.saved)}</td>
-                    <td class="num">{formatBytes(hostTable.other.original)}</td>
-                    <td class="num">{formatPercent(hostTable.other.percent, hostTable.other.saved)}</td>
-                  </tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-          <p class="note">{SAVINGS_QUALIFIER}</p>
-          <p class="since" data-testid="since-by-host" title={optimizerSince?.iso ?? undefined}>
-            {optimizerSince?.text ?? "since restart"} (optimizer restart)
-            {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
-          </p>
-        </section>
-      {/if}
-      </div>
 
       <section
-        class="card reads-across-container"
+        class="card optimizer-card reads-across-container"
         class:card--muted={!scope.isGlobal && focusRow === null}
         data-testid="savings-optimizer-card"
         aria-labelledby="savings-optimizer-heading"
@@ -550,6 +510,48 @@
         {/if}
         <p class="more"><a href="#/optimizer?section=cache">Optimizer cache</a></p>
       </section>
+
+      <!-- Last in the document, so the totals come before their breakdown;
+           on a wide window it lies under the module card. -->
+      {#if hostTable}
+        <section class="card reads-across-container" data-testid="savings-by-host-card" aria-labelledby="savings-by-host-heading">
+          <h2 id="savings-by-host-heading">Optimizer cache serves by host</h2>
+          <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
+            <table class="breakdown reads-across" data-testid="savings-by-host">
+              <thead>
+                <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
+              </thead>
+              <tbody>
+                {#each hostTable.hosts as row (row.host)}
+                  <tr>
+                    <td class="host-cell">{row.host}</td>
+                    <td class="num">{formatCount(row.hits)}</td>
+                    <td class="num">{formatSignedBytes(row.saved)}</td>
+                    <td class="num">{formatBytes(row.original)}</td>
+                    <td class="num">{formatPercent(row.percent, row.saved)}</td>
+                  </tr>
+                {/each}
+                {#if hostTable.other}
+                  <tr data-testid="savings-by-host-other">
+                    <td class="host-cell">Other hosts and serves without a host</td>
+                    <td class="num">{formatCount(hostTable.other.hits)}</td>
+                    <td class="num">{formatSignedBytes(hostTable.other.saved)}</td>
+                    <td class="num">{formatBytes(hostTable.other.original)}</td>
+                    <td class="num">{formatPercent(hostTable.other.percent, hostTable.other.saved)}</td>
+                  </tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+          <p class="note">{SAVINGS_QUALIFIER}</p>
+          <p class="since" data-testid="since-by-host" title={optimizerSince?.iso ?? undefined}>
+            {optimizerSince?.text ?? "since restart"} (optimizer restart)
+            {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+          </p>
+        </section>
+      {/if}
     </div>
 
     <section class="card chart-card" data-testid="savings-chart-card" aria-labelledby="savings-chart-heading">
@@ -592,19 +594,23 @@
   }
   .cards {
     display: grid;
-    /* The cards share the full width in equal columns; more cards, more
-       columns. */
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-card-min)), 1fr));
     gap: var(--ps-space-md);
     /* A card keeps its own height, not its tallest neighbour's. */
     align-items: start;
   }
-  /* A column of cards: each keeps its own height. */
-  .stack {
-    display: grid;
-    gap: var(--ps-space-md);
-    align-content: start;
-    min-width: 0;
+  /* With a per-host table: two equal columns once two cards fit side by
+     side, never three. The optimizer card takes the second column over
+     both rows; the first row is as tall as the module card, so the
+     per-host card lies directly under it. */
+  .cards.paired {
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(min(100%, max(var(--ps-card-min), calc(50% - var(--ps-space-md)))), 1fr)
+    );
+    grid-template-rows: auto 1fr;
+  }
+  .cards.paired > .optimizer-card {
+    grid-row: span 2;
   }
   .card {
     min-width: 0;
@@ -719,6 +725,7 @@
     color: var(--ps-warning-text);
     border: 1px solid var(--ps-warning);
     border-radius: 999px;
+    white-space: nowrap;
     padding: 0 var(--ps-space-sm);
   }
   .card--muted {
@@ -730,6 +737,11 @@
     display: grid;
     gap: var(--ps-space-md);
     margin-top: var(--ps-space-md);
+  }
+  /* In a card as wide as the page the types sit side by side. */
+  .cards:not(.paired) .split-types {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-figure-min)), 1fr));
+    column-gap: var(--ps-space-lg);
   }
   .split h3 {
     font-size: var(--ps-font-size-sm);
