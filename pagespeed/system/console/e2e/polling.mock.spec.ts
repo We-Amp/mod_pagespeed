@@ -171,6 +171,49 @@ test.describe("Polling", () => {
     expect(mock.calls("stats_json")).toBe(before + 1);
   });
 
+  test("a fresh browser refreshes by itself; a pause holds on other pages and after a reload", async ({ page }) => {
+    await page.clock.install();
+    const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    const toggle = page.getByRole("button", { name: /^Auto-refresh · \d+ s$/ });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toContainText("Auto-refresh on");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle).toContainText("Auto-refresh off");
+
+    // Another page: read once, then nothing by itself.
+    await page.evaluate(() => (location.hash = "#/overview"));
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await settle(page);
+    const onOverview = mock.calls("stats_json");
+    await runFor(page, 20_000);
+    expect(mock.calls("stats_json")).toBe(onOverview);
+
+    // A reload keeps the pause; Refresh still reads.
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("page-updated")).toHaveText(/^paused · /);
+    await settle(page);
+    const reloaded = mock.calls("stats_json");
+    await runFor(page, 20_000);
+    expect(mock.calls("stats_json")).toBe(reloaded);
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect.poll(() => mock.calls("stats_json")).toBe(reloaded + 1);
+
+    // On again: it reads at once and keeps reading, also after a reload.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await settle(page);
+    const resumed = mock.calls("stats_json");
+    await runFor(page, 20_000);
+    expect(mock.calls("stats_json")).toBeGreaterThan(resumed);
+  });
+
   test("changing the range while a read is pending shows only the new range", async ({ page }) => {
     const spans: number[] = [];
     page.on("request", (r) => {

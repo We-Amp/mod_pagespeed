@@ -398,7 +398,7 @@ describe("overviewVerdict", () => {
   it("whole server, optimizer running: its serves and savings since the optimizer started, and they lead", () => {
     const v = overviewVerdict(input());
     expect(v.text).toBe(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago.",
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago.",
     );
     expect(v).toMatchObject({ state: "working", word: "Working", lead: "optimizer" });
     // The module's rewrite figure is not added to it, and not mentioned as a sum.
@@ -407,10 +407,10 @@ describe("overviewVerdict", () => {
 
   it("whole server: one response is singular, and served responses that grew state no saving", () => {
     expect(overviewVerdict(input({ optimizer: optimizer({ serves: { responses: 1, saved: 10 } }) })).text).toContain(
-      "1 optimized response served from the optimizer's cache, 10.0 B saved",
+      "The optimizer counted 1 optimized response served from its cache, 10.0 B saved",
     );
     expect(overviewVerdict(input({ optimizer: optimizer({ serves: { responses: 5, saved: -40 } }) })).text).toBe(
-      "Working. 5 optimized responses served from the optimizer's cache since the optimizer started 3 h ago.",
+      "Working. The optimizer counted 5 optimized responses served from its cache since the optimizer started 3 h ago.",
     );
   });
 
@@ -466,7 +466,7 @@ describe("overviewVerdict", () => {
     // The mirror: the web server reloaded 4 minutes ago; the optimizer has been up for hours.
     const moduleWarm = overviewVerdict(input({ module: { summary: active, startMs: NOW - 4 * MIN } }));
     expect(moduleWarm.text).toBe(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. " +
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. " +
         "Web server restarted 4 min ago; the module's figures are not meaningful yet.",
     );
     expect(moduleWarm.state).toBe("working");
@@ -553,12 +553,12 @@ describe("overviewVerdict", () => {
     const v = overviewVerdict(input({ module: { summary: idle, startMs: NOW - 20_000 } }));
     expect(v).toMatchObject({ state: "working", lead: "optimizer" });
     expect(v.text).toBe(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. " +
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. " +
         "Web server restarted less than a minute ago; the module's figures are not meaningful yet.",
     );
     // Past the warm-up with still nothing rewritten, the optimizer's figures stand alone.
     expect(overviewVerdict(input({ module: { summary: idle, startMs: NOW - 2 * HOUR } }))).toMatchObject({
-      text: "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago.",
+      text: "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago.",
       lead: "optimizer",
     });
   });
@@ -568,7 +568,7 @@ describe("overviewVerdict", () => {
       "Working. 281 KB saved by rewriting since the web server started.",
     );
     expect(overviewVerdict(input({ optimizer: optimizer({ startMs: NOW + HOUR }) })).text).toBe(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started.",
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started.",
     );
   });
 

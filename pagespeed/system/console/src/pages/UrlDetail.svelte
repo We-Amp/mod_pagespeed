@@ -249,6 +249,11 @@
             intervalMs: 10000,
             onToggle: () => (poll.autoRefresh ? poll.stop() : poll.start()),
             onRefresh: () => poll.refresh(),
+            failedParts: () => [
+              healthError,
+              altError,
+              poll.data?.lookup.status === "rejected" ? poll.data.lookup.reason : null,
+            ],
           }
     }
   />

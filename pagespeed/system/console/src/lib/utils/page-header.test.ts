@@ -2,7 +2,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { updatedText } from "./page-header";
+import { ApiError, UnavailableError } from "$lib/api/client";
+import { failedRead, pageOutcome, refreshResultText, updatedText } from "./page-header";
 
 describe("updatedText", () => {
   const now = 1_800_000_000_000;
@@ -34,5 +35,44 @@ describe("updatedText", () => {
   it("admits it has never updated", () => {
     expect(updatedText(null, now, true)).toBe("updated —");
     expect(updatedText(null, now, false)).toBe("updated —");
+  });
+});
+
+describe("refreshResultText", () => {
+  it("says Refreshed only for an answer", () => {
+    expect(refreshResultText("ok")).toBe("Refreshed");
+    // A leaf the server turned off answered.
+    expect(refreshResultText("off")).toBe("Refreshed");
+    expect(refreshResultText("partial")).toBe("Partly refreshed; see the notice");
+    expect(refreshResultText("failed")).toBe("Refresh failed");
+    expect(refreshResultText("busy")).toBe("Server busy; not refreshed");
+  });
+});
+
+describe("pageOutcome", () => {
+  const boom = new ApiError(500, "Internal Server Error");
+  it("keeps the poller's outcome when nothing on the page failed", () => {
+    expect(pageOutcome("ok", [null, null, false])).toBe("ok");
+    expect(pageOutcome("failed", [null])).toBe("failed");
+    expect(pageOutcome("busy", [boom])).toBe("busy");
+  });
+  it("is partial when some parts failed and failed when all did", () => {
+    expect(pageOutcome("ok", [boom, null])).toBe("partial");
+    expect(pageOutcome("ok", [null, true])).toBe("partial");
+    expect(pageOutcome("ok", [boom, true])).toBe("failed");
+    expect(pageOutcome("ok", [new Error("network")])).toBe("failed");
+  });
+  it("counts a state the server reports on purpose as an answer", () => {
+    expect(failedRead(new UnavailableError(403, "Forbidden", "urls"))).toBe(false);
+    expect(failedRead(new ApiError(503, "daemon_not_configured"))).toBe(false);
+    expect(failedRead(new ApiError(503, JSON.stringify({ error: "daemon_not_configured" })))).toBe(false);
+    expect(failedRead(new ApiError(501, "endpoint_unsupported_by_daemon"))).toBe(false);
+    expect(failedRead(new ApiError(404, "not here"))).toBe(false);
+    expect(failedRead(new ApiError(429, "busy"))).toBe(false);
+    // The optimizer not reachable is a failure.
+    expect(failedRead(new ApiError(502, "Bad Gateway"))).toBe(true);
+    // A 503 that does not say "not configured" is the optimizer not answering.
+    expect(failedRead(new ApiError(503, "Service Unavailable"))).toBe(true);
+    expect(failedRead(null)).toBe(false);
   });
 });

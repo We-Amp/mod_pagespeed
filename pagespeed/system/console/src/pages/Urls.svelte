@@ -163,6 +163,7 @@
       intervalMs: 10000,
       onToggle: () => (poll.autoRefresh ? poll.stop() : poll.start()),
       onRefresh: () => poll.refresh(),
+      failedParts: () => [urlsError],
     }}
   >
     {#snippet toolbar()}
