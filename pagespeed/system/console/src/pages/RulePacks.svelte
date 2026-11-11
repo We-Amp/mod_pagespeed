@@ -27,6 +27,7 @@
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import EmptyState from "$lib/EmptyState.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import UnavailableCard from "$lib/UnavailableCard.svelte";
@@ -370,7 +371,7 @@
         </div>
       </div>
       {#if lensHost !== null}
-        <p class="section-note" data-testid="rp-lens">Decisions for {lensHost} (host lens).</p>
+        <p class="section-note" data-testid="rp-lens">{TERMS.hostFilter}: decisions for {lensHost}.</p>
       {/if}
 
       {#if tailRows.length === 0 && tailNote === null}

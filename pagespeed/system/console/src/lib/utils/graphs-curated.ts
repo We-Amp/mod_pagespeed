@@ -14,6 +14,7 @@
  */
 
 import { num } from "$lib/alerts";
+import { TERMS } from "$lib/data/terms";
 import type { DaemonStatsResponse } from "$lib/api/types";
 import { toRatesPerSecond, type Sample } from "./graph-series";
 import type { GraphsView } from "./graphs-view";
@@ -45,10 +46,10 @@ export interface CuratedChartSpec {
 }
 
 export const CURATED_CHARTS: readonly CuratedChartSpec[] = [
-  { id: "requests", title: "In-place requests", unit: "per-second", source: "module" },
-  { id: "module_saved", title: "Module rewrite savings", unit: "bytes-per-second", source: "module" },
-  { id: "optimizer_saved", title: "Optimizer serve savings", unit: "bytes-per-second", source: "optimizer" },
-  { id: "hit_rate", title: "Optimized-copy hit rate", unit: "percent", source: "module" },
+  { id: "requests", title: "Requests checked against the optimizer's cache", unit: "per-second", source: "module" },
+  { id: "module_saved", title: TERMS.savedByRewriting, unit: "bytes-per-second", source: "module" },
+  { id: "optimizer_saved", title: TERMS.savedByOptimizerCache, unit: "bytes-per-second", source: "optimizer" },
+  { id: "hit_rate", title: TERMS.servedOptimized, unit: "percent", source: "module" },
   { id: "fetch_failures", title: "Resource fetch failures", unit: "per-second", source: "module" },
   { id: "queue", title: "Optimizer jobs in progress", unit: "count", source: "optimizer" },
 ];

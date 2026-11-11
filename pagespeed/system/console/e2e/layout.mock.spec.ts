@@ -713,12 +713,12 @@ test.describe("small fixes", () => {
     expect(Math.max(...widths) - Math.min(...widths), `select widths ${widths.join(", ")}`).toBeLessThanOrEqual(1);
   });
 
-  test("the hit rate's qualifier is a separate word, and the previews heading has room above it", async ({ page }) => {
+  test("the served share has a short label, and the previews heading has room above it", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     await pageReady(page);
-    await expect(page.getByText(/Optimized-copy hit rate \(of all in-place requests\)/)).toBeVisible();
+    await expect(page.getByTestId("savings-optimizer-card").getByText("Served optimized", { exact: true })).toBeVisible();
     await openConsole(page, "pagespeed_global_admin", "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https");
     await pageReady(page);
     const above = await page.locator("#previews-heading").evaluate((h) => {

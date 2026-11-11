@@ -72,11 +72,11 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Decision lines not written: the per-second limit, the daily cap, or a file that could not be written. The counters still count these responses.",
 
   ipro_daemon_served:
-    "In-place requests answered with an optimized variant from the optimizer worker's shared cache, including not-modified revalidations. This is the worker's hit count for optimizer output.",
+    "In-place requests answered with an optimized variant from the optimizer's shared cache, including not-modified revalidations. This is the hit count for optimizer output.",
   ipro_daemon_served_original:
     "In-place requests answered with the stored original's own bytes: the volume held no optimized variant yet, which is every serve while the optimizer is down or still working on the URL. The response carries the origin's own weak ETag, not the optimizer's.",
   ipro_daemon_fallthrough:
-    "In-place requests the optimizer worker declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
+    "In-place requests the optimizer declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
   ipro_daemon_served_css:
     "In-place CSS requests answered from the optimizer's cache since the module started.",
   ipro_daemon_served_js:
@@ -94,13 +94,13 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   process_start_ms:
     "When the module's shared statistics started counting, in milliseconds since the epoch: the window every module-side number on the console covers.",
   ipro_daemon_refresh_notified:
-    "Refresh signals sent to the optimizer worker after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
+    "Refresh signals sent to the optimizer after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
   ipro_daemon_refresh_notify_failed:
-    "Refresh signals that could not be delivered to the optimizer worker. Sustained growth points at a broken notification socket, leaving stale variants unhealed.",
+    "Refresh signals that could not be delivered to the optimizer. Sustained growth points at a broken notification socket, leaving stale variants unhealed.",
   ipro_daemon_fallback_notified:
-    "Notifications sent after serving a near-match variant, asking the worker to build the exact variant this client asked for (viewport, pixel density, data saving, image format).",
+    "Notifications sent after serving a near-match variant, asking the optimizer to build the exact variant this client asked for (viewport, pixel density, data saving, image format).",
   ipro_daemon_fallback_notify_failed:
-    "Variant-request notifications that failed to send. Non-zero while near-match serves continue means variant sets will not converge; check the worker notification socket.",
+    "Variant-request notifications that failed to send. Non-zero while near-match serves continue means variant sets will not converge; check the optimizer's notification socket.",
 
   ipro_recorder_resources:
     "In-place recordings started, that is origin responses the server began capturing for future optimization. Each finished recording also lands in exactly one outcome counter, so the outcomes trail this one by whatever is still in flight.",
@@ -168,7 +168,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   rewrite_cached_output_missed_deadline:
     "Optimizations still unfinished when the page had to be flushed, so the original content went out and the result was kept for next time. Individual requests can ask to wait for every optimization instead, and those never land here.",
   num_rewrites_executed:
-    "Optimization jobs actually started on a background worker. A rough measure of optimization work performed rather than reused from cache.",
+    "Optimization jobs actually started in the background. A rough measure of optimization work performed rather than reused from cache.",
   num_rewrites_dropped:
     "Optimization jobs cancelled before running because the server was shedding load or shutting down. Persistent growth means workers are saturated and pages go out unoptimized.",
   num_rewrites_abandoned_for_lock_contention:
@@ -730,11 +730,11 @@ export const STAT_FAMILY_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> 
     ],
     [
       "ipro_daemon_",
-      "In-place optimization on servers where the optimized cache is owned by the optimizer worker rather than by the serving module. These counters split eligible requests into served and declined, and count the notifications sent to make the worker rebuild or add a variant.",
+      "In-place optimization on servers where the optimized cache is owned by the optimizer rather than by the serving module. These counters split eligible requests into served and declined, and count the notifications sent to make the optimizer rebuild or add a variant.",
     ],
     [
       "ipro_recorder_",
-      "The recorder that captures an origin response the first time an in-place URL misses the cache. Each finished recording is counted in exactly one outcome, so the outcomes trail the recordings started by whatever is in flight. Where the optimizer worker owns the cache it records separately and moves none of these.",
+      "The recorder that captures an origin response the first time an in-place URL misses the cache. Each finished recording is counted in exactly one outcome, so the outcomes trail the recordings started by whatever is in flight. Where the optimizer owns the cache it records separately and moves none of these.",
     ],
     [
       "zerocopy_serve_",

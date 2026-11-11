@@ -29,7 +29,8 @@
  */
 
 import type { DaemonHealthResponse, DaemonStatsResponse } from "$lib/api/types";
-import { MODULE_DOCS } from "$lib/data/product-facts-console";
+import { DOCS } from "$lib/data/product-facts-console";
+import { checkLabel, OPTIMIZER_NOT_ANSWERING, OPTIMIZER_NOT_ANSWERING_FIX } from "$lib/utils/daemon";
 import { memoryAckStore, type AckStore } from "$lib/utils/finding-acks";
 import { formatClock } from "$lib/utils/format";
 import { coveredWindowText, EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
@@ -94,6 +95,12 @@ export interface AlertRule {
   message: (cur: AlertSnapshot, prev: AlertSnapshot | null, history: readonly CounterSample[]) => string;
   /** The fix, in one sentence. */
   fix: string;
+  /**
+   * The fix for this sample, when the cause the message names calls for a
+   * different one than `fix`; undefined keeps `fix`. The message and the fix
+   * of one finding always describe the same cause.
+   */
+  fixFor?: (cur: AlertSnapshot, prev: AlertSnapshot | null, history: readonly CounterSample[]) => string | undefined;
   /** A console route with the detail, when one exists. */
   link?: string;
   /** A documentation page about it, when one exists. */
@@ -155,9 +162,9 @@ export const VOLUME_GENERATION_TEMPLATE =
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
   "was created. Install a module and optimizer package pair that agree.";
 
-const DOC_ACCESS = `${MODULE_DOCS}/admin-console/#access-control`;
-const DOC_MESSAGES = `${MODULE_DOCS}/admin-console/#message-history`;
-const DOC_DIAGNOSE = `${MODULE_DOCS}/troubleshooting/#how-to-get-more-diagnostic-information`;
+const DOC_ACCESS = DOCS.access;
+const DOC_MESSAGES = DOCS.messages;
+const DOC_DIAGNOSE = DOCS.diagnose;
 
 /** A finite number at a dotted path of an untrusted value, else undefined. */
 export function num(value: unknown, path: string): number | undefined {
@@ -398,7 +405,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
     check: (cur) => (cur.health === null ? undefined : failedChecks(cur.health).length > 0),
     message: (cur) => {
       const names = failedChecks(cur.health);
-      return `Optimizer health ${names.length === 1 ? "check" : "checks"} failing: ${names.join(", ")}.`;
+      return `Optimizer health ${names.length === 1 ? "check" : "checks"} failing: ${names.map(checkLabel).join(", ")}.`;
     },
     fix: "Optimizer status shows each check; the optimizer's log usually names the cause.",
     doc: DOC_DIAGNOSE,
@@ -437,8 +444,8 @@ export const ALERT_RULES: readonly AlertRule[] = [
     message: (cur, _prev, history) => {
       if ((loggedGroups(cur, isGenerationRefusal) ?? []).length > 0) {
         return (
-          "The web server is not using the optimizer's cache: the module logged that it and the optimizer are " +
-          "built for different cache directory generations, so it opened nothing."
+          "The web server is not using the optimizer's cache: the module logged that the module and optimizer " +
+          "packages use different cache layouts, so it opened nothing."
         );
       }
       return (
@@ -448,18 +455,22 @@ export const ALERT_RULES: readonly AlertRule[] = [
     },
     // The module's own line, as logged, behind the written sentence.
     details: (cur) => (loggedGroups(cur, isGenerationRefusal) ?? []).slice(0, 1).map((g) => capText(g.template, 400)),
-    fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
+    // The path fix fits the counters; a logged refusal names the packages, and so does its fix.
+    fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) name the same directory.",
+    fixFor: (cur) =>
+      (loggedGroups(cur, isGenerationRefusal) ?? []).length > 0
+        ? "Install module and optimizer packages from the same release, then restart the web server and the optimizer."
+        : undefined,
   },
   {
     id: "daemon-unreachable",
-    label: "Optimizer unreachable",
+    label: "Optimizer not answering",
     severity: "warning",
     kind: "state",
     link: "#/optimizer",
     check: (cur) => (cur.daemon === "transient" ? undefined : cur.daemon === "unreachable"),
-    message: () =>
-      "The optimizer worker is configured but not answering. The module keeps serving pages without it.",
-    fix: "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.",
+    message: () => OPTIMIZER_NOT_ANSWERING,
+    fix: OPTIMIZER_NOT_ANSWERING_FIX,
     doc: DOC_DIAGNOSE,
   },
   {
@@ -592,9 +603,9 @@ export const ALERT_RULES: readonly AlertRule[] = [
       return size > 0 && inflight >= size;
     },
     message: (cur) =>
-      `All ${fmt(num(cur.daemonStats, "thread_pool.size") ?? 0)} optimizer worker threads are busy ` +
+      `All ${fmt(num(cur.daemonStats, "thread_pool.size") ?? 0)} optimizer threads are busy ` +
       `(${fmt(num(cur.daemonStats, "thread_pool.inflight") ?? 0)} in flight); new work waits until current jobs finish.`,
-    fix: "If this persists, give the optimizer more worker threads or a machine with more cores.",
+    fix: "If this persists, give the optimizer more threads or a machine with more cores.",
   },
   {
     id: "connection-saturation",
@@ -730,7 +741,7 @@ export function healthSummary(
   if (alerts.length === 0) {
     if (!moduleOk) return { text: "Module statistics unavailable", level: "warning" };
     if (logOff) return { text: "Findings from the message log are not available on this console", level: "info" };
-    if (logUnavailable) return { text: "Findings unavailable — the message log could not be read", level: "info" };
+    if (logUnavailable) return { text: "Findings unavailable: the message log could not be read", level: "info" };
     return { text: `No findings${warnings}${acked}`, level: "healthy" };
   }
   const action = alerts.filter((a) => a.severity !== "info").length;
@@ -744,6 +755,7 @@ interface RuleState {
   since: number;
   lastFired: number;
   message: string;
+  fix: string;
   details: string[];
   count?: number;
   countNoun?: CountNoun;
@@ -773,6 +785,7 @@ export class AlertTracker {
           since: st ? st.since : nowMs,
           lastFired: nowMs,
           message: rule.message(cur, this.prev, this.history),
+          fix: rule.fixFor?.(cur, this.prev, this.history) ?? rule.fix,
           details: rule.details ? rule.details(cur, this.prev) : [],
           count: rule.count ? rule.count(cur, this.prev) : undefined,
           countNoun: rule.countNoun ? rule.countNoun(cur, this.prev) : undefined,
@@ -846,7 +859,7 @@ export class AlertTracker {
         label: rule.label,
         severity: rule.severity,
         message: st.message,
-        fix: rule.fix,
+        fix: st.fix,
         link: rule.link,
         doc: rule.doc,
         details: st.details,

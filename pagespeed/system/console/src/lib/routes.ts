@@ -23,7 +23,7 @@ export interface Route {
   /** Sidebar entry only on the whole-server console (the page itself still
    * loads on a per-vhost console and explains the scope there). */
   globalOnly?: boolean;
-  /** The page narrows itself to the host lens; on any other page the shell says the lens does not apply. */
+  /** The page narrows itself to the host filter; on any other page the shell says the filter does not apply. */
   hostAware?: boolean;
   /**
    * The leaves (path without query) the page reads. The sidebar marks the
@@ -95,6 +95,17 @@ export const routes: Route[] = [
     hostAware: true,
     component: () => import("../pages/UrlDetail.svelte"),
   },
+  // The module's messages and the optimizer's log in one place: with the pages every reader starts from.
+  {
+    path: "#/logs",
+    label: "Logs",
+    icon: "scroll",
+    group: "overview",
+    hostAware: true,
+    leaves: ["/message_history", "/v1/daemon/logs"],
+    leavesPerVhost: ["/message_history"],
+    component: () => import("../pages/Logs.svelte"),
+  },
   {
     path: "#/statistics",
     label: "Statistics",
@@ -150,16 +161,6 @@ export const routes: Route[] = [
     icon: "server",
     group: "optimizer",
     component: () => import("../pages/OptimizerStatus.svelte"),
-  },
-  {
-    path: "#/logs",
-    label: "Logs",
-    icon: "scroll",
-    group: "optimizer",
-    hostAware: true,
-    leaves: ["/message_history", "/v1/daemon/logs"],
-    leavesPerVhost: ["/message_history"],
-    component: () => import("../pages/Logs.svelte"),
   },
   {
     path: "#/support",

@@ -182,6 +182,35 @@ export function optimizedCopyHitRate(vars: Record<string, unknown>): OptimizedCo
   };
 }
 
+/** The words around a "Served optimized" figure: what it is a share of, and the caveat behind it. */
+export interface ServedOptimizedText {
+  /** What the total counts, after "of N": "requests for CSS, JavaScript and images". */
+  of: string;
+  /** The longer explanation, for a tooltip; it keeps the conditional / HEAD caveat. */
+  tooltip: string;
+}
+
+/**
+ * How a "Served optimized" share reads, for both counter sets: with the
+ * per-type counters it is a share of the requests for CSS, JavaScript and
+ * images; an older module counts every request it looked up, pages included.
+ */
+export function servedOptimizedText(mode: OptimizedCopyHitRate["mode"]): ServedOptimizedText {
+  return mode === "optimizable"
+    ? {
+        of: "requests for CSS, JavaScript and images",
+        tooltip:
+          "Requests for CSS, JavaScript and images that were answered with an optimized copy from the optimizer's cache. " +
+          "Conditional and HEAD requests count as served.",
+      }
+    : {
+        of: "requests of every type",
+        tooltip:
+          "Requests answered with an optimized copy from the optimizer's cache, as a share of every request the module " +
+          "looked up there, pages included. This module version does not count CSS, JavaScript and images separately.",
+      };
+}
+
 export interface SplitVerdict {
   count: number;
   bytes: number;

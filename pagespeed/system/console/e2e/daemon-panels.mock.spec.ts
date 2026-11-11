@@ -91,8 +91,11 @@ test.describe("Daemon panels", () => {
   test("health checks read as pass or fail, not as JSON", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, "v1/daemon/health": F.HEALTH_CHECK_FAILING });
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
-    await expect(page.getByRole("row", { name: /cache_configured/ })).toContainText("Pass");
-    await expect(page.getByRole("row", { name: /cache_open/ })).toContainText("Fail");
+    // Plain names; the optimizer's own id stays one hover away.
+    await expect(page.getByRole("row", { name: /Cache directory configured/ })).toContainText("Pass");
+    const failing = page.getByRole("row", { name: /Cache opened/ });
+    await expect(failing).toContainText("Fail");
+    await expect(failing.getByRole("cell").first()).toHaveAttribute("title", "cache_open");
     await expect(page.getByText('{"pass"')).toHaveCount(0);
   });
 

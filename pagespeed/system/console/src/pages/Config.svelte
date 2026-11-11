@@ -7,7 +7,8 @@
   import type { ConfigResponse } from "$lib/api/types";
   import LoadError from "$lib/LoadError.svelte";
   import EmptyState from "$lib/EmptyState.svelte";
-  import UnavailableCard, { DOCS_URL } from "$lib/UnavailableCard.svelte";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
+  import { DOCS_URL } from "$lib/data/product-facts-console";
   import { isUnavailable } from "$lib/api/client";
   import PageHeader from "$lib/PageHeader.svelte";
   import Tabs from "$lib/Tabs.svelte";

@@ -81,12 +81,12 @@ describe("sampleOverview", () => {
 describe("unknownHealth", () => {
   it("claims no verdict and names the time of the last answer", () => {
     expect(unknownHealth(1_800_000_000_000, () => "10:31:15")).toEqual({
-      text: "Status unknown — last answer 10:31:15",
+      text: "Status unknown. Last answer 10:31:15",
       level: "unknown",
     });
   });
   it("says so when the server never answered", () => {
-    expect(unknownHealth(null)).toEqual({ text: "Status unknown — the server has not answered", level: "unknown" });
+    expect(unknownHealth(null)).toEqual({ text: "Status unknown. The server has not answered", level: "unknown" });
   });
 });
 
@@ -256,7 +256,7 @@ describe("daemonServeSavings", () => {
 describe("texts", () => {
   it("availabilityText names every state", () => {
     expect(availabilityText("not-configured").word).toBe("Not configured");
-    expect(availabilityText("unreachable").word).toBe("Unreachable");
+    expect(availabilityText("unreachable").word).toBe("Not answering");
     expect(availabilityText("unsupported").word).toBe("Outdated");
     expect(availabilityText("transient").word).toBe("Checking");
     expect(availabilityText("ok").word).toBe("Running");
@@ -536,9 +536,9 @@ describe("overviewVerdict", () => {
 
   it("disconnected: status unknown with the time of the last answer, and no figure from before", () => {
     const v = overviewVerdict(input({ down: true, lastAnswerAt: NOW }), clock);
-    expect(v).toMatchObject({ state: "unknown", word: "Status unknown", text: "Status unknown — last answer 10:25:51.", lead: null });
+    expect(v).toMatchObject({ state: "unknown", word: "Status unknown", text: "Status unknown. Last answer 10:25:51.", lead: null });
     expect(overviewVerdict(input({ down: true, lastAnswerAt: null }), clock).text).toBe(
-      "Status unknown — the server has not answered.",
+      "Status unknown. The server has not answered.",
     );
   });
 

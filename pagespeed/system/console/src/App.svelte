@@ -12,6 +12,7 @@
   import { pollers } from "$lib/api/poller";
   import ConnectionBanner from "$lib/ConnectionBanner.svelte";
   import { HostLens, activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import HostLensSelect from "$lib/HostLensSelect.svelte";
   import { ConsoleScope } from "$lib/console-scope.svelte";
   import LoadError from "$lib/LoadError.svelte";
@@ -405,7 +406,7 @@
     <ConnectionBanner />
     {#if lensHost !== null && router.currentRoute.hostAware !== true}
       <p class="lens-note" data-testid="lens-note">
-        Host lens {lensHost}: this page has no per-host figures, so it shows the whole server.
+        {TERMS.hostFilter} {lensHost}: this page has no per-host figures, so it shows the whole server.
       </p>
     {/if}
     {#if loadError}

@@ -22,11 +22,11 @@ export function qualityTier(score: number): QualityTier {
 export function qualityTierLabel(tier: QualityTier): string {
   switch (tier) {
     case "good":
-      return "Good quality — perceptually near-lossless";
+      return "Good quality: perceptually near-lossless";
     case "acceptable":
-      return "Acceptable quality — minor artifacts may be visible";
+      return "Acceptable quality: minor artifacts may be visible";
     case "poor":
-      return "Poor quality — noticeable degradation";
+      return "Poor quality: noticeable degradation";
   }
 }
 

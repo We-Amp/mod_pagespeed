@@ -46,7 +46,7 @@ test("shows module and optimizer savings on the global console", async ({ page }
   const optimizerCard = page.getByTestId("savings-optimizer-card");
   await expect(optimizerCard.getByTestId("savings-hit-rate")).toContainText("26%");
   await expect(optimizerCard.getByTestId("savings-hit-rate")).toContainText("3,122 of 12,006");
-  await expect(optimizerCard).toContainText("of all in-place requests");
+  await expect(optimizerCard).toContainText("3,122 of 12,006 requests of every type");
 
   await expect(page.getByTestId("savings-optimizer-total")).toContainText("673 KB");
   await expect(page.getByTestId("savings-optimizer-total")).toContainText("3% of 21.4 MB");
@@ -78,7 +78,7 @@ test("keeps the module figures when the optimizer is unreachable", async ({ page
   });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   await expect(page.getByTestId("savings-module-total")).toContainText("12.3 MB");
-  await expect(page.getByTestId("savings-optimizer-unavailable")).toContainText("Unreachable");
+  await expect(page.getByTestId("savings-optimizer-unavailable")).toContainText("Not answering");
 });
 
 test("says so when no optimizer is configured", async ({ page }) => {
@@ -163,7 +163,7 @@ test("the chart fills in as samples arrive and announces its series", async ({ p
   await expect(chart).toBeVisible();
   // The latest value is a byte rate: a finite number with its byte unit — the
   // exact figure depends on poll spacing, so the shape is asserted, not the value.
-  await expect(chart).toHaveAccessibleName(/Module rewrites latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
+  await expect(chart).toHaveAccessibleName(/Saved by rewriting latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
 });
 
 for (const [name, viewport] of [
@@ -255,13 +255,19 @@ test("keys every split figure to its bar colour with a swatch", async ({ page })
   }
 });
 
-test("shows the optimized-copy hit rate on the optimizer card with the excluded rest", async ({ page }) => {
+test("shows the served share on the optimizer card with the excluded rest", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   const card = page.getByTestId("savings-optimizer-card");
   await expect(card.getByTestId("savings-hit-rate")).toContainText("%");
-  await expect(card).toContainText("Optimized-copy hit rate");
-  await expect(card).toContainText("conditional and HEAD requests count as served");
+  await expect(card).toContainText("Served optimized");
+  await expect(card.getByTestId("savings-hit-rate")).toContainText("requests for CSS, JavaScript and images");
+  await expect(card).not.toContainText(/hit rate|in-place|cacheable resource/);
+  // The counter caveat stays, one hover away on the label.
+  await expect(card.getByText("Served optimized", { exact: true })).toHaveAttribute(
+    "title",
+    /Conditional and HEAD requests count as served\.$/,
+  );
   await expect(page.getByTestId("savings-not-optimizable")).toContainText(
     "requests not optimizable or not recorded",
   );
@@ -281,7 +287,11 @@ test("an older module keeps the old rate, labelled for what it divides by", asyn
     stats_json: F.ok(oldModuleStats),
   });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
-  await expect(page.getByTestId("savings-optimizer-card")).toContainText("of all in-place requests");
+  await expect(page.getByTestId("savings-optimizer-card")).toContainText("requests of every type");
+  await expect(page.getByTestId("savings-optimizer-card").getByText("Served optimized", { exact: true })).toHaveAttribute(
+    "title",
+    /pages included/,
+  );
   await expect(page.getByTestId("savings-not-optimizable")).toHaveCount(0);
 });
 
@@ -568,7 +578,7 @@ test("a web server restarted minutes ago: the module's shares are a sentence, no
   // The hit rate is counted by the module, so it waits too, and keeps its counts.
   const rate = page.getByTestId("savings-hit-rate");
   await expect(rate).toContainText("Too early for a percentage");
-  await expect(rate.locator(".detail")).toHaveText(/^[\d,]+ of [\d,]+ cacheable resource requests/);
+  await expect(rate.locator(".detail")).toHaveText(/^[\d,]+ of [\d,]+ requests for CSS, JavaScript and images$/);
   await expect(rate).not.toContainText("%");
   await expect(rate).not.toContainText("—");
   // The optimizer's own base is a day old: its percentage stays.
@@ -619,7 +629,7 @@ test("the chart names its real window and shows latest values in the card", asyn
   // expect timeout is also 5 s -- so these assertions get 15 s, keeping
   // the second poll inside the window instead of racing it.
   await expect(heading).toContainText(/Last \d+ (s|min)/, { timeout: 15_000 });
-  await expect(page.getByTestId("savings-chart-legend")).toContainText("Module rewrites", { timeout: 15_000 });
+  await expect(page.getByTestId("savings-chart-legend")).toContainText("Saved by rewriting", { timeout: 15_000 });
   await expect(page.getByTestId("savings-chart-legend")).not.toContainText("--", { timeout: 15_000 });
   // The latest rate reads as bytes per second through the shared byte formatter, never a bare "N/s".
   await expect(page.getByTestId("savings-chart-legend").locator(".legend-value").first()).toHaveText(
@@ -660,7 +670,7 @@ test.describe("serve savings per host", () => {
     await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/stats": F.OPT_STATS_PAGE });
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     const card = page.getByTestId("savings-by-host-card");
-    await expect(card.getByRole("heading", { level: 2 })).toHaveText("Optimizer cache serves by host");
+    await expect(card.getByRole("heading", { level: 2 })).toHaveText("Saved by the optimizer's cache, by host");
     await expect(card.getByTestId("savings-by-host")).toBeVisible();
     await expect(card).toContainText("Measured in transfer bytes");
     await expect(page.getByTestId("savings-optimizer-card").getByTestId("savings-by-host")).toHaveCount(0);
@@ -797,7 +807,7 @@ test("a per-vhost console shows the row the module marks, under that row's own n
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, "v1/daemon/stats": F.OPT_STATS_SITE_ROW });
   await openConsole(page, "pagespeed_admin", "#/savings");
   const own = page.getByTestId("savings-this-host");
-  await expect(own).toContainText("Saved on responses served for example.test");
+  await expect(own).toContainText("Saved by the optimizer's cache for example.test");
   await expect(own).toContainText("75%");
   await expect(own).toContainText("4 responses");
   await expect(page.getByTestId("savings-optimizer-card")).not.toHaveClass(/card--muted/);

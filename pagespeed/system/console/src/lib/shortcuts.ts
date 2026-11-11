@@ -26,28 +26,28 @@ export const GO_KEYS: Readonly<Record<string, string>> = {
   o: "#/overview",
   v: "#/savings",
   u: "#/urls",
+  l: "#/logs",
+  m: "#/logs?source=module",
   s: "#/statistics",
   g: "#/graphs",
   h: "#/histograms",
   a: "#/caches",
   c: "#/configuration",
-  m: "#/logs?source=module",
   d: "#/optimizer",
-  l: "#/logs",
 };
 
 const GO_NAMES: Readonly<Record<string, string>> = {
   o: "Overview",
   v: "Savings",
   u: "URLs",
+  l: "Logs",
+  m: "Module messages (Logs)",
   s: "Statistics",
   g: "Graphs (Statistics)",
   h: "Histograms",
   a: "Caches",
   c: "Configuration",
-  m: "Module messages (Logs)",
   d: "Optimizer status",
-  l: "Logs",
 };
 
 /** How long "g" waits for its second key. */
