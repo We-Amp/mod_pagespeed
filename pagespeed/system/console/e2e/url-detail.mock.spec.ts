@@ -317,7 +317,7 @@ test("a server without an optimizer: the module's answer is the whole answer, wi
   await expect(page.getByTestId("url-module-lookup")).toContainText("This is an original URL");
   await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
   await expect(page.getByTestId("url-detail-per-vhost")).toHaveText(
-    "No optimizer is connected to this server: the module's answer is the whole answer.",
+    "No optimizer is configured for this server; the module optimizes on its own. The module's answer is the whole answer.",
   );
   await expect(page.getByRole("link", { name: "whole-server console" })).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText(/unreachable|HTTP [45]\d\d/);
@@ -334,7 +334,7 @@ test("whole-server console without an optimizer: no link to an optimizer log tha
   await ready(page);
   // The same sentence as on a per-vhost console, and nothing that reads as a fault.
   await expect(page.getByTestId("url-detail-per-vhost")).toHaveText(
-    "No optimizer is connected to this server: the module's answer is the whole answer.",
+    "No optimizer is configured for this server; the module optimizes on its own. The module's answer is the whole answer.",
   );
   await expect(page.getByTestId("url-detail-unreachable")).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText(/HTTP [45]\d\d|unreachable/);

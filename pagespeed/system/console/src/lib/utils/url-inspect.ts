@@ -12,8 +12,8 @@
 
 import { ApiError } from "$lib/api/client";
 import type { CacheEntryKey, CacheEntryResponse, DaemonCooldownEntry } from "$lib/api/types";
-import { WEBSITE, WEBSITE_HOST } from "$lib/data/product-facts-console";
-import { cooldownReasonLabel, errorCode } from "./daemon";
+import { DOCS, WEBSITE_HOST } from "$lib/data/product-facts-console";
+import { cooldownReasonLabel, errorCode, NO_OPTIMIZER_CONFIGURED } from "./daemon";
 import { detailHref, displayUrl, entryKeyFromAbsoluteUrl } from "./urls-api";
 
 // ── The pasted URL ───────────────────────────────────────────────────
@@ -126,7 +126,7 @@ export function cooldownText(entry: DaemonCooldownEntry): string {
  */
 export function wholeServerLine(noOptimizer: boolean): { text: string; link: boolean } {
   return noOptimizer
-    ? { text: "No optimizer is connected to this server: the module's answer is the whole answer.", link: false }
+    ? { text: `${NO_OPTIMIZER_CONFIGURED} The module's answer is the whole answer.`, link: false }
     : { text: "The whole-server console adds the optimizer's record of this URL.", link: true };
 }
 
@@ -142,35 +142,30 @@ export interface UrlReason {
   evidence: string | null;
 }
 
-const DOCS = `${WEBSITE}/docs`;
-
 const REASONS: ReadonlyArray<Omit<UrlReason, "evidence">> = [
   {
     id: "not-requested",
     title: "Not requested yet",
     text: "It is optimized after a request for it has passed through this server. Request it, then refresh.",
-    doc: {
-      label: "Pages are never served optimized",
-      href: `${DOCS}/troubleshooting/#pages-are-never-served-optimized--cache-never-warms`,
-    },
+    doc: { label: "Pages are never served optimized", href: DOCS.neverOptimized },
   },
   {
     id: "not-cacheable",
     title: "The response is not cacheable",
     text: "A private, no-store or already expired response is left as it is.",
-    doc: { label: "Set Cache-Control headers", href: `${DOCS}/cache-control/` },
+    doc: { label: "Set Cache-Control headers", href: DOCS.cacheControl },
   },
   {
     id: "host-not-authorized",
     title: "The host is not authorized",
     text: "A resource on another host than its page is rewritten only when that host is authorized.",
-    doc: { label: "Domain authorization", href: `${DOCS}/domain-configuration/#domain-authorization` },
+    doc: { label: "Domain authorization", href: DOCS.domainAuthorization },
   },
   {
     id: "original-kept",
     title: "It was tried and the original was kept",
     text: "The result was not smaller, or the file was too large or unreadable. It is tried again later.",
-    doc: { label: "Images not converting", href: `${DOCS}/troubleshooting/#images-not-converting-to-webpavif` },
+    doc: { label: "Images not converting", href: DOCS.imagesNotConverting },
   },
 ];
 

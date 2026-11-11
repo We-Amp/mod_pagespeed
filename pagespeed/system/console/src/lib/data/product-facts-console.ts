@@ -50,6 +50,14 @@ export const DOCS = {
   optimizerSetup: `${DOCS_BASE}/configuration/#area-optimizer-worker`,
   /** How to get more diagnostic information. */
   diagnose: `${DOCS_BASE}/troubleshooting/#how-to-get-more-diagnostic-information`,
+  /** Why a URL is not served optimized yet. */
+  neverOptimized: `${DOCS_BASE}/troubleshooting/#pages-are-never-served-optimized--cache-never-warms`,
+  /** Why an image keeps its original format. */
+  imagesNotConverting: `${DOCS_BASE}/troubleshooting/#images-not-converting-to-webpavif`,
+  /** Cache-Control headers the origin should send. */
+  cacheControl: `${DOCS_BASE}/cache-control/`,
+  /** Authorizing other hosts' resources. */
+  domainAuthorization: `${DOCS_BASE}/domain-configuration/#domain-authorization`,
 } as const;
 
 /** The admin console's page in the product documentation. */

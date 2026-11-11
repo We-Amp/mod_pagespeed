@@ -124,7 +124,7 @@ describe("the optimizer's half", () => {
   it("a page without the optimizer's record says what the whole-server console adds, or that there is no optimizer", () => {
     expect(wholeServerLine(false)).toEqual({ text: "The whole-server console adds the optimizer's record of this URL.", link: true });
     expect(wholeServerLine(true)).toEqual({
-      text: "No optimizer is connected to this server: the module's answer is the whole answer.",
+      text: "No optimizer is configured for this server; the module optimizes on its own. The module's answer is the whole answer.",
       link: false,
     });
   });
