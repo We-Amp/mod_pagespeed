@@ -16,9 +16,15 @@
   // with grouping off (source=optimizer&group=0) is the raw stream -- oldest
   // to newest, following the newest entry until the reader scrolls up, a
   // "Jump to newest" that counts what arrived since, the restart/gap/shed
-  // markers inline, and a 3-second poll of the optimizer's ring alone. The
-  // view is a function of the hash; the source and grouping controls
-  // navigate, so the page mounts with its view's one poller.
+  // markers inline, and a 3-second poll of the optimizer's ring alone.
+  //
+  // The view (source, grouping) is preset by the address when the page
+  // mounts. The Source and Group repeats controls then change it in place:
+  // the page stays mounted with its one poller, so the filter text, the
+  // levels, the expanded rows, the scroll position and the keyboard focus
+  // stay where they are, and the choice is written into the address
+  // (view-address.ts). The fetcher reads the view as it is at each poll;
+  // entering or leaving the raw view changes the poller's interval.
   //
   // Per-sample bookkeeping (both cursors and buffers) lives INSIDE the
   // fetcher, never in an $effect (polling-discipline.test.ts).
@@ -47,6 +53,7 @@
   import { formatCount, formatIsoTitle } from "$lib/utils/format";
   import { linkSegments } from "$lib/utils/linkify";
   import { hostsInText, textNamesHost } from "$lib/utils/host-lens";
+  import { replaceViewParams } from "$lib/utils/view-address";
   import {
     EMPTY_LOG_BUFFER,
     countUnseen,
@@ -80,13 +87,19 @@
   // Cap on how many module messages are kept client-side across polls.
   const MAX_RETAINED_MESSAGES = 2000;
 
-  // The view, from the hash (presets from a link; the controls below
-  // navigate to change them). A per-vhost console shows the module's
-  // messages only.
-  const source: SourceFilter = scope.isGlobal ? parseSourceFilter(router.params.get("source")) : "module";
-  const grouped = router.params.get("group") !== "0";
-  const raw = source === "optimizer" && !grouped;
-  const POLL_MS = raw ? 3000 : 5000;
+  const POLL_MS = 5000;
+  const RAW_POLL_MS = 3000;
+
+  // The view: preset by the address the page was opened with, then the
+  // operator's to change with the controls below. A per-vhost console shows
+  // the module's messages only.
+  const linkedSource: SourceFilter = scope.isGlobal ? parseSourceFilter(router.params.get("source")) : "module";
+  const linkedGrouped = router.params.get("group") !== "0";
+  const linkedRaw = linkedSource === "optimizer" && !linkedGrouped;
+  let source = $state<SourceFilter>(linkedSource);
+  let grouped = $state(linkedGrouped);
+  let raw = $derived(source === "optimizer" && !grouped);
+  let intervalMs = $derived(raw ? RAW_POLL_MS : POLL_MS);
 
   // Both buffers are replaced wholesale by each fold, never deep-proxied.
   let messages: MessagesState = $state.raw({ items: [], next: 0 });
@@ -111,11 +124,13 @@
   }
 
   const poll = usePolling(async () => {
+    // The view this read is for: a control may change it before the answer.
+    const rawRead = raw;
     const previousNextId = optimizer.nextId;
     const askOptimizer = !optimizerOff && !knownPerVhostScope(scope.config, scope.isGlobal);
     const [mod, opt] = await Promise.allSettled([
       // The raw view reads the optimizer's ring alone, as the old page did.
-      raw ? Promise.resolve(null) : api.getMessages(messages.next || undefined),
+      rawRead ? Promise.resolve(null) : api.getMessages(messages.next || undefined),
       askOptimizer
         ? readLogPages((since) => api.daemonLogs(since), optimizer)
         : Promise.reject(wholeServerConsoleOnlyError()),
@@ -147,7 +162,7 @@
       if (!isBusyAnswer(err)) optimizerError = err;
       // The raw view's one source is busy: the poller's one-second retry,
       // with the current view kept.
-      if (raw && isBusyAnswer(err)) throw err;
+      if (rawRead && isBusyAnswer(err)) throw err;
     }
     if (mod.status === "rejected") {
       const err = asError(mod.reason);
@@ -165,7 +180,7 @@
     }
     updatedAt = Date.now();
     return updatedAt;
-  }, POLL_MS);
+  }, linkedRaw ? RAW_POLL_MS : POLL_MS);
 
   async function pinToNewestWhenRendered(attempts = 3): Promise<void> {
     // On the very first page the list mounts only once the poller's own
@@ -182,11 +197,12 @@
   }
 
   // The level filter is a preset from the link (level=) and the operator's
-  // to change from there; the raw view shows every level unless the link
-  // names one, as the old page did.
+  // to change from there; a link to the raw view shows every level unless
+  // it names one, as the old page did. Changing the view with the controls
+  // leaves the levels as the operator set them.
   const levelParam = router.params.get("level");
   const levelKnown = isKnownTimelineLevel(levelParam);
-  let enabledLevels = $state(timelineLevelFilter(raw && levelParam === null ? "debug" : levelParam));
+  let enabledLevels = $state(timelineLevelFilter(linkedRaw && levelParam === null ? "debug" : levelParam));
   let text = $state("");
   let expanded = $state<Record<string, boolean>>({});
 
@@ -223,14 +239,33 @@
     return `#/logs?${params.toString()}`;
   }
 
-  /** Another view of this page: the link's level kept, the source and the grouping as asked. */
-  function viewHref(nextSource: SourceFilter, nextGrouped: boolean): string {
-    const params = new URLSearchParams();
-    if (levelParam !== null) params.set("level", levelParam);
-    if (scope.isGlobal && nextSource !== "both") params.set("source", nextSource);
-    if (!nextGrouped) params.set("group", "0");
-    const query = params.toString();
-    return query === "" ? "#/logs" : `#/logs?${query}`;
+  /**
+   * Another view of this page, in place: the address carries the choice and
+   * keeps its other parameters. Between views that read both logs nothing
+   * is fetched: they are filters over what is already here. Entering the
+   * raw view starts following the newest entry at its faster interval;
+   * leaving it reads the module's messages at once, from where they were
+   * last read.
+   */
+  function setView(nextSource: SourceFilter, nextGrouped: boolean): void {
+    const wasRaw = raw;
+    source = nextSource;
+    grouped = nextGrouped;
+    replaceViewParams({
+      ...(scope.isGlobal ? { source: nextSource === "both" ? null : nextSource } : {}),
+      group: nextGrouped ? null : "0",
+    });
+    const nowRaw = nextSource === "optimizer" && !nextGrouped;
+    if (nowRaw === wasRaw) return;
+    poll.setIntervalMs(nowRaw ? RAW_POLL_MS : POLL_MS);
+    if (nowRaw) {
+      follow = true;
+      anchorId = null;
+      unseenFrom = null;
+      void pinToNewestWhenRendered();
+    } else {
+      poll.invalidate();
+    }
   }
 
   function onLogScroll() {
@@ -283,7 +318,7 @@
     {updatedAt}
     refresh={{
       autoRefresh: poll.autoRefresh,
-      intervalMs: POLL_MS,
+      intervalMs,
       onToggle: () => (poll.autoRefresh ? poll.stop() : poll.start()),
       onRefresh: () => poll.refresh(),
     }}
@@ -398,7 +433,7 @@
                 name="logs-source"
                 value={option.value}
                 checked={source === option.value}
-                onchange={() => router.navigate(viewHref(option.value, grouped))}
+                onchange={() => setView(option.value, grouped)}
               />
               {option.label}
             </label>
@@ -415,7 +450,7 @@
         {/each}
       </fieldset>
       <label class="toggle field-check">
-        <input type="checkbox" checked={grouped} onchange={() => router.navigate(viewHref(source, !grouped))} />
+        <input type="checkbox" checked={grouped} onchange={() => setView(source, !grouped)} />
         Group repeats
       </label>
       <div class="control-group">

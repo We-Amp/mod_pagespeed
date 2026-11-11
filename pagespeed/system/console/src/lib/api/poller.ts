@@ -104,6 +104,7 @@ export class Poller<T> {
   private rerun = false;
   private disposed = false;
   private lastOutcome: Outcome = "ok";
+  private intervalMs: number;
   private readonly clock: PollerClock;
   private readonly visibility: VisibilitySource | null;
   private readonly stopWatching: () => void;
@@ -113,6 +114,7 @@ export class Poller<T> {
     private readonly fetcher: () => Promise<T>,
     private readonly options: PollerOptions,
   ) {
+    this.intervalMs = options.intervalMs;
     this.clock = options.clock ?? realClock;
     this.visibility = options.visibility === undefined ? documentVisibility() : options.visibility;
     this.state = {
@@ -177,6 +179,20 @@ export class Poller<T> {
     void this.refresh();
   }
 
+  /**
+   * Changes the interval of a running poller (a page whose views refresh at
+   * different rates). A refresh that is already scheduled is scheduled anew,
+   * one new interval -- or its back-off -- from now; a refresh in flight is
+   * left alone and the wait after it uses the new interval.
+   */
+  setIntervalMs(intervalMs: number): void {
+    if (this.disposed || intervalMs === this.intervalMs) return;
+    this.intervalMs = intervalMs;
+    if (this.timer === null) return;
+    this.clearTimer();
+    this.scheduleNext();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -226,7 +242,7 @@ export class Poller<T> {
   }
 
   private nextDelay(): number {
-    const { intervalMs } = this.options;
+    const intervalMs = this.intervalMs;
     if (this.lastOutcome === "failed") {
       return backoffDelay(intervalMs, this.state.failures, this.options.maxBackoffMs);
     }
