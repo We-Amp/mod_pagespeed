@@ -39,6 +39,15 @@ const pages = readdirSync(PAGES)
   .filter((f) => f.endsWith(".svelte"))
   .map((f) => ({ name: f, source: readFileSync(join(PAGES, f), "utf8") }));
 
+// Every component: the pages, the shared ones beside this file, and the shell.
+const components = [
+  ...pages,
+  ...readdirSync(LIB)
+    .filter((f) => f.endsWith(".svelte"))
+    .map((f) => ({ name: f, source: readFileSync(join(LIB, f), "utf8") })),
+  { name: "App.svelte", source: readFileSync(join(LIB, "..", "App.svelte"), "utf8") },
+];
+
 // A rule on a bare table part or heading restyles every one on the page.
 const BARE_ELEMENT = /^(table|thead|tbody|tfoot|tr|th|td|caption|h[1-6])(?![\w-])/;
 // The shared classes and their modifiers.
@@ -113,5 +122,22 @@ describe("shared component layer", () => {
 
   it("the body text of a page is the body type role", () => {
     expect(theme).toMatch(/^main\s*\{[^}]*font-size:\s*var\(--ps-type-body-size\)/m);
+  });
+
+  // A modifier joins its class with one hyphen (.notice-error, .card-muted),
+  // never with "--", in the markup and in the styles alike.
+  it("names no class with a double hyphen", () => {
+    const offenders: string[] = [];
+    for (const { name, source } of components) {
+      const style = /<style[^>]*>[\s\S]*?<\/style>/.exec(source)?.[0] ?? "";
+      const markup = source.replace(style, "");
+      for (const [m] of style.matchAll(/\.-?[A-Za-z_][\w-]*--[\w-]*/g)) offenders.push(`${name}: ${m}`);
+      for (const [, list] of markup.matchAll(/\bclass="([^"]*)"/g)) {
+        for (const token of list.split(/\s+/)) if (token.includes("--")) offenders.push(`${name}: ${token}`);
+      }
+      for (const [m] of markup.matchAll(/\bclass:[\w-]*--[\w-]*/g)) offenders.push(`${name}: ${m}`);
+    }
+    for (const [m] of theme.matchAll(/\.-?[A-Za-z_][\w-]*--[\w-]*/g)) offenders.push(`theme.css: ${m}`);
+    expect(offenders).toEqual([]);
   });
 });

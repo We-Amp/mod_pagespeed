@@ -82,7 +82,7 @@ test.describe("Statistics page - detailed checks", () => {
     expect(totalAfter).toBeGreaterThan(0);
 
     // Every visible row name should contain "cache_hits".
-    const nameCells = page.locator("td.name-cell");
+    const nameCells = page.locator(".name-cell");
     const filteredCount = await nameCells.count();
     for (let i = 0; i < filteredCount; i++) {
       const text = await nameCells.nth(i).textContent();

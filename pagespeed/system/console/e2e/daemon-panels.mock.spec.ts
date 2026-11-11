@@ -95,7 +95,7 @@ test.describe("Daemon panels", () => {
     await expect(page.getByRole("row", { name: /Cache directory configured/ })).toContainText("Pass");
     const failing = page.getByRole("row", { name: /Cache opened/ });
     await expect(failing).toContainText("Fail");
-    await expect(failing.getByRole("cell").first()).toHaveAttribute("title", "cache_open");
+    await expect(failing.getByRole("rowheader")).toHaveAttribute("title", "cache_open");
     await expect(page.getByText('{"pass"')).toHaveCount(0);
   });
 

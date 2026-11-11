@@ -28,6 +28,7 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import SortableHeader from "$lib/SortableHeader.svelte";
   import { formatCount } from "$lib/utils/format";
+  import { settledCount } from "$lib/utils/filter-status";
   import {
     cooldownReasonLabel,
     errorCode,
@@ -139,6 +140,10 @@
   // as garbage do not count toward it.
   let win = $derived(pageWindow(urlsData ?? undefined, offset, rows.length));
 
+  // The count, read out once the filter box is quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((text) => (countStatus = text));
+
   // The next page starts where the daemon says it does: its pages need not
   // hold URLS_PAGE_SIZE rows. offset + URLS_PAGE_SIZE when it says nothing.
   let nextOffset = $derived.by(() => {
@@ -184,8 +189,12 @@
         aria-label="Filter this page by URL or host"
         data-testid="urls-search"
         bind:value={search}
-        oninput={remember}
+        oninput={() => {
+          remember();
+          announceCount(() => `${formatCount(rows.length)} of ${formatCount(pageCount)} URLs on this page`);
+        }}
       />
+      <span class="visually-hidden" role="status" data-testid="urls-count-status">{countStatus}</span>
     {/snippet}
   </PageHeader>
 

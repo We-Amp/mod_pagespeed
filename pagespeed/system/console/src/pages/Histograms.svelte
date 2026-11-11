@@ -10,6 +10,7 @@
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import { bucketWidths, bucketShares, unitForHistogram } from "$lib/utils/histograms";
   import { formatCount, formatPercent, formatSig } from "$lib/utils/format";
+  import { settledCount } from "$lib/utils/filter-status";
   import type { HistogramJson } from "$lib/api/types";
   import { useConsole } from "$lib/api/context";
 
@@ -53,6 +54,10 @@
     bucketShares(selected?.buckets ?? [], selected?.count ?? 0),
   );
 
+  // The count, read out once the filter box is quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((text) => (countStatus = text));
+
   function selectHistogram(index: number) {
     selectedIndex = index;
   }
@@ -82,8 +87,11 @@
         type="text"
         class="search-input field field-search"
         placeholder="Filter histograms by name..."
+        aria-label="Filter histograms by name"
         bind:value={search}
+        oninput={() => announceCount(() => `${filteredIndices.length} of ${rows.length} histograms`)}
       />
+      <span class="visually-hidden" role="status" data-testid="histograms-count-status">{countStatus}</span>
     {/snippet}
   </PageHeader>
 
@@ -105,17 +113,17 @@
         <table class="data data-dense histogram-table">
           <thead>
             <tr>
-              <th>Histogram Name</th>
+              <th scope="col">Histogram Name</th>
               <th scope="col" class="num">Unit</th>
-              <th class="num">Count</th>
-              <th class="num">Avg</th>
-              <th class="num">StdDev</th>
-              <th class="num">Min</th>
-              <th class="num">Median</th>
-              <th class="num">Max</th>
-              <th class="num">90%</th>
-              <th class="num">95%</th>
-              <th class="num">99%</th>
+              <th scope="col" class="num">Count</th>
+              <th scope="col" class="num">Avg</th>
+              <th scope="col" class="num">StdDev</th>
+              <th scope="col" class="num">Min</th>
+              <th scope="col" class="num">Median</th>
+              <th scope="col" class="num">Max</th>
+              <th scope="col" class="num">90%</th>
+              <th scope="col" class="num">95%</th>
+              <th scope="col" class="num">99%</th>
             </tr>
           </thead>
           <tbody>
@@ -126,7 +134,7 @@
                 class:selected={effectiveSelected === idx}
                 onclick={() => selectHistogram(idx)}
               >
-                <td class="name-cell">
+                <th scope="row" class="name-cell">
                   <button
                     type="button"
                     class="row-select"
@@ -136,7 +144,7 @@
                       selectHistogram(idx);
                     }}
                   >{row.name}</button>
-                </td>
+                </th>
                 <td class="num">{unitForHistogram(row.name)}</td>
                 <td class="num">{formatCount(row.count)}</td>
                 <td class="num">{row.avg === null ? "—" : formatSig(row.avg)}</td>
@@ -160,17 +168,17 @@
           <table class="data data-dense detail-table">
             <thead>
               <tr>
-                <th>Bucket</th>
-                <th class="num">Count</th>
-                <th class="num">%</th>
-                <th class="num">Cumulative %</th>
-                <th>Distribution</th>
+                <th scope="col">Bucket</th>
+                <th scope="col" class="num">Count</th>
+                <th scope="col" class="num">%</th>
+                <th scope="col" class="num">Cumulative %</th>
+                <th scope="col">Distribution</th>
               </tr>
             </thead>
             <tbody>
               {#each selected.buckets as bucket, i}
                 <tr>
-                  <td class="bucket-range">[{bucket.start}, {bucket.limit})</td>
+                  <th scope="row" class="bucket-range">[{bucket.start}, {bucket.limit})</th>
                   <td class="num">{bucket.count}</td>
                   <td class="num">{formatPercent(shares[i].percent)}</td>
                   <td class="num">{formatPercent(shares[i].cumulative)}</td>

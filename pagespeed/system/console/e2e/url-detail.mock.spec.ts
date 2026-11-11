@@ -286,7 +286,7 @@ test("a URL the module holds an optimized result for is not listed with reasons 
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup(F.LOOKUP_OPTIMIZED) });
   await openConsole(page, "pagespeed_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-verdict")).toHaveText("Optimized. The module's result is optimized.");
+  await expect(page.getByTestId("url-verdict")).toHaveText("Optimized. The module rewrote it.");
   await expect(page.getByTestId("url-module-lookup")).toHaveText("The module holds a current rewrite result for this URL.");
   await expect(page.getByTestId("url-reasons")).toHaveCount(0);
   await expect(page.getByTestId("url-detail-per-vhost")).toBeVisible();

@@ -444,8 +444,8 @@
               <table class="data">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Purged URL</th>
+                    <th scope="col">#</th>
+                    <th scope="col">Purged URL</th>
                   </tr>
                 </thead>
                 <tbody>

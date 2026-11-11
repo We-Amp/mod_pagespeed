@@ -270,14 +270,14 @@
                 count as no net savings above.
               </p>
             {/if}
-            <table class="data-inline breakdown reads-across" data-testid="savings-module-table">
+            <table class="data-inline breakdown reads-across" data-testid="savings-module-table" aria-label="Module rewrites, by type">
               <thead>
-                <tr><th>Type</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
+                <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
               </thead>
               <tbody>
                 {#each rows as row (row.key)}
                   <tr>
-                    <td>{row.label}</td>
+                    <th scope="row">{row.label}</th>
                     <td class="num">{formatBytes(row.saved)}{#if row.regressed} <span class="note">(no net savings)</span>{/if}</td>
                     <td class="num">{formatBytes(row.original)}</td>
                     <td class="num">{formatPercent(row.percent, row.saved)}</td>
@@ -411,14 +411,14 @@
                 The optimizer served more bytes than the originals on some responses; those count as negative savings above.
               </p>
             {/if}
-            <table class="data-inline breakdown reads-across" data-testid="savings-optimizer-table">
+            <table class="data-inline breakdown reads-across" data-testid="savings-optimizer-table" aria-label="Optimizer cache serves, by type">
               <thead>
-                <tr><th>Type</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
+                <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
               </thead>
               <tbody>
                 {#each serveView.served as row (row.key)}
                   <tr>
-                    <td>{row.label}</td>
+                    <th scope="row">{row.label}</th>
                     <td class="num">{formatSignedBytes(row.saved)}</td>
                     <td class="num">{formatBytes(row.original)}</td>
                     <td class="num">{formatPercent(row.percent, row.saved)}</td>
@@ -514,14 +514,14 @@
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
           <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
-            <table class="data-inline breakdown reads-across" data-testid="savings-by-host">
+            <table class="data-inline breakdown reads-across" data-testid="savings-by-host" aria-labelledby="savings-by-host-heading">
               <thead>
-                <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
+                <tr><th scope="col">Host</th><th scope="col">Responses</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
               </thead>
               <tbody>
                 {#each hostTable.hosts as row (row.host)}
                   <tr>
-                    <td class="host-cell">{row.host}</td>
+                    <th scope="row" class="host-cell">{row.host}</th>
                     <td class="num">{formatCount(row.hits)}</td>
                     <td class="num">{formatSignedBytes(row.saved)}</td>
                     <td class="num">{formatBytes(row.original)}</td>
@@ -530,7 +530,7 @@
                 {/each}
                 {#if hostTable.other}
                   <tr data-testid="savings-by-host-other">
-                    <td class="host-cell">Other hosts and serves without a host</td>
+                    <th scope="row" class="host-cell">Other hosts and serves without a host</th>
                     <td class="num">{formatCount(hostTable.other.hits)}</td>
                     <td class="num">{formatSignedBytes(hostTable.other.saved)}</td>
                     <td class="num">{formatBytes(hostTable.other.original)}</td>
@@ -656,7 +656,7 @@
     margin-bottom: var(--ps-space-md);
   }
   /* Only host names break. */
-  .breakdown td.host-cell {
+  .breakdown .host-cell {
     white-space: normal;
   }
   /* In a very narrow window (a small phone, a desktop window at 400% zoom)
