@@ -84,7 +84,7 @@ test.describe("Overview", () => {
   test("daemon absent (unreachable): the module card keeps working", async ({ page }) => {
     const { errors } = await open(page, "pagespeed_admin", healthy({ "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE }));
     await expect(page.getByTestId("module-bytes-saved")).toContainText("12.3 MB");
-    await expect(page.getByTestId("optimizer-state")).toHaveText("Unreachable");
+    await expect(page.getByTestId("optimizer-state")).toHaveText("Not answering");
     await expect(page.getByTestId("optimizer-card")).toContainText("configured but not answering");
     await expectNoJunk(page);
     expect(errors).toEqual([]);

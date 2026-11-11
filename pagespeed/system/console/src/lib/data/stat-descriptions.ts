@@ -168,7 +168,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   rewrite_cached_output_missed_deadline:
     "Optimizations still unfinished when the page had to be flushed, so the original content went out and the result was kept for next time. Individual requests can ask to wait for every optimization instead, and those never land here.",
   num_rewrites_executed:
-    "Optimization jobs actually started on a background worker. A rough measure of optimization work performed rather than reused from cache.",
+    "Optimization jobs actually started in the background. A rough measure of optimization work performed rather than reused from cache.",
   num_rewrites_dropped:
     "Optimization jobs cancelled before running because the server was shedding load or shutting down. Persistent growth means workers are saturated and pages go out unoptimized.",
   num_rewrites_abandoned_for_lock_contention:

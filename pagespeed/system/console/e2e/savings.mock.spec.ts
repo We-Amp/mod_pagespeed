@@ -78,7 +78,7 @@ test("keeps the module figures when the optimizer is unreachable", async ({ page
   });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   await expect(page.getByTestId("savings-module-total")).toContainText("12.3 MB");
-  await expect(page.getByTestId("savings-optimizer-unavailable")).toContainText("Unreachable");
+  await expect(page.getByTestId("savings-optimizer-unavailable")).toContainText("Not answering");
 });
 
 test("says so when no optimizer is configured", async ({ page }) => {

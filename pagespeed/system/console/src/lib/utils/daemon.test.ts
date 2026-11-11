@@ -67,11 +67,11 @@ describe("daemonUnavailableReason", () => {
     );
   });
 
-  it("keeps 'unreachable' for the proxy's 502 and for anything it cannot name", () => {
-    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("unreachable");
-    expect(daemonUnavailableReason(new Error("network down"))).toBe("unreachable");
+  it("says not answering for the proxy's 502 and for anything it cannot name", () => {
+    expect(daemonUnavailableReason(new ApiError(502, "daemon_unreachable"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new ApiError(502, "Bad Gateway"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new ApiError(404, "Unknown admin page"))).toBe("the optimizer is not answering");
+    expect(daemonUnavailableReason(new Error("network down"))).toBe("the optimizer is not answering");
   });
 });
 

@@ -511,7 +511,7 @@
           <h2 id="savings-by-host-heading">{TERMS.savedByOptimizerCache}, by host</h2>
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="table-scroll" role="region" aria-label="Hosts table" tabindex="0">
+          <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
             <table class="breakdown reads-across" data-testid="savings-by-host">
               <thead>
                 <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
@@ -549,7 +549,7 @@
 
     <section class="card chart-card" data-testid="savings-chart-card" aria-labelledby="savings-chart-heading">
       <h2 id="savings-chart-heading" data-testid="savings-chart-window">
-        Savings — {chartView ? chartWindowLabel(chartView.timestamps) : "collecting samples"}
+        Savings: {chartView ? chartWindowLabel(chartView.timestamps) : "collecting samples"}
       </h2>
       {#if chartView}
         <div class="chart-legend" data-testid="savings-chart-legend">

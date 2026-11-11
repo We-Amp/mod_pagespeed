@@ -273,7 +273,7 @@ export function availabilityText(a: DaemonAvailability): { word: string; detail:
       };
     case "unreachable":
       return {
-        word: "Unreachable",
+        word: "Not answering",
         detail: OPTIMIZER_NOT_ANSWERING,
       };
     case "unsupported":

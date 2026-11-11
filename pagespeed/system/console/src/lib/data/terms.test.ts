@@ -2,10 +2,11 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 // One name per thing. The console's copy lives in string tables and page
-// templates; this reads all of it and fails on a second name for the
-// optimizer, for either savings figure, for the served share or for the
-// host filter, and on a documentation link that does not come from the one
-// table of links.
+// templates; this reads all of it and fails on the names the console used
+// to have for the optimizer, its not-answering state, either savings
+// figure, the served share and the host filter, and on a documentation link
+// that does not come from the one table of links. It is a list of retired
+// names: it cannot catch a synonym nobody has used yet.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -73,8 +74,22 @@ describe("the console's vocabulary", () => {
     expect(uses(/optimizer worker/i)).toEqual([]);
     expect(uses(/\bthe worker\b|\bworker's\b/i)).toEqual([]);
     expect(uses(/\b(the|a|this) daemon\b/i)).toEqual([]);
+    expect(uses(/\b(optimi[sz]er|pagespeed|background) daemon\b|\bdaemon's\b/i)).toEqual([]);
+    expect(uses(/\b(pagespeed|optimi[sz]er|background) worker\b/i)).toEqual([]);
+    // Identifiers and the web server's own worker processes are not names for the optimizer.
+    expect(uses(/daemonView|worker processes/)).not.toEqual([]);
     // The option names are the product's own and stay as they are.
     expect(uses(/DaemonVolumePath/)).not.toEqual([]);
+  });
+
+  it("calls an optimizer that is configured but silent \"not answering\"", () => {
+    expect(uses(/optimizer (is )?unreachable|word: "Unreachable"|return "unreachable"|could not reach the optimizer/i, [
+      // The availability value of the same name is read by code, never shown.
+      "lib/utils/overview.ts",
+    ])).toEqual([]);
+    expect(uses(/word: "Unreachable"|optimizer unreachable/i)).toEqual([]);
+    expect(ALERT_RULES.find((r) => r.id === "daemon-unreachable")?.label).toBe("Optimizer not answering");
+    expect(optimizerAbsenceText("not-answering").title).toBe("Optimizer not answering");
   });
 
   it("names the module's savings figure one way", () => {

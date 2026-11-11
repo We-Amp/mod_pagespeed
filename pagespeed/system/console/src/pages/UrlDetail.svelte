@@ -260,7 +260,7 @@
     {#if cooldown}
       {@const reason = cooldownReasonLabel(cooldown.reason)}
       <p class="cooldown-banner" data-testid="url-detail-cooldown">
-        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{` — ${Math.max(
+        In cooldown{#if reason !== null}{` (${reason})`}{/if}{#if typeof cooldown.remaining_seconds === "number" && Number.isFinite(cooldown.remaining_seconds)}{`, ${Math.max(
               0,
               Math.round(cooldown.remaining_seconds),
             )}s remaining`}{/if}.

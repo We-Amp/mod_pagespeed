@@ -324,7 +324,7 @@
 
   function curatedTitle(chart: CuratedChart): string {
     // The host the optimizer savings follow: the lens, or a per-vhost console's own.
-    return chart.id === "optimizer_saved" && focusHost !== null ? `${chart.title} — ${focusHost}` : chart.title;
+    return chart.id === "optimizer_saved" && focusHost !== null ? `${chart.title} for ${focusHost}` : chart.title;
   }
 
   function curatedFormat(unit: CuratedUnit): (v: number) => string {

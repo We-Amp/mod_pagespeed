@@ -46,7 +46,7 @@ test("a cooldown banner separates its reason and remaining time", async ({ page 
   );
   await openConsole(page, "pagespeed_global_admin", DETAIL_HASH);
   await ready(page);
-  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing) — 42s remaining.");
+  await expect(page.getByTestId("url-detail-cooldown")).toHaveText("In cooldown (Processing), 42s remaining.");
 });
 
 test("renders the variants, badges and image previews", async ({ page }) => {

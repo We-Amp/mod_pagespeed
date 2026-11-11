@@ -46,7 +46,7 @@ export interface CuratedChartSpec {
 }
 
 export const CURATED_CHARTS: readonly CuratedChartSpec[] = [
-  { id: "requests", title: "Requests looked up for optimization", unit: "per-second", source: "module" },
+  { id: "requests", title: "Requests checked against the optimizer's cache", unit: "per-second", source: "module" },
   { id: "module_saved", title: TERMS.savedByRewriting, unit: "bytes-per-second", source: "module" },
   { id: "optimizer_saved", title: TERMS.savedByOptimizerCache, unit: "bytes-per-second", source: "optimizer" },
   { id: "hit_rate", title: TERMS.servedOptimized, unit: "percent", source: "module" },

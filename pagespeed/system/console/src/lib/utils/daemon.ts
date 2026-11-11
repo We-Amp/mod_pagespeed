@@ -74,7 +74,7 @@ export function wholeServerConsoleOnlyError(): ApiError {
  * Operator-facing words for why one daemon panel has nothing to show
  * ("Health is not available: ..."). Maps the daemon proxy's
  * three reason codes and a 503 the optimizer sent itself; anything else
- * (including a genuine transport failure/timeout) defaults to "unreachable".
+ * (including a genuine transport failure/timeout) reads as not answering.
  */
 export function daemonUnavailableReason(error: Error | null): string {
   switch (errorCode(error)) {
@@ -83,10 +83,10 @@ export function daemonUnavailableReason(error: Error | null): string {
     case "endpoint_unsupported_by_daemon":
       return "this optimizer version does not provide this panel";
     case "daemon_unreachable":
-      return "unreachable";
+      return "the optimizer is not answering";
     default:
       // A 503 the optimizer sent itself: it is running, and the next refresh asks again.
-      return absenceOf(error) === "did-not-answer" ? "the optimizer did not answer this refresh" : "unreachable";
+      return absenceOf(error) === "did-not-answer" ? "the optimizer did not answer this refresh" : "the optimizer is not answering";
   }
 }
 

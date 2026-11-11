@@ -416,7 +416,7 @@ test.describe("the default charts", () => {
     });
     await openConsole(page, "pagespeed_global_admin", "#/graphs?lens=www.example.com");
     await expect(page.getByTestId("curated-lens-note")).toContainText("www.example.com");
-    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — www.example.com" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache for www.example.com" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("lens-note")).toHaveCount(0);
   });
 
@@ -428,7 +428,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_PAGE,
     });
     await openConsole(page, "pagespeed_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — static.example.com" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache for static.example.com" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("host-lens")).toHaveCount(0);
   });
 
@@ -441,7 +441,7 @@ test.describe("the default charts", () => {
       "v1/daemon/stats": F.OPT_STATS_SITE_ROW,
     });
     await openConsole(page, "pagespeed_admin", "#/graphs");
-    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache — example.test" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Saved by the optimizer's cache for example.test" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("curated-whole-server-note")).toHaveCount(0);
   });
 
@@ -496,7 +496,7 @@ test.describe("the default charts", () => {
     };
     await poll();
     await poll();
-    await expect(chart.getByRole("heading", { name: "Saved by the optimizer's cache — www.example.com" })).toBeVisible();
+    await expect(chart.getByRole("heading", { name: "Saved by the optimizer's cache for www.example.com" })).toBeVisible();
     await expect(chart.getByTestId("curated-latest")).toHaveText("0 B/s");
 
     await page.getByTestId("host-lens").getByRole("combobox", { name: "Host" }).selectOption("");

@@ -256,7 +256,7 @@ describe("daemonServeSavings", () => {
 describe("texts", () => {
   it("availabilityText names every state", () => {
     expect(availabilityText("not-configured").word).toBe("Not configured");
-    expect(availabilityText("unreachable").word).toBe("Unreachable");
+    expect(availabilityText("unreachable").word).toBe("Not answering");
     expect(availabilityText("unsupported").word).toBe("Outdated");
     expect(availabilityText("transient").word).toBe("Checking");
     expect(availabilityText("ok").word).toBe("Running");

@@ -464,7 +464,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
   },
   {
     id: "daemon-unreachable",
-    label: "Optimizer unreachable",
+    label: "Optimizer not answering",
     severity: "warning",
     kind: "state",
     link: "#/optimizer",
