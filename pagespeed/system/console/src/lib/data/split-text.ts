@@ -10,7 +10,7 @@ export const SPLIT_TEXT = {
   /** Shown instead of the split while too few of the served bytes can be split. */
   unavailable: "The split between compression and optimization appears once the cached entries have refreshed.",
   /** Shown when the optimizer does not report the split at all (an older version). */
-  notReported: "This optimizer version does not report how much of this compression saved and how much optimization saved.",
+  notReported: "This optimizer version does not split this figure into compression and optimization.",
   unsplitLabel: "Not yet attributed",
   encodingLabel: "Saved by mod_pagespeed compression",
   rewriteLabel: "Saved by optimization",
