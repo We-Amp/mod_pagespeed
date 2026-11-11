@@ -292,7 +292,8 @@ export interface OverviewHealth {
 /**
  * The health line while the server is not answering. What the page last
  * read says nothing about now, so the line claims nothing: it names the time
- * of the last answer the page's figures come from instead of a verdict.
+ * of the server's last answer to the module read (an error answer counts)
+ * instead of a verdict.
  */
 export function unknownHealth(
   lastAnsweredAt: number | null,

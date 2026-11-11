@@ -61,6 +61,9 @@
   let lastModule = $state<StatsResponse | null>(null);
   let daemonView = $state<AlertSnapshot | null>(null);
   let updatedAt = $state<number | null>(null);
+  // When the server last answered the module read at all (an error answer
+  // counts): the stamp is the age of the figures, this is the age of contact.
+  let lastAnswerAt = $state<number | null>(null);
 
   // This mount's first sample is a baseline for rate rules: nothing was
   // sampled while the page was not shown.
@@ -105,6 +108,7 @@
           const status = sample.module.error instanceof ApiError ? sample.module.error.status : null;
           if (isConnectionFailure("/stats_json", status)) throw sample.module.error;
         }
+        lastAnswerAt = sample.at;
         return sample;
       }),
     5000,
@@ -167,7 +171,7 @@
   let serveSavings = $derived(daemonServeSavings(daemonView?.daemonStats ?? null));
   let health = $derived(
     serverDown
-      ? unknownHealth(updatedAt)
+      ? unknownHealth(lastAnswerAt)
       : healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable, logOff),
   );
 </script>

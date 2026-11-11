@@ -192,6 +192,29 @@ test.describe("Connection", () => {
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });
 
+  test("a server that answered with an error and then went down still has a last answer", async ({ page }) => {
+    let down = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      { ...F.allReplies(), stats_json: { status: 404, body: "Unknown admin page: stats_json" } },
+      { down: () => down },
+    );
+    await openConsole(page, "pagespeed_admin");
+    const health = page.getByTestId("health-summary");
+    await expect(health).toHaveText("Module statistics unavailable");
+    // No figures were ever read: the stamp has nothing to age.
+    await expect(page.getByTestId("page-updated")).toHaveText("updated —");
+
+    down = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByTestId("connection-banner")).toBeVisible();
+    // The server did answer before it went down, so the line carries that time.
+    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).not.toContainText("has not answered");
+    await expect(page.getByTestId("page-updated")).toHaveText("updated —");
+  });
+
   test("a gateway 5xx on every Overview leaf keeps the banner steady and the Overview backs off", async ({ page }) => {
     await page.clock.install();
     let down = false;

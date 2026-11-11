@@ -41,6 +41,13 @@ describe("the console's polling discipline", () => {
     expect(offenders(sourceFiles(join(SRC, "pages")), /^(?!\s*(\/\/|\*)).*\$effect(\.\w+)?\s*\(/m)).toEqual([]);
   });
 
+  // The ticking clock (lib/now.svelte.ts) ages text on screen and nothing
+  // else: only the page header reads it, so no fetch can hang off a tick.
+  it("lets only the page header read the ticking clock", () => {
+    const readers = offenders(sourceFiles(SRC), /from\s+["'][^"']*\bnow\.svelte(\.ts)?["']/);
+    expect(readers).toEqual(["lib/PageHeader.svelte"]);
+  });
+
   it("refreshes every data page through usePolling", () => {
     for (const page of POLLING_PAGES) {
       const text = readFileSync(join(SRC, "pages", `${page}.svelte`), "utf8");
