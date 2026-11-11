@@ -54,6 +54,10 @@
     min-width: 0;
   }
 
+  label {
+    white-space: nowrap;
+  }
+
   /* One width on every page, whatever hosts it lists, so the top bar's
      right group never shifts when navigating; a long name is cut short.
      The compact control height: the band is a toolbar, not a form. */

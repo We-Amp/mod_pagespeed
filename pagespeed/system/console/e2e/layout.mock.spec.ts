@@ -112,32 +112,50 @@ test.describe("the top bar's spacing", () => {
     });
   }
 
-  test("nothing overlaps or is cut short at the narrowest desktop width", async ({ page }) => {
-    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
-    await page.setViewportSize({ width: 1440, height: 800 });
-    await openConsole(page, "pagespeed_global_admin", "#/overview");
-    await pageReady(page);
-    const select = page.getByTestId("host-lens").locator("select");
-    const wide = (await box(select)).width;
-    await page.setViewportSize({ width: 769, height: 800 });
-    const parts = await page
-      .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
-      .evaluateAll((els) =>
-        els
-          .filter((el) => el.getClientRects().length > 0)
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-          }),
-      );
-    for (let i = 1; i < parts.length; i++) {
-      expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
-      expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
-    }
-    const chip = page.locator(".topbar-chip");
-    expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect((await box(select)).width).toBeCloseTo(wide, 0);
-  });
+  // With a host filter on a page that ignores it, the control carries a
+  // "not applied" note: still nothing may be cut short or wrap.
+  const NARROW = [
+    { width: 769, hash: "#/overview" },
+    { width: 769, hash: "#/statistics?lens=www.example.test" },
+    { width: 880, hash: "#/statistics?lens=www.example.test" },
+    { width: 960, hash: "#/statistics?lens=www.example.test" },
+  ];
+  for (const { width, hash } of NARROW) {
+    test(`nothing overlaps or is cut short at ${width} px on ${hash}`, async ({ page }) => {
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      const select = page.getByTestId("host-lens").locator("select");
+      const wide = (await box(select)).width;
+      await page.setViewportSize({ width, height: 800 });
+      const label = await box(page.getByTestId("host-lens").locator("label"));
+      expect(label.bottom - label.top, "the Host filter label stays on one line").toBeLessThan(24);
+      const bar = await box(page.locator(".topbar"));
+      expect((await box(page.locator(".topbar-lens"))).right, "the host filter stays inside the bar").toBeLessThanOrEqual(bar.right);
+      expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true);
+      if (hash.includes("lens=")) {
+        await expect(page.getByRole("combobox", { name: "Host" }).first()).toHaveAccessibleDescription("(not applied on this page)");
+      }
+      const parts = await page
+        .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
+        .evaluateAll((els) =>
+          els
+            .filter((el) => el.getClientRects().length > 0)
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+            }),
+        );
+      for (let i = 1; i < parts.length; i++) {
+        expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
+        expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
+      }
+      const chip = page.locator(".topbar-chip");
+      expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect((await box(select)).width).toBeCloseTo(wide, 0);
+    });
+  }
 });
 
 interface Item {

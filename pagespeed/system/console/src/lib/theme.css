@@ -800,6 +800,7 @@ p.note {
   font-size: var(--ps-font-size-xs);
   font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

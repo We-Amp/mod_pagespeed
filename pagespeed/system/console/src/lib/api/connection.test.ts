@@ -123,12 +123,20 @@ describe("OptimizerPresenceMonitor", () => {
     m.subscribe((p) => seen.push(p));
     m.record("/stats_json", 200);
     m.record("/v1/daemon/health", null);
-    m.record("/v1/daemon/health", 502, JSON.stringify({ error: "daemon_unreachable" }));
     expect(seen).toEqual(["unknown"]);
     m.record("/v1/daemon/health", 503, NOT_CONFIGURED);
     m.record("/v1/daemon/stats", 503, NOT_CONFIGURED);
     expect(seen).toEqual(["unknown", "none"]);
     m.record("/v1/daemon/health", 200, "{}");
+    expect(seen).toEqual(["unknown", "none", "present"]);
+  });
+
+  it("an optimizer configured later un-mutes on the next read, even one that does not answer", () => {
+    const m = new OptimizerPresenceMonitor();
+    const seen: string[] = [];
+    m.subscribe((p) => seen.push(p));
+    m.record("/v1/daemon/health", 503, NOT_CONFIGURED);
+    m.record("/v1/daemon/logs", 502, JSON.stringify({ error: "daemon_unreachable" }));
     expect(seen).toEqual(["unknown", "none", "present"]);
   });
 

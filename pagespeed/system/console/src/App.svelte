@@ -747,6 +747,20 @@
     display: none;
   }
 
+  /* A narrow desktop window has no room for the "not applied" note beside
+     the host filter: the scope chip keeps its width, and the note stays the
+     control's description. */
+  @media (max-width: 900px) {
+    .topbar-lens :global(.lens-off) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+
   @media (max-width: 768px) {
     .nav-key {
       display: none;

@@ -79,8 +79,11 @@ export class OptimizerPresenceMonitor {
   record(path: string, status: number | null, body?: string): void {
     if (status === null || !path.startsWith("/v1/daemon/")) return;
     let next = this.current;
-    if (status >= 200 && status < 300) next = "present";
-    else if (status === 503 && daemonReasonCode(body) === "daemon_not_configured") next = "none";
+    const code = daemonReasonCode(body);
+    // An answer, or the proxy naming a configured optimizer that did not
+    // answer: there is one. Only the proxy's own "not configured" says none.
+    if ((status >= 200 && status < 300) || (code !== null && code !== "daemon_not_configured")) next = "present";
+    else if (status === 503 && code === "daemon_not_configured") next = "none";
     if (next === this.current) return;
     this.current = next;
     for (const fn of this.listeners) fn(next);
@@ -95,6 +98,7 @@ export class OptimizerPresenceMonitor {
     };
   }
 
+  /** Back to unknown, without telling listeners (tests; a fresh console starts there). */
   reset(): void {
     this.current = "unknown";
   }
