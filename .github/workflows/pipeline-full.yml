@@ -1624,7 +1624,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location $env:GITHUB_WORKSPACE
+          # A host failure of the site start (HTTP.sys refused a binding,
+          # hresult 0x80070020; the setup script's infra-class.txt marker,
+          # classified by tools/ci/iis_failure_class.py as in the PR tier's
+          # IIS System Tests) means no test ran. It is retried once, on this
+          # runner after the binding has had time to drain: the verifier
+          # settings are machine-global, so a retry on another runner would
+          # need the whole job again. A test failure is never retried, and
+          # the retry's own failure of either class fails the step.
+          $marker = Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt'
+          Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
           .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $line = "$(& python tools\ci\iis_failure_class.py $env:PAGESPEED_EVIDENCE_DIR | Select-Object -Last 1)".Trim()
+            if ($line -eq 'infra iis-site-start') {
+              Write-Host "::warning::the test site did not start on $($env:RUNNER_NAME) (a failure of the host, not of the change); the tests run once more"
+              Start-Sleep -Seconds 60
+              Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+              .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
+              $code = $LASTEXITCODE
+            }
+          }
+          exit $code
 
       - name: Export the Application Verifier log
         if: always()

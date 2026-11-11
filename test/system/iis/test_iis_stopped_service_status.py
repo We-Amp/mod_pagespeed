@@ -129,6 +129,26 @@ def _recycle_pool() -> None:
     time.sleep(3)
 
 
+def _wait_until_serving(host: str, port: int, path: str, timeout: float = 120.0) -> None:
+    """Block until the site answers a request (any status) after a recycle.
+
+    _recycle_pool returns before the new worker process has loaded the
+    module and read the changed configuration, and under Application
+    Verifier that takes minutes, not seconds. Polling until a request is
+    answered makes the reload an observed event instead of a guess.
+    """
+    deadline = time.time() + _scaled(timeout)
+    last: object = None
+    while time.time() < deadline:
+        try:
+            _get(host, port, path)
+            return
+        except (OSError, http.client.HTTPException) as exc:
+            last = exc
+            time.sleep(2)
+    pytest.fail(f"site did not answer after the pool recycle: {last!r}")
+
+
 def _non_loopback_addresses() -> List[str]:
     try:
         infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
@@ -145,7 +165,7 @@ def _non_loopback_addresses() -> List[str]:
 def _get(host: str, port: int, path: str, source: Optional[str] = None):
     """GET path from host:port, optionally from a given local address."""
     conn = http.client.HTTPConnection(
-        host, port, timeout=30, source_address=(source, 0) if source else None
+        host, port, timeout=_scaled(30), source_address=(source, 0) if source else None
     )
     try:
         conn.request("GET", path, headers={"Host": "localhost"})
@@ -408,7 +428,11 @@ def test_half_configured_service_event_log_says_not_set(server_config, example_r
     started = time.time()
     pipe = rf"\\.\pipe\pagespeed-halfset-{uuid.uuid4().hex}"
     with _site_config_with(SITE_CONFIG, f"pagespeed DaemonSocketPath {pipe}\n"):
-        _get("127.0.0.1", server_config.port, f"{example_root}/combine_javascript1.js")
+        # Wait for the recycled worker to serve (it has then read the new
+        # configuration) before the request this test is about.
+        page = f"{example_root}/combine_javascript1.js"
+        _wait_until_serving("127.0.0.1", server_config.port, page)
+        _get("127.0.0.1", server_config.port, page)
         found = _wait_for_event(started, pipe)
         assert found, (
             "no event-log entry names the configured pipe; got: "
