@@ -766,8 +766,8 @@ test.describe("full-width tables whose columns stay together", () => {
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/urls");
     await pageReady(page);
-    await expectFullWidthTable(page, 'main [data-testid="urls-table"]', ".table-wrapper");
-    const wrapper = await box(page.locator("main .table-wrapper").first());
+    await expectFullWidthTable(page, 'main [data-testid="urls-table"]', ".table-frame");
+    const wrapper = await box(page.locator("main .table-frame").first());
     const lens = await box(page.getByTestId("host-lens"));
     expect(Math.abs(wrapper.right - lens.right), "the URL table's frame ends under the Host selector").toBeLessThanOrEqual(1);
     await expectReadsAcross(page, 'main [data-testid="urls-table"]');
@@ -1404,4 +1404,30 @@ test.describe("focus rings inside a scrolling container", () => {
       });
     }
   }
+});
+
+// One type scale: the page area reads at 14 px under a 32 px title, the
+// headings take their roles' sizes on every page, and the shell around the
+// page keeps the browser's 16 px.
+test.describe("type roles", () => {
+  const size = (el: Element) => getComputedStyle(el).fontSize;
+  test("body, title and headings take their roles' sizes", async ({ page }) => {
+    await page.setViewportSize(DESKTOPS[0]);
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/optimizer");
+    await pageReady(page);
+    expect(await page.locator("main").evaluate(size)).toBe("14px");
+    expect(await page.locator("main h1").evaluate(size)).toBe("32px");
+    expect(await page.locator(".topbar").evaluate(size)).toBe("16px");
+    const sections = await page.locator("main .section-title").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
+    expect(sections.length).toBeGreaterThan(1);
+    expect(new Set(sections)).toEqual(new Set(["18px"]));
+    for (const route of ["#/optimizer", "#/overview", "#/savings"]) {
+      await openConsole(page, "pagespeed_global_admin", route);
+      await pageReady(page);
+      const cards = await page.locator("main .card-title").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
+      expect(cards.length, route).toBeGreaterThan(0);
+      expect(new Set(cards), route).toEqual(new Set(["16px"]));
+    }
+  });
 });

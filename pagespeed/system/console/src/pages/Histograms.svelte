@@ -92,30 +92,30 @@
   {:else if histograms.error && !histograms.data}
     <LoadError error={histograms.error} noun="the histograms" onretry={() => histograms.refresh()} />
   {:else if rows.length === 0}
-    <p class="empty">No histogram data available.</p>
+    <p class="muted">No histogram data available.</p>
   {:else}
     <RefreshNotice error={histograms.error} />
 
     {#if filteredIndices.length === 0}
-      <p class="empty">No histograms match your filter.</p>
+      <p class="muted">No histograms match your filter.</p>
     {:else}
       <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="histogram-wrapper" role="region" aria-label="Histogram summary" tabindex="0">
-        <table class="histogram-table">
+      <div class="table-frame table-frame-tall histogram-wrapper" role="region" aria-label="Histogram summary" tabindex="0">
+        <table class="data data-dense histogram-table">
           <thead>
             <tr>
               <th>Histogram Name</th>
-              <th scope="col" class="num-head">Unit</th>
-              <th class="num-head">Count</th>
-              <th class="num-head">Avg</th>
-              <th class="num-head">StdDev</th>
-              <th class="num-head">Min</th>
-              <th class="num-head">Median</th>
-              <th class="num-head">Max</th>
-              <th class="num-head">90%</th>
-              <th class="num-head">95%</th>
-              <th class="num-head">99%</th>
+              <th scope="col" class="num">Unit</th>
+              <th class="num">Count</th>
+              <th class="num">Avg</th>
+              <th class="num">StdDev</th>
+              <th class="num">Min</th>
+              <th class="num">Median</th>
+              <th class="num">Max</th>
+              <th class="num">90%</th>
+              <th class="num">95%</th>
+              <th class="num">99%</th>
             </tr>
           </thead>
           <tbody>
@@ -137,16 +137,16 @@
                     }}
                   >{row.name}</button>
                 </td>
-                <td class="num-cell">{unitForHistogram(row.name)}</td>
-                <td class="num-cell num">{formatCount(row.count)}</td>
-                <td class="num-cell num">{row.avg === null ? "—" : formatSig(row.avg)}</td>
-                <td class="num-cell num">{row.stddev === null ? "—" : formatSig(row.stddev)}</td>
-                <td class="num-cell num">{row.min === null ? "—" : formatSig(row.min)}</td>
-                <td class="num-cell num">{row.median === null ? "—" : formatSig(row.median)}</td>
-                <td class="num-cell num">{row.max === null ? "—" : formatSig(row.max)}</td>
-                <td class="num-cell num">{row.p90 === null ? "—" : formatSig(row.p90)}</td>
-                <td class="num-cell num">{row.p95 === null ? "—" : formatSig(row.p95)}</td>
-                <td class="num-cell num">{row.p99 === null ? "—" : formatSig(row.p99)}</td>
+                <td class="num">{unitForHistogram(row.name)}</td>
+                <td class="num">{formatCount(row.count)}</td>
+                <td class="num">{row.avg === null ? "—" : formatSig(row.avg)}</td>
+                <td class="num">{row.stddev === null ? "—" : formatSig(row.stddev)}</td>
+                <td class="num">{row.min === null ? "—" : formatSig(row.min)}</td>
+                <td class="num">{row.median === null ? "—" : formatSig(row.median)}</td>
+                <td class="num">{row.max === null ? "—" : formatSig(row.max)}</td>
+                <td class="num">{row.p90 === null ? "—" : formatSig(row.p90)}</td>
+                <td class="num">{row.p95 === null ? "—" : formatSig(row.p95)}</td>
+                <td class="num">{row.p99 === null ? "—" : formatSig(row.p99)}</td>
               </tr>
             {/each}
           </tbody>
@@ -155,15 +155,15 @@
 
       {#if selected?.buckets.length}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="detail-wrapper" role="region" aria-label="Buckets of {selected.name}" tabindex="0">
-          <h2 class="detail-title">{selected.name}</h2>
-          <table class="detail-table">
+        <div class="card detail-wrapper" role="region" aria-label="Buckets of {selected.name}" tabindex="0">
+          <h2 class="minor-title detail-title">{selected.name}</h2>
+          <table class="data data-dense detail-table">
             <thead>
               <tr>
                 <th>Bucket</th>
-                <th class="num-head">Count</th>
-                <th class="num-head">%</th>
-                <th class="num-head">Cumulative %</th>
+                <th class="num">Count</th>
+                <th class="num">%</th>
+                <th class="num">Cumulative %</th>
                 <th>Distribution</th>
               </tr>
             </thead>
@@ -171,9 +171,9 @@
               {#each selected.buckets as bucket, i}
                 <tr>
                   <td class="bucket-range">[{bucket.start}, {bucket.limit})</td>
-                  <td class="num-cell">{bucket.count}</td>
-                  <td class="num-cell">{formatPercent(shares[i].percent)}</td>
-                  <td class="num-cell">{formatPercent(shares[i].cumulative)}</td>
+                  <td class="num">{bucket.count}</td>
+                  <td class="num">{formatPercent(shares[i].percent)}</td>
+                  <td class="num">{formatPercent(shares[i].cumulative)}</td>
                   <td class="bar-cell">
                     <div class="bar bar-fill" style="width: {Math.max(2, widths[i])}%"
                     ></div>
@@ -190,38 +190,12 @@
 
 <style>
   .histogram-wrapper {
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    overflow: auto;
-    max-height: 50vh;
     margin-bottom: var(--ps-space-md);
   }
 
-  .histogram-table {
-    width: 100%;
-    border-collapse: collapse;
+  .histogram-table,
+  .detail-table {
     font-family: var(--ps-font-mono);
-    font-size: var(--ps-font-size-sm);
-  }
-
-  .histogram-table thead {
-    position: sticky;
-    top: 0;
-    background: var(--ps-bg-secondary);
-    z-index: 1;
-  }
-
-  .histogram-table th {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
-  }
-
-  .histogram-table td {
-    padding: var(--ps-space-xs) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border);
   }
 
   .summary-row {
@@ -229,12 +203,8 @@
     transition: background-color 0.15s;
   }
 
-  .summary-row:hover {
-    background-color: var(--ps-surface-hover);
-  }
-
   .summary-row.selected {
-    background-color: var(--ps-primary-light, #e3f2fd);
+    background-color: var(--ps-primary-light);
   }
 
   .name-cell {
@@ -253,73 +223,22 @@
     cursor: pointer;
   }
 
-  /* A numeric column's header sits over its right-aligned values. */
-  .histogram-table th.num-head,
-  .detail-table th.num-head {
-    text-align: right;
-  }
-
-  .num-cell {
-    text-align: right;
-    white-space: nowrap;
-  }
-
   .detail-wrapper {
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    padding: var(--ps-space-md);
-    background: var(--ps-bg-secondary);
     overflow: auto;
     max-height: 40vh;
   }
 
-  .detail-title {
-    margin: 0 0 var(--ps-space-sm) 0;
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
-  }
-
-  .detail-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: var(--ps-font-mono);
-    font-size: var(--ps-font-size-sm);
-  }
-
-  .detail-table th {
-    padding: var(--ps-space-xs) var(--ps-space-md);
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
-  }
-
-  .detail-table td {
-    padding: var(--ps-space-xs) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border);
-  }
-
   .bucket-range {
     white-space: nowrap;
-    font-family: var(--ps-font-mono);
   }
 
   .bar-cell {
     width: 40%;
-    padding-right: var(--ps-space-md);
   }
 
   /* A bucket's share: the shared bar fill, at this table's height. */
   .bar {
     height: 16px;
     border-radius: 2px;
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
-
-  .empty {
-    color: var(--ps-text-secondary);
   }
 </style>

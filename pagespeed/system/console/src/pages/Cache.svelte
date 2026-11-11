@@ -194,7 +194,7 @@
   >
     {#snippet toolbar()}
       {#if purgeEnabled !== undefined}
-        <span class="purge-badge" class:purge-on={purgeEnabled} class:purge-off={!purgeEnabled}>
+        <span class="badge" class:badge-tint-ok={purgeEnabled} class:badge-tint-warning={!purgeEnabled}>
           {purgeEnabled ? "Purge enabled" : "Purge disabled"}
         </span>
       {/if}
@@ -202,7 +202,7 @@
   </PageHeader>
 
   {#if purgeEnabled === false}
-    <p class="purge-note" data-testid="purge-disabled-note">
+    <p class="note" data-testid="purge-disabled-note">
       Purging is off on this server, so the purge views are hidden. Turn it on with
       the EnableCachePurge option in the server's PageSpeed configuration.
     </p>
@@ -231,11 +231,11 @@
               {@const cohorts = parseCacheCohorts(cache.summary)}
               {@const tree = cohorts ? null : parseCacheSummary(cache.summary)}
               {@const layers = tree ? flattenTree(tree) : []}
-              <div class="cache-card">
+              <div class="card cache-card">
                 <div class="cache-header">
-                  <h2 class="cache-name">{cache.name}</h2>
+                  <h2 class="card-title cache-name">{cache.name}</h2>
                   {#if cache.summary === "none"}
-                    <span class="cache-badge cache-badge-off">Not configured</span>
+                    <span class="badge">Not configured</span>
                   {/if}
                 </div>
 
@@ -258,7 +258,7 @@
                                 <span class="layer-name">
                                   <span class="layer-label">{layer.label}</span>
                                   {#if layer.role}
-                                    <span class="layer-role">{formatRole(layer.role)}</span>
+                                    <span class="badge badge-tint-primary layer-role">{formatRole(layer.role)}</span>
                                   {/if}
                                 </span>
                                 {#if layer.prefix}
@@ -282,7 +282,7 @@
                           <span class="layer-name">
                             <span class="layer-label">{layer.label}</span>
                             {#if layer.role}
-                              <span class="layer-role">{formatRole(layer.role)}</span>
+                              <span class="badge badge-tint-primary layer-role">{formatRole(layer.role)}</span>
                             {/if}
                           </span>
                           {#if layer.prefix}
@@ -304,12 +304,12 @@
 
           {#if backendStats}
             {@const stats = parseBackendStats(backendStats)}
-            <div class="cache-card">
+            <div class="card cache-card">
               <div class="cache-header">
-                <h2 class="cache-name">Backend Stats</h2>
+                <h2 class="card-title cache-name">Backend Stats</h2>
               </div>
               <div class="cache-body">
-                <p class="stats-scope" data-testid="backend-stats-scope">Some of these counters are kept by each web-server process (here, the one that answered), so they can differ from Statistics.</p>
+                <p class="note stats-scope" data-testid="backend-stats-scope">Some of these counters are kept by each web-server process (here, the one that answered), so they can differ from Statistics.</p>
                 {#if stats.length > 0}
                   <div class="stats-grid">
                     {#each stats as stat}
@@ -330,7 +330,7 @@
             <pre>{structureFallbackText}</pre>
           </div>
         {:else}
-          <p class="empty">No cache structure data available.</p>
+          <p class="muted">No cache structure data available.</p>
         {/if}
       </div>
 
@@ -351,20 +351,20 @@
         </form>
 
         {#if lookupError}
-          <div class="result-box result-error">
+          <div class="notice notice-error result-box">
             <strong>Error:</strong> {lookupError}
           </div>
         {/if}
 
         {#if lookupResult}
-          <div class="result-box" class:result-error={!!lookupResult.error}>
-            <h2 class="result-title">Result for: <code class="lookup-url-display">{lookupResult.url || lookupUrl}</code></h2>
+          <div class="notice result-box" class:notice-error={!!lookupResult.error}>
+            <h2 class="notice-title result-title">Result for: <code class="lookup-url-display">{lookupResult.url || lookupUrl}</code></h2>
             {#if lookupResult.error}
               <p class="error" role="alert">{lookupResult.error}</p>
             {:else if lookupResult.value}
               <pre class="result-pre">{lookupResult.value}</pre>
             {:else}
-              <p class="empty">No cache entry found for this URL.</p>
+              <p class="muted">No cache entry found for this URL.</p>
             {/if}
             {#if lookupEntry !== null}
               <p class="result-actions">
@@ -399,13 +399,13 @@
         </div>
 
         {#if purgeError}
-          <div class="result-box result-error">
+          <div class="notice notice-error result-box">
             <strong>Error:</strong> {purgeError}
           </div>
         {/if}
 
         {#if purgeResult}
-          <div class="result-box" class:result-success={purgeResult.success} class:result-error={!purgeResult.success}>
+          <div class="notice result-box" class:notice-ok={purgeResult.success} class:notice-error={!purgeResult.success}>
             <p>
               {#if purgeResult.error}
                 Purge failed. {purgeResult.error}
@@ -433,15 +433,15 @@
           <p class="error" role="alert">{purgeSetError}</p>
         {:else if purgeSetData}
           {#if purgeSetData.global_invalidation_timestamp_ms}
-            <p class="meta">
+            <p class="note">
               Global invalidation timestamp:
               <time title={formatIsoTitle(purgeSetData.global_invalidation_timestamp_ms)}>{formatRelative(purgeSetData.global_invalidation_timestamp_ms, Date.now())}</time>
             </p>
           {/if}
 
           {#if purgeSetData.purge_set && purgeSetData.purge_set.length > 0}
-            <div class="purge-list">
-              <table>
+            <div class="table-frame">
+              <table class="data">
                 <thead>
                   <tr>
                     <th>#</th>
@@ -459,9 +459,9 @@
               </table>
             </div>
           {:else if purgeSetData.purge_enabled === false}
-            <p class="empty">Cache purging is disabled. Enable it with <code>EnableCachePurge on</code> in your configuration.</p>
+            <p class="muted">Cache purging is disabled. Enable it with <code>EnableCachePurge on</code> in your configuration.</p>
           {:else}
-            <p class="empty">Purge set is empty.</p>
+            <p class="muted">Purge set is empty.</p>
           {/if}
         {:else if purgeSetLoading}
           <p class="loading">Loading purge set...</p>
@@ -472,35 +472,6 @@
 </div>
 
 <style>
-  .purge-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: var(--ps-space-xs) var(--ps-space-sm);
-    border-radius: 999px;
-    font-size: var(--ps-font-size-xs);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    line-height: 1;
-  }
-
-  .purge-on {
-    background: color-mix(in srgb, var(--ps-success) 12%, var(--ps-bg));
-    color: var(--ps-success-text);
-    border: 1px solid color-mix(in srgb, var(--ps-success) 30%, transparent);
-  }
-
-  .purge-off {
-    background: color-mix(in srgb, var(--ps-warning) 12%, var(--ps-bg));
-    color: var(--ps-warning-text);
-    border: 1px solid color-mix(in srgb, var(--ps-warning) 30%, transparent);
-  }
-
-  .purge-note {
-    margin: 0 0 var(--ps-space-md);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
   .tab-content {
     min-height: 200px;
   }
@@ -542,19 +513,6 @@
     font-size: var(--ps-font-size-xs);
   }
 
-  .result-box {
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-bg-secondary);
-  }
-
-  .result-box .result-title {
-    font-size: var(--ps-font-size-sm);
-    margin-bottom: var(--ps-space-sm);
-    word-break: break-all;
-  }
-
   .lookup-url-display {
     font-family: var(--ps-font-mono);
     font-size: var(--ps-font-size-sm);
@@ -563,14 +521,8 @@
     border-radius: 3px;
   }
 
-  .result-error {
-    border-color: var(--ps-error);
-    background: color-mix(in srgb, var(--ps-error) 5%, var(--ps-bg));
-  }
-
-  .result-success {
-    border-color: var(--ps-success);
-    background: color-mix(in srgb, var(--ps-success) 5%, var(--ps-bg));
+  .result-title {
+    word-break: break-all;
   }
 
   .result-pre {
@@ -594,11 +546,11 @@
     column-gap: var(--ps-space-md);
   }
 
+  /* A card in two parts, a header band and a body: the parts carry the padding. */
   .cache-card {
     break-inside: avoid;
     margin-bottom: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
+    padding: 0;
     overflow: hidden;
   }
 
@@ -612,28 +564,12 @@
   }
 
   .cache-name {
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
     margin: 0;
     flex: 1;
   }
 
-  .cache-badge {
-    font-size: var(--ps-font-size-xs);
-    padding: 2px var(--ps-space-sm);
-    border-radius: 999px;
-    font-weight: 500;
-  }
-
-  .cache-badge-off {
-    background: var(--ps-bg-secondary);
-    color: var(--ps-text-secondary);
-    border: 1px solid var(--ps-border);
-  }
-
   .cache-body {
     padding: var(--ps-space-md);
-    background: var(--ps-bg);
   }
 
   .cache-empty {
@@ -725,12 +661,6 @@
   }
 
   .layer-role {
-    font-size: var(--ps-font-size-xs);
-    color: var(--ps-primary);
-    font-weight: 600;
-    background: var(--ps-primary-light);
-    padding: 1px 6px;
-    border-radius: 999px;
     flex-shrink: 0;
   }
 
@@ -774,12 +704,6 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0;
-  }
-
-  .stats-scope {
-    margin: 0 0 var(--ps-space-xs);
-    font-size: var(--ps-font-size-xs);
-    color: var(--ps-text-secondary);
   }
 
   .stat-row {
@@ -827,38 +751,6 @@
     background: var(--ps-bg-secondary);
   }
 
-  .purge-list {
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    overflow: auto;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-  }
-
-  th {
-    text-align: left;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-  }
-
-  td {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
   .row-num {
     width: 50px;
     color: var(--ps-text-secondary);
@@ -869,26 +761,13 @@
     word-break: break-all;
   }
 
-  .meta {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
   /* In the column forms a button keeps its own width. */
   .form-row .btn {
     align-self: flex-start;
   }
 
-  .loading {
-    color: var(--ps-text-secondary);
-  }
-
   .error {
     color: var(--ps-error);
-  }
-
-  .empty {
-    color: var(--ps-text-secondary);
   }
 
   @media (max-width: 600px) {

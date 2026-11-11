@@ -30,34 +30,3 @@
     <a class="empty-action" href={action.href}>{action.label}</a>
   {/if}
 </div>
-
-<style>
-  /* As wide as its text needs, not the window. */
-  .empty-state {
-    max-width: var(--ps-card-max);
-    padding: var(--ps-space-md);
-    border: 1px dashed var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-bg-secondary);
-    color: var(--ps-text);
-    overflow-wrap: anywhere;
-  }
-
-  .empty-title {
-    margin: 0;
-    font-weight: 600;
-  }
-
-  .empty-detail {
-    margin: var(--ps-space-xs) 0 0;
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  .empty-action {
-    display: inline-block;
-    margin-top: var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-primary);
-  }
-</style>

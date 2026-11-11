@@ -233,7 +233,7 @@
       onRefresh: () => poll.refresh(),
     }}
   />
-  <p class="scope-line" data-testid="savings-scope">{scopeLine}</p>
+  <p class="note scope-line" data-testid="savings-scope">{scopeLine}</p>
   {#if poll.loading}
     <p class="loading">Loading savings...</p>
   {:else}
@@ -241,7 +241,7 @@
          module card; without it the two cards stack, each as wide as the page. -->
     <div class="cards" class:paired={hostTable !== null}>
       <section class="card reads-across-container" data-testid="savings-module-card" aria-labelledby="savings-module-heading">
-        <h2 id="savings-module-heading">Module rewrites <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
+        <h2 class="card-title" id="savings-module-heading">Module rewrites <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if rows && total && summary}
           <RefreshNotice error={moduleError} />
           {#if summary.active || total.saved > 0}
@@ -260,7 +260,7 @@
             </dl>
             <p class="since" data-testid="since-module" title={moduleSince?.iso ?? undefined}>
               {moduleSince?.text ?? "since restart"} (web server restart or reload)
-              {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+              {#if moduleSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
             </p>
             {#if rows.some((row) => row.regressed)}
               <p class="note" data-testid="savings-module-regression">
@@ -268,7 +268,7 @@
                 count as no net savings above.
               </p>
             {/if}
-            <table class="breakdown reads-across" data-testid="savings-module-table">
+            <table class="data-inline breakdown reads-across" data-testid="savings-module-table">
               <thead>
                 <tr><th>Type</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
               </thead>
@@ -303,11 +303,11 @@
 
       <section
         class="card optimizer-card reads-across-container"
-        class:card--muted={!scope.isGlobal && focusRow === null}
+        class:card-muted={!scope.isGlobal && focusRow === null}
         data-testid="savings-optimizer-card"
         aria-labelledby="savings-optimizer-heading"
       >
-        <h2 id="savings-optimizer-heading">Optimizer cache serves <ScopeChip label="whole server" shown={optimizerChip} /></h2>
+        <h2 class="card-title" id="savings-optimizer-heading">Optimizer cache serves <ScopeChip label="whole server" shown={optimizerChip} /></h2>
         {#if !scope.isGlobal && focusRow === null}
           <p class="note" data-testid="optimizer-scope-note">
             Server-wide numbers. The per-host view is on the
@@ -352,7 +352,7 @@
             <!-- The headline figures: side by side once the card is wide. -->
             <div class="headlines">
             <div class="headline">
-            <h3 class="window-heading" data-testid="window-heading-optimizer">Optimizer counters (since optimizer restart)</h3>
+            <h3 class="minor-title muted window-heading" data-testid="window-heading-optimizer">Optimizer counters (since optimizer restart)</h3>
             <dl class="figures">
               <div class="figure">
                 <dt class="metric-label">{TERMS.savedByOptimizerCache}</dt>
@@ -370,13 +370,13 @@
             <SavingsSplitLine split={serveView.total.split} />
             <p class="since" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
               {optimizerSince?.text ?? "since restart"} (optimizer restart)
-              {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+              {#if optimizerSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
             </p>
             </div>
             {#if hitRate && hitRate.percent !== null}
               <div class="headline">
               <!-- Computed from module counters, so it carries the module's time base. -->
-              <h3 class="window-heading" data-testid="window-heading-module">Module counters (since web server restart or reload)</h3>
+              <h3 class="minor-title muted window-heading" data-testid="window-heading-module">Module counters (since web server restart or reload)</h3>
               <dl class="figures">
                 <div class="figure">
                   <dt class="metric-label" title={servedOptimizedText(hitRate.mode).tooltip}>{TERMS.servedOptimized}</dt>
@@ -390,7 +390,7 @@
               </dl>
               <p class="since" data-testid="since-hit-rate" title={moduleSince?.iso ?? undefined}>
                 {moduleSince?.text ?? "since restart"} (web server restart or reload)
-                {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+                {#if moduleSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
               </p>
               </div>
             {/if}
@@ -409,7 +409,7 @@
                 The optimizer served more bytes than the originals on some responses; those count as negative savings above.
               </p>
             {/if}
-            <table class="breakdown reads-across" data-testid="savings-optimizer-table">
+            <table class="data-inline breakdown reads-across" data-testid="savings-optimizer-table">
               <thead>
                 <tr><th>Type</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
               </thead>
@@ -427,7 +427,7 @@
             <div class="split-types">
               {#each split as s (s.key)}
                 <div class="split" data-testid="savings-split-{s.key}">
-                  <h3>{s.label}</h3>
+                  <h3 class="minor-title">{s.label}</h3>
                   {#if s.hasData}
                     <div
                       class="split-bar"
@@ -508,11 +508,11 @@
            on a wide window it lies under the module card. -->
       {#if hostTable}
         <section class="card reads-across-container" data-testid="savings-by-host-card" aria-labelledby="savings-by-host-heading">
-          <h2 id="savings-by-host-heading">{TERMS.savedByOptimizerCache}, by host</h2>
+          <h2 class="card-title" id="savings-by-host-heading">{TERMS.savedByOptimizerCache}, by host</h2>
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
           <div class="table-scroll" role="region" aria-label="Savings by host" tabindex="0">
-            <table class="breakdown reads-across" data-testid="savings-by-host">
+            <table class="data-inline breakdown reads-across" data-testid="savings-by-host">
               <thead>
                 <tr><th>Host</th><th>Responses</th><th>Saved</th><th>Of original</th><th>Saved %</th></tr>
               </thead>
@@ -541,14 +541,14 @@
           <p class="note">{SAVINGS_QUALIFIER}</p>
           <p class="since" data-testid="since-by-host" title={optimizerSince?.iso ?? undefined}>
             {optimizerSince?.text ?? "since restart"} (optimizer restart)
-            {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
+            {#if optimizerSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
           </p>
         </section>
       {/if}
     </div>
 
     <section class="card chart-card" data-testid="savings-chart-card" aria-labelledby="savings-chart-heading">
-      <h2 id="savings-chart-heading" data-testid="savings-chart-window">
+      <h2 class="card-title" id="savings-chart-heading" data-testid="savings-chart-window">
         Savings: {chartView ? chartWindowLabel(chartView.timestamps) : "collecting samples"}
       </h2>
       {#if chartView}
@@ -580,11 +580,6 @@
 </div>
 
 <style>
-  .scope-line {
-    margin: 0 0 var(--ps-space-md);
-    color: var(--ps-text-secondary);
-    font-size: var(--ps-font-size-sm);
-  }
   .cards {
     display: grid;
     gap: var(--ps-space-md);
@@ -604,17 +599,6 @@
   }
   .cards.paired > .optimizer-card {
     grid-row: span 2;
-  }
-  .card {
-    min-width: 0;
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-surface);
-  }
-  .card h2 {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-lg);
   }
   .chart-card {
     margin-top: var(--ps-space-md);
@@ -663,29 +647,15 @@
   }
   /* Words where a figure would be: read as a sentence, not as a headline. */
   .too-early {
-    font-size: var(--ps-font-size-base);
+    font-size: var(--ps-type-body-size);
     font-weight: 400;
   }
-  .breakdown {
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
+  .scope-line {
+    margin-bottom: var(--ps-space-md);
   }
-  .breakdown th, .breakdown td {
-    /* Columns sit at their content's width, a step apart. */
-    padding: var(--ps-space-xs) var(--ps-space-md) var(--ps-space-xs) 0;
-    text-align: left;
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-  /* Figures keep their unit on one line ("33.8 MB"); only host names break. */
-  .breakdown td {
-    white-space: nowrap;
-  }
+  /* Only host names break. */
   .breakdown td.host-cell {
     white-space: normal;
-  }
-  .breakdown th {
-    color: var(--ps-text-secondary);
-    font-weight: 600;
   }
   /* In a very narrow window (a small phone, a desktop window at 400% zoom)
      four columns of figures are wider than their card at the usual size:
@@ -702,41 +672,11 @@
       padding-right: 0;
     }
   }
-  .window-heading {
-    margin: 0 0 var(--ps-space-xs);
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
-    color: var(--ps-text-secondary);
-  }
-  .note {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
   .onboarding-title { font-weight: 600; }
-  .more {
-    margin: var(--ps-space-sm) 0 0;
-    font-size: var(--ps-font-size-sm);
-  }
-  .more a { color: var(--ps-primary); }
-  .loading { color: var(--ps-text-secondary); }
   .since {
     margin: var(--ps-space-xs) 0 0;
     font-size: var(--ps-font-size-xs);
     color: var(--ps-text-secondary);
-  }
-  .warming {
-    margin-left: var(--ps-space-xs);
-    font-weight: 600;
-    color: var(--ps-warning-text);
-    border: 1px solid var(--ps-warning);
-    border-radius: 999px;
-    white-space: nowrap;
-    padding: 0 var(--ps-space-sm);
-  }
-  .card--muted {
-    background: var(--ps-bg-secondary);
-    border: 1px dashed var(--ps-secondary);
-    opacity: var(--ps-muted-opacity);
   }
   .split-types {
     display: grid;
@@ -747,11 +687,6 @@
   .cards:not(.paired) .split-types {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ps-figure-min)), 1fr));
     column-gap: var(--ps-space-lg);
-  }
-  .split h3 {
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
-    margin: 0 0 var(--ps-space-xs);
   }
   /* A stacked bar: one .bar-fill per share, sized by its count. The track
      shows only in the gaps, so two shares read apart whatever their fills:

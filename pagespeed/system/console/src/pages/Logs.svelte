@@ -338,7 +338,7 @@
     }}
   />
 
-  <p class="scope-note" data-testid="logs-scope-note">
+  <p class="note" data-testid="logs-scope-note">
     {#if raw}
       The optimizer's own recent log, oldest to newest; the list follows
       the newest entry until you scroll up.
@@ -351,13 +351,13 @@
   </p>
 
   {#if lensHost !== null}
-    <p class="filter-note" data-testid="logs-lens">
+    <p class="note" data-testid="logs-lens">
       {TERMS.hostFilter}: entries that name {lensHost}. Entries that name no host are hidden while the filter is on.
     </p>
   {/if}
 
   {#if levelParam}
-    <p class="filter-note" data-testid="logs-filter-note">
+    <p class="note" data-testid="logs-filter-note">
       {#if levelKnown}
         Showing {levelParam} entries and anything more severe.
       {:else}
@@ -377,14 +377,14 @@
     <RefreshNotice error={poll.error} />
 
     {#if isUnavailable(moduleError) && source !== "optimizer"}
-      <p class="source-note" data-testid="logs-module-off">
+      <p class="notice source-note" data-testid="logs-module-off">
         The module's messages are turned off on this console.
       </p>
     {:else if moduleError && source !== "optimizer"}
-      <p class="source-note" data-testid="logs-module-error">The module's messages could not be read: {moduleError.message}</p>
+      <p class="notice source-note" data-testid="logs-module-error">The module's messages could not be read: {moduleError.message}</p>
     {/if}
     {#if perVhost}
-      <p class="source-note" data-testid="logs-per-vhost">
+      <p class="notice source-note" data-testid="logs-per-vhost">
         The optimizer's log covers every virtual host on this server, so this
         per-host console shows the module's messages only.
         {#if globalHref !== null}
@@ -393,45 +393,45 @@
       </p>
     {:else if source !== "module" && optimizerError}
       {#if isUnavailable(optimizerError)}
-        <p class="source-note" data-testid="logs-optimizer-off">
+        <p class="notice source-note" data-testid="logs-optimizer-off">
           The optimizer's log is turned off on this console.
         </p>
       {:else if optimizerError instanceof ApiError && optimizerError.status === 404}
-        <p class="source-note" data-testid="logs-no-support">
+        <p class="notice source-note" data-testid="logs-no-support">
           This module version cannot show the optimizer's log; the module's messages are below.
         </p>
       {:else if optimizerError instanceof ApiError && optimizerError.status === 501}
-        <p class="source-note" data-testid="logs-no-support">
+        <p class="notice source-note" data-testid="logs-no-support">
           This optimizer version does not provide logs. Update the optimizer package.
         </p>
       {:else if errorCode(optimizerError) === "response_too_large"}
-        <p class="source-note" data-testid="logs-too-large">
+        <p class="notice source-note" data-testid="logs-too-large">
           The optimizer answered with a log page larger than the console accepts. The optimizer
           itself is running; the page asks again on the next refresh.
         </p>
       {:else if isDaemonUnavailable(optimizerError)}
-        <p class="source-note" data-testid="logs-unreachable">
+        <p class="notice source-note" data-testid="logs-unreachable">
           The optimizer's log is not shown. {optimizerUnavailableNote(optimizerError).detail}
         </p>
       {:else}
-        <p class="source-note" data-testid="logs-optimizer-error">The optimizer's log could not be read: {optimizerError.message}</p>
+        <p class="notice source-note" data-testid="logs-optimizer-error">The optimizer's log could not be read: {optimizerError.message}</p>
       {/if}
     {/if}
     {#if source !== "module" && !raw}
       {#if notes.restarts > 0}
-        <p class="source-note" data-testid="logs-restart">
+        <p class="notice source-note" data-testid="logs-restart">
           The optimizer restarted {notes.restarts === 1 ? "once" : `${formatCount(notes.restarts)} times`} while this
           page was open; its earlier entries are kept.
         </p>
       {/if}
       {#if notes.dropped > 0}
-        <p class="source-note" data-testid="logs-gap">
+        <p class="notice source-note" data-testid="logs-gap">
           {entriesText(notes.dropped)} dropped: the optimizer logged faster than this page reads,
           and its log ring moved on.
         </p>
       {/if}
       {#if notes.notRecorded > 0}
-        <p class="source-note" data-testid="logs-shed">
+        <p class="notice source-note" data-testid="logs-shed">
           {entriesText(notes.notRecorded)} not recorded: the optimizer was logging faster than it could keep.
         </p>
       {/if}
@@ -542,7 +542,7 @@
         {/each}
       </div>
       {#if rawRows.length > rawVisible.length}
-        <p class="section-note" data-testid="logs-render-cap">
+        <p class="note" data-testid="logs-render-cap">
           Showing {formatCount(rawVisible.length)} of {formatCount(rawRows.length)} rows; narrow the filters, or jump to
           the newest, to see others.
         </p>
@@ -560,7 +560,7 @@
         {#each visibleRows as row (row.key)}
           <div class="log-row log-row--{isKnownTimelineLevel(row.level) ? row.level : 'debug'}" data-testid="log-group" data-source={row.source}>
             <div class="log-meta">
-              <span class="source-badge">{row.source === "module" ? "Module" : "Optimizer"}</span>
+              <span class="badge badge-outline source-badge">{row.source === "module" ? "Module" : "Optimizer"}</span>
               <span class="level-badge {levelBadgeClass(row.level)}">{row.level}</span>
               {#if row.lastTs !== null}
                 <time class="log-time" datetime={formatIsoTitle(row.lastTs)} title={formatIsoTitle(row.lastTs)}>{formatLogTimestamp(row.lastTs)}</time>
@@ -595,7 +595,7 @@
         {/each}
       </div>
       {#if rows.length > visibleRows.length}
-        <p class="section-note" data-testid="logs-render-cap">
+        <p class="note" data-testid="logs-render-cap">
           Showing the newest {formatCount(visibleRows.length)} of {formatCount(rows.length)} rows; narrow the filters to see others.
         </p>
       {/if}
@@ -604,23 +604,8 @@
 </div>
 
 <style>
-  .scope-note,
-  .filter-note,
-  .section-note,
   .source-note {
     margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  .source-note {
-    padding: var(--ps-space-xs) var(--ps-space-sm);
-    border-left: 3px solid var(--ps-border);
-    background: var(--ps-bg-secondary);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
   }
 
   .controls {
@@ -750,15 +735,6 @@
     flex-wrap: wrap;
     gap: var(--ps-space-sm);
     margin-bottom: var(--ps-space-xs);
-  }
-
-  .source-badge {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 600;
-    padding: 0 var(--ps-space-sm);
-    border: 1px solid var(--ps-border);
-    border-radius: 999px;
-    color: var(--ps-text-secondary);
   }
 
   .log-time,

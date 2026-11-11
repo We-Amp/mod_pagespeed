@@ -256,7 +256,7 @@
   {#if key === null}
     <div class="empty-state" data-testid="url-detail-misuse">
       <p class="empty-title">No URL to inspect</p>
-      <p class="empty-description">
+      <p class="empty-detail">
         This view needs a cached entry's path, host and scheme. Open it from
         the <a href="#/urls">URLs page</a> or the Cache page's lookup.
       </p>
@@ -279,7 +279,7 @@
 
     <div class="answer">
       <section class="card" data-testid="url-module" aria-labelledby="url-module-heading">
-        <h2 id="url-module-heading">The module's answer</h2>
+        <h2 class="card-title" id="url-module-heading">The module's answer</h2>
         <ul class="facts">
           <li data-testid="url-module-lookup">{lookup.text}</li>
           <li data-testid="url-module-log">
@@ -290,7 +290,7 @@
 
       {#if reasonsShown}
         <section class="card" aria-labelledby="url-reasons-heading">
-          <h2 id="url-reasons-heading">Usual reasons a URL is not optimized</h2>
+          <h2 class="card-title" id="url-reasons-heading">Usual reasons a URL is not optimized</h2>
           <ul class="reasons" data-testid="url-reasons">
             {#each reasons as reason (reason.id)}
               <li data-testid="url-reason-{reason.id}">
@@ -333,7 +333,7 @@
     {:else if belowFloor && altError instanceof ApiError && (altError.status === 404 || altError.status === 501)}
       <div class="empty-state" data-testid="url-detail-below-floor">
         <p class="empty-title">The optimizer is too old for this view</p>
-        <p class="empty-description">
+        <p class="empty-detail">
           The optimizer is {typeof healthData?.version === "string" ? healthData.version : "an older version"},
           below the minimum {MIN_OPTIMIZER_VERSION} for the URL index.
         </p>
@@ -342,7 +342,7 @@
       {#if errorCode(altError) === "not_in_index"}
         <div class="empty-state" data-testid="url-detail-not-found">
           <p class="empty-title">Not in the optimizer's index</p>
-          <p class="empty-description">
+          <p class="empty-detail">
             The optimizer holds nothing for <code>{shown}</code>. It records
             URLs as it optimizes them.
           </p>
@@ -350,7 +350,7 @@
       {:else}
         <div class="empty-state" data-testid="url-detail-no-support">
           <p class="empty-title">The URL index is not available here</p>
-          <p class="empty-description">
+          <p class="empty-detail">
             This module version cannot show the optimizer's cached-URL
             index; the rest of the console works as before.
           </p>
@@ -359,7 +359,7 @@
     {:else if isDaemonUnavailable(altError)}
       <div class="empty-state" data-testid="url-detail-unreachable">
         <p class="empty-title">{optimizerUnavailableNote(altError).title}</p>
-        <p class="empty-description">{optimizerUnavailableNote(altError).detail}</p>
+        <p class="empty-detail">{optimizerUnavailableNote(altError).detail}</p>
       </div>
     {:else}
       <LoadError error={altError} noun="this URL's variants" onretry={() => poll.refresh()} />
@@ -368,25 +368,25 @@
 
 <!-- What the optimizer holds for the URL: its variants and their previews. -->
 {#snippet optimizerRecord()}
-    <div class="info-grid">
+    <div class="info-grid card">
       <div class="info-item">
-        <span class="info-label">Status</span>
+        <span class="metric-label">Status</span>
         <span class="info-value" data-testid="url-detail-status">{statusLabel(status)}</span>
       </div>
       <div class="info-item">
-        <span class="info-label">Variants</span>
+        <span class="metric-label">Variants</span>
         <span class="info-value" data-testid="url-detail-count">{rows.length}</span>
       </div>
     </div>
 
     {#if cooldown}
-      <p class="cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
+      <p class="notice notice-warning cooldown-banner" data-testid="url-detail-cooldown">{cooldownText(cooldown)}</p>
     {/if}
 
     <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div class="table-wrapper" role="region" aria-label="Variants" tabindex="0">
-      <table data-testid="variants-table" class="card-table">
+    <div class="table-frame variants-frame" role="region" aria-label="Variants" tabindex="0">
+      <table data-testid="variants-table" class="data card-table">
         <thead>
           <tr>
             <th scope="col" class="num">ID</th>
@@ -459,10 +459,10 @@
 
     {#if previews.length > 0}
       <section class="previews-section" aria-labelledby="previews-heading">
-        <h2 id="previews-heading">Variant previews</h2>
+        <h2 class="section-title" id="previews-heading">Variant previews</h2>
         <div class="preview-grid" data-testid="variant-previews">
           {#each previews as row (row.rowKey)}
-            <figure class="preview-card" data-testid="preview-{row.id}">
+            <figure class="card preview-card" data-testid="preview-{row.id}">
               <QueuedImage
                 src={previewSrc(row.id ?? 0)}
                 alt={altText(row)}
@@ -496,8 +496,8 @@
         </div>
         {#if compareRow !== null && compareRow.id !== null && compareOriginalId !== null}
           {#key compareRow.id}
-            <div class="compare-panel" data-testid="compare-panel">
-              <h3>Variant {compareRow.id} against its original</h3>
+            <div class="card compare-panel" data-testid="compare-panel">
+              <h3 class="card-title">Variant {compareRow.id} against its original</h3>
               <div class="compare-modes control-group" role="group" aria-label="Comparison mode">
                 <button
                   type="button"
@@ -535,110 +535,20 @@
     margin-top: var(--ps-space-lg);
   }
 
-  h2 {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    margin: 0 0 var(--ps-space-md) 0;
-    padding-bottom: var(--ps-space-xs);
-    border-bottom: 1px solid var(--ps-border);
+  .cooldown-banner {
+    margin-top: var(--ps-space-md);
   }
 
-  .info-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ps-space-lg);
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .info-label {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 600;
-    color: var(--ps-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .info-value {
-    font-size: var(--ps-font-size-sm);
-    font-family: var(--ps-font-mono);
-    color: var(--ps-text);
-  }
-
-  .table-wrapper {
+  .variants-frame {
     /* Twelve columns: a tighter step between them keeps the table inside its
        frame on a desktop, with wider glyphs too. */
     --ps-cell-pad-x: var(--ps-space-sm);
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
+    margin-top: var(--ps-space-md);
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-    position: sticky;
-    top: 0;
-  }
-
-  th {
-    text-align: left;
-    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    /* A plain header may wrap, to keep a twelve-column table in its frame. */
+  /* A plain header may wrap, to keep a twelve-column table in its frame. */
+  .variants-frame thead th {
     white-space: normal;
-  }
-
-  td {
-    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
-  tbody tr:hover {
-    background: var(--ps-surface-hover);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: var(--ps-space-xl) var(--ps-space-lg);
-    border: 1px dashed var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .empty-title {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    color: var(--ps-text-secondary);
-    margin-bottom: var(--ps-space-sm);
-  }
-
-  .empty-description {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-    line-height: 1.5;
   }
 
   .raw {
@@ -667,7 +577,6 @@
     margin-top: var(--ps-space-sm);
   }
 
-
   .whole-server,
   .optimizer-log {
     margin-top: var(--ps-space-md);
@@ -681,21 +590,9 @@
     font-family: var(--ps-font-mono);
     font-size: var(--ps-font-size-xs);
   }
-  th.num,
-  td.num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
   .sentinel {
     font-style: italic;
     color: var(--ps-text-secondary);
-  }
-  .cooldown-banner {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-warning);
-    border-radius: var(--ps-border-radius);
-    background: color-mix(in srgb, var(--ps-warning) 12%, var(--ps-bg));
-    color: var(--ps-warning-text);
   }
   .preview-grid {
     display: grid;
@@ -705,9 +602,6 @@
   .preview-card {
     margin: 0;
     padding: var(--ps-space-sm);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
   }
   .preview-card :global(img) {
     max-width: 100%;
@@ -729,9 +623,6 @@
   }
   .compare-panel {
     margin-top: var(--ps-space-md);
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
   }
   .compare-modes {
     margin-bottom: var(--ps-space-sm);

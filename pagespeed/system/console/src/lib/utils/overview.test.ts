@@ -11,7 +11,6 @@ import {
   countText,
   daemonAvailability,
   daemonServeSavings,
-  findingsStampText,
   moduleSummary,
   optimizerFloor,
   optimizerServes,
@@ -360,18 +359,6 @@ describe("the message log in the sample", () => {
     expect(down.daemonDownAt).toBe(100);
     expect(toSnapshot(sample({ at: 200 }), down).daemonDownAt).toBe(100);
     expect(toSnapshot(sample({ at: 300 })).daemonDownAt).toBeNull();
-  });
-});
-
-describe("findingsStampText", () => {
-  const since = (text: string) => ({ text, iso: null, warming: false });
-  it("names both time bases, either one, or nothing", () => {
-    expect(findingsStampText(since("since 3 h"), since("since 2 min"))).toBe(
-      "Counters: module since 3 h · optimizer since 2 min",
-    );
-    expect(findingsStampText(since("since 3 h"), null)).toBe("Counters: module since 3 h");
-    expect(findingsStampText(null, since("since restart"))).toBe("Counters: optimizer since restart");
-    expect(findingsStampText(null, null)).toBe("");
   });
 });
 

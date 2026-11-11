@@ -256,7 +256,7 @@
       onRefresh: () => poll.refresh(),
     }}
   />
-  <p class="scope-line" data-testid="overview-scope">{scopeLine}</p>
+  <p class="note scope-line" data-testid="overview-scope">{scopeLine}</p>
   {#if poll.loading}
     <p class="loading">Loading overview...</p>
   {:else}
@@ -284,7 +284,7 @@
     <!-- A source's time base, in the page's one wording, with its warming mark. -->
     {#snippet since(base: TimeBase, testid: string)}
       <span data-testid={testid} title={base.iso ?? undefined}>{base.text}</span>{#if base.warming}{" "}<span
-          class="warming"
+          class="badge badge-outline-warning"
           data-testid="warming-pill">warming up</span
         >{/if}
     {/snippet}
@@ -438,13 +438,13 @@
 
     <div class="cards">
       <section class="card reads-across-container" data-testid="module-card" aria-labelledby="module-heading">
-        <h2 id="module-heading">Module <span class="version">{moduleVersion}</span> <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
+        <h2 class="card-title" id="module-heading">Module <span class="version">{moduleVersion}</span> <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if summary}
           {#if !tiles}
             <RefreshNotice error={serverDown ? null : moduleError} />
           {/if}
           {#if summary.active && rows}
-            <table class="breakdown reads-across card-table" data-testid="module-by-type">
+            <table class="data-inline breakdown reads-across card-table" data-testid="module-by-type">
               <caption>{TERMS.savedByRewriting}, by type</caption>
               <thead>
                 <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
@@ -467,7 +467,7 @@
               title="The module is running and ready."
               detail="Nothing has been optimized yet. Once this web server serves pages, this overview shows what the module and the optimizer are doing."
             />
-            <h3 class="steps-title">Next steps</h3>
+            <h3 class="minor-title steps-title">Next steps</h3>
             <ol class="next-steps" data-testid="overview-next-steps">
               <li>Load a page of this site in a browser, twice: the first request starts the optimization.</li>
               <li>
@@ -497,7 +497,7 @@
         data-testid="optimizer-card"
         aria-labelledby="optimizer-heading"
       >
-        <h2 id="optimizer-heading">
+        <h2 class="card-title" id="optimizer-heading">
           Optimizer
           {#if typeof daemonView?.health?.version === "string" && daemonView.health.version}<span class="version">{daemonView.health.version}</span>{/if}
           <ScopeChip label="whole server" shown={optimizerChip} />
@@ -526,7 +526,7 @@
             {@render servedShare(false)}
           {/if}
           {#if scope.isGlobal && serveRows.length > 0}
-            <table class="breakdown reads-across card-table" data-testid="optimizer-by-type">
+            <table class="data-inline breakdown reads-across card-table" data-testid="optimizer-by-type">
               <caption>Served from the optimizer's cache, by type</caption>
               <thead>
                 <tr><th scope="col">Type</th><th scope="col">Responses</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
@@ -584,11 +584,6 @@
 </div>
 
 <style>
-  .scope-line {
-    margin: 0 0 var(--ps-space-md);
-    color: var(--ps-text-secondary);
-    font-size: var(--ps-font-size-sm);
-  }
 
   /* The verdict is one sentence at the reading size; its first word is the state. */
   .verdict {
@@ -618,11 +613,6 @@
     border-radius: var(--ps-border-radius-lg);
   }
 
-  /* A paragraph in a card keeps the card's rhythm. */
-  .card .note {
-    margin: 0 0 var(--ps-space-sm);
-  }
-
   /* The state word and, while the server is down, the line that says it is the last known one. */
   .state {
     display: flex;
@@ -644,6 +634,10 @@
     margin-top: 0;
   }
 
+  .scope-line {
+    margin-bottom: var(--ps-space-md);
+  }
+
   .stat-tiles {
     margin-bottom: var(--ps-space-md);
   }
@@ -657,16 +651,6 @@
     /* The two cards are of a size: they share one height. */
   }
 
-  .card h2:not(.stat-tile-label) {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--ps-space-sm);
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-type-card-title-size);
-    font-weight: var(--ps-type-card-title-weight);
-  }
-
   .version {
     font-family: var(--ps-font-mono);
     font-size: var(--ps-font-size-xs);
@@ -675,63 +659,8 @@
     overflow-wrap: anywhere;
   }
 
-  .warming {
-    margin-left: var(--ps-space-xs);
-    font-weight: 600;
-    color: var(--ps-warning-text);
-    border: 1px solid var(--ps-warning);
-    border-radius: 999px;
-    padding: 0 var(--ps-space-sm);
-    white-space: nowrap;
-  }
-
-  /* The by-type tables: columns at their content's width, a step apart. */
-  .breakdown {
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  .breakdown caption {
-    padding-bottom: var(--ps-space-xs);
-    text-align: left;
-    font-size: var(--ps-type-label-size);
-    font-weight: var(--ps-type-label-weight);
-    color: var(--ps-text-secondary);
-  }
-
-  .breakdown th,
-  .breakdown td {
-    padding: var(--ps-space-xs) var(--ps-space-md) var(--ps-space-xs) 0;
-    text-align: left;
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  .breakdown td {
-    white-space: nowrap;
-  }
-
-  .breakdown thead th {
-    color: var(--ps-text-secondary);
-    font-weight: 600;
-  }
-
-  .breakdown tbody th {
-    font-weight: 400;
-  }
-
-  /* On a phone the card rows carry their own padding. */
-  @media (max-width: 640px) {
-    .breakdown.card-table th,
-    .breakdown.card-table td {
-      padding: var(--ps-space-xs) var(--ps-space-sm);
-      white-space: normal;
-    }
-  }
-
   .steps-title {
-    margin: var(--ps-space-md) 0 var(--ps-space-xs);
-    font-size: var(--ps-font-size-sm);
-    font-weight: 600;
+    margin-top: var(--ps-space-md);
   }
 
   .next-steps {
@@ -758,16 +687,4 @@
     overflow-wrap: anywhere;
   }
 
-  .more {
-    margin: var(--ps-space-sm) 0 0;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  .more a {
-    color: var(--ps-primary);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
 </style>

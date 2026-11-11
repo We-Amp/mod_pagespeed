@@ -23,7 +23,7 @@ test("health, load and cache on one page, every leaf read once per refresh", asy
   for (const name of ["Health", "Load", "Cache"]) {
     await expect(page.getByRole("heading", { level: 2, name, exact: true })).toBeVisible();
   }
-  await expect(page.locator(".status-badge")).toHaveText("ok");
+  await expect(page.locator(".status-word")).toHaveText("ok");
   await expect(page.getByText("Notifications received")).toBeVisible();
   await expect(page.getByText("Cache entries")).toBeVisible();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -148,7 +148,7 @@ test("the sections come back when the optimizer answers again", async ({ page })
   up = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Health", exact: true })).toBeVisible();
-  await expect(page.locator(".status-badge")).toHaveText("ok");
+  await expect(page.locator(".status-word")).toHaveText("ok");
   await expect(page.getByTestId("optimizer-absent")).toHaveCount(0);
 });
 
@@ -177,7 +177,7 @@ test("health answers and statistics do not: each section says what it has", asyn
   });
   await openConsole(page, "pagespeed_admin", "#/optimizer");
   await ready(page);
-  await expect(page.locator(".status-badge")).toHaveText("ok");
+  await expect(page.locator(".status-word")).toHaveText("ok");
   await expect(page.getByTestId("statistics-unavailable")).toHaveCount(1);
   await expect(page.getByTestId("statistics-unavailable")).toContainText("this optimizer version does not provide this panel");
   await expect(page.getByTestId("daemon-unreachable")).toHaveCount(0);
@@ -193,7 +193,7 @@ test("health answers and statistics get the optimizer's own 503: a refresh witho
   });
   await openConsole(page, "pagespeed_admin", "#/optimizer");
   await ready(page);
-  await expect(page.locator(".status-badge")).toHaveText("ok");
+  await expect(page.locator(".status-word")).toHaveText("ok");
   const state = page.getByTestId("statistics-unavailable");
   await expect(state).toContainText("Statistics are not available: the optimizer did not answer this refresh.");
   await expect(state).not.toContainText("unreachable");
