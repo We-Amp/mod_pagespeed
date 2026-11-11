@@ -254,10 +254,13 @@
                             {#each cohort.layers as layer}
                               <div class="layer" style="--depth: {layer.depth}">
                                 <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
-                                <span class="layer-label">{layer.label}</span>
-                                {#if layer.role}
-                                  <span class="layer-role">{formatRole(layer.role)}</span>
-                                {/if}
+                                <!-- The level mark stays beside its layer's name when the row wraps. -->
+                                <span class="layer-name">
+                                  <span class="layer-label">{layer.label}</span>
+                                  {#if layer.role}
+                                    <span class="layer-role">{formatRole(layer.role)}</span>
+                                  {/if}
+                                </span>
                                 {#if layer.prefix}
                                   <span class="layer-prefix">{layer.prefix}</span>
                                 {/if}
@@ -275,10 +278,13 @@
                       {#each layers as layer}
                         <div class="layer" style="--depth: {layer.depth}">
                           <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
-                          <span class="layer-label">{layer.label}</span>
-                          {#if layer.role}
-                            <span class="layer-role">{formatRole(layer.role)}</span>
-                          {/if}
+                          <!-- The level mark stays beside its layer's name when the row wraps. -->
+                          <span class="layer-name">
+                            <span class="layer-label">{layer.label}</span>
+                            {#if layer.role}
+                              <span class="layer-role">{formatRole(layer.role)}</span>
+                            {/if}
+                          </span>
                           {#if layer.prefix}
                             <span class="layer-prefix">{layer.prefix}</span>
                           {/if}
@@ -704,6 +710,13 @@
     flex-shrink: 0;
   }
 
+  .layer-name {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-sm);
+    min-width: 0;
+  }
+
   .layer-label {
     min-width: 0;
     font-weight: 500;
@@ -718,6 +731,7 @@
     background: var(--ps-primary-light);
     padding: 1px 6px;
     border-radius: 999px;
+    flex-shrink: 0;
   }
 
   .layer-prefix {

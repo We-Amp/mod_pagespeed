@@ -826,6 +826,13 @@ table.reads-across {
     outline-color: CanvasText;
   }
 
+  /* A bar that marks the current page (the sidebar's leading edge) is
+   * the text colour of the surface around the row, so it reads as a bar
+   * beside the fill, not as a notch in it. */
+  [aria-current="page"]::before {
+    background: CanvasText !important;
+  }
+
   /* A hint drawn over the current page's row (the sidebar's shortcut
    * keys) joins the row's pair, without a backplate of its own. */
   [aria-current="page"] + [aria-hidden="true"] {

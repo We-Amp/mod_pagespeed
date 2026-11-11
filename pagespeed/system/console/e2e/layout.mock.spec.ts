@@ -1273,6 +1273,93 @@ test.describe("the findings link", () => {
       expect(a.left - 4).toBeGreaterThanOrEqual(0);
       expect(a.right + 4).toBeLessThanOrEqual(width);
       expect(await noHorizontalScroll(page)).toBe(true);
+      // Once the focus moves on, the findings are plain content again.
+      await page.getByRole("heading", { level: 1 }).click();
+      await expect(anchor).not.toBeFocused();
+      await expect(anchor).not.toHaveAttribute("tabindex");
+    });
+  }
+
+  test("a click on a finding's text, or selecting it, leaves no outline", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mockAdmin(page, "pagespeed_global_admin", { ...wholeServerReplies(), "v1/daemon/health": F.HEALTH_CHECK_FAILING });
+    await openConsole(page, "pagespeed_global_admin", "#/overview");
+    await pageReady(page);
+    const anchor = page.getByTestId("findings-anchor");
+    const outline = () => anchor.evaluate((el) => getComputedStyle(el).outlineStyle);
+    const sentence = page.getByTestId("alert-daemon-check-failed").locator("p").first();
+    const point = async () => {
+      const b = await box(sentence);
+      return { x: b.left + 20, y: b.top + b.height / 2 };
+    };
+    // A plain click on the sentence.
+    let at = await point();
+    await page.mouse.click(at.x, at.y);
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+    // A drag across it, as when copying the text.
+    await page.mouse.move(at.x - 15, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 100, at.y, { steps: 4 });
+    await page.mouse.up();
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+    // The same after the link was used once and the focus has moved on.
+    await page.getByTestId("findings-link").click();
+    await expect(anchor).toBeFocused();
+    expect(await outline()).toBe("solid");
+    await page.getByRole("heading", { level: 1 }).click();
+    at = await point();
+    await page.mouse.click(at.x, at.y);
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+  });
+});
+
+// A strip of tabs or views scrolls sideways, so it clips whatever an item
+// draws outside its own box. The focus ring of an item is therefore drawn
+// where no ancestor cuts it: whole, on all four sides.
+test.describe("focus rings in a scrolling strip", () => {
+  for (const [name, hash, role] of [
+    ["the Caches tabs", "#/caches", "tab"],
+    ["the Table and Graphs views", "#/statistics", "view"],
+  ] as const) {
+    test(`${name}: the keyboard's ring is whole`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      const items = role === "tab" ? page.getByRole("tab") : page.locator("main nav a");
+      const count = await items.count();
+      expect(count).toBeGreaterThanOrEqual(2);
+      // Reached with the keyboard.
+      await items.first().focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(items.first()).toBeFocused();
+      for (let i = 0; i < count; i++) {
+        const cut = await page.evaluate(() => {
+          const el = document.activeElement as HTMLElement;
+          const s = getComputedStyle(el);
+          if (s.outlineStyle !== "solid" || parseFloat(s.outlineWidth) !== 2) return [`no ring on ${el.textContent}`];
+          const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
+          const r = el.getBoundingClientRect();
+          const ring = { left: r.left - reach, top: r.top - reach, right: r.right + reach, bottom: r.bottom + reach };
+          const out: string[] = [];
+          for (let a = el.parentElement; a !== null; a = a.parentElement) {
+            const cs = getComputedStyle(a);
+            if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+            const b = a.getBoundingClientRect();
+            if (ring.left < b.left - 0.5 || ring.top < b.top - 0.5 || ring.right > b.right + 0.5 || ring.bottom > b.bottom + 0.5) {
+              out.push(`${el.textContent}: ring cut by ${a.tagName.toLowerCase()}.${a.className}`);
+            }
+          }
+          return out;
+        });
+        expect(cut, `item ${i}`).toEqual([]);
+        // The next item: tabs move with the arrow keys, links with Tab.
+        await page.keyboard.press(role === "tab" ? "ArrowRight" : "Tab");
+      }
     });
   }
 });

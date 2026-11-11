@@ -48,6 +48,11 @@
     color: var(--ps-text);
     background: var(--ps-surface-hover);
   }
+  /* The strip scrolls sideways, so it clips what its items draw outside
+     their box: the focus ring is drawn inside the item, whole. */
+  .view-link:focus-visible {
+    outline-offset: -2px;
+  }
   .view-link.current {
     color: var(--ps-primary);
     border-bottom-color: var(--ps-primary);

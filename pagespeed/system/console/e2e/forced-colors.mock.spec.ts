@@ -134,14 +134,17 @@ for (const scheme of ["light", "dark"] as const) {
       const nav = page.getByRole("navigation", { name: "Console pages" });
       const current = nav.locator('a[aria-current="page"]');
       await expect(current).toHaveCount(1);
-      expect(await fillOf(page, current)).not.toBe(await fillOf(page, nav.locator("a:not([aria-current])").first()));
-      // And it carries a bar at its leading edge, in the colour of its text.
+      const plain = await fillOf(page, nav.locator("a:not([aria-current])").first());
+      expect(await fillOf(page, current)).not.toBe(plain);
+      // And it carries a bar at its leading edge: neither the row's fill
+      // nor the sidebar's surface, so it shows as a bar and not as a notch.
       const b = await box(current);
       const { at } = await painted(page, await current.screenshot({ animations: "disabled" }), [
         [1, b.height / 2],
         [6, b.height / 2],
       ]);
       expect(at[0], "the bar differs from the row's fill").not.toBe(at[1]);
+      expect(at[0], "the bar differs from the sidebar's surface").not.toBe(plain);
     });
 
     test("tabs: the selected tab is filled, the other tabs are not", async ({ page }) => {
