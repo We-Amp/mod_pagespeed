@@ -105,6 +105,10 @@
     const onChange = () => {
       drawerMode = drawerMedia.matches;
       if (!drawerMode) sidebarOpen = false;
+      // The window shrank (or was zoomed) into the drawer layout with the
+      // focus in the sidebar: the sidebar is now a closed, inert drawer, so
+      // the focus goes to the button that opens it, not nowhere.
+      else if (!sidebarOpen && navEl?.contains(document.activeElement)) menuToggle?.focus();
     };
     drawerMedia.addEventListener("change", onChange);
     return () => drawerMedia.removeEventListener("change", onChange);
@@ -214,19 +218,34 @@
 
   /**
    * Closes the drawer. A focus that was inside it, or that a tap on the
-   * backdrop has just taken away, goes back to the menu button, not nowhere.
+   * backdrop has just taken away, goes back to the menu button, not
+   * nowhere; Escape always returns it there.
    */
-  function closeDrawer(): void {
+  function closeDrawerFrom(key: "pointer" | "escape"): void {
     if (!sidebarOpen) return;
     const active = document.activeElement;
     const stranded = active === null || active === document.body || (navEl?.contains(active) ?? false);
     sidebarOpen = false;
-    if (stranded) menuToggle?.focus();
+    if (key === "escape" || stranded) menuToggle?.focus();
+  }
+
+  function closeDrawer(): void {
+    closeDrawerFrom("pointer");
   }
 
   function toggleSidebar(): void {
     if (sidebarOpen) closeDrawer();
     else void openDrawer();
+  }
+
+  /** The search shortcut: the page's search box; an open drawer closes first, as the page behind it is inert. */
+  async function focusPageSearch(): Promise<void> {
+    const box = () => document.querySelector<HTMLElement>("main input[type='text'], main input[type='search']");
+    if (sidebarOpen && box() !== null) {
+      sidebarOpen = false;
+      await tick();
+    }
+    box()?.focus();
   }
 
   const shortcuts = new ShortcutReader();
@@ -243,8 +262,7 @@
     if (helpOpen) return; // the dialog handles its own keys
     if (e.key === "Escape" && drawerMode && sidebarOpen) {
       e.preventDefault();
-      sidebarOpen = false;
-      menuToggle?.focus();
+      closeDrawerFrom("escape");
       return;
     }
     const action = shortcuts.read(
@@ -261,7 +279,7 @@
         void pollers.refreshAll();
         break;
       case "search":
-        document.querySelector<HTMLElement>("main input[type='text'], main input[type='search']")?.focus();
+        void focusPageSearch();
         break;
       case "go":
         router.navigate(action.path);

@@ -196,6 +196,35 @@ test.describe("the decisions", () => {
     await expect(select).toBeFocused();
   });
 
+  test("a pack whose log cannot be read yet: the page says whose decisions it still shows", async ({ page }) => {
+    let failing = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      replies((call, request) =>
+        failing && request.url.searchParams.get("pack") === "house-rules" ? F.MODULE_FAILURE : R.TWO_BY_PACK(call, request),
+      ),
+    );
+    await openConsole(page, "pagespeed_admin", "#/rule-packs");
+    await ready(page);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+    await expect(page.getByTestId("rp-tail-pending")).toHaveCount(0);
+    failing = true;
+    const select = page.getByTestId("rp-tail-pack").getByRole("combobox");
+    await select.selectOption("house-rules");
+    const pending = page.getByTestId("rp-tail-pending");
+    await expect(pending).toContainText("house-rules has not been read yet");
+    await expect(pending).toContainText("still those of edge-seo");
+    await expect(select).toHaveValue("house-rules");
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+    await expect(page.getByTestId("rp-raw-log")).toHaveAttribute("href", /pack=edge-seo$/);
+    failing = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(1);
+    await expect(select).toHaveValue("house-rules");
+  });
+
   test("a link to another pack's log opens the page afresh after the selector changed it", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", replies(R.TWO_BY_PACK));
     await openConsole(page, "pagespeed_admin", "#/rule-packs?pack=house-rules");
