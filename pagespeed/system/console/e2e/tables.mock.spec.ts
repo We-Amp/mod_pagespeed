@@ -118,11 +118,15 @@ test.describe("Table semantics", () => {
     });
   }
 
-  test("Statistics: the counter's name heads its row", async ({ page }) => {
+  test("Statistics: the counter's name alone heads its row, also with the descriptions shown", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin", "#/statistics");
-    const row = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: /^num_flushes/ }) });
-    await expect(row).toHaveCount(1);
+    await expect(page.locator(".stat-desc").first()).toBeVisible();
+    const header = page.getByRole("rowheader", { name: "num_flushes", exact: true });
+    await expect(header).toHaveCount(1);
+    // The description is still there for assistive technology, as the header's description.
+    await expect(header).toHaveAccessibleDescription(/\S/);
+    const row = page.getByRole("row").filter({ has: header });
     await expect(row.getByRole("cell")).not.toHaveCount(0);
   });
 

@@ -149,6 +149,7 @@
   .old-console-row {
     display: flex;
     flex-wrap: wrap;
+    align-items: baseline;
     gap: var(--ps-space-md);
     font-size: var(--ps-font-size-sm);
   }

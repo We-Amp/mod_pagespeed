@@ -39,6 +39,22 @@ const pages = readdirSync(PAGES)
   .filter((f) => f.endsWith(".svelte"))
   .map((f) => ({ name: f, source: readFileSync(join(PAGES, f), "utf8") }));
 
+/** The JavaScript of every class={...} attribute, braces balanced. */
+function classExpressions(markup: string): string[] {
+  const out: string[] = [];
+  for (const m of markup.matchAll(/\bclass=\{/g)) {
+    let depth = 1;
+    let i = m.index! + m[0].length;
+    const start = i;
+    for (; i < markup.length && depth > 0; i++) {
+      if (markup[i] === "{") depth++;
+      else if (markup[i] === "}") depth--;
+    }
+    out.push(markup.slice(start, i - 1));
+  }
+  return out;
+}
+
 // Every component: the pages, the shared ones beside this file, and the shell.
 const components = [
   ...pages,
@@ -136,6 +152,11 @@ describe("shared component layer", () => {
         for (const token of list.split(/\s+/)) if (token.includes("--")) offenders.push(`${name}: ${token}`);
       }
       for (const [m] of markup.matchAll(/\bclass:[\w-]*--[\w-]*/g)) offenders.push(`${name}: ${m}`);
+      for (const expression of classExpressions(markup)) {
+        for (const [, , text] of expression.matchAll(/(["'`])((?:(?!\1)[\s\S])*)\1/g)) {
+          for (const token of text.split(/\s+/)) if (token.includes("--")) offenders.push(`${name}: ${token}`);
+        }
+      }
     }
     for (const [m] of theme.matchAll(/\.-?[A-Za-z_][\w-]*--[\w-]*/g)) offenders.push(`theme.css: ${m}`);
     expect(offenders).toEqual([]);

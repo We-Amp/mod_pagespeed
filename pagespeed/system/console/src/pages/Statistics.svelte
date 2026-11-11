@@ -205,7 +205,9 @@
                 <tr>
                   <th scope="row" class="name-cell" title={entry.description}>
                     {#each nameSegments(entry.name) as part, i (i)}{part}<wbr />{/each}
-                    {#if showDescriptions}<div class="stat-desc">{entry.description}</div>{/if}
+                    <!-- The row header's name is the counter's name alone (a screen reader
+                         repeats it on every cell); the title carries the description. -->
+                    {#if showDescriptions}<div class="stat-desc" aria-hidden="true">{entry.description}</div>{/if}
                   </th>
                   <td class="value-cell num">{formatCount(entry.value)}</td>
                   {#if showDelta}
