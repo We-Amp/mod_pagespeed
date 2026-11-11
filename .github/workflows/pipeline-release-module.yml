@@ -1043,9 +1043,16 @@ jobs:
           fi
           echo "vex_path=${vex_files[0]}" >> "$GITHUB_OUTPUT"
 
+      # Checksum-verified pinned install (retries; a mismatch aborts).
       - name: Install grype
         id: grype
-        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        env:
+          GRYPE_VERSION: v0.112.0
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          bash tools/sbom/install-pinned-tool.sh grype "$GRYPE_VERSION" "$RUNNER_TEMP/bin"
+          echo "cmd=$RUNNER_TEMP/bin/grype" >> "$GITHUB_OUTPUT"
 
       - name: Vulnerability scan with VEX suppression (grype on the SPDX SBOM, fail on medium and above)
         env:

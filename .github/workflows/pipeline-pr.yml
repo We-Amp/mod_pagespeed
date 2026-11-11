@@ -394,8 +394,8 @@ jobs:
           set -euo pipefail
           COMMIT=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['optimizer_commit'])")
           BASE="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}"
-          curl -fsSL --retry 5 --retry-all-errors "${BASE}/lib/classify/capability_mask.h" -o "${RUNNER_TEMP}/capability_mask.h"
-          curl -fsSL --retry 5 --retry-all-errors "${BASE}/lib/cache/vary_emission.cc" -o "${RUNNER_TEMP}/vary_emission.cc"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/classify/capability_mask.h" "${RUNNER_TEMP}/capability_mask.h"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/cache/vary_emission.cc" "${RUNNER_TEMP}/vary_emission.cc"
           python3 tools/ci/check_image_selection_vary.py pagespeed/system/daemon_abi.h \
             "${RUNNER_TEMP}/capability_mask.h" "${RUNNER_TEMP}/vary_emission.cc"
 
@@ -534,11 +534,17 @@ jobs:
             echo "vex_path=${vex_files[0]}" >> "$GITHUB_OUTPUT"
           fi
 
-      # SHA-pinned; bumping it is a deliberate, reviewed change.
+      # Checksum-verified pinned install (retries; a mismatch aborts).
       - name: Install grype
         if: ${{ !cancelled() }}
         id: grype
-        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        env:
+          GRYPE_VERSION: v0.112.0
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          bash tools/sbom/install-pinned-tool.sh grype "$GRYPE_VERSION" "$RUNNER_TEMP/bin"
+          echo "cmd=$RUNNER_TEMP/bin/grype" >> "$GITHUB_OUTPUT"
 
       - name: Vulnerability scan with VEX suppression (grype on the SPDX SBOM, fail on medium and above)
         if: ${{ !cancelled() }}
