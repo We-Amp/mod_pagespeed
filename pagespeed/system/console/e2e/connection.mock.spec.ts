@@ -333,6 +333,46 @@ test.describe("paused auto-refresh", () => {
     await expect(pill).toHaveText("Connected");
   });
 
+  test("turned back on, the bar says Checking… until the first request settles, not the state from before", async ({ page }) => {
+    let hang = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST },
+      { delayMs: { stats_json: 4000 }, down: () => hang },
+    );
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible({ timeout: 10_000 });
+    const pill = page.getByTestId("connection-pill");
+    await expect(pill).toHaveText("Paused");
+    // The server stops answering while paused; nothing asks, so nothing knows.
+    hang = true;
+    const seen: string[] = [];
+    await page.exposeFunction("notePill", (t: string) => seen.push(t));
+    await pill.evaluate((el) =>
+      new MutationObserver(() => (window as unknown as { notePill: (t: string) => void }).notePill(el.textContent ?? "")).observe(el, {
+        subtree: true,
+        characterData: true,
+        childList: true,
+      }),
+    );
+    await page.getByRole("button", { name: /auto-refresh/i }).click();
+    await expect(pill).toHaveText("Checking…");
+    await expect(pill.locator(".status-dot")).toHaveClass(/status-dot-square/);
+    await expect(pill).toHaveText("Reconnecting…", { timeout: 10_000 });
+    expect(seen.map((t) => t.trim())).not.toContain("Connected");
+  });
+
+  test("the drawer marks the paused state with the same square", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await page.getByRole("button", { name: "Toggle menu" }).click();
+    const drawer = page.getByTestId("drawer-connection");
+    await expect(drawer).toHaveText("Paused");
+    await expect(drawer.locator(".status-dot")).toHaveCSS("border-top-left-radius", "1px");
+  });
+
   test("the server is down at load: the banner says nothing retries until asked, and Retry still works", async ({ page }) => {
     let down = true;
     await mockAdmin(page, "pagespeed_admin", {
@@ -342,7 +382,7 @@ test.describe("paused auto-refresh", () => {
     await openConsole(page, "pagespeed_admin", "#/statistics");
     const banner = page.getByTestId("connection-banner");
     await expect(banner).toBeVisible();
-    await expect(banner).toContainText("Auto-refresh is paused; refresh to try again");
+    await expect(banner).toContainText("Auto-refresh is paused; use Retry now or turn auto-refresh on");
     await expect(banner).not.toContainText("keeps trying");
     await expect(page.getByTestId("connection-pill")).toHaveText("Paused");
     down = false;

@@ -112,6 +112,19 @@ describe("ConnectionMonitor", () => {
     m.reset();
     expect(m.view).toEqual({ status: "connected", failures: 0, lastAnsweredAt: null });
   });
+
+  it("next() settles at the next request that counts, answered or not", async () => {
+    const m = new ConnectionMonitor();
+    let settled = 0;
+    void m.next().then(() => settled++);
+    // A gateway 5xx on an optimizer leaf counts for nothing.
+    m.record("/v1/daemon/health", 504, 1000, "<html>gateway</html>");
+    await Promise.resolve();
+    expect(settled).toBe(0);
+    m.record("/stats_json", null, 2000);
+    await Promise.resolve();
+    expect(settled).toBe(1);
+  });
 });
 
 describe("OptimizerPresenceMonitor", () => {

@@ -5,8 +5,9 @@
 
 <script lang="ts">
   // Shown while the console cannot reach the server. Every page keeps its
-  // last data and retries on its own, less often the longer the outage lasts;
-  // "Retry now" asks every open panel again at once.
+  // last data and, with auto-refresh on, retries on its own, less often the
+  // longer the outage lasts; paused, nothing retries until asked. "Retry
+  // now" asks every open panel again at once.
   import { onMount } from "svelte";
   import { connection, type ConnectionView } from "$lib/api/connection";
   import { pollers } from "$lib/api/poller";
@@ -52,7 +53,7 @@
   <div class="connection-banner" role="alert" data-testid="connection-banner">
     <p class="connection-text">
       <strong>Cannot reach the server.</strong>
-      {autoOn ? "The console keeps trying, less often the longer this lasts" : "Auto-refresh is paused; refresh to try again"}{#if view.lastAnsweredAt !== null}; the figures below are from {new Date(view.lastAnsweredAt).toLocaleTimeString()}{/if}.
+      {autoOn ? "The console keeps trying, less often the longer this lasts" : "Auto-refresh is paused; use Retry now or turn auto-refresh on"}{#if view.lastAnsweredAt !== null}; the figures below are from {new Date(view.lastAnsweredAt).toLocaleTimeString()}{/if}.
     </p>
     <button type="button" class="btn btn-primary" onclick={retryNow} disabled={retrying}>
       {retrying ? "Retrying…" : "Retry now"}

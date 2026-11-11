@@ -796,8 +796,11 @@ p.note {
 }
 
 .status-dot-bar-paused {
-  border-radius: 1px;
   background: var(--ps-topbar-fg-muted);
+}
+
+.status-dot-square {
+  border-radius: 1px;
 }
 
 /* A short label on the top bar's band (the console's scope): a light
