@@ -317,14 +317,14 @@
           {#if cacheRate && cacheRate.percent !== null}
             {@const words = servedOptimizedText(cacheRate.mode)}
             <p class={hero ? "stat-tile-context" : "note"} title={words.tooltip}>
-              {#if !hero}The module counted {countText(summary.servedByOptimizer)} responses served optimized:{/if}
+              {#if !hero}The module counted {countText(summary.servedByOptimizer)} responses served optimized, 304 Not Modified answers included:{/if}
               {moduleBase.warming
                 ? `of ${formatCount(cacheRate.total)}`
                 : `${formatPercent(cacheRate.percent, cacheRate.served)} of ${formatCount(cacheRate.total)}`}
               {words.of}{moduleBase.warming ? " so far" : ""}
             </p>
           {:else if !hero}
-            <p class="note">The module counted {countText(summary.servedByOptimizer)} responses served optimized.</p>
+            <p class="note">The module counted {countText(summary.servedByOptimizer)} responses served optimized, 304 Not Modified answers included.</p>
           {/if}
         </div>
         {#if judgement}
@@ -522,7 +522,8 @@
             <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
           {/if}
           {#if optimizerLeads}
-            <!-- The module's own count of those serves, with its share. -->
+            <!-- The module's own count of those serves, with its share: it also counts
+                 304 answers, which the optimizer's count in the verdict leaves out. -->
             {@render servedShare(false)}
           {/if}
           {#if scope.isGlobal && serveRows.length > 0}

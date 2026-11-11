@@ -542,11 +542,13 @@ export function overviewVerdict(
   if (optimizer.warming) {
     return working(`${rewriting} Optimizer restarted ${optimizer.ago}; its figures are not meaningful yet.`);
   }
+  // The optimizer's own count: full answers whose saving it could measure. The
+  // module counts more (Overview's optimizer card says so), so whose count it is is said.
   const responses = serves.responses === 1 ? "1 optimized response" : `${formatCount(serves.responses)} optimized responses`;
   const served =
     serves.saved > 0
-      ? `${responses} served from the optimizer's cache, ${formatBytes(serves.saved)} saved ${optimizerSince}.`
-      : `${responses} served from the optimizer's cache ${optimizerSince}.`;
+      ? `The optimizer counted ${responses} served from its cache, ${formatBytes(serves.saved)} saved ${optimizerSince}.`
+      : `The optimizer counted ${responses} served from its cache ${optimizerSince}.`;
   const webServer = module.warming ? ` Web server restarted ${module.ago}; the module's figures are not meaningful yet.` : "";
   return working(`${served}${webServer}`);
 }

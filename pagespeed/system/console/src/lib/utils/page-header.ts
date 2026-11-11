@@ -23,3 +23,17 @@ export function updatedText(
   const overdue = intervalMs !== undefined && intervalMs > 0 && now - updatedAt > OVERDUE_INTERVALS * intervalMs;
   return overdue ? `refresh overdue · updated ${rel}` : `updated ${rel}`;
 }
+
+/** How long the result of a refresh the viewer asked for stays next to the stamp. */
+export const REFRESH_RESULT_MS = 5000;
+
+/**
+ * The words for how a refresh the viewer asked for ended, from the poller's
+ * outcome (lib/api/poller.ts); anything else, a page's own refresh that
+ * returns nothing included, is an answer.
+ */
+export function refreshResultText(outcome: unknown): string {
+  if (outcome === "failed") return "Refresh failed";
+  if (outcome === "busy") return "Server busy; not refreshed";
+  return "Refreshed";
+}

@@ -50,6 +50,8 @@ for (const route of ROUTES) {
     const toggle = page.getByRole("button", { name: /Auto-refresh · \d+ s/ });
     if (route.polls) {
       await expect(toggle).toBeVisible();
+      // On by default, said in words, without the accent of the page's action.
+      await expect(toggle).toContainText("Auto-refresh on");
       await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
       await expect(page.getByText(/^updated /)).toBeVisible();
     } else {
@@ -80,14 +82,57 @@ test("the stamp counts the seconds, also while auto-refresh is paused", async ({
   expect(await stamp.evaluate((el) => el.closest("[aria-live], [role=status], [role=alert], [role=log]") === null)).toBe(true);
 });
 
-test("Configuration keeps its manual refresh, and it still refetches", async ({ page }) => {
+test("Configuration has the shared Refresh button and no auto-refresh; it and r refetch", async ({ page }) => {
+  await page.clock.install();
   const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
   await openConsole(page, "pagespeed_admin", "#/configuration");
   await expect(page.getByRole("heading", { level: 1, name: "Configuration" })).toBeVisible();
-  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  await expect(refresh).toBeVisible();
-  const before = mock.calls("config");
+  const header = page.locator("main .page-header");
+  // One Refresh, the header's icon button; no text button of its own.
+  await expect(page.getByRole("button", { name: /refresh/i })).toHaveCount(1);
+  const refresh = header.getByRole("button", { name: "Refresh", exact: true });
+  await expect(header.getByTestId("page-updated")).toHaveText(/^updated /);
+  // Nothing on a timer.
+  const loaded = mock.calls("config");
+  await page.clock.runFor(30_000);
+  expect(mock.calls("config")).toBe(loaded);
   await refresh.click();
-  await expect.poll(() => mock.calls("config")).toBeGreaterThan(before);
-  await expect(page.locator("main .page-header")).toContainText("this virtual host");
+  await expect.poll(() => mock.calls("config")).toBe(loaded + 1);
+  await expect(header.getByRole("status")).toHaveText("Refreshed");
+  await page.locator("main h1").click();
+  await page.keyboard.press("r");
+  await expect.poll(() => mock.calls("config")).toBe(loaded + 2);
+  await expect(header).toContainText("this virtual host");
+});
+
+test("Refresh says what it came to, and a timer's refresh says nothing", async ({ page }) => {
+  await page.clock.install();
+  let failing = false;
+  const mock = await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    stats_json: () => (failing ? F.MODULE_FAILURE : F.STATS_VHOST),
+  });
+  await openConsole(page, "pagespeed_admin", "#/statistics");
+  await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+  const result = page.locator("main .page-header").getByRole("status");
+  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  // Timer refreshes leave the status region alone (no announcement every few seconds).
+  const before = mock.calls("stats_json");
+  await page.clock.runFor(15_000);
+  await expect.poll(() => mock.calls("stats_json")).toBeGreaterThan(before);
+  await expect(result).toHaveText("");
+  await refresh.click();
+  await expect(result).toHaveText("Refreshed");
+  await expect(refresh).toHaveAttribute("aria-busy", "false");
+  // It goes after a few seconds, so the next one is announced again.
+  await page.clock.runFor(6_000);
+  await expect(result).toHaveText("");
+  failing = true;
+  await refresh.click();
+  await expect(result).toHaveText("Refresh failed");
+  // The refresh shortcut gives the same feedback.
+  failing = false;
+  await page.locator("main h1").click();
+  await page.keyboard.press("r");
+  await expect(result).toHaveText("Refreshed");
 });

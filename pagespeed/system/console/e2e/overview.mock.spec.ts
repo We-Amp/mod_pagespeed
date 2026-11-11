@@ -224,7 +224,7 @@ test.describe("Overview verdict and tiles", () => {
   test("whole server: the optimizer's serves and savings since it started, and that figure leads", async ({ page }) => {
     await open(page, "pagespeed_global_admin", steady());
     await expect(page.getByTestId("health-summary")).toHaveText(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. No findings.",
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. No findings.",
     );
     await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-ok/);
     await expect(page.getByTestId("health-dot")).toHaveClass(/status-dot-ok/);
@@ -403,7 +403,7 @@ test.describe("Overview verdict and tiles", () => {
     // The module's counters are zero again; the optimizer has been serving for hours.
     await open(page, "pagespeed_global_admin", steady({ stats_json: statsStarted(F.STATS_EMPTY, 20_000) }));
     await expect(page.getByTestId("health-summary")).toContainText(
-      "Working. 242 optimized responses served from the optimizer's cache, 673 KB saved since the optimizer started 3 h ago. " +
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. " +
         "Web server restarted less than a minute ago; the module's figures are not meaningful yet.",
     );
     // The page agrees with the sentence: the tiles and the leading figure are there.

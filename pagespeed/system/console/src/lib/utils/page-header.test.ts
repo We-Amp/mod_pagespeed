@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { updatedText } from "./page-header";
+import { refreshResultText, updatedText } from "./page-header";
 
 describe("updatedText", () => {
   const now = 1_800_000_000_000;
@@ -34,5 +34,16 @@ describe("updatedText", () => {
   it("admits it has never updated", () => {
     expect(updatedText(null, now, true)).toBe("updated —");
     expect(updatedText(null, now, false)).toBe("updated —");
+  });
+});
+
+describe("refreshResultText", () => {
+  it("says how a refresh the viewer asked for ended", () => {
+    expect(refreshResultText("ok")).toBe("Refreshed");
+    expect(refreshResultText("failed")).toBe("Refresh failed");
+    expect(refreshResultText("busy")).toBe("Server busy; not refreshed");
+    // A leaf turned off answered; a page refresh without an outcome is an answer.
+    expect(refreshResultText("off")).toBe("Refreshed");
+    expect(refreshResultText(undefined)).toBe("Refreshed");
   });
 });
