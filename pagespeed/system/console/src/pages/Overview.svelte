@@ -331,30 +331,34 @@
          are no tiles. The value is the state word alone; "last known" is context. -->
     {#snippet optimizerState(valueClass: string, contextClass: string)}
       {#if optimizer && daemonView}
-        <p class={valueClass} data-testid="optimizer-state">
-          <span
-            class="status-dot"
-            class:status-dot-ok={optimizer.ok && !serverDown}
-            class:status-dot-warning={!optimizer.ok && !serverDown}
-          ></span>{optimizer.word}
-        </p>
-        {#if serverDown}
-          <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
-        {/if}
+        <div class="state" data-testid="optimizer-state">
+          <p class={valueClass}>
+            <span
+              class="status-dot"
+              class:status-dot-ok={optimizer.ok && !serverDown}
+              class:status-dot-warning={!optimizer.ok && !serverDown}
+            ></span>{optimizer.word}
+          </p>
+          {#if serverDown}
+            <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
+          {/if}
+        </div>
         <p class={contextClass}>Up {formatDuration(daemonView.health?.uptime_seconds)}</p>
         {#if optimizer.busy}
           <p class={contextClass} data-testid="optimizer-busy">All worker threads busy.</p>
         {/if}
       {:else if availability}
-        <p class={valueClass} data-testid="optimizer-state">
-          <span
-            class="status-dot"
-            class:status-dot-warning={!serverDown && (daemonView?.daemon === "unreachable" || daemonView?.daemon === "unsupported")}
-          ></span>{availability.word}
-        </p>
-        {#if serverDown && daemonView?.daemon !== "transient"}
-          <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
-        {/if}
+        <div class="state" data-testid="optimizer-state">
+          <p class={valueClass}>
+            <span
+              class="status-dot"
+              class:status-dot-warning={!serverDown && (daemonView?.daemon === "unreachable" || daemonView?.daemon === "unsupported")}
+            ></span>{availability.word}
+          </p>
+          {#if serverDown && daemonView?.daemon !== "transient"}
+            <p class={contextClass} data-testid="optimizer-last-known">Last known state</p>
+          {/if}
+        </div>
       {/if}
     {/snippet}
 
@@ -598,6 +602,18 @@
   /* A paragraph in a card keeps the card's rhythm. */
   .card .note {
     margin: 0 0 var(--ps-space-sm);
+  }
+
+  /* The state word and, while the server is down, the line that says it is the last known one. */
+  .state {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-space-xs);
+    min-width: 0;
+  }
+
+  .state p {
+    margin: 0;
   }
 
   .figure {

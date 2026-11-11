@@ -177,9 +177,10 @@ test.describe("Connection", () => {
     expect(await borderColour()).not.toBe(verdictBorder);
     expect(await stripDotColour()).not.toBe(green);
     // The value stays the state word; that it is the last known state is a line of context.
-    await expect(optimizer).toHaveText("Running");
+    await expect(optimizer.locator(".stat-tile-value")).toHaveText("Running");
+    await expect(optimizer).toHaveText(/^Running\s*Last known state$/);
     await expect(page.getByTestId("optimizer-last-known")).toHaveText("Last known state");
-    expect((await optimizer.boundingBox())!.height, "the state word is one line").toBeLessThan(45);
+    expect((await optimizer.locator(".stat-tile-value").boundingBox())!.height, "the state word is one line").toBeLessThan(45);
     await expect(dot).not.toHaveClass(/status-dot-ok|status-dot-warning/);
     expect(await dotColour()).not.toBe(green);
     // The last figures stay on screen.

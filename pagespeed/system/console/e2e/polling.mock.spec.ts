@@ -74,8 +74,7 @@ test.describe("Polling", () => {
     expect(asked).toBeLessThanOrEqual(7);
     await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
     // The last view stays, marked as what it is.
-    await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
-    await expect(page.getByTestId("optimizer-last-known")).toHaveText("Last known state");
+    await expect(page.getByTestId("optimizer-state")).toHaveText(/^Running\s*Last known state$/);
   });
 
   test("the savings page never reads the message log", async ({ page }) => {
