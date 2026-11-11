@@ -328,7 +328,7 @@
       </p>
     {/if}
     {#if loadError}
-      <LoadError message={`Failed to load page: ${loadError}`} />
+      <LoadError error={loadError} noun="this page" />
     {:else if loadedComponent}
       {@const Page = loadedComponent}
       <Page />

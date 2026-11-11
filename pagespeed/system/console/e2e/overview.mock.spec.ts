@@ -167,7 +167,7 @@ test.describe("Overview", () => {
   test("module statistics unavailable: an error, and the optimizer card still renders", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", healthy({ stats_json: F.MODULE_FAILURE }));
     await openConsole(page, "pagespeed_admin");
-    await expect(page.getByTestId("module-error")).toContainText("statistics unavailable");
+    await expect(page.getByTestId("module-error")).toContainText("Could not load the module statistics.");
     await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
   });
 

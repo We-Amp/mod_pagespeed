@@ -225,7 +225,7 @@
       {#if isDaemonUnavailable(view.healthError)}
         <p class="empty" data-testid="health-unavailable">Health is not available: {daemonUnavailableReason(view.healthError)}.</p>
       {:else}
-        <LoadError message={view.healthError.message} />
+        <LoadError error={view.healthError} noun="the optimizer's health" onretry={() => poll.refresh()} />
       {/if}
     {/if}
   </section>
@@ -308,7 +308,7 @@
           </p>
         </div>
       {:else}
-        <LoadError message={view.statsError.message} />
+        <LoadError error={view.statsError} noun="the optimizer's statistics" onretry={() => poll.refresh()} />
       {/if}
     {/if}
   </section>

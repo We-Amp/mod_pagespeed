@@ -37,7 +37,7 @@ test.describe("Polling", () => {
       stats_json: () => (failing ? F.MODULE_FAILURE : F.STATS_VHOST),
     });
     await openConsole(page, "pagespeed_admin", "#/statistics");
-    await expect(page.getByText("statistics unavailable")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText("Could not load the statistics.");
     // Two minutes: a fixed five-second cadence would ask 25 times; backing
     // off (5, 10, 20, 40, 60 s) asks 5 times.
     await runFor(page, 120_000);

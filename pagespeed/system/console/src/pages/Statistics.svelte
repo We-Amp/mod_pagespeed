@@ -158,7 +158,7 @@
   {#if stats.loading}
     <p class="loading">Loading statistics...</p>
   {:else if stats.error && !stats.data}
-    <LoadError message={stats.error.message} />
+    <LoadError error={stats.error} noun="the statistics" onretry={() => stats.refresh()} />
   {:else}
     <RefreshNotice error={stats.error} />
 
