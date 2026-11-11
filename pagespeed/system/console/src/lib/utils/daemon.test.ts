@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ApiError } from "$lib/api/client";
-import { ALERT_RULES } from "$lib/alerts";
+import { ALERT_RULES, type AlertSnapshot } from "$lib/alerts";
 import { availabilityText } from "./overview";
 import {
   OPTIMIZER_NOT_ANSWERING_FIX,
@@ -72,8 +72,12 @@ describe("optimizerAbsence", () => {
     expect(optimizerAbsence(new ApiError(503, '{"error":"daemon_not_configured"}'))).toBe("not-configured");
   });
 
-  it("a 503 that is not the proxy's own 'not configured' is an optimizer that does not answer", () => {
-    expect(optimizerAbsence(new ApiError(503, "Service Unavailable"))).toBe("not-answering");
+  it("a 503 the optimizer sent itself is a refresh without an answer, not a stopped optimizer", () => {
+    const busy = new ApiError(503, "Service Unavailable");
+    expect(optimizerAbsence(busy, busy)).toBe("did-not-answer");
+    expect(optimizerAbsence(busy, unreachable)).toBe("not-answering");
+    expect(optimizerAbsence(notConfigured, busy)).toBe("did-not-answer");
+    expect(optimizerAbsence(noLeaf, busy)).toBe("did-not-answer");
   });
 
   it("leaves that disagree: the most telling answer wins, in either order", () => {
@@ -99,11 +103,12 @@ describe("optimizerAbsence", () => {
 });
 
 describe("optimizerAbsenceText", () => {
-  const kinds = ["not-configured", "not-answering", "optimizer-outdated", "module-unsupported"] as const;
+  const kinds = ["not-configured", "not-answering", "did-not-answer", "optimizer-outdated", "module-unsupported"] as const;
 
   it("titles the three reasons in words", () => {
     expect(optimizerAbsenceText("not-configured").title).toBe("No optimizer configured");
     expect(optimizerAbsenceText("not-answering").title).toBe("Optimizer not answering");
+    expect(optimizerAbsenceText("did-not-answer").title).toBe("Optimizer did not answer");
     expect(optimizerAbsenceText("optimizer-outdated").title).toBe("This build has no optimizer endpoints");
     expect(optimizerAbsenceText("module-unsupported").title).toBe("This build has no optimizer endpoints");
   });
@@ -118,8 +123,12 @@ describe("optimizerAbsenceText", () => {
   it("links to a documentation page under the product site", () => {
     for (const kind of kinds) {
       const { doc } = optimizerAbsenceText(kind);
-      expect(doc.label).not.toBe("");
-      expect(doc.href).toMatch(/^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+      if (kind === "did-not-answer") {
+        expect(doc).toBeNull();
+        continue;
+      }
+      expect(doc?.label).not.toBe("");
+      expect(doc?.href).toMatch(/^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
     }
   });
 
@@ -131,8 +140,19 @@ describe("optimizerAbsenceText", () => {
     const rule = ALERT_RULES.find((r) => r.id === "daemon-unreachable");
     expect(rule?.fix).toBe(OPTIMIZER_NOT_ANSWERING_FIX);
     const text = optimizerAbsenceText("not-answering");
+    expect(text.detail).toContain(rule?.message({} as AlertSnapshot, null, []));
     expect(text.detail).toContain(OPTIMIZER_NOT_ANSWERING_FIX);
-    expect(text.doc.href).toBe(rule?.doc);
+    expect(text.doc?.href).toBe(rule?.doc);
+  });
+
+  it("a refresh without an answer says what the Overview card says, and prescribes nothing", () => {
+    const text = optimizerAbsenceText("did-not-answer");
+    expect(text.detail).toBe(availabilityText("transient").detail);
+    expect(text.detail).not.toContain(OPTIMIZER_NOT_ANSWERING_FIX);
+  });
+
+  it("a module without the endpoints says what the Overview card says", () => {
+    expect(optimizerAbsenceText("module-unsupported").detail).toContain(availabilityText("not-configured").detail);
   });
 
   it("an outdated optimizer says what the Overview card says", () => {

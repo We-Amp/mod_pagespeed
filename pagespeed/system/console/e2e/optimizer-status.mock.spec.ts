@@ -86,9 +86,10 @@ const NO_LEAF: Reply = { status: 404, body: { error: "Unknown admin page: v1/dae
 for (const [name, reply, reason, title, says] of [
   ["not configured (503)", F.NOT_CONFIGURED, "not-configured", "No optimizer configured", "the module optimizes on its own"],
   ["not answering (502)", F.UNREACHABLE, "not-answering", "Optimizer not answering", "Start the optimizer service"],
+  ["an optimizer that answers 503 itself", { status: 503, body: { error: "busy" } }, "did-not-answer", "Optimizer did not answer", "the next refresh tries again"],
   ["an optimizer without the endpoints (501)", F.UNSUPPORTED, "optimizer-outdated", "This build has no optimizer endpoints", "Update the optimizer package"],
   ["a module without the endpoints (404)", NO_LEAF, "module-unsupported", "This build has no optimizer endpoints", "does not serve the optimizer's status"],
-] as const) {
+] as [string, Reply, string, string, string][]) {
   test(`no optimizer, ${name}: one explanation in words, and no empty sections`, async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", {
       ...F.allReplies(),
@@ -104,7 +105,13 @@ for (const [name, reply, reason, title, says] of [
     await expect(state.locator(".empty-title")).toHaveText(title);
     await expect(state).toContainText(says);
     await expect(state.locator("p")).toHaveCount(2);
-    await expect(state.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+    if (reason === "did-not-answer") {
+      // Nothing to fix and nothing to look up: the next refresh asks again.
+      await expect(state.getByRole("link")).toHaveCount(0);
+      await expect(state).not.toContainText("Start the optimizer service");
+    } else {
+      await expect(state.getByRole("link")).toHaveAttribute("href", /^https:\/\/[a-z.]+\/1\.1\/docs\/[a-z-]+\/#[a-z-]+$/);
+    }
     // The transport's words stay out of the page.
     await expect(page.locator("main")).not.toContainText(/HTTP \d{3}|daemon_|endpoint_unsupported|Unknown admin page/);
     // No heading with nothing under it, and no report about a cache nothing fills.
@@ -173,6 +180,7 @@ test("health answers and statistics do not: each section says what it has", asyn
   await expect(page.locator(".status-badge")).toHaveText("ok");
   await expect(page.getByTestId("daemon-unreachable")).toHaveCount(1);
   await expect(page.getByTestId("daemon-unreachable")).toContainText("this optimizer version does not provide this panel");
+  await expect(page.locator("main")).not.toContainText(/HTTP \d{3}|endpoint_unsupported/);
   await expect(page.getByTestId("cache-unavailable")).toBeVisible();
 });
 

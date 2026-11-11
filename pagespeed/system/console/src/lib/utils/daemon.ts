@@ -90,13 +90,19 @@ export function daemonUnavailableReason(error: Error | null): string {
 
 /**
  * Why a console has no optimizer to show, when no status leaf answered:
- * - `not-answering`: one is configured and the module could not reach it
- *   (502, or a 503 that is not the proxy's own "not configured");
+ * - `not-answering`: one is configured and the module could not reach it (502);
+ * - `did-not-answer`: a running optimizer answered 503 itself (the proxy
+ *   forwards it); the next refresh asks again, and there is nothing to fix;
  * - `not-configured`: none is configured here (the proxy's 503);
  * - `optimizer-outdated`: the optimizer lacks the status endpoints (501);
  * - `module-unsupported`: this module build serves no optimizer endpoints (404).
  */
-export type OptimizerAbsence = "not-configured" | "not-answering" | "optimizer-outdated" | "module-unsupported";
+export type OptimizerAbsence =
+  | "not-configured"
+  | "not-answering"
+  | "did-not-answer"
+  | "optimizer-outdated"
+  | "module-unsupported";
 
 function absenceOf(error: Error | null): OptimizerAbsence | null {
   if (!(error instanceof ApiError)) return null;
@@ -104,7 +110,7 @@ function absenceOf(error: Error | null): OptimizerAbsence | null {
     case 502:
       return "not-answering";
     case 503:
-      return errorCode(error) === "daemon_not_configured" ? "not-configured" : "not-answering";
+      return errorCode(error) === "daemon_not_configured" ? "not-configured" : "did-not-answer";
     case 501:
       return "optimizer-outdated";
     case 404:
@@ -117,6 +123,7 @@ function absenceOf(error: Error | null): OptimizerAbsence | null {
 /** Most telling first: a leaf that names a configured optimizer outranks one that names none. */
 const ABSENCE_ORDER: readonly OptimizerAbsence[] = [
   "not-answering",
+  "did-not-answer",
   "not-configured",
   "optimizer-outdated",
   "module-unsupported",
@@ -136,11 +143,14 @@ export function optimizerAbsence(...errors: Array<Error | null>): OptimizerAbsen
 export const OPTIMIZER_NOT_ANSWERING_FIX =
   "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.";
 
+/** No optimizer worker here; the Overview card says the same sentence. */
+const NO_OPTIMIZER_CONFIGURED = "No optimizer worker is configured for this server; the module optimizes on its own.";
+
 export interface OptimizerAbsenceText {
   title: string;
   detail: string;
-  /** A fixed documentation link, never a value from an endpoint. */
-  doc: { label: string; href: string };
+  /** A fixed documentation link, never a value from an endpoint; null when there is nothing to look up. */
+  doc: { label: string; href: string } | null;
 }
 
 /** The Optimizer status page's whole-page explanation: a title in words, one paragraph, one documentation link. */
@@ -150,7 +160,7 @@ export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceTe
       return {
         title: "No optimizer configured",
         detail:
-          "No optimizer worker is configured for this server; the module optimizes on its own. " +
+          `${NO_OPTIMIZER_CONFIGURED} ` +
           "This page shows the worker's health, load and cache once one is configured.",
         doc: { label: "Configuring the optimizer worker", href: `${MODULE_DOCS}/configuration/#area-optimizer-worker` },
       };
@@ -165,6 +175,12 @@ export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceTe
           href: `${MODULE_DOCS}/troubleshooting/#how-to-get-more-diagnostic-information`,
         },
       };
+    case "did-not-answer":
+      return {
+        title: "Optimizer did not answer",
+        detail: "The optimizer did not answer this refresh; the next refresh tries again.",
+        doc: null,
+      };
     case "optimizer-outdated":
       return {
         title: "This build has no optimizer endpoints",
@@ -175,9 +191,7 @@ export function optimizerAbsenceText(kind: OptimizerAbsence): OptimizerAbsenceTe
     case "module-unsupported":
       return {
         title: "This build has no optimizer endpoints",
-        detail:
-          "This web server's module does not serve the optimizer's status, so this page has nothing to show. " +
-          "The module optimizes on its own.",
+        detail: `This web server's module does not serve the optimizer's status. ${NO_OPTIMIZER_CONFIGURED}`,
         doc: { label: "About the optimizer status page", href: `${MODULE_DOCS}/admin-console/#optimizer-daemon-panels` },
       };
   }

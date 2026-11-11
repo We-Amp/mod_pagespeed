@@ -85,13 +85,11 @@ export interface StatusView {
   cooldowns: DaemonCooldownsResponse | null;
   /** Neither health nor statistics answered, and both say "no optimizer here". */
   allUnavailable: boolean;
-  /** The failure the page-level explanation names (statistics first). */
-  unavailableError: Error | null;
 }
 
 export function statusView(s: StatusSample | null): StatusView {
   if (s === null) {
-    return { health: null, healthError: null, stats: null, statsError: null, cooldowns: null, allUnavailable: false, unavailableError: null };
+    return { health: null, healthError: null, stats: null, statsError: null, cooldowns: null, allUnavailable: false };
   }
   const healthError = s.health.ok ? null : s.health.error;
   const statsError = s.stats.ok ? null : s.stats.error;
@@ -104,6 +102,5 @@ export function statusView(s: StatusSample | null): StatusView {
     statsError,
     cooldowns: s.cooldowns.ok ? s.cooldowns.data : null,
     allUnavailable,
-    unavailableError: allUnavailable ? statsError : null,
   };
 }

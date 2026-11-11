@@ -73,10 +73,11 @@ describe("statusView", () => {
     expect(v.allUnavailable).toBe(false);
   });
 
-  it("health and statistics both unavailable: one page-level explanation, from the statistics read", () => {
+  it("health and statistics both unavailable: one page-level explanation; both errors stay for the page to name the reason", () => {
     const v = statusView(sample({ health: bad(404), stats: bad(502, "daemon_unreachable") }));
     expect(v.allUnavailable).toBe(true);
-    expect(v.unavailableError?.message).toContain("502");
+    expect(v.healthError?.message).toContain("404");
+    expect(v.statsError?.message).toContain("502");
   });
 
   it("only one of them unavailable: each section explains its own", () => {
@@ -89,7 +90,6 @@ describe("statusView", () => {
   it("a real error next to an unavailable read: no page-level block, each section shows its own", () => {
     const healthFails = statusView(sample({ health: bad(500, "boom"), stats: bad(503) }));
     expect(healthFails.allUnavailable).toBe(false);
-    expect(healthFails.unavailableError).toBeNull();
     expect(healthFails.healthError?.message).toContain("500");
     expect(healthFails.statsError?.message).toContain("503");
     const statsFails = statusView(sample({ health: bad(502, "daemon_unreachable"), stats: bad(500, "boom") }));
