@@ -124,7 +124,7 @@ for (const scheme of ["light", "dark"] as const) {
       await mockAdmin(page, ADMIN, replies(["message_history"]));
       await openConsole(page, ADMIN, "#/overview");
       await expectCard(page, "overview-log-unavailable");
-      await expect(page.getByTestId("health-summary")).toHaveText(
+      await expect(page.getByTestId("findings-summary")).toHaveText(
         "Findings from the message log are not available on this console",
       );
       await expectNoViolations(page);
