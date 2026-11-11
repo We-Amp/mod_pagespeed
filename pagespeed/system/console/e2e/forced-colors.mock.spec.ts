@@ -293,6 +293,32 @@ for (const scheme of ["light", "dark"] as const) {
       }
     });
 
+    test("connection dot: reconnecting is a ring, told apart from the connected disc by shape", async ({ page }) => {
+      let down = false;
+      await page.emulateMedia({ forcedColors: "active", colorScheme: scheme });
+      await mockAdmin(page, ADMIN, wholeServerReplies(), { down: () => down });
+      await openConsole(page, ADMIN, "#/statistics");
+      await pageReady(page);
+      const dot = page.getByTestId("connection-pill").locator(".status-dot");
+      /** The dot's centre and a point just inside its left edge. */
+      const centreAndEdge = async () => {
+        const b = await box(dot);
+        const clip = { x: b.left, y: b.top, width: b.width, height: b.height };
+        return (await painted(page, await page.screenshot({ clip, animations: "disabled" }), [
+          [b.width / 2, b.height / 2],
+          [1, b.height / 2],
+        ])).at;
+      };
+      const [discCentre, discEdge] = await centreAndEdge();
+      expect(discCentre, "the connected dot is filled").toBe(discEdge);
+      down = true;
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect(dot).toHaveClass(/status-dot-bar-warning/);
+      const [ringCentre, ringEdge] = await centreAndEdge();
+      expect(ringCentre, "the reconnecting dot is hollow").not.toBe(ringEdge);
+      expect(ringEdge, "its ring is painted like the disc").toBe(discEdge);
+    });
+
     test("health strip: the leading rule is painted", async ({ page }) => {
       await open(page, scheme, "#/overview");
       const strip = page.getByTestId("health-strip");

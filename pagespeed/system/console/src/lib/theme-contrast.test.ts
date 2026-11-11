@@ -180,8 +180,13 @@ describe("theme tokens", () => {
       expect(contrastRatio(t[declaredToken(".topbar-chip", "color")], chipBg), "scope chip").toBeGreaterThanOrEqual(AA);
     });
     it(`${scheme}: the connection dot is visible on the band`, () => {
-      for (const cls of [".status-dot-bar-ok", ".status-dot-bar-warning"]) {
-        const dot = declaredToken(cls, "background");
+      // The ring (reconnecting) is drawn by its border; the disc and the square by their fill.
+      for (const [cls, prop] of [
+        [".status-dot-bar-ok", "background"],
+        [".status-dot-bar-warning", "border-color"],
+        [".status-dot-bar-paused", "background"],
+      ]) {
+        const dot = declaredToken(cls, prop);
         expect(dot).toMatch(/^--ps-topbar-/);
         expect(contrastRatio(t[dot], t["--ps-topbar-bg"]), `${cls} (${dot}) on the band`).toBeGreaterThanOrEqual(3);
       }

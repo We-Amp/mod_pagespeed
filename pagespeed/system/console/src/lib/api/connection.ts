@@ -111,6 +111,7 @@ const INITIAL: ConnectionView = { status: "connected", failures: 0, lastAnswered
 export class ConnectionMonitor {
   private current: ConnectionView = INITIAL;
   private readonly listeners = new Set<(v: ConnectionView) => void>();
+  private waiters: Array<() => void> = [];
 
   get view(): ConnectionView {
     return this.current;
@@ -135,11 +136,19 @@ export class ConnectionMonitor {
     } else {
       this.current = { status: "connected", failures: 0, lastAnsweredAt: now };
     }
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const fn of waiters) fn();
     // The server is back: what it refused before may have been fixed.
     if (prev.status === "reconnecting" && this.current.status === "connected") unavailable.reset();
     if (this.current.status !== prev.status || this.current.failures !== prev.failures) {
       for (const fn of this.listeners) fn(this.current);
     }
+  }
+
+  /** Resolves when the next request that counts settles: an answer, or none. */
+  next(): Promise<void> {
+    return new Promise((resolve) => this.waiters.push(resolve));
   }
 
   /** Calls `fn` with the current view at once, then on every status or failure-count change. */
