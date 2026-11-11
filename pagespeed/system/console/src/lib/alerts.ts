@@ -98,7 +98,7 @@ export interface AlertRule {
   link?: string;
   /** A documentation page about it, when one exists. */
   doc?: string;
-  /** At most three short lines of detail (may carry log text: render as text). */
+  /** At most three lines of log text behind the written message (render as text; the page keeps them folded). */
   details?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => string[];
   /** A count the overview's summary line states (recent-warnings only). */
   count?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => number;
@@ -280,11 +280,31 @@ const isAdminPublic = (g: MessageGroup): boolean => g.level === "info" && g.temp
 const isGenerationRefusal = (g: MessageGroup): boolean =>
   (g.level === "warning" || g.level === "error") && g.template === VOLUME_GENERATION_TEMPLATE;
 
-/** Warning-or-worse groups seen within the window, most frequent first. */
-function recentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
+/**
+ * Whether a log group is the evidence of a finding of its own (the
+ * cache-generation refusal, the admin-exposure warning): that finding states
+ * the cause, so the group is not listed again under "Warnings in the log".
+ * The admin warning stays an ordinary warning on a console that is public by
+ * configuration, where its finding is off.
+ */
+function hasOwnFinding(s: AlertSnapshot, g: MessageGroup): boolean {
+  if (isGenerationRefusal(g)) return true;
+  return isAdminExposure(g) && !s.messages?.groups.some(isAdminPublic);
+}
+
+/** Warning-or-worse groups seen within the window, with or without a finding of their own. */
+function allRecentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
   if (s.messages === undefined || s.messages === null) return undefined;
-  return s.messages.groups
-    .filter((g) => g.level !== "info" && g.recent > 0)
+  return s.messages.groups.filter((g) => g.level !== "info" && g.recent > 0);
+}
+
+/**
+ * Warning-or-worse groups seen within the window that no other finding
+ * reports, most frequent first: one cause is one finding.
+ */
+function recentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
+  return allRecentWarnings(s)
+    ?.filter((g) => !hasOwnFinding(s, g))
     .sort((a, b) => b.recent - a.recent);
 }
 
@@ -415,15 +435,19 @@ export const ALERT_RULES: readonly AlertRule[] = [
       return false;
     },
     message: (cur, _prev, history) => {
-      const logged = loggedGroups(cur, isGenerationRefusal) ?? [];
-      if (logged.length > 0) {
-        return `The web server is not using the optimizer's cache: ${capText(logged[0].template, 200)}`;
+      if ((loggedGroups(cur, isGenerationRefusal) ?? []).length > 0) {
+        return (
+          "The web server is not using the optimizer's cache: the module logged that it and the optimizer are " +
+          "built for different cache directory generations, so it opened nothing."
+        );
       }
       return (
         `The optimizer is answering, but none of the last ${fmt(fallthroughWithoutServes(cur, history) ?? 0)} ` +
         "CSS, JavaScript and image requests was served from its cache."
       );
     },
+    // The module's own line, as logged, behind the written sentence.
+    details: (cur) => (loggedGroups(cur, isGenerationRefusal) ?? []).slice(0, 1).map((g) => capText(g.template, 400)),
     fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
   },
   {
@@ -655,7 +679,9 @@ export const ALERT_RULES: readonly AlertRule[] = [
       const groups = recentWarnings(cur) ?? [];
       const total = groups.reduce((n, g) => n + g.recent, 0);
       const noun = recentNoun(groups);
-      return `${plural(total, noun.one, noun.many)} ${recentWindow(cur, true)}, of ${plural(groups.length, "kind", "kinds")}.`;
+      // Said when the log holds more than this finding counts, so the two numbers can differ in the open.
+      const elsewhere = (allRecentWarnings(cur) ?? []).length > groups.length ? ", besides those with a finding of their own" : "";
+      return `${plural(total, noun.one, noun.many)} ${recentWindow(cur, true)}, of ${plural(groups.length, "kind", "kinds")}${elsewhere}.`;
     },
     // A kind whose message is empty reads as the Logs page shows it, never as a bare count.
     details: (cur) =>
