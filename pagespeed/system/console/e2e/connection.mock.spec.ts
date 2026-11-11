@@ -145,16 +145,21 @@ test.describe("Connection", () => {
     const health = page.getByTestId("health-summary");
     const optimizer = page.getByTestId("optimizer-state");
     const stamp = page.getByTestId("page-updated");
-    const dotColour = () => optimizer.evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
-    const borderColour = () => health.evaluate((el) => getComputedStyle(el).borderLeftColor);
+    const strip = page.getByTestId("health-strip");
+    const dot = optimizer.locator(".status-dot");
+    const dotColour = () => dot.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const stripDotColour = () => page.getByTestId("health-dot").evaluate((el) => getComputedStyle(el).backgroundColor);
+    const borderColour = () => strip.evaluate((el) => getComputedStyle(el).borderLeftColor);
 
     // Up: a verdict, a green dot, a fresh stamp.
     await expect(optimizer).toHaveText("Running");
-    await expect(optimizer).toHaveClass(/state-ok/);
-    await expect(health).not.toContainText("Status unknown");
+    await expect(dot).toHaveClass(/status-dot-ok/);
+    await expect(health).toHaveText(/^Working\. /);
+    await expect(strip).toHaveClass(/health-strip-ok/);
     await expect(stamp).toHaveText(/^updated \d s ago$/);
     const green = await dotColour();
     const verdictBorder = await borderColour();
+    expect(await stripDotColour()).toBe(green);
 
     // Down for 20 s: every sample fails, and none of them counts as an update.
     down = true;
@@ -165,10 +170,13 @@ test.describe("Connection", () => {
     expect(age).toBeGreaterThanOrEqual(20);
 
     await expect(health).toHaveText(/^Status unknown — last answer \d/);
-    await expect(health).toHaveClass(/health-unknown/);
+    // No figure from before the outage, and no findings count either.
+    await expect(health).not.toContainText(/saved|findings?/);
+    await expect(strip).toHaveClass(/health-strip-unknown/);
     expect(await borderColour()).not.toBe(verdictBorder);
+    expect(await stripDotColour()).not.toBe(green);
     await expect(optimizer).toHaveText("Running · last known");
-    await expect(optimizer).not.toHaveClass(/state-ok|state-warn/);
+    await expect(dot).not.toHaveClass(/status-dot-ok|status-dot-warning/);
     expect(await dotColour()).not.toBe(green);
     // The last figures stay on screen.
     await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
@@ -177,9 +185,9 @@ test.describe("Connection", () => {
     down = false;
     await page.getByTestId("connection-banner").getByRole("button", { name: "Retry now" }).click();
     await expect(page.getByTestId("connection-banner")).toHaveCount(0);
-    await expect(health).not.toContainText("Status unknown");
+    await expect(health).toHaveText(/^Working\. /);
     await expect(optimizer).toHaveText("Running");
-    await expect(optimizer).toHaveClass(/state-ok/);
+    await expect(dot).toHaveClass(/status-dot-ok/);
     expect(await dotColour()).toBe(green);
     await expect(stamp).toHaveText(/^updated \d s ago$/);
   });
@@ -202,7 +210,9 @@ test.describe("Connection", () => {
     );
     await openConsole(page, "pagespeed_admin");
     const health = page.getByTestId("health-summary");
-    await expect(health).toHaveText("Module statistics unavailable");
+    // A failed module read states no figure: the state is unknown, and the count line says why.
+    await expect(health).toHaveText("Status unknown. Module statistics unavailable.");
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-warning/);
     // No figures were ever read: the stamp has nothing to age.
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
 

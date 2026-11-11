@@ -602,6 +602,154 @@ table.reads-across {
   background: var(--ps-primary);
 }
 
+/* A framed surface that holds one subject: a table with its heading, a
+ * group of figures, a set of next steps. */
+.card {
+  min-width: 0;
+  padding: var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius-lg);
+  background: var(--ps-surface);
+}
+
+/* A card whose numbers cover a wider scope than the page around it (the
+ * whole server on a per-host console): the dashed outline is the mark, so
+ * it survives forced colours. */
+.card-muted {
+  border: 1px dashed var(--ps-secondary);
+  background: var(--ps-bg-secondary);
+  opacity: var(--ps-muted-opacity);
+}
+
+/* A row of headline figures. One row from 900 px, two by two below that,
+ * stacked on a phone; the tiles of a row share one height. */
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ps-space-md);
+}
+
+@media (min-width: 900px) {
+  .stat-tiles {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .stat-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* One headline figure: a label, the value, a line or two of context and a
+ * small link to the detail. The value is plain text in the text colour (a
+ * count of zero is not an alert and not a link); the link is its own
+ * target. Add .card for the frame. */
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ps-space-xs);
+  min-width: 0;
+}
+
+.stat-tile-label {
+  margin: 0;
+  font-size: var(--ps-type-label-size);
+  font-weight: var(--ps-type-label-weight);
+  color: var(--ps-text-secondary);
+}
+
+.stat-tile-value {
+  margin: 0;
+  font-size: var(--ps-type-hero-metric-size);
+  font-weight: var(--ps-type-hero-metric-weight);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-text);
+  overflow-wrap: anywhere;
+}
+
+.stat-tile-context {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ps-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The drill-down sits at the tile's foot, at least 24 px tall. */
+.stat-tile-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 24px;
+  margin-top: auto;
+  font-size: 0.8125rem;
+  color: var(--ps-primary);
+}
+
+/* A status mark: a dot before the word that names the state. The word
+ * carries the state; the dot repeats it in colour. */
+.status-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-inline-end: 0.4em;
+  border-radius: 50%;
+  background: var(--ps-text-secondary);
+  vertical-align: 0.05em;
+}
+
+.status-dot-ok {
+  background: var(--ps-success-text);
+}
+
+.status-dot-warning {
+  background: var(--ps-warning-text);
+}
+
+.status-dot-error {
+  background: var(--ps-error);
+}
+
+.status-dot-info {
+  background: var(--ps-primary);
+}
+
+/* The one sentence a page opens with: what state the thing is in, with the
+ * numbers that say so. A band with a leading rule; the rule and the dot
+ * carry the level in colour, the sentence carries it in words. */
+.health-strip {
+  margin: 0 0 var(--ps-space-md);
+  padding: var(--ps-space-sm) var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-inline-start: 3px solid var(--ps-text-secondary);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-secondary);
+  color: var(--ps-text);
+  font-size: var(--ps-type-card-title-size);
+  line-height: var(--ps-type-body-leading);
+  overflow-wrap: anywhere;
+}
+
+.health-strip-ok {
+  border-inline-start-color: var(--ps-success-text);
+}
+
+.health-strip-info {
+  border-inline-start-color: var(--ps-primary);
+}
+
+.health-strip-warning {
+  border-inline-start-color: var(--ps-warning-text);
+}
+
+.health-strip-error {
+  border-inline-start-color: var(--ps-error);
+}
+
 /* Phone tables: rows become label/value cards so no column is off-screen.
  * The header is clipped, not display:none — the columns stay in the
  * accessibility tree (opt-in: a page adds .card-table and data-labels). */
@@ -683,5 +831,16 @@ table.reads-across {
   .status-dot {
     forced-color-adjust: none;
     background: CanvasText !important;
+  }
+
+  /* The health strip's leading rule and the muted card's dashed outline
+   * are borders: the palette paints them. Nothing fades in a forced
+   * palette, so the muted card is told apart by its outline alone. */
+  .health-strip {
+    border-inline-start-color: CanvasText !important;
+  }
+
+  .card-muted {
+    opacity: 1 !important;
   }
 }

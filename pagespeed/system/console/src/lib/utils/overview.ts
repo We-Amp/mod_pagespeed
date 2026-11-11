@@ -11,11 +11,14 @@
 import { ApiError } from "$lib/api/client";
 import type { DaemonHealthResponse, DaemonStatsResponse, StatsResponse } from "$lib/api/types";
 import type { AlertSnapshot, DaemonAvailability, HealthSummary } from "$lib/alerts";
+import { MODULE_DOCS } from "$lib/data/product-facts-console";
 import type { ConfigScope } from "$lib/utils/config-scope";
 import { errorCode } from "$lib/utils/daemon";
 import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type MessageDigest } from "$lib/utils/message-groups";
+import { formatBytes, formatCount, formatRelative } from "$lib/utils/format";
+import type { OptimizedCopyHitRate } from "$lib/utils/savings";
 import { serveSavingsView, type ServeSavingsTotal } from "$lib/utils/serve-savings";
-import type { SinceLabel } from "$lib/utils/since";
+import { sinceLabel, type SinceLabel } from "$lib/utils/since";
 
 export type Fetched<T> = { ok: true; data: T } | { ok: false; error: Error };
 
@@ -355,3 +358,204 @@ export function findingsStampText(moduleSince: SinceLabel | null, optimizerSince
   if (optimizerSince !== null) parts.push(`optimizer ${optimizerSince.text}`);
   return parts.length === 0 ? "" : `Counters: ${parts.join(" · ")}`;
 }
+
+/**
+ * The verdict: the one sentence the overview opens with. It states the state
+ * in a word and backs it with the figures of the sources that have one, each
+ * with the scope and the time base of its own source:
+ *
+ *  - the module's rewrite savings cover the console's scope (this site on a
+ *    per-host console) since the web server started;
+ *  - the optimizer's figures cover the whole server since the optimizer
+ *    started, so a per-host console names the optimizer's state and never
+ *    states its figures as this site's.
+ *
+ * A source that started less than WARMUP_MS ago is warming up: its figures
+ * are left out and the sentence says so, for that source only. A number from
+ * a failed read is never stated. The two savings figures are measured on
+ * different bases and are never added up; `lead` names the one the page
+ * leads with.
+ */
+export type VerdictState = "working" | "warming" | "idle" | "unknown";
+
+export type LeadFigure = "optimizer" | "module";
+
+/** What the optimizer's statistics say it served: responses from its cache and the transfer bytes saved on them. */
+export interface OptimizerServes {
+  responses: number;
+  /** Signed: negative when the served responses grew. */
+  saved: number;
+}
+
+/** The serves of an optimizer statistics answer; null when nothing was served or the block is unusable. */
+export function optimizerServes(stats: DaemonStatsResponse | null): OptimizerServes | null {
+  const view = serveSavingsView(stats?.serve_savings);
+  if (view === null || view.total === null) return null;
+  return { responses: view.served.reduce((n, row) => n + row.hits, 0), saved: view.total.saved };
+}
+
+export interface VerdictInput {
+  /** The whole-server console (false: one virtual host's console). */
+  wholeServer: boolean;
+  /** Epoch ms of the sample the figures come from. */
+  at: number;
+  /** The server is not answering: nothing read earlier says anything about now. */
+  down: boolean;
+  /** Epoch ms of the server's last answer, for the sentence while it is down. */
+  lastAnswerAt: number | null;
+  /** The module figures of this sample; null when that read failed. */
+  module: { summary: ModuleSummary; startMs: number | null } | null;
+  optimizer: {
+    availability: DaemonAvailability;
+    /** The optimizer's own state word ("Running", "Status: degraded"); used when it answers. */
+    stateWord: string;
+    serves: OptimizerServes | null;
+    startMs: number | null;
+  };
+}
+
+export interface OverviewVerdict {
+  state: VerdictState;
+  /** The state in a word or two: the start of `text`. */
+  word: string;
+  /** The whole sentence, `word` included. */
+  text: string;
+  /** Which savings figure leads the page; null when there is none to lead with. */
+  lead: LeadFigure | null;
+}
+
+/** "3 h ago" for a start time; "less than a minute ago" under a minute. */
+function agoText(startMs: number, at: number): string {
+  return at - startMs < 60_000 ? "less than a minute ago" : formatRelative(startMs, at);
+}
+
+/** A source's time base: whether its start is known and believable, and whether it is still warming up. */
+function timeBase(startMs: number | null, at: number): { ago: string | null; warming: boolean } {
+  const label = sinceLabel(startMs, at);
+  if (label.iso === null || startMs === null) return { ago: null, warming: false };
+  return { ago: agoText(startMs, at), warming: label.warming };
+}
+
+/**
+ * The verdict of one sample. `timeText` formats the time of the last answer
+ * while the server is down.
+ */
+export function overviewVerdict(
+  input: VerdictInput,
+  timeText: (ms: number) => string = (ms) => new Date(ms).toLocaleTimeString(),
+): OverviewVerdict {
+  const unknown = (text: string): OverviewVerdict => ({ state: "unknown", word: "Status unknown", text, lead: null });
+  if (input.down) return unknown(unknownHealth(input.lastAnswerAt, timeText).text);
+  if (input.module === null) return unknown("Status unknown.");
+
+  const { summary } = input.module;
+  const { availability, serves } = input.optimizer;
+  const module = timeBase(input.module.startMs, input.at);
+  const optimizer = timeBase(input.optimizer.startMs, input.at);
+  const answers = availability === "ok";
+  const moduleSince = module.ago === null ? "since the web server last started" : `since the web server started ${module.ago}`;
+  const optimizerSince =
+    optimizer.ago === null ? "since the optimizer last started" : `since the optimizer started ${optimizer.ago}`;
+  // The optimizer's figures are a source of the sentence on the whole-server console only.
+  const optimizerFigures = input.wholeServer && answers && serves !== null;
+  const lead: LeadFigure | null = optimizerFigures ? "optimizer" : summary.active && summary.bytesSaved !== null ? "module" : null;
+
+  // What a per-host console says about the optimizer: its state, never its figures.
+  const optimizerState = (): string => {
+    if (availability === "unreachable") return " Optimizer (whole server): not answering.";
+    if (!answers) return "";
+    const state = input.optimizer.stateWord === "Running" ? "running" : input.optimizer.stateWord;
+    const restarted = optimizer.warming && optimizer.ago !== null ? `, restarted ${optimizer.ago}` : "";
+    return ` Optimizer (whole server): ${state}${restarted}.`;
+  };
+  const optimizerNote = (): string => {
+    if (!input.wholeServer) return optimizerState();
+    if (availability === "unreachable") return " The optimizer is not answering.";
+    return "";
+  };
+
+  // No traffic in this console's scope. The optimizer's serves are the whole server's.
+  if (!summary.active && (!input.wholeServer || serves === null || serves.responses === 0)) {
+    return {
+      state: "idle",
+      word: "Running",
+      text: `Running, no traffic seen yet ${moduleSince}.${optimizerNote()}`,
+      lead: null,
+    };
+  }
+
+  const warmSources = [module, ...(optimizerFigures ? [optimizer] : [])];
+  if (warmSources.every((source) => source.warming)) {
+    // The most recent restart is the one the figures wait for.
+    const latest = Math.max(input.module.startMs ?? 0, optimizerFigures ? (input.optimizer.startMs ?? 0) : 0);
+    const whose = input.wholeServer ? "Counters" : "This site's counters";
+    return {
+      state: "warming",
+      word: "Warming up",
+      text: `Warming up. ${whose} restarted ${agoText(latest, input.at)}; figures are not meaningful yet.${optimizerNote()}`,
+      lead,
+    };
+  }
+
+  const site = input.wholeServer ? "" : "This site: ";
+  const saved = summary.bytesSaved;
+  const rewriting =
+    saved === null
+      ? `${site}${site ? "no" : "No"} rewrite savings are reported ${moduleSince}.`
+      : saved === 0
+        ? `${site}${site ? "nothing" : "Nothing"} saved by rewriting ${moduleSince}.`
+        : `${site}${formatBytes(saved)} saved by rewriting ${moduleSince}.`;
+  const working = (rest: string): OverviewVerdict => ({ state: "working", word: "Working", text: `Working. ${rest}`, lead });
+
+  if (!optimizerFigures) return working(`${rewriting}${optimizerNote()}`);
+  if (optimizer.warming) {
+    return working(`${rewriting} Optimizer restarted ${optimizer.ago}; its figures are not meaningful yet.`);
+  }
+  const responses = serves.responses === 1 ? "1 optimized response" : `${formatCount(serves.responses)} optimized responses`;
+  const served =
+    serves.saved > 0
+      ? `${responses} served from the optimizer's cache, ${formatBytes(serves.saved)} saved ${optimizerSince}.`
+      : `${responses} served from the optimizer's cache ${optimizerSince}.`;
+  const webServer = module.warming ? ` Web server restarted ${module.ago}; the module's figures are not meaningful yet.` : "";
+  return working(`${served}${webServer}`);
+}
+
+/** The share of requests the optimizer's cache answered, below which the tile says how to read it. */
+export const LOW_SERVE_SHARE_PERCENT = 10;
+
+/**
+ * How to read a low share of serves from the optimizer's cache, once the
+ * counters are past their warm-up; null when the share needs no comment or
+ * is not known. Over all in-place requests a low share is ordinary (pages
+ * are requests too, and the optimizer's cache answers CSS, JavaScript and
+ * images); over the cacheable requests alone it is worth a look.
+ */
+export function serveShareJudgement(rate: OptimizedCopyHitRate | null, warming: boolean): string | null {
+  if (rate === null || rate.percent === null || warming || rate.percent >= LOW_SERVE_SHARE_PERCENT) return null;
+  return rate.mode === "all-in-place"
+    ? "Normal when most requests are pages: the optimizer's cache answers CSS, JavaScript and images."
+    : "A low share for CSS, JavaScript and images; Savings shows what was not served from the cache.";
+}
+
+/** The one line that relates the two savings figures, which are never added up. */
+export const SAVINGS_RELATION =
+  "Separate from the rewriting figure: these are responses served from the optimizer's cache.";
+
+/**
+ * The colour level of the strip that carries the verdict. Findings that
+ * need action or cannot be read set it, as they did for the count line; a
+ * healthy count takes the verdict's own: working is healthy, warming up and
+ * idle are information, unknown has no colour. `findings` is null while the
+ * server is down: nothing is known then.
+ */
+export function stripLevel(state: VerdictState, findings: HealthSummary["level"] | null): OverviewHealth["level"] {
+  if (findings === null || state === "unknown") return findings === null || findings === "healthy" ? "unknown" : findings;
+  if (findings !== "healthy") return findings;
+  return state === "working" ? "healthy" : "info";
+}
+
+/** Where the documentation explains how to add the optimizer to a server. */
+export const OPTIMIZER_SETUP_DOC = `${MODULE_DOCS}/configuration/#area-optimizer-worker`;
+
+/** The first-run check: the module's own response header on a page it handled (a generic host; the reader fills in theirs). */
+export const RESPONSE_HEADER_CHECK = "curl -sI http://example.com/ | grep -i -E 'x-mod-pagespeed|x-page-speed'";

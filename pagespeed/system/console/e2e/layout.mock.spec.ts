@@ -428,9 +428,9 @@ test.describe("wide windows", () => {
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await pageReady(page);
-    const figures = await page.getByTestId("module-card").locator(".figure").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+    const figures = await page.getByTestId("overview-tiles").locator(".stat-tile-value").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
     expect(figures.length).toBeGreaterThan(1);
-    expect(Math.abs(figures[0] - figures[1]), "the first two figures share a row").toBeLessThanOrEqual(1);
+    for (const top of figures) expect(Math.abs(top - figures[0]), "the tiles' figures share a row").toBeLessThanOrEqual(1);
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     await pageReady(page);
     const [cardBottom, contentBottom, pad] = await page.getByTestId("savings-module-card").evaluate((card) => {
@@ -864,6 +864,76 @@ test.describe("Savings columns", () => {
       expect(await noHorizontalScroll(page)).toBe(true);
     });
   }
+});
+
+// Overview's headline figures are tiles: one row from 900 px, two by two
+// below that, stacked on a phone, and the tiles of a row share one height.
+test.describe("Overview tiles", () => {
+  const tiles = (page: Page) => page.locator('main [data-testid="overview-tiles"] > .stat-tile');
+  const open = async (page: Page, width: number, height: number) => {
+    await page.setViewportSize({ width, height });
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/overview");
+    await pageReady(page);
+    await expect(tiles(page)).toHaveCount(4);
+    return Promise.all((await tiles(page).all()).map((t) => box(t)));
+  };
+
+  for (const width of [900, 1440, 2560]) {
+    test(`four tiles in one row of equal widths and heights at ${width}`, async ({ page }) => {
+      const b = await open(page, width, 1000);
+      for (const t of b) {
+        expect(Math.abs(t.top - b[0].top), "one row").toBeLessThanOrEqual(1);
+        expect(Math.abs(t.bottom - b[0].bottom), "one height").toBeLessThanOrEqual(1);
+        expect(Math.abs(t.width - b[0].width), "one width").toBeLessThanOrEqual(1);
+      }
+      for (let i = 1; i < b.length; i++) expect(b[i].left).toBeGreaterThan(b[i - 1].right);
+      // The row spans the page: it ends where the cards below it end.
+      const cards = await box(page.locator("main .cards"));
+      expect(Math.abs(b[3].right - cards.right)).toBeLessThanOrEqual(1);
+      expect(Math.abs(b[0].left - cards.left)).toBeLessThanOrEqual(1);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  }
+
+  test("two by two below 900 px, each row of one height", async ({ page }) => {
+    const b = await open(page, 800, 1000);
+    expect(Math.abs(b[0].top - b[1].top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[2].top - b[3].top)).toBeLessThanOrEqual(1);
+    expect(b[2].top).toBeGreaterThanOrEqual(b[0].bottom);
+    expect(Math.abs(b[0].left - b[2].left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[1].left - b[3].left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[0].bottom - b[1].bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[2].bottom - b[3].bottom)).toBeLessThanOrEqual(1);
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test("stacked on a phone, each the width of the page", async ({ page }) => {
+    const b = await open(page, 390, 844);
+    for (let i = 1; i < b.length; i++) {
+      expect(b[i].top).toBeGreaterThanOrEqual(b[i - 1].bottom);
+      expect(Math.abs(b[i].left - b[0].left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(b[i].width - b[0].width)).toBeLessThanOrEqual(1);
+    }
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // The by-type tables below stay inside their cards.
+    for (const id of ["module-card", "optimizer-card"]) {
+      const card = await box(page.getByTestId(id));
+      for (const row of await page.getByTestId(id).locator("tbody tr").all()) {
+        expect((await box(row)).right, id).toBeLessThanOrEqual(card.right);
+      }
+    }
+  });
+
+  test("the verdict comes first: above the tiles, the findings and the cards", async ({ page }) => {
+    await open(page, 1440, 900);
+    const strip = await box(page.getByTestId("health-strip"));
+    const first = await box(tiles(page).first());
+    const cards = await box(page.locator("main .cards"));
+    expect(first.top).toBeGreaterThanOrEqual(strip.bottom);
+    expect(cards.top).toBeGreaterThanOrEqual(first.bottom);
+    expect(first.bottom, "the tiles are in the first viewport").toBeLessThanOrEqual(900);
+  });
 });
 
 test.describe("card heights", () => {
