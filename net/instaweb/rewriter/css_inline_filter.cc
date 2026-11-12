@@ -39,7 +39,9 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 
 namespace net_instaweb {
@@ -209,7 +211,15 @@ bool CssInlineFilter::MayCloseStyleElement(StringPiece contents) {
 }
 
 bool CssInlineFilter::NeedsConservativeMarkupCheck(RewriteDriver* driver) {
-  return driver->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml;
+  if (driver->server_context()->response_headers_finalized()) {
+    return driver->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml;
+  }
+  // Some servers never finalize the response headers (MimeTypeXhtmlStatus()
+  // then stays unknown). Use the narrow check only when the headers say
+  // text/html outright.
+  const ResponseHeaders* headers = driver->response_headers();
+  return headers == nullptr ||
+         headers->DetermineContentType() != &kContentTypeHtml;
 }
 
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,

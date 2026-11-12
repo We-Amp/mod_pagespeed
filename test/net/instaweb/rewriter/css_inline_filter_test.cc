@@ -795,14 +795,44 @@ TEST_F(CssInlineFilterTest, XhtmlWithLessThanSignIsNotInlined) {
 
 // A link in SVG or MathML is not an HTML link element, so it is left alone.
 TEST_F(CssInlineFilterTest, ForeignLinkIsLeftAlone) {
+  SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineCss);
-  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
-                                "a{margin:0}\n@media (width < 600px){a{x:y}}",
-                                100);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, "a{margin:0}", 100);
   ValidateNoChanges("svg",
                     "<svg><link rel='stylesheet' href='foo.css'></svg>");
   ValidateNoChanges("math",
                     "<math><link rel='stylesheet' href='foo.css'></math>");
+}
+
+// With response headers that are never finalized (as on some servers), only an
+// explicit text/html content type gets the narrow check.
+TEST_F(CssInlineFilterTest, UnfinalizedHeadersHtmlGetsNarrowCheck) {
+  server_context()->set_response_headers_finalized(false);
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                "@media (width < 600px){a{margin:0}}", 100);
+  ValidateExpected("unfinalized_html", "<link rel='stylesheet' href='foo.css'>",
+                   "<style>@media (width < 600px){a{margin:0}}</style>");
+}
+
+TEST_F(CssInlineFilterTest, UnfinalizedHeadersXhtmlKeepsBroadCheck) {
+  server_context()->set_response_headers_finalized(false);
+  SetXhtmlMimetype();
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                "@media (width < 600px){a{margin:0}}", 100);
+  ValidateNoChanges("unfinalized_xhtml",
+                    "<link rel='stylesheet' href='foo.css'/>");
+}
+
+TEST_F(CssInlineFilterTest, UnfinalizedHeadersNoContentTypeKeepsBroadCheck) {
+  server_context()->set_response_headers_finalized(false);
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                "@media (width < 600px){a{margin:0}}", 100);
+  ValidateNoChanges("unfinalized_none",
+                    "<link rel='stylesheet' href='foo.css'>");
 }
 
 // A '<' that is plain CSS does not stop inlining.
