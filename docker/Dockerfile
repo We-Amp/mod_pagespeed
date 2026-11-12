@@ -24,9 +24,9 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && . /etc/os-release \
     && keytmp="$(mktemp -d)" \
     && for i in 1 2 3 4 5; do \
-         wget -qO "${keytmp}/key.asc" --timeout=20 https://apt.llvm.org/llvm-snapshot.gpg.key \
+         wget -qO "${keytmp}/key.asc" --timeout=20 --tries=1 https://apt.llvm.org/llvm-snapshot.gpg.key \
            && [ -s "${keytmp}/key.asc" ] && break; \
-         echo "apt.llvm.org key fetch attempt ${i} failed" >&2; sleep $((i * 5)); \
+         echo "apt.llvm.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
        done \
     && { [ -s "${keytmp}/key.asc" ] \
          || { echo "ERROR: could not fetch https://apt.llvm.org/llvm-snapshot.gpg.key" >&2; exit 1; }; } \
