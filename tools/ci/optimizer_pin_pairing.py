@@ -8,24 +8,28 @@ version: `install/debian/optimizer-pin.json` names `optimizer-v<version>`, and
 the lane refuses any other pin. A module-only release (a fix in the module
 alone) ships with the optimizer release that is already out instead, and its
 packages depend on that version. The tagged tree opts in explicitly, in the
-pin:
+pin, for one module version:
 
-    "pairing": "unpaired"
+    "unpaired_for": "2.8.2"
 
-so that the choice is recorded with the release commit and a stale pin cannot
-ship unpaired by accident. An absent field, or "paired", is the normal case.
+so that the choice is recorded with the release commit, and it is bound to
+that release: a later cut that forgets to move the pin (or to re-set the
+field) fails instead of shipping unpaired by accident. An absent field is the
+normal, paired case.
 
-For a final version (X.Y.Z) and "unpaired", the pin must name a final
-optimizer release `optimizer-vA.B.C` older than X.Y.Z. A pin that names this
-version's own pair, a newer one or a pre-release is refused: the field is
-stale or wrong, and the cut pull request fixes it. For a pre-release version
-(an rc, a rehearsal, a -pre dry run) the field does not apply and the lane's
-pre-release rules decide; a notice says so.
+For a final version X.Y.Z, `unpaired_for` must be exactly X.Y.Z, and the pin
+must name a final optimizer release `optimizer-vA.B.C` older than X.Y.Z. A
+field bound to another version, a pin that names this version's own pair, a
+newer one or a pre-release is refused: the field is stale or wrong, and the
+cut pull request fixes it. For a pre-release version (an rc, a rehearsal, a
+-pre dry run) the field does not apply and the lane's pre-release rules
+decide; a notice says so.
 
 The rest of the checks do not change in a module-only release: the pinned
 release's SHA256SUMS hash, the cache library commit, and the optimizer's
 VERSION.txt, which must equal the pinned version
-(check_module_optimizer_version.py --pinned-version).
+(check_module_optimizer_version.py --pinned-version). The release lane also
+refuses it when an optimizer release of the module version exists.
 
 Usage:
 
@@ -45,9 +49,8 @@ import tempfile
 SEMVER_RE = re.compile(
     r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
     r'(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$')
-FINAL_PIN_RE = re.compile(
-    r'^optimizer-v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$')
-VALUES = ("paired", "unpaired")
+FINAL_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
+FIELD = "unpaired_for"
 
 
 class InputError(Exception):
@@ -64,56 +67,73 @@ def decide(pin, version):
     if not m:
         raise InputError("version '%s' is not X.Y.Z[-prerelease]" % version)
     core = tuple(int(m.group(i)) for i in (1, 2, 3))
-    pairing = pin.get("pairing", "paired")
-    if pairing not in VALUES:
-        raise PinRefused(
-            "optimizer-pin.json: pairing is %r; it is \"paired\" (the default) "
-            "or \"unpaired\" (a module-only release)" % (pairing,))
-    if pairing == "paired":
+    if FIELD not in pin:
         return False, None
+    bound = pin[FIELD]
+    if not isinstance(bound, str) or not FINAL_RE.match(bound):
+        raise PinRefused(
+            "optimizer-pin.json: %s is %r; it names the one final module "
+            "version X.Y.Z that ships unpaired" % (FIELD, bound))
     tag = pin.get("tag", "")
     if m.group(4):
         return False, (
-            "optimizer-pin.json says pairing \"unpaired\", which applies to a "
-            "final version only; %s is a pre-release, so the pre-release rules "
-            "of the lane decide the pair" % version)
-    p = FINAL_PIN_RE.match(tag)
-    if not p:
+            "optimizer-pin.json says %s %s, which applies to that final "
+            "version only; %s is a pre-release, so the pre-release rules of "
+            "the lane decide the pair" % (FIELD, bound, version))
+    if bound != version:
         raise PinRefused(
-            "optimizer-pin.json says pairing \"unpaired\" but its tag %r is not "
-            "a final optimizer release optimizer-vA.B.C" % tag)
-    pinned = tuple(int(p.group(i)) for i in (2, 3, 4))
+            "optimizer-pin.json says %s %s, but this release is %s. A "
+            "module-only release binds the pin to one version: for a paired "
+            "release pin optimizer-v%s and drop %s; for another module-only "
+            "release set %s to %s" % (FIELD, bound, version, version, FIELD,
+                                      FIELD, version))
+    p = re.match(r'^optimizer-v(.*)$', tag)
+    if not p or not FINAL_RE.match(p.group(1)):
+        raise PinRefused(
+            "optimizer-pin.json says %s %s but its tag %r is not a final "
+            "optimizer release optimizer-vA.B.C" % (FIELD, bound, tag))
+    pinned = tuple(int(x) for x in p.group(1).split("."))
     if pinned == core:
         raise PinRefused(
-            "optimizer-pin.json says pairing \"unpaired\" but %s is the pair "
-            "of %s: drop the pairing field" % (tag, version))
+            "optimizer-pin.json says %s %s but %s is the pair of %s: drop %s"
+            % (FIELD, bound, tag, version, FIELD))
     if pinned > core:
         raise PinRefused(
-            "optimizer-pin.json says pairing \"unpaired\" but %s is newer than "
-            "the module release %s" % (tag, version))
+            "optimizer-pin.json says %s %s but %s is newer than the module "
+            "release %s" % (FIELD, bound, tag, version))
     return True, None
+
+
+def unp(tag, bound):
+    return {"tag": tag, FIELD: bound}
 
 
 CASES = [
     # pin, version, expected: True/False (unpaired) or "refused"
     ({"tag": "optimizer-v2.8.2"}, "2.8.2", False),
     ({"tag": "optimizer-v2.8.1"}, "2.8.2", False),  # the lane then refuses the pin
-    ({"tag": "optimizer-v2.8.2", "pairing": "paired"}, "2.8.2", False),
-    ({"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.8.2", True),
-    ({"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.9.0", True),
-    ({"tag": "optimizer-v2.9.0", "pairing": "unpaired"}, "2.10.0", True),
-    # stale or wrong field: refused, never silently paired or unpaired
-    ({"tag": "optimizer-v2.8.2", "pairing": "unpaired"}, "2.8.2", "refused"),
-    ({"tag": "optimizer-v2.9.0", "pairing": "unpaired"}, "2.8.2", "refused"),
-    ({"tag": "optimizer-v2.8.2-rc.1", "pairing": "unpaired"}, "2.8.3", "refused"),
-    ({"tag": "PLACEHOLDER", "pairing": "unpaired"}, "2.8.2", "refused"),
-    ({"tag": "optimizer-v2.8.1", "pairing": "Unpaired"}, "2.8.2", "refused"),
-    ({"tag": "optimizer-v2.8.1", "pairing": True}, "2.8.2", "refused"),
-    ({"tag": "optimizer-v2.8.1", "pairing": ""}, "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.8.2", True),
+    (unp("optimizer-v2.8.1", "2.9.0"), "2.9.0", True),
+    (unp("optimizer-v2.9.0", "2.10.0"), "2.10.0", True),
+    # a stale binding: the next cut forgot to move the pin or the field
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.8.3", "refused"),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.9.0", "refused"),
+    (unp("optimizer-v2.8.1", "2.8.2"), "3.0.0", "refused"),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.8.1", "refused"),
+    # a wrong pin or field: refused, never silently paired or unpaired
+    (unp("optimizer-v2.8.2", "2.8.2"), "2.8.2", "refused"),
+    (unp("optimizer-v2.9.0", "2.8.2"), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.2-rc.1", "2.8.3"), "2.8.3", "refused"),
+    (unp("PLACEHOLDER", "2.8.2"), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", "2.8.2-rc.1"), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", "v2.8.2"), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", ""), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", True), "2.8.2", "refused"),
+    (unp("optimizer-v2.8.1", None), "2.8.2", "refused"),
     # pre-releases: the field does not apply (rehearsals, rc, -pre dry runs)
-    ({"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.8.1-rehearsal.7", False),
-    ({"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.8.2-rc.1", False),
-    ({"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.8.2-pre.1", False),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.8.1-rehearsal.7", False),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.8.2-rc.1", False),
+    (unp("optimizer-v2.8.1", "2.8.2"), "2.9.0-rc.1", False),
 ]
 
 BAD_VERSIONS = ["2.8", "v2.8.2", "2.8.2+r1", ""]
@@ -143,9 +163,9 @@ def self_test():
     with tempfile.TemporaryDirectory() as t:
         p = os.path.join(t, "pin.json")
         runs = [
-            ("exit 0, unpaired", {"tag": "optimizer-v2.8.1", "pairing": "unpaired"}, "2.8.2", 0, "pair_unpaired=true"),
+            ("exit 0, unpaired", unp("optimizer-v2.8.1", "2.8.2"), "2.8.2", 0, "pair_unpaired=true"),
             ("exit 0, paired", {"tag": "optimizer-v2.8.2"}, "2.8.2", 0, "pair_unpaired=false"),
-            ("exit 1, stale field", {"tag": "optimizer-v2.8.2", "pairing": "unpaired"}, "2.8.2", 1, ""),
+            ("exit 1, stale binding", unp("optimizer-v2.8.1", "2.8.2"), "2.9.0", 1, ""),
             ("exit 2, bad version", {"tag": "optimizer-v2.8.1"}, "2.8", 2, ""),
             ("exit 2, pin not JSON", None, "2.8.2", 2, ""),
         ]

@@ -134,26 +134,32 @@ in `install/debian/optimizer-pin.json` and bump `%global mps_version` in
 
 ### Module-only releases
 
-A release that changes only the module (a weekly fix release, say) does not
+A module-only release, one that changes only the module, does not
 need an optimizer release of its own: it can ship with the optimizer release
 that is already out, and its packages then depend on that version. The cut
 pull request opts in by adding one field to `install/debian/optimizer-pin.json`,
-next to a pin that keeps naming the released optimizer:
+naming the module version it is for, next to a pin that keeps naming the
+released optimizer:
 
 ```json
   "tag": "optimizer-v2.8.1",
-  "pairing": "unpaired",
+  "unpaired_for": "2.8.2",
 ```
 
 The field is part of the tagged tree, so whether a release shipped paired or
 not is recorded with its commit; a pin without it is paired, and a pin that
-merely names an older release is still refused. The `version` job reads the
+merely names an older release is still refused. It is bound to one version:
+a later cut (2.8.3, 2.9.0, 3.0.0) that leaves it in place fails with a message
+to move the pin and drop the field, or to set the field to the new version
+for another module-only release. The `version` job reads the
 pin at the commit being built and decides with `tools/ci/optimizer_pin_pairing.py`
-(output `pair_unpaired`). For a final version `X.Y.Z` and `"unpaired"` the
-pin must name a final optimizer release `optimizer-vA.B.C` older than `X.Y.Z`;
-a pin that names the version's own pair (drop the field), a newer release, a
-pre-release or a placeholder fails the run, and so does any other value of
-the field. For a pre-release version (an rc, a rehearsal, a `-pre` dry run)
+(output `pair_unpaired`). For a final version `X.Y.Z` with `unpaired_for`
+`X.Y.Z` the pin must name a final optimizer release `optimizer-vA.B.C` older
+than `X.Y.Z`; a pin that names the version's own pair (drop the field), a
+newer release, a pre-release or a placeholder fails the run, and so does a
+field that is not a final version, or names another one. `optimizer-fetch`
+also fails the run when an optimizer release `optimizer-vX.Y.Z` exists: the
+cut then pins it. For a pre-release version (an rc, a rehearsal, a `-pre` dry run)
 the field does not apply and the rules above decide, with a notice.
 
 In a module-only release everything else is checked as for a paired one,
@@ -170,8 +176,8 @@ optimizer's packages, `manifest.json` names the pinned tag as
 `optimizer_tag`, and the release notes name it as the version the module
 packages depend on. A candidate of the release behaves the same, so an
 adopting real run takes over packages built against the pinned version; the
-pair rehearsal applies the same rule. The next release that has its own
-optimizer release moves the pin and drops the field.
+pair rehearsal applies the same rule. The next paired release moves the pin
+and drops the field.
 
 ## Running it
 

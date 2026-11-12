@@ -315,10 +315,11 @@ jobs:
           [ "$BUILD_PROFILE" != rehearsal ] || PAIR_LENIENT=true
           case "$TAG" in module-v*-rc.*) PAIR_LENIENT=true ;; esac
           # A module-only release: a final version whose tagged tree records
-          # "pairing": "unpaired" in the pin ships with the older optimizer
-          # release the pin names, and its packages depend on that version
-          # (tools/ci/optimizer_pin_pairing.py refuses a stale or wrong
-          # field). The pin is read from the commit being built.
+          # "unpaired_for": "<this version>" in the pin ships with the older
+          # optimizer release the pin names, and its packages depend on that
+          # version (tools/ci/optimizer_pin_pairing.py refuses a field bound to
+          # another version, or a wrong pin). The pin is read from the commit
+          # being built.
           bash tools/ci/release_version.sh parse "$TAG" >/dev/null
           git fetch --quiet --depth 1 origin "$SHA"
           git show "${SHA}:install/debian/optimizer-pin.json" > "${RUNNER_TEMP}/optimizer-pin.json"
@@ -801,7 +802,7 @@ jobs:
       # A rehearsal or a release candidate version may name a version whose
       # paired optimizer release does not exist; the pin then names an older
       # one and the packages depend on that. So does a module-only release
-      # (pairing "unpaired" in the pin). The file tells the package build
+      # ("unpaired_for" in the pin). The file tells the package build
       # which version to depend on. Any other real run or candidate of a
       # final version has none and depends on the tag's version.
       - name: Record the optimizer pair version when there is no pair release
@@ -1162,11 +1163,22 @@ jobs:
           # In a rehearsal or for a release candidate version the paired
           # release cannot exist, so the pin is taken as it is and the
           # packages are checked against it. A module-only release (the
-          # version job read "pairing": "unpaired" from the tagged pin and
-          # checked that it names an older final release) takes the pin too.
+          # version job read "unpaired_for": "<this version>" from the tagged
+          # pin and checked that it names an older final release) takes the
+          # pin too, unless the paired release exists after all: then the cut
+          # pins it instead.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
             if [ "$PAIR_UNPAIRED" = true ]; then
-              echo "::notice::module-only release: optimizer-pin.json records pairing \"unpaired\"; the packages depend on the pinned '$PIN_TAG', not '$OPTIMIZER_TAG'"
+              code="$(curl -sS --retry 5 -o /dev/null -w '%{http_code}' \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_READ_TOKEN}" \
+                "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/$OPTIMIZER_TAG")"
+              case "$code" in
+                404) ;;
+                200) echo "::error::module-only release, but the optimizer release $OPTIMIZER_TAG exists: pin it in optimizer-pin.json and drop unpaired_for"; exit 1 ;;
+                *) echo "::error::cannot tell whether the optimizer release $OPTIMIZER_TAG exists (HTTP $code)"; exit 1 ;;
+              esac
+              echo "::notice::module-only release: optimizer-pin.json records unpaired_for $RELEASE_VERSION; the packages depend on the pinned '$PIN_TAG', not '$OPTIMIZER_TAG'"
             elif [ "$PAIR_LENIENT" = true ]; then
               echo "::warning::no paired optimizer release for this version: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
             else

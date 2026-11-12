@@ -34,7 +34,7 @@ on its X.Y.Z core must equal VERSION.txt. VERSION.txt may equal either the
 full version or its X.Y.Z core (an rc is cut from a commit whose VERSION.txt
 already names the release it leads to).
 
---pinned-version P is a module-only release (`"pairing": "unpaired"` in the
+--pinned-version P is a module-only release (`"unpaired_for": V` in the
 pin, tools/ci/optimizer_pin_pairing.py): the module ships with the older
 optimizer release P, so VERSION.txt must equal P instead of the module
 version. It is never combined with --dry-run.
