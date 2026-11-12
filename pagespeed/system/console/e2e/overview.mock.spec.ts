@@ -698,6 +698,127 @@ test.describe("Overview alerts", () => {
   });
 });
 
+// What changed since this browser's last visit: a record in localStorage per
+// console, compared once per page open with the first good answer.
+test.describe("Overview since your last visit", () => {
+  const PREFIX = "pagespeed.console.lastVisit:";
+  // A web server that started at a fixed time, as a real one reports it on every read.
+  const START = 1_789_900_000_000;
+  const body = F.STATS_GLOBAL.body as { variables: Record<string, number> };
+  const STATS = F.ok({ ...body, variables: { ...body.variables, process_start_ms: START } });
+  const replies = () => healthy({ stats_json: STATS });
+
+  async function stored(page: Page): Promise<Record<string, Record<string, unknown>>> {
+    return page.evaluate((prefix) => {
+      const out: Record<string, Record<string, unknown>> = {};
+      for (const k of Object.keys(localStorage)) if (k.startsWith(prefix)) out[k] = JSON.parse(localStorage.getItem(k) ?? "null");
+      return out;
+    }, PREFIX);
+  }
+
+  // Moves the stored record into the past and lets `change` alter what it says.
+  async function age(page: Page, change: Record<string, unknown>) {
+    await page.evaluate(
+      ({ prefix, change }) => {
+        for (const k of Object.keys(localStorage)) {
+          if (!k.startsWith(prefix)) continue;
+          const r = JSON.parse(localStorage.getItem(k) ?? "{}");
+          localStorage.setItem(k, JSON.stringify({ ...r, at: r.at - 6 * 86_400_000, ...change }));
+        }
+      },
+      { prefix: PREFIX, change },
+    );
+  }
+
+  test("a first visit shows nothing and stores one record for this console", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", replies());
+    await expect(page.getByTestId("health-summary")).toBeVisible();
+    await expect(page.getByTestId("since-last-visit")).toHaveCount(0);
+    await expect.poll(async () => Object.keys(await stored(page))).toEqual([
+      `${PREFIX}http://console.test/pagespeed_global_admin:global`,
+    ]);
+    const record = Object.values(await stored(page))[0];
+    expect(record.moduleStart).toBe(START);
+    expect(record.optimizer).toBe("2.0.41");
+    expect(typeof record.config).toBe("string");
+    // The next page open with nothing changed: still nothing to say.
+    await page.reload();
+    await expect(page.getByTestId("module-card")).toBeVisible();
+    await expect(page.getByTestId("health-summary")).toBeVisible();
+    await expect(page.getByTestId("since-last-visit")).toHaveCount(0);
+  });
+
+  test("names a restart, a configuration change and an upgrade, under the verdict", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", replies());
+    await expect.poll(async () => Object.keys(await stored(page)).length).toBe(1);
+    // The last visit saw a web server that started a day before this one.
+    await age(page, { moduleStart: START - 86_400_000, config: "0".repeat(32), optimizer: "2.0.40" });
+    await page.reload();
+    const line = page.getByTestId("since-last-visit");
+    await expect(line).toHaveText(
+      "Since your last visit 6 d ago: the web server restarted or reloaded, the configuration changed and the optimizer changed from 2.0.40 to 2.0.41.",
+    );
+    // Directly under the verdict, before the tiles.
+    const strip = await page.getByTestId("health-strip").boundingBox();
+    const box = await line.boundingBox();
+    const tiles = await page.getByTestId("overview-tiles").boundingBox();
+    expect(box!.y).toBeGreaterThan(strip!.y + strip!.height - 1);
+    expect(box!.y + box!.height).toBeLessThan(tiles!.y + 1);
+    // Further refreshes neither re-store the record nor change the line.
+    const after = Object.values(await stored(page))[0].at;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    expect(Object.values(await stored(page))[0].at).toBe(after);
+    await expect(line).toContainText("the web server restarted");
+    // Back on the Overview from another page: the same comparison.
+    await page.getByRole("link", { name: "About", exact: true }).click();
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(page.getByTestId("since-last-visit")).toContainText("the web server restarted");
+    // The next page open compares with this one: nothing changed since.
+    await page.reload();
+    await expect(page.getByTestId("health-summary")).toBeVisible();
+    await expect(page.getByTestId("since-last-visit")).toHaveCount(0);
+  });
+
+  test("the whole-server console and a per-host console keep separate records", async ({ page }) => {
+    await open(page, "pagespeed_admin", healthy({ config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST }));
+    await expect.poll(async () => Object.keys(await stored(page))).toEqual([
+      `${PREFIX}http://console.test/pagespeed_admin:host=www.example.test:80`,
+    ]);
+  });
+
+  test("server down at open: the visit waits for the configuration's answer and is stored under its scope", async ({ page }) => {
+    let down = true;
+    await mockAdmin(page, "pagespeed_admin", healthy({ config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST }), { down: () => down });
+    await openConsole(page, "pagespeed_admin");
+    await expect(page.getByTestId("health-summary")).toContainText("Status unknown");
+    expect(await stored(page)).toEqual({});
+    down = false;
+    await page.getByRole("button", { name: "Retry now" }).click();
+    await expect(page.getByTestId("overview-scope")).toContainText("www.example.test:80");
+    // Only the key a healthy open of this console uses: never the admin path's guess.
+    await expect.poll(async () => Object.keys(await stored(page))).toEqual([
+      `${PREFIX}http://console.test/pagespeed_admin:host=www.example.test:80`,
+    ]);
+    expect(typeof Object.values(await stored(page))[0].config).toBe("string");
+  });
+
+  test("a browser that refuses storage: the Overview renders, without the line", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        get() {
+          throw new Error("blocked");
+        },
+      });
+    });
+    const { errors } = await open(page, "pagespeed_global_admin", replies());
+    await expect(page.getByTestId("health-summary")).toBeVisible();
+    await expect(page.getByTestId("since-last-visit")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+});
+
 // "Why is this URL not optimized?" starts on Overview, on every console: a
 // pasted URL and Enter reach the reasons.
 test.describe("Inspect a URL", () => {
