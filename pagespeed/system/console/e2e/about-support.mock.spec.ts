@@ -3,6 +3,7 @@
 
 // About and Support. Self-contained (support/mock-admin.ts); run after build.sh.
 
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import * as F from "./support/fixtures";
 import { mockAdmin, openConsole } from "./support/mock-admin";
@@ -127,7 +128,43 @@ test.describe("About and Support", () => {
     await expect(page.getByRole("button", { name: "Copy diagnostics" })).toBeVisible();
   });
 
-  test("Support: Copy diagnostics copies a plain-text bundle, reading only this console's pages", async ({ page }) => {
+  test("Support: the diagnostics bundle is shown when the page opens, read once from this console's pages", async ({ page }) => {
+    const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/support");
+    await expect(page.getByRole("heading", { name: "Diagnostics" })).toBeVisible();
+    const area = page.getByLabel("Diagnostics text");
+    await expect(area).toHaveAttribute("readonly", "");
+    await expect(area).toHaveValue(/^mod_pagespeed diagnostics\n/);
+    const text = await area.inputValue();
+    expect(text).toMatch(/^Build: v\S+$/m);
+    expect(text).toContain("Console: this host (www.example.test:80)\n");
+    expect(text).toMatch(/^Browser: Mozilla\/5\.0 .+$/m);
+    expect(text).toMatch(/^Web server: (not detected|Apache|nginx|IIS)$/m);
+    expect(text).toMatch(/^Module started: (unknown|\d{4}-\d\d-\d\dT.+)$/m);
+    expect(text).toContain("Optimizer: 2.0.41 (52344ff)\n");
+    expect(text).toMatch(/^Optimizer started: /m);
+    expect(text).toContain("Configuration SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n");
+    expect(text).toMatch(/^(Findings \(\d+, from one reading\):|Findings: none in one reading)$/m);
+    expect(text).toMatch(/^Optimizer checks/m);
+    expect(text).toContain("Key counters (since the module started):\n  page_load_count: ");
+    expect(text).toMatch(/^Caches/m);
+    expect(text).toMatch(/^Purging: /m);
+    expect(text).toContain("[error] [Sat, 26 Sep 2026 10:04:00 GMT] [Error] [531] Fetch of https://www.example.test/a.css failed\n");
+    expect(text).not.toContain("CycloneCache enabled");
+    expect(text).toMatch(/\nLeft out of this bundle:\n- the configuration text \(its SHA-256 is above\)\n- query strings in addresses\n/);
+
+    // "Read again" reads each source once more; copying reads nothing.
+    const leaves = ["config", "stats_json", "v1/daemon/health", "v1/daemon/stats", "message_history", "cache"] as const;
+    const before = Object.fromEntries(leaves.map((l) => [l, mock.calls(l)]));
+    await page.getByRole("button", { name: "Read again" }).click();
+    const delta = () => Object.fromEntries(leaves.map((l) => [l, mock.calls(l) - before[l]]));
+    // message_history: one read serves the findings and the warning list; cache: the structure and the purge set.
+    await expect.poll(delta).toEqual({ config: 1, stats_json: 1, "v1/daemon/health": 1, "v1/daemon/stats": 1, message_history: 1, cache: 2 });
+    await expect(page.getByRole("button", { name: "Read again" })).toBeEnabled();
+    await expect(page.getByTestId("diagnostics-status")).toHaveText("");
+  });
+
+  test("Support: Copy diagnostics copies the text that is shown", async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
@@ -140,28 +177,17 @@ test.describe("About and Support", () => {
     });
     const mock = await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin", "#/support");
-    await expect(page.getByRole("heading", { name: "Diagnostics" })).toBeVisible();
-    const before = {
-      config: mock.calls("config"),
-      health: mock.calls("v1/daemon/health"),
-      messages: mock.calls("message_history"),
-    };
+    const area = page.getByLabel("Diagnostics text");
+    await expect(area).toHaveValue(/^mod_pagespeed diagnostics\n/);
+    const config = mock.calls("config");
     await page.getByRole("button", { name: "Copy diagnostics" }).click();
     await expect(page.getByTestId("diagnostics-status")).toHaveText("Copied to the clipboard.");
-    const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
-    expect(text.startsWith("mod_pagespeed diagnostics\n")).toBe(true);
-    expect(text).toMatch(/^Module build: (\S+)\nConsole build: \1$/m);
-    expect(text).toContain("Console: this host (www.example.test:80)\n");
-    expect(text).toContain("Optimizer: 2.0.41 (52344ff)\n");
-    expect(text).toContain("Configuration SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n");
-    expect(text).toContain("[error] [Sat, 26 Sep 2026 10:04:00 GMT] [Error] [531] Fetch of https://www.example.test/a.css failed\n");
-    expect(text).not.toContain("CycloneCache enabled");
-    expect(mock.calls("config") - before.config).toBe(1);
-    expect(mock.calls("v1/daemon/health") - before.health).toBe(1);
-    expect(mock.calls("message_history") - before.messages).toBe(1);
+    const copied = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
+    expect(copied).toBe(await area.inputValue());
+    expect(mock.calls("config")).toBe(config);
   });
 
-  test("Support: when the browser refuses the clipboard, the bundle is shown to copy by hand", async ({ page }) => {
+  test("Support: when the browser refuses the clipboard, it points at the text box", async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
@@ -171,10 +197,75 @@ test.describe("About and Support", () => {
     });
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin", "#/support");
+    await expect(page.getByLabel("Diagnostics text")).toHaveValue(/^mod_pagespeed diagnostics\n/);
     await page.getByRole("button", { name: "Copy diagnostics" }).click();
     await expect(page.getByTestId("diagnostics-status")).toContainText("select the text below");
+  });
+
+  test("Support: Download .txt saves the text that is shown", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/support");
     const area = page.getByLabel("Diagnostics text");
     await expect(area).toHaveValue(/^mod_pagespeed diagnostics\n/);
-    await expect(area).toHaveAttribute("readonly", "");
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download .txt" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^mod_pagespeed-diagnostics-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\dZ\.txt$/);
+    const path = await download.path();
+    expect(readFileSync(path, "utf8")).toBe(await area.inputValue());
+    await expect(page.getByTestId("diagnostics-status")).toHaveText("Downloaded as a text file.");
+  });
+
+  test("Support: query strings are removed unless kept; the configuration only when included, secrets replaced", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", {
+      ...F.allReplies(),
+      config: F.ok({
+        config: "",
+        effective_config:
+          "Options\n  FileCachePath (afcp)                /var/cache/mod_pagespeed/\n" +
+          "  DownstreamCachePurgeSecret (dcps)   hunter2-example",
+        scope: "vhost",
+        host: "www.example.test:80",
+      }),
+      message_history: F.ok({
+        scope: "process",
+        next: 1,
+        messages: [{ severity: "error", message: "Fetch of https://www.example.test/a.css?session=abc123 failed" }],
+      }),
+    });
+    await openConsole(page, "pagespeed_admin", "#/support");
+    const area = page.getByLabel("Diagnostics text");
+    await expect(area).toHaveValue(/a\.css\?\[query removed\] failed/);
+    expect(await area.inputValue()).not.toContain("session=abc123");
+    expect(await area.inputValue()).not.toContain("FileCachePath");
+
+    const keep = page.getByLabel("Keep query strings");
+    const config = page.getByLabel("Include the configuration");
+    await expect(keep).not.toBeChecked();
+    await expect(config).not.toBeChecked();
+
+    await keep.check();
+    await expect(area).toHaveValue(/a\.css\?session=abc123 failed/);
+    await keep.uncheck();
+
+    await config.check();
+    await expect(area).toHaveValue(/FileCachePath \(afcp\) +\/var\/cache\/mod_pagespeed\//);
+    const text = await area.inputValue();
+    expect(text).toMatch(/DownstreamCachePurgeSecret \(dcps\) +\[redacted\]\n/);
+    expect(text).not.toContain("hunter2-example");
+    expect(text).toContain("- the values of options whose names suggest a secret\n");
+  });
+
+  test("Support: where to send the bundle, next to the buttons", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/support");
+    const where = page.getByTestId("diagnostics-where");
+    await expect(where).toContainText("Where to send it");
+    await expect(where.getByRole("link", { name: "support request" })).toHaveAttribute("href", "https://modpagespeed.com/support/");
+    await expect(where.getByRole("link", { name: "troubleshooting guide" })).toHaveAttribute(
+      "href",
+      "https://modpagespeed.com/docs/troubleshooting/#how-to-get-more-diagnostic-information",
+    );
   });
 });

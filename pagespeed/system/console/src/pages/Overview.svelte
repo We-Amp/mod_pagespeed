@@ -7,10 +7,14 @@
   import { SAVINGS_QUALIFIER } from "$lib/utils/serve-savings";
   import { ALERT_RULES, AlertTracker, RATE_ALERT_HOLD_MS } from "$lib/alerts";
   import { createAckStore } from "$lib/utils/finding-acks";
+  import { VisitOnce } from "$lib/utils/last-visit";
 
   // One tracker per browser tab. Acknowledgements are remembered across page
   // loads (finding-acks.ts) until the finding's condition clears.
   const tracker = new AlertTracker(ALERT_RULES, RATE_ALERT_HOLD_MS, createAckStore());
+  // One comparison with the last visit per page open, kept when the
+  // Overview is opened again from another page (last-visit.ts).
+  const visit = new VisitOnce();
 </script>
 
 <script lang="ts">
@@ -43,6 +47,7 @@
   import { scopeChipShown } from "$lib/utils/scope-chip";
   import { activeLensHost } from "$lib/host-lens.svelte";
   import { useConsole } from "$lib/api/context";
+  import { lastVisitKey, type SinceLastVisit } from "$lib/utils/last-visit";
   import {
     availabilityText,
     countText,
@@ -110,6 +115,7 @@
         if (sample.module.ok) {
           lastModule = sample.module.data;
           updatedAt = sample.at;
+          if (visit.begin()) settleVisit(sample.at, sample.module.data, snap);
         }
         if (snap.daemon !== "transient" || daemonView === null) daemonView = snap;
         // The hosts the optimizer served feed the lens (the best-ranked source).
@@ -127,6 +133,33 @@
       }),
     5000,
   );
+
+  // What changed since this browser's last visit: settled from this page
+  // open's first good answer, once a configuration read has answered (the
+  // scope in the key and the digest are then the server's; while it has not,
+  // nothing is compared or stored). What this answer lacks is stored as
+  // unknown. A page mounted before the comparison is settled shows it when it is.
+  let sinceVisit = $state<SinceLastVisit | null>(visit.result);
+  void visit.settled.then((line) => {
+    sinceVisit = line;
+  });
+  function settleVisit(at: number, data: StatsResponse, snap: AlertSnapshot): void {
+    const moduleStart = num(variablesOf(data), "process_start_ms") ?? null;
+    const daemonOk = snap.daemon === "ok";
+    const optimizerStart = daemonOk ? (num(snap.daemonStats ?? null, "started_at_ms") ?? null) : null;
+    const version = daemonOk ? snap.health?.version : undefined;
+    void scope.configRead.then(() => {
+      const key = lastVisitKey(window.location.origin, api.basePath, scope.isGlobal, scope.host);
+      visit.settle(key, {
+        at,
+        module: moduleVersion,
+        moduleStart,
+        optimizer: typeof version === "string" && version !== "" ? version : null,
+        optimizerStart,
+        config: scope.configDigest,
+      });
+    });
+  }
 
   function toggleAutoRefresh() {
     if (poll.autoRefresh) poll.stop();
@@ -280,6 +313,9 @@
           >.{/if}
       </p>
     </div>
+    {#if sinceVisit}
+      <p class="note since-visit" data-testid="since-last-visit" title={sinceVisit.iso}>{sinceVisit.text}</p>
+    {/if}
     {#if logOff}
       <UnavailableCard testid="overview-log-unavailable" />
     {/if}
@@ -596,6 +632,12 @@
 
   .verdict-word {
     font-weight: 600;
+  }
+
+  /* What changed since the last visit: a line under the verdict, closer to it than to what follows. */
+  .since-visit {
+    margin-top: calc(-1 * var(--ps-space-sm));
+    margin-bottom: var(--ps-space-md);
   }
 
   /* The findings follow the tiles; the count in the sentence jumps here,

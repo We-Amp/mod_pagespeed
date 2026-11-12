@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { formatSignedBytes } from "./format";
-import { SPLIT_MIN_COVERAGE, serveSavingsView, splitCells } from "./serve-savings";
+import { SPLIT_MIN_COVERAGE, serveSavingsView, splitCells, unsplitText } from "./serve-savings";
 
 // Fixture-only numbers: a text-heavy mix with one class that grew.
 const css = {
@@ -104,6 +104,31 @@ describe("the savings split", () => {
     const mixed = serveSavingsView({ css: partial, js: { hits: 1, original_bytes: 1000, optimized_bytes: 400 } })!;
     const mt = mixed.total!;
     expect(mt.split!.encodingSaved + mt.split!.rewriteSaved + mt.split!.unsplit).toBe(mt.saved);
+  });
+
+  it("never shows a negative unattributed remainder", () => {
+    // The serves outside the split came out 29 B larger than their originals
+    // (small scripts, as on a live server), so the raw remainder is -29 B.
+    const skew = (extra: number) => ({
+      hits: 10,
+      original_bytes: 100000,
+      optimized_bytes: 40000,
+      split: { original_bytes: 95000 + extra, compressed_original_bytes: 60000, optimized_bytes: 38000 - 3029 },
+    });
+    const split = serveSavingsView({ css: skew(0) })!.total!.split!;
+    expect(split.unsplit).toBe(-29);
+    expect(split.encodingSaved + split.rewriteSaved + split.unsplit).toBe(60000);
+    expect(split.unsplitOver).toBe(0);
+    expect(unsplitText(split)).toBe("0 B");
+    expect(splitCells(split).unsplit).toBe("0 B");
+    // Beyond 1% of the original bytes the deficit is said in words, still never negative.
+    const big = serveSavingsView({
+      css: { ...skew(0), split: { original_bytes: 95000, compressed_original_bytes: 60000, optimized_bytes: 33000 } },
+    })!.total!.split!;
+    expect(big.unsplit).toBe(-2000);
+    expect(big.unsplitOver).toBe(2000);
+    expect(unsplitText(big)).toBe("0 B (the rest came out 1.95 KB larger)");
+    expect(unsplitText(big)).not.toContain("−");
   });
 
   it("table cells are a dash unless the row's split is available; an all-zero row is not measured", () => {

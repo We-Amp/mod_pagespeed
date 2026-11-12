@@ -9,6 +9,7 @@ import {
   PRIVACY_URL,
   PRODUCT_DISPLAY_NAME,
   PRODUCT_NAME,
+  SUPPORT_PAGE_URL,
   SUPPORT_URL,
   TERMS_URL,
   VENDOR,
@@ -41,5 +42,11 @@ describe("product-facts-console", () => {
 describe("DOCS_URL", () => {
   it("is the website's admin console documentation page", () => {
     expect(DOCS_URL).toBe(`${canonical.WEBSITE}/docs/admin-console/`);
+  });
+});
+
+describe("SUPPORT_PAGE_URL", () => {
+  it("is the website's support page, derived from the canonical site", () => {
+    expect(SUPPORT_PAGE_URL).toBe(`${canonical.WEBSITE}/support/`);
   });
 });

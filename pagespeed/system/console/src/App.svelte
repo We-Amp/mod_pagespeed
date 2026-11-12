@@ -20,7 +20,7 @@
   import { NAV_GROUPS, router, routes } from "$lib/router.svelte";
   import { SERVER_PAGE_LINKS } from "$lib/routes";
   import ShortcutHelp from "$lib/ShortcutHelp.svelte";
-  import { ShortcutReader } from "$lib/shortcuts";
+  import { ShortcutReader, goKeysFor, setShortcutsOn, shortcutsOn, takesTyping } from "$lib/shortcuts";
   import { isNavActive, navKeyHint, serverPageHref } from "$lib/utils/nav";
   import { detectBasePath } from "$lib/utils/base-path";
   import { DEFAULT_PATH, LatestGate, pageTitle } from "$lib/utils/hash-route";
@@ -76,9 +76,11 @@
   // page; the admin path stands in until then, or if the read fails. A
   // read that fails at start is retried once the connection to the server
   // is next seen restored (scope.config stays null until a read succeeds).
+  // The same answer's text gives the configuration digest the Overview
+  // compares with the last visit; no other read is made for it.
   function loadConfig(): void {
     api.getConfig().then(
-      (r) => scope.apply({ scope: r.scope, host: r.host }),
+      (r) => scope.apply({ scope: r.scope, host: r.host }, r.config),
       () => {},
     );
   }
@@ -273,12 +275,17 @@
 
   const shortcuts = new ShortcutReader();
   let helpOpen = $state(false);
+  // Off: no key does anything (the "?" button still opens the list, where
+  // they are turned back on), and the sidebar hides its hints.
+  let keysOn = $state(shortcutsOn());
+
+  function setKeysOn(on: boolean): void {
+    keysOn = on;
+    setShortcutsOn(on);
+  }
 
   function isEditable(target: EventTarget | null): boolean {
-    return (
-      target instanceof HTMLElement &&
-      (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-    );
+    return target instanceof HTMLElement && takesTyping(target);
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -288,6 +295,8 @@
       closeDrawerFrom("escape");
       return;
     }
+    if (!keysOn) return;
+    shortcuts.goKeys = goKeysFor(scope.isGlobal);
     const action = shortcuts.read(
       { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, editable: isEditable(e.target) },
       Date.now(),
@@ -353,7 +362,7 @@
         </span>
         <!-- Whose figures this console shows: the whole server, or one host. -->
         <span class="topbar-chip" data-testid="console-scope" title={scopeLabel}><span class="visually-hidden">{"Scope: "}</span>{scopeLabel}</span>
-        <button type="button" class="shortcuts-button" onclick={() => (helpOpen = true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+        <button type="button" class="shortcuts-button" onclick={() => (helpOpen = true)} aria-label="Keyboard shortcuts" title={keysOn ? "Keyboard shortcuts (?)" : "Keyboard shortcuts (off)"}>?</button>
       </span>
     </span>
     {#if scope.isGlobal}
@@ -388,7 +397,7 @@
       {/if}
       <ul class="nav-list" aria-labelledby={group.label ? `nav-group-${group.id}` : undefined}>
         {#each routes.filter((r) => r.group === group.id && r.hidden !== true && (r.globalOnly !== true || scope.isGlobal)) as route (route.path)}
-          {@const hint = navKeyHint(route.path)}
+          {@const hint = keysOn ? navKeyHint(route.path, scope.isGlobal) : null}
           {@const active = isNavActive(route, router.path, routes, scope.isGlobal)}
           {@const off = isOff(route)}
           <li class="nav-row">
@@ -397,7 +406,6 @@
               class:active
               href={withLens(route.path, lensHost)}
               aria-current={active ? "page" : undefined}
-              aria-keyshortcuts={hint ?? undefined}
               aria-describedby={off ? `nav-off-${route.path.slice(2).replace(/\W+/g, "-")}` : undefined}
               onclick={closeDrawer}
             >{route.label}</a>
@@ -441,7 +449,7 @@
       <p class="loading">Loading...</p>
     {/if}
   </main>
-  <ShortcutHelp open={helpOpen} onclose={() => (helpOpen = false)} />
+  <ShortcutHelp open={helpOpen} onclose={() => (helpOpen = false)} isGlobal={scope.isGlobal} on={keysOn} onchange={setKeysOn} />
 </div>
 
 <style>

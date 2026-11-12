@@ -3,14 +3,11 @@
   Copyright (c) 2024-2026 We-Amp B.V.
 -->
 
-<script module lang="ts">
-  // The chart palette as theme-token names, shared with in-card legends.
-  export const SERIES_PALETTE = ["--ps-primary", "--ps-success", "--ps-warning", "--ps-error"] as const;
-</script>
-
 <script lang="ts">
-  // A time-series line chart on uPlot, themed from the console's CSS tokens
-  // (read once at mount; a reload re-reads them). A visually hidden
+  // A time-series line chart on uPlot, themed from the console's CSS tokens.
+  // The canvas does not follow CSS by itself, so the chart is drawn again
+  // with fresh colours when the colour scheme or forced colours change;
+  // under forced colours it uses the user's system colours. A visually hidden
   // paragraph summarises the series and names the chart (aria-labelledby),
   // so the text alternative is announced once and is also there to copy.
   import { onDestroy, onMount } from "svelte";
@@ -24,6 +21,7 @@
     valueAxisWidth,
     type ChartSeries,
   } from "./utils/chart-summary";
+  import { opaque, SERIES_TOKENS, seriesStyle, type ChartColours } from "./utils/chart-style";
 
   interface Props {
     title: string;
@@ -66,6 +64,34 @@
     return value === "" ? fallback : value;
   }
 
+  const FORCED = "(forced-colors: active)";
+  const DARK = "(prefers-color-scheme: dark)";
+
+  /** A system colour (CanvasText, Highlight, ...) as the browser paints it now, opaque. */
+  function systemColour(keyword: string): string {
+    const probe = document.createElement("span");
+    probe.style.cssText = `position:absolute;visibility:hidden;forced-color-adjust:none;color:${keyword}`;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value === "" ? keyword : opaque(value);
+  }
+
+  /** The colours to draw with: the theme's tokens, or the forced palette's system colours. */
+  function chartColours(): ChartColours {
+    if (matchMedia(FORCED).matches) {
+      const text = systemColour("CanvasText");
+      return { text, grid: systemColour("GrayText"), axis: text, series: [systemColour("Highlight")], forced: true };
+    }
+    return {
+      text: cssVar("--ps-text-secondary", "CanvasText"),
+      grid: cssVar("--ps-chart-grid", "GrayText"),
+      axis: cssVar("--ps-border", "GrayText"),
+      series: SERIES_TOKENS.map((token) => cssVar(token, "CanvasText")),
+      forced: false,
+    };
+  }
+
   function axisValue(v: number): string {
     const abs = Math.abs(v);
     if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}G`;
@@ -94,8 +120,13 @@
   }
 
   function buildOptions(width: number, plot: number): uPlot.Options {
-    const text = cssVar("--ps-text-secondary", "#555555");
-    const border = cssVar("--ps-border", "#dddddd");
+    const colours = chartColours();
+    const text = colours.text;
+    const grid = { stroke: colours.grid, width: 1 };
+    const ticks = { stroke: colours.grid, width: 1 };
+    const border = { show: true, stroke: colours.axis, width: 1 };
+    // uPlot scales line widths to device pixels, but not dash patterns.
+    const ratio = uPlot.pxRatio || 1;
     const font = axisFont(cssVar("--ps-font-mono", "monospace"));
     return {
       width,
@@ -107,7 +138,9 @@
         {
           stroke: text,
           font,
-          grid: { stroke: border },
+          grid,
+          ticks,
+          border,
           // Room for an hh:mm:ss label between ticks; the step between
           // ticks decides whether seconds are shown.
           space: 80,
@@ -116,7 +149,9 @@
         {
           stroke: text,
           font,
-          grid: { stroke: border },
+          grid,
+          ticks,
+          border,
           size: valueAxisSize,
           values: (_u, splits) => {
             const labels = tickValues ? tickValues(splits) : splits.map((v) => (v === null ? "" : axisValue(v) + unit));
@@ -129,19 +164,43 @@
       ],
       series: [
         {},
-        ...series.map((s, i) => ({
-          label: s.label,
-          stroke: s.color ?? cssVar(SERIES_PALETTE[i % SERIES_PALETTE.length], "#1a73e8"),
-          width: 2,
-          spanGaps: false,
-        })),
+        ...series.map((s, i) => {
+          const style = seriesStyle(i, series.length, colours);
+          return {
+            label: s.label,
+            stroke: style.stroke,
+            width: style.width,
+            dash: style.dash.map((d) => d * ratio),
+            ...(style.fill === undefined ? {} : { fill: style.fill }),
+            // Markers only where samples lie at least 14 px apart (as with
+            // the former 2 px line): a lone sample shows, a dense tail does not.
+            points: { space: 14 },
+            spanGaps: false,
+          };
+        }),
       ],
     };
   }
 
-  onMount(() => {
+  function draw(): void {
+    chart?.destroy();
     plotHeight = heightFor(container.clientWidth);
     chart = new uPlot(buildOptions(container.clientWidth, plotHeight), alignedData(timestamps, series), container);
+  }
+
+  // A change of colour scheme or of forced colours draws the chart again.
+  const schemeQueries: MediaQueryList[] = [];
+  function onSchemeChange(): void {
+    if (chart !== null) draw();
+  }
+
+  onMount(() => {
+    draw();
+    for (const query of [DARK, FORCED]) {
+      const list = matchMedia(query);
+      list.addEventListener("change", onSchemeChange);
+      schemeQueries.push(list);
+    }
     observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       if (chart === null || width <= 0) return;
@@ -157,6 +216,7 @@
   });
 
   onDestroy(() => {
+    for (const list of schemeQueries) list.removeEventListener("change", onSchemeChange);
     observer?.disconnect();
     chart?.destroy();
     chart = null;

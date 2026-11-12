@@ -30,6 +30,12 @@ export const CONSOLE_TITLE = `${PRODUCT_DISPLAY_NAME} Admin Console`;
 export const VENDOR_HOST = new URL(VENDOR_URL).host;
 export const WEBSITE_HOST = new URL(WEBSITE).host;
 
+/**
+ * The website's support page: what a support subscription covers and how to
+ * reach support (SUPPORT_URL is the page that sells the subscriptions).
+ */
+export const SUPPORT_PAGE_URL = `${WEBSITE}/support/`;
+
 /** The one base of every documentation link the console shows. */
 export const DOCS_BASE = `${WEBSITE}/docs`;
 

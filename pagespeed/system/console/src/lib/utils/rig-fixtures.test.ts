@@ -25,6 +25,8 @@ import { daemonServeSavings, moduleSummary, sampleOverview, variablesOf } from "
 import type { OverviewApi } from "./overview";
 import { rulePacksView } from "./rule-packs";
 import { serveSavingsView } from "./serve-savings";
+import { ALREADY_GOOD, NOT_OPTIMIZED, reasonRows } from "./not-optimized";
+import { WARMUP_MS } from "./since";
 
 const dir = fileURLToPath(new URL("../../../test-fixtures/rig/", import.meta.url));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -271,6 +273,22 @@ describe("module counters", () => {
 
   it("the overview treats a server with traffic as active", () => {
     expect(moduleSummary(vars).active).toBe(true);
+  });
+
+  it("reasons for no optimization: silent minutes after the restart, the counted ones once steady", () => {
+    const at = statsGlobal.timestamp_ms as number;
+    expect(at - vars.process_start_ms).toBeLessThan(WARMUP_MS);
+    expect(reasonRows(vars, at, NOT_OPTIMIZED)).toBeNull();
+    const later = at + WARMUP_MS;
+    const rows = reasonRows(vars, later, NOT_OPTIMIZED)!;
+    expect(rows.map((r) => [r.reason.counter, r.count])).toEqual(
+      NOT_OPTIMIZED.filter((r) => vars[r.counter] > 0).map((r) => [r.counter, vars[r.counter]]),
+    );
+    expect(rows.map((r) => r.reason.counter)).toEqual([
+      "resource_url_domain_rejections",
+      "num_cache_control_not_rewritable_resources",
+    ]);
+    expect(reasonRows(vars, later, ALREADY_GOOD)).toEqual([]);
   });
 });
 

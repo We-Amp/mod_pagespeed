@@ -9,13 +9,21 @@
   // rather than left to the browser: showModal() does not reliably keep
   // focus inside a dialog with a single focusable control. The Versions
   // section repeats About's block; the optimizer is asked once, on the first
-  // open.
+  // open. The switch turns every shortcut off for this browser (speech input
+  // dictates letters); the list names only the pages this console has.
   import { useConsole } from "$lib/api/context";
-  import { SHORTCUT_HELP } from "$lib/shortcuts";
+  import { shortcutHelp } from "$lib/shortcuts";
   import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { optimizerVersionsStatus, optimizerVersionText, type OptimizerVersionsStatus } from "$lib/utils/versions";
 
-  let { open, onclose }: { open: boolean; onclose: () => void } = $props();
+  let {
+    open,
+    onclose,
+    isGlobal,
+    on,
+    onchange,
+  }: { open: boolean; onclose: () => void; isGlobal: boolean; on: boolean; onchange: (on: boolean) => void } = $props();
+  let items = $derived(shortcutHelp(isGlobal));
   let dialog: HTMLDialogElement | undefined = $state();
   let title: HTMLHeadingElement | undefined = $state();
 
@@ -70,8 +78,19 @@
 
 <dialog bind:this={dialog} class="shortcut-help" aria-labelledby="shortcut-help-title" onclose={onclose} onkeydown={trapTab}>
   <h2 id="shortcut-help-title" tabindex="-1" bind:this={title}>Keyboard shortcuts</h2>
+  <label class="field-check shortcut-switch">
+    <input type="checkbox" role="switch" checked={on} onchange={(e) => onchange(e.currentTarget.checked)} />
+    Use keyboard shortcuts
+  </label>
+  <p class="note" data-testid="shortcut-switch-note">
+    {#if on}
+      Turn them off if you use speech input or the keys get in your way. Remembered in this browser.
+    {:else}
+      Off in this browser: the keys below do nothing. The ? button in the top bar opens this list.
+    {/if}
+  </p>
   <dl>
-    {#each SHORTCUT_HELP as item (item.keys)}
+    {#each items as item (item.keys)}
       <div class="row">
         <dt><kbd>{item.keys}</kbd></dt>
         <dd>{item.description}</dd>
@@ -119,6 +138,10 @@
   h3 {
     margin: 0 0 var(--ps-space-sm);
     font-size: var(--ps-font-size-base);
+  }
+
+  .shortcut-switch {
+    white-space: normal;
   }
 
   dl {

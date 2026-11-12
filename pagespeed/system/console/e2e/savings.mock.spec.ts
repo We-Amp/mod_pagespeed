@@ -868,3 +868,52 @@ test("against a module that sends every site's rows, a per-vhost console matches
   await expect(page.getByTestId("savings-host-none")).toContainText("No serves recorded for www.example.test");
   await expect(page.getByTestId("savings-optimizer-card")).not.toContainText("static.example.com");
 });
+
+test("lists why content was not optimized, with the fix and the setting's current value", async ({ page }) => {
+  const golden = JSON.parse(F.STATS_JSON_GLOBAL_BYTES);
+  const variables = {
+    ...(STATS_GLOBAL.body as { variables: Record<string, number> }).variables,
+    ...golden.variables,
+    resource_url_domain_rejections: 96,
+    image_rewrites_dropped_due_to_load: 12,
+    image_rewrites_dropped_nosaving_noresize: 4,
+  };
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...goldenReplies(),
+    stats_json: () => F.ok({ ...golden, variables: { ...variables, process_start_ms: Date.now() - 26 * 3_600_000 } }),
+    config: F.ok({
+      config: "Version: 15: on\n\nFilters\nah\tAdd Head\n\nOptions\n  ImageMaxRewritesAtOnce (imrao)  2\n",
+      effective_config: "Version: 15: on\n\nFilters\nah\tAdd Head\n\nOptions\n  ImageMaxRewritesAtOnce (imrao)  4\n",
+      scope: "global",
+      host: "",
+    }),
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const reasons = page.getByTestId("savings-reasons").getByRole("listitem");
+  await expect(reasons).toHaveCount(2);
+  await expect(reasons.nth(0)).toContainText("Domain not authorized 96");
+  await expect(reasons.nth(1)).toContainText("Image work dropped under load 12");
+  // The value in effect, not the whole-server text's.
+  await expect(reasons.nth(1)).toContainText("Now: ImageMaxRewritesAtOnce 4.");
+  // No saving to be had is not a reason to act.
+  await expect(page.getByTestId("savings-reasons-good")).toHaveText(
+    /Nothing to do \(already good\): Recompressed image no smaller 4/,
+  );
+});
+
+test("says nothing about reasons while the web server warms up", async ({ page }) => {
+  const golden = JSON.parse(F.STATS_JSON_GLOBAL_BYTES);
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...goldenReplies(),
+    stats_json: () =>
+      F.ok({
+        ...golden,
+        variables: { ...golden.variables, resource_url_domain_rejections: 96, process_start_ms: Date.now() - 3 * 60_000 },
+      }),
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("savings-module-card")).toBeVisible();
+  await expect(page.getByTestId("since-module").getByTestId("warming-pill")).toBeVisible();
+  await expect(page.getByTestId("savings-reasons")).toHaveCount(0);
+  await expect(page.getByText("Not optimized, by reason")).toHaveCount(0);
+});
