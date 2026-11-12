@@ -61,12 +61,14 @@ class CssInlineFilter::Context : public InlineRewriteContext {
     // Taken now, while the page is parsed: the cache key and the decision in
     // ShouldInline() are both made later and must see the same page charset.
     filter->driver()->containing_charset().CopyToString(&htmls_charset_);
+    conservative_check_ =
+        CssInlineFilter::NeedsConservativeMarkupCheck(filter->driver());
   }
 
   bool ShouldInline(const ResourcePtr& resource,
                     GoogleString* reason) const override {
     return filter_->ShouldInline(resource, attrs_charset_, htmls_charset_,
-                                 reason);
+                                 conservative_check_, reason);
   }
 
   // ShouldInline() depends on the charsets of the page and of the <link>
@@ -74,7 +76,10 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   // not share a metadata cache entry. Both values are page text, so they enter
   // the key as a hash.
   GoogleString CacheKeySuffix() const override {
-    GoogleString charsets = StrCat(htmls_charset_, "/", attrs_charset_);
+    // The decision also depends on the kind of document (see
+    // NeedsConservativeMarkupCheck()).
+    GoogleString charsets = StrCat(htmls_charset_, "/", attrs_charset_,
+                                   conservative_check_ ? "" : "/n");
     LowerString(&charsets);
     return FindServerContext()->lock_hasher()->Hash(charsets);
   }
@@ -103,6 +108,7 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   GoogleUrl base_url_;
   GoogleString attrs_charset_;
   GoogleString htmls_charset_;
+  bool conservative_check_;
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -202,9 +208,14 @@ bool CssInlineFilter::MayCloseStyleElement(StringPiece contents) {
   return FindIgnoreCase(contents, "</style") != StringPiece::npos;
 }
 
+bool CssInlineFilter::NeedsConservativeMarkupCheck(RewriteDriver* driver) {
+  return driver->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml;
+}
+
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
                                    const StringPiece& attrs_charset,
                                    const StringPiece& htmls_charset,
+                                   bool conservative_check,
                                    GoogleString* reason) const {
   // If the contents are bigger than our threshold, don't inline.
   StringPiece contents(resource->ExtractUncompressedContents());
@@ -218,11 +229,13 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
     *reason = "CSS not inlined because it appears to be gzip-encoded";
     return false;
   }
-  // And also not if the contents contain a closing style tag. If we inline an
-  // external stylesheet containing, say, a "</style>", the <style> tag will be
-  // ended early.
-  if (MayCloseStyleElement(contents)) {
-    *reason = "CSS not inlined since it contains a closing style tag";
+  // And also not if the contents could end the <style> element early, as a
+  // "</style>" would. HTML documents only need to rule out a closing style
+  // tag; XHTML keeps the conservative check for any '<'.
+  if (MayBreakInlineStyle(contents, conservative_check)) {
+    *reason = conservative_check
+                  ? "CSS not inlined since it contains a less-than sign"
+                  : "CSS not inlined since it contains a closing style tag";
     return false;
   }
 

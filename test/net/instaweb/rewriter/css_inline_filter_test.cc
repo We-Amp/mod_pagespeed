@@ -131,6 +131,7 @@ class CssInlineFilterTest : public RewriteTestBase {
 
   void VerifyNoInliningForClosingStyleTag(
       const GoogleString& closing_style_tag) {
+    SetHtmlMimetype();
     AddFilter(RewriteOptions::kInlineCss);
     SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
                                   StrCat("a{margin:0}", closing_style_tag),
@@ -779,8 +780,34 @@ TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagInStringOrComment) {
   VerifyNoInliningForClosingStyleTag("a:after{content:\"</style>\"}");
 }
 
+TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagInComment) {
+  VerifyNoInliningForClosingStyleTag("a{margin:0}/* </STYLE> */");
+}
+
+// XHTML keeps the conservative check: any '<' keeps the stylesheet external.
+TEST_F(CssInlineFilterTest, XhtmlWithLessThanSignIsNotInlined) {
+  SetXhtmlMimetype();
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                "@media (width < 600px){a{margin:0}}", 100);
+  ValidateNoChanges("xhtml_lt", "<link rel='stylesheet' href='foo.css'/>");
+}
+
+// A link in SVG or MathML is not an HTML link element, so it is left alone.
+TEST_F(CssInlineFilterTest, ForeignLinkIsLeftAlone) {
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                "a{margin:0}\n@media (width < 600px){a{x:y}}",
+                                100);
+  ValidateNoChanges("svg",
+                    "<svg><link rel='stylesheet' href='foo.css'></svg>");
+  ValidateNoChanges("math",
+                    "<math><link rel='stylesheet' href='foo.css'></math>");
+}
+
 // A '<' that is plain CSS does not stop inlining.
 TEST_F(CssInlineFilterTest, StylesheetWithLessThanSignIsInlined) {
+  SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineCss);
   const char kCss[] =
       "@property --tw-shadow-alpha{syntax:\"<percentage>\";inherits:false;"

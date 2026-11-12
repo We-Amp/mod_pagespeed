@@ -409,6 +409,10 @@ class CssFilter::Context : public SingleRewriteContext {
   // rewrite_inline_ fields reflect us doing inline rewriting.
   InlineCssKind rewrite_inline_css_kind_;
 
+  // Whether CSS serialized into an inline <style> gets the conservative
+  // markup check (true unless the document is known to be plain HTML).
+  bool conservative_markup_check_;
+
   // Information needed for nested rewrites or finishing up serialization.
   int64 in_text_size_;
   GoogleUrl initial_css_base_gurl_;

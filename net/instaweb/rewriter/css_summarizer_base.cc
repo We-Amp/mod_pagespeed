@@ -94,6 +94,9 @@ class CssSummarizerBase::Context : public SingleRewriteContext {
   void ReportDone();
 
   int pos_;  // our position in the list of all styles in the page.
+  // Taken while the page is parsed; see
+  // CssInlineFilter::NeedsConservativeMarkupCheck().
+  bool conservative_markup_check_;
   CssSummarizerBase* filter_;
 
   HtmlElement* element_;
@@ -111,6 +114,8 @@ CssSummarizerBase::Context::Context(int pos, CssSummarizerBase* filter,
     : SingleRewriteContext(driver, nullptr /*parent*/,
                            nullptr /* resource_context*/),
       pos_(pos),
+      conservative_markup_check_(
+          CssInlineFilter::NeedsConservativeMarkupCheck(driver)),
       filter_(filter),
       element_(nullptr),
       text_(nullptr),
@@ -249,7 +254,8 @@ void CssSummarizerBase::Context::RewriteSingle(
         input_resource.get(), StringPiece() /* attribute_charset */,
         StringPiece() /* enclosing_charset */));
   }
-  if (CssInlineFilter::MayCloseStyleElement(result->inlined_data())) {
+  if (CssInlineFilter::MayBreakInlineStyle(result->inlined_data(),
+                                           conservative_markup_check_)) {
     result->clear_inlined_data();
   }
 
@@ -278,7 +284,9 @@ bool CssSummarizerBase::Context::Partition(OutputPartitions* partitions,
 }
 
 GoogleString CssSummarizerBase::Context::CacheKeySuffix() const {
-  return filter_->CacheKeySuffix();
+  // The summary is cleared by a check that depends on the kind of document.
+  return conservative_markup_check_ ? filter_->CacheKeySuffix()
+                                    : StrCat(filter_->CacheKeySuffix(), "_n");
 }
 
 const char CssSummarizerBase::kNumCssUsedForCriticalCssComputation[] =

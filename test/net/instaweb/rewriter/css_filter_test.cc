@@ -730,12 +730,43 @@ TEST_F(CssFilterTest, DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
       << output_buffer_;
 }
 
-// CSS that could read as markup after a rewrite is left as it was.
+// In XHTML, CSS that could read as markup after a rewrite is left as it was.
 TEST_F(CssFilterTest, InlineStyleDoesNotGainLiteralMarkup) {
+  SetXhtmlMimetype();
   ValidateNoChanges("selector",
                     "<style>li[title=\"1\\3C 2\\3E 0\"]{color:blue}</style>");
   ValidateNoChanges("charset", "<style>@charset \"\\3Cpre\";</style>");
   ValidateNoChanges("id_start_escape", "<style>#\\3Cnav{margin:2px}</style>");
+}
+
+// In HTML only a closing style tag is kept out of an inline <style>.
+TEST_F(CssFilterTest, InlineStyleWithClosingTagEscapeIsLeftAlone) {
+  SetHtmlMimetype();
+  ValidateNoChanges("closing_tag",
+                    "<style>a{content:\"\\3C/style\\3E\"}</style>");
+}
+
+// A '<' that is plain CSS (Tailwind 4 @property, media query ranges) does not
+// stop an inline <style> from being minified in HTML, but does in XHTML.
+TEST_F(CssFilterTest, InlineStyleWithLessThanSign) {
+  static const char kCss[] =
+      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
+      "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }"
+      "</style>";
+  SetHtmlMimetype();
+  ValidateExpected(
+      "html", kCss,
+      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
+      "initial-value: 0px }@media (width < 600px){p{margin:0}}</style>");
+}
+
+TEST_F(CssFilterTest, InlineStyleWithLessThanSignInXhtml) {
+  SetXhtmlMimetype();
+  ValidateNoChanges(
+      "xhtml",
+      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
+      "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }"
+      "</style>");
 }
 
 // An inline <style> without markup characters is still minified.

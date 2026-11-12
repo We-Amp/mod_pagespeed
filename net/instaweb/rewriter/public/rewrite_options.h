@@ -650,7 +650,7 @@ class RewriteOptions {
   // what bytes a client receives, and leave it when the change is invisible to
   // output.  Either way, decide explicitly; the failure mode of forgetting is
   // silent stale content, not an error.
-  static constexpr int kOptionsVersion = 16;
+  static constexpr int kOptionsVersion = 17;
 
   // Number of bytes used for signature hashing.
   static constexpr int kHashBytes = 20;
