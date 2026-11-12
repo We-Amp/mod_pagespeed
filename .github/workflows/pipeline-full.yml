@@ -1479,16 +1479,10 @@ jobs:
   # by windows-build. This job needs a host with the IIS role, administrator
   # rights and the Windows SDK debugging tools, and cannot run on a hosted
   # runner, so a fork or Dependabot pull request skips it.
-  #
-  # Report-only until 2026-11-20 (issue #656, tools/ci/quarantine.txt): a
-  # failure shows on the job but does not fail the run or the CI gate. The
-  # nightly-red report still lists it, the release lane's gate still requires
-  # it, and CI goes red once the expiry passes (tools/ci/check_quarantine.py).
   win-appverif:
     permissions:
       contents: read
     name: Windows AppVerif
-    continue-on-error: true
     needs: windows-build
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
@@ -1624,7 +1618,40 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location $env:GITHUB_WORKSPACE
-          .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
+          # A host failure of the site start (HTTP.sys refused a binding,
+          # hresult 0x80070020; the setup script's infra-class.txt marker,
+          # classified by tools/ci/iis_failure_class.py as in the PR tier's
+          # IIS System Tests) means no test ran. It is retried once, on this
+          # runner after the binding has had time to drain: the verifier
+          # settings are machine-global, so a retry on another runner would
+          # need the whole job again. A test failure is never retried, and
+          # the retry's own failure of either class fails the step.
+          # The setup script throws when the site does not start, and under the
+          # Stop preference that would end this step before the classifier
+          # runs, so each run turns a throw into a failing exit code.
+          # Output goes to the host so it cannot leak into the exit code.
+          function Invoke-IisTests {
+            try {
+              .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose | Out-Host
+              $script:code = $LASTEXITCODE
+            } catch {
+              Write-Host "run_iis_tests.ps1 failed: $($_.Exception.Message)"
+              $script:code = 1
+            }
+          }
+          $marker = Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt'
+          Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+          Invoke-IisTests
+          if ($code -ne 0) {
+            $line = "$(& python tools\ci\iis_failure_class.py $env:PAGESPEED_EVIDENCE_DIR | Select-Object -Last 1)".Trim()
+            if ($line -eq 'infra iis-site-start') {
+              Write-Host "::warning::the test site did not start on $($env:RUNNER_NAME) (a failure of the host, not of the change); the tests run once more"
+              Start-Sleep -Seconds 60
+              Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+              Invoke-IisTests
+            }
+          }
+          exit $code
 
       - name: Export the Application Verifier log
         if: always()

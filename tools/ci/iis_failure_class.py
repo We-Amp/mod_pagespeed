@@ -17,8 +17,10 @@ Output, one line on stdout:
                      reason (fail closed: a test failure is never retried
                      away by a marker this script does not know)
 
-The workflow retries an `infra` failure once on another runner; the retry
-runs every test again, and its own failure, of either class, fails the job.
+The PR tier retries an `infra` failure once on another runner, and the
+Application Verifier job (`win-appverif`) once on the same runner, because
+its verifier settings are machine-global; either retry runs every test
+again, and its own failure, of either class, fails the job.
 So a marker can cost one retry but cannot turn a failing test green.
 
 Usage:

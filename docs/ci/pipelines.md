@@ -809,6 +809,11 @@ ejected a pull request from the queue and rebuilt the entries behind it.
   green. The steps are shared with `iis-sys-tests` through a YAML anchor.
   Before the tests start, the job deletes any marker left in the evidence
   directory, so only this run's setup can write one.
+- **Application Verifier: once, on the same runner.** `win-appverif` uses
+  the same marker and classifier, but its verifier settings are machine-global,
+  so it retries an `iis-site-start` failure once on the same runner, after 60
+  seconds for the binding to drain. A test failure and a
+  `httpsys-ipv6-wedge` (which needs a reboot) are not retried.
 - **Required, not by convention.** `fleet-only-skip-check` (and so the `CI
   gate`) fails when the first attempt ended with `failure_class=infra` and
   `iis-sys-tests-retry` did not conclude `success`, whatever skipped it. The
@@ -864,7 +869,7 @@ not read the file: a quarantined job that the release requires must still
 pass at the release commit. The nightly-red issue reads the run's job list,
 so a report-only job's failure in the nightly is still reported.
 
-As of 2026-11-06: `full / Windows AppVerif`, until 2026-11-20 (issue #656).
+As of 2026-11-11: no job is report-only.
 
 ## The tidy sweep
 
