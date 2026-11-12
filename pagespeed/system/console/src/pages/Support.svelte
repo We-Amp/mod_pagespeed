@@ -8,13 +8,16 @@
   // the documentation, and a diagnostics bundle to paste into a request.
   // No license state, no activation flow, no nag — the panel is dismissible
   // and its dismissal is remembered (support-panel.ts); everything below it
-  // is permanent. "Copy diagnostics" reads this console's own pages once and
-  // copies plain text; nothing is sent anywhere (diagnostics.ts).
+  // is permanent. The diagnostics bundle reads this console's own pages once
+  // when the page opens (and again on request) and is shown as plain text to
+  // copy or download; nothing is sent anywhere (diagnostics.ts).
   import { useConsole } from "$lib/api/context";
   import PageHeader from "$lib/PageHeader.svelte";
   import {
+    DOCS,
     DOCS_URL,
     PRODUCT_NAME,
+    SUPPORT_PAGE_URL,
     SUPPORT_TERMS_URL,
     SUPPORT_URL,
     VENDOR,
@@ -24,26 +27,64 @@
     saveSupportDismissed,
     supportSentence,
   } from "$lib/utils/support-panel";
-  import { collectDiagnostics, copyText } from "$lib/utils/diagnostics";
+  import {
+    collectDiagnostics,
+    copyText,
+    diagnosticsFileName,
+    diagnosticsText,
+    downloadText,
+    type DiagnosticsData,
+  } from "$lib/utils/diagnostics";
+  import { detectedDialect } from "$lib/utils/dialect";
 
   const { api, scope } = useConsole();
   const build = import.meta.env.VITE_APP_VERSION ?? "dev";
 
   let dismissed = $state(loadSupportDismissed());
-  let diagnostics = $state<"idle" | "working" | "copied" | "manual">("idle");
-  let diagnosticsText = $state("");
+  let data = $state<DiagnosticsData | null>(null);
+  let reading = $state(false);
+  let keepQueryStrings = $state(false);
+  let includeConfig = $state(false);
+  let status = $state<"" | "copied" | "manual" | "downloaded">("");
+  // The scope settles when the shell's configuration read answers, which
+  // may be after this page's reading: the text names it as it is now.
+  let where = $derived(scope.isGlobal ? "whole server" : `this host (${scope.host || "unknown host"})`);
+  let text = $derived(
+    data === null
+      ? ""
+      : diagnosticsText(data, where, { queryStrings: keepQueryStrings, configText: includeConfig }),
+  );
 
   function setDismissed(value: boolean) {
     dismissed = value;
     saveSupportDismissed(value);
   }
 
-  async function copyDiagnostics() {
-    diagnostics = "working";
-    const where = scope.isGlobal ? "whole server" : `this host (${scope.host || "unknown host"})`;
-    diagnosticsText = await collectDiagnostics(api, where, build);
-    diagnostics = (await copyText(diagnosticsText)) ? "copied" : "manual";
+  async function readDiagnostics() {
+    reading = true;
+    status = "";
+    try {
+      data = await collectDiagnostics(api, {
+        build,
+        userAgent: globalThis.navigator?.userAgent ?? "",
+        server: detectedDialect(),
+      });
+    } finally {
+      reading = false;
+    }
   }
+
+  async function copyDiagnostics() {
+    status = (await copyText(text)) ? "copied" : "manual";
+  }
+
+  function downloadDiagnostics() {
+    if (data === null) return;
+    status = downloadText(text, diagnosticsFileName(data.generatedAt)) ? "downloaded" : "manual";
+  }
+
+  // One reading when the page opens; "Read again" takes another.
+  void readDiagnostics();
 </script>
 
 <div class="page">
@@ -87,38 +128,71 @@
   <section class="diagnostics-section" aria-labelledby="support-diagnostics-heading">
     <h2 class="section-title" id="support-diagnostics-heading">Diagnostics</h2>
     <p class="note">
-      Copies the module and console builds, the optimizer's version, a fingerprint of the
-      configuration and the last 50 warnings and errors as plain text, for a support request.
-      Nothing is sent anywhere. The messages can contain addresses your visitors requested,
-      query strings included: review the text before you share it.
+      Read once when this page opens; nothing is sent anywhere. Treat it as public and review it before you
+      share it.
     </p>
-    <button
-      type="button"
-      class="btn btn-secondary"
-      data-testid="copy-diagnostics"
-      disabled={diagnostics === "working"}
-      onclick={copyDiagnostics}
-    >Copy diagnostics</button>
+    <div class="control-row diagnostics-options">
+      <label class="field-check">
+        <input type="checkbox" bind:checked={keepQueryStrings} data-testid="diagnostics-query-strings" />
+        Keep query strings
+      </label>
+      <label class="field-check">
+        <input type="checkbox" bind:checked={includeConfig} data-testid="diagnostics-config" />
+        Include the configuration
+      </label>
+    </div>
+    <div class="control-row diagnostics-actions">
+      <div class="control-group">
+        <button
+          type="button"
+          class="btn btn-primary"
+          data-testid="copy-diagnostics"
+          disabled={data === null}
+          onclick={copyDiagnostics}
+        >Copy diagnostics</button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-testid="download-diagnostics"
+          disabled={data === null}
+          onclick={downloadDiagnostics}
+        >Download .txt</button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-testid="reread-diagnostics"
+          disabled={reading}
+          onclick={readDiagnostics}
+        >Read again</button>
+      </div>
+    </div>
+    <p class="note diagnostics-where" data-testid="diagnostics-where">
+      Where to send it: with a
+      <a href={SUPPORT_PAGE_URL} target="_blank" rel="noopener noreferrer">support request</a>,
+      or paste it into an issue report. The
+      <a href={DOCS.diagnose} target="_blank" rel="noopener noreferrer">troubleshooting guide</a>
+      says what else helps.
+    </p>
     <p class="diagnostics-status" role="status" data-testid="diagnostics-status">
-      {#if diagnostics === "working"}
-        Collecting…
-      {:else if diagnostics === "copied"}
+      {#if reading}
+        Reading…
+      {:else if status === "copied"}
         Copied to the clipboard.
-      {:else if diagnostics === "manual"}
-        This browser did not allow copying; select the text below and copy it.
+      {:else if status === "manual"}
+        This browser did not allow it; select the text below and copy it.
+      {:else if status === "downloaded"}
+        Downloaded as a text file.
       {/if}
     </p>
-    {#if diagnostics === "manual"}
-      <label class="diagnostics-label" for="diagnostics-text">Diagnostics text</label>
-      <textarea
-        id="diagnostics-text"
-        class="diagnostics-text"
-        data-testid="diagnostics-text"
-        readonly
-        rows="12"
-        value={diagnosticsText}
-      ></textarea>
-    {/if}
+    <label class="diagnostics-label" for="diagnostics-text">Diagnostics text</label>
+    <textarea
+      id="diagnostics-text"
+      class="diagnostics-text"
+      data-testid="diagnostics-text"
+      readonly
+      rows="16"
+      value={text}
+    ></textarea>
   </section>
 </div>
 
@@ -189,6 +263,11 @@
     color: var(--ps-primary);
     cursor: pointer;
     text-decoration: underline;
+  }
+
+  .diagnostics-options,
+  .diagnostics-actions {
+    margin-bottom: var(--ps-space-sm);
   }
 
   .diagnostics-status {
