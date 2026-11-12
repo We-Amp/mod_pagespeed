@@ -25,8 +25,12 @@
 # capped at 1, and all failures are printed):
 #   1. TAG is module-vX.Y.Z[-pre.N] and, for a -pre tag, is judged as the
 #      release X.Y.Z it rehearses.
-#   2. The pin's tag is optimizer-vX.Y.Z (the release's own optimizer).
-#   3. The pinned optimizer commit's VERSION.txt agrees with X.Y.Z
+#   2. The pin's tag is optimizer-vX.Y.Z (the release's own optimizer), or,
+#      for a module-only release ("pairing": "unpaired" in the pin), an older
+#      final optimizer release (optimizer_pin_pairing.py, as the lane's
+#      version job decides it).
+#   3. The pinned optimizer commit's VERSION.txt agrees with X.Y.Z, or with
+#      the pinned version in a module-only release
 #      (check_module_optimizer_version.py, strict).
 #   4. With the optimizer's MODULE.bazel: both halves link one cache library
 #      commit (check_optimizer_pin_pair.py).
@@ -290,15 +294,23 @@ rehearse() {
   case "$pre" in pre|pre.*|pre[0-9]*) judged="$base" ;; esac
   ok "tag $tag is judged as release $judged"
 
-  local pin_tag want_tag
+  local pin_tag want_tag out unpaired=false
   pin_tag="$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1])).get('tag',''))" "$pin")"
   want_tag="optimizer-v${judged}"
-  if [ "$pin_tag" = "$want_tag" ]; then ok "pin names $pin_tag"
+  if out="$(python3 -I "$HERE/optimizer_pin_pairing.py" --pin "$pin" --version "$judged" 2>&1)"; then
+    unpaired="$(printf '%s\n' "$out" | sed -n 's/^pair_unpaired=//p')"
+  else
+    bad "pairing: ${out}"
+  fi
+  local pinned_args=()
+  if [ "$unpaired" = true ]; then
+    ok "pin names $pin_tag: a module-only release of $judged (pairing \"unpaired\")"
+    pinned_args=(--pinned-version "${pin_tag#optimizer-v}")
+  elif [ "$pin_tag" = "$want_tag" ]; then ok "pin names $pin_tag"
   else bad "the pin names '$pin_tag' but release $judged needs '$want_tag'"; fi
 
-  local out
   if out="$(python3 -I "$HERE/check_module_optimizer_version.py" \
-        --module-version "$judged" --optimizer-version-file "$vfile" 2>&1)"; then
+        --module-version "$judged" --optimizer-version-file "$vfile" "${pinned_args[@]+"${pinned_args[@]}"}" 2>&1)"; then
     ok "version: ${out##*$'\n'}"
   else
     bad "version: ${out}"
@@ -344,7 +356,7 @@ rehearse() {
 self_test() {
   local t rc fails=0
   t="$(mktemp -d)"; trap 'rm -rf "$t"' RETURN
-  pin() { printf '{"tag":"%s","optimizer_commit":"%s","sha256sums_sha256":"x"}\n' "$1" "$(printf 'a%.0s' $(seq 40))" > "$t/pin.json"; }
+  pin() { printf '{"tag":"%s","optimizer_commit":"%s","sha256sums_sha256":"x"%s}\n' "$1" "$(printf 'a%.0s' $(seq 40))" "${2:+,\"pairing\":\"$2\"}" > "$t/pin.json"; }
   ver() { printf '%s\n' "$1" > "$t/VERSION.txt"; }
   expect() { # want-rc name args...
     local want="$1" name="$2"; shift 2
@@ -366,6 +378,19 @@ self_test() {
   expect 1 "TEETH VERSION.txt is the old number" --tag module-v2.8.0-pre.1 "${base[@]}"
   pin optimizer-v2.7.0; ver 2.7.0
   expect 1 "TEETH both halves one release behind" --tag module-v2.8.0-pre.2 "${base[@]}"
+  # A module-only release: the pin says so and names an older final release,
+  # whose VERSION.txt is the pinned version.
+  pin optimizer-v2.8.1 unpaired; ver 2.8.1
+  expect 0 "module-only release, -pre tag"     --tag module-v2.8.2-pre.1 "${base[@]}"
+  expect 0 "module-only release, final tag"    --tag module-v2.8.2 "${base[@]}"
+  pin optimizer-v2.8.1 unpaired; ver 2.8.2
+  expect 1 "TEETH module-only, VERSION.txt is not the pinned version" --tag module-v2.8.2 "${base[@]}"
+  pin optimizer-v2.8.1; ver 2.8.1
+  expect 1 "TEETH older pin without the pairing field" --tag module-v2.8.2 "${base[@]}"
+  pin optimizer-v2.8.2 unpaired; ver 2.8.2
+  expect 1 "TEETH stale pairing field on a paired pin" --tag module-v2.8.2 "${base[@]}"
+  pin optimizer-v2.8.1 unpair; ver 2.8.1
+  expect 1 "TEETH unknown pairing value"       --tag module-v2.8.2 "${base[@]}"
   pin optimizer-v2.8.0; ver 2.8.0
   expect 1 "bad tag"                           --tag v2.8.0 "${base[@]}"
   expect 2 "missing input"                     --tag module-v2.8.0-pre.1

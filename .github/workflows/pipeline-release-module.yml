@@ -211,6 +211,7 @@ jobs:
       rehearsal: ${{ steps.derive.outputs.rehearsal }}
       build_profile: ${{ steps.derive.outputs.build_profile }}
       pair_lenient: ${{ steps.derive.outputs.pair_lenient }}
+      pair_unpaired: ${{ steps.derive.outputs.pair_unpaired }}
     steps:
       - name: Checkout master (version tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -313,6 +314,16 @@ jobs:
           PAIR_LENIENT=false
           [ "$BUILD_PROFILE" != rehearsal ] || PAIR_LENIENT=true
           case "$TAG" in module-v*-rc.*) PAIR_LENIENT=true ;; esac
+          # A module-only release: a final version whose tagged tree records
+          # "pairing": "unpaired" in the pin ships with the older optimizer
+          # release the pin names, and its packages depend on that version
+          # (tools/ci/optimizer_pin_pairing.py refuses a stale or wrong
+          # field). The pin is read from the commit being built.
+          bash tools/ci/release_version.sh parse "$TAG" >/dev/null
+          git fetch --quiet --depth 1 origin "$SHA"
+          git show "${SHA}:install/debian/optimizer-pin.json" > "${RUNNER_TEMP}/optimizer-pin.json"
+          PAIR_UNPAIRED="$(python3 -I tools/ci/optimizer_pin_pairing.py --pin "${RUNNER_TEMP}/optimizer-pin.json" --version "${TAG#module-v}")"
+          PAIR_UNPAIRED="${PAIR_UNPAIRED#pair_unpaired=}"
           {
             bash tools/ci/release_version.sh parse "$TAG"
             echo "ref=$REF"
@@ -323,6 +334,7 @@ jobs:
             echo "rehearsal=$REHEARSAL"
             echo "build_profile=$BUILD_PROFILE"
             echo "pair_lenient=$PAIR_LENIENT"
+            echo "pair_unpaired=$PAIR_UNPAIRED"
           } | tee -a "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------
@@ -756,6 +768,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
       PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
+      PAIR_UNPAIRED: ${{ needs.version.outputs.pair_unpaired }}
     steps: &vendor-steps
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -787,14 +800,15 @@ jobs:
 
       # A rehearsal or a release candidate version may name a version whose
       # paired optimizer release does not exist; the pin then names an older
-      # one and the packages depend on that. The file tells the package build
-      # which version to depend on. A real run and a candidate of a final
-      # version have none and depend on the tag's version.
+      # one and the packages depend on that. So does a module-only release
+      # (pairing "unpaired" in the pin). The file tells the package build
+      # which version to depend on. Any other real run or candidate of a
+      # final version has none and depends on the tag's version.
       - name: Record the optimizer pair version when there is no pair release
         run: |
           set -euo pipefail
           rm -f optimizer-pair-version
-          if [ "$PAIR_LENIENT" = true ]; then
+          if [ "$PAIR_LENIENT" = true ] || [ "$PAIR_UNPAIRED" = true ]; then
             pin_tag="$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")"
             case "$pin_tag" in optimizer-v[0-9]*) ;; *) echo "::error::unusable optimizer pin tag '$pin_tag'"; exit 1 ;; esac
             pair="${pin_tag#optimizer-v}"
@@ -964,6 +978,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
       PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
+      PAIR_UNPAIRED: ${{ needs.version.outputs.pair_unpaired }}
     steps: *vendor-steps
 
   # The `-ready` joins below accept an adopted run as success: the build jobs
@@ -1115,6 +1130,7 @@ jobs:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
+      PAIR_UNPAIRED: ${{ needs.version.outputs.pair_unpaired }}
       GH_READ_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1145,9 +1161,13 @@ jobs:
           # The pinned optimizer tag must be the pair of this module version.
           # In a rehearsal or for a release candidate version the paired
           # release cannot exist, so the pin is taken as it is and the
-          # packages are checked against it.
+          # packages are checked against it. A module-only release (the
+          # version job read "pairing": "unpaired" from the tagged pin and
+          # checked that it names an older final release) takes the pin too.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
-            if [ "$PAIR_LENIENT" = true ]; then
+            if [ "$PAIR_UNPAIRED" = true ]; then
+              echo "::notice::module-only release: optimizer-pin.json records pairing \"unpaired\"; the packages depend on the pinned '$PIN_TAG', not '$OPTIMIZER_TAG'"
+            elif [ "$PAIR_LENIENT" = true ]; then
               echo "::warning::no paired optimizer release for this version: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
             else
               echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
@@ -1172,8 +1192,9 @@ jobs:
             -o optimizer-MODULE.bazel
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
           # From 2.5.0 on the module version equals the pinned optimizer's
-          # VERSION.txt. Only while the pin is not yet the pair this release
-          # needs (see above) does a mismatch warn instead of fail.
+          # VERSION.txt; in a module-only release the pinned version does.
+          # Only while the pin is not yet the pair this release needs (see
+          # above) does a mismatch warn instead of fail.
           GUARD=lane-tools/tools/ci/check_module_optimizer_version.py
           if python3 "$GUARD" --enforced --module-version "$RELEASE_VERSION"; then
             curl -fsSL --retry 5 --retry-all-errors \
@@ -1181,7 +1202,9 @@ jobs:
               -o optimizer-VERSION.txt
           fi
           VERSION_ARGS=(--module-version "$RELEASE_VERSION" --optimizer-version-file optimizer-VERSION.txt)
-          if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
+          if [ "$PAIR_UNPAIRED" = true ]; then
+            VERSION_ARGS+=(--pinned-version "$PAIR_VERSION")
+          elif [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
             VERSION_ARGS+=(--dry-run)
           elif [ "$PAIR_LENIENT" = true ]; then
             echo "::notice::rehearsal with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
@@ -1195,11 +1218,14 @@ jobs:
             "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/$PIN_TAG" \
             -o optimizer-release.json
           python3 - <<'PY'
-          import json, sys
+          import json, os, sys
           doc = json.load(open("optimizer-release.json"))
           urls = {a["name"]: a["browser_download_url"] for a in doc.get("assets", [])}
           if "SHA256SUMS" not in urls:
               sys.exit("::error::the pinned optimizer release has no SHA256SUMS asset")
+          # A module-only release ships with a published, final release only.
+          if os.environ.get("PAIR_UNPAIRED") == "true" and (doc.get("draft") or doc.get("prerelease")):
+              sys.exit("::error::module-only release: the pinned optimizer release %s is a draft or a pre-release" % doc.get("tag_name"))
           with open("optimizer-assets.txt", "w") as fh:
               fh.write("\n".join(f"{n} {u}" for n, u in sorted(urls.items())) + "\n")
           PY
@@ -4570,7 +4596,13 @@ jobs:
             if [ "$IS_PRERELEASE" = true ]; then
               printf 'This is a release candidate. It is built and tested like a release but is not meant for production.\n\n'
             fi
-            printf 'The module packages for Apache, nginx and IIS, released with the pagespeed-optimizer packages of %s. Install the optimizer and the module package of the same version together.\n\n' "$OPTIMIZER_TAG"
+            if [ "$OPTIMIZER_TAG" = "optimizer-v${VERSION}" ]; then
+              printf 'The module packages for Apache, nginx and IIS, released with the pagespeed-optimizer packages of %s. Install the optimizer and the module package of the same version together.\n\n' "$OPTIMIZER_TAG"
+            else
+              # A module-only release (or a release candidate): the pin names
+              # an older optimizer release, which the packages depend on.
+              printf 'The module packages for Apache, nginx and IIS, released with the pagespeed-optimizer packages of %s, which the module packages depend on. Install that optimizer version and the module package together.\n\n' "$OPTIMIZER_TAG"
+            fi
             printf 'The native pair of the ASP.NET Core sidecar (nginx, the module built against it and the launch shim, per architecture) is in pagespeed-sidecar-native-%s-linux-*.tar.gz, described by sidecar-pair.json, and is for the WeAmp.PageSpeed.Sidecar NuGet packages.\n\n' "$VERSION"
             printf 'Source commit: %s\n\n' "$RELEASE_SHA"
             cat <<'NOTES'
