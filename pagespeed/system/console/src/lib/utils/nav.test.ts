@@ -71,6 +71,12 @@ describe("navKeyHint", () => {
     expect(navKeyHint("#/optimizer")).toBe("g d");
     expect(navKeyHint("#/urls")).toBe("g u");
     expect(navKeyHint("#/overview")).toBe("g o");
+    expect(navKeyHint("#/rule-packs")).toBe("g p");
+  });
+
+  it("a page only the whole-server console has carries no hint on a per-host one", () => {
+    expect(navKeyHint("#/urls", false)).toBeNull();
+    expect(navKeyHint("#/statistics", false)).toBe("g s");
   });
 
   it("a page without a shortcut, or an unknown path, has none", () => {
