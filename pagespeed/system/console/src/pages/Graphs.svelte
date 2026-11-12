@@ -26,12 +26,13 @@
   import TimeSeriesChart from "$lib/TimeSeriesChart.svelte";
   import { bytesRateTicks } from "$lib/utils/chart-summary";
   import ViewSwitch from "$lib/ViewSwitch.svelte";
-  import { formatBytesRate, formatCount, formatPercent } from "$lib/utils/format";
+  import { formatBytesRate, formatCount, formatIsoTitle, formatPercent } from "$lib/utils/format";
   import {
     formatRate,
     graphTitle,
     lastSampleForDisplay,
     latestForDisplay,
+    latestIndex,
     loadDeltaView,
     saveDeltaView,
     seriesForDisplay,
@@ -348,6 +349,12 @@
     return series.filter((v): v is number => v !== null && Number.isFinite(v));
   }
 
+  /** When the "Latest" figure was sampled, for its tooltip. */
+  function latestTitle(timestamps: number[], series: Sample[]): string | undefined {
+    const i = latestIndex(series);
+    return i < 0 ? undefined : formatIsoTitle(timestamps[i] * 1000);
+  }
+
   function formatSample(v: number | null, isRate: boolean): string {
     if (v === null) return "—";
     return isRate ? formatRate(v) : formatCount(v);
@@ -456,7 +463,13 @@
               {@const format = curatedFormat(chart.unit)}
               {@const latest = chart.unit === "percent" ? lastSampleForDisplay(chart.series) : latestForDisplay(chart.series)}
               <section class="card" data-testid="curated-{chart.id}">
-                <h3 class="card-title">{title}</h3>
+                <div class="chart-head">
+                  <h3 class="card-title chart-title">{title}</h3>
+                  <p class="chart-figure">
+                    <span class="metric-label">Latest</span>
+                    <span class="chart-figure-value" data-testid="curated-latest" title={latest === null ? undefined : latestTitle(chart.timestamps, chart.series)}>{latest === null ? "—" : format(latest)}</span>
+                  </p>
+                </div>
                 <TimeSeriesChart
                   {title}
                   timestamps={chart.timestamps}
@@ -468,7 +481,6 @@
                   formatValue={format}
                   tickValues={chart.unit === "bytes-per-second" ? bytesRateTicks : undefined}
                 />
-                <p class="note summary">Latest: <span data-testid="curated-latest">{latest === null ? "—" : format(latest)}</span></p>
               </section>
             {/each}
           </div>
@@ -504,7 +516,13 @@
       {#each rendered as chart (chart.name)}
         {@const values = plotted(chart.series)}
         <section class="card" data-testid="graph-card-{chart.name}">
-          <h2 class="card-title">{chart.title}</h2>
+          <div class="chart-head">
+            <h2 class="card-title chart-title">{chart.title}</h2>
+            <p class="chart-figure">
+              <span class="metric-label">Latest</span>
+              <span class="chart-figure-value" data-testid="graph-latest" title={latestTitle(chart.timestamps, chart.series)}>{formatSample(latestForDisplay(chart.series), chart.isRate)}</span>
+            </p>
+          </div>
           {#if !showAll}
             <button type="button" class="control btn btn-secondary btn-compact remove" aria-label="Remove {chart.name}" onclick={() => setPinned(pinned.filter((n) => n !== chart.name))}>Remove</button>
           {/if}
@@ -513,14 +531,13 @@
             timestamps={chart.timestamps}
             series={[{ label: chart.title, data: chart.series }]}
             height={160}
-                  aspect={CHART_ASPECT}
-                  maxHeight={CHART_MAX_HEIGHT}
+            aspect={CHART_ASPECT}
+            maxHeight={CHART_MAX_HEIGHT}
             showLegend={false}
             formatValue={chart.isRate ? formatRate : undefined}
           />
           <p class="note summary">
-            Latest: <span data-testid="graph-latest">{formatSample(latestForDisplay(chart.series), chart.isRate)}</span>
-            · Min: {values.length === 0 ? "—" : formatSample(Math.min(...values), chart.isRate)}
+            Min: {values.length === 0 ? "—" : formatSample(Math.min(...values), chart.isRate)}
             · Max: {values.length === 0 ? "—" : formatSample(Math.max(...values), chart.isRate)}
           </p>
           {#if chart.liveSince !== null}
@@ -594,6 +611,33 @@
   }
   .summary {
     margin: var(--ps-space-xs) 0;
+  }
+  /* A chart card's head: the title, and the latest value as a figure at
+     the other end of the line (under the title where the card is narrow). */
+  .chart-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: var(--ps-space-md);
+    margin-bottom: var(--ps-space-sm);
+  }
+  .chart-title {
+    margin-bottom: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .chart-figure {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ps-space-xs);
+    margin: 0;
+  }
+  .chart-figure-value {
+    font-size: var(--ps-font-size-xl);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--ps-text);
   }
   .control-label {
     color: var(--ps-text-secondary);

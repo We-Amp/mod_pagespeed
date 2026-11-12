@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { LABEL_INSET, valueAxisFit } from "./support/chart-axis";
 import { mockAdmin, openConsole } from "./support/mock-admin";
 import * as F from "./support/fixtures";
@@ -134,6 +134,99 @@ test("a gauge that goes down is drawn raw: no delta, no gap", async ({ page }) =
   await expect(card.getByTestId("graph-latest")).toHaveText("25");
   // The plain counter next to it is still rated.
   await expect(page.getByRole("img", { name: /num_flushes \(per second\)/ })).toBeVisible();
+});
+
+/**
+ * How many of a chart's canvas pixels are opaque and within a few levels of
+ * `colour` ("#rrggbb" or "rgb(r, g, b)"): the line's ink in that colour. The
+ * light fill under a line is translucent and never counts.
+ */
+async function inkOf(chart: Locator, colour: string): Promise<number> {
+  return chart.locator("canvas").first().evaluate((canvas: HTMLCanvasElement, colour: string) => {
+    const hex = /^#([0-9a-f]{6})$/i.exec(colour.trim());
+    const target = hex
+      ? [0, 8, 16].map((shift) => (parseInt(hex[1], 16) >> (16 - shift)) & 255)
+      : (colour.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+    const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue;
+      if (Math.max(...[0, 1, 2].map((c) => Math.abs(data[i + c] - target[c]))) <= 24) count++;
+    }
+    return count;
+  }, colour);
+}
+
+/** A token's value on the page, as the chart reads it. */
+async function token(page: Page, name: string): Promise<string> {
+  return page.evaluate((name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(), name);
+}
+
+/** A system colour as the page paints it now. */
+async function systemColour(page: Page, keyword: string): Promise<string> {
+  return page.evaluate((keyword) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = `forced-color-adjust:none;color:${keyword}`;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  }, keyword);
+}
+
+test("a chart is drawn again in the new colours when the scheme or forced colours change", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light", forcedColors: "none" });
+  const mock = await mockAdmin(page, "pagespeed_admin", {
+    config: F.CONFIG_VHOST,
+    stats_json: (n: number) => flushing(100 + n * 10),
+    graphs: F.graphsReply(["num_flushes"]),
+  });
+  await openConsole(page, "pagespeed_admin", "#/graphs?counters=all");
+  await expect.poll(() => mock.calls("stats_json"), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  // Stop polling, so every redraw below is the scheme change's.
+  await page.getByRole("button", { name: "Auto-refresh · 5 s" }).click();
+  const chart = page.getByTestId("graph-card-num_flushes").locator(".ts-chart");
+  const light = await token(page, "--ps-chart-1");
+  await expect.poll(() => inkOf(chart, light)).toBeGreaterThan(0);
+
+  await page.emulateMedia({ colorScheme: "dark", forcedColors: "none" });
+  const dark = await token(page, "--ps-chart-1");
+  expect(dark).not.toBe(light);
+  await expect.poll(() => inkOf(chart, dark)).toBeGreaterThan(0);
+  expect(await inkOf(chart, light), "no line is left in the light scheme's colour").toBe(0);
+
+  // Forced colours: the line takes the palette's highlight colour.
+  await page.emulateMedia({ colorScheme: "dark", forcedColors: "active" });
+  const highlight = await systemColour(page, "Highlight");
+  await expect.poll(() => inkOf(chart, highlight)).toBeGreaterThan(0);
+
+  await page.emulateMedia({ colorScheme: "light", forcedColors: "none" });
+  await expect.poll(() => inkOf(chart, light)).toBeGreaterThan(0);
+  expect(await inkOf(chart, dark), "no line is left in the dark scheme's colour").toBe(0);
+});
+
+test("a chart card shows its latest value as a figure in its head", async ({ page }) => {
+  const mock = await mockAdmin(page, "pagespeed_admin", {
+    config: F.CONFIG_VHOST,
+    stats_json: (n: number) => flushing(100 + n * 10),
+    graphs: F.graphsReply(["num_flushes"]),
+  });
+  await openConsole(page, "pagespeed_admin", "#/graphs?counters=all");
+  await expect.poll(() => mock.calls("stats_json"), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  const card = page.getByTestId("graph-card-num_flushes");
+  const title = card.getByRole("heading", { name: /num_flushes/ });
+  const latest = card.getByTestId("graph-latest");
+  await expect(latest).toHaveText(/^[0-9.]+\/s$/);
+  // Its tooltip names when the sample was taken.
+  await expect(latest).toHaveAttribute("title", /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
+  // Above the chart, larger than the title, on the title's line on a desk window.
+  const [t, l, plot] = await Promise.all([title.boundingBox(), latest.boundingBox(), card.locator(".ts-chart").boundingBox()]);
+  expect(l!.y + l!.height).toBeLessThanOrEqual(plot!.y);
+  expect(Math.abs(l!.y + l!.height - (t!.y + t!.height))).toBeLessThanOrEqual(6);
+  const size = (el: Locator) => el.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+  expect(await size(latest)).toBeGreaterThan(await size(title));
+  // Min and max stay in the line under the chart.
+  await expect(card.locator(".summary")).toHaveText(/^Min: \S+\s+· Max: /);
 });
 
 test("a counter the log does not have is marked live-only", async ({ page }) => {

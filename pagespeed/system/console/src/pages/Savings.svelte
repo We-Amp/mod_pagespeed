@@ -25,7 +25,8 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import ScopeChip from "$lib/ScopeChip.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
-  import TimeSeriesChart, { SERIES_PALETTE } from "$lib/TimeSeriesChart.svelte";
+  import TimeSeriesChart from "$lib/TimeSeriesChart.svelte";
+  import { dashArray, seriesToken } from "$lib/utils/chart-style";
   import { bytesRateTicks, chartWindowLabel } from "$lib/utils/chart-summary";
   import { formatBytes, formatBytesRate, formatCount, formatPercent, formatSignedBytes } from "$lib/utils/format";
   import { useConsole } from "$lib/api/context";
@@ -557,7 +558,10 @@
         <div class="chart-legend" data-testid="savings-chart-legend">
           {#each chartView.series as s, i (s.label)}
             <span class="chart-legend-item">
-              <span class="dot" style:background="var({SERIES_PALETTE[i % SERIES_PALETTE.length]})"></span>
+              <!-- The series' key: its colour and dash pattern, as the chart draws it. -->
+              <svg class="chart-swatch" width="20" height="8" aria-hidden="true">
+                <line x1="0" y1="4" x2="20" y2="4" style:stroke="var({seriesToken(i)})" stroke-width="2" stroke-dasharray={dashArray(i, chartView.series.length)} />
+              </svg>
               {s.label}
               <span class="legend-value num">{latestSeriesValue(s.data)}</span>
             </span>
@@ -619,13 +623,13 @@
     align-items: center;
     gap: var(--ps-space-xs);
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+  /* Each series' latest rate, as a figure beside its name. */
+  .chart-swatch {
     flex: none;
   }
   .legend-value {
+    font-size: var(--ps-type-card-title-size);
+    font-weight: 600;
     color: var(--ps-text);
   }
   /* Headline figures sit side by side once their card is wide enough. */

@@ -354,6 +354,56 @@ for (const scheme of ["light", "dark"] as const) {
       expect(Number(await card.evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
     });
 
+    test("chart stroke: the lines and their legend keys take the palette's highlight colour", async ({ page }) => {
+      // A canvas is not repainted by forced colours: the chart draws itself
+      // in the palette's colours, and its legend keys follow.
+      await open(page, scheme, "#/savings");
+      const highlight = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        probe.style.cssText = "forced-color-adjust:none;color:Highlight";
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return `#${(value.match(/\d+/g) ?? []).slice(0, 3).map((v) => Number(v).toString(16).padStart(2, "0")).join("")}`;
+      });
+      const card = page.getByTestId("savings-chart-card");
+      const plot = card.locator(".ts-chart .u-over");
+      await expect(plot).toHaveCount(1, { timeout: 15_000 });
+      /** How many pixels of a screenshot are within a few levels of the highlight colour. */
+      const highlighted = async (element: Locator): Promise<number> => {
+        const png = await element.screenshot({ animations: "disabled" });
+        const scratch = await page.context().newPage();
+        try {
+          return await scratch.evaluate(
+            async ({ data, target }) => {
+              const image = new Image();
+              image.src = `data:image/png;base64,${data}`;
+              await image.decode();
+              const canvas = document.createElement("canvas");
+              canvas.width = image.width;
+              canvas.height = image.height;
+              const context = canvas.getContext("2d")!;
+              context.drawImage(image, 0, 0);
+              const pixels = context.getImageData(0, 0, image.width, image.height).data;
+              const rgb = [1, 3, 5].map((i) => parseInt(target.slice(i, i + 2), 16));
+              let count = 0;
+              for (let i = 0; i < pixels.length; i += 4) {
+                if (Math.max(...[0, 1, 2].map((c) => Math.abs(pixels[i + c] - rgb[c]))) <= 24) count++;
+              }
+              return count;
+            },
+            { data: png.toString("base64"), target: highlight },
+          );
+        } finally {
+          await scratch.close();
+        }
+      };
+      await expect.poll(() => highlighted(plot), { timeout: 15_000 }).toBeGreaterThan(0);
+      const keys = card.locator(".chart-swatch");
+      expect(await keys.count()).toBeGreaterThan(0);
+      for (const key of await keys.all()) expect(await highlighted(key), "the legend key is painted").toBeGreaterThan(0);
+    });
+
     test("field: keyboard focus draws a ring around a text field", async ({ page }) => {
       // An outline is painted in a forced palette; a border colour or a
       // shadow would not be. The four pages with a field of their own.

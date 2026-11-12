@@ -1226,6 +1226,19 @@ table.data-raw th {
     color: HighlightText !important;
   }
 
+  /* A chart's legend key: the chart draws every series in the highlight
+   * colour (TimeSeriesChart), so the key does too; its dash pattern still
+   * tells the series apart. */
+  .chart-swatch {
+    forced-color-adjust: none;
+  }
+
+  .chart-swatch line {
+    stroke: Highlight !important;
+    /* Opaque, as the chart draws it: a palette may give a translucent one. */
+    stroke: rgb(from Highlight r g b / 1) !important;
+  }
+
   /* Marks drawn with a background: bars and status dots. */
   .bar-fill,
   .status-dot {

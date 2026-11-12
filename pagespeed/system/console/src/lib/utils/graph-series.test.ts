@@ -7,6 +7,7 @@ import {
   formatRate,
   graphTitle,
   latestForDisplay,
+  latestIndex,
   loadDeltaView,
   saveDeltaView,
   seriesForDisplay,
@@ -59,6 +60,15 @@ describe("seriesForDisplay", () => {
     seriesForDisplay([0, 1, 2], values, true);
     seriesForDisplay([0, 1, 2], values, false);
     expect(values).toEqual([1, 2, 3]);
+  });
+});
+
+describe("latestIndex", () => {
+  it("points at the newest finite value, past trailing gaps", () => {
+    expect(latestIndex([1, 2, null])).toBe(1);
+    expect(latestIndex([1, Number.NaN])).toBe(0);
+    expect(latestIndex([null, null])).toBe(-1);
+    expect(latestIndex([])).toBe(-1);
   });
 });
 
