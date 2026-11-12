@@ -193,7 +193,7 @@ test.describe("Histograms page", () => {
 // Configuration page
 // ---------------------------------------------------------------------------
 test.describe("Configuration page", () => {
-  test("displays clean config text in a pre block", async ({ page }) => {
+  test("displays clean config text", async ({ page }) => {
     await navigateTo(page, "#/configuration");
     await page.waitForTimeout(2000);
     await page.screenshot({
@@ -201,7 +201,7 @@ test.describe("Configuration page", () => {
       fullPage: true,
     });
 
-    const pre = page.locator("pre.config-block");
+    const pre = page.getByTestId("config-text");
     await expect(pre).toBeVisible({ timeout: 10000 });
 
     const text = await pre.textContent();
@@ -218,7 +218,7 @@ test.describe("Configuration page", () => {
     await navigateTo(page, "#/configuration");
     await page.waitForTimeout(2000);
 
-    const pre = page.locator("pre.config-block");
+    const pre = page.getByTestId("config-text");
     await expect(pre).toBeVisible({ timeout: 10000 });
 
     const text = await pre.textContent();
@@ -239,7 +239,7 @@ test.describe("Configuration page", () => {
     await refreshBtn.click();
     await page.waitForTimeout(1000);
 
-    const pre = page.locator("pre.config-block");
+    const pre = page.getByTestId("config-text");
     await expect(pre).toBeVisible({ timeout: 10000 });
     const text = await pre.textContent();
     expect(text).toContain("Version");

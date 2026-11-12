@@ -429,7 +429,7 @@ for (const scheme of ["light", "dark"] as const) {
         await openConsole(page, "pagespeed_admin", "#/configuration");
         await ready(page);
         await page.addStyleTag({ content: "body { letter-spacing: 0.05em; }" });
-        const region = page.getByRole("region", { name: "Server configuration" });
+        const region = page.getByRole("region", { name: "This site's configuration" });
         expect(await region.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
         await expect(region).toHaveAttribute("tabindex", "0");
         expect(await noHorizontalScroll(page)).toBe(true);

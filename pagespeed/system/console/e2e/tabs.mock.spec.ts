@@ -26,19 +26,33 @@ test.describe("Caches tabs", () => {
 });
 
 test.describe("Configuration tabs", () => {
-  test("the view switch is a tablist, not segmented buttons", async ({ page }) => {
+  test("the view switch is a tablist, not segmented buttons (per-host console)", async ({ page }) => {
     // The stock config fixture is empty; the tabs need real config text.
     await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST_WITH_TEXT });
     await openConsole(page, "pagespeed_admin", "#/configuration");
     const tabs = page.getByRole("tablist", { name: "Configuration view" });
     await expect(tabs).toBeVisible();
-    const server = page.getByRole("tab", { name: "Server config" });
-    const effective = page.getByRole("tab", { name: "Effective for this request" });
-    await expect(server).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel", { name: "Server config" })).toBeVisible();
-    await server.focus();
+    const site = page.getByRole("tab", { name: "This site" });
+    const effective = page.getByRole("tab", { name: "Effective" });
+    await expect(site).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel", { name: "This site" })).toBeVisible();
+    await site.focus();
     await page.keyboard.press("ArrowRight");
     await expect(effective).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel", { name: "Effective for this request" })).toBeVisible();
+    await expect(page.getByRole("tabpanel", { name: "Effective" })).toBeVisible();
+  });
+
+  test("the whole-server console names its first tab Whole server", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", {
+      ...F.allReplies(),
+      config: F.ok({ ...(F.CONFIG_VHOST_WITH_TEXT.body as Record<string, unknown>), scope: "global", host: "" }),
+    });
+    await openConsole(page, "pagespeed_global_admin", "#/configuration");
+    await expect(page.getByRole("tablist", { name: "Configuration view" }).getByRole("tab")).toHaveText([
+      "Whole server",
+      "Effective",
+    ]);
+    await expect(page.getByRole("tab", { name: "Whole server" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel", { name: "Whole server" })).toBeVisible();
   });
 });
