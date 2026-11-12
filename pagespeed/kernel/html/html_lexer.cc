@@ -304,6 +304,7 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
       tag_start_line_(-1),
       script_escape_state_(HtmlCommentEscapeState::kNone),
       discard_until_start_state_for_error_recovery_(false),
+      content_type_(kContentTypeXml),  // Not HTML until StartParse().
       size_limit_exceeded_(false),
       skip_parsing_(false),
       size_limit_(-1) {
