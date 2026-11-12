@@ -15,10 +15,10 @@ test("each histogram carries its unit and three significant digits", async ({ pa
   await openConsole(page, "pagespeed_admin", "#/histograms");
   await expect(page.getByRole("columnheader", { name: "Unit" })).toBeVisible();
   const us = page.getByRole("row", { name: /Html Time us/ });
-  await expect(us.locator("td").nth(1)).toHaveText("µs");
+  await expect(us.locator("td").first()).toHaveText("µs");
   await expect(us.getByRole("cell", { name: "1,500", exact: true }).first()).toBeVisible(); // avg
   const ms = page.getByRole("row", { name: /Rewrite Latency ms/ });
-  await expect(ms.locator("td").nth(1)).toHaveText("ms");
+  await expect(ms.locator("td").first()).toHaveText("ms");
   await expect(ms.getByRole("cell", { name: "12.0", exact: true }).first()).toBeVisible(); // avg
   await expect(ms.getByRole("cell", { name: "—", exact: true }).first()).toBeVisible(); // stddev null
 });

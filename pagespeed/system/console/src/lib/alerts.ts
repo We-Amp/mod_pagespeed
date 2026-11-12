@@ -29,8 +29,10 @@
  */
 
 import type { DaemonHealthResponse, DaemonStatsResponse } from "$lib/api/types";
-import { MODULE_DOCS } from "$lib/data/product-facts-console";
+import { DOCS } from "$lib/data/product-facts-console";
+import { checkLabel, OPTIMIZER_NOT_ANSWERING, OPTIMIZER_NOT_ANSWERING_FIX } from "$lib/utils/daemon";
 import { memoryAckStore, type AckStore } from "$lib/utils/finding-acks";
+import type { Dialect } from "$lib/utils/dialect";
 import { formatClock } from "$lib/utils/format";
 import { coveredWindowText, EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
 import { WARMUP_MS } from "$lib/utils/since";
@@ -79,6 +81,9 @@ export interface CounterSample {
 
 export type AlertSeverity = "error" | "warning" | "info";
 
+/** The setting a fix names, ready to paste, per web server syntax (only the servers that have it). */
+export type Snippets = Partial<Record<Dialect, string>>;
+
 export interface AlertRule {
   id: string;
   label: string;
@@ -94,11 +99,23 @@ export interface AlertRule {
   message: (cur: AlertSnapshot, prev: AlertSnapshot | null, history: readonly CounterSample[]) => string;
   /** The fix, in one sentence. */
   fix: string;
+  /**
+   * The fix for this sample, when the cause the message names calls for a
+   * different one than `fix`; undefined keeps `fix`. The message and the fix
+   * of one finding always describe the same cause.
+   */
+  fixFor?: (cur: AlertSnapshot, prev: AlertSnapshot | null, history: readonly CounterSample[]) => string | undefined;
+  /**
+   * What `fix` names, to paste: packaged defaults and generic placeholders,
+   * as the product's own configuration files and documentation write them.
+   * They belong to `fix`: a sample whose fix comes from `fixFor` shows none.
+   */
+  snippets?: Snippets;
   /** A console route with the detail, when one exists. */
   link?: string;
   /** A documentation page about it, when one exists. */
   doc?: string;
-  /** At most three short lines of detail (may carry log text: render as text). */
+  /** At most three lines of log text behind the written message (render as text; the page keeps them folded). */
   details?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => string[];
   /** A count the overview's summary line states (recent-warnings only). */
   count?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => number;
@@ -119,6 +136,8 @@ export interface ActiveAlert {
   severity: AlertSeverity;
   message: string;
   fix: string;
+  /** The rule's snippets, when the fix shown is the one they belong to. */
+  snippets?: Snippets;
   link?: string;
   doc?: string;
   details: string[];
@@ -155,9 +174,9 @@ export const VOLUME_GENERATION_TEMPLATE =
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
   "was created. Install a module and optimizer package pair that agree.";
 
-const DOC_ACCESS = `${MODULE_DOCS}/admin-console/#access-control`;
-const DOC_MESSAGES = `${MODULE_DOCS}/admin-console/#message-history`;
-const DOC_DIAGNOSE = `${MODULE_DOCS}/troubleshooting/#how-to-get-more-diagnostic-information`;
+const DOC_ACCESS = DOCS.access;
+const DOC_MESSAGES = DOCS.messages;
+const DOC_DIAGNOSE = DOCS.diagnose;
 
 /** A finite number at a dotted path of an untrusted value, else undefined. */
 export function num(value: unknown, path: string): number | undefined {
@@ -280,11 +299,31 @@ const isAdminPublic = (g: MessageGroup): boolean => g.level === "info" && g.temp
 const isGenerationRefusal = (g: MessageGroup): boolean =>
   (g.level === "warning" || g.level === "error") && g.template === VOLUME_GENERATION_TEMPLATE;
 
-/** Warning-or-worse groups seen within the window, most frequent first. */
-function recentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
+/**
+ * Whether a log group is the evidence of a finding of its own (the
+ * cache-generation refusal, the admin-exposure warning): that finding states
+ * the cause, so the group is not listed again under "Warnings in the log".
+ * The admin warning stays an ordinary warning on a console that is public by
+ * configuration, where its finding is off.
+ */
+function hasOwnFinding(s: AlertSnapshot, g: MessageGroup): boolean {
+  if (isGenerationRefusal(g)) return true;
+  return isAdminExposure(g) && !s.messages?.groups.some(isAdminPublic);
+}
+
+/** Warning-or-worse groups seen within the window, with or without a finding of their own. */
+function allRecentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
   if (s.messages === undefined || s.messages === null) return undefined;
-  return s.messages.groups
-    .filter((g) => g.level !== "info" && g.recent > 0)
+  return s.messages.groups.filter((g) => g.level !== "info" && g.recent > 0);
+}
+
+/**
+ * Warning-or-worse groups seen within the window that no other finding
+ * reports, most frequent first: one cause is one finding.
+ */
+function recentWarnings(s: AlertSnapshot): MessageGroup[] | undefined {
+  return allRecentWarnings(s)
+    ?.filter((g) => !hasOwnFinding(s, g))
     .sort((a, b) => b.recent - a.recent);
 }
 
@@ -368,6 +407,10 @@ function fallthroughWithoutServes(cur: AlertSnapshot, history: readonly CounterS
   return served === 0 ? fallthrough : 0;
 }
 
+/** The two admin paths as the packaged configurations name them. */
+const ADMIN_PATHS = ["/pagespeed_admin", "/pagespeed_global_admin"] as const;
+const NGINX_LOCAL = "{ allow 127.0.0.1; allow ::1; deny all; }";
+
 export const ALERT_RULES: readonly AlertRule[] = [
   {
     id: "daemon-check-failed",
@@ -378,7 +421,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
     check: (cur) => (cur.health === null ? undefined : failedChecks(cur.health).length > 0),
     message: (cur) => {
       const names = failedChecks(cur.health);
-      return `Optimizer health ${names.length === 1 ? "check" : "checks"} failing: ${names.join(", ")}.`;
+      return `Optimizer health ${names.length === 1 ? "check" : "checks"} failing: ${names.map(checkLabel).join(", ")}.`;
     },
     fix: "Optimizer status shows each check; the optimizer's log usually names the cause.",
     doc: DOC_DIAGNOSE,
@@ -415,27 +458,42 @@ export const ALERT_RULES: readonly AlertRule[] = [
       return false;
     },
     message: (cur, _prev, history) => {
-      const logged = loggedGroups(cur, isGenerationRefusal) ?? [];
-      if (logged.length > 0) {
-        return `The web server is not using the optimizer's cache: ${capText(logged[0].template, 200)}`;
+      if ((loggedGroups(cur, isGenerationRefusal) ?? []).length > 0) {
+        return (
+          "The web server is not using the optimizer's cache: the module logged that the module and optimizer " +
+          "packages use different cache layouts, so it opened nothing."
+        );
       }
       return (
         `The optimizer is answering, but none of the last ${fmt(fallthroughWithoutServes(cur, history) ?? 0)} ` +
         "CSS, JavaScript and image requests was served from its cache."
       );
     },
-    fix: "Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.",
+    // The module's own line, as logged, behind the written sentence.
+    details: (cur) => (loggedGroups(cur, isGenerationRefusal) ?? []).slice(0, 1).map((g) => capText(g.template, 400)),
+    // The path fix fits the counters; a logged refusal names the packages, and so does its fix.
+    fix: "Point the web server's DaemonVolumePath at the optimizer's cache directory (--cache-dir) followed by /cache.",
+    // The packaged default. Apache and nginx only: this cause is found while the
+    // optimizer answers through the module, which the IIS module does not offer.
+    snippets: {
+      apache: "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache",
+      nginx: "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;",
+    },
+    fixFor: (cur) =>
+      (loggedGroups(cur, isGenerationRefusal) ?? []).length > 0
+        ? "Install module and optimizer packages from the same release, then restart the web server and the optimizer."
+        : undefined,
   },
   {
     id: "daemon-unreachable",
-    label: "Optimizer unreachable",
+    label: "Optimizer not answering",
     severity: "warning",
     kind: "state",
     link: "#/optimizer",
     check: (cur) => (cur.daemon === "transient" ? undefined : cur.daemon === "unreachable"),
-    message: () =>
-      "The optimizer worker is configured but not answering. The module keeps serving pages without it.",
-    fix: "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.",
+    message: () => OPTIMIZER_NOT_ANSWERING,
+    // No snippet: the packaged socket is the directive's built-in default, so pasting it changes nothing.
+    fix: OPTIMIZER_NOT_ANSWERING_FIX,
     doc: DOC_DIAGNOSE,
   },
   {
@@ -479,8 +537,15 @@ export const ALERT_RULES: readonly AlertRule[] = [
       }.`;
     },
     fix:
-      "Restrict the admin paths to trusted addresses at the web server (Apache: Require local; nginx: allow " +
-      "127.0.0.1; deny all; IIS: InfoUrlsLocalOnly), or acknowledge this if the console is public on purpose.",
+      "Restrict the admin paths to trusted addresses at the web server, or acknowledge this if the console is " +
+      "public on purpose.",
+    snippets: {
+      apache: ADMIN_PATHS.map((p) => `<Location ${p}>\n    Require local\n</Location>`).join("\n"),
+      nginx: ADMIN_PATHS.map(
+        (p) => `location = ${p} ${NGINX_LOCAL}\nlocation ^~ ${p}/ ${NGINX_LOCAL}`,
+      ).join("\n"),
+      iis: "pagespeed InfoUrlsLocalOnly on",
+    },
   },
   {
     id: "admin-public",
@@ -568,9 +633,9 @@ export const ALERT_RULES: readonly AlertRule[] = [
       return size > 0 && inflight >= size;
     },
     message: (cur) =>
-      `All ${fmt(num(cur.daemonStats, "thread_pool.size") ?? 0)} optimizer worker threads are busy ` +
+      `All ${fmt(num(cur.daemonStats, "thread_pool.size") ?? 0)} optimizer threads are busy ` +
       `(${fmt(num(cur.daemonStats, "thread_pool.inflight") ?? 0)} in flight); new work waits until current jobs finish.`,
-    fix: "If this persists, give the optimizer more worker threads or a machine with more cores.",
+    fix: "If this persists, give the optimizer more threads or a machine with more cores.",
   },
   {
     id: "connection-saturation",
@@ -655,7 +720,9 @@ export const ALERT_RULES: readonly AlertRule[] = [
       const groups = recentWarnings(cur) ?? [];
       const total = groups.reduce((n, g) => n + g.recent, 0);
       const noun = recentNoun(groups);
-      return `${plural(total, noun.one, noun.many)} ${recentWindow(cur, true)}, of ${plural(groups.length, "kind", "kinds")}.`;
+      // Said when the log holds more than this finding counts, so the two numbers can differ in the open.
+      const elsewhere = (allRecentWarnings(cur) ?? []).length > groups.length ? ", besides those with a finding of their own" : "";
+      return `${plural(total, noun.one, noun.many)} ${recentWindow(cur, true)}, of ${plural(groups.length, "kind", "kinds")}${elsewhere}.`;
     },
     // A kind whose message is empty reads as the Logs page shows it, never as a bare count.
     details: (cur) =>
@@ -704,7 +771,7 @@ export function healthSummary(
   if (alerts.length === 0) {
     if (!moduleOk) return { text: "Module statistics unavailable", level: "warning" };
     if (logOff) return { text: "Findings from the message log are not available on this console", level: "info" };
-    if (logUnavailable) return { text: "Findings unavailable — the message log could not be read", level: "info" };
+    if (logUnavailable) return { text: "Findings unavailable: the message log could not be read", level: "info" };
     return { text: `No findings${warnings}${acked}`, level: "healthy" };
   }
   const action = alerts.filter((a) => a.severity !== "info").length;
@@ -718,6 +785,8 @@ interface RuleState {
   since: number;
   lastFired: number;
   message: string;
+  fix: string;
+  snippets?: Snippets;
   details: string[];
   count?: number;
   countNoun?: CountNoun;
@@ -743,10 +812,13 @@ export class AlertTracker {
       const result = rule.check(cur, this.prev, this.history);
       const st = this.state.get(rule.id);
       if (result === true) {
+        const fixFor = rule.fixFor?.(cur, this.prev, this.history);
         this.state.set(rule.id, {
           since: st ? st.since : nowMs,
           lastFired: nowMs,
           message: rule.message(cur, this.prev, this.history),
+          fix: fixFor ?? rule.fix,
+          snippets: fixFor === undefined ? rule.snippets : undefined,
           details: rule.details ? rule.details(cur, this.prev) : [],
           count: rule.count ? rule.count(cur, this.prev) : undefined,
           countNoun: rule.countNoun ? rule.countNoun(cur, this.prev) : undefined,
@@ -820,7 +892,8 @@ export class AlertTracker {
         label: rule.label,
         severity: rule.severity,
         message: st.message,
-        fix: rule.fix,
+        fix: st.fix,
+        snippets: st.snippets,
         link: rule.link,
         doc: rule.doc,
         details: st.details,

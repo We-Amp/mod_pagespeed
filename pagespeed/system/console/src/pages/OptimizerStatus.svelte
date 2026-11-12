@@ -25,6 +25,7 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import {
+    checkLabel,
     checkResult,
     counterRows,
     daemonUnavailableReason,
@@ -40,6 +41,7 @@
   import { SAVINGS_QUALIFIER, serveSavingsView, splitCells } from "$lib/utils/serve-savings";
   import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import { SPLIT_TEXT } from "$lib/data/split-text";
+  import { TERMS } from "$lib/data/terms";
   import { hostSavingsView } from "$lib/utils/host-savings";
 
   const { api, lens } = useConsole();
@@ -81,11 +83,11 @@
   let absence = $derived(view.allUnavailable ? optimizerAbsence(view.healthError, view.statsError) : null);
   let absenceText = $derived(absence === null ? null : optimizerAbsenceText(absence));
 
-  type BadgeColor = "success" | "warning" | "neutral";
-  let statusColor = $derived.by((): BadgeColor => {
+  // The dot repeats the status word in colour: ok, anything else, or none.
+  let statusTone = $derived.by((): "ok" | "warning" | null => {
     const status = view.health?.status;
-    if (!status) return "neutral";
-    return status === "ok" ? "success" : "warning";
+    if (!status) return null;
+    return status === "ok" ? "ok" : "warning";
   });
   let checks = $derived(objectEntries(view.health?.checks));
   let browser = $derived(view.health?.browser);
@@ -113,6 +115,7 @@
       intervalMs: 5000,
       onToggle: toggleAutoRefresh,
       onRefresh: () => poll.refresh(),
+      failedParts: () => [view.healthError, view.statsError],
     }}
   />
   <RefreshNotice error={poll.error} />
@@ -129,15 +132,18 @@
   {:else}
   <div class="daemon-sections">
   <section class="daemon-section" id="optimizer-health" aria-labelledby="optimizer-health-heading">
-    <h2 id="optimizer-health-heading" data-page-focus={section === "health" ? "" : undefined}>Health</h2>
+    <h2 class="section-title" id="optimizer-health-heading" data-page-focus={section === "health" ? "" : undefined}>Health</h2>
     {#if poll.loading}
       <p class="loading">Loading the optimizer's health...</p>
     {:else if view.health}
-      <div class="status-card">
+      <div class="card status-card">
         <div class="status-row">
-          <span class="status-badge badge-{statusColor}" role="status">
-            {view.health.status ?? "unknown"}
-          </span>
+          <span class="status-word" role="status"><span
+              class="status-dot"
+              class:status-dot-ok={statusTone === "ok"}
+              class:status-dot-warning={statusTone === "warning"}
+              aria-hidden="true"
+            ></span>{view.health.status ?? "unknown"}</span>
           {#if view.health.ready !== undefined}
             <span class="ready-flag">
               {view.health.ready ? "ready" : "not ready"}
@@ -171,24 +177,29 @@
       </div>
 
       {#if checks.length > 0}
-        <h3>Checks</h3>
+        <h3 class="card-title">Checks</h3>
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="table-wrapper" role="region" aria-label="Checks" tabindex="0">
-          <table>
+        <div class="table-frame" role="region" aria-label="Checks" tabindex="0">
+          <table class="data">
             <thead>
               <tr>
-                <th>Check</th>
-                <th>Result</th>
+                <th scope="col">Check</th>
+                <th scope="col">Result</th>
               </tr>
             </thead>
             <tbody>
               {#each checks as [name, value] (name)}
                 {@const result = checkResult(value)}
                 <tr>
-                  <td class="name-cell">{name}</td>
+                  <th scope="row" class="name-cell" title={name}>{checkLabel(name)}</th>
                   <td class="check-cell">
-                    <span class="check" class:check-pass={result.pass === true} class:check-fail={result.pass === false}>{result.text}</span>
+                    <span class="check"><span
+                      class="status-dot"
+                      class:status-dot-ok={result.pass === true}
+                      class:status-dot-error={result.pass === false}
+                      aria-hidden="true"
+                    ></span>{result.text}</span>
                   </td>
                 </tr>
               {/each}
@@ -198,8 +209,8 @@
       {/if}
 
       {#if browser}
-        <h3>Browser analysis</h3>
-        <div class="info-grid">
+        <h3 class="card-title">Browser analysis</h3>
+        <div class="info-grid card">
           <div class="info-item">
             <span class="info-label metric-label">Enabled</span>
             <span class="info-value metric-value num">{fieldValue(browser.enabled)}</span>
@@ -228,7 +239,7 @@
       {/if}
     {:else if view.healthError && !view.allUnavailable}
       {#if isDaemonUnavailable(view.healthError)}
-        <p class="empty" data-testid="health-unavailable">Health is not available: {daemonUnavailableReason(view.healthError)}.</p>
+        <p class="muted" data-testid="health-unavailable">Health is not available: {daemonUnavailableReason(view.healthError)}.</p>
       {:else}
         <LoadError error={view.healthError} noun="the optimizer's health" onretry={() => poll.refresh()} />
       {/if}
@@ -236,11 +247,11 @@
   </section>
 
   <section class="daemon-section" id="optimizer-load" aria-labelledby="optimizer-load-heading">
-    <h2 id="optimizer-load-heading" data-page-focus={section === "load" ? "" : undefined}>Load</h2>
+    <h2 class="section-title" id="optimizer-load-heading" data-page-focus={section === "load" ? "" : undefined}>Load</h2>
     {#if poll.loading}
       <p class="loading">Loading the optimizer's load...</p>
     {:else if view.stats}
-      <div class="info-grid info-grid--panel">
+      <div class="info-grid card">
         <div class="info-item">
           <span class="info-label metric-label">Thread pool</span>
           <span class="info-value metric-value num">
@@ -269,22 +280,22 @@
         </div>
       </div>
 
-      <h3>Cache cooldowns</h3>
+      <h3 class="card-title">Cache cooldowns</h3>
       {#if view.cooldowns === null}
-        <p class="empty">The cooldown list is unavailable on this optimizer.</p>
+        <p class="muted">The cooldown list is unavailable on this optimizer.</p>
       {:else if cooldownEntries.length === 0}
-        <p class="empty">No URLs in cooldown.</p>
+        <p class="muted">No URLs in cooldown.</p>
       {:else}
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="table-wrapper" role="region" aria-label="Cache cooldowns" tabindex="0">
-          <table>
+        <div class="table-frame" role="region" aria-label="Cache cooldowns" tabindex="0">
+          <table class="data">
             <thead>
               <tr>
-                <th>URL</th>
-                <th>Reason</th>
-                <th class="num">Remaining</th>
-                <th class="num">Duration</th>
+                <th scope="col">URL</th>
+                <th scope="col">Reason</th>
+                <th scope="col" class="num">Remaining</th>
+                <th scope="col" class="num">Duration</th>
               </tr>
             </thead>
             <tbody>
@@ -292,7 +303,7 @@
                    duplicate or absent URLs must not throw. -->
               {#each cooldownEntries as entry, i (i)}
                 <tr>
-                  <td class="name-cell">{entry.url ?? "—"}</td>
+                  <th scope="row" class="name-cell">{entry.url ?? "—"}</th>
                   <td>{entry.reason ?? "—"}</td>
                   <td class="value-cell">{formatDuration(entry.remaining_seconds)}</td>
                   <td class="value-cell">{formatDuration(entry.duration_seconds)}</td>
@@ -316,11 +327,11 @@
   </section>
 
   <section class="daemon-section" id="optimizer-cache" aria-labelledby="optimizer-cache-heading">
-    <h2 id="optimizer-cache-heading" data-page-focus={section === "cache" ? "" : undefined}>Cache</h2>
+    <h2 class="section-title" id="optimizer-cache-heading" data-page-focus={section === "cache" ? "" : undefined}>Cache</h2>
     {#if poll.loading}
       <p class="loading">Loading the optimizer's cache statistics...</p>
     {:else if view.stats}
-      <div class="info-grid info-grid--panel">
+      <div class="info-grid card">
         <div class="info-item">
           <span class="info-label metric-label">Cache entries</span>
           <span class="info-value metric-value num">{fieldValue(view.stats.cache?.entries)}</span>
@@ -331,19 +342,19 @@
         </div>
       </div>
 
-      <h3 id="serve-savings-heading">Serve savings</h3>
-      <p class="section-note" data-testid="serve-savings-source">
+      <h3 class="card-title" id="serve-savings-heading">{TERMS.savedByOptimizerCache}</h3>
+      <p class="note" data-testid="serve-savings-source">
         Recorded by this web server's module each time it serves an optimized
         response from the optimizer's cache. {SAVINGS_QUALIFIER}
       </p>
       {#if savings === null}
-        <p class="empty" data-testid="serve-savings-absent">This optimizer version reports no serve savings.</p>
+        <p class="muted" data-testid="serve-savings-absent">This optimizer version does not report what its cache saved.</p>
       {:else}
         {#if savings.served.length > 0}
           <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="table-wrapper" role="region" aria-label="Serve savings" tabindex="0">
-            <table data-testid="serve-savings-table" aria-labelledby="serve-savings-heading">
+          <div class="table-frame" role="region" aria-label={TERMS.savedByOptimizerCache} tabindex="0">
+            <table class="data" data-testid="serve-savings-table" aria-labelledby="serve-savings-heading">
               <thead>
                 <tr>
                   <th scope="col">Content</th>
@@ -406,18 +417,18 @@
             <SavingsSplitLine split={savings.total.split} />
           {/if}
         {:else}
-          <p class="empty" data-testid="serve-savings-none">
+          <p class="muted" data-testid="serve-savings-none">
             No optimized responses have been served from the optimizer's cache yet.
           </p>
         {/if}
         {#if savings.notServed.length > 0}
-          <p class="section-note" data-testid="serve-savings-not-served">Not served from the optimizer's cache on this server so far: {savings.notServed.join(", ")}.</p>
+          <p class="note" data-testid="serve-savings-not-served">Not served from the optimizer's cache on this server so far: {savings.notServed.join(", ")}.</p>
         {/if}
         <details class="raw" data-testid="serve-savings-raw">
           <summary>Raw counters</summary>
-          <table class="raw-table">
+          <table class="data-raw">
             <thead>
-              <tr><th>Counter</th><th>Value</th></tr>
+              <tr><th scope="col">Counter</th><th scope="col">Value</th></tr>
             </thead>
             <tbody>
               {#each counterRows(view.stats.serve_savings, "serve_savings") as row (row.name)}
@@ -428,7 +439,7 @@
         </details>
       {/if}
     {:else if view.statsError && !view.allUnavailable}
-      <p class="empty" data-testid="cache-unavailable">The optimizer's statistics are not available; see Load above.</p>
+      <p class="muted" data-testid="cache-unavailable">The optimizer's statistics are not available; see Load above.</p>
     {/if}
   </section>
   <HtmlCachePanel />
@@ -438,10 +449,6 @@
 
 <style>
   .status-card {
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
     margin-bottom: var(--ps-space-lg);
   }
 
@@ -450,30 +457,6 @@
     align-items: center;
     gap: var(--ps-space-sm);
     margin-bottom: var(--ps-space-md);
-  }
-
-  .status-badge {
-    display: inline-block;
-    padding: var(--ps-space-xs) var(--ps-space-md);
-    border-radius: var(--ps-border-radius);
-    font-weight: 700;
-    font-size: var(--ps-font-size-sm);
-    text-transform: capitalize;
-  }
-
-  .badge-success {
-    background: var(--ps-success-text);
-    color: var(--ps-text-inverse);
-  }
-
-  .badge-warning {
-    background: var(--ps-warning);
-    color: var(--ps-warning-contrast-text);
-  }
-
-  .badge-neutral {
-    background: var(--ps-bg-tertiary);
-    color: var(--ps-text-secondary);
   }
 
   .ready-flag {
@@ -497,104 +480,6 @@
     scroll-margin-top: calc(var(--ps-topbar-height) + var(--ps-space-md));
   }
 
-  h2 {
-    font-size: var(--ps-font-size-lg);
-    font-weight: 600;
-    margin: 0 0 var(--ps-space-md) 0;
-    padding-bottom: var(--ps-space-xs);
-    border-bottom: 1px solid var(--ps-border);
-  }
-
-  h3 {
-    font-size: var(--ps-font-size-base);
-    font-weight: 600;
-    margin: var(--ps-space-lg) 0 var(--ps-space-sm) 0;
-  }
-
-  .info-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ps-space-lg);
-  }
-
-  .info-grid--panel {
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
-  }
-
-  .info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .info-hint {
-    max-width: 28ch;
-    font-size: var(--ps-font-size-xs);
-    color: var(--ps-text-secondary);
-  }
-
-  .section-note {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  /* A wide table scrolls inside its frame and never widens the page: the
-     zero width keeps it out of the page's minimum width on a phone, and
-     min-width fills the column. */
-  .table-wrapper {
-    width: 0;
-    min-width: 100%;
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-  }
-
-  th {
-    text-align: left;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    font-weight: 600;
-    border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
-  }
-
-  th.num {
-    text-align: right;
-  }
-
-  /* A row header sits in the row like a cell: the same border, not the
-     column header's heavier one. */
-  tbody th {
-    font-weight: normal;
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  td {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
-  tbody tr:hover {
-    background: var(--ps-surface-hover);
-  }
-
   .name-cell {
     font-family: var(--ps-font-mono);
     word-break: break-all;
@@ -610,51 +495,7 @@
     white-space: nowrap;
   }
 
-  .check::before {
-    content: "";
-    display: inline-block;
-    width: 0.6em;
-    height: 0.6em;
-    margin-right: 0.4em;
-    border-radius: 50%;
-    background: var(--ps-text-secondary);
-  }
-
-  .check-pass::before {
-    background: var(--ps-success);
-  }
-
-  .check-fail::before {
-    background: var(--ps-error);
-  }
-
-  .empty {
-    color: var(--ps-text-secondary);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
-  }
-
   .raw {
     margin-top: var(--ps-space-sm);
-  }
-
-  .raw-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-xs);
-    font-family: var(--ps-font-mono);
-  }
-
-  .raw-table th,
-  .raw-table td {
-    text-align: left;
-    padding-right: var(--ps-space-sm);
-    border-bottom: 1px solid var(--ps-border-light);
-  }
-
-  .raw-table th {
-    color: var(--ps-text-secondary);
   }
 </style>

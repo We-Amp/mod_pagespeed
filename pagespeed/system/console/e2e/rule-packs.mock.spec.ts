@@ -174,6 +174,77 @@ test.describe("the decisions", () => {
     await expect(page.getByTestId("rp-server-page")).toHaveAttribute("href", "/pagespeed_admin/rule_packs?pack=house-rules");
   });
 
+  test("the selector changes the log in place: it keeps the focus, the filters and the host lens", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", replies(R.TWO_BY_PACK, F.CONFIG_GLOBAL));
+    await openConsole(page, "pagespeed_global_admin", "#/rule-packs?lens=www.example.test");
+    await ready(page);
+    await page.evaluate(() => document.querySelector("main h1")!.setAttribute("data-mark", "1"));
+    await page.getByTestId("rp-filter-rule").fill("robots");
+    const select = page.getByTestId("rp-tail-pack").getByRole("combobox");
+    await select.focus();
+    await select.selectOption("house-rules");
+    await expect(page).toHaveURL(/#\/rule-packs\?lens=www\.example\.test&pack=house-rules$/);
+    await expect(page.getByTestId("rp-raw-log")).toHaveAttribute("href", /pack=house-rules$/);
+    await expect(select).toBeFocused();
+    await expect(select).toHaveValue("house-rules");
+    await expect(page.locator("main h1[data-mark='1']")).toHaveCount(1);
+    await expect(page.getByTestId("rp-filter-rule")).toHaveValue("robots");
+    // Back to the first pack: the address names it, and a reload shows the same log.
+    await select.selectOption("edge-seo");
+    await expect(page).toHaveURL(/#\/rule-packs\?lens=www\.example\.test&pack=edge-seo$/);
+    await expect(page.getByTestId("rp-raw-log")).toHaveAttribute("href", /pack=edge-seo$/);
+    await expect(select).toBeFocused();
+  });
+
+  test("a pack whose log cannot be read yet: the page says whose decisions it still shows", async ({ page }) => {
+    let failing = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      replies((call, request) =>
+        failing && request.url.searchParams.get("pack") === "house-rules" ? F.MODULE_FAILURE : R.TWO_BY_PACK(call, request),
+      ),
+    );
+    await openConsole(page, "pagespeed_admin", "#/rule-packs");
+    await ready(page);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+    await expect(page.getByTestId("rp-tail-pending")).toHaveCount(0);
+    failing = true;
+    const select = page.getByTestId("rp-tail-pack").getByRole("combobox");
+    await select.selectOption("house-rules");
+    const pending = page.getByTestId("rp-tail-pending");
+    await expect(pending).toContainText("house-rules has not been read yet");
+    await expect(pending).toContainText("still those of edge-seo");
+    await expect(select).toHaveValue("house-rules");
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+    await expect(page.getByTestId("rp-raw-log")).toHaveAttribute("href", /pack=edge-seo$/);
+    failing = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(1);
+    await expect(select).toHaveValue("house-rules");
+  });
+
+  test("a link to another pack's log opens the page afresh after the selector changed it", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", replies(R.TWO_BY_PACK));
+    await openConsole(page, "pagespeed_admin", "#/rule-packs?pack=house-rules");
+    await ready(page);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(1);
+    const select = page.getByTestId("rp-tail-pack").getByRole("combobox");
+    await select.selectOption("edge-seo");
+    await expect(page).toHaveURL(/#\/rule-packs\?pack=edge-seo$/);
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+    await page.evaluate(() => document.querySelector("main h1")!.setAttribute("data-mark", "1"));
+    // The address the page was opened with, followed again.
+    await page.evaluate(() => {
+      window.location.hash = "#/rule-packs?pack=house-rules";
+    });
+    await ready(page);
+    await expect(page.locator("main h1[data-mark='1']")).toHaveCount(0);
+    await expect(select).toHaveValue("house-rules");
+    await expect(page.getByTestId("rp-decision")).toHaveCount(1);
+  });
+
   test("raw log and server page links point at the console that is open", async ({ page }) => {
     await mockAdmin(page, "renamed_admin", replies(R.ONE));
     await openConsole(page, "renamed_admin", "#/rule-packs");

@@ -73,7 +73,7 @@ describe("ALERT_RULES", () => {
       expect(["error", "warning", "info"]).toContain(rule.severity);
       expect(["rate", "state"]).toContain(rule.kind);
       expect(rule.fix.length, rule.id).toBeGreaterThan(0);
-      if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/1\.1\/docs\//);
+      if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/docs\//);
     }
     expect(seen.size).toBe(17);
   });
@@ -180,7 +180,7 @@ describe("AlertTracker", () => {
       T0,
     );
     expect(ids(out)).toEqual(["daemon-check-failed"]);
-    expect(out[0].message).toBe("Optimizer health check failing: cache_open.");
+    expect(out[0].message).toBe("Optimizer health check failing: Cache opened.");
     expect(out[0].link).toBe("#/optimizer");
   });
 
@@ -373,7 +373,7 @@ describe("healthSummary", () => {
 
   it("never says 'No findings' when the message log could not be read", () => {
     expect(healthSummary([], true, [], true)).toEqual({
-      text: "Findings unavailable — the message log could not be read",
+      text: "Findings unavailable: the message log could not be read",
       level: "info",
     });
     expect(healthSummary([], false, [], true)).toEqual({ text: "Module statistics unavailable", level: "warning" });
@@ -424,8 +424,9 @@ describe("findings from the module's message log", () => {
     expect(out[0].message).toBe(
       `An admin page was requested from an address other than this server itself (last at ${formatClock(T1 - 60_000)}).`,
     );
-    expect(out[0].fix).toContain("Require local");
-    expect(out[0].doc).toBe("https://modpagespeed.com/1.1/docs/admin-console/#access-control");
+    expect(out[0].fix).toContain("Restrict the admin paths");
+    expect(out[0].snippets?.apache).toContain("Require local");
+    expect(out[0].doc).toBe("https://modpagespeed.com/docs/admin-console/#access-control");
     expect(out[0].link).toBe("#/logs?source=module&level=warning");
     expect(out[0].details).toEqual([]);
   });
@@ -502,17 +503,27 @@ describe("findings from the module's message log", () => {
     expect(ids(t.evaluate(withLog([group(ACL)]), T1 + 15_000))).toEqual(["admin-exposed"]);
   });
 
-  it("volume-not-opened: a recent cache-generation refusal is an error, ranks first, and names the two settings", () => {
+  it("volume-not-opened: a recent cache-generation refusal is an error, ranks first, and its fix names the packages", () => {
     for (const level of ["warning", "error"] as const) {
       const out = new AlertTracker().evaluate(withLog([group(ACL), group(VOLUME, { level, recent: 1 })]), T1);
-      expect(ids(out), level).toEqual(["volume-not-opened", "admin-exposed", "recent-warnings"]);
+      // The refusal is this finding's evidence: it is not counted again under "Warnings in the log".
+      expect(ids(out), level).toEqual(["volume-not-opened", "admin-exposed"]);
       expect(out[0].severity).toBe("error");
-      expect(out[0].message).toContain(
-        "The web server is not using the optimizer's cache: in-place optimization is OFF: the optimizer worker " +
-          "publishes cache directory generation N",
+      // A written sentence; the module's own line waits in the details.
+      expect(out[0].message).toBe(
+        "The web server is not using the optimizer's cache: the module logged that the module and optimizer " +
+          "packages use different cache layouts, so it opened nothing.",
       );
-      expect(out[0].fix).toBe("Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.");
-      expect(out[0].doc).toBe("https://modpagespeed.com/1.1/docs/troubleshooting/#how-to-get-more-diagnostic-information");
+      expect(out[0].message).not.toContain("in-place optimization is OFF");
+      expect(out[0].details).toEqual([VOLUME]);
+      // The fix answers the cause the sentence names: the packages, not a path.
+      expect(out[0].fix).toBe(
+        "Install module and optimizer packages from the same release, then restart the web server and the optimizer.",
+      );
+      expect(out[0].fix).not.toContain("DaemonVolumePath");
+      // So the path to paste is not offered either.
+      expect(out[0].snippets).toBeUndefined();
+      expect(out[0].doc).toBe("https://modpagespeed.com/docs/troubleshooting/#how-to-get-more-diagnostic-information");
     }
   });
 
@@ -580,6 +591,42 @@ describe("findings from the module's message log", () => {
     expect(three[0].message).toBe("3 warnings in the last 15 minutes, of 2 kinds.");
     const oneError = new AlertTracker().evaluate(withLog([group("Fetch of URL failed", { level: "error", recent: 1 })]), T1);
     expect(oneError[0].message).toBe("1 warning or error in the last 15 minutes, of 1 kind.");
+  });
+
+  it("one cause is one finding: a log line with a finding of its own is left out of the warnings", () => {
+    // The admin warning and the cache refusal, both recent, next to an ordinary warning.
+    const out = new AlertTracker().evaluate(
+      withLog([
+        group(ACL, { recent: 4, count: 9 }),
+        group(VOLUME, { level: "error", recent: 2 }),
+        group("Slow origin response for URL", { recent: 3 }),
+      ]),
+      T1,
+    );
+    expect(ids(out)).toEqual(["volume-not-opened", "admin-exposed", "recent-warnings"]);
+    const recent = out[2];
+    expect(recent.count).toBe(3);
+    expect(recent.details).toEqual(["×3 Slow origin response for URL"]);
+    // The log holds more warnings than this finding counts, and it says so.
+    expect(recent.message).toBe("3 warnings in the last 15 minutes, of 1 kind, besides those with a finding of their own.");
+    for (const a of out) {
+      if (a.id !== "admin-exposed") expect(a.details.join("\n"), a.id).not.toContain("admin handler");
+      if (a.id !== "volume-not-opened") expect(a.details.join("\n"), a.id).not.toContain("in-place optimization is OFF");
+    }
+    expect(healthSummary(out, true).text).toBe("3 findings · 2 need action · 3 warnings in the last 15 min");
+  });
+
+  it("one cause is one finding: with nothing else in the log there is no warnings finding at all", () => {
+    const out = new AlertTracker().evaluate(withLog([group(ACL, { recent: 4 }), group(VOLUME, { recent: 1 })]), T1);
+    expect(ids(out)).toEqual(["volume-not-opened", "admin-exposed"]);
+    expect(healthSummary(out, true).text).toBe("2 findings · 2 need action");
+  });
+
+  it("the admin warning stays an ordinary warning on a console that is public by configuration", () => {
+    const out = new AlertTracker().evaluate(withLog([group(PUBLIC_LINE, { level: "info" }), group(ACL, { recent: 2 })]), T1);
+    expect(ids(out)).toEqual(["admin-public", "recent-warnings"]);
+    expect(out[1].count).toBe(2);
+    expect(out[1].message).toBe("2 warnings in the last 15 minutes, of 1 kind.");
   });
 
   it("recent-warnings: details carry template text verbatim (rendered as text by the page)", () => {
@@ -753,6 +800,12 @@ describe("volume-not-opened from the counters", () => {
     expect(out[0].message).toBe(
       "The optimizer is answering, but none of the last 50 CSS, JavaScript and image requests was served from its cache.",
     );
+    // Nothing in the log names the packages: the two paths are what to check.
+    expect(out[0].fix).toBe(
+      "Point the web server's DaemonVolumePath at the optimizer's cache directory (--cache-dir) followed by /cache.",
+    );
+    // The path fix comes with the path directive to paste.
+    expect(out[0].snippets?.nginx).toBe("pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;");
   });
 
   it("a window shorter than 15 minutes is no evidence, however many requests fell through", () => {
@@ -869,5 +922,87 @@ describe("ranking and acknowledgement", () => {
     const second = new AlertTracker(ALERT_RULES, RATE_ALERT_HOLD_MS, createAckStore(storage));
     expect(second.evaluate(errors(0, 2), T0 + 5000)).toEqual([]);
     expect(ids(second.acknowledged())).toEqual(["origin-misconfiguration"]);
+  });
+});
+
+describe("a fix that names a setting comes with the setting to paste", () => {
+  // A directive (two or more capitalised words run together) or a command-line flag.
+  const NAMES_SETTING = /\b(?:[A-Z][a-z]+){2,}\b|--[a-z][a-z-]+/;
+  // admin-public: "Nothing to do", the setting is named as the reason, not as something to change.
+  // daemon-unreachable: the directive to check; its packaged value is the built-in default, so a
+  // pasted line would change nothing.
+  const NOTHING_TO_PASTE = ["admin-public", "daemon-unreachable"];
+  const byId = (id: string) => ALERT_RULES.find((r) => r.id === id)!;
+
+  it("every rule whose fix names a setting has snippets", () => {
+    for (const rule of ALERT_RULES) {
+      if (NAMES_SETTING.test(rule.fix) && !NOTHING_TO_PASTE.includes(rule.id)) {
+        expect(rule.snippets, rule.id).toBeDefined();
+      }
+    }
+    expect(ALERT_RULES.filter((r) => NAMES_SETTING.test(r.fix)).map((r) => r.id)).toEqual([
+      "volume-not-opened",
+      "daemon-unreachable",
+      "admin-public",
+    ]);
+    // The access rule's fix is a block per server, so its sentence names none of them.
+    expect(ALERT_RULES.filter((r) => r.snippets).map((r) => r.id)).toEqual(["volume-not-opened", "admin-exposed"]);
+  });
+
+  it("each snippet names the setting in its server's own syntax, with packaged defaults only", () => {
+    expect(byId("volume-not-opened").snippets).toEqual({
+      apache: "ModPagespeedDaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache",
+      nginx: "pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;",
+    });
+    expect(byId("daemon-unreachable").snippets).toBeUndefined();
+    expect(byId("admin-exposed").snippets).toEqual({
+      apache:
+        "<Location /pagespeed_admin>\n    Require local\n</Location>\n" +
+        "<Location /pagespeed_global_admin>\n    Require local\n</Location>",
+      nginx:
+        "location = /pagespeed_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location ^~ /pagespeed_admin/ { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location = /pagespeed_global_admin { allow 127.0.0.1; allow ::1; deny all; }\n" +
+        "location ^~ /pagespeed_global_admin/ { allow 127.0.0.1; allow ::1; deny all; }",
+      iis: "pagespeed InfoUrlsLocalOnly on",
+    });
+  });
+
+  it("snippets carry no host of a real installation: only loopback addresses and packaged paths", () => {
+    for (const rule of ALERT_RULES) {
+      for (const text of Object.values(rule.snippets ?? {})) {
+        expect(text, rule.id).not.toMatch(/https?:|\.test\b|\.com\b/);
+        expect(text.replace(/127\.0\.0\.1(\/32)?/g, ""), rule.id).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
+      }
+    }
+  });
+
+  it("a finding carries its rule's snippets", () => {
+    const tracker = new AlertTracker();
+    const out = tracker.evaluate(withLog([group(ACL)]), T1);
+    expect(out.map((a) => a.id)).toEqual(["admin-exposed"]);
+    expect(out[0].snippets).toBe(byId("admin-exposed").snippets);
+    const none = new AlertTracker().evaluate(snap({ daemon: "unreachable", health: null, daemonStats: null }), T0);
+    expect(none.find((a) => a.snippets)).toBeUndefined();
+  });
+
+  it("the snippets belong to the rule's own fix: a sample whose fix comes from fixFor shows none", () => {
+    const rule: AlertRule = {
+      id: "two-causes",
+      label: "Two causes",
+      severity: "warning",
+      kind: "state",
+      check: () => true,
+      message: () => "m",
+      fix: "Set SomeSetting.",
+      fixFor: (cur) => (cur.daemon === "unreachable" ? "Install the other package." : undefined),
+      snippets: { apache: "ModPagespeedSomeSetting on" },
+    };
+    const tracker = new AlertTracker([rule]);
+    expect(tracker.evaluate(snap(), T0)[0].snippets).toEqual({ apache: "ModPagespeedSomeSetting on" });
+    const other = tracker.evaluate(snap({ daemon: "unreachable" }), T0 + 5_000)[0];
+    expect(other.fix).toBe("Install the other package.");
+    expect(other.snippets).toBeUndefined();
+    expect(tracker.evaluate(snap(), T0 + 10_000)[0].snippets).toEqual({ apache: "ModPagespeedSomeSetting on" });
   });
 });

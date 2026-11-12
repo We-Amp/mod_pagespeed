@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-// Every page, in both colour schemes, checked with axe-core: no WCAG 2.0/2.1
-// A or AA violation, and headings, landmarks and regions in order.
+// Every page, in both colour schemes, checked with axe-core: no WCAG 2.0, 2.1
+// or 2.2 A or AA violation, and headings, landmarks and regions in order.
 // Self-contained (support/mock-admin.ts); run after build.sh.
 
 import AxeBuilder from "@axe-core/playwright";
@@ -11,14 +11,23 @@ import * as F from "./support/fixtures";
 import * as R from "./support/rule-packs-fixtures";
 import { noHorizontalScroll } from "./support/layout";
 import { NETWORK_ERROR, mockAdmin, openConsole } from "./support/mock-admin";
+import { rigPerHostReplies, rigWholeServerReplies } from "./support/rig";
 
 const ok = F.ok;
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
+// Both consoles, each with the captures of a running server (support/rig.ts),
+// so every page is checked as it reads with data, not as a refusal.
+const CONSOLES = [
+  { admin: "pagespeed_global_admin", replies: rigWholeServerReplies },
+  { admin: "pagespeed_admin", replies: rigPerHostReplies },
+] as const;
+
 const ROUTES = [
   "#/overview", "#/savings", "#/statistics", "#/configuration", "#/histograms", "#/caches", "#/console", "#/messages",
-  "#/graphs", "#/graphs?counters=all", "#/optimizer", "#/optimizer?section=cache", "#/urls", "#/logs", "#/support", "#/about",
+  "#/graphs", "#/graphs?counters=all", "#/optimizer", "#/optimizer?section=cache", "#/urls",
+  "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https", "#/rule-packs", "#/logs", "#/support", "#/about",
   // The "Show all" link only renders once a severity filter is present.
   "#/messages?level=warning",
   "#/messages?level=info",
@@ -30,7 +39,7 @@ async function ready(page: Page) {
 }
 
 async function expectNoViolations(page: Page) {
-  const wcag = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  const wcag = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"]).analyze();
   const structure = await new AxeBuilder({ page })
     .withRules(["heading-order", "page-has-heading-one", "landmark-one-main", "landmark-unique", "region"])
     .analyze();
@@ -44,13 +53,15 @@ for (const scheme of ["light", "dark"] as const) {
   test.describe(`Accessibility (${scheme})`, () => {
     test.use({ colorScheme: scheme });
 
-    for (const hash of ROUTES) {
-      test(`${hash}`, async ({ page }) => {
-        await mockAdmin(page, "pagespeed_admin", F.allReplies());
-        await openConsole(page, "pagespeed_admin", hash);
-        await ready(page);
-        await expectNoViolations(page);
-      });
+    for (const { admin, replies } of CONSOLES) {
+      for (const hash of ROUTES) {
+        test(`${admin} ${hash}`, async ({ page }) => {
+          await mockAdmin(page, admin, replies());
+          await openConsole(page, admin, hash);
+          await ready(page);
+          await expectNoViolations(page);
+        });
+      }
     }
 
     test("the shortcut list", async ({ page }) => {
@@ -90,7 +101,7 @@ for (const scheme of ["light", "dark"] as const) {
       await expectNoViolations(page);
       await openConsole(page, "pagespeed_global_admin", "#/statistics?lens=www.example.test");
       await ready(page);
-      await expect(page.getByTestId("lens-note")).toBeVisible();
+      await expect(page.getByTestId("host-lens-note")).toBeVisible();
       await expectNoViolations(page);
     });
 
@@ -99,6 +110,47 @@ for (const scheme of ["light", "dark"] as const) {
       await openConsole(page, "pagespeed_admin");
       await ready(page);
       await expect(page.getByTestId("alert-daemon-check-failed")).toBeVisible();
+      await expectNoViolations(page);
+    });
+
+    test("findings with a setting to paste, a tab chosen and copied", async ({ page }) => {
+      await mockAdmin(
+        page,
+        "pagespeed_admin",
+        {
+          ...F.allReplies(),
+          message_history: F.messageGroups([
+            { level: "warning", template: F.ACL_TEMPLATE, count: 1, last_ms: Date.now() - 60_000 },
+          ]),
+        },
+        { server: "nginx/1.26.2" },
+      );
+      await openConsole(page, "pagespeed_admin");
+      await ready(page);
+      const finding = page.getByTestId("alert-admin-exposed");
+      await expect(finding.getByTestId("snippet-detected")).toBeVisible();
+      await expectNoViolations(page);
+      await finding.getByRole("tab", { name: "IIS" }).click();
+      await finding.getByTestId("snippet-copy").click();
+      await expect(finding.getByTestId("snippet-status")).not.toHaveText("");
+      await expectNoViolations(page);
+    });
+
+    test("the overview while the optimizer is not answering", async ({ page }) => {
+      await mockAdmin(page, "pagespeed_admin", {
+        ...F.allReplies(),
+        "v1/daemon/health": F.UNREACHABLE,
+        "v1/daemon/stats": F.UNREACHABLE,
+      });
+      await openConsole(page, "pagespeed_admin");
+      await ready(page);
+      await expect(page.getByTestId("alert-daemon-unreachable")).toBeVisible();
+      // The tile and the card are two landmarks with two names.
+      await expect(page.getByRole("region", { name: "Optimizer state" })).toHaveAttribute("data-testid", "tile-optimizer");
+      await expect(page.getByRole("region", { name: /^Optimizer(?! state)/ })).toHaveAttribute(
+        "data-testid",
+        "optimizer-card",
+      );
       await expectNoViolations(page);
     });
 

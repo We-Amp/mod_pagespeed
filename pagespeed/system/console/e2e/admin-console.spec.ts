@@ -20,9 +20,9 @@ test.describe("App shell", () => {
   test("loads and shows topbar with title", async ({ page }) => {
     await page.goto(BASE);
     // The chrome derives from the product facts: the product name in the
-    // logo and the vendor link; a per-host console carries no scope label.
+    // logo; a per-host console names its own host as the scope.
     await expect(page.locator(".topbar-logo")).toContainText("mod_pagespeed");
-    await expect(page.locator(".topbar-badge")).toHaveCount(0);
+    await expect(page.getByTestId("console-scope")).not.toContainText("Whole server");
   });
 
   test("sidebar has all 11 nav items", async ({ page }) => {

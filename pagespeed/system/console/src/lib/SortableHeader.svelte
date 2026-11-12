@@ -6,7 +6,8 @@
 <script lang="ts">
   // A sortable column header: the sort state on the header cell (aria-sort)
   // and a real button inside it, so it works from the keyboard and screen
-  // readers announce the order.
+  // readers announce the order. The button's hit area covers the whole
+  // cell, so the cell that lights up on hover is the target.
   let {
     label,
     active,
@@ -23,6 +24,7 @@
 </script>
 
 <th
+  scope="col"
   class="sortable"
   class:right={align === "right"}
   aria-sort={active ? (ascending ? "ascending" : "descending") : "none"}
@@ -33,14 +35,9 @@
 </th>
 
 <style>
+  /* The cell itself is a table.data header (theme.css). */
   .sortable {
-    /* A wide table may set --ps-cell-pad-x on its frame to tighten the
-       step between columns; header and cells then still line up. */
-    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
-    border-bottom: 2px solid var(--ps-border);
-    font-weight: 600;
-    text-align: left;
-    white-space: nowrap;
+    position: relative;
   }
 
   .sortable.right {
@@ -59,6 +56,12 @@
     font: inherit;
     text-align: inherit;
     cursor: pointer;
+  }
+
+  .sort-button::after {
+    content: "";
+    position: absolute;
+    inset: 0;
   }
 
   .sort-indicator {

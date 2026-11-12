@@ -108,10 +108,13 @@ test("the lens is remembered across a reload; a page without per-host data says 
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible();
   await expect(lensSelect(page)).toHaveValue("example.test");
-  await expect(page.getByTestId("lens-note")).toContainText("example.test");
-  await expect(page.getByTestId("lens-note")).toContainText("whole server");
-  await lensSelect(page).selectOption("");
+  // Beside the control, not above the page: the page itself is unchanged.
+  await expect(page.getByTestId("host-lens-note")).toHaveText("(not applied on this page)");
+  await expect(lensSelect(page)).toHaveAccessibleDescription("(not applied on this page)");
   await expect(page.getByTestId("lens-note")).toHaveCount(0);
+  await expect(page.getByTestId("host-lens").locator("label")).toHaveText("Host filter");
+  await lensSelect(page).selectOption("");
+  await expect(page.getByTestId("host-lens-note")).toHaveCount(0);
   await expect(page).toHaveURL(/#\/statistics$/);
 });
 
@@ -125,7 +128,7 @@ test("a whole-server console on a renamed admin path remembers the lens too", as
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible();
   await expect(lensSelect(page)).toHaveValue("example.test");
-  await expect(page.getByTestId("lens-note")).toContainText("example.test");
+  await expect(page.getByTestId("host-lens-note")).toBeVisible();
 });
 
 test("a store that refuses: the lens still works for the visit", async ({ page }) => {
@@ -231,6 +234,32 @@ test("phone: the lens sits in the drawer, and nothing scrolls sideways", async (
   expect(
     await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1),
   ).toBe(true);
+  // A page without per-host figures: the drawer is closed, so the page
+  // itself says the filter does not apply; the drawer's control says so too.
+  await page.goto(`${ORIGIN}/pagespeed_global_admin/#/statistics?lens=www.example.test`);
+  await expect(page.getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible();
+  await expect(page.getByTestId("lens-note")).toBeVisible();
+  await page.getByRole("button", { name: "Toggle menu" }).click();
+  await expect(page.getByTestId("host-lens-drawer-note")).toHaveText("(not applied on this page)");
+});
+
+test("before any page has named a host, the control says so and offers nothing", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/about");
+  await expect(page.getByRole("heading", { level: 1, name: "About" })).toBeVisible();
+  await expect(lensSelect(page)).toBeDisabled();
+  await expect(lensSelect(page).locator("option")).toHaveText(["No hosts seen yet"]);
+  await page.getByRole("link", { name: "URLs", exact: true }).click();
+  await urlsReady(page);
+  await expect(lensSelect(page)).toBeEnabled();
+  await expect(lensSelect(page).locator("option").first()).toHaveText("All hosts");
+});
+
+test("the control is the compact control height", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalReplies());
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await urlsReady(page);
+  expect((await lensSelect(page).boundingBox())!.height).toBeCloseTo(28, 0);
 });
 
 // ── The optimizer's host names, through the address ─────────────────
@@ -276,7 +305,7 @@ test("every row the optimizer reports is listed as text, none folded into other"
   await expect(rows.nth(1)).toContainText("[2001:db8::1]");
   await expect(rows.nth(2)).toContainText("a_b.test");
   await expect(rows.nth(3)).toContainText("10.1.2.3");
-  await expect(page.getByTestId("savings-by-host-other").locator("td").nth(1)).toHaveText("1");
+  await expect(page.getByTestId("savings-by-host-other").locator("td").first()).toHaveText("1");
   await expect(lensSelect(page).locator("option")).toHaveText(["All hosts", "10.1.2.3", "[2001:db8::1]", "a_b.test", "www.example.com"]);
 });
 

@@ -214,3 +214,21 @@ export function pageWindow(
     hasMore: body?.has_more === true,
   };
 }
+
+/** The list's view as the address carries it: page offset and filter text. */
+export interface UrlsView {
+  offset: number;
+  q: string;
+}
+
+/** The view an address names; anything missing or malformed is the default. */
+export const urlsViewFromParams = (params: URLSearchParams): UrlsView => ({
+  offset: Math.max(0, Math.floor(Number(params.get("offset"))) || 0),
+  q: params.get("q") ?? "",
+});
+
+/** The address parameters for a view; a default part is left out. */
+export const urlsViewParams = ({ offset, q }: UrlsView): Record<string, string | null> => ({
+  offset: offset > 0 ? String(offset) : null,
+  q: q || null,
+});

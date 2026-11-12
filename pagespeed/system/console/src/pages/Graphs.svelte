@@ -49,6 +49,7 @@
   import type { DaemonStatsResponse } from "$lib/api/types";
   import EmptyState from "$lib/EmptyState.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import { router } from "$lib/router.svelte";
   import {
     CURATED_GROUP,
@@ -323,7 +324,7 @@
 
   function curatedTitle(chart: CuratedChart): string {
     // The host the optimizer savings follow: the lens, or a per-vhost console's own.
-    return chart.id === "optimizer_saved" && focusHost !== null ? `${chart.title} — ${focusHost}` : chart.title;
+    return chart.id === "optimizer_saved" && focusHost !== null ? `${chart.title} for ${focusHost}` : chart.title;
   }
 
   function curatedFormat(unit: CuratedUnit): (v: number) => string {
@@ -362,7 +363,7 @@
       onToggle: toggleAutoRefresh,
       onRefresh: () => {
         logRequested = true;
-        void graphs.refresh();
+        return graphs.refresh();
       },
     }}
   >
@@ -432,7 +433,7 @@
   {#if !showAll}
     {#if lensHost !== null}
       <p class="note" data-testid="curated-lens-note">
-        The optimizer savings chart follows the host lens ({lensHost}); the module's charts cover the whole server.
+        {TERMS.hostFilter} {lensHost}: the optimizer savings chart shows this host; the module's charts cover the whole server.
       </p>
     {/if}
     {#if !scope.isGlobal && focusHost === null && curated !== null && curated.shown.some((c) => c.id === "optimizer_saved")}
@@ -467,7 +468,7 @@
                   formatValue={format}
                   tickValues={chart.unit === "bytes-per-second" ? bytesRateTicks : undefined}
                 />
-                <p class="summary">Latest: <span data-testid="curated-latest">{latest === null ? "—" : format(latest)}</span></p>
+                <p class="note summary">Latest: <span data-testid="curated-latest">{latest === null ? "—" : format(latest)}</span></p>
               </section>
             {/each}
           </div>
@@ -517,7 +518,7 @@
             showLegend={false}
             formatValue={chart.isRate ? formatRate : undefined}
           />
-          <p class="summary">
+          <p class="note summary">
             Latest: <span data-testid="graph-latest">{formatSample(latestForDisplay(chart.series), chart.isRate)}</span>
             · Min: {values.length === 0 ? "—" : formatSample(Math.min(...values), chart.isRate)}
             · Max: {values.length === 0 ? "—" : formatSample(Math.max(...values), chart.isRate)}
@@ -532,8 +533,8 @@
           {/if}
           <details>
             <summary>Raw data</summary>
-            <table class="raw">
-              <thead><tr><th>Time</th><th>Value</th></tr></thead>
+            <table class="data-raw">
+              <thead><tr><th scope="col">Time</th><th scope="col">Value</th></tr></thead>
               <tbody>
                 {#each chart.timestamps as ts, i (ts)}
                   <tr>
@@ -565,13 +566,8 @@
     margin-bottom: var(--ps-space-lg);
   }
   /* The note about charts without data sits below the charts, not on them. */
-  .curated :global(.empty-state) {
-    margin-top: var(--ps-space-md);
-  }
-  .section-title {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-base);
-    font-weight: 600;
+  .curated > .charts:not(:last-child) {
+    margin-bottom: var(--ps-space-md);
   }
   .add-list {
     margin: 0 0 var(--ps-space-md);
@@ -585,52 +581,19 @@
     max-width: 100%;
   }
   /* Charts share the full width, at most three to a row: a wide window
-     makes them larger (their height follows their width), not flatter. */
+     makes them larger (their height follows their width), not flatter. A
+     chart is never wider than the page, so a narrow or zoomed window shows
+     one chart per row, whole. */
   .charts {
     display: grid;
     grid-template-columns: repeat(
       auto-fit,
-      minmax(max(320px, calc((100% - 2 * var(--ps-space-md)) / 3)), 1fr)
+      minmax(min(100%, max(320px, calc((100% - 2 * var(--ps-space-md)) / 3))), 1fr)
     );
     gap: var(--ps-space-md);
   }
-  .card {
-    min-width: 0;
-    padding: var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-surface);
-  }
-  .card-title {
-    margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    font-family: var(--ps-font-mono);
-    overflow-wrap: anywhere;
-  }
   .summary {
     margin: var(--ps-space-xs) 0;
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-  .raw {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-xs);
-    font-family: var(--ps-font-mono);
-  }
-  .raw th, .raw td {
-    text-align: left;
-    padding: 0 var(--ps-space-sm) 0 0;
-  }
-  .note {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-  .loading { color: var(--ps-text-secondary); }
-  .control:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
   }
   .control-label {
     color: var(--ps-text-secondary);

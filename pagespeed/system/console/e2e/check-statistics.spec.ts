@@ -82,7 +82,7 @@ test.describe("Statistics page - detailed checks", () => {
     expect(totalAfter).toBeGreaterThan(0);
 
     // Every visible row name should contain "cache_hits".
-    const nameCells = page.locator("td.name-cell");
+    const nameCells = page.locator(".name-cell");
     const filteredCount = await nameCells.count();
     for (let i = 0; i < filteredCount; i++) {
       const text = await nameCells.nth(i).textContent();
@@ -123,7 +123,7 @@ test.describe("Statistics page - detailed checks", () => {
     });
 
     // Check table wrapper has reasonable dimensions.
-    const tableWrapper = page.locator(".table-wrapper");
+    const tableWrapper = page.locator(".table-frame");
     const box = await tableWrapper.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThan(200);
@@ -143,7 +143,7 @@ test.describe("Statistics page - detailed checks", () => {
 
     // Ensure the search input doesn't overlap the table.
     const searchBox = await page.locator(".search-input").boundingBox();
-    const tableBox = await page.locator(".table-wrapper").boundingBox();
+    const tableBox = await page.locator(".table-frame").boundingBox();
     expect(searchBox).not.toBeNull();
     expect(tableBox).not.toBeNull();
     expect(searchBox!.y + searchBox!.height).toBeLessThanOrEqual(

@@ -107,7 +107,21 @@ test("an unreachable daemon renders the shared empty state", async ({ page }) =>
   await mockAdmin(page, "pagespeed_global_admin", globalReplies(F.UNREACHABLE));
   await openConsole(page, "pagespeed_global_admin", "#/urls");
   await ready(page);
-  await expect(page.getByTestId("urls-unreachable")).toContainText("unreachable");
+  const state = page.getByTestId("urls-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("Optimizer not answering");
+  await expect(state).toContainText("The optimizer is configured but not answering.");
+  // The transport's words stay out of the page.
+  await expect(state).not.toContainText(/HTTP \d{3}|daemon_|unreachable/);
+});
+
+test("an optimizer that answers 503 itself is not called unreachable", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", globalReplies({ status: 503, body: { error: "busy" } }));
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await ready(page);
+  const state = page.getByTestId("urls-unreachable");
+  await expect(state.locator(".empty-title")).toHaveText("Optimizer did not answer");
+  await expect(state).toContainText("The optimizer did not answer this refresh; the next refresh tries again.");
+  await expect(state).not.toContainText(/unreachable/i);
 });
 
 test("an empty index says so", async ({ page }) => {
@@ -230,4 +244,56 @@ test("a row opens the entry's detail view, carrying its site to the lookups", as
   await expect(page.getByTestId("variants-table")).toBeVisible();
   expect(sites.length).toBeGreaterThan(0);
   expect(sites.every((s) => s === F.HERO_SITE)).toBe(true);
+});
+
+// The list shows one page of the index; a URL the operator already has goes
+// straight to its page.
+test("Inspect a URL opens the URL's page, whether or not it is on this page of the index", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalReplies(F.URLS_TWO_PAGES),
+    cache: F.cacheWithLookup(),
+    "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await ready(page);
+  // The filter stays the page's search box; the inspect input is its own, labelled control.
+  await expect(page.getByTestId("urls-search")).toBeVisible();
+  const input = page.getByRole("searchbox", { name: "Inspect a URL" });
+  await input.fill("https://www.example.test/never-listed.jpg");
+  await input.press("Enter");
+  await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/never-listed.jpg");
+  await expect(page.getByTestId("url-detail-not-found")).toBeVisible();
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+});
+
+test("per-vhost console: the index is not shown, and a URL can still be inspected", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+  await openConsole(page, "pagespeed_admin", "#/urls");
+  await ready(page);
+  await expect(page.getByTestId("urls-per-vhost")).toBeVisible();
+  await page.getByTestId("inspect-url").fill("https://www.example.test/a.css");
+  await page.getByTestId("inspect-url").press("Enter");
+  await expect(page.getByTestId("url-module-lookup")).toBeVisible();
+  await expect(page.getByTestId("url-reasons")).toBeVisible();
+});
+
+test("the way back from a URL's page returns to the same page of the list and filter", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...globalReplies(F.URLS_TWO_PAGES),
+    "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/urls");
+  await ready(page);
+  await page.getByTestId("urls-next").click();
+  await expect(page.getByTestId("urls-pager")).toContainText("3–3 of 3");
+  await page.getByTestId("urls-search").fill("app");
+  // The view is in the address, written in place.
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/urls?offset=2&q=app");
+  await page.getByRole("link", { name: "http://cdn.example.test/app.js?v=2" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "URL Detail" })).toBeVisible();
+  await page.getByRole("link", { name: "Back to URLs" }).click();
+  await ready(page);
+  await expect(page.getByTestId("urls-search")).toHaveValue("app");
+  await expect(page.getByTestId("urls-pager")).toContainText("3–3 of 3");
+  await expect(page.getByTestId("urls-table").locator("tbody tr")).toHaveCount(1);
 });

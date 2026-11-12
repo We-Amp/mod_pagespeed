@@ -50,7 +50,7 @@
   <PageHeader title="Support" />
 
   {#if !dismissed}
-    <div class="support-panel" data-testid="support-panel">
+    <div class="card support-panel" data-testid="support-panel">
       <button
         class="dismiss"
         onclick={() => setDismissed(true)}
@@ -67,7 +67,7 @@
       >View support subscriptions &rarr;</a>
     </div>
   {:else}
-    <p class="dismissed-note">
+    <p class="note">
       The support panel is hidden.
       <button class="show-again" onclick={() => setDismissed(false)}>
         Show again
@@ -76,7 +76,7 @@
   {/if}
 
   <section class="docs-section" aria-labelledby="support-docs-heading">
-    <h2 id="support-docs-heading">Documentation and help</h2>
+    <h2 class="section-title" id="support-docs-heading">Documentation and help</h2>
     <ul class="docs-list">
       <li><a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Admin console documentation</a></li>
       <li><a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">Support subscriptions</a></li>
@@ -85,8 +85,8 @@
   </section>
 
   <section class="diagnostics-section" aria-labelledby="support-diagnostics-heading">
-    <h2 id="support-diagnostics-heading">Diagnostics</h2>
-    <p class="diagnostics-intro">
+    <h2 class="section-title" id="support-diagnostics-heading">Diagnostics</h2>
+    <p class="note">
       Copies the module and console builds, the optimizer's version, a fingerprint of the
       configuration and the last 50 warnings and errors as plain text, for a support request.
       Nothing is sent anywhere. The messages can contain addresses your visitors requested,
@@ -127,10 +127,6 @@
   .support-panel {
     max-width: var(--ps-card-max);
     position: relative;
-    padding: var(--ps-space-lg);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius-lg);
-    background: var(--ps-bg-secondary);
   }
 
   .dismiss {
@@ -145,6 +141,9 @@
     cursor: pointer;
     padding: var(--ps-space-xs);
     border-radius: var(--ps-border-radius);
+    /* At least 24 px square: a pointer target (WCAG 2.5.8). */
+    min-width: 24px;
+    min-height: 24px;
   }
 
   .dismiss:hover {
@@ -171,11 +170,6 @@
     text-decoration: underline;
   }
 
-  .dismissed-note {
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
   .docs-section,
   .diagnostics-section {
     margin-top: var(--ps-space-lg);
@@ -195,12 +189,6 @@
     color: var(--ps-primary);
     cursor: pointer;
     text-decoration: underline;
-  }
-
-  .diagnostics-intro {
-    margin: var(--ps-space-sm) 0;
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
   }
 
   .diagnostics-status {

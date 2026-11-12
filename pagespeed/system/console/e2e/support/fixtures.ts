@@ -405,6 +405,35 @@ export function contentBusyOnce(): Responder {
 /** A content leaf that is always busy. */
 export const CONTENT_ALWAYS_BUSY: Reply = BUSY_REPLY;
 
+/**
+ * The cache leaf as the module answers it: the structure for a bare read,
+ * and for a lookup (`?url=`) a 200 whose `value` is the module's text --
+ * here its answer for an original (not rewritten) URL.
+ */
+export const cacheWithLookup = (lookup: Reply = ok({ value: "Unable to decode resource." })): Responder =>
+  (_call, request) => (request.url.searchParams.has("url") ? lookup : CACHE_STRUCTURE);
+
+/** The module's lookup answer for a rewritten URL it holds a current result for. */
+export const LOOKUP_CURRENT: Reply = ok({
+  value:
+    "Metadata cache key:rname/ic_QJ3kP/https://www.example.test/hero.png@x@_\ncache_ok:true\ncan_revalidate:false\npartitions is NULL\n",
+});
+
+/** A current result whose partition is the optimized rewrite (its own url; the input's url is nested deeper). */
+export const LOOKUP_OPTIMIZED: Reply = ok({
+  value:
+    'Metadata cache key:rname/ic_QJ3kP/https://www.example.test/hero.png@x@_\ncache_ok:true\ncan_revalidate:false\npartitions:partition {\n  url: "https://www.example.test/hero.png.pagespeed.ic.QJ3kP.webp"\n  input {\n    index: 0\n    url: "https://www.example.test/hero.png"\n  }\n}\n\n',
+});
+
+/** A current result that kept the original (`optimizable: false`). */
+export const LOOKUP_KEPT: Reply = ok({
+  value:
+    'Metadata cache key:rname/ic_QJ3kP/https://www.example.test/hero.png@x@_\ncache_ok:true\ncan_revalidate:false\npartitions:partition {\n  optimizable: false\n  input {\n    index: 0\n    url: "https://www.example.test/hero.png"\n  }\n}\n\n',
+});
+
+/** The module's refusal of a lookup for another host's URL on a per-vhost console. */
+export const LOOKUP_OTHER_HOST: Reply = { status: 403, body: { error: "URL belongs to another host; use that host's console" } };
+
 /** A healthy reply for every leaf: a per-vhost console with an optimizer. */
 export function allReplies(): Partial<Record<Leaf, Responder>> {
   return {

@@ -5,12 +5,15 @@
 
 <script lang="ts">
   // The overview's findings, worst first: what is wrong, the fix, and where
-  // to read more. Acknowledged findings wait in a collapsed group of their
+  // to read more; a fix that names a setting comes with the setting to
+  // paste. Log text a finding quotes is folded under "Log lines", after
+  // the written cause and the fix. Acknowledged findings wait in a collapsed group of their
   // own until their condition clears (alerts.ts). Messages and details may
   // carry message-log text -- visitor-controlled URLs and host names -- so
   // everything here renders as text; the only links are the rule's own
   // route and documentation constants.
   import type { ActiveAlert, AlertSeverity } from "$lib/alerts";
+  import SnippetBlock from "./SnippetBlock.svelte";
 
   let {
     findings,
@@ -38,14 +41,20 @@
               <strong class="finding-label">{finding.label}</strong>
               <span class="alert-message">{finding.message}</span>
             </p>
-            {#if finding.details.length > 0}
-              <ul class="finding-details" data-testid="finding-details">
-                {#each finding.details as line, i (i)}
-                  <li>{line}</li>
-                {/each}
-              </ul>
-            {/if}
             <p class="finding-fix" data-testid="finding-fix"><span class="fix-label">Fix:</span> {finding.fix}</p>
+            {#if finding.snippets}
+              <SnippetBlock id={finding.id} snippets={finding.snippets} />
+            {/if}
+            {#if finding.details.length > 0}
+              <details class="finding-log" data-testid="finding-log">
+                <summary>{finding.details.length === 1 ? "Log line" : "Log lines"}</summary>
+                <ul class="finding-details" data-testid="finding-details">
+                  {#each finding.details as line, i (i)}
+                    <li>{line}</li>
+                  {/each}
+                </ul>
+              </details>
+            {/if}
             {#if finding.link || finding.doc}
               <p class="finding-links">
                 {#if finding.link}
@@ -153,20 +162,30 @@
     margin-right: var(--ps-space-xs);
   }
 
-  /* A log excerpt keeps the text's measure: one line, cut with an ellipsis. */
-  .finding-details li {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* Log text as the server wrote it waits behind the written sentence and the fix. */
+  .finding-log {
+    margin: 0 0 var(--ps-space-xs);
   }
 
-  /* Its width comes from the text block, never from the excerpt's length. */
+  .finding-log summary {
+    width: fit-content;
+    min-height: 24px;
+    cursor: pointer;
+    color: var(--ps-text-secondary);
+  }
+
+  /* Its width comes from the text block, never from a line's length: a long line wraps. */
   .finding-details {
     contain: inline-size;
-    margin: 0 0 var(--ps-space-xs) var(--ps-space-md);
+    margin: var(--ps-space-xs) 0 0 var(--ps-space-md);
     padding: 0;
+    list-style: none;
     font-family: var(--ps-font-mono);
     font-size: var(--ps-font-size-xs);
+  }
+
+  .finding-details li + li {
+    margin-top: var(--ps-space-xs);
   }
 
   .fix-label {

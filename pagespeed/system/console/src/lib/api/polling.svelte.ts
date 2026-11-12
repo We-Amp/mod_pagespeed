@@ -2,7 +2,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { onDestroy } from "svelte";
-import { Poller, pollers, type PollerOptions, type PollerState } from "./poller";
+import { autoRefreshOn, onAutoRefreshChange } from "./auto-refresh";
+import { Poller, pollers, type PollerOptions, type PollerState, type RefreshOutcome } from "./poller";
 
 export interface PollingControls<T> {
   readonly data: T | null;
@@ -12,19 +13,22 @@ export interface PollingControls<T> {
   readonly failures: number;
   readonly paused: boolean;
   readonly nextAt: number | null;
-  refresh(): Promise<void>;
+  refresh(): Promise<RefreshOutcome>;
   start(): void;
   stop(): void;
   /** The fetcher's inputs changed: drop an answer in flight and fetch again. */
   invalidate(): void;
+  /** Changes the interval from here on (poller.ts, setIntervalMs). */
+  setIntervalMs(intervalMs: number): void;
 }
 
 /**
  * Poll `fetcher` every `intervalMs` through the console's shared poller
  * (lib/api/poller.ts): one request at a time, back-off on failures, busy
  * answers kept as "try again", nothing while the tab is hidden. Starts at
- * once and stops when the component is destroyed. Call it during component
- * initialisation.
+ * once and stops when the component is destroyed; while the viewer has
+ * paused auto-refresh (lib/api/auto-refresh.ts) it fetches once and waits.
+ * Call it during component initialisation.
  */
 export function usePolling<T>(
   fetcher: () => Promise<T>,
@@ -37,9 +41,12 @@ export function usePolling<T>(
     state = s;
   });
   const unregister = pollers.add(poller);
-  poller.start();
+  if (autoRefreshOn()) poller.start();
+  else void poller.refresh();
+  const unfollow = onAutoRefreshChange((on) => (on ? poller.start() : poller.stop()));
   onDestroy(() => {
     unregister();
+    unfollow();
     poller.dispose();
   });
 
@@ -69,5 +76,6 @@ export function usePolling<T>(
     start: () => poller.start(),
     stop: () => poller.stop(),
     invalidate: () => poller.invalidate(),
+    setIntervalMs: (intervalMs) => poller.setIntervalMs(intervalMs),
   };
 }

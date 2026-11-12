@@ -26,28 +26,28 @@ export const GO_KEYS: Readonly<Record<string, string>> = {
   o: "#/overview",
   v: "#/savings",
   u: "#/urls",
+  l: "#/logs",
+  m: "#/logs?source=module",
   s: "#/statistics",
   g: "#/graphs",
   h: "#/histograms",
   a: "#/caches",
   c: "#/configuration",
-  m: "#/logs?source=module",
   d: "#/optimizer",
-  l: "#/logs",
 };
 
 const GO_NAMES: Readonly<Record<string, string>> = {
   o: "Overview",
   v: "Savings",
   u: "URLs",
+  l: "Logs",
+  m: "Module messages (Logs)",
   s: "Statistics",
   g: "Graphs (Statistics)",
   h: "Histograms",
   a: "Caches",
   c: "Configuration",
-  m: "Module messages (Logs)",
   d: "Optimizer status",
-  l: "Logs",
 };
 
 /** How long "g" waits for its second key. */
@@ -55,7 +55,7 @@ export const GO_TIMEOUT_MS = 1500;
 
 export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; description: string }> = [
   { keys: "?", description: "Show this list" },
-  { keys: "r", description: "Refresh the page's data now (Configuration, About and Support have no live data; Configuration has its own Refresh button)" },
+  { keys: "r", description: "Refresh the page's data now, as the Refresh button does (About and Support have no data to refresh)" },
   { keys: "/", description: "Jump to the page's search box" },
   ...Object.keys(GO_KEYS).map((k) => ({ keys: `g ${k}`, description: `Go to ${GO_NAMES[k]}` })),
   { keys: "Esc", description: "Close this list" },

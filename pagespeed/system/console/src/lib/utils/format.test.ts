@@ -11,6 +11,7 @@ import {
   formatIsoTitle,
   formatPercent,
   formatRelative,
+  formatSpan,
   formatSig,
   formatUnit,
 } from "./format";
@@ -87,6 +88,16 @@ describe("formatRelative", () => {
   });
   it("clamps a future timestamp to 0 s ago", () => {
     expect(formatRelative(now + 5_000, now)).toBe("0 s ago");
+  });
+});
+
+describe("formatSpan", () => {
+  it("says a span in the console's sentence words, rounded down", () => {
+    expect(formatSpan(42)).toBe("42 s");
+    expect(formatSpan(125)).toBe("2 min");
+    expect(formatSpan(7300)).toBe("2 h");
+    expect(formatSpan(3 * 86_400 + 5)).toBe("3 d");
+    expect(formatSpan(-4)).toBe("0 s");
   });
 });
 

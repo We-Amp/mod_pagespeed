@@ -7,8 +7,10 @@
   import type { ConfigResponse } from "$lib/api/types";
   import LoadError from "$lib/LoadError.svelte";
   import EmptyState from "$lib/EmptyState.svelte";
-  import UnavailableCard, { DOCS_URL } from "$lib/UnavailableCard.svelte";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
+  import { DOCS_URL } from "$lib/data/product-facts-console";
   import { isUnavailable } from "$lib/api/client";
+  import type { RefreshOutcome } from "$lib/api/poller";
   import PageHeader from "$lib/PageHeader.svelte";
   import Tabs from "$lib/Tabs.svelte";
   import { displayHost, scopeLine } from "$lib/utils/config-scope";
@@ -31,7 +33,8 @@
     { id: "effective", label: "Effective for this request" },
   ];
 
-  async function fetchConfig() {
+  // Asked for, never on a timer: the text changes only with the configuration.
+  async function fetchConfig(): Promise<RefreshOutcome> {
     // A failure on screen stays until the answer arrives: the notice, and
     // the focus on its "Try again", survive the retry.
     loading = true;
@@ -39,9 +42,11 @@
       data = await api.getConfig();
       error = null;
       updatedAt = Date.now();
+      return "ok";
     } catch (err) {
       if (isUnavailable(err)) off = true;
       else error = err instanceof Error ? err : String(err);
+      return off ? "off" : "failed";
     } finally {
       loading = false;
     }
@@ -64,15 +69,8 @@
     title="Configuration"
     subtitle={scopeLine(data ? { scope: data.scope, host: displayHost(data.host, window.location.host) } : {})}
     updatedAt={updatedAt}
-  >
-    {#snippet toolbar()}
-      {#if !off}
-        <button type="button" class="btn btn-secondary" onclick={fetchConfig} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-      {/if}
-    {/snippet}
-  </PageHeader>
+    refresh={off ? undefined : { onRefresh: fetchConfig }}
+  />
 
   {#if off}
     <UnavailableCard testid="config-unavailable" />
@@ -130,9 +128,5 @@
     word-break: break-word;
     background: var(--ps-bg-secondary);
     color: var(--ps-text);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
   }
 </style>

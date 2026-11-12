@@ -25,7 +25,7 @@ export function statisticsScopeLine(isGlobal: boolean, host = ""): string {
   }
   const named = host ? ` (${host})` : "";
   return (
-    `Statistics of this virtual host${named} — separate from other hosts only ` +
+    `Statistics of this virtual host${named}. They are separate from other hosts only ` +
     "when per-virtual-host statistics are enabled"
   );
 }

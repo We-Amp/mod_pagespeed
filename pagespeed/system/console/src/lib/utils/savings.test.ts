@@ -12,6 +12,7 @@ import {
   notYetOptimized,
   optimizedCopyHitRate,
   savingsSplit,
+  servedOptimizedText,
   splitSummaryText,
 } from "./savings";
 import { serveSavingsView } from "./serve-savings";
@@ -218,6 +219,19 @@ describe("optimizedCopyHitRate", () => {
 
   it("shows no rate when nothing was in place yet", () => {
     expect(optimizedCopyHitRate({}).percent).toBeNull();
+  });
+});
+
+describe("servedOptimizedText", () => {
+  it("says what the share is a share of, for both counter sets", () => {
+    expect(servedOptimizedText("optimizable").of).toBe("requests for CSS, JavaScript and images");
+    expect(servedOptimizedText("all-in-place").of).toBe("requests of every type");
+  });
+
+  it("keeps the conditional and HEAD caveat in the longer text", () => {
+    expect(servedOptimizedText("optimizable").tooltip).toContain("Conditional and HEAD requests count as served.");
+    // An older module counts pages too: the longer text says why the share is lower there.
+    expect(servedOptimizedText("all-in-place").tooltip).toContain("pages included");
   });
 });
 

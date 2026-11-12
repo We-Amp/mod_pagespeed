@@ -16,9 +16,20 @@
   // with grouping off (source=optimizer&group=0) is the raw stream -- oldest
   // to newest, following the newest entry until the reader scrolls up, a
   // "Jump to newest" that counts what arrived since, the restart/gap/shed
-  // markers inline, and a 3-second poll of the optimizer's ring alone. The
-  // view is a function of the hash; the source and grouping controls
-  // navigate, so the page mounts with its view's one poller.
+  // markers inline, and a 3-second poll of the optimizer's ring alone.
+  //
+  // The view (source, grouping, the text filter `q=`) is preset by the
+  // address when the page mounts; the text filter writes itself back, so a
+  // link to "the entries that name this URL" can be shared. A URL in an
+  // entry links to the URL and, by the mark after it, to its page in this
+  // console; the mark is drawn by the stylesheet, so the entry's text stays
+  // the log's own (to read, to select and to copy).
+  // The Source and Group repeats controls then change it in place:
+  // the page stays mounted with its one poller, so the filter text, the
+  // levels, the expanded rows, the scroll position and the keyboard focus
+  // stay where they are, and the choice is written into the address
+  // (view-address.ts). The fetcher reads the view as it is at each poll;
+  // entering or leaving the raw view changes the poller's interval.
   //
   // Per-sample bookkeeping (both cursors and buffers) lives INSIDE the
   // fetcher, never in an $effect (polling-discipline.test.ts).
@@ -43,10 +54,14 @@
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import { knownPerVhostScope } from "$lib/utils/config-scope";
-  import { daemonUnavailableReason, errorCode, isDaemonUnavailable, wholeServerConsoleOnlyError } from "$lib/utils/daemon";
+  import { errorCode, isDaemonUnavailable, optimizerUnavailableNote, wholeServerConsoleOnlyError } from "$lib/utils/daemon";
+  import { TERMS } from "$lib/data/terms";
   import { formatCount, formatIsoTitle } from "$lib/utils/format";
   import { linkSegments } from "$lib/utils/linkify";
+  import { inspectHrefForLink } from "$lib/utils/url-inspect";
   import { hostsInText, textNamesHost } from "$lib/utils/host-lens";
+  import { replaceViewParams } from "$lib/utils/view-address";
+  import { settledCount } from "$lib/utils/filter-status";
   import {
     EMPTY_LOG_BUFFER,
     countUnseen,
@@ -80,13 +95,19 @@
   // Cap on how many module messages are kept client-side across polls.
   const MAX_RETAINED_MESSAGES = 2000;
 
-  // The view, from the hash (presets from a link; the controls below
-  // navigate to change them). A per-vhost console shows the module's
-  // messages only.
-  const source: SourceFilter = scope.isGlobal ? parseSourceFilter(router.params.get("source")) : "module";
-  const grouped = router.params.get("group") !== "0";
-  const raw = source === "optimizer" && !grouped;
-  const POLL_MS = raw ? 3000 : 5000;
+  const POLL_MS = 5000;
+  const RAW_POLL_MS = 3000;
+
+  // The view: preset by the address the page was opened with, then the
+  // operator's to change with the controls below. A per-vhost console shows
+  // the module's messages only.
+  const linkedSource: SourceFilter = scope.isGlobal ? parseSourceFilter(router.params.get("source")) : "module";
+  const linkedGrouped = router.params.get("group") !== "0";
+  const linkedRaw = linkedSource === "optimizer" && !linkedGrouped;
+  let source = $state<SourceFilter>(linkedSource);
+  let grouped = $state(linkedGrouped);
+  let raw = $derived(source === "optimizer" && !grouped);
+  let intervalMs = $derived(raw ? RAW_POLL_MS : POLL_MS);
 
   // Both buffers are replaced wholesale by each fold, never deep-proxied.
   let messages: MessagesState = $state.raw({ items: [], next: 0 });
@@ -111,11 +132,13 @@
   }
 
   const poll = usePolling(async () => {
+    // The view this read is for: a control may change it before the answer.
+    const rawRead = raw;
     const previousNextId = optimizer.nextId;
     const askOptimizer = !optimizerOff && !knownPerVhostScope(scope.config, scope.isGlobal);
     const [mod, opt] = await Promise.allSettled([
       // The raw view reads the optimizer's ring alone, as the old page did.
-      raw ? Promise.resolve(null) : api.getMessages(messages.next || undefined),
+      rawRead ? Promise.resolve(null) : api.getMessages(messages.next || undefined),
       askOptimizer
         ? readLogPages((since) => api.daemonLogs(since), optimizer)
         : Promise.reject(wholeServerConsoleOnlyError()),
@@ -147,7 +170,7 @@
       if (!isBusyAnswer(err)) optimizerError = err;
       // The raw view's one source is busy: the poller's one-second retry,
       // with the current view kept.
-      if (raw && isBusyAnswer(err)) throw err;
+      if (rawRead && isBusyAnswer(err)) throw err;
     }
     if (mod.status === "rejected") {
       const err = asError(mod.reason);
@@ -165,7 +188,7 @@
     }
     updatedAt = Date.now();
     return updatedAt;
-  }, POLL_MS);
+  }, linkedRaw ? RAW_POLL_MS : POLL_MS);
 
   async function pinToNewestWhenRendered(attempts = 3): Promise<void> {
     // On the very first page the list mounts only once the poller's own
@@ -182,12 +205,13 @@
   }
 
   // The level filter is a preset from the link (level=) and the operator's
-  // to change from there; the raw view shows every level unless the link
-  // names one, as the old page did.
+  // to change from there; a link to the raw view shows every level unless
+  // it names one, as the old page did. Changing the view with the controls
+  // leaves the levels as the operator set them.
   const levelParam = router.params.get("level");
   const levelKnown = isKnownTimelineLevel(levelParam);
-  let enabledLevels = $state(timelineLevelFilter(raw && levelParam === null ? "debug" : levelParam));
-  let text = $state("");
+  let enabledLevels = $state(timelineLevelFilter(linkedRaw && levelParam === null ? "debug" : levelParam));
+  let text = $state(router.params.get("q") ?? "");
   let expanded = $state<Record<string, boolean>>({});
 
   let perVhost = $derived(optimizerOff || knownPerVhostScope(scope.config, scope.isGlobal));
@@ -220,17 +244,50 @@
   function levelHref(level: string): string {
     const params = new URLSearchParams({ source, level });
     if (!grouped) params.set("group", "0");
+    if (text.trim() !== "") params.set("q", text);
     return `#/logs?${params.toString()}`;
   }
 
-  /** Another view of this page: the link's level kept, the source and the grouping as asked. */
-  function viewHref(nextSource: SourceFilter, nextGrouped: boolean): string {
-    const params = new URLSearchParams();
-    if (levelParam !== null) params.set("level", levelParam);
-    if (scope.isGlobal && nextSource !== "both") params.set("source", nextSource);
-    if (!nextGrouped) params.set("group", "0");
-    const query = params.toString();
-    return query === "" ? "#/logs" : `#/logs?${query}`;
+  /**
+   * Another view of this page, in place: the address carries the choice and
+   * keeps its other parameters. Between views that read both logs nothing
+   * is fetched: they are filters over what is already here. Entering the
+   * raw view starts following the newest entry at its faster interval;
+   * leaving it reads the module's messages at once, from where they were
+   * last read.
+   */
+  function setView(nextSource: SourceFilter, nextGrouped: boolean): void {
+    const wasRaw = raw;
+    source = nextSource;
+    grouped = nextGrouped;
+    replaceViewParams({
+      ...(scope.isGlobal ? { source: nextSource === "both" ? null : nextSource } : {}),
+      group: nextGrouped ? null : "0",
+    });
+    const nowRaw = nextSource === "optimizer" && !nextGrouped;
+    if (nowRaw === wasRaw) return;
+    poll.setIntervalMs(nowRaw ? RAW_POLL_MS : POLL_MS);
+    if (nowRaw) {
+      follow = true;
+      anchorId = null;
+      unseenFrom = null;
+      void pinToNewestWhenRendered();
+    } else {
+      poll.invalidate();
+    }
+  }
+
+  // The count, read out once the filters are quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((status) => (countStatus = status));
+  const announceFiltered = () =>
+    announceCount(() => `Showing ${formatCount(filtered.length)} of ${formatCount(sourceEntries.length)} entries`);
+
+  /** The text filter, kept in the address in place (no history entry per keystroke). */
+  function setText(value: string): void {
+    text = value;
+    replaceViewParams({ q: value.trim() === "" ? null : value });
+    announceFiltered();
   }
 
   function onLogScroll() {
@@ -275,7 +332,7 @@
 <!-- Log text is visitor-influenced: every segment renders as a text node;
      only an http(s) URL that parses becomes a link (linkify.ts). Kept on one
      line: the text keeps its whitespace (pre-wrap). -->
-{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{:else}{segment.text}{/if}{/each}{/snippet}
+{#snippet linked(value: string)}{#each linkSegments(value) as segment, i (i)}{#if segment.kind === "link"}<a class="log-link" href={segment.href} target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">{segment.text}</a>{@const inspect = inspectHrefForLink(segment.href)}{#if inspect !== null}<a class="log-inspect" href={inspect} aria-label={`Inspect ${segment.text}`} data-testid="log-inspect"></a>{/if}{:else}{segment.text}{/if}{/each}{/snippet}
 
 <div class="page">
   <PageHeader
@@ -283,16 +340,22 @@
     {updatedAt}
     refresh={{
       autoRefresh: poll.autoRefresh,
-      intervalMs: POLL_MS,
+      intervalMs,
       onToggle: () => (poll.autoRefresh ? poll.stop() : poll.start()),
       onRefresh: () => poll.refresh(),
+      failedParts: () => [
+        ...(source !== "optimizer" ? [moduleError] : []),
+        ...(source !== "module" ? [optimizerError] : []),
+      ],
     }}
   />
 
-  <p class="scope-note" data-testid="logs-scope-note">
+  <p class="note" data-testid="logs-scope-note">
     {#if raw}
       The optimizer's own recent log, oldest to newest; the list follows
       the newest entry until you scroll up.
+    {:else if perVhost}
+      The module's messages (every virtual host of this server), newest first.
     {:else}
       The module's messages (every virtual host of this server) and the
       optimizer's own recent log, newest first.
@@ -300,13 +363,13 @@
   </p>
 
   {#if lensHost !== null}
-    <p class="filter-note" data-testid="logs-lens">
-      Entries that name {lensHost} (host lens); entries that name no host are hidden while the lens is on.
+    <p class="note" data-testid="logs-lens">
+      {TERMS.hostFilter}: entries that name {lensHost}. Entries that name no host are hidden while the filter is on.
     </p>
   {/if}
 
   {#if levelParam}
-    <p class="filter-note" data-testid="logs-filter-note">
+    <p class="note" data-testid="logs-filter-note">
       {#if levelKnown}
         Showing {levelParam} entries and anything more severe.
       {:else}
@@ -326,14 +389,14 @@
     <RefreshNotice error={poll.error} />
 
     {#if isUnavailable(moduleError) && source !== "optimizer"}
-      <p class="source-note" data-testid="logs-module-off">
+      <p class="notice source-note" data-testid="logs-module-off">
         The module's messages are turned off on this console.
       </p>
     {:else if moduleError && source !== "optimizer"}
-      <p class="source-note" data-testid="logs-module-error">The module's messages could not be read: {moduleError.message}</p>
+      <p class="notice source-note" data-testid="logs-module-error">The module's messages could not be read: {moduleError.message}</p>
     {/if}
     {#if perVhost}
-      <p class="source-note" data-testid="logs-per-vhost">
+      <p class="notice source-note" data-testid="logs-per-vhost">
         The optimizer's log covers every virtual host on this server, so this
         per-host console shows the module's messages only.
         {#if globalHref !== null}
@@ -342,46 +405,45 @@
       </p>
     {:else if source !== "module" && optimizerError}
       {#if isUnavailable(optimizerError)}
-        <p class="source-note" data-testid="logs-optimizer-off">
+        <p class="notice source-note" data-testid="logs-optimizer-off">
           The optimizer's log is turned off on this console.
         </p>
       {:else if optimizerError instanceof ApiError && optimizerError.status === 404}
-        <p class="source-note" data-testid="logs-no-support">
+        <p class="notice source-note" data-testid="logs-no-support">
           This module version cannot show the optimizer's log; the module's messages are below.
         </p>
       {:else if optimizerError instanceof ApiError && optimizerError.status === 501}
-        <p class="source-note" data-testid="logs-no-support">
+        <p class="notice source-note" data-testid="logs-no-support">
           This optimizer version does not provide logs. Update the optimizer package.
         </p>
       {:else if errorCode(optimizerError) === "response_too_large"}
-        <p class="source-note" data-testid="logs-too-large">
+        <p class="notice source-note" data-testid="logs-too-large">
           The optimizer answered with a log page larger than the console accepts. The optimizer
           itself is running; the page asks again on the next refresh.
         </p>
       {:else if isDaemonUnavailable(optimizerError)}
-        <p class="source-note" data-testid="logs-unreachable">
-          The optimizer's log: optimizer unreachable ({daemonUnavailableReason(optimizerError)}).
-          Its entries appear here once it answers.
+        <p class="notice source-note" data-testid="logs-unreachable">
+          The optimizer's log is not shown. {optimizerUnavailableNote(optimizerError).detail}
         </p>
       {:else}
-        <p class="source-note" data-testid="logs-optimizer-error">The optimizer's log could not be read: {optimizerError.message}</p>
+        <p class="notice source-note" data-testid="logs-optimizer-error">The optimizer's log could not be read: {optimizerError.message}</p>
       {/if}
     {/if}
     {#if source !== "module" && !raw}
       {#if notes.restarts > 0}
-        <p class="source-note" data-testid="logs-restart">
+        <p class="notice source-note" data-testid="logs-restart">
           The optimizer restarted {notes.restarts === 1 ? "once" : `${formatCount(notes.restarts)} times`} while this
           page was open; its earlier entries are kept.
         </p>
       {/if}
       {#if notes.dropped > 0}
-        <p class="source-note" data-testid="logs-gap">
+        <p class="notice source-note" data-testid="logs-gap">
           {entriesText(notes.dropped)} dropped: the optimizer logged faster than this page reads,
           and its log ring moved on.
         </p>
       {/if}
       {#if notes.notRecorded > 0}
-        <p class="source-note" data-testid="logs-shed">
+        <p class="notice source-note" data-testid="logs-shed">
           {entriesText(notes.notRecorded)} not recorded: the optimizer was logging faster than it could keep.
         </p>
       {/if}
@@ -398,7 +460,7 @@
                 name="logs-source"
                 value={option.value}
                 checked={source === option.value}
-                onchange={() => router.navigate(viewHref(option.value, grouped))}
+                onchange={() => setView(option.value, grouped)}
               />
               {option.label}
             </label>
@@ -409,13 +471,13 @@
         <legend>Level</legend>
         {#each TIMELINE_LEVELS as level (level)}
           <label class="field-check">
-            <input type="checkbox" bind:checked={enabledLevels[level]} />
+            <input type="checkbox" bind:checked={enabledLevels[level]} onchange={announceFiltered} />
             <span class="level-badge level-badge-{level}">{level} ({formatCount(counts[level])})</span>
           </label>
         {/each}
       </fieldset>
       <label class="toggle field-check">
-        <input type="checkbox" checked={grouped} onchange={() => router.navigate(viewHref(source, !grouped))} />
+        <input type="checkbox" checked={grouped} onchange={() => setView(source, !grouped)} />
         Group repeats
       </label>
       <div class="control-group">
@@ -425,9 +487,11 @@
         placeholder="Filter the entries"
         aria-label="Filter the entries"
         data-testid="logs-search"
-        bind:value={text}
+        value={text}
+        oninput={(event) => setText(event.currentTarget.value)}
       />
       <span class="count field-text">Showing {formatCount(filtered.length)} of {formatCount(sourceEntries.length)}</span>
+      <span class="visually-hidden" role="status" data-testid="logs-count-status">{countStatus}</span>
       </div>
     </div>
 
@@ -491,7 +555,7 @@
         {/each}
       </div>
       {#if rawRows.length > rawVisible.length}
-        <p class="section-note" data-testid="logs-render-cap">
+        <p class="note" data-testid="logs-render-cap">
           Showing {formatCount(rawVisible.length)} of {formatCount(rawRows.length)} rows; narrow the filters, or jump to
           the newest, to see others.
         </p>
@@ -507,9 +571,9 @@
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="timeline" data-testid="logs-timeline" role="region" aria-label="Log entries" tabindex="0">
         {#each visibleRows as row (row.key)}
-          <div class="log-row log-row--{isKnownTimelineLevel(row.level) ? row.level : 'debug'}" data-testid="log-group" data-source={row.source}>
+          <div class="log-row log-row-{isKnownTimelineLevel(row.level) ? row.level : 'debug'}" data-testid="log-group" data-source={row.source}>
             <div class="log-meta">
-              <span class="source-badge">{row.source === "module" ? "Module" : "Optimizer"}</span>
+              <span class="badge badge-outline source-badge">{row.source === "module" ? "Module" : "Optimizer"}</span>
               <span class="level-badge {levelBadgeClass(row.level)}">{row.level}</span>
               {#if row.lastTs !== null}
                 <time class="log-time" datetime={formatIsoTitle(row.lastTs)} title={formatIsoTitle(row.lastTs)}>{formatLogTimestamp(row.lastTs)}</time>
@@ -544,7 +608,7 @@
         {/each}
       </div>
       {#if rows.length > visibleRows.length}
-        <p class="section-note" data-testid="logs-render-cap">
+        <p class="note" data-testid="logs-render-cap">
           Showing the newest {formatCount(visibleRows.length)} of {formatCount(rows.length)} rows; narrow the filters to see others.
         </p>
       {/if}
@@ -553,23 +617,8 @@
 </div>
 
 <style>
-  .scope-note,
-  .filter-note,
-  .section-note,
   .source-note {
     margin: 0 0 var(--ps-space-sm);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text-secondary);
-  }
-
-  .source-note {
-    padding: var(--ps-space-xs) var(--ps-space-sm);
-    border-left: 3px solid var(--ps-border);
-    background: var(--ps-bg-secondary);
-  }
-
-  .loading {
-    color: var(--ps-text-secondary);
   }
 
   .controls {
@@ -677,19 +726,19 @@
     background: var(--ps-bg-secondary);
   }
 
-  .log-row--fatal {
+  .log-row-fatal {
     border-left-color: var(--ps-severity-fatal-bg);
   }
 
-  .log-row--error {
+  .log-row-error {
     border-left-color: var(--ps-error);
   }
 
-  .log-row--warning {
+  .log-row-warning {
     border-left-color: var(--ps-warning);
   }
 
-  .log-row--info {
+  .log-row-info {
     border-left-color: var(--ps-primary);
   }
 
@@ -699,15 +748,6 @@
     flex-wrap: wrap;
     gap: var(--ps-space-sm);
     margin-bottom: var(--ps-space-xs);
-  }
-
-  .source-badge {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 600;
-    padding: 0 var(--ps-space-sm);
-    border: 1px solid var(--ps-border);
-    border-radius: 999px;
-    color: var(--ps-text-secondary);
   }
 
   .log-time,
@@ -731,8 +771,20 @@
     min-width: 0;
   }
 
-  .log-link {
+  .log-link,
+  .log-inspect {
     color: var(--ps-primary);
+  }
+
+  /* The way to the URL's page in this console: a mark after the URL, with
+     room to hit it. */
+  .log-inspect {
+    margin-left: var(--ps-space-xs);
+    font-size: var(--ps-font-size-xs);
+  }
+
+  .log-inspect::after {
+    content: "inspect";
   }
 
   .log-expand {

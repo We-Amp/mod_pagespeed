@@ -30,8 +30,15 @@ class Router {
    */
   navigations: number = $state(0);
 
+  /**
+   * The address before the last navigation, with what pages wrote into it
+   * in place; "" until the first one. Read when a page mounts.
+   */
+  previous = "";
+
   constructor() {
-    window.addEventListener("hashchange", () => {
+    window.addEventListener("hashchange", (event) => {
+      this.previous = new URL(event.oldURL).hash;
       this.hash = getHash();
       this.navigations += 1;
     });

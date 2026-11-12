@@ -6,12 +6,14 @@
 <script lang="ts">
   import { onMount, tick, untrack, type Component } from "svelte";
   import { AdminApiClient } from "$lib/api/client";
-  import { connection, type ConnectionView } from "$lib/api/connection";
+  import { connection, optimizerPresence, type ConnectionView } from "$lib/api/connection";
   import { unavailable } from "$lib/api/unavailable";
   import { provideConsole } from "$lib/api/context";
   import { pollers } from "$lib/api/poller";
+  import { autoRefreshOn, onAutoRefreshChange } from "$lib/api/auto-refresh";
   import ConnectionBanner from "$lib/ConnectionBanner.svelte";
   import { HostLens, activeLensHost } from "$lib/host-lens.svelte";
+  import { TERMS } from "$lib/data/terms";
   import HostLensSelect from "$lib/HostLensSelect.svelte";
   import { ConsoleScope } from "$lib/console-scope.svelte";
   import LoadError from "$lib/LoadError.svelte";
@@ -25,16 +27,7 @@
   import { LensFollower, lensAddressRewrite, lensFromParams, lensStorageKey, loadLens, withLens } from "$lib/utils/host-lens";
   import { markProgrammaticFocus } from "$lib/utils/programmatic-focus";
   import { moduleTag } from "$lib/utils/versions";
-  import {
-    CONSOLE_TITLE,
-    PRODUCT_DISPLAY_NAME,
-    PRODUCT_NAME,
-    VENDOR,
-    VENDOR_HOST,
-    VENDOR_URL,
-    WEBSITE,
-    WEBSITE_HOST,
-  } from "$lib/data/product-facts-console";
+  import { CONSOLE_TITLE, PRODUCT_DISPLAY_NAME, PRODUCT_NAME, WEBSITE, WEBSITE_HOST } from "$lib/data/product-facts-console";
 
   const { basePath, isGlobal: pathSaysGlobal } = detectBasePath();
   const api = new AdminApiClient(basePath);
@@ -93,6 +86,28 @@
   const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
 
   let sidebarOpen = $state(false);
+
+  // At this width (a phone, or a desktop window zoomed to 200% and more) the
+  // sidebar is a drawer; the stylesheet below uses the same breakpoint.
+  // Closed, the drawer is off screen and inert: out of the tab order and
+  // hidden from assistive technology. Open, the page behind it is inert
+  // instead, so Tab stays in the drawer and the top bar.
+  const drawerMedia = window.matchMedia("(max-width: 768px)");
+  let drawerMode = $state(drawerMedia.matches);
+  onMount(() => {
+    const onChange = () => {
+      drawerMode = drawerMedia.matches;
+      if (!drawerMode) sidebarOpen = false;
+      // The window shrank (or was zoomed) into the drawer layout with the
+      // focus in the sidebar: the sidebar is now a closed, inert drawer, so
+      // the focus goes to the button that opens it, not nowhere.
+      else if (!sidebarOpen && navEl?.contains(document.activeElement)) menuToggle?.focus();
+    };
+    drawerMedia.addEventListener("change", onChange);
+    return () => drawerMedia.removeEventListener("change", onChange);
+  });
+  let navEl = $state<HTMLElement>();
+  let menuToggle = $state<HTMLButtonElement>();
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
 
@@ -111,6 +126,36 @@
 
   // What the top bar says about the server: answered or not (not a health check).
   let connectionView = $state<ConnectionView>(connection.view);
+  let connected = $derived(connectionView.status === "connected");
+  // Paused auto-refresh asks nothing, so the bar cannot say the server
+  // answers (or that the console keeps trying): it says it is paused.
+  // Turned back on, the state from before the pause is old news: the bar
+  // says "Checking…" until the next request settles.
+  let autoOn = $state(autoRefreshOn());
+  let checking = $state(false);
+  let checks = 0;
+  onMount(() =>
+    onAutoRefreshChange((on) => {
+      autoOn = on;
+      const ticket = ++checks;
+      checking = on;
+      if (on)
+        void connection.next().then(() => {
+          if (ticket === checks) checking = false;
+        });
+    }),
+  );
+  let neutral = $derived(!autoOn || checking);
+  let stateWord = $derived(!autoOn ? "Paused" : checking ? "Checking…" : connected ? "Connected" : "Reconnecting…");
+  // The console's scope, in the top bar and at the head of the drawer.
+  let scopeLabel = $derived(scope.isGlobal ? "Whole server" : scope.host || "This host");
+  // A server without an optimizer: its pages stay listed, under a muted heading.
+  let noOptimizer = $state(false);
+  onMount(() =>
+    optimizerPresence.subscribe((p) => {
+      noOptimizer = p === "none";
+    }),
+  );
   onMount(() =>
     connection.subscribe((v) => {
       connectionView = v;
@@ -121,12 +166,17 @@
   );
 
   // Load the page for the current hash (a new query on the same page loads
-  // it afresh). Only the most recent navigation may show its page -- a
-  // slower load must not replace a later one; the tab title names the page,
-  // and after the first load focus moves to the new page's heading.
+  // it afresh). Every navigation counts, also one to the address the router
+  // last read: a page's own controls rewrite the address in place
+  // (view-address.ts), and following a link back to the earlier address
+  // must still mount the page from it (router.navigations). Only the most
+  // recent navigation may show its page -- a slower load must not replace a
+  // later one; the tab title names the page, and after the first load focus
+  // moves to the new page's heading.
   const loads = new LatestGate();
   let firstLoad = true;
   $effect(() => {
+    void router.navigations;
     const route = router.currentRoute;
     const ticket = loads.begin();
     // Every navigation closes the phone's drawer, however it was made
@@ -164,7 +214,12 @@
   }
 
   /** The skip link: the user asked for it, so the usual focus ring rules apply. */
-  function focusPageHeading(): void {
+  async function focusPageHeading(): Promise<void> {
+    if (sidebarOpen) {
+      // The page is inert behind an open drawer: close it first.
+      sidebarOpen = false;
+      await tick();
+    }
     pageHeading()?.focus();
   }
 
@@ -176,8 +231,44 @@
     heading.focus();
   }
 
-  function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
+  /** Opens the drawer with the focus on the current page's link. */
+  async function openDrawer(): Promise<void> {
+    sidebarOpen = true;
+    await tick();
+    const link = navEl?.querySelector<HTMLElement>("a[aria-current='page']") ?? navEl?.querySelector<HTMLElement>("a");
+    link?.focus();
+  }
+
+  /**
+   * Closes the drawer. A focus that was inside it, or that a tap on the
+   * backdrop has just taken away, goes back to the menu button, not
+   * nowhere; Escape always returns it there.
+   */
+  function closeDrawerFrom(key: "pointer" | "escape"): void {
+    if (!sidebarOpen) return;
+    const active = document.activeElement;
+    const stranded = active === null || active === document.body || (navEl?.contains(active) ?? false);
+    sidebarOpen = false;
+    if (key === "escape" || stranded) menuToggle?.focus();
+  }
+
+  function closeDrawer(): void {
+    closeDrawerFrom("pointer");
+  }
+
+  function toggleSidebar(): void {
+    if (sidebarOpen) closeDrawer();
+    else void openDrawer();
+  }
+
+  /** The search shortcut: the page's search box; an open drawer closes first, as the page behind it is inert. */
+  async function focusPageSearch(): Promise<void> {
+    const box = () => document.querySelector<HTMLElement>("main input[type='text'], main input[type='search']");
+    if (sidebarOpen && box() !== null) {
+      sidebarOpen = false;
+      await tick();
+    }
+    box()?.focus();
   }
 
   const shortcuts = new ShortcutReader();
@@ -192,6 +283,11 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (helpOpen) return; // the dialog handles its own keys
+    if (e.key === "Escape" && drawerMode && sidebarOpen) {
+      e.preventDefault();
+      closeDrawerFrom("escape");
+      return;
+    }
     const action = shortcuts.read(
       { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, editable: isEditable(e.target) },
       Date.now(),
@@ -206,7 +302,7 @@
         void pollers.refreshAll();
         break;
       case "search":
-        document.querySelector<HTMLElement>("main input[type='text'], main input[type='search']")?.focus();
+        void focusPageSearch();
         break;
       case "go":
         router.navigate(action.path);
@@ -228,6 +324,7 @@
       aria-label="Toggle menu"
       aria-expanded={sidebarOpen}
       aria-controls="console-nav"
+      bind:this={menuToggle}
     >
       <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
@@ -246,46 +343,53 @@
       </a>
       <span class="topbar-subtitle">
         <span class="topbar-version" title={appVersion}>{moduleTag(appVersion)}</span>
-        <span class="topbar-subtitle-sep" aria-hidden="true">·</span>
-        <span class="topbar-connection" data-testid="connection-state">{connectionView.status === "connected" ? "connected" : "reconnecting"}</span>
-        <span class="topbar-subtitle-sep topbar-vendor" aria-hidden="true">·</span>
-        <a
-          href={VENDOR_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="topbar-subtitle-link topbar-vendor"
-          aria-label="{VENDOR} – visit {VENDOR_HOST}"
-        >{VENDOR_HOST}</a>
       </span>
       <span class="topbar-tools">
-        <!-- Tells the two consoles apart; a per-host console needs no label. -->
-        {#if scope.isGlobal}<span class="topbar-badge">Global Admin</span>{/if}
+        <!-- Whether the server answers: a dot and a word; announced when it
+             changes. On a phone the word is hidden and names the dot. -->
+        <span class="topbar-status" role="status" data-testid="connection-pill">
+          <span class="status-dot" class:status-dot-bar-ok={!neutral && connected} class:status-dot-bar-warning={!neutral && !connected} class:status-dot-bar-paused={neutral} class:status-dot-square={neutral}></span>
+          <span class="topbar-status-word" data-testid="connection-state">{stateWord}</span>
+        </span>
+        <!-- Whose figures this console shows: the whole server, or one host. -->
+        <span class="topbar-chip" data-testid="console-scope" title={scopeLabel}><span class="visually-hidden">{"Scope: "}</span>{scopeLabel}</span>
         <button type="button" class="shortcuts-button" onclick={() => (helpOpen = true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
       </span>
     </span>
     {#if scope.isGlobal}
       <span class="topbar-lens">
-        <HostLensSelect id="host-lens-top" testid="host-lens" host={lens.host} options={lens.options} onselect={selectLens} />
+        <HostLensSelect id="host-lens-top" testid="host-lens" host={lens.host} options={lens.options} applied={router.currentRoute.hostAware === true} onselect={selectLens} />
       </span>
     {/if}
   </header>
 
   <!-- Sidebar -->
-  <nav class="sidebar" class:open={sidebarOpen} id="console-nav" aria-label="Console pages">
+  <nav
+    class="sidebar"
+    class:open={sidebarOpen}
+    id="console-nav"
+    aria-label="Console pages"
+    inert={drawerMode && !sidebarOpen}
+    bind:this={navEl}
+  >
     <div class="drawer-scope">
-      <span class="drawer-chip">{scope.isGlobal ? "Whole server" : scope.host || "This host"}</span>
+      <span class="drawer-chip">{scopeLabel}</span>
+      <span class="drawer-status" data-testid="drawer-connection"><span class="status-dot" class:status-dot-ok={!neutral && connected} class:status-dot-warning={!neutral && !connected} class:status-dot-square={neutral}></span>{stateWord}</span>
       {#if scope.isGlobal}
-        <HostLensSelect id="host-lens-drawer" testid="host-lens-drawer" host={lens.host} options={lens.options} onselect={selectLens} />
+        <HostLensSelect id="host-lens-drawer" testid="host-lens-drawer" host={lens.host} options={lens.options} applied={router.currentRoute.hostAware === true} onselect={selectLens} />
       {/if}
     </div>
     {#each NAV_GROUPS as group (group.id)}
       {#if group.label}
-        <p class="nav-group-label" class:nav-group-label--muted={group.muted === true} id="nav-group-{group.id}">{group.label}</p>
+        {@const muted = group.id === "optimizer" && noOptimizer}
+        <p class="nav-group-label" class:nav-group-label-muted={muted} id="nav-group-{group.id}">
+          {group.label}{#if muted}{" "}<span class="nav-group-off" data-testid="nav-optimizer-off">not configured</span>{/if}
+        </p>
       {/if}
       <ul class="nav-list" aria-labelledby={group.label ? `nav-group-${group.id}` : undefined}>
         {#each routes.filter((r) => r.group === group.id && r.hidden !== true && (r.globalOnly !== true || scope.isGlobal)) as route (route.path)}
           {@const hint = navKeyHint(route.path)}
-          {@const active = isNavActive(route, router.path, routes)}
+          {@const active = isNavActive(route, router.path, routes, scope.isGlobal)}
           {@const off = isOff(route)}
           <li class="nav-row">
             <a
@@ -295,19 +399,19 @@
               aria-current={active ? "page" : undefined}
               aria-keyshortcuts={hint ?? undefined}
               aria-describedby={off ? `nav-off-${route.path.slice(2).replace(/\W+/g, "-")}` : undefined}
-              onclick={() => (sidebarOpen = false)}
+              onclick={closeDrawer}
             >{route.label}</a>
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
             {#if off}
               <span class="nav-off" aria-hidden="true">off</span>
-              <span class="sr-only" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
+              <span class="visually-hidden" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
             {:else if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
           </li>
         {/each}
         <!-- Pages the server renders itself: plain same-tab anchors, no hash route. -->
         {#each SERVER_PAGE_LINKS.filter((l) => l.group === group.id) as link (link.leaf)}
           <li class="nav-row">
-            <a class="nav-item" href={serverPageHref(api.basePath, link.leaf)} onclick={() => (sidebarOpen = false)}>{link.label}</a>
+            <a class="nav-item" href={serverPageHref(api.basePath, link.leaf)} onclick={closeDrawer}>{link.label}</a>
           </li>
         {/each}
       </ul>
@@ -316,15 +420,16 @@
 
   <!-- Backdrop for mobile sidebar -->
   {#if sidebarOpen}
-    <div class="backdrop" onclick={() => (sidebarOpen = false)} role="presentation"></div>
+    <div class="backdrop" onclick={closeDrawer} role="presentation"></div>
   {/if}
 
   <!-- Main content -->
-  <main class="content" id="main" tabindex="-1">
+  <main class="content" id="main" tabindex="-1" inert={drawerMode && sidebarOpen}>
     <ConnectionBanner />
-    {#if lensHost !== null && router.currentRoute.hostAware !== true}
+    <!-- On a phone the host filter is in the drawer, so the page says it does not apply; a wider window says so beside the control. -->
+    {#if drawerMode && lensHost !== null && router.currentRoute.hostAware !== true}
       <p class="lens-note" data-testid="lens-note">
-        Host lens {lensHost}: this page has no per-host figures, so it shows the whole server.
+        {TERMS.hostFilter} {lensHost}: this page has no per-host figures, so it shows the whole server.
       </p>
     {/if}
     {#if loadError}
@@ -355,8 +460,11 @@
      console label with the shortcuts button, the host lens) sit
      --ps-space-md apart, items within a group --ps-space-sm, and the bar's
      side padding is the content's, so their edges line up. */
+  /* min-width: the bar never widens the page; its parts give way (the
+     scope chip first) instead. */
   .topbar {
     grid-area: topbar;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: var(--ps-space-md);
@@ -431,18 +539,6 @@
     font-weight: 700;
   }
 
-  .topbar-subtitle-link {
-    color: inherit;
-    text-decoration: none;
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.15s;
-  }
-
-  .topbar-subtitle-link:hover,
-  .topbar-subtitle-link:focus-visible {
-    border-bottom-color: currentColor;
-  }
-
   .topbar-tools {
     display: inline-flex;
     align-items: center;
@@ -450,18 +546,14 @@
     min-width: 0;
   }
 
-  .topbar-badge {
+  /* The connection state: the dot carries it in colour, the word in words. */
+  .topbar-status {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
     font-size: var(--ps-font-size-xs);
     font-weight: 600;
-    padding: 2px 8px;
-    border-radius: var(--ps-border-radius);
-    background: rgba(255, 255, 255, 0.15);
-    letter-spacing: 0.02em;
     white-space: nowrap;
-    flex-shrink: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .shortcuts-button {
@@ -543,7 +635,10 @@
     padding-right: calc(var(--ps-space-md) + 3em);
   }
 
+  /* The shortcut hints show while the pointer or the focus is in the
+     sidebar, at the labels' own secondary colour: quiet without dimming. */
   .nav-key {
+    visibility: hidden;
     position: absolute;
     top: 50%;
     right: var(--ps-space-md);
@@ -553,6 +648,11 @@
     color: var(--ps-text-secondary);
     white-space: nowrap;
     pointer-events: none;
+  }
+
+  .sidebar:hover .nav-key,
+  .sidebar:focus-within .nav-key {
+    visibility: visible;
   }
 
   /* A page the server has turned off: still listed, quieter. */
@@ -567,17 +667,9 @@
     pointer-events: none;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
   .nav-item {
     display: block;
+    position: relative;
     width: 100%;
     padding: var(--ps-space-sm) var(--ps-space-lg);
     background: none;
@@ -596,10 +688,29 @@
     color: var(--ps-text);
   }
 
+  /* A row spans the sidebar from edge to edge, and the sidebar scrolls, so
+     it clips what a row draws outside its box: the focus ring is drawn
+     inside the row, whole. */
+  .nav-item:focus-visible {
+    outline-offset: -2px;
+  }
+
   .nav-item.active {
     color: var(--ps-primary);
     background: var(--ps-primary-light);
     font-weight: 500;
+  }
+
+  /* The current page is marked by a shape as well as a colour: a bar at
+     the row's leading edge, in the row's text colour. It is drawn inside
+     the link, so the highlight still spans the row from edge to edge. */
+  .nav-item.active::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 3px;
+    background: currentColor;
   }
 
   .skip-link {
@@ -629,10 +740,17 @@
     color: var(--ps-text-secondary);
   }
 
-  .nav-group-label--muted {
+  /* A group whose pages have nothing to show here (no optimizer on this
+     server): the heading is quieter and says why, in the "off" tag's style. */
+  .nav-group-label-muted {
     font-weight: 500;
-    letter-spacing: normal;
+  }
+
+  .nav-group-off {
+    margin-inline-start: var(--ps-space-sm);
+    font-style: italic;
     text-transform: none;
+    letter-spacing: normal;
   }
 
   .content {
@@ -653,15 +771,31 @@
     display: none;
   }
 
-  .loading {
-    color: var(--ps-text-secondary);
-    padding: var(--ps-space-md);
+  /* A narrow desktop window has no room for the "not applied" note beside
+     the host filter: the scope chip keeps its width, and the note stays the
+     control's description. The breakpoints leave room for a system font
+     wider than the usual ones. */
+  @media (max-width: 900px) {
+    .topbar-lens :global(.lens-off) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
 
-  /* On a narrow desktop window the vendor link gives way, so the console
-     label and the host lens keep their full width. */
-  @media (max-width: 960px) {
-    .topbar-vendor {
+  /* Up to 1024 px the note takes the version's room, and up to 900 px the
+     host filter does: the version stays on the About page, as on a phone. */
+  @media (max-width: 1024px) {
+    .topbar:has(:global(.lens-off)) .topbar-subtitle {
+      display: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .topbar:has(.topbar-lens) .topbar-subtitle {
       display: none;
     }
   }
@@ -697,6 +831,21 @@
       display: none;
     }
 
+    /* The bar keeps the dot; its word still names it to assistive
+       technology, and the drawer's head says it in full. */
+    .topbar-status-word {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .topbar-status .status-dot {
+      margin: 0;
+    }
+
     /* The drawer: everything below the top bar, from top to bottom. */
     .sidebar {
       position: fixed;
@@ -708,7 +857,6 @@
       width: var(--ps-sidebar-width);
       z-index: 20;
       transform: translateX(-100%);
-      transition: transform 0.2s ease;
     }
 
     .topbar-lens {
@@ -722,6 +870,11 @@
       gap: var(--ps-space-sm);
       padding: var(--ps-space-sm) var(--ps-space-lg);
       border-bottom: 1px solid var(--ps-border-light);
+    }
+
+    .drawer-status {
+      font-size: var(--ps-font-size-xs);
+      color: var(--ps-text-secondary);
     }
 
     .drawer-chip {
@@ -751,10 +904,17 @@
     }
   }
 
-  /* On the narrowest phones the logo and scope badge can no longer coexist;
-     drop the badge rather than clipping it. */
+  /* The drawer slides only for a reader who has not asked for less motion. */
+  @media (max-width: 768px) and (prefers-reduced-motion: no-preference) {
+    .sidebar {
+      transition: transform 0.2s ease;
+    }
+  }
+
+  /* On the narrowest phones the logo and the scope chip can no longer
+     coexist: the chip gives way to the drawer's head, which names the scope. */
   @media (max-width: 430px) {
-    .topbar-badge {
+    .topbar-chip {
       display: none;
     }
   }

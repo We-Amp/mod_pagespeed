@@ -7,8 +7,9 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, openConsole, type Leaf, type Responder } from "./support/mock-admin";
 import { box, noHorizontalScroll, pageReady, perHostReplies, scrollTo, sidewaysScrollers, viewport, wholeServerReplies, widenText } from "./support/layout";
+import { rigPerHostReplies, rigWholeServerReplies } from "./support/rig";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -93,12 +94,9 @@ test.describe("the top bar's spacing", () => {
       await openConsole(page, "pagespeed_global_admin", "#/overview");
       await pageReady(page);
       expect(await gap(page, ".topbar-logo-link", ".topbar-subtitle"), "logo to the version line").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-subtitle-link", ".topbar-badge"), "host name to the console label").toBeCloseTo(GROUP, 0);
-      expect(await gap(page, ".topbar-badge", ".shortcuts-button"), "console label to the shortcuts button").toBeCloseTo(ITEM, 0);
-      const line = await page.locator(".topbar-subtitle > *").evaluateAll((els) =>
-        els.slice(1).map((el, i) => el.getBoundingClientRect().left - els[i].getBoundingClientRect().right),
-      );
-      for (const g of line) expect(g, `gaps in the version line: ${line.join(", ")}`).toBeGreaterThanOrEqual(ITEM - 1);
+      expect(await gap(page, ".topbar-subtitle", ".topbar-status"), "version to the connection state").toBeCloseTo(GROUP, 0);
+      expect(await gap(page, ".topbar-status", ".topbar-chip"), "connection state to the scope chip").toBeCloseTo(ITEM, 0);
+      expect(await gap(page, ".topbar-chip", ".shortcuts-button"), "scope chip to the shortcuts button").toBeCloseTo(ITEM, 0);
       const lens = page.getByTestId("host-lens");
       expect(await gap(page, '[data-testid="host-lens"] label', '[data-testid="host-lens"] select'), "Host label to its select").toBeCloseTo(ITEM, 0);
       // The lens ends at the top bar's padding, and that padding is the content's.
@@ -112,32 +110,78 @@ test.describe("the top bar's spacing", () => {
     });
   }
 
-  test("nothing overlaps or is cut short at the narrowest desktop width", async ({ page }) => {
-    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
-    await page.setViewportSize({ width: 1440, height: 800 });
-    await openConsole(page, "pagespeed_global_admin", "#/overview");
-    await pageReady(page);
-    const select = page.getByTestId("host-lens").locator("select");
-    const wide = (await box(select)).width;
-    await page.setViewportSize({ width: 769, height: 800 });
-    const parts = await page
-      .locator(".topbar-logo-link, .topbar-subtitle > *, .topbar-badge, .shortcuts-button, .topbar-lens")
-      .evaluateAll((els) =>
-        els
-          .filter((el) => el.getClientRects().length > 0)
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-          }),
-      );
-    for (let i = 1; i < parts.length; i++) {
-      expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
-      expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
-    }
-    const badge = page.locator(".topbar-badge");
-    expect(await badge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect((await box(select)).width).toBeCloseTo(wide, 0);
-  });
+  // With a host filter on a page that ignores it, the control carries a
+  // "not applied" note: still nothing may be cut short or wrap, also where
+  // the system's font is wider (widenText).
+  const NARROW = [
+    { width: 769, hash: "#/overview" },
+    { width: 769, hash: "#/statistics?lens=www.example.test" },
+    { width: 880, hash: "#/statistics?lens=www.example.test" },
+    { width: 901, hash: "#/statistics?lens=www.example.test" },
+    { width: 960, hash: "#/statistics?lens=www.example.test" },
+    { width: 1025, hash: "#/statistics?lens=www.example.test" },
+  ];
+  for (const { width, hash } of NARROW) {
+    test(`nothing overlaps or is cut short at ${width} px on ${hash}`, async ({ page }) => {
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      const select = page.getByTestId("host-lens").locator("select");
+      const wide = (await box(select)).width;
+      await widenText(page);
+      await page.setViewportSize({ width, height: 800 });
+      const label = await box(page.getByTestId("host-lens").locator("label"));
+      expect(label.bottom - label.top, "the Host filter label stays on one line").toBeLessThan(24);
+      const bar = await box(page.locator(".topbar"));
+      expect((await box(page.locator(".topbar-lens"))).right, "the host filter stays inside the bar").toBeLessThanOrEqual(bar.right);
+      expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true);
+      if (hash.includes("lens=")) {
+        await expect(page.getByRole("combobox", { name: "Host" }).first()).toHaveAccessibleDescription("(not applied on this page)");
+        // Shown beside the control where the bar has room for it...
+        expect((await box(page.getByTestId("host-lens-note"))).width > 1).toBe(width > 900);
+      }
+      // ...before the version line, which gives way first.
+      expect(await page.locator(".topbar-subtitle").isVisible(), "the version line").toBe(width > (hash.includes("lens=") ? 1024 : 900));
+      const parts = await page
+        .locator(".topbar-logo-link, .topbar-subtitle, .topbar-status, .topbar-chip, .shortcuts-button, .topbar-lens")
+        .evaluateAll((els) =>
+          els
+            .filter((el) => el.getClientRects().length > 0)
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { name: el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+            }),
+        );
+      for (let i = 1; i < parts.length; i++) {
+        expect(parts[i].left, `${parts[i - 1].name} | ${parts[i].name}`).toBeGreaterThanOrEqual(parts[i - 1].right + ITEM - 1);
+        expect(parts[i].top, `${parts[i].name} stays on the line`).toBeLessThan(parts[0].bottom);
+      }
+      const chip = page.locator(".topbar-chip");
+      expect(await chip.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect((await box(select)).width).toBeCloseTo(wide, 0);
+    });
+  }
+
+  for (const width of [1440, 769, 480]) {
+    test(`a long host name is cut short in the scope chip, not past the bar, at ${width} px`, async ({ page }) => {
+      const host = `${"a-very-long-virtual-host-name-".repeat(2)}for-testing.example.test:8080`;
+      await page.setViewportSize({ width, height: 800 });
+      await mockAdmin(page, "pagespeed_admin", {
+        ...perHostReplies(),
+        config: F.ok({ config: "", effective_config: "", scope: "vhost", host }),
+      });
+      await openConsole(page, "pagespeed_admin", "#/overview");
+      await pageReady(page);
+      const chip = page.getByTestId("console-scope");
+      await expect(chip).toHaveAttribute("title", host);
+      await expect(chip).toHaveText(`Scope: ${host}`);
+      expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth), "the chip is ellipsised").toBe(true);
+      const help = await box(page.locator(".shortcuts-button"));
+      expect(help.right, "the shortcuts button stays inside the window").toBeLessThanOrEqual(width);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  }
 });
 
 interface Item {
@@ -428,9 +472,9 @@ test.describe("wide windows", () => {
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await pageReady(page);
-    const figures = await page.getByTestId("module-card").locator(".figure").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+    const figures = await page.getByTestId("overview-tiles").locator(".stat-tile-value").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
     expect(figures.length).toBeGreaterThan(1);
-    expect(Math.abs(figures[0] - figures[1]), "the first two figures share a row").toBeLessThanOrEqual(1);
+    for (const top of figures) expect(Math.abs(top - figures[0]), "the tiles' figures share a row").toBeLessThanOrEqual(1);
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     await pageReady(page);
     const [cardBottom, contentBottom, pad] = await page.getByTestId("savings-module-card").evaluate((card) => {
@@ -445,7 +489,7 @@ test.describe("wide windows", () => {
     expect(cardBottom - contentBottom - pad, "the module card is no taller than its content").toBeLessThanOrEqual(1);
   });
 
-  for (const hash of ["#/overview", "#/savings"]) {
+  for (const hash of ["#/overview"]) {
     test(`the two cards of ${hash} sit side by side on a laptop window`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await mockAdmin(page, "pagespeed_admin", perHostReplies());
@@ -573,6 +617,17 @@ test.describe("the sidebar's rows", () => {
       expect(hint.right).toBeLessThanOrEqual(area.right);
       await expect.poll(() => link.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     }
+    // The current page also carries a 3 px bar at the row's leading edge,
+    // drawn inside the link: a mark by shape, which costs the row no width.
+    const bar = await page.locator(".nav-item.active").evaluate((el) => {
+      const s = getComputedStyle(el, "::before");
+      return { width: parseFloat(s.width), height: parseFloat(s.height), left: parseFloat(s.left), row: el.getBoundingClientRect().height };
+    });
+    expect(bar.width).toBe(3);
+    expect(bar.left).toBe(0);
+    expect(Math.abs(bar.height - bar.row)).toBeLessThanOrEqual(1);
+    const plain = await page.locator(".nav-item", { hasText: "Histograms" }).evaluate((el) => getComputedStyle(el, "::before").content);
+    expect(plain, "only the current page has the bar").toBe("none");
     // The hint is not part of the link's name and is hidden from assistive technology.
     await expect(page.getByRole("link", { name: "Statistics", exact: true })).toBeVisible();
     await expect(page.locator(".nav-key").first()).toHaveAttribute("aria-hidden", "true");
@@ -601,18 +656,23 @@ test.describe("buttons inside list and table rows", () => {
 });
 
 test.describe("findings", () => {
-  test("a finding's button follows its text, and its log excerpt keeps the text's measure", async ({ page }) => {
+  test("a finding's button follows its text, and its log lines keep the text's measure", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await mockAdmin(page, "pagespeed_global_admin", {
       ...wholeServerReplies(),
       message_history: F.messageGroups([
         { level: "warning", template: F.VOLUME_TEMPLATE, count: 1, recent: 1, last_ms: Date.now() - 60_000 },
+        { level: "warning", template: `Slow origin response for ${"a-long-path-segment/".repeat(12)}`, count: 2, recent: 2, last_ms: Date.now() - 60_000 },
       ]),
     });
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await pageReady(page);
     const findings = page.locator('[data-testid="alerts"] li.finding');
     await expect(findings.first()).toBeVisible();
+    // The log lines are folded; the geometry is pinned with every one of them open.
+    const folds = page.locator('[data-testid="alerts"] details.finding-log');
+    await expect(folds).toHaveCount(2);
+    for (const fold of await folds.all()) await fold.locator("summary").click();
     const cards = await box(page.locator("main .cards"));
     for (const finding of await findings.all()) {
       const row = await box(finding);
@@ -708,12 +768,12 @@ test.describe("small fixes", () => {
     expect(Math.max(...widths) - Math.min(...widths), `select widths ${widths.join(", ")}`).toBeLessThanOrEqual(1);
   });
 
-  test("the hit rate's qualifier is a separate word, and the previews heading has room above it", async ({ page }) => {
+  test("the served share has a short label, and the previews heading has room above it", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     await pageReady(page);
-    await expect(page.getByText(/Optimized-copy hit rate \(of all in-place requests\)/)).toBeVisible();
+    await expect(page.getByTestId("savings-optimizer-card").getByText("Served optimized", { exact: true })).toBeVisible();
     await openConsole(page, "pagespeed_global_admin", "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https");
     await pageReady(page);
     const above = await page.locator("#previews-heading").evaluate((h) => {
@@ -747,8 +807,8 @@ test.describe("full-width tables whose columns stay together", () => {
     await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/urls");
     await pageReady(page);
-    await expectFullWidthTable(page, 'main [data-testid="urls-table"]', ".table-wrapper");
-    const wrapper = await box(page.locator("main .table-wrapper").first());
+    await expectFullWidthTable(page, 'main [data-testid="urls-table"]', ".table-frame");
+    const wrapper = await box(page.locator("main .table-frame").first());
     const lens = await box(page.getByTestId("host-lens"));
     expect(Math.abs(wrapper.right - lens.right), "the URL table's frame ends under the Host selector").toBeLessThanOrEqual(1);
     await expectReadsAcross(page, 'main [data-testid="urls-table"]');
@@ -801,6 +861,167 @@ test.describe("full-width tables whose columns stay together", () => {
   }
 });
 
+// Savings on a laptop window: never a short card beside a long one. With a
+// per-host table there are two columns of comparable height; without one
+// the module card and the optimizer card stack, each as wide as the page.
+test.describe("Savings columns", () => {
+  const WIDE = { width: 1440, height: 900 };
+
+  test("whole server: the per-host card fills the column under the module card, within a factor of two of the optimizer card", async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    await pageReady(page);
+    const [module, optimizer, hosts] = await Promise.all(
+      ["savings-module-card", "savings-optimizer-card", "savings-by-host-card"].map((id) => box(page.getByTestId(id))),
+    );
+    // Two columns, their tops level.
+    expect(Math.abs(module.top - optimizer.top)).toBeLessThanOrEqual(1);
+    expect(optimizer.left).toBeGreaterThan(module.right);
+    expect(Math.abs(optimizer.width - module.width)).toBeLessThanOrEqual(1);
+    // The per-host card: the module card's column, one gap below it.
+    expect(Math.abs(hosts.left - module.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(hosts.width - module.width)).toBeLessThanOrEqual(1);
+    expect(hosts.top - module.bottom).toBeGreaterThan(0);
+    expect(hosts.top - module.bottom).toBeLessThanOrEqual(24);
+    const [left, right] = [hosts.bottom - module.top, optimizer.height];
+    expect(Math.max(left, right) / Math.min(left, right), `column heights ${left} and ${right}`).toBeLessThan(2);
+  });
+
+  const withoutPerHostFigures = (): ReturnType<typeof wholeServerReplies> => {
+    const stats = JSON.parse(F.OPT_STATS_PAGE_BYTES) as Record<string, unknown>;
+    delete stats.serve_savings_by_host;
+    return { ...wholeServerReplies(), "v1/daemon/stats": F.ok(stats) };
+  };
+  for (const [name, admin, replies, hash] of [
+    ["a per-host console", "pagespeed_admin", perHostReplies, "#/savings"],
+    ["the whole server with a host selected", "pagespeed_global_admin", wholeServerReplies, "#/savings?lens=static.example.com"],
+    ["an optimizer without per-host figures", "pagespeed_global_admin", withoutPerHostFigures, "#/savings"],
+  ] as const) {
+    test(`${name}: the two cards stack at full width, and the types' bars share a row`, async ({ page }) => {
+      await page.setViewportSize(WIDE);
+      await mockAdmin(page, admin, replies());
+      await openConsole(page, admin, hash);
+      await pageReady(page);
+      await expect(page.getByTestId("savings-by-host-card")).toHaveCount(0);
+      const cards = await page.locator("main .cards > .card").all();
+      expect(cards).toHaveLength(2);
+      const [module, optimizer] = [await box(cards[0]), await box(cards[1])];
+      expect(optimizer.top).toBeGreaterThan(module.bottom);
+      expect(Math.abs(optimizer.left - module.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(optimizer.width - module.width)).toBeLessThanOrEqual(1);
+      const main = await box(page.locator("main .page"));
+      expect(module.width).toBeGreaterThanOrEqual(main.width - 1);
+      // A card this wide lays the three types out across it.
+      const tops = await page.locator('main [data-testid^="savings-split-"].split').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+      expect(tops).toHaveLength(3);
+      expect(new Set(tops).size, `tops ${tops.join(", ")}`).toBe(1);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  }
+});
+
+// Overview's headline figures are tiles: one row from 900 px, two by two
+// below that, stacked on a phone, and the tiles of a row share one height.
+test.describe("Overview tiles", () => {
+  const tiles = (page: Page) => page.locator('main [data-testid="overview-tiles"] > .stat-tile');
+  const open = async (page: Page, width: number, height: number) => {
+    await page.setViewportSize({ width, height });
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/overview");
+    await pageReady(page);
+    await expect(tiles(page)).toHaveCount(4);
+    return Promise.all((await tiles(page).all()).map((t) => box(t)));
+  };
+
+  for (const width of [900, 1440, 2560]) {
+    test(`four tiles in one row of equal widths and heights at ${width}`, async ({ page }) => {
+      const b = await open(page, width, 1000);
+      for (const t of b) {
+        expect(Math.abs(t.top - b[0].top), "one row").toBeLessThanOrEqual(1);
+        expect(Math.abs(t.bottom - b[0].bottom), "one height").toBeLessThanOrEqual(1);
+        expect(Math.abs(t.width - b[0].width), "one width").toBeLessThanOrEqual(1);
+      }
+      for (let i = 1; i < b.length; i++) expect(b[i].left).toBeGreaterThan(b[i - 1].right);
+      // The row spans the page: it ends where the cards below it end.
+      const cards = await box(page.locator("main .cards"));
+      expect(Math.abs(b[3].right - cards.right)).toBeLessThanOrEqual(1);
+      expect(Math.abs(b[0].left - cards.left)).toBeLessThanOrEqual(1);
+      expect(await noHorizontalScroll(page)).toBe(true);
+    });
+  }
+
+  test("two by two below 900 px, each row of one height", async ({ page }) => {
+    const b = await open(page, 800, 1000);
+    expect(Math.abs(b[0].top - b[1].top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[2].top - b[3].top)).toBeLessThanOrEqual(1);
+    expect(b[2].top).toBeGreaterThanOrEqual(b[0].bottom);
+    expect(Math.abs(b[0].left - b[2].left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[1].left - b[3].left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[0].bottom - b[1].bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b[2].bottom - b[3].bottom)).toBeLessThanOrEqual(1);
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test("stacked on a phone, each the width of the page", async ({ page }) => {
+    const b = await open(page, 390, 844);
+    for (let i = 1; i < b.length; i++) {
+      expect(b[i].top).toBeGreaterThanOrEqual(b[i - 1].bottom);
+      expect(Math.abs(b[i].left - b[0].left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(b[i].width - b[0].width)).toBeLessThanOrEqual(1);
+    }
+    expect(await noHorizontalScroll(page)).toBe(true);
+    // The by-type tables below stay inside their cards.
+    for (const id of ["module-card", "optimizer-card"]) {
+      const card = await box(page.getByTestId(id));
+      for (const row of await page.getByTestId(id).locator("tbody tr").all()) {
+        expect((await box(row)).right, id).toBeLessThanOrEqual(card.right);
+      }
+    }
+  });
+
+  for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
+    test(`320 px, ${admin}: nothing scrolls sideways, and the by-type rows stay inside their cards`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await mockAdmin(page, admin, admin === "pagespeed_admin" ? perHostReplies() : wholeServerReplies());
+      await openConsole(page, admin, "#/overview");
+      await pageReady(page);
+      await expect(page.getByTestId("module-by-type").locator("tbody tr")).toHaveCount(3);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      expect(await sidewaysScrollers(page)).toEqual([]);
+      for (const id of ["module-card", "optimizer-card"]) {
+        const card = await box(page.getByTestId(id));
+        for (const el of await page.getByTestId(id).locator("tbody tr, p").all()) {
+          expect((await box(el)).right, id).toBeLessThanOrEqual(card.right);
+        }
+      }
+      for (const tile of await tiles(page).all()) {
+        const t = await box(tile);
+        for (const el of await tile.locator("p, a, h2").all()) expect((await box(el)).right).toBeLessThanOrEqual(t.right);
+      }
+    });
+  }
+
+  test("a tile carries one line of context, so the lead tile does not set the row's height", async ({ page }) => {
+    await open(page, 1440, 900);
+    for (const tile of await tiles(page).all()) {
+      expect(await tile.locator(".stat-tile-context").count()).toBeLessThanOrEqual(2);
+    }
+    const row = await box(page.getByTestId("overview-tiles"));
+    expect(row.height, "the row is compact").toBeLessThanOrEqual(240);
+  });
+
+  test("the verdict comes first: above the tiles, the findings and the cards", async ({ page }) => {
+    await open(page, 1440, 900);
+    const strip = await box(page.getByTestId("health-strip"));
+    const first = await box(tiles(page).first());
+    const cards = await box(page.locator("main .cards"));
+    expect(first.top).toBeGreaterThanOrEqual(strip.bottom);
+    expect(cards.top).toBeGreaterThanOrEqual(first.bottom);
+    expect(first.bottom, "the tiles are in the first viewport").toBeLessThanOrEqual(900);
+  });
+});
+
 test.describe("card heights", () => {
   for (const width of [1440, 2560]) {
     test(`Overview's two cards share one height at ${width}`, async ({ page }) => {
@@ -831,4 +1052,427 @@ test.describe("tables fit their frame on a desktop", () => {
       }
     });
   }
+});
+
+// The Overview's two cards share a row only where each is wide enough for
+// its by-type table: across the desktop widths, also in a wider system font,
+// no table runs past its card and the page never scrolls sideways.
+test.describe("the Overview's by-type tables", () => {
+  const consoles = [
+    { admin: "pagespeed_global_admin", replies: rigWholeServerReplies },
+    { admin: "pagespeed_admin", replies: rigPerHostReplies },
+  ] as const;
+  for (const { admin, replies } of consoles) {
+    test(`${admin}: stay inside their cards from 769 to 1440 px`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await mockAdmin(page, admin, replies());
+      await openConsole(page, admin, "#/overview");
+      await pageReady(page);
+      await widenText(page);
+      await expect(page.getByTestId("module-by-type")).toBeVisible();
+      if (admin === "pagespeed_global_admin") await expect(page.getByTestId("optimizer-by-type")).toBeVisible();
+      for (let width = 769; width <= 1440; width += 8) {
+        await page.setViewportSize({ width, height: 800 });
+        const overruns = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>("table.card-table")].flatMap((table) => {
+            const card = table.closest("section")!;
+            const r = card.getBoundingClientRect();
+            const s = getComputedStyle(card);
+            const inner = r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight);
+            const over = table.getBoundingClientRect().right - inner;
+            return over > 0.5 ? [`${table.dataset.testid} +${over.toFixed(1)} px`] : [];
+          }),
+        );
+        expect(overruns, `at ${width} px`).toEqual([]);
+        expect(await noHorizontalScroll(page), `at ${width} px`).toBe(true);
+      }
+    });
+  }
+});
+
+// A window 320 CSS px wide is a 1280 px window at 400% zoom. Every page
+// reflows into it: the document never scrolls sideways, and no text is cut
+// off where it cannot be scrolled to. The pages are opened with data of a
+// real size (a captured statistics reply of some 320 counters, ten
+// histograms, the cache structure of a running server), because a page that
+// only shows a refusal reflows trivially.
+test.describe("a 320 px window", () => {
+  type Replies = Partial<Record<Leaf, Responder>>;
+
+  // The captures of one running server (support/rig.ts).
+  const consoles: ReadonlyArray<{ admin: "pagespeed_global_admin" | "pagespeed_admin"; replies: () => Replies }> = [
+    { admin: "pagespeed_global_admin", replies: rigWholeServerReplies },
+    { admin: "pagespeed_admin", replies: rigPerHostReplies },
+  ];
+
+  const ROUTES = [
+    "#/overview",
+    "#/savings",
+    "#/urls",
+    "#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https",
+    "#/statistics",
+    "#/graphs",
+    "#/graphs?counters=all",
+    "#/histograms",
+    "#/caches",
+    "#/configuration",
+    "#/rule-packs",
+    "#/optimizer",
+    "#/logs",
+    "#/support",
+    "#/about",
+  ];
+
+  const open = async (page: Page, admin: (typeof consoles)[number]["admin"], replies: Replies, hash: string) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await mockAdmin(page, admin, replies);
+    await openConsole(page, admin, hash);
+    await pageReady(page);
+  };
+
+  /** How far the document scrolls sideways (0 when it does not). */
+  const sidewaysScroll = (page: Page) =>
+    page.evaluate(() => document.scrollingElement!.scrollWidth - document.scrollingElement!.clientWidth);
+
+  for (const { admin, replies } of consoles) {
+    for (const hash of ROUTES) {
+      test(`${admin} ${hash}: the page does not scroll sideways`, async ({ page }) => {
+        await open(page, admin, replies(), hash);
+        expect(await sidewaysScroll(page)).toBe(0);
+        // Nor at the end of a long page.
+        await scrollTo(page, 1);
+        expect(await sidewaysScroll(page)).toBe(0);
+      });
+    }
+  }
+
+  test("Statistics shows the whole fixture, so the reflow is of a real page", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/statistics");
+    await expect(page.locator("main")).toContainText(/of 3\d\d variables/);
+  });
+
+  for (const { admin, replies } of consoles) {
+    test(`${admin} Savings: the by-type tables stay inside their cards, figures on one line`, async ({ page }) => {
+      await open(page, admin, replies(), "#/savings");
+      // With room to spare: also where the system's font is wider.
+      await widenText(page);
+      const tables = admin === "pagespeed_global_admin" ? ["savings-module-table", "savings-optimizer-table"] : ["savings-module-table"];
+      for (const id of tables) {
+        const table = page.getByTestId(id);
+        await expect(table).toBeVisible();
+        const inner = await table.locator("xpath=ancestor::section[1]").evaluate((card) => {
+          const r = card.getBoundingClientRect();
+          const s = getComputedStyle(card);
+          return r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight);
+        });
+        expect((await box(table)).right, id).toBeLessThanOrEqual(inner + 0.5);
+        // Still a table: a row's cells share one line, and a figure keeps its unit beside it.
+        const row = table.locator("tbody tr").first();
+        const cells = await Promise.all((await row.locator("th, td").all()).map((c) => box(c)));
+        expect(cells.length).toBe(4);
+        for (const c of cells) expect(Math.abs(c.top - cells[0].top)).toBeLessThanOrEqual(1);
+        expect(await row.locator("td").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
+      }
+      expect(await sidewaysScroll(page)).toBe(0);
+    });
+  }
+
+  test("Graphs: every chart is whole, one to a row", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/graphs");
+    const main = await box(page.locator("main"));
+    const cards = await page.locator("main .charts > *").all();
+    expect(cards.length).toBeGreaterThan(0);
+    let previousBottom = -Infinity;
+    for (const card of cards) {
+      const c = await box(card);
+      expect(c.right, "a chart ends inside the page").toBeLessThanOrEqual(main.right);
+      expect(c.top, "one chart per row").toBeGreaterThanOrEqual(previousBottom);
+      previousBottom = c.bottom;
+      for (const drawing of await card.locator("canvas, svg").all()) {
+        expect((await box(drawing)).right, "a chart's drawing ends inside its card").toBeLessThanOrEqual(c.right);
+      }
+    }
+  });
+
+  test("Caches: a layer's name and its statistic's name are shown whole, inside their card", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", consoles[0].replies(), "#/caches");
+    await expect(page.locator(".layer").first()).toBeVisible();
+    // Each run of text in a layer row, as painted, against the row and the
+    // card that clips it (a card hides what overflows it, with no way to
+    // scroll there).
+    const cut = await page.locator("main").evaluate((main) => {
+      const out: string[] = [];
+      for (const row of main.querySelectorAll<HTMLElement>(".layer")) {
+        const card = row.closest<HTMLElement>(".cache-card")!.getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        for (const part of row.querySelectorAll<HTMLElement>("span")) {
+          const range = document.createRange();
+          range.selectNodeContents(part);
+          for (const r of range.getClientRects()) {
+            if (r.right > rowBox.right + 0.5 || r.left < rowBox.left - 0.5 || r.right > card.right + 0.5) {
+              out.push(`${part.className} "${part.textContent}" (${r.left.toFixed(1)}..${r.right.toFixed(1)}, row ..${rowBox.right.toFixed(1)}, card ..${card.right.toFixed(1)})`);
+            }
+          }
+        }
+      }
+      return out;
+    });
+    expect(cut).toEqual([]);
+    // The fixture has the rows that were cut: a statistic's name on every stats layer.
+    await expect(page.locator(".layer-prefix", { hasText: "file_cache_small" }).first()).toBeVisible();
+  });
+
+  test("the shortcut list opens at its top, with the focus on its title", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 256 });
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await pageReady(page);
+    await page.keyboard.press("?");
+    const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(dialog).toBeVisible();
+    // The list is longer than the window, so it scrolls: it must start at the top.
+    expect(await dialog.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(0);
+    const title = dialog.getByRole("heading", { name: "Keyboard shortcuts" });
+    await expect(title).toBeFocused();
+    await expect(title).toBeInViewport();
+    // Close is the next stop, and Escape still returns to the page.
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+});
+
+// A text field that has the keyboard's focus shows the console's ring: a
+// 2 px outline, which a forced palette also paints. No page replaces it
+// with a border colour or a shadow.
+test.describe("focused fields", () => {
+  for (const [hash, name, selector, tab] of [
+    ["#/statistics", "search", "main input.field", null],
+    ["#/histograms", "filter", "main input.field", null],
+    ["#/graphs", "counter search", "main input.field", null],
+    ["#/graphs", "time range", "main select.field", null],
+    ["#/caches", "URL to look up", "#lookup-url", "Cache Lookup"],
+  ] as const) {
+    test(`${hash}: the ${name} field shows the focus ring`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      if (tab !== null) await page.getByRole("tab", { name: tab }).click();
+      const field = page.locator(selector);
+      await expect(field).toHaveCount(1);
+      await expect(field).toBeVisible();
+      // Reached with the keyboard: Tab from the control before it.
+      await field.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(field).toBeFocused();
+      const ring = await field.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: parseFloat(s.outlineWidth), offset: parseFloat(s.outlineOffset), shadow: s.boxShadow };
+      });
+      expect(ring).toEqual({ style: "solid", width: 2, offset: 2, shadow: "none" });
+      // The ring is the accent colour, not the field's resting border.
+      const colours = await field.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const probe = document.createElement("span");
+        probe.style.color = "var(--ps-primary)";
+        document.body.append(probe);
+        const accent = getComputedStyle(probe).color;
+        probe.remove();
+        return { outline: s.outlineColor, accent };
+      });
+      expect(colours.outline).toBe(colours.accent);
+    });
+  }
+});
+
+// The findings count in Overview's verdict is a link that moves the focus
+// to the findings. Where the focus went is shown, however the link was used.
+test.describe("the findings link", () => {
+  for (const how of ["keyboard", "pointer"] as const) {
+    test(`by ${how}: the findings show the focus ring`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await mockAdmin(page, "pagespeed_global_admin", { ...wholeServerReplies(), "v1/daemon/health": F.HEALTH_CHECK_FAILING });
+      await openConsole(page, "pagespeed_global_admin", "#/overview");
+      await pageReady(page);
+      const link = page.getByTestId("findings-link");
+      if (how === "keyboard") {
+        await link.focus();
+        await page.keyboard.press("Enter");
+      } else {
+        await link.click();
+      }
+      const anchor = page.getByTestId("findings-anchor");
+      await expect(anchor).toBeFocused();
+      const ring = await anchor.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: parseFloat(s.outlineWidth) };
+      });
+      expect(ring).toEqual({ style: "solid", width: 2 });
+      // The ring lies inside the page: it is not cut off at the window's edge.
+      const a = await box(anchor);
+      const { width } = await viewport(page);
+      expect(a.left - 4).toBeGreaterThanOrEqual(0);
+      expect(a.right + 4).toBeLessThanOrEqual(width);
+      expect(await noHorizontalScroll(page)).toBe(true);
+      // Once the focus moves on, the findings are plain content again.
+      await page.getByRole("heading", { level: 1 }).click();
+      await expect(anchor).not.toBeFocused();
+      await expect(anchor).not.toHaveAttribute("tabindex");
+    });
+  }
+
+  test("a click on a finding's text, or selecting it, leaves no outline", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mockAdmin(page, "pagespeed_global_admin", { ...wholeServerReplies(), "v1/daemon/health": F.HEALTH_CHECK_FAILING });
+    await openConsole(page, "pagespeed_global_admin", "#/overview");
+    await pageReady(page);
+    const anchor = page.getByTestId("findings-anchor");
+    const outline = () => anchor.evaluate((el) => getComputedStyle(el).outlineStyle);
+    const sentence = page.getByTestId("alert-daemon-check-failed").locator("p").first();
+    const point = async () => {
+      const b = await box(sentence);
+      return { x: b.left + 20, y: b.top + b.height / 2 };
+    };
+    // A plain click on the sentence.
+    let at = await point();
+    await page.mouse.click(at.x, at.y);
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+    // A drag across it, as when copying the text.
+    await page.mouse.move(at.x - 15, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 100, at.y, { steps: 4 });
+    await page.mouse.up();
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+    // The same after the link was used once and the focus has moved on.
+    await page.getByTestId("findings-link").click();
+    await expect(anchor).toBeFocused();
+    expect(await outline()).toBe("solid");
+    await page.getByRole("heading", { level: 1 }).click();
+    at = await point();
+    await page.mouse.click(at.x, at.y);
+    await expect(anchor).not.toBeFocused();
+    expect(await outline()).toBe("none");
+  });
+});
+
+// A strip of tabs or views scrolls sideways, and the sidebar scrolls, so
+// each clips whatever an item draws outside its own box. The focus ring of
+// an item is therefore drawn where no ancestor cuts it: whole, on all four
+// sides.
+test.describe("focus rings inside a scrolling container", () => {
+  /** What cuts the focused element's ring: nothing, when the ring lies inside every clipping ancestor. */
+  const ringCuts = (page: Page) =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const s = getComputedStyle(el);
+      if (s.outlineStyle !== "solid" || parseFloat(s.outlineWidth) !== 2) return [`no ring on ${el.textContent}`];
+      const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
+      const r = el.getBoundingClientRect();
+      const ring = { left: r.left - reach, top: r.top - reach, right: r.right + reach, bottom: r.bottom + reach };
+      const out: string[] = [];
+      for (let a = el.parentElement; a !== null; a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+        // An ancestor clips at its padding box: what lies over its border is cut too.
+        const o = a.getBoundingClientRect();
+        const b = { left: o.left + a.clientLeft, top: o.top + a.clientTop, right: o.left + a.clientLeft + a.clientWidth, bottom: o.top + a.clientTop + a.clientHeight };
+        // A side counts only where the ancestor clips along that axis.
+        const x = cs.overflowX !== "visible" && (ring.left < b.left - 0.5 || ring.right > b.right + 0.5);
+        const y = cs.overflowY !== "visible" && (ring.top < b.top - 0.5 || ring.bottom > b.bottom + 0.5);
+        if (x || y) out.push(`${el.textContent}: ring cut by ${a.tagName.toLowerCase()}.${a.className}`);
+      }
+      return out;
+    });
+
+  for (const [name, hash, role] of [
+    ["the Caches tabs", "#/caches", "tab"],
+    ["the Table and Graphs views", "#/statistics", "view"],
+  ] as const) {
+    test(`${name}: the keyboard's ring is whole`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+      await openConsole(page, "pagespeed_global_admin", hash);
+      await pageReady(page);
+      const items = role === "tab" ? page.getByRole("tab") : page.locator("main nav a");
+      const count = await items.count();
+      expect(count).toBeGreaterThanOrEqual(2);
+      // Reached with the keyboard.
+      await items.first().focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(items.first()).toBeFocused();
+      for (let i = 0; i < count; i++) {
+        expect(await ringCuts(page), `item ${i}`).toEqual([]);
+        // The next item: tabs move with the arrow keys, links with Tab.
+        await page.keyboard.press(role === "tab" ? "ArrowRight" : "Tab");
+      }
+    });
+  }
+
+  for (const admin of ["pagespeed_global_admin", "pagespeed_admin"] as const) {
+    for (const [where, size] of [
+      ["on a desktop", { width: 1280, height: 800 }],
+      ["in the phone drawer", { width: 390, height: 844 }],
+    ] as const) {
+      test(`${admin}, the sidebar's links ${where}: the keyboard's ring is whole`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await mockAdmin(page, admin, admin === "pagespeed_admin" ? perHostReplies() : wholeServerReplies());
+        await openConsole(page, admin, "#/overview");
+        await pageReady(page);
+        const links = page.locator("#console-nav a.nav-item");
+        const count = await links.count();
+        expect(count).toBeGreaterThanOrEqual(10);
+        if (size.width < 600) {
+          // The drawer opens from the keyboard, with the focus on the current page's link.
+          await page.getByRole("button", { name: "Toggle menu" }).focus();
+          await page.keyboard.press("Enter");
+          await expect(page.locator("#console-nav")).toHaveClass(/open/);
+          await expect(links.first()).toBeFocused();
+        } else {
+          await links.first().focus();
+          await page.keyboard.press("Shift+Tab");
+          await page.keyboard.press("Tab");
+          await expect(links.first()).toBeFocused();
+        }
+        // Every link in turn, the current page's (filled) row included.
+        for (let i = 0; i < count; i++) {
+          await expect(links.nth(i)).toBeFocused();
+          expect(await ringCuts(page), `link ${i}`).toEqual([]);
+          await page.keyboard.press("Tab");
+        }
+      });
+    }
+  }
+});
+
+// One type scale: the page area reads at 14 px under a 32 px title, the
+// headings take their roles' sizes on every page, and the shell around the
+// page keeps the browser's 16 px.
+test.describe("type roles", () => {
+  const size = (el: Element) => getComputedStyle(el).fontSize;
+  test("body, title and headings take their roles' sizes", async ({ page }) => {
+    await page.setViewportSize(DESKTOPS[0]);
+    await mockAdmin(page, "pagespeed_global_admin", wholeServerReplies());
+    await openConsole(page, "pagespeed_global_admin", "#/optimizer");
+    await pageReady(page);
+    expect(await page.locator("main").evaluate(size)).toBe("14px");
+    expect(await page.locator("main h1").evaluate(size)).toBe("32px");
+    expect(await page.locator(".topbar").evaluate(size)).toBe("16px");
+    const sections = await page.locator("main .section-title").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
+    expect(sections.length).toBeGreaterThan(1);
+    expect(new Set(sections)).toEqual(new Set(["18px"]));
+    for (const route of ["#/optimizer", "#/overview", "#/savings"]) {
+      await openConsole(page, "pagespeed_global_admin", route);
+      await pageReady(page);
+      const cards = await page.locator("main .card-title").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
+      expect(cards.length, route).toBeGreaterThan(0);
+      expect(new Set(cards), route).toEqual(new Set(["16px"]));
+    }
+  });
 });

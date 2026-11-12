@@ -91,12 +91,15 @@ test.describe("Daemon panels", () => {
   test("health checks read as pass or fail, not as JSON", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, "v1/daemon/health": F.HEALTH_CHECK_FAILING });
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
-    await expect(page.getByRole("row", { name: /cache_configured/ })).toContainText("Pass");
-    await expect(page.getByRole("row", { name: /cache_open/ })).toContainText("Fail");
+    // Plain names; the optimizer's own id stays one hover away.
+    await expect(page.getByRole("row", { name: /Cache directory configured/ })).toContainText("Pass");
+    const failing = page.getByRole("row", { name: /Cache opened/ });
+    await expect(failing).toContainText("Fail");
+    await expect(failing.getByRole("rowheader")).toHaveAttribute("title", "cache_open");
     await expect(page.getByText('{"pass"')).toHaveCount(0);
   });
 
-  test("key-value panels lead with the value, and the status pill reads in sentence case", async ({ page }) => {
+  test("key-value panels lead with the value, and the status word reads in sentence case", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", {
       config: F.CONFIG_VHOST,
       "v1/daemon/health": F.HEALTH_OK,
@@ -106,8 +109,8 @@ test.describe("Daemon panels", () => {
     const uptime = page.locator(".info-item", { hasText: "Uptime" });
     await expect(uptime.locator(".info-value")).toHaveCSS("font-size", "24px");
     await expect(uptime.locator(".info-label")).toHaveCSS("text-transform", "none");
-    await expect(page.locator(".status-badge")).toHaveText("ok");
-    await expect(page.locator(".status-badge")).toHaveCSS("text-transform", "capitalize");
+    await expect(page.locator(".status-word")).toHaveText("ok");
+    await expect(page.locator(".status-word")).toHaveCSS("text-transform", "capitalize");
     await expect(page.locator(".ready-flag")).toHaveCSS("text-transform", "capitalize");
   });
 

@@ -29,7 +29,7 @@ test.describe("Connection", () => {
     });
     await openConsole(page, "pagespeed_admin", "#/statistics");
     await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
 
     down = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -38,14 +38,14 @@ test.describe("Connection", () => {
     await expect(banner).toHaveAttribute("role", "alert");
     await expect(banner).toContainText("Cannot reach the server.");
     await expect(banner).toContainText("the figures below are from");
-    await expect(page.getByTestId("connection-state")).toHaveText("reconnecting");
+    await expect(page.getByTestId("connection-state")).toHaveText("Reconnecting…");
     await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
     await expect(page.getByText("Last refresh failed: cannot reach the server.")).toBeVisible();
 
     down = false;
     await banner.getByRole("button", { name: "Retry now" }).click();
     await expect(banner).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
     await expect(page.getByText("Last refresh failed")).toHaveCount(0);
   });
 
@@ -92,13 +92,13 @@ test.describe("Connection", () => {
       { down: () => outage },
     );
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
 
     outage = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     const banner = page.getByTestId("connection-banner");
     await expect(banner).toBeVisible();
-    await expect(page.getByTestId("connection-state")).toHaveText("reconnecting");
+    await expect(page.getByTestId("connection-state")).toHaveText("Reconnecting…");
 
     // The server is back, but the optimizer's own health check is still
     // failing on its own terms -- a plain 5xx, not one of the proxy's
@@ -107,7 +107,7 @@ test.describe("Connection", () => {
     daemonOwnFailure = true;
     await banner.getByRole("button", { name: "Retry now" }).click();
     await expect(banner).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
   });
 
   test("an unreachable optimizer is a panel state, not a lost connection", async ({ page }) => {
@@ -115,7 +115,7 @@ test.describe("Connection", () => {
     await openConsole(page, "pagespeed_admin", "#/daemon/status");
     await expect(page.getByTestId("daemon-unreachable")).toBeVisible();
     await expect(page.getByTestId("connection-banner")).toHaveCount(0);
-    await expect(page.getByTestId("connection-state")).toHaveText("connected");
+    await expect(page.getByTestId("connection-state")).toHaveText("Connected");
   });
 
   test("a gateway error in front of the module counts as a lost connection", async ({ page }) => {
@@ -145,16 +145,21 @@ test.describe("Connection", () => {
     const health = page.getByTestId("health-summary");
     const optimizer = page.getByTestId("optimizer-state");
     const stamp = page.getByTestId("page-updated");
-    const dotColour = () => optimizer.evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
-    const borderColour = () => health.evaluate((el) => getComputedStyle(el).borderLeftColor);
+    const strip = page.getByTestId("health-strip");
+    const dot = optimizer.locator(".status-dot");
+    const dotColour = () => dot.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const stripDotColour = () => page.getByTestId("health-dot").evaluate((el) => getComputedStyle(el).backgroundColor);
+    const borderColour = () => strip.evaluate((el) => getComputedStyle(el).borderLeftColor);
 
     // Up: a verdict, a green dot, a fresh stamp.
     await expect(optimizer).toHaveText("Running");
-    await expect(optimizer).toHaveClass(/state-ok/);
-    await expect(health).not.toContainText("Status unknown");
+    await expect(dot).toHaveClass(/status-dot-ok/);
+    await expect(health).toHaveText(/^Working\. /);
+    await expect(strip).toHaveClass(/health-strip-ok/);
     await expect(stamp).toHaveText(/^updated \d s ago$/);
     const green = await dotColour();
     const verdictBorder = await borderColour();
+    expect(await stripDotColour()).toBe(green);
 
     // Down for 20 s: every sample fails, and none of them counts as an update.
     down = true;
@@ -164,11 +169,21 @@ test.describe("Connection", () => {
     const age = Number(/updated (\d+) s ago/.exec((await stamp.textContent()) ?? "")?.[1]);
     expect(age).toBeGreaterThanOrEqual(20);
 
-    await expect(health).toHaveText(/^Status unknown — last answer \d/);
-    await expect(health).toHaveClass(/health-unknown/);
+    await expect(health).toHaveText(/^Status unknown\. Last answer \d/);
+    // The banner and the verdict say it; no third notice repeats it above the tiles.
+    await expect(page.locator("main .refresh-notice")).toHaveCount(0);
+    // No figure from before the outage, and no findings count either.
+    await expect(health).not.toContainText(/saved|findings?/);
+    await expect(strip).not.toHaveClass(/health-strip-(ok|info|warning|error)/);
+    await expect(page.getByTestId("health-dot")).not.toHaveClass(/status-dot-(ok|info|warning|error)/);
     expect(await borderColour()).not.toBe(verdictBorder);
-    await expect(optimizer).toHaveText("Running · last known");
-    await expect(optimizer).not.toHaveClass(/state-ok|state-warn/);
+    expect(await stripDotColour()).not.toBe(green);
+    // The value stays the state word; that it is the last known state is a line of context.
+    await expect(optimizer.locator(".stat-tile-value")).toHaveText("Running");
+    await expect(optimizer).toHaveText(/^Running\s*Last known state$/);
+    await expect(page.getByTestId("optimizer-last-known")).toHaveText("Last known state");
+    expect((await optimizer.locator(".stat-tile-value").boundingBox())!.height, "the state word is one line").toBeLessThan(45);
+    await expect(dot).not.toHaveClass(/status-dot-ok|status-dot-warning/);
     expect(await dotColour()).not.toBe(green);
     // The last figures stay on screen.
     await expect(page.getByTestId("module-bytes-saved")).toBeVisible();
@@ -177,9 +192,10 @@ test.describe("Connection", () => {
     down = false;
     await page.getByTestId("connection-banner").getByRole("button", { name: "Retry now" }).click();
     await expect(page.getByTestId("connection-banner")).toHaveCount(0);
-    await expect(health).not.toContainText("Status unknown");
+    await expect(health).toHaveText(/^Working\. /);
     await expect(optimizer).toHaveText("Running");
-    await expect(optimizer).toHaveClass(/state-ok/);
+    await expect(page.getByTestId("optimizer-last-known")).toHaveCount(0);
+    await expect(dot).toHaveClass(/status-dot-ok/);
     expect(await dotColour()).toBe(green);
     await expect(stamp).toHaveText(/^updated \d s ago$/);
   });
@@ -188,7 +204,7 @@ test.describe("Connection", () => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies(), { down: () => true });
     await openConsole(page, "pagespeed_admin");
     await expect(page.getByTestId("connection-banner")).toBeVisible();
-    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown — the server has not answered");
+    await expect(page.getByTestId("health-summary")).toHaveText("Status unknown. The server has not answered.");
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });
 
@@ -202,7 +218,9 @@ test.describe("Connection", () => {
     );
     await openConsole(page, "pagespeed_admin");
     const health = page.getByTestId("health-summary");
-    await expect(health).toHaveText("Module statistics unavailable");
+    // A failed module read states no figure: the state is unknown, and the count line says why.
+    await expect(health).toHaveText("Status unknown. Module statistics unavailable.");
+    await expect(page.getByTestId("health-strip")).not.toHaveClass(/health-strip-(ok|info)/);
     // No figures were ever read: the stamp has nothing to age.
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
 
@@ -210,7 +228,7 @@ test.describe("Connection", () => {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByTestId("connection-banner")).toBeVisible();
     // The server did answer before it went down, so the line carries that time.
-    await expect(health).toHaveText(/^Status unknown — last answer \d/);
+    await expect(health).toHaveText(/^Status unknown\. Last answer \d/);
     await expect(health).not.toContainText("has not answered");
     await expect(page.getByTestId("page-updated")).toHaveText("updated —");
   });
@@ -239,14 +257,14 @@ test.describe("Connection", () => {
     // gateway's own 504.
     await runFor(page, 5_000);
     await expect(banner).toBeVisible();
-    await expect(state).toHaveText("reconnecting");
+    await expect(state).toHaveText("Reconnecting…");
     const figuresAtFirstCycle = await banner.textContent();
 
     // A second cycle: no flicker back to "connected" from the daemon
     // leaves' own 504s, and the same pinned time.
     await runFor(page, 5_000);
     await expect(banner).toBeVisible();
-    await expect(state).toHaveText("reconnecting");
+    await expect(state).toHaveText("Reconnecting…");
     expect(await banner.textContent()).toBe(figuresAtFirstCycle);
 
     // A fixed five-second cadence would have asked the module leaf about
@@ -255,5 +273,121 @@ test.describe("Connection", () => {
     const asked = mock.calls("stats_json") - before;
     expect(asked).toBeGreaterThanOrEqual(3);
     expect(asked).toBeLessThanOrEqual(7);
+  });
+});
+
+test.describe("the connection pill", () => {
+  for (const width of [1440, 390, 320]) {
+    test(`a dot and a word in a polite status, at ${width} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      let down = false;
+      await mockAdmin(page, "pagespeed_admin", {
+        config: F.CONFIG_VHOST,
+        stats_json: () => (down ? NETWORK_ERROR : F.STATS_VHOST),
+      });
+      await openConsole(page, "pagespeed_admin", "#/statistics");
+      await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+      const pill = page.getByTestId("connection-pill");
+      const dot = pill.locator(".status-dot");
+      await expect(pill).toHaveAttribute("role", "status");
+      await expect(dot).toBeVisible();
+      await expect(dot).toHaveClass(/status-dot-bar-ok/);
+      // The word names the state at every width; a phone shows only the dot.
+      await expect(pill).toHaveText("Connected");
+      const wordWidth = await page.getByTestId("connection-state").evaluate((el) => el.getBoundingClientRect().width);
+      expect(wordWidth > 2).toBe(width > 768);
+
+      down = true;
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect(dot).toHaveClass(/status-dot-bar-warning/);
+      await expect(pill).toHaveText("Reconnecting…");
+      // A ring, not a disc: the dot alone tells the states apart by shape.
+      await expect(dot).toHaveCSS("border-top-width", "2px");
+      await expect(dot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      if (width <= 768) {
+        // The drawer's head says it in full.
+        await page.getByRole("button", { name: "Toggle menu" }).click();
+        await expect(page.getByTestId("drawer-connection")).toBeVisible();
+        await expect(page.getByTestId("drawer-connection")).toHaveText("Reconnecting…");
+      }
+    });
+  }
+});
+
+test.describe("paused auto-refresh", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("pagespeed.console.autoRefresh", "off"));
+  });
+
+  test("the bar says Paused, not Connected: nothing is asking the server", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
+    const pill = page.getByTestId("connection-pill");
+    await expect(pill).toHaveText("Paused");
+    await expect(pill.locator(".status-dot")).toHaveClass(/status-dot-bar-paused/);
+    // A square: neither the connected disc nor the reconnecting ring.
+    await expect(pill.locator(".status-dot")).toHaveCSS("border-top-left-radius", "1px");
+    // Turned back on, the bar follows the server again.
+    await page.getByRole("button", { name: /auto-refresh/i }).click();
+    await expect(pill).toHaveText("Connected");
+  });
+
+  test("turned back on, the bar says Checking… until the first request settles, not the state from before", async ({ page }) => {
+    let hang = false;
+    await mockAdmin(
+      page,
+      "pagespeed_admin",
+      { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST },
+      { delayMs: { stats_json: 4000 }, down: () => hang },
+    );
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible({ timeout: 10_000 });
+    const pill = page.getByTestId("connection-pill");
+    await expect(pill).toHaveText("Paused");
+    // The server stops answering while paused; nothing asks, so nothing knows.
+    hang = true;
+    const seen: string[] = [];
+    await page.exposeFunction("notePill", (t: string) => seen.push(t));
+    await pill.evaluate((el) =>
+      new MutationObserver(() => (window as unknown as { notePill: (t: string) => void }).notePill(el.textContent ?? "")).observe(el, {
+        subtree: true,
+        characterData: true,
+        childList: true,
+      }),
+    );
+    await page.getByRole("button", { name: /auto-refresh/i }).click();
+    await expect(pill).toHaveText("Checking…");
+    await expect(pill.locator(".status-dot")).toHaveClass(/status-dot-square/);
+    await expect(pill).toHaveText("Reconnecting…", { timeout: 10_000 });
+    expect(seen.map((t) => t.trim())).not.toContain("Connected");
+  });
+
+  test("the drawer marks the paused state with the same square", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockAdmin(page, "pagespeed_admin", { config: F.CONFIG_VHOST, stats_json: F.STATS_VHOST });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    await page.getByRole("button", { name: "Toggle menu" }).click();
+    const drawer = page.getByTestId("drawer-connection");
+    await expect(drawer).toHaveText("Paused");
+    await expect(drawer.locator(".status-dot")).toHaveCSS("border-top-left-radius", "1px");
+  });
+
+  test("the server is down at load: the banner says nothing retries until asked, and Retry still works", async ({ page }) => {
+    let down = true;
+    await mockAdmin(page, "pagespeed_admin", {
+      config: () => (down ? NETWORK_ERROR : F.CONFIG_VHOST),
+      stats_json: () => (down ? NETWORK_ERROR : F.STATS_VHOST),
+    });
+    await openConsole(page, "pagespeed_admin", "#/statistics");
+    const banner = page.getByTestId("connection-banner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("Auto-refresh is paused; use Retry now or turn auto-refresh on");
+    await expect(banner).not.toContainText("keeps trying");
+    await expect(page.getByTestId("connection-pill")).toHaveText("Paused");
+    down = false;
+    await banner.getByRole("button", { name: "Retry now" }).click();
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByText("css_filter_total_bytes_saved")).toBeVisible();
   });
 });

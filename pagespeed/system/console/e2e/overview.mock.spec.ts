@@ -42,7 +42,8 @@ test.describe("Overview", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
     await expect(page.locator(".nav-item").first()).toHaveText("Overview");
     await expect(page.locator(".nav-item").nth(1)).toHaveText("Savings");
-    await expect(page.locator(".nav-item").nth(2)).toHaveText("Statistics");
+    await expect(page.locator(".nav-item").nth(2)).toHaveText("Logs");
+    await expect(page.locator(".nav-item").nth(3)).toHaveText("Statistics");
     expect(errors).toEqual([]);
   });
 
@@ -63,7 +64,7 @@ test.describe("Overview", () => {
     await expect(page.getByTestId("overview-scope")).toContainText("This virtual host (www.example.test:80)");
     await expect(page.getByTestId("module-bytes-saved")).toContainText("281 KB");
     await expect(page.getByTestId("module-served")).toHaveText(/^7/);
-    await expect(page.getByTestId("module-served")).toContainText("of 1,651 in-place requests");
+    await expect(page.getByTestId("module-served")).toContainText("of 1,651 requests of every type");
     await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
     await expectNoJunk(page);
   });
@@ -83,7 +84,7 @@ test.describe("Overview", () => {
   test("daemon absent (unreachable): the module card keeps working", async ({ page }) => {
     const { errors } = await open(page, "pagespeed_admin", healthy({ "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE }));
     await expect(page.getByTestId("module-bytes-saved")).toContainText("12.3 MB");
-    await expect(page.getByTestId("optimizer-state")).toHaveText("Unreachable");
+    await expect(page.getByTestId("optimizer-state")).toHaveText("Not answering");
     await expect(page.getByTestId("optimizer-card")).toContainText("configured but not answering");
     await expectNoJunk(page);
     expect(errors).toEqual([]);
@@ -161,7 +162,7 @@ test.describe("Overview", () => {
   test("all worker threads busy is a note, not a start-up state", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy({ "v1/daemon/health": F.HEALTH_BUSY }));
     await expect(page.getByTestId("optimizer-state")).toHaveText("Running");
-    await expect(page.getByTestId("optimizer-busy")).toHaveText("All worker threads busy.");
+    await expect(page.getByTestId("optimizer-busy")).toHaveText("All optimizer threads busy.");
   });
 
   test("module statistics unavailable: an error, and the optimizer card still renders", async ({ page }) => {
@@ -173,7 +174,10 @@ test.describe("Overview", () => {
 
   test("links lead to the detail pages", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy());
-    await page.getByTestId("module-fetch-failures").getByRole("link").click();
+    // A figure is plain text; its drill-down is a link of its own in the tile.
+    await expect(page.getByTestId("module-fetch-failures").getByRole("link")).toHaveCount(0);
+    await expect(page.getByTestId("module-bytes-saved").getByRole("link")).toHaveCount(0);
+    await page.getByTestId("module-fetch-failures-link").click();
     await expect(page).toHaveURL(/#\/logs\?source=module&level=warning$/);
   });
 
@@ -192,6 +196,313 @@ test.describe("Overview", () => {
   });
 });
 
+// The page answers first: one sentence with the state and the figures behind
+// it, then the tiles. Each number carries the scope and the time base of its
+// own source; the two savings figures are never added up.
+test.describe("Overview verdict and tiles", () => {
+  const HOUR = 3_600_000;
+  const vars = (reply: typeof F.STATS_GLOBAL) => (reply.body as { variables: Record<string, number> }).variables;
+  const withBody = (reply: typeof F.STATS_GLOBAL, patch: Record<string, unknown>) => ({
+    ...reply,
+    body: { ...(reply.body as Record<string, unknown>), ...patch },
+  });
+  /** Statistics whose web server started `ageMs` ago. */
+  const statsStarted = (reply: typeof F.STATS_GLOBAL, ageMs: number): Responder => () =>
+    withBody(reply, { variables: { ...vars(reply), process_start_ms: Date.now() - ageMs } });
+  /** Optimizer statistics whose optimizer started `ageMs` ago. */
+  const optimizerStarted = (ageMs: number): Responder => () => withBody(F.DAEMON_STATS, { started_at_ms: Date.now() - ageMs });
+  const steady = (extra: Partial<Record<Leaf, Responder>> = {}) =>
+    healthy({ stats_json: statsStarted(F.STATS_GLOBAL, 26 * HOUR), "v1/daemon/stats": optimizerStarted(3 * HOUR), ...extra });
+
+  /** The element starts inside the first viewport: nothing to scroll for. */
+  async function inFirstViewport(page: Page, testId: string): Promise<boolean> {
+    const box = await page.getByTestId(testId).first().boundingBox();
+    const viewport = page.viewportSize();
+    return box !== null && viewport !== null && box.y >= 0 && box.y + Math.min(box.height, 40) <= viewport.height;
+  }
+
+  test("whole server: the optimizer's serves and savings since it started, and that figure leads", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady());
+    await expect(page.getByTestId("health-summary")).toHaveText(
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. No findings.",
+    );
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-ok/);
+    await expect(page.getByTestId("health-dot")).toHaveClass(/status-dot-ok/);
+    // One leading figure: the optimizer's transfer savings, in the second tile.
+    const lead = page.getByTestId("overview-lead-figure");
+    await expect(lead).toHaveCount(1);
+    await expect(lead).toHaveText("673 KB");
+    await expect(page.getByTestId("tile-cache").getByTestId("overview-lead-figure")).toHaveCount(1);
+    await expect(page.getByTestId("tile-cache").getByTestId("optimizer-savings")).toContainText("3% of 21.4 MB");
+    // One line of context in the tile; how the figure is measured sits with the by-type table.
+    await expect(page.getByTestId("tile-cache").getByTestId("optimizer-savings").locator("p")).toHaveCount(2);
+    await expect(page.getByTestId("tile-cache").getByTestId("savings-qualifier")).toHaveCount(0);
+    await expect(page.getByTestId("optimizer-card").getByTestId("savings-qualifier")).toHaveText(
+      "Measured in transfer bytes, includes compression.",
+    );
+    // The two figures are related in words, never added up.
+    await expect(page.getByTestId("savings-relation")).toHaveText(
+      "Separate from the rewriting figure: these are responses served from the optimizer's cache.",
+    );
+    await expect(page.getByTestId("tile-rewriting").getByTestId("module-bytes-saved")).toContainText("12.3 MB");
+    const main = await page.locator("main").innerText();
+    expect(main).not.toContain("12.9 MB"); // 12.3 MB + 673 KB
+    // Each tile names its own time base.
+    await expect(page.getByTestId("tile-rewriting").getByTestId("since-module")).toHaveText("since the web server started 1 d ago");
+    await expect(page.getByTestId("tile-cache").getByTestId("since-optimizer")).toHaveText("since the optimizer started 3 h ago");
+    // Once per source: the other module tile does not repeat it.
+    await expect(page.getByTestId("since-module")).toHaveCount(1);
+    await expect(page.getByTestId("tile-fetch-failures").locator(".stat-tile-context")).toHaveCount(0);
+    // Below the tiles: both sources by type.
+    await expect(page.getByTestId("module-by-type").locator("tbody tr")).toHaveCount(3);
+    await expect(page.getByTestId("optimizer-by-type").locator("tbody tr")).toHaveText([/CSS\s*197/, /Images\s*45/]);
+    // The verdict's count is the optimizer's; the card's is the module's, and it says why the two differ.
+    const card = page.getByTestId("optimizer-card");
+    await expect(card.getByTestId("module-served")).toContainText(/The module counted 3,122 responses served optimized: 26% of 12,006/);
+    await expect(card.getByTestId("served-counts-relation")).toHaveText(
+      'It also counts answers to conditional requests ("not modified"), so its count can be higher than the optimizer\'s.',
+    );
+    await expect(page.getByTestId("tile-cache").getByTestId("served-counts-relation")).toHaveCount(0);
+    await expectNoJunk(page);
+  });
+
+  test("a figure is plain text in the text colour; a zero is not a link and not an alert", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady());
+    const failures = page.getByTestId("module-fetch-failures");
+    await expect(failures).toHaveText("0");
+    const text = await page.locator("h1").evaluate((el) => getComputedStyle(el).color);
+    for (const id of ["module-fetch-failures", "overview-lead-figure"]) {
+      const figure = page.getByTestId(id);
+      expect(await figure.evaluate((el) => getComputedStyle(el).color), id).toBe(text);
+      expect(await figure.evaluate((el) => getComputedStyle(el).textDecorationLine), id).toBe("none");
+      expect(await figure.evaluate((el) => el.closest("a") === null && el.querySelector("a") === null), id).toBe(true);
+    }
+    // The drill-down is its own link, at least 24 px tall.
+    for (const link of await page.getByTestId("overview-tiles").locator("a.stat-tile-link").all()) {
+      expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(24);
+    }
+    await expect(page.getByTestId("overview-tiles").locator("a.stat-tile-link")).toHaveCount(4);
+  });
+
+  test("per host: this site's rewriting leads; the optimizer is named by state, its figures stay whole-server", async ({ page }) => {
+    await open(page, "pagespeed_admin", steady({ config: F.CONFIG_VHOST, stats_json: statsStarted(F.STATS_VHOST, 26 * HOUR) }));
+    const verdict = page.getByTestId("health-summary");
+    await expect(verdict).toHaveText(
+      "Working. This site: 281 KB saved by rewriting since the web server started 1 d ago. Optimizer (whole server): running. No findings.",
+    );
+    // The optimizer's whole-server figures are not in the sentence and not in a tile.
+    await expect(verdict).not.toContainText("673 KB");
+    await expect(verdict).not.toContainText("242");
+    await expect(page.getByTestId("tile-rewriting").getByTestId("overview-lead-figure")).toHaveText("281 KB");
+    await expect(page.getByTestId("overview-tiles").getByTestId("optimizer-savings")).toHaveCount(0);
+    // They stay in the muted whole-server card, labelled as such.
+    const card = page.getByTestId("optimizer-card");
+    await expect(card).toHaveClass(/card-muted/);
+    await expect(card.getByTestId("optimizer-savings")).toContainText("673 KB");
+    await expect(card.getByTestId("optimizer-scope-note")).toContainText("Server-wide numbers");
+    // This site's own count of serves from the optimizer's cache is a tile, with how to read a low share.
+    await expect(page.getByTestId("tile-cache").getByTestId("module-served")).toContainText("of 1,651 requests of every type");
+    await expect(page.getByTestId("serve-share-judgement")).toHaveText(
+      "Normal when most requests are pages: the optimizer's cache answers CSS, JavaScript and images.",
+    );
+    await expect(page.getByTestId("tile-optimizer").locator(".scope-chip")).toHaveText("whole server");
+  });
+
+  test("module only: the rewriting figure leads, there is no optimizer-cache tile, and the optimizer can be added", async ({ page }) => {
+    await open(page, "pagespeed_admin", healthy({
+      stats_json: statsStarted(F.STATS_MODULE_ONLY, 26 * HOUR),
+      "v1/daemon/health": F.NOT_CONFIGURED,
+      "v1/daemon/stats": F.NOT_CONFIGURED,
+    }));
+    await expect(page.getByTestId("health-summary")).toHaveText(
+      "Working. 12.3 MB saved by rewriting since the web server started 1 d ago. No findings.",
+    );
+    await expect(page.getByTestId("overview-lead-figure")).toHaveText("12.3 MB");
+    await expect(page.getByTestId("tile-cache")).toHaveCount(0);
+    await expect(page.getByTestId("overview-tiles").locator(".stat-tile")).toHaveCount(3);
+    await expect(page.getByTestId("tile-optimizer").getByTestId("optimizer-state")).toHaveText("Not configured");
+    const add = page.getByTestId("add-optimizer");
+    await expect(add).toHaveText("Add the optimizer");
+    await expect(add).toHaveAttribute("href", "https://modpagespeed.com/docs/configuration/#area-optimizer-worker");
+    await expect(add).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  test("warm-up applies per source: a restarted optimizer does not hide the module's figure", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady({ "v1/daemon/stats": optimizerStarted(4 * 60_000) }));
+    await expect(page.getByTestId("health-summary")).toContainText(
+      "Working. 12.3 MB saved by rewriting since the web server started 1 d ago. Optimizer restarted 4 min ago; its figures are not meaningful yet.",
+    );
+    // No share is printed for the warming source, and no bare dash stands in for it.
+    const savings = page.getByTestId("optimizer-savings");
+    await expect(savings).toContainText("of 21.4 MB so far, since the optimizer started 4 min ago");
+    await expect(savings).not.toContainText("%");
+    await expect(savings).not.toContainText("—");
+    await expect(page.getByTestId("tile-cache").getByTestId("warming-pill")).toHaveCount(1);
+    await expect(page.getByTestId("overview-tiles").getByTestId("warming-pill")).toHaveCount(1);
+    await expect(page.getByTestId("tile-rewriting").getByTestId("warming-pill")).toHaveCount(0);
+    await expect(page.getByTestId("module-bytes-saved")).toContainText("47% of 26.4 MB");
+  });
+
+  test("every source warming: no figure in the sentence", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady({
+      stats_json: statsStarted(F.STATS_GLOBAL, 9 * 60_000),
+      "v1/daemon/stats": optimizerStarted(4 * 60_000),
+    }));
+    const verdict = page.getByTestId("health-summary");
+    await expect(verdict).toContainText("Warming up. Counters restarted 4 min ago; figures are not meaningful yet.");
+    await expect(verdict).not.toContainText(/KB|MB/);
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-info/);
+  });
+
+  test("first run: running with no traffic, and three next steps instead of empty figures", async ({ page }) => {
+    await open(page, "pagespeed_admin", healthy({
+      stats_json: statsStarted(F.STATS_EMPTY, 2 * HOUR),
+      "v1/daemon/health": F.NOT_CONFIGURED,
+      "v1/daemon/stats": F.NOT_CONFIGURED,
+    }));
+    await expect(page.getByTestId("health-summary")).toHaveText(
+      "Running, no traffic seen yet since the web server started 2 h ago. No findings.",
+    );
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-info/);
+    await expect(page.getByTestId("overview-tiles")).toHaveCount(0);
+    await expect(page.getByTestId("overview-lead-figure")).toHaveCount(0);
+    const steps = page.getByTestId("overview-next-steps").locator("li");
+    await expect(steps).toHaveCount(3);
+    await expect(steps.nth(0)).toContainText("Load a page of this site");
+    await expect(page.getByTestId("overview-header-check")).toHaveText(
+      "curl -sI http://example.com/ | grep -i -E 'x-mod-pagespeed|x-page-speed'",
+    );
+    await expect(steps.nth(2)).toContainText("Come back here");
+    await expect(page.getByTestId("optimizer-card").getByTestId("optimizer-state")).toHaveText("Not configured");
+    await expect(page.getByTestId("add-optimizer")).toBeVisible();
+    await expectNoJunk(page);
+  });
+
+  test("one signal: the dot and the rule follow the word; findings are marked in words where they are counted", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady({ "v1/daemon/health": F.HEALTH_CHECK_FAILING }));
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .* Error 1 finding · 1 needs action\.$/);
+    // "Working" keeps the working colour: the dot never says something the word does not.
+    await expect(page.getByTestId("health-strip")).toHaveClass(/health-strip-ok/);
+    await expect(page.getByTestId("health-dot")).toHaveClass(/status-dot-ok/);
+    await expect(page.getByTestId("health-dot")).not.toHaveClass(/status-dot-(error|warning)/);
+    // The findings' level is a word beside the count, not a colour alone.
+    const mark = page.getByTestId("findings-mark");
+    await expect(mark).toHaveText("Error");
+    await expect(mark).toHaveClass(/level-badge-error/);
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 1 needs action");
+    // The count is a link to the findings: it scrolls there and takes focus, and the page stays.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const link = page.getByTestId("findings-link");
+    await expect(link).toHaveText("1 finding · 1 needs action");
+    await link.click();
+    await expect(page.getByTestId("findings-anchor")).toBeFocused();
+    await expect(page.getByTestId("alert-daemon-check-failed")).toBeInViewport();
+    await expect(page).toHaveURL(/pagespeed_global_admin\/(#\/overview)?$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
+    // The findings follow the tiles.
+    const tiles = (await page.getByTestId("overview-tiles").boundingBox())!;
+    const findings = (await page.getByTestId("alerts").boundingBox())!;
+    expect(findings.y).toBeGreaterThanOrEqual(tiles.y + tiles.height);
+  });
+
+  test("right after a web server restart the optimizer's figures still lead: tiles, no first-run steps", async ({ page }) => {
+    // The module's counters are zero again; the optimizer has been serving for hours.
+    await open(page, "pagespeed_global_admin", steady({ stats_json: statsStarted(F.STATS_EMPTY, 20_000) }));
+    await expect(page.getByTestId("health-summary")).toContainText(
+      "Working. The optimizer counted 242 optimized responses served from its cache, 673 KB saved since the optimizer started 3 h ago. " +
+        "Web server restarted less than a minute ago; the module's figures are not meaningful yet.",
+    );
+    // The page agrees with the sentence: the tiles and the leading figure are there.
+    await expect(page.getByTestId("overview-tiles")).toBeVisible();
+    await expect(page.getByTestId("overview-lead-figure")).toHaveText("673 KB");
+    await expect(page.getByTestId("tile-rewriting").getByTestId("warming-pill")).toBeVisible();
+    // Not a first run: no onboarding, a plain line instead of a table of zeros.
+    await expect(page.getByTestId("overview-empty")).toHaveCount(0);
+    await expect(page.getByTestId("overview-next-steps")).toHaveCount(0);
+    await expect(page.getByTestId("module-nothing-yet")).toHaveText(
+      "The module has rewritten nothing since the web server started less than a minute ago.",
+    );
+    await expectNoJunk(page);
+  });
+
+  test("a failed module read over good figures: status unknown with the reason, and the notice above the stale tiles", async ({ page }) => {
+    let fail = false;
+    const good = statsStarted(F.STATS_GLOBAL, 26 * HOUR);
+    await open(page, "pagespeed_global_admin", steady({
+      stats_json: (call, request) => (fail ? { status: 500, body: { error: "internal" } } : good(call, request)),
+    }));
+    await expect(page.getByTestId("health-summary")).toContainText(/^Working\. /);
+    await expect(page.locator("main .refresh-notice")).toHaveCount(0);
+    fail = true;
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes("stats_json") && r.status() === 500),
+      page.getByRole("button", { name: "Refresh", exact: true }).click(),
+    ]);
+    const verdict = page.getByTestId("health-summary");
+    await expect(verdict).toHaveText(
+      /^Status unknown\. The module statistics could not be read; the figures are from \d\d:\d\d:\d\d\.$/,
+    );
+    // Said once: the findings count does not repeat that the statistics are unavailable.
+    await expect(verdict).not.toContainText("Module statistics unavailable");
+    // Never "No findings" over figures that were not read, no green, and no figure in the sentence.
+    await expect(verdict).not.toContainText("No findings");
+    await expect(verdict).not.toContainText(/KB|MB/);
+    await expect(page.getByTestId("health-strip")).not.toHaveClass(/health-strip-(ok|info)/);
+    // The last good figures stay, under a notice that says why they are stale.
+    await expect(page.getByTestId("module-bytes-saved")).toContainText("12.3 MB");
+    const notice = page.locator("main .refresh-notice");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toContainText("Last refresh failed");
+    await expect(notice).toContainText("Showing the most recent data");
+    const noticeBox = (await notice.boundingBox())!;
+    const tilesBox = (await page.getByTestId("overview-tiles").boundingBox())!;
+    expect(noticeBox.y + noticeBox.height, "the notice is above the tiles").toBeLessThanOrEqual(tilesBox.y);
+    // It answers again: the verdict and the figures are current, the notice is gone.
+    fail = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(verdict).toContainText(/^Working\. /);
+    await expect(notice).toHaveCount(0);
+  });
+
+  test("the sentence's figures are not announced on every refresh: only the findings count is a status", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", steady());
+    const verdict = page.getByTestId("health-summary");
+    expect(await verdict.evaluate((el) => el.closest("[aria-live], [role=status], [role=alert], [role=log]") === null)).toBe(true);
+    await expect(page.getByTestId("findings-summary")).toHaveAttribute("role", "status");
+  });
+
+  for (const [name, size] of [["desk", { width: 1440, height: 900 }], ["phone", { width: 390, height: 844 }]] as const) {
+    const consoles = {
+      "whole server": { admin: "pagespeed_global_admin", replies: () => steady() },
+      "per host": {
+        admin: "pagespeed_admin",
+        replies: () => steady({ config: F.CONFIG_VHOST, stats_json: statsStarted(F.STATS_VHOST, 26 * HOUR) }),
+      },
+      "module only": {
+        admin: "pagespeed_admin",
+        replies: () =>
+          steady({
+            config: F.CONFIG_VHOST,
+            stats_json: statsStarted(F.STATS_MODULE_ONLY, 26 * HOUR),
+            "v1/daemon/health": F.NOT_CONFIGURED,
+            "v1/daemon/stats": F.NOT_CONFIGURED,
+          }),
+      },
+    } as const;
+    for (const [consoleName, { admin, replies }] of Object.entries(consoles)) {
+      test(`${name}, ${consoleName}: the verdict and the leading figure are in the first viewport`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await open(page, admin, replies());
+        await expect(page.getByTestId("health-summary")).toContainText(/^Working\. .*\d.* since /);
+        expect(await inFirstViewport(page, "health-summary")).toBe(true);
+        expect(await inFirstViewport(page, "overview-lead-figure")).toBe(true);
+        await expect(page.getByTestId("overview-lead-figure")).toHaveText(/\d.*(B|KB|MB|GB)/);
+      });
+    }
+  }
+});
+
 test.describe("Overview time bases and scope", () => {
   const golden = (): Partial<Record<Leaf, Responder>> => ({
     ...F.allReplies(),
@@ -200,20 +511,23 @@ test.describe("Overview time bases and scope", () => {
     "v1/daemon/stats": F.OPT_STATS_PAGE,
   });
 
-  test("the cache-serve line is a link with its percentage", async ({ page }) => {
+  test("the cache-serve line carries its percentage and caveat, and the tile links to Savings", async ({ page }) => {
     await mockAdmin(page, "pagespeed_global_admin", golden());
     await openConsole(page, "pagespeed_global_admin", "#/overview");
+    const served = page.getByTestId("module-served");
+    await expect(served).toContainText("%");
+    // What the share is a share of, in plain words; the counter caveat (the
+    // rate leans upward) stays one hover away, as on the Savings page.
+    await expect(served).toContainText("requests for CSS, JavaScript and images");
+    await expect(served).not.toContainText(/cacheable|in-place|HEAD/);
+    await expect(served.locator("[title]")).toHaveAttribute(
+      "title",
+      "Requests for CSS, JavaScript and images that were answered with an optimized copy from the optimizer's cache. " +
+        "Conditional and HEAD requests count as served.",
+    );
+    await expect(served.getByRole("link")).toHaveCount(0);
     const link = page.getByTestId("module-served-link");
     await expect(link).toHaveAttribute("href", "#/savings");
-    await expect(link).toContainText("%");
-    // The same counter caveat as the Savings page: the rate leans upward.
-    await expect(link).toContainText(
-      "cacheable resource requests; conditional and HEAD requests count as served",
-    );
-    await expect(link).toHaveAttribute(
-      "title",
-      "Share of cacheable resource requests (CSS, JavaScript, images) answered from the optimizer's cache; conditional and HEAD requests count as served",
-    );
     await link.click();
     await expect(page).toHaveURL(/#\/savings$/);
   });
@@ -223,8 +537,9 @@ test.describe("Overview time bases and scope", () => {
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await expect(page.getByTestId("module-card").locator(".scope-chip")).toHaveCount(0);
     await expect(page.getByTestId("optimizer-card").locator(".scope-chip")).toHaveCount(0);
-    await expect(page.getByTestId("since-module")).toContainText("(web server restart or reload)");
-    await expect(page.getByTestId("since-optimizer")).toContainText("(optimizer restart)");
+    await expect(page.getByTestId("module-card").getByTestId("since-module")).toHaveCount(0);
+    await expect(page.getByTestId("tile-rewriting").getByTestId("since-module")).toContainText("since the web server started");
+    await expect(page.getByTestId("since-optimizer")).toContainText("since the optimizer started");
   });
 
   test("the per-host console mutes the optimizer card and names the host scope", async ({ page }) => {
@@ -232,7 +547,7 @@ test.describe("Overview time bases and scope", () => {
     await openConsole(page, "pagespeed_admin", "#/overview");
     await expect(page.getByTestId("module-card").locator(".scope-chip")).toHaveCount(0);
     await expect(page.getByTestId("optimizer-card").locator(".scope-chip")).toHaveText("whole server");
-    await expect(page.getByTestId("optimizer-card")).toHaveClass(/card--muted/);
+    await expect(page.getByTestId("optimizer-card")).toHaveClass(/card-muted/);
     await expect(page.getByTestId("optimizer-scope-note").locator("a")).toHaveAttribute(
       "href",
       /pagespeed_global_admin\/#\/savings$/,
@@ -252,7 +567,7 @@ for (const scheme of ["light", "dark"] as const) {
       });
       await openConsole(page, "pagespeed_admin", "#/overview");
       const muted = page.getByTestId("optimizer-card");
-      await expect(muted).toHaveClass(/card--muted/);
+      await expect(muted).toHaveClass(/card-muted/);
       await expect(muted).toHaveCSS("border-top-style", "dashed");
       await expect(page.getByTestId("module-card")).toHaveCSS("border-top-style", "solid");
       if (scheme === "dark") {
@@ -275,7 +590,7 @@ test.describe("Overview alerts", () => {
 
   test("healthy: no alerts, a healthy summary", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy());
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings");
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 
@@ -289,14 +604,14 @@ test.describe("Overview alerts", () => {
     await expect(page.getByTestId("alerts")).toHaveAttribute("role", "status");
     await expect(page.getByTestId("alerts")).toHaveAttribute("aria-live", "polite");
     await expect(alert).not.toHaveAttribute("role", "alert");
-    await expect(page.getByTestId("health-summary")).toHaveText("1 finding · 1 needs action");
+    await expect(page.getByTestId("findings-summary")).toHaveText("1 finding · 1 needs action");
     await alert.getByRole("link", { name: "Details" }).click();
     await expect(page).toHaveURL(/#\/optimizer$/);
   });
 
   test("daemon absent (not configured): nothing to alert", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy({ "v1/daemon/health": F.NOT_CONFIGURED, "v1/daemon/stats": F.NOT_CONFIGURED }));
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings");
     await expect(page.getByTestId("alerts")).toHaveCount(0);
   });
 
@@ -304,13 +619,13 @@ test.describe("Overview alerts", () => {
     for (const admin of ["pagespeed_admin", "pagespeed_global_admin"] as const) {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await open(page, admin, healthy({ "v1/daemon/health": F.HEALTH_CHECK_FAILING }));
-      await expect(page.getByTestId("alert-daemon-check-failed")).toContainText("cache_open");
+      await expect(page.getByTestId("alert-daemon-check-failed")).toContainText("Cache opened");
     }
   });
 
   test("empty statistics: nothing to alert", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy({ stats_json: F.STATS_EMPTY, "v1/daemon/stats": F.DAEMON_STATS_EMPTY }));
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings");
   });
 
   test("optimizer below the floor (endpoint not provided): the update warning", async ({ page }) => {
@@ -347,7 +662,7 @@ test.describe("Overview alerts", () => {
     const alerts = page.getByTestId("alerts").locator('[data-testid^="alert-"]');
     await expect(alerts).toHaveCount(2);
     await expect(alerts.first()).toHaveAttribute("data-testid", "alert-daemon-check-failed");
-    await expect(page.getByTestId("health-summary")).toHaveText("2 findings · 2 need action");
+    await expect(page.getByTestId("findings-summary")).toHaveText("2 findings · 2 need action");
   });
 
   // Weakly ordered by design: a regular 5 s refresh can consume a responder
@@ -364,7 +679,7 @@ test.describe("Overview alerts", () => {
     await expect(alert).toBeVisible();
     await alert.getByRole("button", { name: /^Acknowledge / }).click();
     await expect(alert).toHaveCount(0);
-    await expect(page.getByTestId("health-summary")).toHaveText("No findings · 1 acknowledged");
+    await expect(page.getByTestId("findings-summary")).toHaveText("No findings · 1 acknowledged");
     await refresh(page);
     await expect(alert).toHaveCount(0);
     await refresh(page);
@@ -380,5 +695,72 @@ test.describe("Overview alerts", () => {
     await page.getByRole("link", { name: "Overview", exact: true }).click();
     await expect(page.getByTestId("module-card")).toBeVisible();
     await expect(page.getByTestId("alert-origin-misconfiguration")).toHaveCount(0);
+  });
+});
+
+// "Why is this URL not optimized?" starts on Overview, on every console: a
+// pasted URL and Enter reach the reasons.
+test.describe("Inspect a URL", () => {
+  const CONSOLES: Array<[string, Admin, Partial<Record<Leaf, Responder>>]> = [
+    ["whole-server console", "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL, "v1/daemon/cache/alternates": F.ALTERNATES_NOT_IN_INDEX }],
+    ["per-vhost console", "pagespeed_admin", F.allReplies()],
+    [
+      "module-only server",
+      "pagespeed_admin",
+      {
+        ...F.allReplies(),
+        "v1/daemon/health": F.NOT_CONFIGURED,
+        "v1/daemon/stats": F.NOT_CONFIGURED,
+        "v1/daemon/cooldowns": F.NOT_CONFIGURED,
+      },
+    ],
+  ];
+  for (const [name, admin, replies] of CONSOLES) {
+    test(`${name}: a pasted URL reaches the reasons in two interactions`, async ({ page }) => {
+      await open(page, admin, { ...replies, cache: F.cacheWithLookup() });
+      const input = page.getByRole("searchbox", { name: "Inspect a URL" });
+      await input.fill("  https://www.example.test/a.css ");
+      await input.press("Enter");
+      await expect(page).toHaveURL(/#\/urls\/detail\?url=%2Fa\.css&host=www\.example\.test&scheme=https$/);
+      await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/a.css");
+      await expect(page.getByTestId("url-module-lookup")).toBeVisible();
+      await expect(page.getByTestId("url-reasons").getByRole("listitem")).toHaveCount(4);
+      // Back returns to Overview.
+      await page.goBack();
+      await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    });
+  }
+
+  test("the button does what Enter does", async ({ page }) => {
+    await open(page, "pagespeed_admin", { ...F.allReplies(), cache: F.cacheWithLookup() });
+    await page.getByTestId("inspect-url").fill("http://www.example.test/img/hero.png?v=2#top");
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await expect(page.getByTestId("url-detail-url")).toHaveText("http://www.example.test/img/hero.png?v=2");
+  });
+
+  test("text that is not a full URL stays put and says what is expected", async ({ page }) => {
+    const { mock } = await open(page, "pagespeed_admin", F.allReplies());
+    const input = page.getByTestId("inspect-url");
+    const problem = page.getByTestId("inspect-url-problem");
+    await expect(problem).toHaveText("");
+    await input.fill("www.example.test/a.css");
+    await input.press("Enter");
+    await expect(problem).toHaveText("Enter a full URL, starting with http:// or https://.");
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(input).toBeFocused();
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    // Typing again clears the line; an empty box does nothing.
+    await input.fill("");
+    await expect(problem).toHaveText("");
+    await input.press("Enter");
+    await expect(problem).toHaveText("");
+    await expect(page).toHaveURL(/\/pagespeed_admin\/(#\/overview)?$/);
+    // Nothing was looked up.
+    expect(mock.calls("cache")).toBe(0);
+  });
+
+  test("the input is there while the server is not answering, and with findings above it", async ({ page }) => {
+    await open(page, "pagespeed_global_admin", healthy({ "v1/daemon/health": F.UNREACHABLE, "v1/daemon/stats": F.UNREACHABLE }));
+    await expect(page.getByTestId("inspect-url")).toBeVisible();
   });
 });

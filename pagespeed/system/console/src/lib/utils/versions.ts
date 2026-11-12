@@ -58,7 +58,7 @@ export async function optimizerVersionsOnce(
 
 export interface OptimizerVersionsStatus extends OptimizerVersions {
   /** Why no version is shown: the optimizer's availability word ("Not
-   *  configured", "Unreachable", …), or "Not available right now" when it
+   *  configured", "Not answering", …), or "Not available right now" when it
    *  stayed busy through the one retry; null when it answered. */
   unavailable: string | null;
 }

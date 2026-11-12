@@ -62,37 +62,29 @@ function mix(tint: string, percent: number, base: string): string {
   return `#${a.map((v, i) => Math.round(v * p + b[i] * (1 - p)).toString(16).padStart(2, "0")).join("")}`;
 }
 
-// Every category badge class (FormatBadge, QualityBadge, ContentClassBadge):
-// its text is the plain text token; the category colour lives on the 12%
-// color-mix tint over --ps-bg (and the border). The pairing must hold AA in
-// both schemes — a status token as the text colour did not (the tint is too
-// close to it in the light scheme).
-const BADGE_CLASSES = [
-  "format-webp",
-  "format-avif",
-  "format-jpeg",
-  "format-png",
-  "quality-good",
-  "quality-acceptable",
-  "quality-poor",
-  "class-photo",
-  "class-screenshot",
-  "class-illustration",
-  "class-noisy",
-] as const;
-const BADGE_TINTS: Record<(typeof BADGE_CLASSES)[number], string> = {
-  "format-webp": "--ps-primary",
-  "format-avif": "--ps-secondary",
-  "format-jpeg": "--ps-warning",
-  "format-png": "--ps-success",
-  "quality-good": "--ps-success",
-  "quality-acceptable": "--ps-warning",
-  "quality-poor": "--ps-error",
-  "class-photo": "--ps-warning",
-  "class-screenshot": "--ps-primary",
-  "class-illustration": "--ps-success",
-  "class-noisy": "--ps-error",
-};
+// Every tinted badge (FormatBadge, QualityBadge, ContentClassBadge, and the
+// pages' category and state tags): its text is the plain text token; the
+// colour lives on a 12% color-mix tint over the card (and on the border).
+// The pairing must hold AA in both schemes -- a status token as the text
+// colour did not (the tint is too close to it in the light scheme).
+const BADGE_TINTS = {
+  "badge-tint-primary": "--ps-primary",
+  "badge-tint-secondary": "--ps-secondary",
+  "badge-tint-ok": "--ps-success",
+  "badge-tint-warning": "--ps-warning",
+  "badge-tint-error": "--ps-error",
+} as const;
+const BADGE_CLASSES = Object.keys(BADGE_TINTS) as (keyof typeof BADGE_TINTS)[];
+// The filled badges: a state worth seeing from afar.
+const BADGE_SOLID = [".badge-solid-ok", ".badge-solid-warning", ".badge-solid-error"];
+
+/** The token a theme rule's property takes, from its block in theme.css. */
+function declaredToken(selector: string, property: string): string {
+  const block = new RegExp(`^\\${selector}\\s*\\{([^}]*)\\}`, "m").exec(css);
+  const token = block && new RegExp(`(?:^|[;\\s])${property}:\\s*var\\((--ps-[\\w-]+)\\)`).exec(block[1]);
+  expect(token, `${selector} ${property} token`).not.toBeNull();
+  return (token as RegExpExecArray)[1];
+}
 
 // --ps-muted-opacity per scheme: the first declaration is the light value,
 // the second the dark override.
@@ -182,9 +174,22 @@ describe("theme tokens", () => {
       for (const [fg, bg] of TOPBAR_PAIRS) {
         expect(contrastRatio(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(AA);
       }
-      // The scope badge sits on a 15% white overlay over the band.
-      const badgeBg = mix("#ffffff", 15, t["--ps-topbar-bg"]);
-      expect(contrastRatio(t["--ps-topbar-fg"], badgeBg), "scope badge").toBeGreaterThanOrEqual(AA);
+      // The scope chip sits on a 15% white overlay over the band.
+      expect(css).toMatch(/^\.topbar-chip\s*\{[^}]*background:\s*rgba\(255, 255, 255, 0\.15\)/m);
+      const chipBg = mix("#ffffff", 15, t["--ps-topbar-bg"]);
+      expect(contrastRatio(t[declaredToken(".topbar-chip", "color")], chipBg), "scope chip").toBeGreaterThanOrEqual(AA);
+    });
+    it(`${scheme}: the connection dot is visible on the band`, () => {
+      // The ring (reconnecting) is drawn by its border; the disc and the square by their fill.
+      for (const [cls, prop] of [
+        [".status-dot-bar-ok", "background"],
+        [".status-dot-bar-warning", "border-color"],
+        [".status-dot-bar-paused", "background"],
+      ]) {
+        const dot = declaredToken(cls, prop);
+        expect(dot).toMatch(/^--ps-topbar-/);
+        expect(contrastRatio(t[dot], t["--ps-topbar-bg"]), `${cls} (${dot}) on the band`).toBeGreaterThanOrEqual(3);
+      }
     });
     it(`${scheme}: the shared level badges pass AA in both schemes`, () => {
       for (const [fg, bg] of LEVEL_BADGE_PAIRS) {
@@ -211,8 +216,22 @@ describe("theme tokens", () => {
     it(`${scheme}: badge text passes AA on its colour-mix tint`, () => {
       for (const cls of BADGE_CLASSES) {
         const tint = BADGE_TINTS[cls];
-        const bg = mix(t[tint], 12, t["--ps-bg"]);
+        const bg = mix(t[tint], 12, t["--ps-surface"]);
         expect(contrastRatio(t["--ps-text"], bg), `.${cls}: --ps-text on 12% ${tint}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: a filled badge's text passes AA on its fill`, () => {
+      for (const cls of BADGE_SOLID) {
+        const [fg, bg] = [declaredToken(cls, "color"), declaredToken(cls, "background")];
+        expect(contrastRatio(t[fg], t[bg]), `${cls}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: a neutral or outlined badge's text passes AA where it sits`, () => {
+      const neutral = [declaredToken(".badge", "color"), declaredToken(".badge", "background")];
+      expect(contrastRatio(t[neutral[0]], t[neutral[1]]), ".badge").toBeGreaterThanOrEqual(AA);
+      const outline = declaredToken(".badge-outline-warning", "color");
+      for (const bg of SURFACES) {
+        expect(contrastRatio(t[outline], t[bg]), `.badge-outline-warning on ${bg}`).toBeGreaterThanOrEqual(AA);
       }
     });
   }
@@ -397,6 +416,68 @@ describe("notices", () => {
   });
 });
 
+// The health strip (a page's opening sentence) and the status dot. The
+// strip's text sits on its own band; its leading rule and the dot are marks
+// that repeat the state in colour, so they need 3:1 against what they sit on.
+describe("health strip and status dot", () => {
+  const declared = (selector: string, property: string): string => {
+    const block = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css);
+    const token = block && new RegExp(`(?:^|[;\\s])${property}:[^;]*var\\((--ps-[\\w-]+)\\)`).exec(block[1]);
+    expect(token, `${selector} ${property} token`).not.toBeNull();
+    return (token as RegExpExecArray)[1];
+  };
+  const band = declared(".health-strip", "background");
+  const text = declared(".health-strip", "color");
+  const levels = [".health-strip", ".health-strip-ok", ".health-strip-info", ".health-strip-warning", ".health-strip-error"];
+  const rules = levels.map((v) => declared(v, v === ".health-strip" ? "border-inline-start" : "border-inline-start-color"));
+  const dotClasses = [".status-dot", ".status-dot-ok", ".status-dot-info", ".status-dot-warning", ".status-dot-error"];
+  const dots = dotClasses.map((v) => declared(v, "background"));
+  for (const scheme of ["light", "dark"] as const) {
+    const t = tokens[scheme];
+    it(`${scheme}: the sentence, its secondary line and a link pass AA on the strip`, () => {
+      for (const fg of [text, "--ps-text-secondary", "--ps-primary"]) {
+        expect(contrastRatio(t[fg], t[band]), `${fg} on ${band}`).toBeGreaterThanOrEqual(AA);
+      }
+    });
+    it(`${scheme}: every level's leading rule is visible on the strip and on the page`, () => {
+      for (const [i, rule] of rules.entries()) {
+        for (const bg of [band, "--ps-bg"]) {
+          expect(contrastRatio(t[rule], t[bg]), `${levels[i]} rule (${rule}) on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+    it(`${scheme}: every status dot is visible on the strip, the card and the muted card`, () => {
+      const percent = MUTED_OPACITY[scheme] * 100;
+      const muted = mix(t["--ps-bg-secondary"], percent, t["--ps-bg"]);
+      for (const [i, dot] of dots.entries()) {
+        for (const bg of [band, "--ps-surface"]) {
+          expect(contrastRatio(t[dot], t[bg]), `${dotClasses[i]} (${dot}) on ${bg}`).toBeGreaterThanOrEqual(3);
+        }
+        expect(contrastRatio(mix(t[dot], percent, t["--ps-bg"]), muted), `${dotClasses[i]} on the muted card`).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+  it("never draws a rule or a dot in a status fill colour", () => {
+    for (const token of [...rules, ...dots]) {
+      expect(token).not.toBe("--ps-warning");
+      expect(token).not.toBe("--ps-success");
+    }
+  });
+  it("the tile's figure is plain text at the hero size, never a link colour", () => {
+    const value = /\.stat-tile-value\s*\{([^}]*)\}/.exec(css);
+    expect(value).not.toBeNull();
+    expect((value as RegExpExecArray)[1]).toContain("color: var(--ps-text);");
+    expect((value as RegExpExecArray)[1]).toContain("font-size: var(--ps-type-hero-metric-size);");
+    expect((value as RegExpExecArray)[1]).toContain("font-variant-numeric: tabular-nums;");
+  });
+  it("the card and the muted card are declared once, in the theme", () => {
+    expect(css.match(/^\.card\s*\{/gm)).toHaveLength(1);
+    expect(css.match(/^\.card-muted\s*\{/gm)).toHaveLength(1);
+    const muted = /^\.card-muted\s*\{([^}]*)\}/m.exec(css);
+    expect((muted as RegExpExecArray)[1]).toContain("dashed");
+  });
+});
+
 // Forced colours replace author colours at paint time. The marks that
 // survive are declared once, on state attributes and shared classes, so a
 // page restyle cannot drop them (e2e/forced-colors.mock.spec.ts checks the
@@ -405,7 +486,7 @@ describe("forced colours", () => {
   it("has one block, in the theme, keyed on state and shared classes", () => {
     expect(css.match(/@media\s*\(forced-colors:\s*active\)/g)).toHaveLength(1);
     const block = css.slice(css.search(/@media\s*\(forced-colors:\s*active\)/));
-    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot"]) {
+    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot", ".health-strip", ".card-muted"]) {
       expect(block, selector).toContain(selector);
     }
   });
@@ -417,10 +498,11 @@ describe("forced colours", () => {
   });
 });
 
-// The savings split's stacked bar: each segment fill must stand out from the
-// bar's track (which also shows as the gap between segments) and from the
-// card behind it — the muted per-host card included — and neighbouring
-// segments must differ by 3:1, so the bar reads without relying on hue.
+// The savings split's stacked bar: each share is a .bar-fill whose colour
+// must stand out from the bar's track (which also shows as the gap between
+// two shares) and from the card behind it, the muted per-host card
+// included. Two shares are told apart by that gap, not by their hues: the
+// fills are close in lightness, and a forced palette paints them alike.
 describe("savings split bar", () => {
   const savings = readFileSync(join(SRC, "pages/Savings.svelte"), "utf8");
   const background = (selector: string): string => {
@@ -434,24 +516,26 @@ describe("savings split bar", () => {
   const track = background(".split-bar");
   for (const scheme of ["light", "dark"] as const) {
     const t = tokens[scheme];
-    it(`${scheme}: every segment passes 4.5:1 on the track and the card`, () => {
+    it(`${scheme}: every share passes 4.5:1 on the track and the card`, () => {
       for (const [i, fill] of fills.entries()) {
         for (const bg of [track, "--ps-surface", "--ps-bg-secondary"]) {
           expect(contrastRatio(t[fill], t[bg]), `${order[i]} (${fill}) on ${bg}`).toBeGreaterThanOrEqual(AA);
         }
       }
     });
-    it(`${scheme}: neighbouring segments differ by 3:1`, () => {
-      for (let i = 1; i < fills.length; i++) {
-        expect(
-          contrastRatio(t[fills[i - 1]], t[fills[i]]),
-          `${order[i - 1]} next to ${order[i]}`,
-        ).toBeGreaterThanOrEqual(3);
-      }
+    it(`${scheme}: no share is drawn in the text colour, and no two share a fill`, () => {
+      expect(fills).not.toContain("--ps-text");
+      expect(new Set(fills.map((fill) => t[fill])).size).toBe(fills.length);
     });
   }
-  it("separates segments with a gap in the track colour", () => {
-    expect(savings).toMatch(/\.split-bar\s*\{[^}]*\bgap:/);
+  it("separates two shares with a gap in the track colour", () => {
+    expect(savings).toMatch(/\.split-bar\s*\{[^}]*\bgap:\s*[1-9]/);
+  });
+  it("draws every share as a .bar-fill, the mark the forced-colours rules keep painted", () => {
+    expect(savings).toMatch(/class="bar-fill split-\{seg\.key\}"/);
+    expect(readFileSync(join(SRC, "lib/theme.css"), "utf8")).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*\.bar-fill[^{]*\{[^}]*forced-color-adjust:\s*none/,
+    );
   });
 });
 
@@ -481,18 +565,21 @@ describe("components", () => {
   it("never hard-code a hex colour as a background colour: it must go through a theme token", () => {
     expect(offenders(/(^|[^-])background(-color)?:\s*#[0-9a-fA-F]{3,8}\b/m)).toEqual([]);
   });
-  it("gives every category badge class the plain text colour on its tint", () => {
-    // Binds the badge components to the pairings BADGE_TINTS checks above.
-    const found = new Set<string>();
-    for (const file of ["lib/FormatBadge.svelte", "lib/QualityBadge.svelte", "lib/ContentClassBadge.svelte"]) {
-      const css = readFileSync(join(SRC, file), "utf8");
-      for (const cls of BADGE_CLASSES) {
-        const block = new RegExp(`\\.${cls}(?:\\s*,\\s*\\.[\\w-]+)*\\s*\\{([^}]*)\\}`).exec(css);
-        if (block === null) continue; // another component's class
-        found.add(cls);
-        expect(block[1], `${file} .${cls}`).toContain("color: var(--ps-text);");
-      }
+  it("gives every tinted badge the plain text colour, its tint mixed over the card", () => {
+    // Binds the theme's tint classes to the pairings BADGE_TINTS checks above.
+    for (const cls of BADGE_CLASSES) {
+      const block = new RegExp(`^\\.${cls}\\s*\\{([^}]*)\\}`, "m").exec(css);
+      expect(block, cls).not.toBeNull();
+      const body = (block as RegExpExecArray)[1];
+      expect(body, cls).toContain("color: var(--ps-text);");
+      expect(body, cls).toContain(`color-mix(in srgb, var(${BADGE_TINTS[cls]}) 12%, var(--ps-surface))`);
     }
-    expect(found.size).toBe(BADGE_CLASSES.length); // no class silently dropped
+    // The badge components declare no colours of their own: they pick a tint.
+    for (const file of ["lib/FormatBadge.svelte", "lib/QualityBadge.svelte", "lib/ContentClassBadge.svelte"]) {
+      const source = readFileSync(join(SRC, file), "utf8");
+      expect(source, file).toMatch(/badge-tint-/);
+      const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(source)?.[1] ?? "";
+      expect(style, file).not.toMatch(/color-mix|(^|[^-])color:|border-color:/m);
+    }
   });
 });

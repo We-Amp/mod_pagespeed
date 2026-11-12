@@ -24,6 +24,7 @@
     type SortState,
   } from "$lib/utils/stat-table";
   import { formatCount } from "$lib/utils/format";
+  import { settledCount } from "$lib/utils/filter-status";
   import { statisticsScopeLine } from "$lib/utils/config-scope";
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
@@ -71,6 +72,10 @@
   let totalCount = $derived(
     stats.data?.variables ? Object.keys(stats.data.variables).length : 0,
   );
+
+  // The count, read out once the search box is quiet (never on a refresh).
+  let countStatus = $state("");
+  const announceCount = settledCount((text) => (countStatus = text));
 
   // A real server reports hundreds of counters: past this many, a family
   // starts collapsed (except the key counters) so the page is not tens of
@@ -130,9 +135,13 @@
         placeholder="Search name or description..."
         aria-label="Search statistics"
         bind:value={search}
-        oninput={() => (groupToggled = {})}
+        oninput={() => {
+          groupToggled = {};
+          announceCount(() => `${entries.length} of ${totalCount} variables`);
+        }}
       />
       <span class="count field-text">{entries.length} of {totalCount} variables</span>
+      <span class="visually-hidden" role="status" data-testid="statistics-count-status">{countStatus}</span>
       </div>
       <div class="control-group">
       <label class="toggle field-check">
@@ -164,7 +173,7 @@
 
     <!-- On a wide window the groups flow into columns; with descriptions
          shown each column needs more room to stay readable. -->
-    <div class="stat-groups" class:stat-groups--described={showDescriptions}>
+    <div class="stat-groups" class:stat-groups-described={showDescriptions}>
     {#each groups as group (group.key)}
       <details class="stat-group" open={groupOpen(group)}>
         <summary
@@ -175,8 +184,8 @@
         >{group.label} <span class="stat-group-count">{group.rows.length}</span></summary>
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div class="table-wrapper" role="region" aria-label="{group.label} statistics" tabindex="0">
-          <table>
+        <div class="table-frame" role="region" aria-label="{group.label} statistics" tabindex="0">
+          <table class="data data-dense stat-table">
             <colgroup>
               <col />
               <col class="value-col" />
@@ -194,10 +203,12 @@
             <tbody>
               {#each group.rows as entry (entry.name)}
                 <tr>
-                  <td class="name-cell" title={entry.description}>
+                  <th scope="row" class="name-cell" title={entry.description}>
                     {#each nameSegments(entry.name) as part, i (i)}{part}<wbr />{/each}
-                    {#if showDescriptions}<div class="stat-desc">{entry.description}</div>{/if}
-                  </td>
+                    <!-- The row header's name is the counter's name alone (a screen reader
+                         repeats it on every cell); the title carries the description. -->
+                    {#if showDescriptions}<div class="stat-desc" aria-hidden="true">{entry.description}</div>{/if}
+                  </th>
                   <td class="value-cell num">{formatCount(entry.value)}</td>
                   {#if showDelta}
                     <td class="value-cell num delta-cell" class:delta-pos={entry.delta !== null && entry.delta > 0} class:delta-neg={entry.delta !== null && entry.delta < 0}>
@@ -220,12 +231,6 @@
 </div>
 
 <style>
-  .search-input:focus {
-    outline: none;
-    border-color: var(--ps-primary);
-    box-shadow: 0 0 0 2px var(--ps-primary-light);
-  }
-
   .toggle {
     color: var(--ps-text-secondary);
     user-select: none;
@@ -233,12 +238,6 @@
 
   .count {
     font-size: var(--ps-font-size-sm);
-  }
-
-  .table-wrapper {
-    overflow-x: auto;
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
   }
 
   /* Column minimums: 44rem keeps a name and its value together; with
@@ -250,29 +249,14 @@
     column-gap: var(--ps-space-lg);
   }
 
-  .stat-groups--described {
+  .stat-groups-described {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 48rem), 1fr));
   }
 
   /* The value columns have one width in every table, so the "Value"
      header sits at the same place in each table of a column. */
-  table {
-    width: 100%;
+  .stat-table {
     table-layout: fixed;
-    border-collapse: collapse;
-    font-size: var(--ps-font-size-sm);
-  }
-
-  thead {
-    background: var(--ps-bg-tertiary);
-    position: sticky;
-    top: 0;
-  }
-
-  td {
-    padding: 3px var(--ps-space-md);
-    line-height: 1.4;
-    border-bottom: 1px solid var(--ps-border-light);
   }
 
   .value-col {
@@ -322,14 +306,6 @@
     color: var(--ps-error);
   }
 
-  tbody tr:nth-child(even) {
-    background: var(--ps-bg-secondary);
-  }
-
-  tbody tr:hover {
-    background: var(--ps-surface-hover);
-  }
-
   .name-cell {
     font-family: var(--ps-font-mono);
     word-break: normal;
@@ -349,7 +325,4 @@
     padding: var(--ps-space-xl);
   }
 
-  .loading {
-    color: var(--ps-text-secondary);
-  }
 </style>

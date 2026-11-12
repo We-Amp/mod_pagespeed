@@ -94,16 +94,22 @@ export function documentVisibility(): VisibilitySource | null {
   };
 }
 
-type Outcome = "ok" | "busy" | "failed" | "off";
+/**
+ * How a refresh ended: an answer, "busy" (kept the last view), a failure,
+ * or the leaf is turned off. "partial" is never the poller's: a page that
+ * reads several parts reports it when some of them failed.
+ */
+export type RefreshOutcome = "ok" | "busy" | "failed" | "off" | "partial";
 
 export class Poller<T> {
   private state: PollerState<T>;
   private timer: unknown = null;
-  private inFlight: Promise<void> | null = null;
+  private inFlight: Promise<RefreshOutcome> | null = null;
   private generation = 0;
   private rerun = false;
   private disposed = false;
-  private lastOutcome: Outcome = "ok";
+  private lastOutcome: RefreshOutcome = "ok";
+  private intervalMs: number;
   private readonly clock: PollerClock;
   private readonly visibility: VisibilitySource | null;
   private readonly stopWatching: () => void;
@@ -113,6 +119,7 @@ export class Poller<T> {
     private readonly fetcher: () => Promise<T>,
     private readonly options: PollerOptions,
   ) {
+    this.intervalMs = options.intervalMs;
     this.clock = options.clock ?? realClock;
     this.visibility = options.visibility === undefined ? documentVisibility() : options.visibility;
     this.state = {
@@ -150,8 +157,8 @@ export class Poller<T> {
     this.patch({ autoRefresh: false, nextAt: null });
   }
 
-  refresh(): Promise<void> {
-    if (this.disposed) return Promise.resolve();
+  refresh(): Promise<RefreshOutcome> {
+    if (this.disposed) return Promise.resolve("ok");
     if (this.inFlight !== null) return this.inFlight;
     this.clearTimer();
     const run = this.fetchOnce(this.generation).finally(() => {
@@ -177,6 +184,20 @@ export class Poller<T> {
     void this.refresh();
   }
 
+  /**
+   * Changes the interval of a running poller (a page whose views refresh at
+   * different rates). A refresh that is already scheduled is scheduled anew,
+   * one new interval -- or its back-off -- from now; a refresh in flight is
+   * left alone and the wait after it uses the new interval.
+   */
+  setIntervalMs(intervalMs: number): void {
+    if (this.disposed || intervalMs === this.intervalMs) return;
+    this.intervalMs = intervalMs;
+    if (this.timer === null) return;
+    this.clearTimer();
+    this.scheduleNext();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -185,31 +206,31 @@ export class Poller<T> {
     this.listeners.clear();
   }
 
-  private async fetchOnce(generation: number): Promise<void> {
+  private async fetchOnce(generation: number): Promise<RefreshOutcome> {
     let data: T;
     try {
       data = await this.fetcher();
     } catch (err) {
-      if (this.disposed || generation !== this.generation) return;
+      if (this.disposed || generation !== this.generation) return "ok";
       const error = err instanceof Error ? err : new Error(String(err));
       if ((this.options.isBusy ?? isBusyAnswer)(error)) {
-        this.lastOutcome = "busy";
-        return;
+        return (this.lastOutcome = "busy");
       }
       if (error instanceof UnavailableError) {
         // Turned off on purpose: the error is the page's state, not a
         // failure to back off from, and nothing asks again by itself.
         this.lastOutcome = "off";
         this.patch({ error, loading: false });
-        return;
+        return "off";
       }
       this.lastOutcome = "failed";
       this.patch({ error, failures: this.state.failures + 1, loading: false });
-      return;
+      return "failed";
     }
-    if (this.disposed || generation !== this.generation) return;
+    if (this.disposed || generation !== this.generation) return "ok";
     this.lastOutcome = "ok";
     this.patch({ data, error: null, failures: 0, loading: false });
+    return "ok";
   }
 
   private scheduleNext(): void {
@@ -226,7 +247,7 @@ export class Poller<T> {
   }
 
   private nextDelay(): number {
-    const { intervalMs } = this.options;
+    const intervalMs = this.intervalMs;
     if (this.lastOutcome === "failed") {
       return backoffDelay(intervalMs, this.state.failures, this.options.maxBackoffMs);
     }
@@ -263,7 +284,7 @@ export class Poller<T> {
 }
 
 export interface Refreshable {
-  refresh(): Promise<void>;
+  refresh(): Promise<unknown>;
 }
 
 /** Every poller of the pages currently shown, for "Retry now" and the refresh shortcut. */

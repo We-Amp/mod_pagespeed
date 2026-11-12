@@ -64,11 +64,54 @@ function daemonReasonCode(body: string | undefined): string | null {
   }
 }
 
+/**
+ * Whether this server has an optimizer, as far as the console has seen:
+ * any answer from a `/v1/daemon/` leaf says yes, the proxy's own
+ * `daemon_not_configured` says no; until either, unknown. Read by the
+ * sidebar, which mutes the optimizer's pages on a server without one.
+ */
+export type OptimizerPresence = "unknown" | "none" | "present";
+
+export class OptimizerPresenceMonitor {
+  private current: OptimizerPresence = "unknown";
+  private readonly listeners = new Set<(p: OptimizerPresence) => void>();
+
+  record(path: string, status: number | null, body?: string): void {
+    if (status === null || !path.startsWith("/v1/daemon/")) return;
+    let next = this.current;
+    const code = daemonReasonCode(body);
+    // An answer, or the proxy naming a configured optimizer that did not
+    // answer: there is one. Only the proxy's own "not configured" says none.
+    if ((status >= 200 && status < 300) || (code !== null && code !== "daemon_not_configured")) next = "present";
+    else if (status === 503 && code === "daemon_not_configured") next = "none";
+    if (next === this.current) return;
+    this.current = next;
+    for (const fn of this.listeners) fn(next);
+  }
+
+  /** Calls `fn` with the current state at once, then on every change. */
+  subscribe(fn: (p: OptimizerPresence) => void): () => void {
+    this.listeners.add(fn);
+    fn(this.current);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  /** Back to unknown, without telling listeners (tests; a fresh console starts there). */
+  reset(): void {
+    this.current = "unknown";
+  }
+}
+
+export const optimizerPresence = new OptimizerPresenceMonitor();
+
 const INITIAL: ConnectionView = { status: "connected", failures: 0, lastAnsweredAt: null };
 
 export class ConnectionMonitor {
   private current: ConnectionView = INITIAL;
   private readonly listeners = new Set<(v: ConnectionView) => void>();
+  private waiters: Array<() => void> = [];
 
   get view(): ConnectionView {
     return this.current;
@@ -83,6 +126,7 @@ export class ConnectionMonitor {
    * bar on every sample of an outage that a gateway is fronting.
    */
   record(path: string, status: number | null, now: number, body?: string): void {
+    optimizerPresence.record(path, status, body);
     const prev = this.current;
     if (status !== null && status >= 500 && status <= 599 && path.startsWith("/v1/daemon/") && daemonReasonCode(body) === null) {
       return;
@@ -92,11 +136,19 @@ export class ConnectionMonitor {
     } else {
       this.current = { status: "connected", failures: 0, lastAnsweredAt: now };
     }
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const fn of waiters) fn();
     // The server is back: what it refused before may have been fixed.
     if (prev.status === "reconnecting" && this.current.status === "connected") unavailable.reset();
     if (this.current.status !== prev.status || this.current.failures !== prev.failures) {
       for (const fn of this.listeners) fn(this.current);
     }
+  }
+
+  /** Resolves when the next request that counts settles: an answer, or none. */
+  next(): Promise<void> {
+    return new Promise((resolve) => this.waiters.push(resolve));
   }
 
   /** Calls `fn` with the current view at once, then on every status or failure-count change. */

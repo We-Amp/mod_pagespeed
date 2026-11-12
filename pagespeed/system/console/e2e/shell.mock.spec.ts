@@ -56,15 +56,16 @@ test.describe("Console shell", () => {
     await expect(page.getByRole("main")).toBeVisible();
   });
 
-  test("groups the navigation into module, optimizer and help pages", async ({ page }) => {
+  test("groups the navigation into module, optimizer and help pages, with Logs in the first group", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin");
     const nav = page.getByRole("navigation", { name: "Console pages" });
-    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings"]);
+    // Logs holds the module's messages too: it is not filed under the optimizer.
+    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "Logs"]);
     await expect(nav.getByRole("list", { name: "Module" }).getByRole("link")).toHaveText([
       "Statistics", "Histograms", "Caches", "Configuration", "Rule packs",
     ]);
-    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status", "Logs"]);
+    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status"]);
     await expect(nav.getByRole("list", { name: "Help" }).getByRole("link")).toHaveText(["Support", "About"]);
     await expect(page.locator(".nav-item")).toHaveCount(11);
   });
@@ -76,8 +77,8 @@ test.describe("Console shell", () => {
     });
     await openConsole(page, "pagespeed_global_admin");
     const nav = page.getByRole("navigation", { name: "Console pages" });
-    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "URLs"]);
-    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status", "Logs"]);
+    await expect(nav.getByRole("list").first().getByRole("link")).toHaveText(["Overview", "Savings", "URLs", "Logs"]);
+    await expect(nav.getByRole("list", { name: "Optimizer" }).getByRole("link")).toHaveText(["Status"]);
     await expect(page.locator(".nav-item")).toHaveCount(12);
   });
 
@@ -98,6 +99,69 @@ test.describe("Console shell", () => {
     await ready(page);
     await expect(page.getByRole("link", { name: "Status", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.locator('.nav-item[aria-current="page"]')).toHaveCount(1);
+  });
+
+  test("a per-host console has no URLs entry: a URL's detail page marks Overview, where it is opened from", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/urls/detail?url=https%3A%2F%2Fwww.example.test%2F");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    const nav = page.getByRole("navigation", { name: "Console pages" });
+    await expect(nav.getByRole("link", { name: "URLs", exact: true })).toHaveCount(0);
+    await expect(nav.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator('.nav-item[aria-current="page"]')).toHaveCount(1);
+  });
+
+  test("the group headings share one style", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/overview");
+    await ready(page);
+    const styles = await page.locator(".nav-group-label").evaluateAll((els) =>
+      els.map((el) => {
+        const s = getComputedStyle(el);
+        return `${s.fontWeight} ${s.textTransform} ${s.color} ${s.fontSize}`;
+      }),
+    );
+    expect(styles).toHaveLength(3);
+    expect(new Set(styles).size).toBe(1);
+    await expect(page.getByTestId("nav-optimizer-off")).toHaveCount(0);
+  });
+
+  test("a server without an optimizer: the Optimizer heading is muted and says so; its page stays", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", {
+      ...F.allReplies(),
+      "v1/daemon/health": F.NOT_CONFIGURED,
+      "v1/daemon/stats": F.NOT_CONFIGURED,
+    });
+    await openConsole(page, "pagespeed_admin", "#/overview");
+    await ready(page);
+    const nav = page.getByRole("navigation", { name: "Console pages" });
+    await expect(page.getByTestId("nav-optimizer-off")).toHaveText("not configured");
+    await expect(page.locator("#nav-group-optimizer")).toHaveClass(/nav-group-label-muted/);
+    await expect(nav.getByRole("list", { name: "Optimizer not configured" }).getByRole("link")).toHaveText(["Status"]);
+    await nav.getByRole("link", { name: "Status", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  });
+
+  test("shortcut hints show only while the pointer or the focus is in the sidebar", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_admin", F.allReplies());
+    await openConsole(page, "pagespeed_admin", "#/overview");
+    await ready(page);
+    const hint = page.locator(".nav-row", { has: page.getByRole("link", { name: "Statistics", exact: true }) }).locator(".nav-key");
+    await page.mouse.move(1000, 600);
+    await expect(hint).toBeHidden();
+    await page.getByRole("link", { name: "Statistics", exact: true }).hover();
+    await expect(hint).toBeVisible();
+    // At the labels' own secondary colour: no dimmed third text tier.
+    const [hintColour, labelColour] = await page.evaluate(() => [
+      getComputedStyle(document.querySelector(".nav-key")!).color,
+      getComputedStyle(document.querySelector(".nav-group-label")!).color,
+    ]);
+    expect(hintColour).toBe(labelColour);
+    expect(await hint.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+    await page.mouse.move(1000, 600);
+    await expect(hint).toBeHidden();
+    await page.getByRole("link", { name: "Statistics", exact: true }).focus();
+    await expect(hint).toBeVisible();
   });
 
   test("each entry names its shortcut beside it; the link's name is the page's", async ({ page }) => {
@@ -277,7 +341,7 @@ test.describe("top bar", () => {
     test.describe(scheme, () => {
       test.use({ colorScheme: scheme });
       test("is a dark band with white text", async ({ page }) => {
-        // The whole-server console: only it carries the console label.
+        // The whole-server console: it also carries the host filter.
         await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL });
         await openConsole(page, "pagespeed_global_admin", "#/overview");
         const topbar = page.locator(".topbar");
@@ -286,7 +350,9 @@ test.describe("top bar", () => {
           "background-color",
           scheme === "dark" ? "rgb(23, 38, 63)" : "rgb(29, 78, 216)",
         );
-        await expect(page.locator(".topbar-badge")).toHaveCSS("color", "rgb(255, 255, 255)");
+        await expect(page.getByTestId("console-scope")).toHaveCSS("color", "rgb(255, 255, 255)");
+        // The connection dot: the band's own green, not the page's (too dark on the band).
+        await expect(page.getByTestId("connection-pill").locator(".status-dot")).toHaveCSS("background-color", "rgb(134, 239, 172)");
         // The logo accent keeps its light fill in dark too: a fill tuned for
         // a light band disappears on the dark one.
         await expect(page.locator(".logo-accent").first()).toHaveCSS("fill", "rgb(96, 165, 250)");

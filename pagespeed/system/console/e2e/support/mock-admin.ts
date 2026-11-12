@@ -79,6 +79,8 @@ export interface MockOptions {
    * own responder (or the default 404 for a leaf nothing mocked).
    */
   down?: () => boolean;
+  /** The `Server` response header of every leaf, as a web server writes it; absent by default. */
+  server?: string;
 }
 
 export interface MockAdmin {
@@ -99,6 +101,7 @@ export async function mockAdmin(
   const busy = new Map<string, number>();
   const pending = new Map<string, number>();
   const prefix = `/${admin}/`;
+  const headers = options.server === undefined ? undefined : { Server: options.server };
   await page.route(`${ORIGIN}/**`, async (route) => {
     const requestUrl = new URL(route.request().url());
     const path = requestUrl.pathname;
@@ -145,6 +148,7 @@ export async function mockAdmin(
         await route
           .fulfill({
             status: reply.status,
+            headers,
             contentType: reply.contentType ?? "application/json",
             body: JSON.stringify(reply.body),
           })

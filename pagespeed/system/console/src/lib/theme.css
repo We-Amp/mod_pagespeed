@@ -36,6 +36,9 @@
   --ps-topbar-fg-muted: #cbd5e1;
   /* The logo's decorative chevron and cursor, tuned against the band. */
   --ps-topbar-accent: #60a5fa;
+  /* The connection dot: the page's status colours are too dark on the band. */
+  --ps-topbar-ok: #86efac;
+  --ps-topbar-warning: #fcd34d;
 
   /* Surfaces */
   --ps-bg: #ffffff;
@@ -59,9 +62,9 @@
      dimming, so there the card keeps full opacity on a tinted background. */
   --ps-muted-opacity: 1;
 
-  /* Stacked-bar fills for the savings split. Its middle segment uses
-     --ps-text; these two flank it. Each clears 4.5:1 on the card and
-     3:1 against --ps-text, so neighbouring segments read apart. */
+  /* Stacked-bar fills for the savings split, next to --ps-primary for the
+     share that was optimized and served. Each clears 4.5:1 on the card;
+     the bar keeps a gap between two shares, so they read apart. */
   --ps-split-optimal: #78716c;
   --ps-split-encoded: #15803d;
 
@@ -100,7 +103,8 @@
   --ps-type-card-title-size: 1rem;
   --ps-type-card-title-weight: 600;
   --ps-type-body-size: 0.875rem;
-  --ps-type-body-leading: 1.45;
+  /* Whole pixels at 14 px (21 px), so rows and controls keep whole-pixel heights. */
+  --ps-type-body-leading: 1.5;
   /* Labels and meta text; a group label is the same size, heavier, in capitals. */
   --ps-type-label-size: 0.75rem;
   --ps-type-label-weight: 500;
@@ -181,8 +185,6 @@
     --ps-surface: #282523;
     --ps-surface-hover: #3d3936;
 
-    /* --ps-text stays this light: the savings bar's middle segment is
-       drawn in it and must stand 3:1 apart from its neighbours. */
     --ps-text: #fafaf9;
     --ps-text-secondary: #bdb7b1;
     --ps-text-inverse: #1c1917;
@@ -212,6 +214,8 @@
     --ps-topbar-fg: #ffffff;
     --ps-topbar-fg-muted: #94a3b8;
     --ps-topbar-accent: #60a5fa;
+    --ps-topbar-ok: #86efac;
+    --ps-topbar-warning: #fcd34d;
   }
 }
 
@@ -231,7 +235,7 @@ body {
   font-size: var(--ps-font-size-base);
   color: var(--ps-text);
   background: var(--ps-bg);
-  line-height: 1.5;
+  line-height: var(--ps-type-body-leading);
   -webkit-font-smoothing: antialiased;
   /* Checkboxes, radio buttons and range sliders take the accent. */
   accent-color: var(--ps-primary);
@@ -310,8 +314,26 @@ a {
   width: 100%;
 }
 
+/* The page area reads at the body size; the shell around it (top bar,
+ * drawer, dialogs, the connection banner) keeps the browser's. The line
+ * height is the document's, the body role's leading. */
+main {
+  font-size: var(--ps-type-body-size);
+}
+
 main p {
   max-width: 75ch;
+}
+
+/* The link line at a card's foot ("All statistics"). */
+.more {
+  margin: var(--ps-space-sm) 0 0;
+  font-size: var(--ps-font-size-sm);
+}
+
+/* A line that stands in for content still on its way. */
+.loading {
+  color: var(--ps-text-secondary);
 }
 
 /* Controls: one look, one height and one spacing on every page. A page
@@ -535,18 +557,52 @@ table.reads-across {
 /* Shared text and message classes: a page or a component uses these
  * instead of declaring its own copy. */
 
-/* A section heading inside a page (below the page title). */
+/* Headings, one per type role. The page title is PageHeader's h1. */
+
+/* A section of a page, below the title: ruled off from what it heads. */
 .section-title {
   margin: 0 0 var(--ps-space-md);
-  font-size: var(--ps-font-size-lg);
-  font-weight: 600;
+  padding-bottom: var(--ps-space-xs);
+  border-bottom: 1px solid var(--ps-border);
+  font-size: var(--ps-type-section-size);
+  font-weight: var(--ps-type-section-weight);
   color: var(--ps-text);
+}
+
+/* A card's title or a sub-section heading; a tag after the words (a
+ * version, "warming up") sits on its baseline. */
+.card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ps-space-sm);
+  margin: 0 0 var(--ps-space-sm);
+  font-size: var(--ps-type-card-title-size);
+  font-weight: var(--ps-type-card-title-weight);
+  color: var(--ps-text);
+  overflow-wrap: anywhere;
+}
+
+/* A sub-section heading that follows other content: a step apart from it. */
+.card-title:not(:first-child) {
+  margin-top: var(--ps-space-lg);
+}
+
+/* A heading inside a card, at the body size: a group of figures, a table. */
+.minor-title {
+  margin: 0 0 var(--ps-space-xs);
+  font-size: var(--ps-type-body-size);
+  font-weight: 600;
 }
 
 /* A sentence of context under a figure, a table or a heading. */
 .note {
   font-size: var(--ps-font-size-sm);
   color: var(--ps-text-secondary);
+}
+
+p.note {
+  margin: 0 0 var(--ps-space-sm);
 }
 
 /* Secondary text at the size of its surroundings. */
@@ -587,6 +643,10 @@ table.reads-across {
   border-inline-start-color: var(--ps-error);
 }
 
+.notice-ok {
+  border-inline-start-color: var(--ps-success-text);
+}
+
 .notice-title {
   font-weight: 600;
 }
@@ -602,6 +662,465 @@ table.reads-across {
   display: block;
   min-width: 2px;
   background: var(--ps-primary);
+}
+
+/* A framed surface that holds one subject: a table with its heading, a
+ * group of figures, a set of next steps. */
+.card {
+  min-width: 0;
+  padding: var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius-lg);
+  background: var(--ps-surface);
+}
+
+/* A card whose numbers cover a wider scope than the page around it (the
+ * whole server on a per-host console): the dashed outline is the mark, so
+ * it survives forced colours. */
+.card-muted {
+  border: 1px dashed var(--ps-secondary);
+  background: var(--ps-bg-secondary);
+  opacity: var(--ps-muted-opacity);
+}
+
+/* A row of headline figures. One row from 900 px, two by two below that,
+ * stacked on a phone; the tiles of a row share one height. */
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ps-space-md);
+  margin-bottom: var(--ps-space-md);
+}
+
+@media (min-width: 900px) {
+  .stat-tiles {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .stat-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* One headline figure: a label, the value, a line or two of context and a
+ * small link to the detail. The value is plain text in the text colour (a
+ * count of zero is not an alert and not a link); the link is its own
+ * target. Add .card for the frame. */
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ps-space-xs);
+  min-width: 0;
+}
+
+.stat-tile-label {
+  margin: 0;
+  font-size: var(--ps-type-label-size);
+  font-weight: var(--ps-type-label-weight);
+  color: var(--ps-text-secondary);
+}
+
+.stat-tile-value {
+  margin: 0;
+  font-size: var(--ps-type-hero-metric-size);
+  font-weight: var(--ps-type-hero-metric-weight);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-text);
+  overflow-wrap: anywhere;
+}
+
+.stat-tile-context {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ps-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The drill-down sits at the tile's foot, at least 24 px tall. */
+.stat-tile-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 24px;
+  margin-top: auto;
+  font-size: 0.8125rem;
+  color: var(--ps-primary);
+}
+
+/* A status mark: a dot before the word that names the state. The word
+ * carries the state; the dot repeats it in colour. */
+.status-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-inline-end: 0.4em;
+  border-radius: 50%;
+  background: var(--ps-text-secondary);
+  vertical-align: 0.05em;
+}
+
+.status-dot-ok {
+  background: var(--ps-success-text);
+}
+
+.status-dot-warning {
+  background: var(--ps-warning-text);
+}
+
+.status-dot-error {
+  background: var(--ps-error);
+}
+
+.status-dot-info {
+  background: var(--ps-primary);
+}
+
+/* The same dot on the top bar's band, in the band's own status colours. */
+.status-dot-bar-ok {
+  background: var(--ps-topbar-ok);
+}
+
+/* Told apart by shape too, for a phone's bar (dot only) and forced
+ * colours: a disc when connected, a ring while reconnecting, a square
+ * while paused. */
+.status-dot-bar-warning {
+  border: 2px solid;
+  border-color: var(--ps-topbar-warning);
+  background: transparent;
+}
+
+.status-dot-bar-paused {
+  background: var(--ps-topbar-fg-muted);
+}
+
+.status-dot-square {
+  border-radius: 1px;
+}
+
+/* A short label on the top bar's band (the console's scope): a light
+ * tint over the band, in the band's text colour. A long host name is cut
+ * short with an ellipsis; the whole name stays its text and its title. */
+.topbar-chip {
+  padding: 2px var(--ps-space-sm);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--ps-topbar-fg);
+  font-size: var(--ps-font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 14rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A state in one word after its dot, in sentence case ("Ok"). */
+.status-word {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+/* The one sentence a page opens with: what state the thing is in, with the
+ * numbers that say so. A band with a leading rule; the rule and the dot
+ * carry the level in colour, the sentence carries it in words. */
+.health-strip {
+  margin: 0 0 var(--ps-space-md);
+  padding: var(--ps-space-sm) var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-inline-start: 3px solid var(--ps-text-secondary);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-secondary);
+  color: var(--ps-text);
+  font-size: var(--ps-type-card-title-size);
+  line-height: var(--ps-type-body-leading);
+  overflow-wrap: anywhere;
+}
+
+/* A level mark in the sentence (the findings' worst level) sits on its line. */
+.health-strip .level-badge {
+  vertical-align: 0.1em;
+}
+
+.health-strip-ok {
+  border-inline-start-color: var(--ps-success-text);
+}
+
+.health-strip-info {
+  border-inline-start-color: var(--ps-primary);
+}
+
+.health-strip-warning {
+  border-inline-start-color: var(--ps-warning-text);
+}
+
+.health-strip-error {
+  border-inline-start-color: var(--ps-error);
+}
+
+/* Facts side by side, each a label over its value; they wrap. Add .card
+ * for a framed panel. */
+.info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-lg);
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.info-value {
+  overflow-wrap: anywhere;
+}
+
+/* A line under a fact that says what it means. */
+.info-hint {
+  max-width: 28ch;
+  font-size: var(--ps-font-size-xs);
+  color: var(--ps-text-secondary);
+}
+
+/* "Nothing to show here, and why" (EmptyState): as wide as its text. */
+.empty-state {
+  max-width: var(--ps-card-max);
+  padding: var(--ps-space-md);
+  border: 1px dashed var(--ps-border);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-secondary);
+  color: var(--ps-text);
+  overflow-wrap: anywhere;
+}
+
+.empty-title {
+  font-weight: 600;
+}
+
+.empty-detail {
+  margin: var(--ps-space-xs) 0 0;
+  font-size: var(--ps-font-size-sm);
+  color: var(--ps-text-secondary);
+}
+
+.empty-action {
+  display: inline-block;
+  margin-top: var(--ps-space-sm);
+  font-size: var(--ps-font-size-sm);
+}
+
+/* A short tag: a state, a format, a source. One size; the words carry
+ * the meaning. Neutral by default; a solid fill for a state worth seeing
+ * from afar, a tint for a category, an outline for a quiet label. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ps-space-xs);
+  padding: 0 var(--ps-space-sm);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg-tertiary);
+  color: var(--ps-text-secondary);
+  font-size: var(--ps-font-size-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.badge-solid-ok {
+  border-color: var(--ps-success-text);
+  background: var(--ps-success-text);
+  color: var(--ps-text-inverse);
+}
+
+.badge-solid-warning {
+  border-color: var(--ps-warning);
+  background: var(--ps-warning);
+  color: var(--ps-warning-contrast-text);
+}
+
+.badge-solid-error {
+  border-color: var(--ps-error);
+  background: var(--ps-error);
+  color: var(--ps-text-inverse);
+}
+
+/* Plain text on a 12% tint over the card; the category colour is on the
+ * border (a status colour as text is below AA on its own tint). */
+.badge-tint-primary {
+  border-color: var(--ps-primary);
+  background: color-mix(in srgb, var(--ps-primary) 12%, var(--ps-surface));
+  color: var(--ps-text);
+}
+
+.badge-tint-secondary {
+  border-color: var(--ps-secondary);
+  background: color-mix(in srgb, var(--ps-secondary) 12%, var(--ps-surface));
+  color: var(--ps-text);
+}
+
+.badge-tint-ok {
+  border-color: var(--ps-success);
+  background: color-mix(in srgb, var(--ps-success) 12%, var(--ps-surface));
+  color: var(--ps-text);
+}
+
+.badge-tint-warning {
+  border-color: var(--ps-warning);
+  background: color-mix(in srgb, var(--ps-warning) 12%, var(--ps-surface));
+  color: var(--ps-text);
+}
+
+.badge-tint-error {
+  border-color: var(--ps-error);
+  background: color-mix(in srgb, var(--ps-error) 12%, var(--ps-surface));
+  color: var(--ps-text);
+}
+
+.badge-outline {
+  background: transparent;
+}
+
+.badge-outline-warning {
+  border-color: var(--ps-warning);
+  background: transparent;
+  color: var(--ps-warning-text);
+}
+
+/* A table in a frame. A wide table scrolls inside its frame and never
+ * widens the page: the zero width keeps it out of the page's minimum
+ * width, and min-width fills the column. A frame may set --ps-cell-pad-x
+ * to close the columns up. */
+.table-frame {
+  width: 0;
+  min-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius);
+}
+
+/* A long table scrolls within half the window, under a header that stays. */
+.table-frame-tall {
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.table-frame-tall thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ps-font-size-sm);
+}
+
+table.data thead {
+  background: var(--ps-bg-tertiary);
+}
+
+/* A cell that wraps keeps its first line level with its neighbours'. */
+table.data th,
+table.data td {
+  padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
+  border-bottom: 1px solid var(--ps-border-light);
+  text-align: left;
+  vertical-align: top;
+}
+
+table.data thead th {
+  font-weight: 600;
+  border-bottom: 2px solid var(--ps-border);
+  white-space: nowrap;
+}
+
+/* A row header reads like a cell. */
+table.data tbody th {
+  font-weight: normal;
+}
+
+table.data .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+table.data tbody tr:nth-child(even) {
+  background: var(--ps-bg-secondary);
+}
+
+table.data tbody tr:hover {
+  background: var(--ps-surface-hover);
+}
+
+/* Many short rows: half the vertical padding. */
+table.data-dense tbody th,
+table.data-dense td {
+  padding-block: var(--ps-space-xs);
+}
+
+/* A small table inside a card: no frame, no band, no zebra. Columns sit
+ * at their content's width, a step apart; a figure keeps its unit on one
+ * line. */
+table.data-inline {
+  border-collapse: collapse;
+  font-size: var(--ps-font-size-sm);
+}
+
+table.data-inline caption {
+  padding-bottom: var(--ps-space-xs);
+  text-align: left;
+  font-size: var(--ps-type-label-size);
+  font-weight: var(--ps-type-label-weight);
+  color: var(--ps-text-secondary);
+}
+
+table.data-inline th,
+table.data-inline td {
+  padding: var(--ps-space-xs) var(--ps-space-md) var(--ps-space-xs) 0;
+  border-bottom: 1px solid var(--ps-border-light);
+  text-align: left;
+}
+
+table.data-inline td {
+  white-space: nowrap;
+}
+
+table.data-inline thead th {
+  font-weight: 600;
+  color: var(--ps-text-secondary);
+}
+
+table.data-inline tbody th {
+  font-weight: 400;
+}
+
+/* Raw values under a <details>: small monospace, no frame, no band. */
+table.data-raw {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--ps-font-mono);
+  font-size: var(--ps-font-size-xs);
+}
+
+table.data-raw th,
+table.data-raw td {
+  padding: 0 var(--ps-space-sm) 0 0;
+  border-bottom: 1px solid var(--ps-border-light);
+  text-align: left;
+}
+
+table.data-raw th {
+  color: var(--ps-text-secondary);
 }
 
 /* Phone tables: rows become label/value cards so no column is off-screen.
@@ -653,6 +1172,13 @@ table.reads-across {
   .card-table tr td:last-child {
     border-bottom: none;
   }
+
+  /* A small table's card rows carry their own padding. */
+  table.data-inline.card-table th,
+  table.data-inline.card-table td {
+    padding: var(--ps-space-xs) var(--ps-space-sm);
+    white-space: normal;
+  }
 }
 
 /* Forced colours (Windows contrast themes): the user's palette replaces
@@ -674,10 +1200,30 @@ table.reads-across {
     color: HighlightText !important;
   }
 
-  [aria-current="page"]:focus-visible,
-  [aria-selected="true"]:focus-visible,
+  /* A toggle's focus ring lies around it, on the page's surface. The
+   * ring of the current page or the selected tab is drawn inside the
+   * item, on its fill, so it takes the fill's own text colour. */
   [aria-pressed="true"]:focus-visible {
     outline-color: CanvasText;
+  }
+
+  [aria-current="page"]:focus-visible,
+  [aria-selected="true"]:focus-visible {
+    outline-color: HighlightText;
+  }
+
+  /* A bar that marks the current page (the sidebar's leading edge) is
+   * the text colour of the surface around the row, so it reads as a bar
+   * beside the fill, not as a notch in it. */
+  [aria-current="page"]::before {
+    background: CanvasText !important;
+  }
+
+  /* A hint drawn over the current page's row (the sidebar's shortcut
+   * keys) joins the row's pair, without a backplate of its own. */
+  [aria-current="page"] + [aria-hidden="true"] {
+    forced-color-adjust: none;
+    color: HighlightText !important;
   }
 
   /* Marks drawn with a background: bars and status dots. */
@@ -685,5 +1231,21 @@ table.reads-across {
   .status-dot {
     forced-color-adjust: none;
     background: CanvasText !important;
+  }
+
+  .status-dot-bar-warning {
+    border-color: CanvasText;
+    background: Canvas !important;
+  }
+
+  /* The health strip's leading rule and the muted card's dashed outline
+   * are borders: the palette paints them. Nothing fades in a forced
+   * palette, so the muted card is told apart by its outline alone. */
+  .health-strip {
+    border-inline-start-color: CanvasText !important;
+  }
+
+  .card-muted {
+    opacity: 1 !important;
   }
 }
