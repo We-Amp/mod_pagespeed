@@ -22,12 +22,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # clang-20: abseil's absl_nonnull needs nullability_on_classes support that the
 # image's default clang lacks. Replace the default clang in /opt/llvm/bin so
-# Bazel's CC=clang picks it up.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Bazel's CC=clang picks it up. apt retries transient fetch failures; the
+# apt.llvm.org key is fetched with retries and only the key with the pinned
+# fingerprint goes into the keyring (same as docker/Dockerfile).
+ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update && apt-get install -y --no-install-recommends \
       software-properties-common gnupg wget \
     && . /etc/os-release \
-    && wget -qO /usr/share/keyrings/llvm-snapshot.gpg.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg.asc] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-20 main" \
+    && keytmp="$(mktemp -d)" \
+    && for i in 1 2 3 4 5; do \
+         wget -qO "${keytmp}/key.asc" --timeout=20 https://apt.llvm.org/llvm-snapshot.gpg.key \
+           && [ -s "${keytmp}/key.asc" ] && break; \
+         echo "apt.llvm.org key fetch attempt ${i} failed" >&2; sleep $((i * 5)); \
+       done \
+    && { [ -s "${keytmp}/key.asc" ] \
+         || { echo "ERROR: could not fetch https://apt.llvm.org/llvm-snapshot.gpg.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${keytmp}" gpg --batch --quiet --import "${keytmp}/key.asc"; \
+         GNUPGHOME="${keytmp}" gpg --batch --with-colons --list-keys "${LLVM_APT_KEY_FPR}" 2>/dev/null \
+           | awk -F: -v fpr="${LLVM_APT_KEY_FPR}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+         || { echo "ERROR: the apt.llvm.org key file does not hold the pinned key ${LLVM_APT_KEY_FPR}" >&2; exit 1; }; } \
+    && GNUPGHOME="${keytmp}" gpg --batch --export "${LLVM_APT_KEY_FPR}" > /usr/share/keyrings/llvm-snapshot.gpg \
+    && rm -rf "${keytmp}" \
+    && [ -s /usr/share/keyrings/llvm-snapshot.gpg ] \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-20 main" \
        > /etc/apt/sources.list.d/llvm-20.list \
     && apt-get update && apt-get install -y --no-install-recommends \
       clang-20 libc++-20-dev libc++abi-20-dev lld-20 libclang-rt-20-dev \
