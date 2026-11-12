@@ -59,6 +59,8 @@
   import { globalConsoleHref } from "$lib/utils/urls-api";
   import { scopeChipShown } from "$lib/utils/scope-chip";
   import { toRatesPerSecond } from "$lib/utils/graph-series";
+  import { ALREADY_GOOD, NOT_OPTIMIZED, reasonCount, reasonRows } from "$lib/utils/not-optimized";
+  import { optionValue, parseConfigText, type ParsedConfig } from "$lib/utils/config-text";
 
   const { api, scope, lens } = useConsole();
 
@@ -67,6 +69,10 @@
   let lastModule = $state<StatsResponse | null>(null);
   let daemonView = $state<AlertSnapshot | null>(null);
   let updatedAt = $state<number | null>(null);
+  // The configuration, read once and only when a reason names a setting, so
+  // its current value (not set: the module default) can stand next to the fix.
+  let config = $state<ParsedConfig | null>(null);
+  let configAsked = false;
 
   // Per-sample bookkeeping runs inside the fetcher, not in an $effect (same
   // contract as the Overview page): each sample appends to the live series
@@ -81,6 +87,15 @@
         if (sample.module.ok) {
           lastModule = sample.module.data;
           updatedAt = sample.at;
+          const v = variablesOf(lastModule);
+          if (!configAsked && NOT_OPTIMIZED.some((r) => r.option && (reasonCount(v, r.counter) ?? 0) > 0)) {
+            configAsked = true;
+            // The text in effect (the server sends both); a value is shown only from a cleanly parsed text.
+            api.getConfig().then((c) => {
+              const parsed = parseConfigText(c.effective_config ?? c.config);
+              if (parsed.structured) config = parsed;
+            }, () => {});
+          }
         }
         if (snap.daemon !== "transient" || daemonView === null) daemonView = snap;
         // The hosts the optimizer served feed the lens (the best-ranked source).
@@ -111,6 +126,8 @@
   let rows = $derived(vars ? moduleSavingsByType(vars) : null);
   let total = $derived(rows ? moduleSavingsTotal(rows) : null);
   let hitRate = $derived(vars ? optimizedCopyHitRate(vars) : null);
+  let reasons = $derived(reasonRows(vars, updatedAt ?? undefined, NOT_OPTIMIZED));
+  let good = $derived(reasonRows(vars, updatedAt ?? undefined, ALREADY_GOOD) ?? []);
   let serveView = $derived(serveSavingsView(daemonView?.daemonStats?.serve_savings));
   // Serve savings per host: the lens host on the whole-server console, the
   // console's own host on a per-vhost one (never a lens there).
@@ -286,6 +303,29 @@
                 {/each}
               </tbody>
             </table>
+            {#if reasons}
+              <h3 class="minor-title">Not optimized, by reason</h3>
+              {#if reasons.length > 0}
+                <ul class="reasons" data-testid="savings-reasons">
+                  {#each reasons as { reason, count } (reason.counter)}
+                    <li>
+                      <span class="reason">{reason.label} <span class="num">{formatCount(count)}</span></span>
+                      <span class="note"
+                        >{reason.fix}{#if reason.option && config}{" "}Now: {reason.option[0]}
+                          {optionValue(config, reason.option[0]) ?? `${reason.option[1]} (default)`}.{/if}</span
+                      >
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="note" data-testid="savings-reasons-none">None counted since the web server started.</p>
+              {/if}
+              {#if good.length > 0}
+                <p class="note" data-testid="savings-reasons-good">
+                  Nothing to do (already good): {good.map((g) => `${g.reason.label} ${formatCount(g.count)}`).join(" · ")}
+                </p>
+              {/if}
+            {/if}
           {:else}
             <div class="onboarding" data-testid="savings-empty">
               <p class="onboarding-title">No traffic yet.</p>
@@ -787,5 +827,19 @@
 
   .host-cell {
     overflow-wrap: anywhere;
+  }
+
+  .reasons {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reasons li {
+    margin-bottom: var(--ps-space-xs);
+  }
+  .reason {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--ps-space-sm);
   }
 </style>

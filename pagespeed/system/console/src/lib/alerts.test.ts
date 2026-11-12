@@ -75,7 +75,7 @@ describe("ALERT_RULES", () => {
       expect(rule.fix.length, rule.id).toBeGreaterThan(0);
       if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/docs\//);
     }
-    expect(seen.size).toBe(17);
+    expect(seen.size).toBe(18);
   });
 
   it("fix texts name the pages the sidebar has", () => {
@@ -931,7 +931,8 @@ describe("a fix that names a setting comes with the setting to paste", () => {
   // admin-public: "Nothing to do", the setting is named as the reason, not as something to change.
   // daemon-unreachable: the directive to check; its packaged value is the built-in default, so a
   // pasted line would change nothing.
-  const NOTHING_TO_PASTE = ["admin-public", "daemon-unreachable"];
+  // image-work-dropped: how far to raise the limit depends on the server; Savings shows the current value.
+  const NOTHING_TO_PASTE = ["admin-public", "daemon-unreachable", "image-work-dropped"];
   const byId = (id: string) => ALERT_RULES.find((r) => r.id === id)!;
 
   it("every rule whose fix names a setting has snippets", () => {
@@ -944,6 +945,7 @@ describe("a fix that names a setting comes with the setting to paste", () => {
       "volume-not-opened",
       "daemon-unreachable",
       "admin-public",
+      "image-work-dropped",
     ]);
     // The access rule's fix is a block per server, so its sentence names none of them.
     expect(ALERT_RULES.filter((r) => r.snippets).map((r) => r.id)).toEqual(["volume-not-opened", "admin-exposed"]);
