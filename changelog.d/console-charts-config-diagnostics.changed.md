@@ -6,6 +6,6 @@
   system colours.
 - **Keyboard shortcuts in the admin console can be turned off**, from the
   shortcuts dialog; the choice is remembered in the browser. The dialog lists
-  only the pages the open console has, and `g p` opens Rule packs. Only text
-  fields pause the shortcuts while you type; a focused checkbox or button no
-  longer does.
+  only the pages the open console has, and `g p` opens Rule packs. A focused
+  checkbox or radio button no longer pauses the shortcuts; text fields,
+  drop-down lists and editable text still do.

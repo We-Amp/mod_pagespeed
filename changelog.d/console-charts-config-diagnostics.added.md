@@ -7,11 +7,13 @@
 - **The Support page always shows a diagnostics bundle you can copy or
   download.** It holds what support needs to act: the console's scope, start
   times, findings, the optimizer's checks, a dozen key counters, the cache and
-  purge summary, the browser and the detected server, and it ends with a list
-  of what was left out. Query strings and public client addresses are removed,
-  cookies, credentials and tokens are always redacted, and the configuration
-  text is included only when you turn it on, with secret-looking values
-  redacted.
+  purge summary, up to 50 recent warnings and errors from the log, the browser
+  and the detected server, and it ends with a list of what was left out. By
+  default query strings are removed, and public client addresses in the log
+  lines are masked. Cookie and authorization header values, bearer tokens and
+  passwords inside addresses are replaced. The configuration text is included
+  only when you turn it on, with the values of secret-looking options
+  replaced. Review the bundle before you share it.
 - **The Overview says what changed since your last visit**, for example that
   the web server restarted or reloaded, the configuration changed, or the
   module or optimizer version changed. The record is kept only in your
