@@ -41,7 +41,6 @@
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
-#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 
 namespace net_instaweb {
@@ -215,11 +214,9 @@ bool CssInlineFilter::NeedsConservativeMarkupCheck(RewriteDriver* driver) {
     return driver->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml;
   }
   // Some servers never finalize the response headers (MimeTypeXhtmlStatus()
-  // then stays unknown). Use the narrow check only when the headers say
-  // text/html outright.
-  const ResponseHeaders* headers = driver->response_headers();
-  return headers == nullptr ||
-         headers->DetermineContentType() != &kContentTypeHtml;
+  // then stays unknown), and may not have the content type in them at all.
+  // Use the narrow check only when the parse was started as plain HTML.
+  return driver->content_type().type() != ContentType::kHtml;
 }
 
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,

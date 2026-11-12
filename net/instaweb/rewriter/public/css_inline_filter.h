@@ -76,8 +76,8 @@ class CssInlineFilter : public CommonFilter {
   // document gets the conservative MayContainMarkup() check. The narrower
   // MayCloseStyleElement() check is used only for HTML documents; XHTML, and
   // documents whose type is not known, keep the conservative one. When the
-  // server does not finalize response headers, only an explicit text/html
-  // content type counts as HTML. (SVG and
+  // server does not finalize response headers, only a parse started as plain
+  // HTML counts as HTML. (SVG and
   // MathML elements never reach the filters as style or link elements: the
   // parser gives them no keyword, so they are left alone.)
   static bool NeedsConservativeMarkupCheck(RewriteDriver* driver);

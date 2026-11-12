@@ -51,6 +51,7 @@ class HtmlLexer {
 
   // Initialize a new parse session, id is only used for error messages.
   void StartParse(const StringPiece& id, const ContentType& content_type);
+  const ContentType& content_type() const { return content_type_; }
 
   // Parse a chunk of text, adding events to the parser by calling
   // html_parse_->AddEvent(...).

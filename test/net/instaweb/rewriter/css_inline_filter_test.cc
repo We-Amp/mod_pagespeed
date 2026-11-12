@@ -804,35 +804,37 @@ TEST_F(CssInlineFilterTest, ForeignLinkIsLeftAlone) {
                     "<math><link rel='stylesheet' href='foo.css'></math>");
 }
 
-// With response headers that are never finalized (as on some servers), only an
-// explicit text/html content type gets the narrow check.
-TEST_F(CssInlineFilterTest, UnfinalizedHeadersHtmlGetsNarrowCheck) {
-  server_context()->set_response_headers_finalized(false);
-  SetHtmlMimetype();
-  AddFilter(RewriteOptions::kInlineCss);
-  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
-                                "@media (width < 600px){a{margin:0}}", 100);
-  ValidateExpected("unfinalized_html", "<link rel='stylesheet' href='foo.css'>",
-                   "<style>@media (width < 600px){a{margin:0}}</style>");
+// With response headers that are never finalized, and no Content-Type in them
+// (as on Apache), the type the parse was started with decides: only plain
+// HTML gets the narrow check.
+class CssInlineUnfinalizedHeadersTest : public CssInlineFilterTest {
+ protected:
+  GoogleString InlineWithParseType(const ContentType& type) {
+    server_context()->set_response_headers_finalized(false);
+    AddFilter(RewriteOptions::kInlineCss);
+    SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                  "@media (width < 600px){a{margin:0}}", 100);
+    SetupWriter();
+    rewrite_driver()->StartParseWithType(StrCat(kTestDomain, "x.html"), type);
+    rewrite_driver()->ParseText("<link rel='stylesheet' href='foo.css'>");
+    rewrite_driver()->FinishParse();
+    return output_buffer_;
+  }
+};
+
+TEST_F(CssInlineUnfinalizedHeadersTest, HtmlParseGetsNarrowCheck) {
+  EXPECT_EQ("<style>@media (width < 600px){a{margin:0}}</style>",
+            InlineWithParseType(kContentTypeHtml));
 }
 
-TEST_F(CssInlineFilterTest, UnfinalizedHeadersXhtmlKeepsBroadCheck) {
-  server_context()->set_response_headers_finalized(false);
-  SetXhtmlMimetype();
-  AddFilter(RewriteOptions::kInlineCss);
-  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
-                                "@media (width < 600px){a{margin:0}}", 100);
-  ValidateNoChanges("unfinalized_xhtml",
-                    "<link rel='stylesheet' href='foo.css'/>");
+TEST_F(CssInlineUnfinalizedHeadersTest, XhtmlParseKeepsBroadCheck) {
+  EXPECT_EQ("<link rel='stylesheet' href='foo.css'>",
+            InlineWithParseType(kContentTypeXhtml));
 }
 
-TEST_F(CssInlineFilterTest, UnfinalizedHeadersNoContentTypeKeepsBroadCheck) {
-  server_context()->set_response_headers_finalized(false);
-  AddFilter(RewriteOptions::kInlineCss);
-  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
-                                "@media (width < 600px){a{margin:0}}", 100);
-  ValidateNoChanges("unfinalized_none",
-                    "<link rel='stylesheet' href='foo.css'>");
+TEST_F(CssInlineUnfinalizedHeadersTest, OtherParseTypeKeepsBroadCheck) {
+  EXPECT_EQ("<link rel='stylesheet' href='foo.css'>",
+            InlineWithParseType(kContentTypeXml));
 }
 
 // A '<' that is plain CSS does not stop inlining.
