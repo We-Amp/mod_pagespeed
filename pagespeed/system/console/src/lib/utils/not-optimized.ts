@@ -39,7 +39,7 @@ export const NOT_OPTIMIZED: readonly Reason[] = [
   {
     counter: "css_filter_parse_failures",
     label: "CSS the parser could not read",
-    fix: "Logs names them. They are served as they are, with only their URLs rewritten when Fallback Rewrite Css is on.",
+    fix: "Logs names the files. They are served as they are, with only their URLs rewritten when Fallback Rewrite Css is on.",
   },
   {
     counter: "javascript_minification_failures",

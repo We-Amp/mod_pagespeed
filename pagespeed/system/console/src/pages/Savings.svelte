@@ -663,10 +663,10 @@
     align-items: center;
     gap: var(--ps-space-xs);
   }
-  /* Each series' latest rate, as a figure beside its name. */
   .chart-swatch {
     flex: none;
   }
+  /* Each series' latest rate, as a figure beside its name. */
   .legend-value {
     font-size: var(--ps-type-card-title-size);
     font-weight: 600;
