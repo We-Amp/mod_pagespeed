@@ -266,15 +266,35 @@ TEST_F(CriticalSelectorFilterTest,
                            "<body><div>Stuff</div></body>"));
 }
 
-// Likewise a kept selector whose escape decodes to '<' and a letter.
-TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterKeepsTheLink) {
+// Likewise a kept selector whose escape decodes to a closing style tag.
+TEST_F(CriticalSelectorFilterTest, EscapedClosingStyleTagKeepsTheLink) {
   SetResponseWithDefaultHeaders(
       "c.css", kContentTypeCss,
-      "label[for=\"\\3Cmain\"]{text-decoration:underline}", 100);
-  ValidateNoChanges("escaped_lt_letter",
+      "label[for=\"\\3C/style\"]{text-decoration:underline}", 100);
+  ValidateNoChanges("escaped_closing_style",
                     StrCat("<head>", CssLinkHref("c.css"),
                            "</head>"
                            "<body><div>Stuff</div></body>"));
+}
+
+// A '<' that is ordinary CSS (a registered property's syntax descriptor, a
+// media query range) must not keep the critical rules from being inlined.
+TEST_F(CriticalSelectorFilterTest, LessThanSignInCssIsInlined) {
+  SetResponseWithDefaultHeaders(
+      "c.css", kContentTypeCss,
+      "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
+      "@media (width < 600px){div{margin:0}}"
+      "*{color:red}",
+      100);
+  Parse("lt_in_css", StrCat("<head>", CssLinkHref("c.css"),
+                            "</head>"
+                            "<body><div>Stuff</div></body>"));
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("<style>"))
+      << output_buffer_;
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("<length>"))
+      << output_buffer_;
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("(width < 600px)"))
+      << output_buffer_;
 }
 
 TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {

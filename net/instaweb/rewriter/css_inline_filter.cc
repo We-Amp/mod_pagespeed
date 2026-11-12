@@ -198,6 +198,10 @@ bool CssInlineFilter::MayContainMarkup(StringPiece contents) {
   return contents.find('<') != StringPiece::npos;
 }
 
+bool CssInlineFilter::MayCloseStyleElement(StringPiece contents) {
+  return FindIgnoreCase(contents, "</style") != StringPiece::npos;
+}
+
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
                                    const StringPiece& attrs_charset,
                                    const StringPiece& htmls_charset,
@@ -214,11 +218,11 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
     *reason = "CSS not inlined because it appears to be gzip-encoded";
     return false;
   }
-  // And also not if the contents contain a '<' anywhere. If we inline an
+  // And also not if the contents contain a closing style tag. If we inline an
   // external stylesheet containing, say, a "</style>", the <style> tag will be
   // ended early.
-  if (MayContainMarkup(contents)) {
-    *reason = "CSS not inlined since it contains a less-than sign";
+  if (MayCloseStyleElement(contents)) {
+    *reason = "CSS not inlined since it contains a closing style tag";
     return false;
   }
 

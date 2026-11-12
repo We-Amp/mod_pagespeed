@@ -68,6 +68,10 @@ class CssInlineFilter : public CommonFilter {
   // Could a browser see markup in contents if it were the text of an inline
   // <style> element?  Such CSS must not be written into the HTML.
   static bool MayContainMarkup(StringPiece contents);
+  // Could contents end an inline <style> element early?  Only a closing style
+  // tag (case-insensitive "</style") can; any other '<' is plain CSS text
+  // (for example @property syntax descriptors or media range queries).
+  static bool MayCloseStyleElement(StringPiece contents);
 
  protected:
   // Changes filter id code (which shows up in cache keys and

@@ -249,7 +249,7 @@ void CssSummarizerBase::Context::RewriteSingle(
         input_resource.get(), StringPiece() /* attribute_charset */,
         StringPiece() /* enclosing_charset */));
   }
-  if (CssInlineFilter::MayContainMarkup(result->inlined_data())) {
+  if (CssInlineFilter::MayCloseStyleElement(result->inlined_data())) {
     result->clear_inlined_data();
   }
 

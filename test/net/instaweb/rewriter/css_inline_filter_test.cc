@@ -145,7 +145,7 @@ class CssInlineFilterTest : public RewriteTestBase {
                      "<link rel='stylesheet' href='foo.css'>",
                      "<link rel='stylesheet' href='foo.css'>"
                      "<!--CSS not inlined since it contains "
-                     "a less-than sign-->");
+                     "a closing style tag-->");
   }
 
   void TurnOnDebug() {
@@ -774,9 +774,22 @@ TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagWithSpaces) {
   VerifyNoInliningForClosingStyleTag("</style abc>");
 }
 
-// A stylesheet with a tag in it stays external.
-TEST_F(CssInlineFilterTest, NoInliningOfAnyTag) {
-  VerifyNoInliningForClosingStyleTag("td[headers=\"<x\"]{padding:3px}");
+// A closing style tag inside a string or comment still keeps it external.
+TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagInStringOrComment) {
+  VerifyNoInliningForClosingStyleTag("a:after{content:\"</style>\"}");
+}
+
+// A '<' that is plain CSS does not stop inlining.
+TEST_F(CssInlineFilterTest, StylesheetWithLessThanSignIsInlined) {
+  AddFilter(RewriteOptions::kInlineCss);
+  const char kCss[] =
+      "@property --tw-shadow-alpha{syntax:\"<percentage>\";inherits:false;"
+      "initial-value:100%}"
+      "@media (width < 600px){a{margin:0}}"
+      "td[headers=\"<x\"]{padding:3px}";
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, kCss, 100);
+  ValidateExpected("inlined_lt", "<link rel='stylesheet' href='foo.css'>",
+                   StrCat("<style>", kCss, "</style>"));
 }
 
 TEST_F(CssInlineFilterTest, StylesheetWithoutMarkupIsInlined) {
