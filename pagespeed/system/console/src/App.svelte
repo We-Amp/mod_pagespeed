@@ -76,9 +76,11 @@
   // page; the admin path stands in until then, or if the read fails. A
   // read that fails at start is retried once the connection to the server
   // is next seen restored (scope.config stays null until a read succeeds).
+  // The same answer's text gives the configuration digest the Overview
+  // compares with the last visit; no other read is made for it.
   function loadConfig(): void {
     api.getConfig().then(
-      (r) => scope.apply({ scope: r.scope, host: r.host }),
+      (r) => scope.apply({ scope: r.scope, host: r.host }, r.config),
       () => {},
     );
   }
