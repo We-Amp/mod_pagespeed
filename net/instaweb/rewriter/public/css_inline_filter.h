@@ -68,6 +68,25 @@ class CssInlineFilter : public CommonFilter {
   // Could a browser see markup in contents if it were the text of an inline
   // <style> element?  Such CSS must not be written into the HTML.
   static bool MayContainMarkup(StringPiece contents);
+  // Could contents end an inline <style> element early?  Only a closing style
+  // tag (case-insensitive "</style") can; any other '<' is plain CSS text
+  // (for example @property syntax descriptors or media range queries).
+  static bool MayCloseStyleElement(StringPiece contents);
+  // Whether CSS written into an inline <style> element of the current
+  // document gets the conservative MayContainMarkup() check. The narrower
+  // MayCloseStyleElement() check is used only for HTML documents; XHTML, and
+  // documents whose type is not known, keep the conservative one. When the
+  // server does not finalize response headers, only a parse started as plain
+  // HTML counts as HTML. (SVG and
+  // MathML elements never reach the filters as style or link elements: the
+  // parser gives them no keyword, so they are left alone.)
+  static bool NeedsConservativeMarkupCheck(RewriteDriver* driver);
+  // The check to apply to CSS that is about to be written into an inline
+  // <style> element.
+  static bool MayBreakInlineStyle(StringPiece contents, bool conservative) {
+    return conservative ? MayContainMarkup(contents)
+                        : MayCloseStyleElement(contents);
+  }
 
  protected:
   // Changes filter id code (which shows up in cache keys and
@@ -86,7 +105,7 @@ class CssInlineFilter : public CommonFilter {
 
   bool ShouldInline(const ResourcePtr& resource,
                     const StringPiece& attrs_attribute,
-                    const StringPiece& htmls_charset,
+                    const StringPiece& htmls_charset, bool conservative_check,
                     GoogleString* reason) const;
   void RenderInline(const ResourcePtr& resource, const CachedResult& cached,
                     const GoogleUrl& base_url, const StringPiece& text,

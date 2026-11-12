@@ -698,7 +698,9 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   }
 
   // Check the bytes that are actually written, whatever produced them.
-  if (CssInlineFilter::MayContainMarkup(*css_to_use)) {
+  if (CssInlineFilter::MayBreakInlineStyle(
+          *css_to_use,
+          CssInlineFilter::NeedsConservativeMarkupCheck(driver()))) {
     return;
   }
 
