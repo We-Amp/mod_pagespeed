@@ -14,9 +14,9 @@
  *      before anyone edits this file. The longest matching prefix wins.
  *   3. `NEUTRAL_STAT_DESCRIPTION` -- an honest "not described yet".
  *
- * The accompanying test asserts that every counter emitted by a real server
- * resolves at least to a family description, so the table cannot silently rot
- * as counters are added.
+ * The accompanying test asserts that every counter in the captured server
+ * dumps has an exact description, so the table cannot silently rot as
+ * counters are added. The family layer covers counters added later.
  *
  * Style rules for the text, enforced by the test:
  *   - Prose an operator can act on: what is counted, when it moves, and where
@@ -64,6 +64,42 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "HTML responses the policy would not store. The refused-by-reason counters add up to this.",
   daemon_html_refused_other:
     "Refusals for a reason this module has no counter for: an optimizer library newer than the module.",
+  daemon_html_refused_method:
+    "Refusals: the request method was not GET.",
+  daemon_html_refused_status:
+    "Refusals: the status was not 200.",
+  daemon_html_refused_incomplete:
+    "Refusals: a partial or incomplete body, or one too short to scan for personalisation.",
+  daemon_html_refused_auth_request:
+    "Refusals: the request carried credentials (Authorization or Proxy-Authorization, or a signed-in user). No response header overrides this.",
+  daemon_html_refused_cookie_request:
+    "Refusals: the request carried a cookie and the response was not marked shareable (public or s-maxage).",
+  daemon_html_refused_set_cookie:
+    "Refusals: the response sets a cookie.",
+  daemon_html_refused_private:
+    "Refusals: Cache-Control private.",
+  daemon_html_refused_no_store:
+    "Refusals: Cache-Control no-store, on the response or the request.",
+  daemon_html_refused_no_lifetime:
+    "Refusals: no freshness lifetime (or always revalidate) and no ETag or Last-Modified to revalidate with.",
+  daemon_html_refused_vary:
+    "Refusals: Vary names more than Accept-Encoding. The decision log names the token.",
+  daemon_html_refused_headers:
+    "Refusals: a response header could not be reproduced on a cache hit. The decision log names it.",
+  daemon_html_refused_nonce_csp:
+    "Refusals: the Content-Security-Policy carries a nonce, which a stored copy cannot reuse.",
+  daemon_html_refused_nonce_link:
+    "Refusals: a Link header carries a nonce, which a stored copy cannot reuse.",
+  daemon_html_refused_content_type:
+    "Refusals: Content-Type is not text/html, or is sent twice.",
+  daemon_html_refused_encoding:
+    "Refusals: the origin sent the body compressed.",
+  daemon_html_refused_size:
+    "Refusals: the body is over the size cap.",
+  daemon_html_refused_url:
+    "Refusals: the path is not a safe cache key (a query, percent sign, fragment or path parameter, or an optimized URL).",
+  daemon_html_refused_personalisation_signal:
+    "Refusals: the body shows it was rendered for one visitor (a CSRF token, or a login, checkout or cart form).",
   daemon_html_unavailable:
     "HTML responses under the report that nothing could classify: no optimizer configured, an optimizer library older than the policy, or a server without the report (IIS, Envoy).",
   daemon_html_classify_failed:
@@ -97,6 +133,16 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Refresh signals sent to the optimizer after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
   ipro_daemon_refresh_notify_failed:
     "Refresh signals that could not be delivered to the optimizer. Sustained growth points at a broken notification socket, leaving stale variants unhealed.",
+  ipro_daemon_served_original_only:
+    "Stored-original serves with no optimized copy of any kind cached (stylesheets and scripts once per URL per time window, images on every serve). Climbing while the optimizer is healthy means it makes no copies for those URLs.",
+  ipro_daemon_heal_notified:
+    "Requests to the optimizer to remake a missing optimized copy, sent after serving the stored original. Counts asks, not repairs.",
+  ipro_daemon_heal_notify_failed:
+    "Those requests that could not be sent. Climbing means the optimizer is not receiving them.",
+  daemon_serve_declined_no_site:
+    "In-place requests the optimizer path declined because their site has no cache identity. Normally zero.",
+  daemon_record_declined_no_site:
+    "Origin responses not recorded for the optimizer because their site has no cache identity. Normally zero.",
   ipro_daemon_fallback_notified:
     "Notifications sent after serving a near-match variant, asking the optimizer to build the exact variant this client asked for (viewport, pixel density, data saving, image format).",
   ipro_daemon_fallback_notify_failed:
@@ -173,6 +219,14 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Optimization jobs cancelled before running because the server was shedding load or shutting down. Persistent growth means workers are saturated and pages go out unoptimized.",
   num_rewrites_abandoned_for_lock_contention:
     "Optimizations dropped immediately, without waiting, because the exclusive lock for that resource could not be taken, or because the server was shutting down. The lock case means another worker is already doing that same work.",
+  rewrite_budget_contexts_hits:
+    "Rewrites left undone: the page had started as many rewrites as one page may. The per-page limits are fixed.",
+  rewrite_budget_input_bytes_hits:
+    "Rewrites stopped: the page's rewrites had loaded as many input bytes as one page may.",
+  rewrite_budget_input_loads_hits:
+    "Rewrites that waited (not dropped): the page had as many input loads in progress as one page may.",
+  rewrite_budget_partition_entries_hits:
+    "Rewrites left undone: the page's rewrites had used up the result entries one page may hold.",
   total_rewrite_count:
     "HTML documents fully processed by the optimizer, counted once per document when parsing finishes. Effectively the volume of pages passing through optimization.",
   num_flushes:
@@ -511,6 +565,64 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "The subset of those requests that were for optimized resources rather than pages. Useful for telling whether missing domain configuration is affecting assets specifically.",
 
   // ---------------------------------------------------------------------
+  // Rule packs
+  // ---------------------------------------------------------------------
+  rule_pack_loads:
+    "New versions of a rule pack file read and put in use.",
+  rule_pack_load_errors:
+    "New versions of a rule pack file that could not be read or parsed; the version loaded earlier, if any, stays in use, and with none the pack is off. The log names the error.",
+  rule_pack_loads_signed:
+    "Rule pack versions whose signature verified, once per process per version.",
+  rule_pack_refused_unsigned:
+    "Packs refused with signing required: no signature file.",
+  rule_pack_refused_signature_unreadable:
+    "Packs refused with signing required: the signature file is unreadable or malformed.",
+  rule_pack_refused_publisher_mismatch:
+    "Packs refused with signing required: signed by a key other than the pack's publisher.",
+  rule_pack_refused_unknown_key:
+    "Packs refused with signing required: the signing key is not trusted.",
+  rule_pack_refused_bad_signature:
+    "Packs refused with signing required: the signature does not match, so the file changed after signing.",
+  rule_pack_refused_duplicate_id:
+    "Pack files refused because a file loaded earlier on the host has a pack with the same id.",
+  rule_pack_pages_evaluated:
+    "Pages a rule pack evaluated (host listed, a rule matches the path), once per pack per page.",
+  rule_pack_pages_modified:
+    "Pages a rule pack changed, in the HTML or the response headers.",
+  rule_pack_pages_would_modify:
+    "Pages a rule in report mode would have changed; the decision log says how.",
+  rule_pack_pages_skipped_host_not_listed:
+    "Pages skipped: the pack lists no site for the host.",
+  rule_pack_pages_skipped_no_head:
+    "Pages skipped: no head for the head rules.",
+  rule_pack_pages_skipped_malformed_head:
+    "Pages skipped: where the head ends could not be known, such as an element in it never closed.",
+  rule_pack_pages_skipped_not_rewritable:
+    "Pages skipped: what a change touches had already been sent on.",
+  rule_pack_pages_skipped_size_limit:
+    "Pages skipped: the changes would add more bytes than one page may.",
+  rule_pack_pages_skipped_error:
+    "Reserved; nothing moves it in this release.",
+  rule_pack_decisions_applied:
+    "Rule decisions carried out: an element or header added, changed or removed.",
+  rule_pack_decisions_would_apply:
+    "Rule decisions that would have changed the page, in report mode.",
+  rule_pack_decisions_claimed:
+    "Rules that acted on nothing because an earlier pack on the host holds the same target.",
+  rule_pack_late_removed:
+    "Elements of an already decided kind found later in the page and removed or corrected.",
+  rule_pack_late_unremovable:
+    "Such late elements that had already been sent on, so stayed.",
+  rule_pack_headers_set:
+    "Link response headers a rule set or replaced.",
+  rule_pack_headers_flushed:
+    "Header changes not made because the headers had already been sent.",
+  rule_pack_decision_log_lines:
+    "Lines written to the rule pack decision log, each decision once per process.",
+  rule_pack_decision_log_dropped:
+    "Decision lines not written: the daily cap, or an unwritable log file.",
+
+  // ---------------------------------------------------------------------
   // Image optimization
   // ---------------------------------------------------------------------
   image_rewrites:
@@ -591,6 +703,8 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Stylesheets successfully parsed and rewritten, each now shipping in optimized form. Usually smaller, but not always: an already optimized stylesheet can be rewritten without shrinking.",
   css_filter_parse_failures:
     "Stylesheets the parser could not read cleanly. Non-zero means those files fall back to a limited URL-only rewrite; the log names the offending files.",
+  css_filter_parse_max_bytes_exceeded:
+    "Stylesheets and style attributes over the CSS parse limit (CssParseMaxBytes, 2 MiB by default), left unoptimized. The log names each URL once.",
   css_filter_rewrites_dropped:
     "Stylesheets discarded because the optimized version was no smaller than the original. Common on already minified stylesheets, and harmless.",
   css_filter_fallback_rewrites:

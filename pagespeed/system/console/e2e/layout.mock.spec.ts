@@ -39,9 +39,9 @@ test.describe("the sidebar band", () => {
 
     test(`fills the height below the top bar anywhere on a long page at ${size.width}`, async ({ page }) => {
       await page.setViewportSize(size);
-      // Many counters: a page several windows long at any width.
+      // Many counters in the family that starts open: a page several windows long at any width.
       const variables: Record<string, number> = { ...(F.STATS_GLOBAL.body as { variables: Record<string, number> }).variables };
-      for (let i = 0; i < 120; i++) variables[`num_cache_counter_${i}`] = i;
+      for (let i = 0; i < 120; i++) variables[`num_rewrites_counter_${i}`] = i;
       await mockAdmin(page, "pagespeed_global_admin", { ...wholeServerReplies(), stats_json: F.ok({ variables, maxlength: 60, timestamp_ms: 1_790_000_000_000 }) });
       await openConsole(page, "pagespeed_global_admin", "#/statistics");
       await pageReady(page);

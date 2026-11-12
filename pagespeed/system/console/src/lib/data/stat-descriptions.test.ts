@@ -10,6 +10,10 @@ import {
   statDescriptionSource,
 } from "./stat-descriptions";
 import statNames from "../../../test-fixtures/stat-names.fixture.json";
+import apacheStatNames from "../../../test-fixtures/stat-names.apache-2.8.1.fixture.json";
+
+/** Every counter name a captured server dump holds. */
+const CAPTURED_NAMES = [...new Set([...(statNames as string[]), ...(apacheStatNames as string[])])];
 
 describe("describeStat", () => {
   it("prefers an exact entry", () => {
@@ -102,20 +106,22 @@ describe("coverage of the counters a running server emits", () => {
   // or removed. It lives outside src/ deliberately: the console source hash
   // covers src/, so keeping the fixture out of it means refreshing the data
   // does not force a bundle rebuild.
-  it("describes every counter in the captured statistics dump", () => {
-    const misses = (statNames as string[]).filter(
-      (name) => statDescriptionSource(name) === "none",
-    );
+  // stat-names.apache-2.8.1.fixture.json is the whole-server dump of an
+  // Apache module 2.8.1 with the optimizer, rule packs and the HTML cache
+  // report configured.
+  it("describes every counter in the captured statistics dumps exactly", () => {
+    const misses = CAPTURED_NAMES.filter((name) => statDescriptionSource(name) !== "exact");
     expect(
       misses,
-      `${misses.length} counter(s) from the captured statistics dump have no ` +
-        `description. Add an exact entry, or a family prefix that covers ` +
-        `them, to stat-descriptions.ts:\n  ${misses.join("\n  ")}`,
+      `${misses.length} counter(s) from the captured statistics dumps have no ` +
+        `exact description. Add an exact entry to stat-descriptions.ts:\n  ` +
+        misses.join("\n  "),
     ).toEqual([]);
   });
 
   it("captured a realistic dump, not a stub", () => {
     expect((statNames as string[]).length).toBeGreaterThan(200);
+    expect((apacheStatNames as string[]).length).toBeGreaterThan(300);
   });
 });
 

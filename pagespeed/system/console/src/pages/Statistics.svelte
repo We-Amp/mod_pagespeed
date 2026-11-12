@@ -78,11 +78,11 @@
   const announceCount = settledCount((text) => (countStatus = text));
 
   // A real server reports hundreds of counters: past this many, a family
-  // starts collapsed (except the key counters) so the page is not tens of
+  // starts collapsed (except Page rewriting, KEY_GROUP) so the page is not tens of
   // thousands of pixels tall. A search opens every family that matches, and
   // a family the reader opened or closed stays as they left it.
   const COLLAPSE_ABOVE = 60;
-  const KEY_GROUP = "num";
+  const KEY_GROUP = "rewriting";
   let groupToggled = $state<Record<string, boolean>>({});
   // A new search starts from what it matches: an earlier manual close does
   // not hide a group the search found.
@@ -177,6 +177,7 @@
     {#each groups as group (group.key)}
       <details class="stat-group" open={groupOpen(group)}>
         <summary
+          aria-label="{group.label}, {group.rows.length} {group.rows.length === 1 ? 'counter' : 'counters'}"
           onclick={(e) => {
             e.preventDefault();
             groupToggled[group.key] = !groupOpen(group);

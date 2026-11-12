@@ -5,8 +5,8 @@
 # Refresh src/lib/data/stat-names.fixture.json from a running server.
 #
 # The fixture is the set of statistics variable names a real server emits. The
-# unit test holds every name in it to at least a family-level description, so
-# the description table cannot silently rot as counters are added. When
+# unit tests hold every name in it to an exact description and a named
+# Statistics group, so the tables cannot silently rot as counters are added. When
 # counters change, regenerate the fixture here and fix whatever the test then
 # reports as undescribed.
 #
