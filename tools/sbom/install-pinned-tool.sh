@@ -9,7 +9,9 @@
 # leaving a truncated binary on PATH (segfault, exit 139; issue #859).
 #
 # Usage: install-pinned-tool.sh <syft|grype> <vX.Y.Z> <bin-dir>
-# Env:   INSTALL_RETRIES   download+verify attempts (default 3)
+# Env:   INSTALL_RETRIES   download+verify attempts (default 1; each one makes
+#                          two fetch_retry.sh calls, so the worst case is
+#                          INSTALL_RETRIES x 2 x 150 s at the fetch defaults)
 #        PINNED_TOOL_BASE  override of https://github.com/anchore (tests)
 #        FETCH_RETRY_*     see tools/ci/fetch_retry.sh (per-download retries)
 #        PINNED_TOOL_OS / PINNED_TOOL_ARCH  override platform (tests)
@@ -28,7 +30,7 @@ os="${PINNED_TOOL_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 arch="${PINNED_TOOL_ARCH:-$(uname -m)}"
 case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
 base="${PINNED_TOOL_BASE:-https://github.com/anchore}"
-retries="${INSTALL_RETRIES:-3}"
+retries="${INSTALL_RETRIES:-1}"
 ver="${version#v}"
 tarball="${tool}_${ver}_${os}_${arch}.tar.gz"
 sums="${tool}_${ver}_checksums.txt"

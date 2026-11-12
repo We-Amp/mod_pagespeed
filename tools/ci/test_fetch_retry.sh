@@ -60,4 +60,46 @@ FETCH_RETRY_COUNT=8 FETCH_RETRY_MAX_TIME=30 bash "$script" "http://127.0.0.1:$po
   || fail "retry across a short outage"
 cmp -s "$work/www/a.txt" "$work/out/f5.txt" || fail "late-server content differs"
 
+# 6. a stalled transfer is cut off and the whole call stays inside
+#    FETCH_RETRY_MAX_TIME + FETCH_ATTEMPT_MAX_TIME (here 4 + 3 s).
+kill "$srv_pid" 2>/dev/null || true; wait "$srv_pid" 2>/dev/null || true; srv_pid=""
+cat > "$work/stall.py" <<'EOF'
+import socket, sys, threading, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(8)
+def serve(c):
+    c.recv(4096)
+    c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nx")
+    time.sleep(120)
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=serve, args=(c,), daemon=True).start()
+EOF
+python3 -I "$work/stall.py" "$port" >/dev/null 2>&1 &
+srv_pid=$!
+for _ in $(seq 1 50); do
+  python3 -I -c 'import socket,sys;socket.create_connection(("127.0.0.1",int(sys.argv[1])),1)' "$port" 2>/dev/null && break
+  sleep 0.1
+done
+start=$SECONDS rc=0
+FETCH_RETRY_COUNT=8 FETCH_RETRY_MAX_TIME=4 FETCH_ATTEMPT_MAX_TIME=3 FETCH_STALL_TIME=2 \
+  bash "$script" "http://127.0.0.1:$port/a.txt" "$work/out/f6.txt" >/dev/null 2>&1 || rc=$?
+took=$((SECONDS - start))
+[ "$rc" -ne 0 ] || fail "stalled transfer must fail"
+[ "$took" -le 9 ] || fail "stalled transfer took ${took}s, bound is 7s"
+[ ! -e "$work/out/f6.txt" ] || fail "file left behind after stall"
+
+# 7. the default curl flags carry the stall limit and the per-attempt cap.
+mkdir -p "$work/shim"
+printf '#!/bin/sh\necho "$@" > "%s"\nexit 22\n' "$work/args" > "$work/shim/curl"
+chmod +x "$work/shim/curl"
+env -u FETCH_RETRY_COUNT -u FETCH_RETRY_MAX_TIME -u FETCH_ATTEMPT_MAX_TIME \
+    -u FETCH_STALL_TIME -u FETCH_CONNECT_TIMEOUT PATH="$work/shim:$PATH" \
+  bash "$script" "http://127.0.0.1:1/x" "$work/out/f7.txt" >/dev/null 2>&1 || true
+args="$(cat "$work/args")"
+for want in "--retry 8" "--retry-max-time 90" "--max-time 60" "--speed-limit 1024" \
+            "--speed-time 60" "--connect-timeout 20"; do
+  case " $args " in *" $want "*) ;; *) fail "default curl flags lack '$want': $args" ;; esac
+done
+
 echo "PASS: fetch_retry"

@@ -38,6 +38,13 @@ echo "$out" | grep -q "sha256 mismatch" || fail "missing mismatch message: $out"
 echo "$out" | grep -q "ABORTING" || fail "missing ABORTING message: $out"
 [ ! -e "$work/bad/syft" ] || fail "binary installed despite checksum mismatch"
 
+# 2b. the default is one download+verify attempt (fetch_retry.sh does the
+#     transport retries), which keeps the worst case inside job timeouts.
+rc=0; out="$(env -u INSTALL_RETRIES PINNED_TOOL_BASE="file://$work/release" PINNED_TOOL_OS=linux PINNED_TOOL_ARCH=amd64 \
+  INSTALL_RETRY_SLEEP=0 bash "$script" syft "$ver" "$work/bad1" 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || fail "wrong checksum must exit non-zero with the default attempts"
+echo "$out" | grep -q "attempt 1/1:" || fail "default should be one attempt: $out"
+
 # 3. checksum file lacking the tarball entry also aborts.
 echo "deadbeef  other.tar.gz" > "$rel/syft_9.9.9_checksums.txt"
 rc=0; out="$(run "$work/missing")" || rc=$?

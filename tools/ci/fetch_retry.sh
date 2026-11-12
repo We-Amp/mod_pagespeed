@@ -10,8 +10,17 @@
 #             <dest>; on a mismatch nothing is left at <dest> and the exit
 #             status is 3.
 # Env:   FETCH_RETRY_COUNT         curl --retry count (default 8)
-#        FETCH_RETRY_MAX_TIME      total retry window in seconds (default 900)
+#        FETCH_RETRY_MAX_TIME      window in seconds in which a new attempt may
+#                                  start (default 90)
+#        FETCH_ATTEMPT_MAX_TIME    hard cap on one attempt in seconds, connect
+#                                  included (default 60)
+#        FETCH_STALL_TIME          abort an attempt that moves under 1 KiB/s
+#                                  for this many seconds (default 60)
 #        FETCH_CONNECT_TIMEOUT     connect timeout in seconds (default 20)
+# Bound: one call takes at most FETCH_RETRY_MAX_TIME + FETCH_ATTEMPT_MAX_TIME
+#        seconds (150 by default): the last attempt starts inside the window
+#        and is cut off by its own cap, so a stalled or trickling transfer can
+#        never run on to the job timeout.
 # Exit:  0 ok, 2 usage, 3 checksum mismatch, otherwise curl's status.
 set -euo pipefail
 
@@ -32,7 +41,9 @@ trap 'rm -f "$tmp"' EXIT
 
 curl -fsSL \
   --retry "${FETCH_RETRY_COUNT:-8}" --retry-all-errors \
-  --retry-max-time "${FETCH_RETRY_MAX_TIME:-900}" \
+  --retry-max-time "${FETCH_RETRY_MAX_TIME:-90}" \
+  --max-time "${FETCH_ATTEMPT_MAX_TIME:-60}" \
+  --speed-limit 1024 --speed-time "${FETCH_STALL_TIME:-60}" \
   --connect-timeout "${FETCH_CONNECT_TIMEOUT:-20}" \
   -o "$tmp" "$url"
 
