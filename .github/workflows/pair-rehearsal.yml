@@ -101,8 +101,8 @@ jobs:
           OPT_COMMIT=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$PIN")
           case "$OPT_COMMIT" in *[!0-9a-f]*|"") echo "::error::the pin has no optimizer_commit"; exit 1 ;; esac
           RAW="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPT_COMMIT"
-          curl -fsSL --retry 5 --retry-all-errors "$RAW/VERSION.txt" -o optimizer-VERSION.txt
-          curl -fsSL --retry 5 --retry-all-errors "$RAW/MODULE.bazel" -o optimizer-MODULE.bazel
+          bash tools/ci/fetch_retry.sh "$RAW/VERSION.txt" optimizer-VERSION.txt
+          bash tools/ci/fetch_retry.sh "$RAW/MODULE.bazel" optimizer-MODULE.bazel
           ARGS=(--tag "$TAG" --pin "$PIN" --optimizer-version-file optimizer-VERSION.txt
                 --optimizer-module-bazel optimizer-MODULE.bazel
                 --repositories-bzl candidate/bazel/repositories.bzl)

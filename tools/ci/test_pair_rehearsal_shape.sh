@@ -141,7 +141,8 @@ for _, body in runs:
     for ln in body.splitlines():
         s = ln.strip()
         if re.match(r"(bash|sh|python3?|node|perl|ruby)\b", s) and not (
-                s.startswith("bash tools/ci/pair_rehearsal.sh ") or s.startswith("python3 -I -c ")
+                s.startswith("bash tools/ci/pair_rehearsal.sh ") or s.startswith("bash tools/ci/fetch_retry.sh ")
+                or s.startswith("python3 -I -c ")
                 or "$(python3 -I -c " in s):
             v.append("the run block runs %r: only the master copy of the rehearsal is run" % s[:60])
     for need in ["--tag ", "--pin ", "--optimizer-version-file ", "--optimizer-module-bazel ",
