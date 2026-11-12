@@ -1114,6 +1114,8 @@ jobs:
         with:
           path: vendor
           key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          restore-keys: |
+            mps-vendor-
 
       # The dependency sources are public and fetched over https. The vendor
       # script names one of them with an ssh-style address, so the rewrite

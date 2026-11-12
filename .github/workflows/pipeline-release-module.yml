@@ -829,6 +829,9 @@ jobs:
       - &v-vendor
         name: Vendor all dependencies
         env:
+          # The vendored tree ships in the source tarball: never seed it from
+          # runner history.
+          CI_BAZEL_REPO_CACHE: ""
           GIT_CONFIG_COUNT: "1"
           GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
           GIT_CONFIG_VALUE_0: "git@github.com:"
