@@ -1236,7 +1236,9 @@ test.describe("a 320 px window", () => {
     const title = dialog.getByRole("heading", { name: "Keyboard shortcuts" });
     await expect(title).toBeFocused();
     await expect(title).toBeInViewport();
-    // Close is the next stop, and Escape still returns to the page.
+    // The on/off switch is the next stop, then Close; Escape still returns to the page.
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("switch", { name: "Use keyboard shortcuts" })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
     await page.keyboard.press("Escape");

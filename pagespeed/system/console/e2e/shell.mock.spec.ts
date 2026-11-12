@@ -167,11 +167,17 @@ test.describe("Console shell", () => {
   test("each entry names its shortcut beside it; the link's name is the page's", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin", "#/overview");
+    const hintOf = (name: string) =>
+      page.locator(".nav-row", { has: page.getByRole("link", { name, exact: true }) }).locator(".nav-key");
     const statistics = page.getByRole("link", { name: "Statistics", exact: true });
-    await expect(statistics).toHaveAttribute("aria-keyshortcuts", "g s");
-    await expect(page.locator(".nav-row", { has: statistics }).locator(".nav-key")).toHaveText("g s");
-    await expect(page.getByRole("link", { name: "Status", exact: true })).toHaveAttribute("aria-keyshortcuts", "g d");
-    await expect(page.getByRole("link", { name: "Support", exact: true })).not.toHaveAttribute("aria-keyshortcuts", /.+/);
+    await expect(statistics).toBeVisible();
+    await expect(hintOf("Statistics")).toHaveText("g s");
+    await expect(hintOf("Status")).toHaveText("g d");
+    await expect(hintOf("Rule packs")).toHaveText("g p");
+    await expect(hintOf("Support")).toHaveCount(0);
+    // aria-keyshortcuts cannot express a two-key sequence ("g s" would
+    // announce two single keys): the dialog is where the keys are explained.
+    await expect(page.locator(".nav-item[aria-keyshortcuts]")).toHaveCount(0);
   });
 
   test("Graphs is a view of Statistics: the sidebar marks Statistics, and the views switch", async ({ page }) => {

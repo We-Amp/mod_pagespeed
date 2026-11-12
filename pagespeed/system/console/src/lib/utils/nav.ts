@@ -4,11 +4,11 @@
 /** Sidebar helpers: the shortcut hint beside an entry, and which entry is current. */
 
 import type { Route } from "$lib/routes";
-import { GO_KEYS } from "$lib/shortcuts";
+import { goKeysFor } from "$lib/shortcuts";
 
-/** The "g x" shortcut that goes exactly to `path`, or null when it has none. */
-export function navKeyHint(path: string): string | null {
-  for (const [letter, target] of Object.entries(GO_KEYS)) {
+/** The "g x" shortcut that goes exactly to `path` on this console, or null when it has none. */
+export function navKeyHint(path: string, isGlobal = true): string | null {
+  for (const [letter, target] of Object.entries(goKeysFor(isGlobal))) {
     if (target === path) return `g ${letter}`;
   }
   return null;
