@@ -13,11 +13,31 @@ LABEL description="Development environment for mod_pagespeed"
 # Install clang-20 (abseil's absl_nonnull requires nullability_on_classes
 # support; clang-18 lacks it, clang-19 partially supports it but misparses).
 # Replace the default clang in /opt/llvm/bin so Bazel's CC=clang picks it up.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt retries transient fetch failures; the apt.llvm.org key is fetched with
+# retries and only the key with the pinned fingerprint (the one
+# https://apt.llvm.org/ publishes) goes into the keyring, so a failed fetch
+# stops the build instead of leaving an empty key behind.
+ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common gnupg wget \
     && . /etc/os-release \
-    && wget -qO /usr/share/keyrings/llvm-snapshot.gpg.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg.asc] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-20 main" \
+    && keytmp="$(mktemp -d)" \
+    && for i in 1 2 3 4 5; do \
+         wget -qO "${keytmp}/key.asc" --timeout=20 --tries=1 https://apt.llvm.org/llvm-snapshot.gpg.key \
+           && [ -s "${keytmp}/key.asc" ] && break; \
+         echo "apt.llvm.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
+       done \
+    && { [ -s "${keytmp}/key.asc" ] \
+         || { echo "ERROR: could not fetch https://apt.llvm.org/llvm-snapshot.gpg.key" >&2; exit 1; }; } \
+    && { GNUPGHOME="${keytmp}" gpg --batch --quiet --import "${keytmp}/key.asc"; \
+         GNUPGHOME="${keytmp}" gpg --batch --with-colons --list-keys "${LLVM_APT_KEY_FPR}" 2>/dev/null \
+           | awk -F: -v fpr="${LLVM_APT_KEY_FPR}" '$1=="fpr" && $10==fpr { ok=1 } END { exit !ok }' \
+         || { echo "ERROR: the apt.llvm.org key file does not hold the pinned key ${LLVM_APT_KEY_FPR}" >&2; exit 1; }; } \
+    && GNUPGHOME="${keytmp}" gpg --batch --export "${LLVM_APT_KEY_FPR}" > /usr/share/keyrings/llvm-snapshot.gpg \
+    && rm -rf "${keytmp}" \
+    && [ -s /usr/share/keyrings/llvm-snapshot.gpg ] \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-20 main" \
        > /etc/apt/sources.list.d/llvm-20.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     clang-20 clang-format-20 clang-tidy-20 libc++-20-dev libc++abi-20-dev lld-20 \
