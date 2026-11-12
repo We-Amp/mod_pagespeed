@@ -38,17 +38,19 @@ test("counters group into named, collapsible families", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", F.allReplies());
   await openConsole(page, "pagespeed_admin", "#/statistics");
   const groups = page.locator(".stat-group");
-  await expect(groups).toHaveCount(5);
-  // All five of this fixture's prefixes (css, image, ipro, javascript, num)
-  // are curated, and curated groups order by label.localeCompare —
-  // "Counts" sorts before "CSS". The array form pins the full order.
+  await expect(groups).toHaveCount(6);
+  // Families by what they count, in the family table's order, not by the
+  // first word of a name: num_flushes is page rewriting, the
+  // num_resource_fetch counters are origin fetches.
   await expect(groups.locator("summary")).toContainText([
-    "Counts", "CSS", "Images", "In-place optimization", "JavaScript",
+    "Page rewriting", "Optimizer serving", "Origin fetches", "Images", "CSS", "JavaScript",
   ]);
-  const ipro = groups.filter({ hasText: "In-place optimization" });
-  await expect(ipro.locator("tbody tr")).toHaveCount(2);
-  await ipro.locator("summary").click();
-  await expect(ipro.locator("tbody tr").first()).toBeHidden();
+  const optimizer = groups.filter({ hasText: "Optimizer serving" });
+  await expect(optimizer.locator("tbody tr")).toHaveCount(2);
+  // The count is announced as a count, not as part of the family's name.
+  await expect(optimizer.locator("summary")).toHaveAccessibleName("Optimizer serving, 2 counters");
+  await optimizer.locator("summary").click();
+  await expect(optimizer.locator("tbody tr").first()).toBeHidden();
 });
 
 test("the delta column is opt-in and shows movement since the page opened", async ({ page }) => {
@@ -73,10 +75,10 @@ test("the delta column is opt-in and shows movement since the page opened", asyn
   await page.getByRole("checkbox", { name: "Δ since open" }).check();
   await expect(page.getByRole("columnheader", { name: "Δ since open" }).first()).toBeVisible();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  const counts = page.locator(".stat-group", { hasText: "Counts" });
-  await expect(counts.locator("tr", { hasText: "num_flushes" })).toContainText("+25");
-  const ipro = page.locator(".stat-group", { hasText: "In-place optimization" });
-  await expect(ipro.locator("tr", { hasText: "ipro_daemon_served" })).toContainText("-3");
+  const rewriting = page.locator(".stat-group", { hasText: "Page rewriting" });
+  await expect(rewriting.locator("tr", { hasText: "num_flushes" })).toContainText("+25");
+  const optimizer = page.locator(".stat-group", { hasText: "Optimizer serving" });
+  await expect(optimizer.locator("tr", { hasText: "ipro_daemon_served" })).toContainText("-3");
   await expect(page.locator(".delta-pos").first()).toBeVisible();
   await expect(page.locator(".delta-neg").first()).toBeVisible();
 });
@@ -99,7 +101,7 @@ test("the old Console page lands on Statistics with the Δ column on", async ({ 
   await expect(page.getByRole("button", { name: "Δ since open" }).first()).toBeVisible();
 });
 
-test("a long counter list starts collapsed except the key counters; a search opens the matches", async ({ page }) => {
+test("a long counter list starts collapsed except page rewriting; a search opens the matches", async ({ page }) => {
   const variables: Record<string, number> = { num_flushes: 3 };
   for (let i = 0; i < 70; i++) variables[`css_counter_${i}`] = i;
   variables.javascript_blocks = 1;
@@ -109,8 +111,8 @@ test("a long counter list starts collapsed except the key counters; a search ope
   });
   await openConsole(page, "pagespeed_admin", "#/statistics");
   const css = page.locator(".stat-group", { hasText: "CSS" });
-  const counts = page.locator(".stat-group", { hasText: "Counts" });
-  await expect(counts).toHaveJSProperty("open", true);
+  const rewriting = page.locator(".stat-group", { hasText: "Page rewriting" });
+  await expect(rewriting).toHaveJSProperty("open", true);
   await expect(css).toHaveJSProperty("open", false);
   await css.locator("summary").click();
   await expect(css).toHaveJSProperty("open", true);
@@ -125,9 +127,9 @@ test("a new search opens a group the reader had closed", async ({ page }) => {
   for (let i = 0; i < 70; i++) variables[`css_counter_${i}`] = i;
   await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), stats_json: F.ok({ variables, maxlength: 60 }) });
   await openConsole(page, "pagespeed_admin", "#/statistics");
-  const counts = page.locator(".stat-group", { hasText: "Counts" });
-  await counts.locator("summary").click();
-  await expect(counts).toHaveJSProperty("open", false);
+  const rewriting = page.locator(".stat-group", { hasText: "Page rewriting" });
+  await rewriting.locator("summary").click();
+  await expect(rewriting).toHaveJSProperty("open", false);
   await page.getByRole("searchbox", { name: "Search statistics" }).fill("flushes");
-  await expect(counts).toHaveJSProperty("open", true);
+  await expect(rewriting).toHaveJSProperty("open", true);
 });

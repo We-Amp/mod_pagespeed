@@ -44,45 +44,63 @@ export interface StatRow {
   delta: number | null;
 }
 
-/** The family a counter belongs to: the text before the first "_". */
+/**
+ * The families of counters, in the order the page shows them: what an
+ * operator reads first comes first. Each family lists the name patterns it
+ * owns, separated by spaces: a pattern matches the start of a name, or with a
+ * leading "*" its end. The longest matching pattern of any family wins, so
+ * "cache_flush_" (purges) beats "cache_" (the HTTP cache). The key is what
+ * keeps a group's open or closed state across polls; never reuse one.
+ */
+export const STAT_FAMILIES: ReadonlyArray<readonly [key: string, label: string, patterns: string]> = [
+  ["rewriting", "Page rewriting", "rewrite_ num_rewrites_ total_rewrite_ num_flushes num_deadline_ named-lock-rewrite- *-queue-depth current-expensive- csp_blocked_ domain_rewrites url_trim cache_extensions not_cacheable num_cache_control_ converted_meta_"],
+  ["ipro", "In-place optimization", "ipro_ in_place_"],
+  ["optimizer", "Optimizer serving", "ipro_daemon_ daemon_ zerocopy_"],
+  ["html", "Optimizer HTML cache", "daemon_html_"],
+  ["packs", "Rule packs", "rule_pack_"],
+  ["http", "HTTP cache", "cache_ compressed_cache_ num_fallback_ num_conditional_ num_proactively_"],
+  ["file", "File cache", "file_cache_ stdio_fs_"],
+  ["shm", "Shared memory cache", "shm_cache_"],
+  ["cyclone", "Cyclone cache", "cyclone_cache_"],
+  ["external", "Memcached and Redis", "memcache redis_ cache_batcher_"],
+  ["pcache", "Property cache", "pcache-"],
+  ["fetch", "Origin fetches", "curl_ http_ dropped-fetch- queued-fetch- current-fetch- num_resource_fetch_ resource_url_ url_input_ font_service_ slurp_"],
+  ["resources", "Optimized resource requests", "total_fetch_ resource_fetch resource_404"],
+  ["images", "Images", "image_ num_dedup_inlined_images_ lazyload_ critical_images_ prioritize_critical_images"],
+  ["css", "CSS", "css_ flatten_imports_ num_css_ critical_css_ critical_selectors_"],
+  ["js", "JavaScript", "javascript_ js_ num_js_"],
+  ["purge", "Purges and cache flushes", "purge_ _purge_ downstream_ successful_downstream_ cache_flush_"],
+  ["beacons", "Beacons, ads and local storage", "page_load_ total_page_load_ beacon_ instrumentation_ show_ads_ num_local_storage_"],
+  ["proxy", "Proxy-all mode", "proxy-all-mode-"],
+  ["botauth", "Web bot authentication", "web_bot_auth_"],
+  ["process", "Server process", "child_shutdown_ process_start_ timestamp_ statistics_"],
+];
+
+/** Where a counter no family claims goes: last, under an honest name. */
+export const OTHER_FAMILY = { key: "other", label: "Other" } as const;
+
+const PATTERNS: ReadonlyArray<readonly [pattern: string, family: number]> = STAT_FAMILIES.flatMap(
+  ([, , patterns], i) => patterns.split(" ").map((p) => [p, i] as const),
+);
+
+/** The index into STAT_FAMILIES of a counter's family, or -1 for Other. */
+function familyIndex(name: string): number {
+  let best = -1;
+  let bestLength = 0;
+  for (const [pattern, i] of PATTERNS) {
+    const hit = pattern[0] === "*" ? name.endsWith(pattern.slice(1)) : name.startsWith(pattern);
+    if (hit && pattern.length > bestLength) {
+      best = i;
+      bestLength = pattern.length;
+    }
+  }
+  return best;
+}
+
+/** The key of the family a counter belongs to ("other" when none claims it). */
 export function statGroupKey(name: string): string {
-  const cut = name.indexOf("_");
-  return cut === -1 ? name : name.slice(0, cut);
-}
-
-/** Curated family labels for the prefixes a real server emits; anything
- * else falls through to the title-cased prefix (groupLabel). */
-export const STAT_GROUP_LABELS: Readonly<Record<string, string>> = {
-  ipro: "In-place optimization",
-  cache: "Cache",
-  image: "Images",
-  javascript: "JavaScript",
-  js: "JavaScript",
-  css: "CSS",
-  curl: "Origin fetches",
-  memcache: "Memcached",
-  memcached: "Memcached",
-  redis: "Redis",
-  purge: "Purges",
-  http: "HTTP",
-  num: "Counts",
-  critical: "Critical selectors",
-  lazyload: "Lazyload",
-  shm: "Shared memory",
-  file: "File cache",
-  cyclone: "Cyclone cache",
-  compressed: "Compressed cache",
-  downstream: "Downstream cache",
-  font: "Resource inputs",
-  url: "Resource inputs",
-};
-
-function titleCase(key: string): string {
-  return key === "" ? "" : key[0].toUpperCase() + key.slice(1);
-}
-
-function groupLabel(key: string): string {
-  return STAT_GROUP_LABELS[key] ?? titleCase(key);
+  const i = familyIndex(name);
+  return i < 0 ? OTHER_FAMILY.key : STAT_FAMILIES[i][0];
 }
 
 /** One collapsible family of counters. */
@@ -92,30 +110,23 @@ export interface StatGroup {
   rows: StatRow[];
 }
 
-/** Group rows by family: curated groups first (by label), then the rest
- * (by label). A group with no rows cannot occur — the caller passes the
- * rows it wants shown (already search-filtered). */
+/** Group rows by family, in the families' own order, Other last. Rows keep
+ * the order they arrive in (the caller's sort). A family with no rows is
+ * left out: the caller passes the rows it wants shown (already
+ * search-filtered). */
 export function groupStatRows(rows: StatRow[]): StatGroup[] {
-  // Prefixes that share a label (js and javascript, memcache and memcached)
-  // are one family: two groups with one name would also be two landmarks
-  // with one name.
-  const byLabel = new Map<string, { key: string; rows: StatRow[] }>();
+  const buckets: StatRow[][] = STAT_FAMILIES.map(() => []);
+  const other: StatRow[] = [];
   for (const row of rows) {
-    const key = statGroupKey(row.name);
-    const label = groupLabel(key);
-    const group = byLabel.get(label) ?? { key, rows: [] };
-    // One fixed key per family, whatever order the rows arrive in (a sort by
-    // value changes it on every poll), so a reader's open/closed choice stays.
-    if (key < group.key) group.key = key;
-    group.rows.push(row);
-    byLabel.set(label, group);
+    const i = familyIndex(row.name);
+    (i < 0 ? other : buckets[i]).push(row);
   }
-  const groups = [...byLabel.entries()].map(([label, g]) => ({ key: g.key, label, rows: g.rows }));
-  return groups.sort((a, b) => {
-    const aKnown = a.key in STAT_GROUP_LABELS ? 0 : 1;
-    const bKnown = b.key in STAT_GROUP_LABELS ? 0 : 1;
-    return aKnown - bKnown || a.label.localeCompare(b.label);
+  const groups: StatGroup[] = [];
+  buckets.forEach((b, i) => {
+    if (b.length) groups.push({ key: STAT_FAMILIES[i][0], label: STAT_FAMILIES[i][1], rows: b });
   });
+  if (other.length) groups.push({ ...OTHER_FAMILY, rows: other });
+  return groups;
 }
 
 /**

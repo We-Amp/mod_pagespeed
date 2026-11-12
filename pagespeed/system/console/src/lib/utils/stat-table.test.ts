@@ -6,7 +6,8 @@ import {
   DEFAULT_SORT,
   DELTA_COLUMN_STORAGE_KEY,
   DESCRIPTION_COLUMN_STORAGE_KEY,
-  STAT_GROUP_LABELS,
+  OTHER_FAMILY,
+  STAT_FAMILIES,
   buildRows,
   groupStatRows,
   loadDeltaColumn,
@@ -19,7 +20,9 @@ import {
   type SortState,
   type StatRow,
 } from "./stat-table";
-import { NEUTRAL_STAT_DESCRIPTION } from "$lib/data/stat-descriptions";
+import { NEUTRAL_STAT_DESCRIPTION, STAT_DESCRIPTIONS } from "$lib/data/stat-descriptions";
+import statNames from "../../../test-fixtures/stat-names.fixture.json";
+import apacheStatNames from "../../../test-fixtures/stat-names.apache-2.8.1.fixture.json";
 
 /** Minimal in-memory Storage stand-in. */
 function fakeStorage(initial: Record<string, string> = {}): Storage {
@@ -218,43 +221,98 @@ describe("nameSegments", () => {
   });
 });
 
+/** Every counter a captured server dump holds, plus every counter the
+ * description table knows (some exist on one server type only). */
+const KNOWN_NAMES = [
+  ...new Set([...(statNames as string[]), ...(apacheStatNames as string[]), ...Object.keys(STAT_DESCRIPTIONS)]),
+];
+
+/** Families that may hold a single counter, and why. None today. */
+const SINGLE_COUNTER_FAMILIES: Readonly<Record<string, string>> = {};
+
 describe("statGroupKey", () => {
-  it("is the text before the first underscore; a bare name groups under itself", () => {
-    expect(statGroupKey("cache_hit_ratio")).toBe("cache");
-    expect(statGroupKey("ipro_daemon_served")).toBe("ipro");
-    expect(statGroupKey("requests")).toBe("requests");
+  it("files a counter by what it counts, not by its first word", () => {
+    expect(statGroupKey("num_flushes")).toBe("rewriting");
+    expect(statGroupKey("num_css_inlined")).toBe("css");
+    expect(statGroupKey("num_js_inlined")).toBe("js");
+    expect(statGroupKey("num_resource_fetch_failures")).toBe("fetch");
+    expect(statGroupKey("ipro_served")).toBe("ipro");
+    expect(statGroupKey("ipro_daemon_served")).toBe("optimizer");
+    expect(statGroupKey("daemon_html_refused_vary")).toBe("html");
+    expect(statGroupKey("named-lock-rewrite-scheduler-granted")).toBe("rewriting");
+    expect(statGroupKey("low-priority-worked-queue-depth")).toBe("rewriting");
+    expect(statGroupKey("pcache-cohorts-dom_hits")).toBe("pcache");
+  });
+  it("lets the longest pattern win", () => {
+    expect(statGroupKey("cache_hits")).toBe("http");
+    expect(statGroupKey("cache_flush_count")).toBe("purge");
+    expect(statGroupKey("cache_batcher_queued_gets")).toBe("external");
+    expect(statGroupKey("cache_extensions")).toBe("rewriting");
+  });
+  it("puts an unknown counter in Other", () => {
+    expect(statGroupKey("requests")).toBe(OTHER_FAMILY.key);
+    expect(statGroupKey("num_brand_new_thing")).toBe(OTHER_FAMILY.key);
+    expect(statGroupKey("")).toBe(OTHER_FAMILY.key);
+  });
+});
+
+describe("the family table", () => {
+  it("files every counter a real server emits in a named family", () => {
+    const other = KNOWN_NAMES.filter((name) => statGroupKey(name) === OTHER_FAMILY.key);
+    expect(other, `counters with no family:\n  ${other.join("\n  ")}`).toEqual([]);
+  });
+
+  it("has no family of one, unless it is listed with its reason", () => {
+    const sizes = new Map<string, number>();
+    for (const name of KNOWN_NAMES) sizes.set(statGroupKey(name), (sizes.get(statGroupKey(name)) ?? 0) + 1);
+    for (const [key] of STAT_FAMILIES) {
+      const size = sizes.get(key) ?? 0;
+      expect(size, `${key} matches no known counter`).toBeGreaterThan(0);
+      if (!(key in SINGLE_COUNTER_FAMILIES)) expect(size, `${key} holds one counter`).toBeGreaterThan(1);
+    }
+  });
+
+  it("gives each family its own key and its own label", () => {
+    const keys = STAT_FAMILIES.map(([key]) => key);
+    const labels = STAT_FAMILIES.map(([, label]) => label);
+    expect(new Set([...keys, OTHER_FAMILY.key]).size).toBe(keys.length + 1);
+    expect(new Set([...labels, OTHER_FAMILY.label]).size).toBe(labels.length + 1);
+  });
+
+  it("gives no pattern to two families", () => {
+    const patterns = STAT_FAMILIES.flatMap(([, , p]) => p.split(" "));
+    expect(patterns.filter((p, i) => patterns.indexOf(p) !== i)).toEqual([]);
+    expect(patterns).not.toContain("");
   });
 });
 
 describe("groupStatRows", () => {
   const row = (name: string): StatRow => ({ name, value: 0, description: "", delta: null });
-  it("curated groups come first, ordered by label; the rest follow, title-cased", () => {
+  it("orders groups by the family table, Other last", () => {
     const groups = groupStatRows([
       row("zzz_unknown_a"), row("javascript_rewrites"), row("cache_hits"),
-      row("css_filter_total_bytes_saved"), row("another_new_one"),
+      row("css_filter_total_bytes_saved"), row("num_flushes"), row("ipro_served"),
     ]);
     expect(groups.map((g) => g.label)).toEqual([
-      "Cache", "CSS", "JavaScript", "Another", "Zzz",
+      "Page rewriting", "In-place optimization", "HTTP cache", "CSS", "JavaScript", "Other",
     ]);
   });
-  it("an unknown prefix is its own honest group; empty input groups nothing", () => {
+  it("groups nothing for no rows, and keeps the caller's row order", () => {
     expect(groupStatRows([])).toEqual([]);
-    expect(groupStatRows([row("total_rewrite_count")]).map((g) => g.label)).toEqual(["Total"]);
+    const groups = groupStatRows([row("num_js_inlined"), row("javascript_minify_uses"), row("js_file_count_reduction")]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows.map((r) => r.name)).toEqual(["num_js_inlined", "javascript_minify_uses", "js_file_count_reduction"]);
   });
-  it("shares one label across the curated synonyms", () => {
-    expect(STAT_GROUP_LABELS["javascript"]).toBe(STAT_GROUP_LABELS["js"]);
-    expect(STAT_GROUP_LABELS["ipro"]).toBe("In-place optimization");
+  it("keeps one key per family whatever the row order", () => {
+    const rows = [row("js_a"), row("javascript_b"), row("num_js_inlined")];
+    expect(groupStatRows(rows).map((g) => g.key)).toEqual(["js"]);
+    expect(groupStatRows([...rows].reverse()).map((g) => g.key)).toEqual(["js"]);
   });
-
-  it("a merged group keeps one key whatever the row order", () => {
-    const rows = [row("js_a"), row("javascript_b")];
-    expect(groupStatRows(rows)[0].key).toBe("javascript");
-    expect(groupStatRows([...rows].reverse())[0].key).toBe("javascript");
-  });
-
-  it("prefixes that share a label are one group, so a label names one family", () => {
-    const groups = groupStatRows([row("js_a"), row("javascript_b"), row("memcache_x"), row("memcached_y")]);
-    expect(groups.map((g) => [g.label, g.rows.length])).toEqual([["JavaScript", 2], ["Memcached", 2]]);
+  it("splits the whole-server dump into a few named families", () => {
+    const groups = groupStatRows((apacheStatNames as string[]).map(row));
+    expect(groups.map((g) => g.key)).not.toContain(OTHER_FAMILY.key);
+    expect(groups.length).toBeLessThanOrEqual(STAT_FAMILIES.length);
+    expect(groups.reduce((n, g) => n + g.rows.length, 0)).toBe((apacheStatNames as string[]).length);
   });
 });
 
