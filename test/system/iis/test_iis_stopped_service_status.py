@@ -129,7 +129,7 @@ def _recycle_pool() -> None:
     time.sleep(3)
 
 
-def _wait_until_serving(host: str, port: int, path: str, timeout: float = 120.0) -> None:
+def _wait_until_serving(host: str, port: int, path: str, timeout: float = 90.0) -> None:
     """Block until the site answers a request (any status) after a recycle.
 
     _recycle_pool returns before the new worker process has loaded the
