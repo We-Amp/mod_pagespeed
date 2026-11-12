@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { SERIES_TOKENS } from "./utils/chart-style";
 import { colorDistance, contrastRatio, themeTokens, type Vision } from "./utils/contrast";
 
 const LIB = fileURLToPath(new URL(".", import.meta.url));
@@ -357,7 +358,25 @@ describe("type scale", () => {
   it("charts read their axis and grid colours from theme tokens", () => {
     const chart = readFileSync(join(SRC, "lib/TimeSeriesChart.svelte"), "utf8");
     expect(chart).toContain('cssVar("--ps-text-secondary"');
+    expect(chart).toContain('cssVar("--ps-chart-grid"');
     expect(chart).toContain('cssVar("--ps-border"');
+  });
+  it("chart series take the pinned chart palette, in its order", () => {
+    expect([...SERIES_TOKENS]).toEqual(CHART_SERIES);
+  });
+  it("under forced colours a chart draws in the user's system colours", () => {
+    const chart = readFileSync(join(SRC, "lib/TimeSeriesChart.svelte"), "utf8");
+    for (const keyword of ["CanvasText", "GrayText", "Highlight"]) {
+      expect(chart).toContain(`systemColour("${keyword}")`);
+    }
+  });
+  // Canvas and SVG colours are out of reach of the component colour check
+  // above: the chart code names tokens and system colours, never a hex.
+  it("the chart code names no hex colour", () => {
+    for (const file of ["lib/TimeSeriesChart.svelte", "pages/Savings.svelte", "lib/utils/chart-style.ts"]) {
+      const source = readFileSync(join(SRC, file), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      expect(source.match(/#[0-9a-f]{3,8}\b/gi) ?? [], file).toEqual([]);
+    }
   });
 });
 
@@ -486,7 +505,7 @@ describe("forced colours", () => {
   it("has one block, in the theme, keyed on state and shared classes", () => {
     expect(css.match(/@media\s*\(forced-colors:\s*active\)/g)).toHaveLength(1);
     const block = css.slice(css.search(/@media\s*\(forced-colors:\s*active\)/));
-    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot", ".health-strip", ".card-muted"]) {
+    for (const selector of ['[aria-current="page"]', '[aria-selected="true"]', '[aria-pressed="true"]', ".bar-fill", ".status-dot", ".health-strip", ".card-muted", ".chart-swatch"]) {
       expect(block, selector).toContain(selector);
     }
   });

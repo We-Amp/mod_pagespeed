@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-/** One plottable series: a label, an optional color, values aligned with the timestamps. */
+/** One plottable series: a label and values aligned with the timestamps. */
 export interface ChartSeries {
   label: string;
-  color?: string;
   data: (number | null)[];
 }
 

@@ -81,11 +81,15 @@ export function seriesForDisplay(
  * reading.
  */
 export function latestForDisplay(series: readonly Sample[]): number | null {
-  for (let i = series.length - 1; i >= 0; i--) {
-    const v = series[i];
-    if (v !== null && Number.isFinite(v)) return v;
-  }
-  return null;
+  const i = latestIndex(series);
+  return i < 0 ? null : series[i];
+}
+
+/** The index of the newest non-null, finite value; -1 when there is none. */
+export function latestIndex(series: readonly Sample[]): number {
+  let i = series.length - 1;
+  while (i >= 0 && !Number.isFinite(series[i] ?? NaN)) i--;
+  return i;
 }
 
 /**
