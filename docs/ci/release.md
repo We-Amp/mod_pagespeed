@@ -50,14 +50,17 @@ revision) into the copy every build starts from, with
 `1.19.0~rc.1`, the dpkg and rpm spelling of a pre-release), taken from the tag
 rather than from the tree. The pinned optimizer release (`install/debian/optimizer-pin.json`)
 must be `optimizer-v` plus the same version, and its cache library must be the
-one this tree links: the `optimizer-fetch` job refuses a pin that is not.
+one this tree links: the `optimizer-fetch` job refuses a pin that is not. The
+one exception is a module-only release, which the pin opts into explicitly
+(see "Module-only releases" below).
 
 In a dry run the optimizer release paired with the version cannot exist yet.
 The `optimizer-fetch` job then accepts the pinned optimizer tag as it is, emits
 a warning naming both versions, and the package build and `validate` use the
 pinned version: the Apache packages must depend on, and the optimizer packages
 must have, the pinned version instead of the tag's. A real run keeps the hard
-failure: the pin must be `optimizer-v` plus the tag's version.
+failure: the pin must be `optimizer-v` plus the tag's version, unless the pin
+records a module-only release.
 
 The tag must exist, and its commit must be reachable from `master`. The ref
 guard (`.github/actions/ref-guard`) refuses any other ref and any event but a
@@ -129,6 +132,53 @@ its `VERSION.txt`); record its tag, commit and the hash of its `SHA256SUMS`
 in `install/debian/optimizer-pin.json` and bump `%global mps_version` in
 `packaging/cpanel`; then tag the module.
 
+### Module-only releases
+
+A module-only release, one that changes only the module, does not
+need an optimizer release of its own: it can ship with the optimizer release
+that is already out, and its packages then depend on that version. The cut
+pull request opts in by adding one field to `install/debian/optimizer-pin.json`,
+naming the module version it is for, next to a pin that keeps naming the
+released optimizer:
+
+```json
+  "tag": "optimizer-v2.8.1",
+  "unpaired_for": "2.8.2",
+```
+
+The field is part of the tagged tree, so whether a release shipped paired or
+not is recorded with its commit; a pin without it is paired, and a pin that
+merely names an older release is still refused. It is bound to one version:
+a later cut (2.8.3, 2.9.0, 3.0.0) that leaves it in place fails with a message
+to move the pin and drop the field, or to set the field to the new version
+for another module-only release. The `version` job reads the
+pin at the commit being built and decides with `tools/ci/optimizer_pin_pairing.py`
+(output `pair_unpaired`). For a final version `X.Y.Z` with `unpaired_for`
+`X.Y.Z` the pin must name a final optimizer release `optimizer-vA.B.C` older
+than `X.Y.Z`; a pin that names the version's own pair (drop the field), a
+newer release, a pre-release or a placeholder fails the run, and so does a
+field that is not a final version, or names another one. `optimizer-fetch`
+also fails the run when an optimizer release `optimizer-vX.Y.Z` exists: the
+cut then pins it. For a pre-release version (an rc, a rehearsal, a `-pre` dry run)
+the field does not apply and the rules above decide, with a notice.
+
+In a module-only release everything else is checked as for a paired one,
+against the pinned release: `optimizer-fetch` verifies its `SHA256SUMS`
+against the pin and every package against `SHA256SUMS`, refuses a pinned
+release that is a draft or a GitHub pre-release, requires the pinned
+commit's `VERSION.txt` to equal the pinned version
+(`check_module_optimizer_version.py --pinned-version`) and the cache library
+to be the one this tree links. The `vendor` job writes `optimizer-pair-version`,
+so the deb and rpm packages (el8 and el10 included) depend on
+`pagespeed-optimizer (= A.B.C)`, and `validate` asserts that and that the
+included optimizer packages carry `A.B.C`. The release ships the pinned
+optimizer's packages, `manifest.json` names the pinned tag as
+`optimizer_tag`, and the release notes name it as the version the module
+packages depend on. A candidate of the release behaves the same, so an
+adopting real run takes over packages built against the pinned version; the
+pair rehearsal applies the same rule. The next paired release moves the pin
+and drops the field.
+
 ## Running it
 
 A push of a tag matching `module-v*` runs the lane with `dry_run` false. A
@@ -193,7 +243,8 @@ and version checks, whether the `fleet-hyperv` gates must have run). Whether
 anything is signed follows `dry_run`, and the CI gates' strictness too. A
 candidate therefore stamps the final version, has no `optimizer-pair-version`
 file, fails on a pin that is not the version's pair (for `-rc.N` the pair does
-not exist, so the pin is taken as it is, in a real run too), builds the cPanel
+not exist, so the pin is taken as it is, in a real run too; a module-only
+release takes the pin and writes the file, see above), builds the cPanel
 packages and requires the three gates to have run. It never enters the `release`
 environment: each of those jobs carries both `dry_run == 'false'` and
 `candidate != 'true'` in its `if:`, which `tools/ci/check-workflow-shape.sh`
@@ -530,7 +581,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | Job | Class | What it does |
 |---|---|---|
 | `ref-guard` | hosted | enforces the ref guard (tag glob `module-v*`) |
-| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate`, `rehearsal` and `build_profile` from the tag (or, in a rehearsal, makes the tag up) |
+| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate`, `rehearsal` and `build_profile` from the tag (or, in a rehearsal, makes the tag up), and `pair_unpaired` from the pin at the commit (a module-only release) |
 | `adopt` | hosted | reads the candidate trailers of the tag and, in a real run that names a candidate, verifies it and copies its artifacts into the run (see "Adopting a candidate run"); `adopted` is false in every other run |
 | `vendor` | fleet-heavy, pair | vendors dependencies, stamps the module version, rebuilds the admin console with it, makes the `tree` artifact and the source tarball |
 | `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |

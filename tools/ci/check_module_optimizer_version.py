@@ -34,10 +34,15 @@ on its X.Y.Z core must equal VERSION.txt. VERSION.txt may equal either the
 full version or its X.Y.Z core (an rc is cut from a commit whose VERSION.txt
 already names the release it leads to).
 
+--pinned-version P is a module-only release (`"unpaired_for": V` in the
+pin, tools/ci/optimizer_pin_pairing.py): the module ships with the older
+optimizer release P, so VERSION.txt must equal P instead of the module
+version. It is never combined with --dry-run.
+
 Usage:
 
     tools/ci/check_module_optimizer_version.py --module-version V \\
-        --optimizer-version-file FILE [--dry-run]
+        --optimizer-version-file FILE [--dry-run | --pinned-version P]
     tools/ci/check_module_optimizer_version.py --enforced --module-version V
     tools/ci/check_module_optimizer_version.py --self-test
 
@@ -82,12 +87,21 @@ def enforced(module_version):
     return parse(module_version)[0] >= ENFORCED_SINCE
 
 
-def check(module_version, read_optimizer_version, dry_run=False):
+def check(module_version, read_optimizer_version, dry_run=False, pinned=None):
     """Return (verdict, message); verdict is 'pass', 'skip', 'warn' or 'fail'.
 
     read_optimizer_version is a callable, called only when the check applies.
+    pinned is the optimizer version of a module-only release, or None.
     """
     core, pre = parse(module_version)
+    if pinned is not None:
+        if dry_run:
+            raise VersionError("--pinned-version and --dry-run are exclusive")
+        pcore, ppre = parse(pinned)
+        if ppre or pcore >= core:
+            raise VersionError(
+                "a module-only release pins an older final optimizer release; "
+                "%s is not older than module %s" % (pinned, module_version))
     if dry_run and is_dry_run_tag(pre):
         return "skip", (
             "module %s is a dry-run tag (-%s) and the pair is not final; the "
@@ -101,6 +115,17 @@ def check(module_version, read_optimizer_version, dry_run=False):
     have = read_optimizer_version().strip()
     if not have:
         raise VersionError("the pinned optimizer's VERSION.txt is empty")
+    if pinned is not None:
+        if have == pinned:
+            return "pass", (
+                "module-only release: module %s ships with optimizer %s, and the "
+                "pinned optimizer's VERSION.txt says %s" % (module_version, pinned, have))
+        return "fail", (
+            "module-only release: module %s pins optimizer-v%s, but the "
+            "optimizer's VERSION.txt at the pinned commit says '%s'. Record the "
+            "commit that release was built from in "
+            "install/debian/optimizer-pin.json (optimizer_commit)."
+            % (module_version, pinned, have))
     if have in (module_version, want_core):
         return "pass", (
             "module %s and the pinned optimizer's VERSION.txt %s agree"
@@ -152,6 +177,22 @@ CASES = [
     ("2.8.0-rehearsal.3", "2.8.0", True, "pass"),
 ]
 
+# module-only releases (--pinned-version): VERSION.txt must be the pinned
+# version, never the module version
+PINNED_CASES = [
+    # module, pinned, optimizer VERSION.txt, verdict
+    ("2.8.2", "2.8.1", "2.8.1", "pass"),
+    ("2.8.2", "2.8.1", "2.8.1\n", "pass"),
+    ("2.8.2", "2.8.1", "2.8.2", "fail"),
+    ("2.8.2", "2.8.1", "2.8.0", "fail"),
+    ("2.9.0", "2.8.1", "2.8.1", "pass"),
+    # the pinned version must be older and final
+    ("2.8.2", "2.8.2", "2.8.2", "refused"),
+    ("2.8.2", "2.9.0", "2.9.0", "refused"),
+    ("2.8.2", "2.8.1-rc.1", "2.8.1-rc.1", "refused"),
+    ("2.8.2", "2.8", "2.8", "refused"),
+]
+
 BAD_INPUT = ["2.5", "v2.5.0", "2.5.0+r1", "02.5.0", "", "2.5.0-"]
 
 
@@ -167,6 +208,18 @@ def self_test():
         failed += not ok
         print("  %-16s %-8s %-7s %-5s %s" % (
             module, optimizer.strip(), "dry" if dry else "real", got,
+            "ok" if ok else "FAIL (want %s)" % want))
+        if not ok:
+            print("      %s" % msg)
+    for module, pinned, optimizer, want in PINNED_CASES:
+        try:
+            got, msg = check(module, lambda: optimizer, pinned=pinned)
+        except VersionError as exc:
+            got, msg = "refused", str(exc)
+        ok = got == want
+        failed += not ok
+        print("  %-16s %-8s pinned %-11s %-7s %s" % (
+            module, optimizer.strip(), pinned, got,
             "ok" if ok else "FAIL (want %s)" % want))
         if not ok:
             print("      %s" % msg)
@@ -226,6 +279,9 @@ def self_test():
                 ("--enforced 2.5.0 -> 0", ["--enforced", "--module-version", "2.5.0"], 0),
                 ("--enforced 1.19.1 -> 1", ["--enforced", "--module-version", "1.19.1"], 1),
                 ("--enforced 2.5.0-pre.1 -> 0", ["--enforced", "--module-version", "2.5.0-pre.1"], 0),
+                ("exit 1, pinned version mismatch", ["--module-version", "2.5.0", "--optimizer-version-file", v, "--pinned-version", "2.3.0"], 1),
+                ("exit 0, pinned version matches", ["--module-version", "2.5.0", "--optimizer-version-file", v, "--pinned-version", "2.4.0"], 0),
+                ("exit 2, pinned with --dry-run", ["--module-version", "2.5.0", "--optimizer-version-file", v, "--pinned-version", "2.4.0", "--dry-run"], 2),
             ]
             results = [(n, main(["x"] + a), want) for n, a, want in runs]
         finally:
@@ -247,7 +303,7 @@ def self_test():
         else:
             print("  %-38s FAIL" % "dry-run warning in the step summary")
             failed += 1
-    total = len(CASES) + len(BAD_INPUT) + extra
+    total = len(CASES) + len(PINNED_CASES) + len(BAD_INPUT) + extra
     if failed:
         print("FAIL: %d of %d self-test cases" % (failed, total))
         return 1
@@ -275,8 +331,9 @@ def main(argv):
     dry_run = "--dry-run" in args
     args = [a for a in args if a != "--dry-run"]
     opts = dict(zip(args[0::2], args[1::2]))
-    if (len(args) != 4 or set(opts) != {"--module-version",
-                                        "--optimizer-version-file"}):
+    required = {"--module-version", "--optimizer-version-file"}
+    if (len(args) != 2 * len(opts) or not required <= set(opts)
+            or not set(opts) <= required | {"--pinned-version"}):
         print(__doc__, file=sys.stderr)
         return 2
     path = opts["--optimizer-version-file"]
@@ -290,7 +347,8 @@ def main(argv):
                                "(%s): %s" % (path, exc.strerror))
 
     try:
-        verdict, msg = check(opts["--module-version"], read, dry_run)
+        verdict, msg = check(opts["--module-version"], read, dry_run,
+                             opts.get("--pinned-version"))
     except VersionError as exc:
         print("::error::%s" % exc, file=sys.stderr)
         return 2
