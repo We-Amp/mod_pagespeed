@@ -12,10 +12,13 @@
  */
 
 import { num } from "$lib/alerts";
-import { formatSignedBytes } from "./format";
+import { formatBytes, formatSignedBytes } from "./format";
 
 /** The share of served bytes the split must cover before it is shown. */
 export const SPLIT_MIN_COVERAGE = 0.9;
+
+/** The share of the original bytes within which a negative remainder shows as 0 B (see unsplitText). */
+export const UNSPLIT_SKEW = 0.01;
 
 /**
  * The saving divided into what the served encoding saved and what the
@@ -37,6 +40,8 @@ export interface EncodingSplit {
    *  (original - served) minus encodingSaved and rewriteSaved, so the three
    *  parts add up to the headline exactly at any coverage. */
   unsplit: number;
+  /** -unsplit when that exceeds UNSPLIT_SKEW of the original bytes, else 0. */
+  unsplitOver: number;
   /** True when the HTML class's own optimization part is negative (it gained
    *  markup); only set on the total. */
   htmlGrew: boolean;
@@ -100,13 +105,15 @@ function encodingSplitOf(
   const encodingSaved = covered - compressed;
   const rewriteSaved = compressed - coveredServed;
   const coverage = original > 0 ? Math.min(1, covered / original) : 0;
+  const unsplit = original - servedBytes - encodingSaved - rewriteSaved;
   return {
     coveredOriginal: covered,
     compressedOriginal: compressed,
     coveredServed,
     encodingSaved,
     rewriteSaved,
-    unsplit: original - servedBytes - encodingSaved - rewriteSaved,
+    unsplit,
+    unsplitOver: -unsplit > original * UNSPLIT_SKEW ? -unsplit : 0,
     htmlGrew: false,
     coverage,
     available: covered > 0 && coverage >= SPLIT_MIN_COVERAGE,
@@ -199,6 +206,22 @@ export function splitCells(split: EncodingSplit | null): { encoding: string; rew
   return {
     encoding: formatSignedBytes(split.encodingSaved),
     rewrite: formatSignedBytes(split.rewriteSaved),
-    unsplit: formatSignedBytes(split.unsplit),
+    unsplit: unsplitText(split),
   };
+}
+
+/**
+ * The remainder as shown, never a negative saving. It is the saving of the
+ * serves the split does not cover, so it falls below 0 when those serves
+ * came out larger than their originals (seen on a live server: small scripts
+ * served a few bytes larger). A second, smaller cause: the optimizer reads its
+ * totals and its split one counter at a time, so a serve counted in between
+ * is in the split but not in the totals. A deficit within UNSPLIT_SKEW of the
+ * original bytes is immaterial and shows as 0 B; a larger one is said in words.
+ */
+export function unsplitText(split: EncodingSplit): string {
+  const zero = formatBytes(0);
+  return split.unsplitOver > 0
+    ? `${zero} (the rest came out ${formatBytes(split.unsplitOver)} larger)`
+    : formatBytes(Math.max(0, split.unsplit));
 }

@@ -37,6 +37,7 @@ import { formatClock } from "$lib/utils/format";
 import { coveredWindowText, EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
 import { WARMUP_MS } from "$lib/utils/since";
 import { isDirtyBuild } from "$lib/utils/versions";
+import { DUE_TO_LOAD, pastWarmup } from "$lib/utils/not-optimized";
 
 /** What the daemon proxy said about the optimizer in one sample. */
 export type DaemonAvailability =
@@ -733,6 +734,19 @@ export const ALERT_RULES: readonly AlertRule[] = [
     countNoun: (cur) => recentNoun(recentWarnings(cur) ?? []),
     countWindow: (cur) => recentWindow(cur),
     fix: "Logs lists them grouped by kind, newest first; the kinds that need action have their own findings here.",
+  },
+  {
+    id: "image-work-dropped",
+    label: "Image work dropped under load",
+    severity: "warning",
+    kind: "rate",
+    link: "#/savings",
+    // Silent while the web server warms up: a cold start sheds work on purpose.
+    check: (cur, prev) => (pastWarmup(cur.module, cur.at) ? rose(cur, prev, moduleOf, DUE_TO_LOAD) : undefined),
+    message: (cur, prev) =>
+      `The server was too busy to optimize ${plural(rise(cur, prev, moduleOf, DUE_TO_LOAD) ?? 0, "image", "images")} ` +
+      `since the last refresh (${fmt(num(cur.module, DUE_TO_LOAD) ?? 0)} since the web server started); those are served as they are.`,
+    fix: "Raise ImageMaxRewritesAtOnce (default 8) if the server has spare CPU, or add capacity; Savings shows the current value.",
   },
 ];
 

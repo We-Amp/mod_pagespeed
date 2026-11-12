@@ -3,7 +3,7 @@
 <script lang="ts">
   import { SPLIT_TEXT } from "$lib/data/split-text";
   import { formatSignedBytes } from "$lib/utils/format";
-  import type { EncodingSplit } from "$lib/utils/serve-savings";
+  import { unsplitText, type EncodingSplit } from "$lib/utils/serve-savings";
 
   let { split }: { split: EncodingSplit | null } = $props();
 
@@ -28,7 +28,7 @@
     {#if split.coverage < 1}
       <div class="split-row">
         <dt>{SPLIT_TEXT.unsplitLabel}</dt>
-        <dd class="num" data-testid="savings-split-unsplit">{formatSignedBytes(split.unsplit)}</dd>
+        <dd class="num" data-testid="savings-split-unsplit">{unsplitText(split)}</dd>
       </div>
       <p class="note" data-testid="savings-split-coverage">{SPLIT_TEXT.coverageNote(coveragePercent)}</p>
     {/if}
