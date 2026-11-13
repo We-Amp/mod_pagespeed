@@ -1174,7 +1174,24 @@ jobs:
                 -H "Authorization: Bearer ${GH_READ_TOKEN}" \
                 "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/$OPTIMIZER_TAG")"
               case "$code" in
-                404) ;;
+                404)
+                  # A tag can exist with no published release, and the tags
+                  # endpoint answers 404 for it: look for the tag itself.
+                  code="$(curl -sS --retry 5 -o /dev/null -w '%{http_code}' \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "Authorization: Bearer ${GH_READ_TOKEN}" \
+                    "https://api.github.com/repos/We-Amp/pagespeed-optimizer/git/ref/tags/$OPTIMIZER_TAG")"
+                  case "$code" in
+                    404) ;;
+                    200) echo "::error::module-only release, but the optimizer tag $OPTIMIZER_TAG exists without a published release: finish or remove it first"; exit 1 ;;
+                    *) echo "::error::cannot tell whether the optimizer tag $OPTIMIZER_TAG exists (HTTP $code)"; exit 1 ;;
+                  esac
+                  # Drafts are not detectable here: GitHub lists a draft only
+                  # to a token with push access to the optimizer repo, and this
+                  # step has the read-only GITHUB_TOKEN of this repo. The
+                  # unpaired_for version binding stays the guard against a
+                  # draft.
+                  ;;
                 200) echo "::error::module-only release, but the optimizer release $OPTIMIZER_TAG exists: pin it in optimizer-pin.json and drop unpaired_for"; exit 1 ;;
                 *) echo "::error::cannot tell whether the optimizer release $OPTIMIZER_TAG exists (HTTP $code)"; exit 1 ;;
               esac

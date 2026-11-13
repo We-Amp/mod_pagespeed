@@ -78,7 +78,7 @@ extract_step "$WF" "Download and verify against the pin" > "${T}/fetch.sh" \
 COMMIT=1111111111111111111111111111111111111111
 CYC=2222222222222222222222222222222222222222
 FIX="${T}/fix"
-mkdir -p "${T}/bin" "${FIX}/raw/${COMMIT}" "${FIX}/api" "${FIX}/dl"
+mkdir -p "${T}/bin" "${FIX}/raw/${COMMIT}" "${FIX}/api" "${FIX}/ref" "${FIX}/dl"
 printf 'x(\n    name = "cyclone",\n    commit = "%s",\n)\n' "$CYC" > "${FIX}/raw/${COMMIT}/MODULE.bazel"
 for f in pagespeed-optimizer_2.8.1_amd64.deb pagespeed-optimizer-2.8.1-1.x86_64.rpm; do
   printf '%s\n' "$f" > "${FIX}/dl/$f"
@@ -105,9 +105,11 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+echo "$url" >> "$FIX/calls"
 case "$url" in
   https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/*) f="$FIX/raw/${url#https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/}" ;;
   https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/*) f="$FIX/api/${url##*/}.json" ;;
+  https://api.github.com/repos/We-Amp/pagespeed-optimizer/git/ref/tags/*) f="$FIX/ref/${url##*/}" ;;
   https://dl.test/*) f="$FIX/dl/${url##*/}" ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 9 ;;
 esac
@@ -120,7 +122,7 @@ if [ "$remote" = 1 ]; then cp "$f" "./${url##*/}"; else cp "$f" "$out"; fi
 STUB
 chmod +x "${T}/bin/curl"
 
-fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists -> exit status
+fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists [ref] -> exit status
   local d="${T}/f$RANDOM$RANDOM"
   mkdir -p "$d/install/debian" "$d/bazel" "$d/tools/ci" "$d/lane-tools/tools/ci"
   printf '{"tag": "%s", "optimizer_commit": "%s", "sha256sums_sha256": "%s"}\n' "$3" "$COMMIT" "$SUMS" \
@@ -129,7 +131,11 @@ fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists
   cp "${ROOT}/tools/ci/check_optimizer_pin_pair.py" "$d/tools/ci/"
   cp "${ROOT}/tools/ci/check_module_optimizer_version.py" "$d/lane-tools/tools/ci/"
   printf '%s\n' "$4" > "${FIX}/raw/${COMMIT}/VERSION.txt"
-  rm -f "${FIX}"/api/*.json
+  rm -f "${FIX}"/api/*.json "${FIX}"/ref/*
+  rm -f "${FIX}/calls"
+  case "${7:-}" in
+    ref) : > "${FIX}/ref/optimizer-v2.8.2" ;;
+  esac
   release_json "$3" "$5" > "${FIX}/api/$3.json"
   [ "$6" = true ] && release_json optimizer-v2.8.2 false > "${FIX}/api/optimizer-v2.8.2.json"
   (cd "$d" && FIX="$FIX" PATH="${T}/bin:$PATH" GITHUB_OUTPUT="$d/out" GITHUB_STEP_SUMMARY="$d/summary" \
@@ -152,6 +158,10 @@ expect_fetch "a real paired run still refuses the older pin" fail "pins 'optimiz
 expect_fetch "module-only: VERSION.txt must be the pinned version" fail "VERSION.txt at the pinned commit says '2.8.2'" false true optimizer-v2.8.1 2.8.2 false false
 expect_fetch "module-only: a pre-release pinned release is refused" fail "is a draft or a pre-release" false true optimizer-v2.8.1 2.8.1 true false
 expect_fetch "module-only: refused when optimizer-v2.8.2 exists" fail "the optimizer release optimizer-v2.8.2 exists" false true optimizer-v2.8.1 2.8.1 false true
+expect_fetch "module-only: refused when the optimizer tag exists without a release" fail "optimizer tag optimizer-v2.8.2 exists without a published release" false true optimizer-v2.8.1 2.8.1 false false ref
+# Drafts cannot be listed with this token: no release-list call may be made.
+fetch false true optimizer-v2.8.1 2.8.1 false false
+if grep -qE '/releases(\?|$)' "${FIX}/calls"; then bad "fetch: the release list is requested"; else ok "fetch: no draft-list call is made"; fi
 expect_fetch "a rehearsal still takes the older pin with a warning" pass "no paired optimizer release for this version" true false optimizer-v2.8.1 2.8.2 false false
 
 # ---- teeth: each check removed from a copy must fail this test -----------
@@ -180,8 +190,11 @@ PY
     'VERSION_ARGS+=(--pinned-version "$PAIR_VERSION")' ':'
   mutate "draft or pre-release refusal" \
     'if os.environ.get("PAIR_UNPAIRED") == "true" and (doc.get("draft") or doc.get("prerelease")):' 'if False:'
+  mutate "bare tag refusal" \
+    '                    200) echo "::error::module-only release, but the optimizer tag' '                    ref-off) echo "::error::module-only release, but the optimizer tag'
   mutate "existing paired release refusal" \
-    '                404) ;;' '                404|200) ;;'
+    '                200) echo "::error::module-only release, but the optimizer release' '                200) true ;;
+                ok200) echo "::error::module-only release, but the optimizer release'
 fi
 
 if [ "$fail" -ne 0 ]; then echo "test_release_unpaired_pin: FAILED" >&2; exit 1; fi
