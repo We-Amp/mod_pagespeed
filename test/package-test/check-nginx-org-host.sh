@@ -62,7 +62,16 @@ if command -v apt-get >/dev/null; then
   . /etc/os-release
   apt-get -qq update >/dev/null
   apt-get -qq install -y curl ca-certificates gnupg >/dev/null 2>&1
-  curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor > /usr/share/keyrings/nginx.gpg
+  # Pinned set: the three keys in https://nginx.org/keys/nginx_signing.key (fingerprints per https://nginx.org/en/linux_packages.html); accept the file only if every key in it is listed.
+  NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
+  nkey="$(mktemp -d)"
+  curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 60 -o "$nkey/nginx.asc" https://nginx.org/keys/nginx_signing.key || fail "could not fetch the nginx.org signing key"
+  GNUPGHOME="$nkey" gpg --batch --quiet --import "$nkey/nginx.asc"
+  got="$(GNUPGHOME="$nkey" gpg --batch --with-colons --list-keys | grep -A1 "^pub:" | grep "^fpr:" | cut -d: -f10)"
+  [ -n "$got" ] || fail "no key found in the nginx.org key file"
+  for f in $got; do case " $NGINX_KEY_FPR " in *" $f "*) ;; *) fail "unpinned key $f in the nginx.org key file";; esac; done
+  gpg --dearmor < "$nkey/nginx.asc" > /usr/share/keyrings/nginx.gpg
+  rm -rf "$nkey"
   echo "deb [signed-by=/usr/share/keyrings/nginx.gpg] https://nginx.org/packages/${ID} ${VERSION_CODENAME} nginx" > /etc/apt/sources.list.d/nginx.list
   printf "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" > /etc/apt/preferences.d/99nginx
   apt-get -qq update >/dev/null
