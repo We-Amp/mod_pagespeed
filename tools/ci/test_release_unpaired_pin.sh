@@ -105,12 +105,11 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+echo "$url" >> "$FIX/calls"
 case "$url" in
   https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/*) f="$FIX/raw/${url#https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/}" ;;
   https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/*) f="$FIX/api/${url##*/}.json" ;;
   https://api.github.com/repos/We-Amp/pagespeed-optimizer/git/ref/tags/*) f="$FIX/ref/${url##*/}" ;;
-  https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases\?per_page=100\&page=1) f="$FIX/api/list.json" ;;
-  https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases\?per_page=100\&page=2) f="$FIX/api/list2.json" ;;
   https://dl.test/*) f="$FIX/dl/${url##*/}" ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 9 ;;
 esac
@@ -123,7 +122,7 @@ if [ "$remote" = 1 ]; then cp "$f" "./${url##*/}"; else cp "$f" "$out"; fi
 STUB
 chmod +x "${T}/bin/curl"
 
-fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists [ref|draft|draft-page2|other-draft] -> exit status
+fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists [ref] -> exit status
   local d="${T}/f$RANDOM$RANDOM"
   mkdir -p "$d/install/debian" "$d/bazel" "$d/tools/ci" "$d/lane-tools/tools/ci"
   printf '{"tag": "%s", "optimizer_commit": "%s", "sha256sums_sha256": "%s"}\n' "$3" "$COMMIT" "$SUMS" \
@@ -133,15 +132,9 @@ fetch() { # lenient unpaired pin-tag VERSION.txt pinned-prerelease paired-exists
   cp "${ROOT}/tools/ci/check_module_optimizer_version.py" "$d/lane-tools/tools/ci/"
   printf '%s\n' "$4" > "${FIX}/raw/${COMMIT}/VERSION.txt"
   rm -f "${FIX}"/api/*.json "${FIX}"/ref/*
-  echo '[]' > "${FIX}/api/list.json"
-  rm -f "${FIX}/api/list2.json"
+  rm -f "${FIX}/calls"
   case "${7:-}" in
     ref) : > "${FIX}/ref/optimizer-v2.8.2" ;;
-    draft) echo '[{"tag_name":"optimizer-v2.8.2","draft":true}]' > "${FIX}/api/list.json" ;;
-    draft-page2)
-      python3 -I -c 'import json;print(json.dumps([{"tag_name":"optimizer-v2.7.%d"%i,"draft":False} for i in range(100)]))' > "${FIX}/api/list.json"
-      echo '[{"tag_name":"optimizer-v2.8.2","draft":true}]' > "${FIX}/api/list2.json" ;;
-    other-draft) echo '[{"tag_name":"optimizer-v2.9.0","draft":true}]' > "${FIX}/api/list.json" ;;
   esac
   release_json "$3" "$5" > "${FIX}/api/$3.json"
   [ "$6" = true ] && release_json optimizer-v2.8.2 false > "${FIX}/api/optimizer-v2.8.2.json"
@@ -166,9 +159,9 @@ expect_fetch "module-only: VERSION.txt must be the pinned version" fail "VERSION
 expect_fetch "module-only: a pre-release pinned release is refused" fail "is a draft or a pre-release" false true optimizer-v2.8.1 2.8.1 true false
 expect_fetch "module-only: refused when optimizer-v2.8.2 exists" fail "the optimizer release optimizer-v2.8.2 exists" false true optimizer-v2.8.1 2.8.1 false true
 expect_fetch "module-only: refused when the optimizer tag exists without a release" fail "optimizer tag optimizer-v2.8.2 exists without a published release" false true optimizer-v2.8.1 2.8.1 false false ref
-expect_fetch "module-only: refused when a draft optimizer release exists" fail "a draft release of the optimizer tag optimizer-v2.8.2 exists" false true optimizer-v2.8.1 2.8.1 false false draft
-expect_fetch "module-only: a draft on the second release page is found" fail "a draft release of the optimizer tag optimizer-v2.8.2 exists" false true optimizer-v2.8.1 2.8.1 false false draft-page2
-expect_fetch "module-only: a draft of another tag is ignored" pass "module-only release: module 2.8.2 ships with optimizer 2.8.1" false true optimizer-v2.8.1 2.8.1 false false other-draft
+# Drafts cannot be listed with this token: no release-list call may be made.
+fetch false true optimizer-v2.8.1 2.8.1 false false
+if grep -qE '/releases(\?|$)' "${FIX}/calls"; then bad "fetch: the release list is requested"; else ok "fetch: no draft-list call is made"; fi
 expect_fetch "a rehearsal still takes the older pin with a warning" pass "no paired optimizer release for this version" true false optimizer-v2.8.1 2.8.2 false false
 
 # ---- teeth: each check removed from a copy must fail this test -----------
@@ -199,12 +192,9 @@ PY
     'if os.environ.get("PAIR_UNPAIRED") == "true" and (doc.get("draft") or doc.get("prerelease")):' 'if False:'
   mutate "bare tag refusal" \
     '                    200) echo "::error::module-only release, but the optimizer tag' '                    ref-off) echo "::error::module-only release, but the optimizer tag'
-  mutate "draft refusal" \
-    '                      draft) echo "::error::module-only' '                      draft-off) echo "::error::module-only'
-  mutate "release list pagination" \
-    '                      more) page=$((page + 1)) ;;' '                      more) break ;;'
   mutate "existing paired release refusal" \
-    '                404) ;;' '                404|200) ;;'
+    '                200) echo "::error::module-only release, but the optimizer release' '                200) true ;;
+                ok200) echo "::error::module-only release, but the optimizer release'
 fi
 
 if [ "$fail" -ne 0 ]; then echo "test_release_unpaired_pin: FAILED" >&2; exit 1; fi
