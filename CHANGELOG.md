@@ -7,6 +7,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-14
+
+### Added
+
+- **Inspect a URL in the admin console.** Paste a URL on Overview or URLs to
+  see what the module holds for it, the usual reasons it is not optimized with
+  a documentation link each, and, on the whole-server console, the optimizer's
+  record including any cooldown. A per-host console links to the same URL on
+  the whole-server console. Each URL in Logs has an "inspect" link, and Logs
+  can be filtered by URL.
+- **Findings come with the setting to paste.** A finding whose fix is a
+  configuration setting shows it for Apache, nginx or IIS, with a copy button.
+  The tab follows the web server named in the response's Server header and
+  remembers your choice.
+- **URL detail opens with a verdict.** One line says whether the URL is
+  optimized, not optimized yet, in cooldown or unknown, and says why when it
+  cannot tell. A "Back to …" link returns to the list, log filter or page you
+  came from.
+- **The admin console Configuration page can be searched and compared.** A
+  filter box narrows the text to matching lines and says how many match, Copy
+  copies the whole text, and lines that differ between the server's
+  configuration and the one in effect for this request are marked "differs".
+  When the text has its usual shape, filters show as a list and options as a
+  table; any other text is still shown and searched line by line.
+- **The Support page always shows a diagnostics bundle you can copy or
+  download.** It holds what support needs to act: the console's scope, start
+  times, findings, the optimizer's checks, a dozen key counters, the cache and
+  purge summary, up to 50 recent warnings and errors from the log, the browser
+  and the detected server, and it ends with a list of what was left out. By
+  default query strings are removed, and public client addresses in the log
+  lines are masked. Cookie and authorization header values, bearer tokens and
+  passwords inside addresses are replaced. The configuration text is included
+  only when you turn it on, with the values of secret-looking options
+  replaced. Review the bundle before you share it.
+- **The Overview says what changed since your last visit**, for example that
+  the web server restarted or reloaded, the configuration changed, or the
+  module or optimizer version changed. The record is kept only in your
+  browser; a first visit, or a visit where nothing changed, shows nothing.
+- **Savings explains why some content was not optimized.** A "Not optimized,
+  by reason" list names each reason the module counted, such as hosts it is
+  not authorized to rewrite, resources whose caching headers make them unsafe
+  to optimize, CSS or JavaScript the parser or minifier could not process, and
+  image work dropped under load, with a fix for each. Image work dropped under
+  load is also an Overview finding while it keeps happening.
+
+### Changed
+
+- **Admin console dark mode has depth.** The page, sidebar, cards and table
+  rows are now separate shades, so cards and row dividers stay visible.
+- **The admin console stays usable in Windows high-contrast mode.** The current
+  page, the selected tab and pressed toggles keep a visible highlight under
+  forced colours.
+- **The admin console Overview answers first.** It opens with one sentence that
+  says whether the console is working, with the main figure and the time it
+  covers, followed by a row of headline tiles: savings from rewriting, savings
+  by the optimizer's cache, resource fetch failures and the optimizer's state.
+  When a finding needs action, the findings count carries a Warning or Error
+  badge and links to the findings. A fresh install lists next steps instead of
+  empty figures.
+- **Each cause is listed once.** A log warning that already has its own finding
+  is no longer repeated under "Warnings in the log", and quoted log text is
+  folded under the written cause.
+- **Savings reads at a glance.** The split bars show three named shares with a
+  legend, the per-host breakdown has its own card, the columns stay balanced,
+  and while the optimizer is still warming up the page says it is too early
+  for a percentage instead of showing a dash.
+- **One vocabulary across the admin console.** Each figure has one name on
+  every page ("Saved by rewriting", "Saved by the optimizer's cache", "Served
+  optimized"), the host control is called "Host filter", Logs moved to the top
+  of the menu, health checks have plain names, and an optimizer that does not
+  answer is described the same way everywhere. The About page maps the old
+  console's page names to the new ones.
+- **Admin console pages share one look.** Tables, cards, badges, notes and
+  headings are styled the same on every page, and body text is a steady
+  14 px.
+- **The admin console top bar shows connection and scope.** A pill reads
+  "Connected" or "Reconnecting…", a chip names the scope (whole server or the
+  host), and with no optimizer configured its menu group is muted and marked
+  "not configured".
+- **The auto-refresh control says whether it is on or off**, a pause is
+  remembered across reloads, and a refresh you ask for reports whether it
+  worked: "Refreshed", "Partly refreshed", "Server busy" or "Refresh failed".
+- **The admin console Statistics page groups counters by what they measure.**
+  Before, counters were grouped by the first word of their name, which gave
+  dozens of small groups such as "Not", "In", "Show" and "Num". Now there are
+  about twenty named groups, most useful first: page rewriting, in-place
+  optimization, the optimizer's serving and HTML cache, rule packs, each cache
+  backend, origin fetches, images, CSS, JavaScript, purges and the server
+  process. Counters a newer module adds before the console knows them are
+  listed last, under "Other". Screen readers announce each group's size as a
+  number of counters.
+- **Every counter on the Statistics page has its own description**, including
+  the rule pack counters, the per-page rewrite limits, each reason the HTML
+  cache report gives for not storing a page, and the CSS parse size limit.
+- **Admin console charts use their own palette and a second channel.** Series
+  no longer borrow the status colours; a second series is dashed, so the two
+  can be told apart without colour, the grid is fainter than the data, and the
+  latest value is shown as a figure in the card header. Charts redraw when you
+  switch between light and dark or turn on forced colours, where they use the
+  system colours.
+- **Keyboard shortcuts in the admin console can be turned off**, from the
+  shortcuts dialog; the choice is remembered in the browser. The dialog lists
+  only the pages the open console has, and `g p` opens Rule packs. A focused
+  checkbox or radio button no longer pauses the shortcuts; text fields,
+  drop-down lists and editable text still do.
+
+### Fixed
+
+- **The admin console no longer looks healthy while the server is down.** When
+  the module stops answering, Overview says "Status unknown" with the time of
+  the last answer instead of a green verdict, and the optimizer's state is
+  marked "last known". The "updated N s ago" stamp now counts up on every page
+  and says "refresh overdue" once three refreshes have been missed.
+- **A page that fails to load explains why.** Instead of a raw message such as
+  "HTTP 404: Unknown admin page", the console names what could not be read, the
+  likely cause (no answer, not available on this server, sign-in or address
+  restriction, server or proxy error), a docs link and a "Try again" button.
+  The original message stays available under "Technical details".
+- **Optimizer status and Overview agree.** Without an optimizer configured the
+  page shows one explanation with a docs link instead of "Optimizer unreachable"
+  above empty sections, and an optimizer that is running but did not answer one
+  refresh is no longer reported as stopped.
+- **Admin console view controls no longer reload the page.** Changing the Logs
+  source or "Group repeats", or the Rule packs log selection, keeps the filter
+  text, chosen levels, expanded rows, scroll position and keyboard focus, and
+  no longer adds a Back step per change.
+- **The admin console menu at phone width and high zoom behaves like a drawer.**
+  When closed it is out of the tab order; when open, focus moves into it, the
+  page behind cannot be reached, Escape closes it and focus returns to the
+  menu button.
+- **Rule packs no longer shows one pack selected while the table still shows
+  another** after a failed read; a note names both until the read succeeds.
+- **Every admin console control shows where the keyboard is.** Text fields,
+  selects, tabs and menu links draw a complete focus ring, also in Windows
+  high-contrast mode, where the current page, selected tab and chart bars now
+  stay visible. At 320 px wide (400% zoom) the pages no longer scroll sideways.
+- **Admin console screen-reader support.** Filter result counts are announced
+  after typing stops, table headers carry their scope and row headers name the
+  row, the Savings tables are named, and small controls meet the 24 px target
+  size.
+- **A paused admin console no longer claims to be connected.** With
+  auto-refresh off the top bar reads "Paused", after turning it back on it
+  reads "Checking…" until the server answers, and the outage banner says how
+  to try again instead of promising automatic retries.
+- **The admin console fits a wider system font.** The top bar, the Overview
+  and Savings tables and the Savings legend keep their layout when the
+  operating system's interface font is wider than usual.
+- **Savings no longer shows a negative "Not yet attributed" amount.** When the
+  responses the optimizer's split does not cover came out larger than their
+  originals, the remainder read as a small negative number such as −29 B. It
+  now shows 0 B, and says how much larger the rest came out when the
+  difference is more than 1% of the original bytes.
+- **Critical CSS is now inlined for HTML pages whose stylesheet contains a
+  "<".** On HTML pages, a stylesheet with `@property` syntax descriptors such
+  as `"<length>"` (Tailwind CSS 4 emits these) or range media queries such as
+  `@media (width < 600px)` was never inlined by `prioritize_critical_css` or
+  `inline_css`, and an inline `<style>` with such rules was not minified. A
+  stylesheet that could end the inline `<style>` element early is still kept
+  external, and the debug message says why. XHTML pages keep the previous
+  behaviour. Affected: 2.8.1 and earlier.
+
 ## [2.8.1] - 2026-11-09
 
 ### Fixed

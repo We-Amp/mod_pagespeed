@@ -21,12 +21,16 @@
     "optimizer release FIRST, record the pin, then cut the module release.",
     "A PLACEHOLDER tag makes the release lane refuse loudly.",
     "",
-    "This train's optimizer release was cut from an optimizer commit carrying the",
+    "2.8.2 is a module-only release: it ships with optimizer-v2.8.1, and its",
+    "packages depend on pagespeed-optimizer 2.8.1 (unpaired_for 2.8.2). The",
+    "next cut moves the pin and drops the field, or sets it to that version.",
+    "The pinned optimizer release was cut from an optimizer commit carrying the",
     "same cache-library commit this module links (on-disk format v9, cache directory generation 3), so",
     "the pair speaks one cache format. The pin-pair check in CI asserts that",
     "equality; do not hand-edit this file without re-running it."
   ],
   "tag": "optimizer-v2.8.1",
+  "unpaired_for": "2.8.2",
   "optimizer_commit": "da49038ca203b4f65956c82a4e0d3cc416772265",
   "sha256sums_sha256": "eb1a3eb92e8b8db6db00c329ededd24ed98980bdad7ed15ab40a96e35b05e63a"
 }

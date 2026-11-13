@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-%global mps_version 2.8.1
+%global mps_version 2.8.2
 %global mps_release 1
 %global upstream_rpm mod-pagespeed-%{mps_version}-%{mps_release}.x86_64.rpm
 # The stock upstream RPM filename carries NO dist tag (it is the same artifact
@@ -188,6 +188,9 @@ if [ "$1" = "0" ] && [ -x /scripts/restartsrv_httpd ]; then
 fi
 
 %changelog
+* Sat Nov 14 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:2.8.2-1.cpanel
+- Repackage mod-pagespeed-2.8.2; mps_version tracks VERSION.
+
 * Mon Nov 09 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:2.8.1-1.cpanel
 - Repackage mod-pagespeed-2.8.1; mps_version tracks VERSION.
 
