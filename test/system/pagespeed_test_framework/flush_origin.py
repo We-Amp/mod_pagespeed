@@ -29,7 +29,11 @@ Routes (the path after /mod_pagespeed_test/flush_origin/):
                                rule_packs filter can no longer remove; the
                                response carries a Link header with a
                                canonical entry, which the flushed headers
-                               keep
+                               keep; with ?gate=K the second window
+                               waits for a request to release?key=K (or
+                               GATE_TIMEOUT_S) instead of FLUSH_PAUSE_S
+  release?key=K                opens gate K: the held split_head page sends
+                               its second window
   link_header                  one unflushed HTML response without a
                                canonical, whose Link header has a preload, a
                                stale canonical and a preconnect entry
@@ -78,6 +82,10 @@ from urllib.parse import parse_qs, urlsplit
 # the proxy's non-blocking read of the backend comes up empty and the proxy
 # flushes what it has, as it would for a PHP page blocked after flush().
 FLUSH_PAUSE_S = 0.2
+
+# How long a gated split_head waits for its release before it sends the second
+# window anyway (so a client that never releases fails instead of hanging).
+GATE_TIMEOUT_S = 20.0
 
 # The Link header of the rule_packs routes: a preload that must survive, a
 # canonical the pack's rule disagrees with, and a preconnect that must too.
@@ -196,6 +204,12 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    def _gate(self, key: str) -> threading.Event:
+        """The gate named `key`, created by whichever of split_head and
+        release asks first."""
+        with self.server.gate_lock:
+            return self.server.gates.setdefault(key, threading.Event())
+
     # -- routes ---------------------------------------------------------------
 
     def do_HEAD(self):
@@ -271,9 +285,22 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
                     b'<link rel="canonical" href="https://wrong.example.com/b">\n'
                 )
             self._start("text/html; charset=UTF-8", [("Link", SPLIT_HEAD_LINK)])
-            self._chunk(first, pause=FLUSH_PAUSE_S)
+            gate = query.get("gate", [""])[0]
+            if gate:
+                # Hold the second window until the client says the first one
+                # (and the headers) reached it. A fixed pause is not enough on
+                # a loaded host: the proxy may read both windows in one go.
+                self._chunk(first)
+                self._gate(gate).wait(GATE_TIMEOUT_S)
+                with self.server.gate_lock:
+                    self.server.gates.pop(gate, None)
+            else:
+                self._chunk(first, pause=FLUSH_PAUSE_S)
             self._chunk(b"</head>\n<body>\n<p>A head split by a flush.</p>\n</body>\n</html>\n")
             self._end_chunks()
+        elif route == "release":
+            self._gate(query.get("key", [""])[0]).set()
+            self._whole("text/plain", b"released", [])
         elif route == "link_header":
             # One window, no flush before the head closes: the response
             # headers are still writable when the rule_packs filter decides.
@@ -355,6 +382,8 @@ def make_server(port: int, image_dir: str, host: str = "127.0.0.1"):
     server.image_dir = image_dir
     server.abort_lock = threading.Lock()
     server.abort_keys_seen = set()
+    server.gate_lock = threading.Lock()
+    server.gates = {}
     return server
 
 
