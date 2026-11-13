@@ -1444,6 +1444,30 @@ class TestFlushOriginAndFetchChunks:
         assert b'<li data-thumb="a.jpg">' in response.chunks[0].data
         assert b'<img src="a.jpg"/>' in response.chunks[1].data
 
+    def test_gated_split_head_holds_the_second_window_until_released(self, origin_server):
+        port = origin_server.server_address[1]
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5.0)
+        try:
+            sock.sendall(b"GET /split_head?gate=g1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            raw = b""
+            while b'<meta charset="utf-8">' not in raw:
+                raw += sock.recv(65536)
+            # Well past FLUSH_PAUSE_S: nothing more comes while the gate is shut.
+            sock.settimeout(flush_origin.FLUSH_PAUSE_S * 3)
+            with pytest.raises(socket.timeout):
+                sock.recv(65536)
+            assert b"</head>" not in raw
+            assert self._fetch(origin_server, "release?key=g1").status == 200
+            sock.settimeout(5.0)
+            while not raw.endswith(b"0\r\n\r\n"):
+                data = sock.recv(65536)
+                assert data, raw
+                raw += data
+        finally:
+            sock.close()
+        assert b"</head>" in raw
+        assert not origin_server.gates
+
     def test_image_is_served_from_the_image_dir(self, origin_server):
         response = self._fetch(origin_server, "a.jpg")
         assert response.status == 200

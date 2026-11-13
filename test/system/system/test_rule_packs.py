@@ -36,7 +36,7 @@ import re
 import subprocess
 import time
 import uuid
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 import pytest
 
@@ -672,10 +672,37 @@ class TestSplitHead:
 
     ROUTE = "/mod_pagespeed_test/flush_origin/split_head"
 
-    def test_an_insert_into_the_open_head_succeeds(self, pack_site, pack_stats):
-        site = pack_site(ENFORCE_HOST)
+    def _get(self, server_config, pack_site, query: str) -> Tuple[List[str], str]:
+        """The Link entries and the body of split_head?<query> on the enforce
+        host, with the origin's second window held until the response headers
+        have reached this client.
+
+        The headers go out when the module flushes the first window, so their
+        arrival is the event the split needs. A fixed pause at the origin is
+        not enough on a loaded host: the proxy can read both windows in one
+        go, and then the head is never split.
+        """
+        gate = uuid.uuid4().hex
+        conn = http.client.HTTPConnection(
+            server_config.host, int(os.environ["PAGESPEED_RULE_PACKS_PORT"]), timeout=30
+        )
+        try:
+            conn.request("GET", f"{self.ROUTE}?{query}&gate={gate}", headers={"Host": ENFORCE_HOST})
+            response = conn.getresponse()
+            assert response.status == 200, response.status
+            release = pack_site(ENFORCE_HOST).get(
+                f"/mod_pagespeed_test/flush_origin/release?key={gate}"
+            )
+            require_status_ok(release, "flush_origin/release")
+            body = response.read().decode("utf-8")
+            link = ", ".join(response.headers.get_all("Link") or [])
+        finally:
+            conn.close()
+        return _link_entries(link), body
+
+    def test_an_insert_into_the_open_head_succeeds(self, server_config, pack_site, pack_stats):
         before = pack_stats(ENFORCE_HOST)
-        html = _fetch(site, self.ROUTE, f"run={_run_id()}")
+        _, html = self._get(server_config, pack_site, f"run={_run_id()}")
         after = pack_stats(ENFORCE_HOST)
 
         assert _canonicals(html) == [f"https://{ENFORCE_HOST}{self.ROUTE}"], html
@@ -684,11 +711,10 @@ class TestSplitHead:
         assert_stat_delta(before, after, "rule_pack_pages_skipped_not_rewritable", 0)
 
     def test_a_repair_of_an_element_already_sent_degrades_to_not_rewritable(
-        self, pack_site, pack_stats
+        self, server_config, pack_site, pack_stats
     ):
-        site = pack_site(ENFORCE_HOST)
         before = pack_stats(ENFORCE_HOST)
-        html = _fetch(site, self.ROUTE, f"run={_run_id()}&canonical=wrong")
+        _, html = self._get(server_config, pack_site, f"run={_run_id()}&canonical=wrong")
         after = pack_stats(ENFORCE_HOST)
 
         # The head is as the origin sent it: both conflicting canonicals stay
@@ -700,10 +726,11 @@ class TestSplitHead:
         assert_stat_delta(before, after, "rule_pack_pages_modified", 0)
         assert_stat_delta(before, after, "rule_pack_pages_skipped_not_rewritable", 1)
 
-    def test_the_link_header_is_skipped_once_the_headers_went_out(self, pack_site, pack_stats):
-        site = pack_site(ENFORCE_HOST)
+    def test_the_link_header_is_skipped_once_the_headers_went_out(
+        self, server_config, pack_site, pack_stats
+    ):
         before = pack_stats(ENFORCE_HOST)
-        entries = _link_header(site, self.ROUTE, f"run={_run_id()}")
+        entries, _ = self._get(server_config, pack_site, f"run={_run_id()}")
         after = pack_stats(ENFORCE_HOST)
 
         # The origin's conflicting canonical is still there: the headers were
@@ -715,10 +742,9 @@ class TestSplitHead:
         assert_stat_delta(before, after, "rule_pack_pages_modified", 1)
 
     @pytest.mark.requires_fixture("rule_pack_log")
-    def test_the_decision_log_says_why_the_header_was_skipped(self, pack_site):
-        site = pack_site(ENFORCE_HOST)
+    def test_the_decision_log_says_why_the_header_was_skipped(self, server_config, pack_site):
         run = _run_id()
-        _fetch(site, self.ROUTE, f"run={run}")
+        self._get(server_config, pack_site, f"run={run}")
         lines = _wait_for_decision_lines(ENFORCE_HOST, f"{self.ROUTE}?run={run}")
 
         header = [l for l in lines if l["rule"] == "canonical-repair" and l.get("header")]
