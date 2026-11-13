@@ -1,6 +1,6 @@
 # mod_pagespeed 2.8.2 Release Notes
 
-**Release date:** 2026-11-14
+**Release date:** 2026-11-13
 
 **Status:** Stable
 
