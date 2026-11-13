@@ -1,3 +1,135 @@
+# mod_pagespeed 2.8.2 Release Notes
+
+**Release date:** 2026-11-14
+
+**Status:** Stable
+
+**Packages:** the module packages for Apache, nginx and IIS and the cPanel package
+are 2.8.2, on the same platforms and channels as 2.8.1. `pagespeed-optimizer` stays at
+2.8.1: the 2.8.2 module packages depend on it, so upgrading the module keeps or
+installs optimizer 2.8.1. The container images, the NuGet packages and the Helm chart
+are not part of this release and stay at 2.8.1.
+
+## Highlights
+
+- **Critical CSS is inlined again for pages whose stylesheet contains a "<".**
+  Stylesheets that use `@property` syntax descriptors such as `"<length>"` (Tailwind
+  CSS 4 emits these) or range media queries such as `@media (width < 600px)` were
+  never inlined by `prioritize_critical_css` or `inline_css`, so those pages kept
+  render-blocking stylesheets.
+- **The admin console Overview answers first.** It opens with one sentence on whether
+  the console is working, then headline tiles for savings, fetch failures and the
+  optimizer's state, and links straight to any finding that needs action.
+- **Inspect a URL in the admin console.** Paste a URL on Overview or URLs to see what
+  the module holds for it and the usual reasons it is not optimized. Findings whose
+  fix is a setting show that setting for Apache, nginx or IIS, ready to copy.
+- **The admin console no longer looks healthy while the server is down**, and a page
+  that fails to load says why and offers "Try again".
+- **New in the admin console:** a diagnostics bundle to copy or download on the
+  Support page, a "Not optimized, by reason" list on Savings, a summary of what
+  changed since your last visit, search and compare on Configuration, and Statistics
+  grouped by what each counter measures, with a description for every counter.
+- **The admin console is easier to use with a keyboard and a screen reader** (the
+  checks now cover WCAG 2.2 AA), and it reads better in dark mode and Windows
+  high-contrast mode.
+
+## Action required when upgrading
+
+- None. Upgrade the module packages as usual; `pagespeed-optimizer` 2.8.1 stays
+  installed and does not need an upgrade. The cache is kept across the upgrade.
+
+## Fixed
+
+_Module (all ports unless named)_
+
+- **Critical CSS is inlined again for HTML pages whose stylesheet contains a "<".**
+  On HTML pages, a stylesheet with `@property` syntax descriptors such as
+  `"<length>"` (Tailwind CSS 4 emits these) or range media queries such as
+  `@media (width < 600px)` was never inlined by `prioritize_critical_css` or
+  `inline_css`, and an inline `<style>` with such rules was not minified. Only a
+  closing style tag in the stylesheet keeps it external now, and the debug message
+  names that reason. XHTML pages keep the previous, more conservative behaviour.
+  Affected: 2.8.1 and earlier.
+
+_Admin console_
+
+- **The console no longer looks healthy while the server is down.** Overview says
+  "Status unknown" with the time of the last answer instead of a green verdict, and
+  the optimizer's state is marked "last known". The "updated N s ago" stamp counts up
+  on every page and says "refresh overdue" once three refreshes have been missed. With
+  auto-refresh off the top bar reads "Paused" instead of "Connected".
+- **A page that fails to load explains why**: what could not be read, the likely
+  cause, a docs link and a "Try again" button, with the original message under
+  "Technical details".
+- **Optimizer status and Overview agree.** Without an optimizer configured the page
+  shows one explanation with a docs link, and an optimizer that is running but missed
+  one refresh is no longer reported as stopped.
+- **Savings no longer shows a negative "Not yet attributed" amount.** It shows 0 B
+  instead, and says how much larger the rest came out when the difference is more
+  than 1% of the original bytes.
+- **View controls no longer reload the page.** Changing the Logs source, "Group
+  repeats" or the Rule packs log selection keeps the filter text, levels, expanded
+  rows, scroll position and focus.
+- **Rule packs no longer shows one pack selected while the table shows another**
+  after a failed read.
+- **Keyboard and screen-reader fixes:** every control shows a complete focus ring,
+  also in Windows high-contrast mode; at phone width and high zoom the menu behaves
+  like a drawer; filter result counts are announced; tables carry header scope and
+  names; small controls meet the 24 px target size; at 320 px wide no page scrolls
+  sideways; the layout holds with a wider system font.
+
+## Changed
+
+_Admin console_
+
+- **Overview answers first**, with one status sentence, headline tiles, a findings
+  badge that links to the findings, and next steps on a fresh install. A log warning
+  that already has its own finding is no longer listed twice.
+- **One vocabulary and one look.** Each figure has one name on every page ("Saved by
+  rewriting", "Saved by the optimizer's cache", "Served optimized"), the host control
+  is called "Host filter", Logs moved to the top of the menu, and tables, cards and
+  badges are styled the same everywhere. The About page maps the old page names to
+  the new ones.
+- **The top bar shows connection and scope** ("Connected" or "Reconnecting…", whole
+  server or host), and the auto-refresh control says whether it is on, remembers a
+  pause and reports the result of a manual refresh.
+- **Savings reads at a glance**, with named shares and a legend, a separate per-host
+  card, and a note instead of a dash while the optimizer is still warming up.
+- **Statistics are grouped by what they measure** (about twenty named groups, most
+  useful first), and every counter has its own description.
+- **Charts use their own palette and a second channel**: a second series is dashed,
+  the latest value is shown in the card header, and charts follow light, dark and
+  forced-colour modes.
+- **Keyboard shortcuts can be turned off** from the shortcuts dialog, which lists only
+  the pages the open console has; `g p` opens Rule packs.
+- **Dark mode has depth** (page, sidebar, cards and rows are separate shades), and
+  Windows high-contrast mode keeps the current page, selected tab and pressed toggles
+  visible.
+
+## Added
+
+_Admin console_
+
+- **Inspect a URL** on Overview or URLs: what the module holds for it, the usual
+  reasons it is not optimized with a documentation link each, and, on the whole-server
+  console, the optimizer's record. Each URL in Logs has an "inspect" link, and Logs can
+  be filtered by URL. URL detail opens with a one-line verdict and a "Back to …" link.
+- **Findings come with the setting to paste** for Apache, nginx or IIS, with a copy
+  button; the tab follows the web server named in the response's Server header.
+- **A diagnostics bundle on the Support page**, to copy or download. By default query
+  strings are removed, public client addresses in log lines are masked, and cookie
+  and authorization values, bearer tokens and passwords in addresses are replaced. The
+  configuration text is included only when you turn it on, with secret-looking values
+  replaced. Review the bundle before you share it.
+- **"Not optimized, by reason" on Savings**, naming each reason the module counted
+  with a fix for each; image work dropped under load is also an Overview finding while
+  it keeps happening.
+- **"Since your last visit" on Overview**: a restart or reload, a configuration change
+  or a version change. The record is kept only in your browser.
+- **Search and compare on Configuration**: a filter box with a match count, Copy, and
+  lines that differ between the server's configuration and the one in effect for the
+  request marked "differs".
+
 # mod_pagespeed 2.8.1 Release Notes
 
 **Release date:** 2026-11-09
