@@ -1089,7 +1089,7 @@ jobs:
       - name: Install grype
         id: grype
         env:
-          GRYPE_VERSION: v0.118.0
+          GRYPE_VERSION: v0.121.2
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bin"

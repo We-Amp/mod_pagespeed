@@ -539,7 +539,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: grype
         env:
-          GRYPE_VERSION: v0.118.0
+          GRYPE_VERSION: v0.121.2
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bin"
@@ -579,7 +579,7 @@ jobs:
     timeout-minutes: 15
     env:
       SYFT_VERSION: v1.44.0
-      GRYPE_VERSION: v0.112.0
+      GRYPE_VERSION: v0.121.2
       # Isolated, job-local database cache so the pinned import cannot be
       # clobbered by a live-database auto-update.
       GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
@@ -655,7 +655,7 @@ jobs:
     timeout-minutes: 30
     env:
       SYFT_VERSION: v1.44.0
-      GRYPE_VERSION: v0.112.0
+      GRYPE_VERSION: v0.121.2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
