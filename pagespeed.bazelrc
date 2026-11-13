@@ -166,13 +166,15 @@ build:windows --nobuild_runfile_links
 # Remote cache via a shared bazel-remote (one central cache for CI)
 # =============================================================================
 # Shared L2 cache across all CI runners and runs. Used alongside --disk_cache (L1).
-# No authentication required — the cache is on the local network.
+# Writes may need credentials, supplied by the runner as a system bazelrc
+# (docs/ci/runner-environment.md, BAZEL_CACHE_AUTH_RC); nothing is stored here.
 #
 # The endpoint is addressed through the environment-neutral alias
 # `bazel-remote-cache`; NO environment-specific hostname or address is stored in
 # this tree (they live in GitHub repository variables).
 #   * CI Linux jobs run in Docker and map the alias with
-#     `--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}`.
+#     `--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}`
+#     (tools/ci/remote-cache-docker-args.sh).
 #   * CI Windows jobs build natively and pass `--remote_cache` explicitly.
 #   * Locally, either add a `bazel-remote-cache` entry to /etc/hosts, or put
 #     `build:remote-cache --remote_cache=http://<host>:9090` in user.bazelrc

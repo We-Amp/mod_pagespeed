@@ -26,12 +26,14 @@ WS="${GITHUB_WORKSPACE:-$(pwd)}"
 source "${WS}/tools/ci/slot-budget.sh"
 # shellcheck source=tools/ci/docker_pull_retry.sh
 source "${WS}/tools/ci/docker_pull_retry.sh"
+# shellcheck source=tools/ci/remote-cache-docker-args.sh
+source "${WS}/tools/ci/remote-cache-docker-args.sh"
 slot_budget 55g || exit 1
 
 EXTRA_DOCKER=()
 BAZEL_CONFIG="--config=envoy-filter --config=remote-cache --nostamp"
 if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-  EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+  remote_cache_docker_args EXTRA_DOCKER
 else
   BAZEL_CONFIG="--config=envoy-filter --nostamp --jobs=${SLOT_JOBS}"
   echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"

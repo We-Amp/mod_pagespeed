@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+# Fixture: maps the remote cache alias without the helper on purpose.
+name: pipeline
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  placeholder:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          EXTRA_DOCKER=()
+          EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          docker run --rm "${EXTRA_DOCKER[@]}" image true

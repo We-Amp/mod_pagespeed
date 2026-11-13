@@ -1338,7 +1338,8 @@ jobs:
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -1578,7 +1579,8 @@ jobs:
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -1985,7 +1987,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -2021,7 +2024,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -2149,7 +2153,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -2259,7 +2264,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -2315,7 +2321,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
@@ -2371,7 +2378,8 @@ jobs:
           [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
