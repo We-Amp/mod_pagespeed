@@ -3502,6 +3502,17 @@ jobs:
       - name: Ensure pinned syft + grype
         run: |
           set -euo pipefail
+          # The pins in the checked-out dep-scan.sh win over the static job env:
+          # a PR runs this workflow from the default branch but dep-scan.sh
+          # from its own checkout, so the env alone could never follow a bump.
+          syft_pin="$(sed -n 's/^SYFT_PIN="\([^"]*\)".*/\1/p' tools/sbom/dep-scan.sh | head -n1)"
+          grype_pin="$(sed -n 's/^GRYPE_PIN="\([^"]*\)".*/\1/p' tools/sbom/dep-scan.sh | head -n1)"
+          if [ -z "$syft_pin" ] || [ -z "$grype_pin" ]; then
+            echo "::error::could not parse SYFT_PIN/GRYPE_PIN from tools/sbom/dep-scan.sh"
+            exit 1
+          fi
+          SYFT_VERSION="v${syft_pin}"
+          GRYPE_VERSION="v${grype_pin}"
           mkdir -p "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           export PATH="$RUNNER_TEMP/bin:$PATH"
