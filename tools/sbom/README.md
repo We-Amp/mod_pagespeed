@@ -153,7 +153,7 @@ PR. Instead:
 
 **npm has completed this ratchet.** Precondition checked before the flip: the
 *widened* scan (all four committed lockfiles, dev deps included, pinned syft
-1.44.0 / grype 0.121.2) reports `0/0/0/0` on every surface **without any VEX
+1.44.0 / grype 0.112.0; re-verified on 0.121.2, 2026-11-13) reports `0/0/0/0` on every surface **without any VEX
 suppression** — nothing was triaged away to make it green, and the two guards
 above make a false green a failure rather than a pass. Images stay report-only
 (see the caveat above). Note the surface-migration below is **not** a one-line
