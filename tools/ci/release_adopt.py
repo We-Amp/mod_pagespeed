@@ -246,6 +246,13 @@ def classify(names, prerelease):
     for n in required:
         if n not in seen:
             problems.append("allowlisted artifact '%s' is missing" % n)
+    # The cPanel packages are named for the kind of version: a final version
+    # ships `asset-ea4-*`, a pre-release holds `rehearsal-ea4-*` only.
+    for n in sorted(seen):
+        if not prerelease and fnmatch.fnmatchcase(n, "rehearsal-ea4-*"):
+            problems.append("artifact '%s' on a final version (a pre-release holds rehearsal-ea4-*)" % n)
+        if prerelease and fnmatch.fnmatchcase(n, "asset-ea4-*"):
+            problems.append("artifact '%s' on a pre-release version (a pre-release ships no cPanel package)" % n)
     for n in sorted(seen):
         if n in SEALED or n in NOT_SEALED_EXACT:
             continue
@@ -1975,6 +1982,12 @@ def self_test():
              drop=("rehearsal-ea4-el8",), want_in_error="'rehearsal-ea4-el8' is missing")
     run_case("accept: the el10 rehearsal cPanel package is not sealed", True, prerelease=True,
              extra=("rehearsal-ea4-el10",))
+    run_case("refuse: a rehearsal cPanel package on a final version", False, extra=("rehearsal-ea4-el9",),
+             want_in_error="'rehearsal-ea4-el9' on a final version")
+    run_case("refuse: the el10 rehearsal cPanel package on a final version", False, extra=("rehearsal-ea4-el10",),
+             want_in_error="'rehearsal-ea4-el10' on a final version")
+    run_case("refuse: a cPanel asset on a release candidate version", False, prerelease=True,
+             extra=("asset-ea4-el9",), want_in_error="'asset-ea4-el9' on a pre-release version")
     run_case("refuse: unexpected artifact", False, extra=("surprise-output",),
              want_in_error="unexpected artifact 'surprise-output'")
     run_case("refuse: a signing artifact in a candidate", False, extra=("signed-windows",),

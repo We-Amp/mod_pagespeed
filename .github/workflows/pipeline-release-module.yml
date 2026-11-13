@@ -3196,6 +3196,7 @@ jobs:
     env: &ea4-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       EA4_OS: ${{ matrix.os }}
+      EA4_REHEARSAL: ${{ needs.version.outputs.rehearsal }}
     steps: &ea4-steps
       - *unlock-vendor
 
@@ -3217,11 +3218,15 @@ jobs:
           # Only the stock rpm belongs in the upstream directory.
           mkdir -p "${RUNNER_TEMP}/stock"
           cp "${RUNNER_TEMP}"/upstream/mod-pagespeed-*.x86_64.rpm "${RUNNER_TEMP}/stock/"
+          # The flag only in a rehearsal (built from master): the script of
+          # an older tag's tree does not know it.
+          extra=()
+          [ "${EA4_REHEARSAL:-}" != true ] || extra=(--rehearsal)
           bash tools/ci/release_ea4_build.sh --os "$EA4_OS" \
             --upstream "${RUNNER_TEMP}/stock" \
             --version-file net/instaweb/public/VERSION \
             --out "${RUNNER_TEMP}/ea4-out" \
-            --work "${RUNNER_TEMP}/ea4-work"
+            --work "${RUNNER_TEMP}/ea4-work" "${extra[@]+"${extra[@]}"}"
 
       - name: Upload the unsigned cPanel package
         if: steps.build.outputs.built == 'true'
@@ -3259,6 +3264,7 @@ jobs:
     timeout-minutes: 60
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      EA4_REHEARSAL: ${{ needs.version.outputs.rehearsal }}
     steps: &ea4-el10-steps
       - *unlock-vendor
 
@@ -3276,11 +3282,13 @@ jobs:
       - name: Build the cPanel package
         id: build
         run: |
+          extra=()
+          [ "${EA4_REHEARSAL:-}" != true ] || extra=(--rehearsal)
           bash tools/ci/release_ea4_build.sh --os el10 \
             --upstream "${RUNNER_TEMP}/stock" \
             --version-file net/instaweb/public/VERSION \
             --out "${RUNNER_TEMP}/ea4-out" \
-            --work "${RUNNER_TEMP}/ea4-work"
+            --work "${RUNNER_TEMP}/ea4-work" "${extra[@]+"${extra[@]}"}"
 
       - name: Upload the unsigned cPanel package
         if: steps.build.outputs.built == 'true'
@@ -4176,6 +4184,16 @@ jobs:
         with:
           name: unsigned-windows
           path: ${{ runner.temp }}/adopted-extra/unsigned-windows
+
+      # A release candidate version holds its cPanel packages as
+      # rehearsal-ea4-* (outside the asset set); the adopting run re-uploaded
+      # them for the cPanel gates, and the re-hash below checks them too.
+      - name: Download the adopted rehearsal cPanel packages (adopted pre-release run)
+        if: ${{ env.ADOPTED == 'true' && env.IS_PRERELEASE == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rehearsal-ea4-*
+          path: ${{ runner.temp }}/adopted-extra
 
       # Every file of every adopted artifact is what the candidate sealed.
       - name: Re-hash the adopted artifacts (adopted run)

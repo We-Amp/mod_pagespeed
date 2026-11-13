@@ -281,7 +281,13 @@ uploaded as `candidate-seal`. The job refuses to seal when the run's own
 title or commit disagree with the version job. A release candidate version
 ships no cPanel package: in place of the three `asset-ea4-*` it must hold
 `rehearsal-ea4-el9` and `rehearsal-ea4-el8`, which its cPanel gates test and
-an adopting run copies for them; a final version holds no `rehearsal-ea4-*`.
+an adopting run copies for them (its `validate` downloads and re-hashes them);
+a final version holds no `rehearsal-ea4-*` and a pre-release no `asset-ea4-*`,
+and the seal refuses either. Transition: an `-rc.N` candidate run started
+before this rule reached `master` has no `rehearsal-ea4-*` and fails its seal
+(run a new candidate), and a pre-release tag on a commit from before it builds
+no `rehearsal-ea4-*`, so its cPanel gates fail at the package download (tag a
+newer commit).
 In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
@@ -994,7 +1000,9 @@ repository, which packs the pair into
   rpm's name does not match the spec (a pre-release's is `X.Y.Z~pre.N`): `%global mps_version` in `packaging/cpanel` must be bumped with the
   module version. The weekly rehearsal is the exception: its version comes
   from the optimizer pin and differs from the spec after a module-only
-  release, so it builds the spec at the rehearsal version, with a notice.
+  release, so the lane passes `--rehearsal` (from the version job's
+  `rehearsal` output) and the spec is built at the rehearsal version, with a
+  notice.
 
 ## The nginx.org rebuild lane
 

@@ -101,6 +101,7 @@ expect_bad bad-adopt-not-in-schema 'adopt-shape'
 expect_bad bad-adopt-download 'adopt-shape'
 expect_bad bad-adopt-pattern 'adopt-shape'
 expect_bad bad-adopt-uploads 'adopt-shape'
+expect_bad bad-adopt-rehash 'does not download the re-uploaded artifact'
 # sign-secrets: the signing jobs read secrets only inside their step named Sign.
 expect_bad bad-sign-secret-job-env 'sign-secrets'
 expect_bad bad-sign-secret-other-step 'sign-secrets'

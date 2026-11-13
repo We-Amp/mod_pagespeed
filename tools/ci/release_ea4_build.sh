@@ -10,13 +10,15 @@
 # protected part of the lane.
 #
 #   release_ea4_build.sh --os el8|el9|el10 --upstream DIR --version-file FILE
-#                        --out DIR [--spec-dir DIR] [--work DIR]
+#                        --out DIR [--spec-dir DIR] [--work DIR] [--rehearsal]
 #   release_ea4_build.sh --self-test
 #
 #   --upstream      directory with exactly one mod-pagespeed-*.x86_64.rpm, the
 #                   stock RPM of that operating system's floor
 #   --version-file  the stamped net/instaweb/public/VERSION
 #   --out           receives the cPanel RPM
+#   --rehearsal     the run is the weekly rehearsal (the lane's version job
+#                   says so); see the spec version rule below
 #
 # Exit status 0 with the line `built=true` or `built=false` on stdout (and in
 # $GITHUB_OUTPUT when set). `built=false` is a skip with a reason on stderr,
@@ -27,14 +29,14 @@
 # pre-release stock RPM is named `X.Y.Z~PRERELEASE`; the package built from it
 # carries that version.
 # The spec's `%global mps_version` must be the version being built, except in
-# the weekly rehearsal (PRERELEASE `rehearsal.N`): its version is made up from
-# the optimizer pin, which differs from the spec after a module-only release,
-# so the spec is built at the rehearsal version, with a notice.
+# the weekly rehearsal (--rehearsal): its version is made up from the
+# optimizer pin, which differs from the spec after a module-only release, so
+# the spec is built at the rehearsal version, with a notice.
 set -euo pipefail
 # shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
-OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""
+OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK="" REHEARSAL=0
 
 # expected_name VERSION_FILE: the stock RPM name the spec expects.
 expected_name() {
@@ -184,6 +186,7 @@ run() {
       --out) OUT="$2"; shift 2 ;;
       --spec-dir) SPEC_DIR="$2"; shift 2 ;;
       --work) WORK="$2"; shift 2 ;;
+      --rehearsal) REHEARSAL=1; shift ;;
       *) echo "release_ea4_build: unknown argument $1" >&2; return 2 ;;
     esac
   done
@@ -218,7 +221,7 @@ run() {
   file_version="$(sed -n 's/^MAJOR=//p' "$VERSION_FILE").$(sed -n 's/^MINOR=//p' "$VERSION_FILE").$(sed -n 's/^BUILD=//p' "$VERSION_FILE")"
   local pre spec_override=""
   pre="$(sed -n 's/^PRERELEASE=//p' "$VERSION_FILE" | head -n 1)"
-  if [ "$spec_version" != "$file_version" ] && [ "${pre#rehearsal.}" != "$pre" ]; then
+  if [ "$spec_version" != "$file_version" ] && [ "$REHEARSAL" = 1 ]; then
     echo "::notice::rehearsal: %global mps_version $spec_version in the spec is not the rehearsal version $file_version (made up from the optimizer pin); building the spec at $file_version" >&2
     spec_override="$file_version"
   elif [ "$spec_version" != "$file_version" ]; then
@@ -309,8 +312,8 @@ self_test() {
   run --os el10 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" 2>/dev/null | grep -qx 'built=false' \
     || { echo "FAIL: el10 spec mismatch should skip"; fail=1; }
   # a pre-release tag needs the bumped spec as a release does; the weekly
-  # rehearsal builds the spec at its made-up version (docker stubbed out:
-  # reaching it means the checks passed)
+  # rehearsal (--rehearsal, not the version text) builds the spec at its
+  # made-up version (docker stubbed out: reaching it means the checks passed)
   mkdir -p "$t/uppre" "$t/uprh"
   : > "$t/uppre/mod-pagespeed-2.5.0~pre.1-1.x86_64.rpm"
   : > "$t/uprh/mod-pagespeed-2.5.0~rehearsal.7-1.x86_64.rpm"
@@ -320,10 +323,13 @@ self_test() {
   grep -qF "::error::%global mps_version 1.19.0" "$t/err" \
     || { echo "FAIL: pre-release spec mismatch should be an error: $(cat "$t/err")"; fail=1; }
   ( docker_pull_retry() { echo "docker reached" >&2; return 1; }
-    run --os el9 --upstream "$t/uprh" --version-file "$t/Vrh" --out "$t/out" --spec-dir "$t/spec-dir" ) >"$t/err" 2>&1 || true
+    run --os el9 --upstream "$t/uprh" --version-file "$t/Vrh" --out "$t/out" --spec-dir "$t/spec-dir" --rehearsal ) >"$t/err" 2>&1 || true
   if ! grep -qF "building the spec at 2.5.0" "$t/err" || ! grep -qx "docker reached" "$t/err"; then
     echo "FAIL: rehearsal spec mismatch should build at the rehearsal version: $(cat "$t/err")"; fail=1
   fi
+  run --os el9 --upstream "$t/uprh" --version-file "$t/Vrh" --out "$t/out" --spec-dir "$t/spec-dir" >"$t/err" 2>&1 || true
+  grep -qF "::error::%global mps_version 1.19.0" "$t/err" \
+    || { echo "FAIL: a rehearsal-like version without --rehearsal should be an error: $(cat "$t/err")"; fail=1; }
   : > "$t/up/mod-pagespeed-1.19.0-2.x86_64.rpm"
   if run --os el9 --upstream "$t/up" --version-file "$t/V" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: two stock RPMs accepted"; fail=1

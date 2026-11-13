@@ -83,8 +83,10 @@
 #       (download-artifact name or pattern, or a `*_artifact` input of a
 #       called workflow) is one the adopting run holds, that is an artifact
 #       of the re-uploaded set or one that a job without the condition
-#       uploads; and the artifacts the `adopt` job uploads are the
-#       re-uploaded set plus adopt-binding;
+#       uploads; the artifacts the `adopt` job uploads are the
+#       re-uploaded set plus adopt-binding; and the `validate` job downloads
+#       every re-uploaded artifact (by name or pattern), because an adopting
+#       run re-hashes each of them there;
 #   (sign-secrets) in pipeline-release-module.yml, when it has an `adopt` job:
 #       in the jobs `windows-sign` and `msi-sign`, every `secrets.<NAME>`
 #       (secrets.GITHUB_TOKEN excepted) sits inside the step named exactly
@@ -396,6 +398,20 @@ EOF
   ups="$(printf '%s\n' "${recs}" | awk -F"${TAB}" '$1=="U" && $2=="adopt" {print $3}' | LC_ALL=C sort)"
   want="$(printf '%s\nadopt-binding\n' "${reup}" | LC_ALL=C sort)"
   [ "${ups}" = "${want}" ] || echo "the adopt job uploads $(printf '%s' "${ups}" | tr '\n' ' '), expected the re-uploaded artifacts of release_adopt.py and adopt-binding"
+  # (d) validate downloads every re-uploaded artifact: an adopting run
+  # re-hashes each of them there and fails on one it does not hold.
+  local vdl
+  vdl="$(printf '%s\n' "${recs}" | awk -F"${TAB}" '$1=="D" && $2=="validate" {print $3}')"
+  set -f
+  for r in ${reup}; do
+    hit=0
+    for pat in ${vdl}; do
+      # shellcheck disable=SC2254  # a download pattern is a glob on purpose
+      case "${r}" in ${pat}) hit=1 ;; esac
+    done
+    [ "${hit}" = 1 ] || echo "the validate job does not download the re-uploaded artifact '${r}', which an adopting run re-hashes there"
+  done
+  set +f
 }
 
 # Problems with where the signing jobs read secrets, one per line. See the
