@@ -26,6 +26,10 @@
 # the package a release would, so it must fail where a release fails. A
 # pre-release stock RPM is named `X.Y.Z~PRERELEASE`; the package built from it
 # carries that version.
+# The spec's `%global mps_version` must be the version being built, except in
+# the weekly rehearsal (PRERELEASE `rehearsal.N`): its version is made up from
+# the optimizer pin, which differs from the spec after a module-only release,
+# so the spec is built at the rehearsal version, with a notice.
 set -euo pipefail
 # shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
@@ -58,15 +62,19 @@ emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "built=$1" >> "$GITHUB_OUTPUT"; fi
 }
 
-# patch_spec SPEC RELEASE [PRERELEASE]: set `%global mps_release`, and with a
-# PRERELEASE append `~PRERELEASE` to `%global mps_version` (the rpm spelling,
-# and the name of the stock RPM the spec wraps).
+# patch_spec SPEC RELEASE [PRERELEASE [VERSION]]: set `%global mps_release`;
+# with a VERSION set `%global mps_version` to it; with a PRERELEASE append
+# `~PRERELEASE` to `%global mps_version` (the rpm spelling, and the name of
+# the stock RPM the spec wraps).
 patch_spec() {
-  local spec="$1" rel="$2" pre="${3:-}" tmp
+  local spec="$1" rel="$2" pre="${3:-}" ver="${4:-}" tmp
   tmp="${spec}.tmp.$$"
-  awk -v rel="$rel" -v pre="$pre" '
+  awk -v rel="$rel" -v pre="$pre" -v ver="$ver" '
     /^%global mps_release / { print "%global mps_release " rel; next }
-    /^%global mps_version / && pre != "" { print $0 "~" pre; next }
+    /^%global mps_version / {
+      line = (ver != "") ? "%global mps_version " ver : $0
+      print line ((pre != "") ? "~" pre : ""); next
+    }
     { print }' "$spec" > "$tmp"
   mv "$tmp" "$spec"
 }
@@ -208,7 +216,12 @@ run() {
   local spec_version file_version
   spec_version="$(sed -n 's/^%global mps_version //p' "$SPEC_DIR/ea-apache24-mod_pagespeed.spec" | head -n 1)"
   file_version="$(sed -n 's/^MAJOR=//p' "$VERSION_FILE").$(sed -n 's/^MINOR=//p' "$VERSION_FILE").$(sed -n 's/^BUILD=//p' "$VERSION_FILE")"
-  if [ "$spec_version" != "$file_version" ]; then
+  local pre spec_override=""
+  pre="$(sed -n 's/^PRERELEASE=//p' "$VERSION_FILE" | head -n 1)"
+  if [ "$spec_version" != "$file_version" ] && [ "${pre#rehearsal.}" != "$pre" ]; then
+    echo "::notice::rehearsal: %global mps_version $spec_version in the spec is not the rehearsal version $file_version (made up from the optimizer pin); building the spec at $file_version" >&2
+    spec_override="$file_version"
+  elif [ "$spec_version" != "$file_version" ]; then
     if [ "$OS" = el10 ]; then
       echo "::warning::%global mps_version $spec_version in the spec is not the release version $file_version; skipping the el10 cPanel package (additive)" >&2
       emit false; return 0
@@ -221,7 +234,7 @@ run() {
   rm -rf "$WORK"; mkdir -p "$WORK/spec" "$WORK/upstream" "$WORK/build-out"
   cp -a "$SPEC_DIR/." "$WORK/spec/"
   cp "${rpms[0]}" "$WORK/upstream/"
-  patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')" "$(sed -n 's/^PRERELEASE=//p' "$VERSION_FILE" | head -n 1)"
+  patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')" "$pre" "$spec_override"
   inner_script > "$WORK/inner.sh"
   docker_pull_retry "almalinux:${OS#el}" || return 1
   docker run --rm --init \
@@ -273,6 +286,9 @@ self_test() {
   printf '%%global mps_version 1.19.0\n%%global mps_release 1\n' > "$t/spec-rc"
   patch_spec "$t/spec-rc" 1 rc.1
   chk "patched spec rc" "$(sed -n 's/^%global mps_version //p' "$t/spec-rc")" "1.19.0~rc.1"
+  printf '%%global mps_version 1.20.0\n%%global mps_release 1\n' > "$t/spec-rh"
+  patch_spec "$t/spec-rh" 1 rehearsal.3 1.19.0
+  chk "patched spec rehearsal" "$(sed -n 's/^%global mps_version //p' "$t/spec-rh")" "1.19.0~rehearsal.3"
   printf 'MAJOR=1\nMINOR=20\nBUILD=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V3"
   if run --os el9 --upstream "$t/up" --version-file "$t/V3" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: release mismatch accepted"; fail=1
@@ -292,6 +308,22 @@ self_test() {
     || { echo "FAIL: spec mismatch error text: $(cat "$t/err")"; fail=1; }
   run --os el10 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" 2>/dev/null | grep -qx 'built=false' \
     || { echo "FAIL: el10 spec mismatch should skip"; fail=1; }
+  # a pre-release tag needs the bumped spec as a release does; the weekly
+  # rehearsal builds the spec at its made-up version (docker stubbed out:
+  # reaching it means the checks passed)
+  mkdir -p "$t/uppre" "$t/uprh"
+  : > "$t/uppre/mod-pagespeed-2.5.0~pre.1-1.x86_64.rpm"
+  : > "$t/uprh/mod-pagespeed-2.5.0~rehearsal.7-1.x86_64.rpm"
+  printf 'MAJOR=2\nMINOR=5\nBUILD=0\nPRERELEASE=pre.1\nLASTCHANGE=1\n' > "$t/Vpre"
+  printf 'MAJOR=2\nMINOR=5\nBUILD=0\nPRERELEASE=rehearsal.7\nLASTCHANGE=1\n' > "$t/Vrh"
+  run --os el9 --upstream "$t/uppre" --version-file "$t/Vpre" --out "$t/out" --spec-dir "$t/spec-dir" >"$t/err" 2>&1 || true
+  grep -qF "::error::%global mps_version 1.19.0" "$t/err" \
+    || { echo "FAIL: pre-release spec mismatch should be an error: $(cat "$t/err")"; fail=1; }
+  ( docker_pull_retry() { echo "docker reached" >&2; return 1; }
+    run --os el9 --upstream "$t/uprh" --version-file "$t/Vrh" --out "$t/out" --spec-dir "$t/spec-dir" ) >"$t/err" 2>&1 || true
+  if ! grep -qF "building the spec at 2.5.0" "$t/err" || ! grep -qx "docker reached" "$t/err"; then
+    echo "FAIL: rehearsal spec mismatch should build at the rehearsal version: $(cat "$t/err")"; fail=1
+  fi
   : > "$t/up/mod-pagespeed-1.19.0-2.x86_64.rpm"
   if run --os el9 --upstream "$t/up" --version-file "$t/V" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: two stock RPMs accepted"; fail=1

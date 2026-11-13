@@ -653,6 +653,28 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
+      - name: Re-upload rehearsal-ea4-el8
+        if: ${{ contains(steps.plan.outputs.names, ',rehearsal-ea4-el8,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rehearsal-ea4-el8
+          path: ${{ runner.temp }}/adopt/in/rehearsal-ea4-el8
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload rehearsal-ea4-el9
+        if: ${{ contains(steps.plan.outputs.names, ',rehearsal-ea4-el9,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rehearsal-ea4-el9
+          path: ${{ runner.temp }}/adopt/in/rehearsal-ea4-el9
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
       - name: Re-upload asset-sidecar-x64
         if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-x64,') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

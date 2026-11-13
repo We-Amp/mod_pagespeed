@@ -264,11 +264,13 @@ After `validate`, the `candidate-seal` job (hosted, no environment, no secret)
 lists the artifacts of its own run through the Actions API, which is the
 source of names, ids and digests (matrix jobs do not aggregate outputs). It
 keeps the artifacts on the allowlist of `tools/ci/release_adopt.py` (the
-`asset-*` files, `unsigned-windows`, `msi-old`, `stock-el8`,
-`testdata-oldpkgs-*` and `release-assets`), fails on a missing allowlisted
+`asset-*` files, `rehearsal-ea4-el9` and `rehearsal-ea4-el8`,
+`unsigned-windows`, `msi-old`, `stock-el8`, `testdata-oldpkgs-*` and
+`release-assets`), fails on a missing allowlisted
 name and on any name that is neither sealed nor on the not-sealed list (`tree`,
 `tree-sidecar`, the per-distro nginx legs, `debug-*`,
-`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`), downloads each
+`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`,
+`rehearsal-ea4-el10`), downloads each
 by id, checks the zip against the API digest and records the hash of every
 file. `candidate-seal.json` (schema 2: `candidate`, `dry_run`, `tag`,
 `version`, `build_sha`, the artifact list and the hash of `SHA256SUMS`, and
@@ -277,7 +279,10 @@ pinned optimizer release's `SHA256SUMS` as `optimizer_sums_sha256`, which
 `optimizer-fetch` outputs after it verified the file against the pin) is
 uploaded as `candidate-seal`. The job refuses to seal when the run's own
 title or commit disagree with the version job. A release candidate version
-has no cPanel packages, so those three are not required for it. In a candidate
+ships no cPanel package: in place of the three `asset-ea4-*` it must hold
+`rehearsal-ea4-el9` and `rehearsal-ea4-el8`, which its cPanel gates test and
+an adopting run copies for them; a final version holds no `rehearsal-ea4-*`.
+In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
 The artifacts API of a run spans all attempts, so a job that uploaded in an
@@ -443,7 +448,9 @@ passes no secret. The guards accept it only as a `schedule` or a
 exists, so the `version` job makes one up from the pinned optimizer release:
 `module-v<pinned version>-rehearsal.<run number>`. That is a pre-release
 (`1.19.0~rehearsal.7` in the packages), so it can never be taken for a
-release; the pin and version-pair checks warn as in a `-pre` dry run. The
+release; the pin and version-pair checks warn as in a `-pre` dry run. It
+builds the cPanel packages as `rehearsal-ea4-*` and runs both cPanel gates
+on them, at the rehearsal version even when the spec carries another. The
 `build_profile` is `rehearsal`, every job checks out the master commit, and
 no job of the `release` environment runs (each carries
 `rehearsal != 'true'` in its `if:`, enforced by
@@ -624,7 +631,9 @@ executed. In a real run `validate` requires every gate to have succeeded and
 the installer gate and both cPanel gates (a pre-release tag included) to have
 reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
 real release needs the fleet enabled at that moment and the guests provisioned.
-A dry run accepts a skipped gate and warns that it is unproven. A missing `ran` output counts as false.
+A dry run accepts a skipped gate and warns that it is unproven, but fails on
+a gate that succeeded without running its smoke while `FLEET_ENABLED` is
+`true` (a real run would fail on it). A missing `ran` output counts as false.
 
 Not done here on purpose: the publication of apt and yum repositories (the
 consumer pulls the release assets, see below), the signing of debs and rpms
@@ -983,7 +992,9 @@ repository, which packs the pair into
   whole workflow again.
 - The cPanel jobs fail, on a release and on a pre-release alike, when the stock
   rpm's name does not match the spec (a pre-release's is `X.Y.Z~pre.N`): `%global mps_version` in `packaging/cpanel` must be bumped with the
-  module version.
+  module version. The weekly rehearsal is the exception: its version comes
+  from the optimizer pin and differs from the spec after a module-only
+  release, so it builds the spec at the rehearsal version, with a notice.
 
 ## The nginx.org rebuild lane
 
