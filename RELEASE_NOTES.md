@@ -6,20 +6,21 @@
 
 **Packages:** the module packages for Apache, nginx and IIS and the cPanel package
 are 2.8.2, on the same platforms and channels as 2.8.1. `pagespeed-optimizer` stays at
-2.8.1: the 2.8.2 module packages depend on it, so upgrading the module keeps or
-installs optimizer 2.8.1. The container images, the NuGet packages and the Helm chart
-are not part of this release and stay at 2.8.1.
+2.8.1: the 2.8.2 Apache and nginx deb and rpm packages depend on it, so upgrading them
+keeps or installs optimizer 2.8.1. The container images, the NuGet packages and the
+Helm chart are not part of this release and stay at 2.8.1.
 
 ## Highlights
 
-- **Critical CSS is inlined again for pages whose stylesheet contains a "<".**
+- **Critical CSS is now inlined for HTML pages whose stylesheet contains a "<".**
   Stylesheets that use `@property` syntax descriptors such as `"<length>"` (Tailwind
   CSS 4 emits these) or range media queries such as `@media (width < 600px)` were
-  never inlined by `prioritize_critical_css` or `inline_css`, so those pages kept
-  render-blocking stylesheets.
+  never inlined by `prioritize_critical_css` or `inline_css`. XHTML pages keep the
+  previous behaviour.
 - **The admin console Overview answers first.** It opens with one sentence on whether
   the console is working, then headline tiles for savings, fetch failures and the
-  optimizer's state, and links straight to any finding that needs action.
+  optimizer's state, and, when a finding needs action, a badge on the findings count
+  that links to the findings.
 - **Inspect a URL in the admin console.** Paste a URL on Overview or URLs to see what
   the module holds for it and the usual reasons it is not optimized. Findings whose
   fix is a setting show that setting for Apache, nginx or IIS, ready to copy.
@@ -29,27 +30,26 @@ are not part of this release and stay at 2.8.1.
   Support page, a "Not optimized, by reason" list on Savings, a summary of what
   changed since your last visit, search and compare on Configuration, and Statistics
   grouped by what each counter measures, with a description for every counter.
-- **The admin console is easier to use with a keyboard and a screen reader** (the
-  checks now cover WCAG 2.2 AA), and it reads better in dark mode and Windows
-  high-contrast mode.
+- **The admin console is easier to use with a keyboard and a screen reader**, and it
+  reads better in dark mode and Windows high-contrast mode.
 
 ## Action required when upgrading
 
 - None. Upgrade the module packages as usual; `pagespeed-optimizer` 2.8.1 stays
-  installed and does not need an upgrade. The cache is kept across the upgrade.
+  installed and does not need an upgrade.
 
 ## Fixed
 
 _Module (all ports unless named)_
 
-- **Critical CSS is inlined again for HTML pages whose stylesheet contains a "<".**
+- **Critical CSS is now inlined for HTML pages whose stylesheet contains a "<".**
   On HTML pages, a stylesheet with `@property` syntax descriptors such as
   `"<length>"` (Tailwind CSS 4 emits these) or range media queries such as
   `@media (width < 600px)` was never inlined by `prioritize_critical_css` or
-  `inline_css`, and an inline `<style>` with such rules was not minified. Only a
-  closing style tag in the stylesheet keeps it external now, and the debug message
-  names that reason. XHTML pages keep the previous, more conservative behaviour.
-  Affected: 2.8.1 and earlier.
+  `inline_css`, and an inline `<style>` with such rules was not minified. A
+  stylesheet that could end the inline `<style>` element early is still kept
+  external, and the debug message says why. XHTML pages keep the previous
+  behaviour. Affected: 2.8.1 and earlier.
 
 _Admin console_
 
@@ -75,8 +75,8 @@ _Admin console_
 - **Keyboard and screen-reader fixes:** every control shows a complete focus ring,
   also in Windows high-contrast mode; at phone width and high zoom the menu behaves
   like a drawer; filter result counts are announced; tables carry header scope and
-  names; small controls meet the 24 px target size; at 320 px wide no page scrolls
-  sideways; the layout holds with a wider system font.
+  names; small controls meet the 24 px target size; at 320 px wide the pages no
+  longer scroll sideways; the layout holds with a wider system font.
 
 ## Changed
 
@@ -102,7 +102,7 @@ _Admin console_
   forced-colour modes.
 - **Keyboard shortcuts can be turned off** from the shortcuts dialog, which lists only
   the pages the open console has; `g p` opens Rule packs.
-- **Dark mode has depth** (page, sidebar, cards and rows are separate shades), and
+- **Dark mode separates the page, sidebar, cards and rows** with their own shades, and
   Windows high-contrast mode keeps the current page, selected tab and pressed toggles
   visible.
 
@@ -118,7 +118,8 @@ _Admin console_
   button; the tab follows the web server named in the response's Server header.
 - **A diagnostics bundle on the Support page**, to copy or download. By default query
   strings are removed, public client addresses in log lines are masked, and cookie
-  and authorization values, bearer tokens and passwords in addresses are replaced. The
+  and authorization header values, bearer tokens and passwords in addresses are
+  replaced. The
   configuration text is included only when you turn it on, with secret-looking values
   replaced. Review the bundle before you share it.
 - **"Not optimized, by reason" on Savings**, naming each reason the module counted

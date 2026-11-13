@@ -129,7 +129,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page shows one explanation with a docs link instead of "Optimizer unreachable"
   above empty sections, and an optimizer that is running but did not answer one
   refresh is no longer reported as stopped.
-- **The Savings page no longer requests the message log** it never displayed.
 - **Admin console view controls no longer reload the page.** Changing the Logs
   source or "Group repeats", or the Rule packs log selection, keeps the filter
   text, chosen levels, expanded rows, scroll position and keyboard focus, and
@@ -143,11 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Every admin console control shows where the keyboard is.** Text fields,
   selects, tabs and menu links draw a complete focus ring, also in Windows
   high-contrast mode, where the current page, selected tab and chart bars now
-  stay visible. At 320 px wide (400% zoom) no page scrolls sideways.
+  stay visible. At 320 px wide (400% zoom) the pages no longer scroll sideways.
 - **Admin console screen-reader support.** Filter result counts are announced
   after typing stops, table headers carry their scope and row headers name the
   row, the Savings tables are named, and small controls meet the 24 px target
-  size. The accessibility checks now cover WCAG 2.2 AA.
+  size.
 - **A paused admin console no longer claims to be connected.** With
   auto-refresh off the top bar reads "Paused", after turning it back on it
   reads "Checking…" until the server answers, and the outage banner says how
@@ -160,14 +159,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   originals, the remainder read as a small negative number such as −29 B. It
   now shows 0 B, and says how much larger the rest came out when the
   difference is more than 1% of the original bytes.
-- **Critical CSS is inlined again for HTML pages whose stylesheet contains a
+- **Critical CSS is now inlined for HTML pages whose stylesheet contains a
   "<".** On HTML pages, a stylesheet with `@property` syntax descriptors such
   as `"<length>"` (Tailwind CSS 4 emits these) or range media queries such as
   `@media (width < 600px)` was never inlined by `prioritize_critical_css` or
-  `inline_css`, and an inline `<style>` with such rules was not minified. Only
-  a closing style tag in the stylesheet keeps it external now, and the debug
-  message names that reason. XHTML pages keep the previous, more conservative
-  behaviour.
+  `inline_css`, and an inline `<style>` with such rules was not minified. A
+  stylesheet that could end the inline `<style>` element early is still kept
+  external, and the debug message says why. XHTML pages keep the previous
+  behaviour. Affected: 2.8.1 and earlier.
 
 ## [2.8.1] - 2026-11-09
 
