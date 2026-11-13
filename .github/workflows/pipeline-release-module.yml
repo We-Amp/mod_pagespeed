@@ -1174,7 +1174,37 @@ jobs:
                 -H "Authorization: Bearer ${GH_READ_TOKEN}" \
                 "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/$OPTIMIZER_TAG")"
               case "$code" in
-                404) ;;
+                404)
+                  # The tags endpoint does not return a draft, and a tag can
+                  # exist with no release at all: look for both.
+                  code="$(curl -sS --retry 5 -o /dev/null -w '%{http_code}' \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "Authorization: Bearer ${GH_READ_TOKEN}" \
+                    "https://api.github.com/repos/We-Amp/pagespeed-optimizer/git/ref/tags/$OPTIMIZER_TAG")"
+                  case "$code" in
+                    404) ;;
+                    200) echo "::error::module-only release, but the optimizer tag $OPTIMIZER_TAG exists without a published release: finish or remove it first"; exit 1 ;;
+                    *) echo "::error::cannot tell whether the optimizer tag $OPTIMIZER_TAG exists (HTTP $code)"; exit 1 ;;
+                  esac
+                  releases="$(mktemp)"
+                  page=1
+                  while :; do
+                    curl -fsS --retry 5 --retry-all-errors \
+                      -H "Accept: application/vnd.github+json" \
+                      -H "Authorization: Bearer ${GH_READ_TOKEN}" \
+                      "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases?per_page=100&page=$page" \
+                      -o "$releases" || { echo "::error::cannot list the optimizer releases (page $page)"; exit 1; }
+                    seen="$(python3 -I -c 'import json,sys; rels=json.load(open(sys.argv[1])); hit=any(r.get("draft") and r.get("tag_name")==sys.argv[2] for r in rels); print("draft" if hit else ("more" if len(rels)>=100 else "end"))' \
+                      "$releases" "$OPTIMIZER_TAG")" \
+                      || { echo "::error::cannot read the optimizer release list (page $page)"; exit 1; }
+                    case "$seen" in
+                      draft) echo "::error::module-only release, but a draft release of the optimizer tag $OPTIMIZER_TAG exists: publish or delete it first"; exit 1 ;;
+                      more) page=$((page + 1)) ;;
+                      *) break ;;
+                    esac
+                  done
+                  rm -f "$releases"
+                  ;;
                 200) echo "::error::module-only release, but the optimizer release $OPTIMIZER_TAG exists: pin it in optimizer-pin.json and drop unpaired_for"; exit 1 ;;
                 *) echo "::error::cannot tell whether the optimizer release $OPTIMIZER_TAG exists (HTTP $code)"; exit 1 ;;
               esac
