@@ -29,9 +29,14 @@ page lists names and meanings only.
 | `CI_WIN_VENDOR_DIR` | Windows | the same, for Windows runners: a directory that may hold the vendor tarball the Linux jobs of the same machine published; the Windows jobs read it and `tools/ci/prune-win-vendor.ps1` never prunes it | no local fast path (a hub fetch goes to a per-profile download directory) |
 | `CI_BAZEL_REPO_CACHE` | Linux, macOS | runner-local directory holding a persistent Bazel repository cache. `tools/vendor-deps.sh` seeds `vendor/repo-cache` from it before the fetch, writes new archives back after it (temp name then rename, safe under concurrent jobs) and prunes it to 30 days / 8G. Must be under the runner user's home. Set it to the empty string to disable | `$HOME/.cache/mps-bazel-repo` |
 | `BAZEL_CACHE_HOST` | Linux | address of the remote Bazel cache; jobs add a host mapping to their build containers and build with the cache configuration | builds use the plain container configuration with no remote cache |
+| `BAZEL_CACHE_AUTH_RC` | Linux | path to a bazelrc fragment with optional cache credentials; jobs that map the cache (`BAZEL_CACHE_HOST`) mount it read-only at `/etc/bazel.bazelrc` in their build containers, where Bazel reads it as the system rc (`tools/ci/remote-cache-docker-args.sh`). Ignored unless it names a readable file | the cache is used without credentials |
 | `BAZEL_REMOTE_CACHE_URL` | Windows, macOS | full remote cache URL, passed as `--remote_cache` | no remote cache |
 | `CI_DEV_IMAGE_LOCK_DIR` | Linux | directory for the per-host lock files `tools/ci/ensure-dev-image.sh` takes around image builds (useful when several runner instances share one container daemon) | locks go to the temporary directory |
 | `CI_IMAGE_LOCK_TIMEOUT` | Linux | seconds a job waits for another build of the same image tag on the host before building anyway | 1200 |
+
+Windows jobs build natively and need no variable for cache credentials: Bazel
+on Windows honours the machine-wide system bazelrc, so a runner can supply
+optional cache credentials there.
 
 ## Windows toolchain and caches
 

@@ -250,6 +250,7 @@ expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
 expect_bad bad-port 'rule e'
+expect_bad bad-cache-host-bare 'cache-auth'
 
 # ci-dev-full-input: the good tree's ci-dev caller has a full job that uses
 # pipeline-full.yml@ci-dev (accepted by the good-tree case above); the same

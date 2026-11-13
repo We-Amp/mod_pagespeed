@@ -248,9 +248,9 @@ build() {
   echo "fan-out plan: nproc=$nproc_n cores/leg=$cores mem/leg=${leg_mem}g budget=${budget}g -> concurrency=$conc over ${#legs[@]} legs"
 
   local extra_docker=()
-  if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-    extra_docker+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
-  fi
+  # shellcheck source=remote-cache-docker-args.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/remote-cache-docker-args.sh"
+  remote_cache_docker_args extra_docker
   local cache_dir="${CACHE_DIR:-}"
   if [ -z "$cache_dir" ]; then cache_dir="$(mktemp -d)"; fi
   mkdir -p "$cache_dir"

@@ -550,7 +550,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -717,7 +718,8 @@ jobs:
           EXTRA=(--cap-add NET_BIND_SERVICE --sysctl net.ipv4.ip_unprivileged_port_start=0)
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -903,7 +905,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           fi
           BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
@@ -947,7 +950,8 @@ jobs:
           MEM="${SLOT_MEM:-24g}"
           EXTRA=()
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
           fi
           # Its own copy of the tree: the distribution container builds as
           # root and must not leave root-owned output in the workspace.
@@ -1107,7 +1111,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           fi
           BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
@@ -1151,7 +1156,8 @@ jobs:
           MEM="${SLOT_MEM:-24g}"
           EXTRA=()
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
           fi
           # Its own copy of the tree: the distribution container builds as
           # root and must not leave root-owned output in the workspace.
@@ -1304,7 +1310,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -1474,7 +1481,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -1634,7 +1642,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -1840,7 +1849,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -2075,7 +2085,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -2307,7 +2318,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
@@ -2576,7 +2588,8 @@ jobs:
           EXTRA=()
           BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
           else
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"

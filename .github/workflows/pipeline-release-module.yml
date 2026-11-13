@@ -1475,7 +1475,17 @@ jobs:
         name: Remote cache and per-runner cache directory
         run: |
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-            echo "DOCKER_CACHE_HOST_ARG=--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}" >> "$GITHUB_ENV"
+            # The cache alias plus the optional credentials mount; every flag is one
+            # word, so the joined string is expanded unquoted by the docker run steps.
+            # A tag cut before the helper existed has no such file: the cache alias alone.
+            CACHE_ARGS=()
+            if [ -f "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh" ]; then
+              source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+              remote_cache_docker_args CACHE_ARGS
+            else
+              CACHE_ARGS+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")  # predates remote-cache-docker-args.sh
+            fi
+            echo "DOCKER_CACHE_HOST_ARG=${CACHE_ARGS[*]}" >> "$GITHUB_ENV"
             echo "BAZEL_CACHE_FLAGS=" >> "$GITHUB_ENV"
             echo "using the remote Bazel cache from the runner environment"
           else
