@@ -50,6 +50,8 @@ SEALED = (
     "asset-ea4-el8",
     "asset-ea4-el9",
     "asset-ea4-el10",
+    "rehearsal-ea4-el8",
+    "rehearsal-ea4-el9",
     "asset-sidecar-x64",
     "asset-sidecar-arm64",
     "unsigned-windows",
@@ -60,13 +62,26 @@ SEALED = (
     "release-assets",
 )
 
-# The cPanel packages are not built for a pre-release version (the spec
-# carries the release version only), so a release candidate has none.
+# A pre-release version ships no cPanel package: a release candidate has no
+# `asset-ea4-*`. It builds them for its cPanel gates as `rehearsal-ea4-*`
+# instead, outside the asset set; a final version has none of those. The el10
+# one has no gate and is not sealed.
 SEALED_OPTIONAL_ON_PRERELEASE = (
     "asset-ea4-el8",
     "asset-ea4-el9",
     "asset-ea4-el10",
 )
+SEALED_ONLY_ON_PRERELEASE = (
+    "rehearsal-ea4-el8",
+    "rehearsal-ea4-el9",
+)
+
+
+def sealed_required(prerelease):
+    """The sealed names a candidate run of a final or a pre-release version holds."""
+    skip = SEALED_OPTIONAL_ON_PRERELEASE if prerelease else SEALED_ONLY_ON_PRERELEASE
+    return [n for n in SEALED if n not in skip]
+
 
 # Artifacts a candidate run may hold that are not sealed. Anything that is in
 # neither list fails the seal, so a new upload is never silently left out.
@@ -76,6 +91,7 @@ NOT_SEALED_EXACT = (
     "msi-unsigned",
     "asset-windows",
     "candidate-seal",
+    "rehearsal-ea4-el10",
 )
 NOT_SEALED_GLOBS = (
     "nginx-x64-*",
@@ -184,6 +200,8 @@ REUPLOADED = (
     "asset-ea4-el8",
     "asset-ea4-el9",
     "asset-ea4-el10",
+    "rehearsal-ea4-el8",
+    "rehearsal-ea4-el9",
     "asset-sidecar-x64",
     "asset-sidecar-arm64",
     "unsigned-windows",
@@ -224,10 +242,17 @@ def classify(names, prerelease):
         if n in seen and n == "candidate-seal":
             problems.append("artifact name '%s' appears more than once" % n)
         seen.add(n)
-    required = [n for n in SEALED if not (prerelease and n in SEALED_OPTIONAL_ON_PRERELEASE)]
+    required = sealed_required(prerelease)
     for n in required:
         if n not in seen:
             problems.append("allowlisted artifact '%s' is missing" % n)
+    # The cPanel packages are named for the kind of version: a final version
+    # ships `asset-ea4-*`, a pre-release holds `rehearsal-ea4-*` only.
+    for n in sorted(seen):
+        if not prerelease and fnmatch.fnmatchcase(n, "rehearsal-ea4-*"):
+            problems.append("artifact '%s' on a final version (a pre-release holds rehearsal-ea4-*)" % n)
+        if prerelease and fnmatch.fnmatchcase(n, "asset-ea4-*"):
+            problems.append("artifact '%s' on a pre-release version (a pre-release ships no cPanel package)" % n)
     for n in sorted(seen):
         if n in SEALED or n in NOT_SEALED_EXACT:
             continue
@@ -1373,7 +1398,7 @@ def _zip_bytes(files):
 
 def _fixture(prerelease=False, drop=(), extra=()):
     tag, sha, run_id = "module-v9.9.9", "a" * 40, 4242
-    names = [n for n in SEALED if n not in drop and not (prerelease and n in SEALED_OPTIONAL_ON_PRERELEASE)]
+    names = [n for n in sealed_required(prerelease) if n not in drop]
     names += ["tree", "debug-linux-x64", "nginx-x64-el9", "nginx-arm64-el9", "testdata-sidecar-results-x64",
               "asset-windows"]
     names += list(extra)
@@ -1513,14 +1538,14 @@ def _verify_cases():
               and b["tag"]["object"]["sha"] == "d" * 40
               and b["binding"].startswith("run 4242 \u00b7 seal ") and b["binding"].endswith(
                   "SHA256SUMS " + w["kw"]["trailers"]["sums"][:12])
-              and sealed == list(SEALED) and b["sums_rows"] == _rows_of(w["fx"]["sums"])
+              and sealed == sealed_required(False) and b["sums_rows"] == _rows_of(w["fx"]["sums"])
               and all(a["new_id"] is None and a["files"] for a in b["artifacts"])
               and {j["conclusion"] for j in b["jobs"]} == {"success", "skipped"}
               and any(j["name"] == "Build (x64, el9)" and j["job"] == "nginx-distro-build" for j in b["jobs"]))
         return ok, "binding: %r" % (b,)
 
     case("accept: every check passes and the binding is written in full", after=shape)
-    case("accept: a release candidate version (no cPanel packages)", prerelease=True)
+    case("accept: a release candidate version (no cPanel asset, the rehearsal cPanel packages)", prerelease=True)
     case("accept: the hosted legs ran and the fleet legs were skipped",
          lambda w: w.update(listing=[j for j in w["listing"] if not j["name"].startswith(CALLER_PREFIX + "Build (x64")
                                      and j["name"] != CALLER_PREFIX + "Vendor" and not j["name"].startswith(CALLER_PREFIX + "Vendor (")]
@@ -1923,7 +1948,7 @@ def self_test():
                      "release_assets_sha256sums_sha256"]
         shape = (list(doc) == want_keys and doc["schema"] == 2 and doc["candidate"] is True
                  and doc["dry_run"] is True and doc["build_sha"] == "a" * 40
-                 and [a["name"] for a in doc["artifacts"]] == list(SEALED)
+                 and [a["name"] for a in doc["artifacts"]] == sealed_required(False)
                  and doc["release_assets_sha256sums_sha256"] == hashlib.sha256(_fixture()["sums"]).hexdigest()
                  and all(set(a) == {"name", "id", "digest", "files"} for a in doc["artifacts"])
                  and all(set(f) == {"path", "size", "sha256"} for a in doc["artifacts"] for f in a["files"]))
@@ -1931,7 +1956,8 @@ def self_test():
               % ("ok  " if shape else "FAIL"))
         if not shape:
             fails += 1
-    run_case("accept: a release candidate version has no cPanel packages", True, prerelease=True)
+    run_case("accept: a release candidate version has the rehearsal cPanel packages, no cPanel asset", True,
+             prerelease=True)
     pdoc = run_case("accept: plans are recorded as an additive field", True,
                     plans={"nginx-x64-plan": ["el8", "el9"]})
     check("seal with plans keeps the schema-2 keys and adds `plans`",
@@ -1952,6 +1978,16 @@ def self_test():
              want_in_error="'asset-linux-x64' is missing")
     run_case("refuse: cPanel package missing on a final version", False, drop=("asset-ea4-el9",),
              want_in_error="'asset-ea4-el9' is missing")
+    run_case("refuse: rehearsal cPanel package missing on a release candidate version", False, prerelease=True,
+             drop=("rehearsal-ea4-el8",), want_in_error="'rehearsal-ea4-el8' is missing")
+    run_case("accept: the el10 rehearsal cPanel package is not sealed", True, prerelease=True,
+             extra=("rehearsal-ea4-el10",))
+    run_case("refuse: a rehearsal cPanel package on a final version", False, extra=("rehearsal-ea4-el9",),
+             want_in_error="'rehearsal-ea4-el9' on a final version")
+    run_case("refuse: the el10 rehearsal cPanel package on a final version", False, extra=("rehearsal-ea4-el10",),
+             want_in_error="'rehearsal-ea4-el10' on a final version")
+    run_case("refuse: a cPanel asset on a release candidate version", False, prerelease=True,
+             extra=("asset-ea4-el9",), want_in_error="'asset-ea4-el9' on a pre-release version")
     run_case("refuse: unexpected artifact", False, extra=("surprise-output",),
              want_in_error="unexpected artifact 'surprise-output'")
     run_case("refuse: a signing artifact in a candidate", False, extra=("signed-windows",),
@@ -2525,7 +2561,7 @@ def main(argv):
     sp.add_argument("--tag", required=True)
     sp.add_argument("--version", required=True)
     sp.add_argument("--sha", required=True)
-    sp.add_argument("--prerelease", action="store_true", help="the version is a release candidate (no cPanel packages)")
+    sp.add_argument("--prerelease", action="store_true", help="the version is a release candidate (rehearsal-ea4-* in place of the cPanel assets)")
     sp.add_argument("--plan", action="append", default=[], metavar="JOB=JSON",
                     help="a plan job's published legs, e.g. nginx-x64-plan='[\"el9\"]' (repeatable)")
     sp.add_argument("--optimizer-sums-sha256", default="",

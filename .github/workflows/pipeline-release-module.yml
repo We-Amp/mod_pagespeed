@@ -58,7 +58,8 @@
 # secret or a write token, and every one of them runs on a hosted runner.
 #
 # Artifacts. Names with the prefix `asset-` hold release files (the `validate`
-# job builds the asset set from exactly those); `tree` is the prepared source
+# job builds the asset set from exactly those); `rehearsal-ea4-*` holds the
+# cPanel packages of a pre-release tag, which ships none; `tree` is the prepared source
 # tree every build starts from; `testdata-*`, `debug-*`, `stock-el8`,
 # `unsigned-windows`, `signed-windows`, `msi-unsigned`, `msi-old` and
 # `release-signature` are inputs of later jobs and are not release files.
@@ -647,6 +648,28 @@ jobs:
         with:
           name: asset-ea4-el10
           path: ${{ runner.temp }}/adopt/in/asset-ea4-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload rehearsal-ea4-el8
+        if: ${{ contains(steps.plan.outputs.names, ',rehearsal-ea4-el8,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rehearsal-ea4-el8
+          path: ${{ runner.temp }}/adopt/in/rehearsal-ea4-el8
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload rehearsal-ea4-el9
+        if: ${{ contains(steps.plan.outputs.names, ',rehearsal-ea4-el9,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rehearsal-ea4-el9
+          path: ${{ runner.temp }}/adopt/in/rehearsal-ea4-el9
           overwrite: true
           retention-days: 14
           compression-level: 0
@@ -3154,8 +3177,10 @@ jobs:
   # ---------------------------------------------------------------------
   # cPanel (EasyApache 4) packages: a repackaging of the stock Apache rpm of
   # the matching floor (the el9 rpm of the x64 build, the el8 rpm of the el8
-  # build). Unsigned; the release lane does not sign rpms. A pre-release tag builds none (the
-  # spec carries the release version).
+  # build). Unsigned; the release lane does not sign rpms. A pre-release tag builds
+  # the package too, so a rehearsal exercises the build and the cPanel gates: the
+  # package is then uploaded as `rehearsal-ea4-*`, outside the `asset-` prefix,
+  # because a pre-release ships no cPanel package.
   # ---------------------------------------------------------------------
   ea4-build:
     name: EA4 Build (${{ matrix.os }})
@@ -3171,6 +3196,7 @@ jobs:
     env: &ea4-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       EA4_OS: ${{ matrix.os }}
+      EA4_REHEARSAL: ${{ needs.version.outputs.rehearsal }}
     steps: &ea4-steps
       - *unlock-vendor
 
@@ -3192,17 +3218,21 @@ jobs:
           # Only the stock rpm belongs in the upstream directory.
           mkdir -p "${RUNNER_TEMP}/stock"
           cp "${RUNNER_TEMP}"/upstream/mod-pagespeed-*.x86_64.rpm "${RUNNER_TEMP}/stock/"
+          # The flag only in a rehearsal (built from master): the script of
+          # an older tag's tree does not know it.
+          extra=()
+          [ "${EA4_REHEARSAL:-}" != true ] || extra=(--rehearsal)
           bash tools/ci/release_ea4_build.sh --os "$EA4_OS" \
             --upstream "${RUNNER_TEMP}/stock" \
             --version-file net/instaweb/public/VERSION \
             --out "${RUNNER_TEMP}/ea4-out" \
-            --work "${RUNNER_TEMP}/ea4-work"
+            --work "${RUNNER_TEMP}/ea4-work" "${extra[@]+"${extra[@]}"}"
 
       - name: Upload the unsigned cPanel package
         if: steps.build.outputs.built == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-ea4-${{ matrix.os }}
+          name: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-${{ matrix.os }}
           path: ${{ runner.temp }}/ea4-out/*.rpm
           retention-days: 14
           if-no-files-found: error
@@ -3234,6 +3264,7 @@ jobs:
     timeout-minutes: 60
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      EA4_REHEARSAL: ${{ needs.version.outputs.rehearsal }}
     steps: &ea4-el10-steps
       - *unlock-vendor
 
@@ -3251,17 +3282,19 @@ jobs:
       - name: Build the cPanel package
         id: build
         run: |
+          extra=()
+          [ "${EA4_REHEARSAL:-}" != true ] || extra=(--rehearsal)
           bash tools/ci/release_ea4_build.sh --os el10 \
             --upstream "${RUNNER_TEMP}/stock" \
             --version-file net/instaweb/public/VERSION \
             --out "${RUNNER_TEMP}/ea4-out" \
-            --work "${RUNNER_TEMP}/ea4-work"
+            --work "${RUNNER_TEMP}/ea4-work" "${extra[@]+"${extra[@]}"}"
 
       - name: Upload the unsigned cPanel package
         if: steps.build.outputs.built == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-ea4-el10
+          name: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el10
           path: ${{ runner.temp }}/ea4-out/*.rpm
           retention-days: 14
           if-no-files-found: error
@@ -3912,11 +3945,10 @@ jobs:
   # hold no secret and no write token. They run in a dry run as well; the
   # installer under test is the one in `asset-windows` (unsigned in a dry run,
   # signed in a real one). A gate workflow can succeed without having tested
-  # anything (it skips when its guest is not provisioned, and the cPanel gate
-  # skips on a pre-release, which has no package). So each gate workflow
+  # anything (it skips when its guest is not provisioned). So each gate workflow
   # exposes an output `ran`, true only when the smoke actually executed, and in
-  # a real run `validate` requires ran == 'true' from the installer gate and,
-  # on a release (not a pre-release), from both cPanel gates. A missing output
+  # a real run `validate` requires ran == 'true' from the installer gate and
+  # from both cPanel gates, a pre-release tag included. A missing output
   # reads as false: the gates fail closed until the gate workflows define it.
   # While the repository variable FLEET_IIS_ENABLED is not 'true' (no runner
   # of the class is registered) the gate jobs are skipped, not queued. A real
@@ -3947,7 +3979,7 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
     with:
       os: el9
-      rpm_artifact: asset-ea4-el9
+      rpm_artifact: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el9
       release_tag: ${{ needs.version.outputs.release_tag }}
 
   gate-cpanel-smoke-el8:
@@ -3959,7 +3991,7 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
     with:
       os: el8
-      rpm_artifact: asset-ea4-el8
+      rpm_artifact: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el8
       release_tag: ${{ needs.version.outputs.release_tag }}
 
   # ---------------------------------------------------------------------
@@ -4095,9 +4127,10 @@ jobs:
           # succeeded there and been skipped in a dry run (a candidate is a
           # dry run). The gates need the fleet-hyperv class and can succeed
           # without testing anything, so in a release build (a real run or a
-          # candidate) each must have succeeded AND reported ran == true (the
-          # cPanel gates are exempt on a pre-release, which has no package);
-          # in a rehearsal a skipped gate is allowed.
+          # candidate) each must have succeeded AND reported ran == true, a
+          # pre-release tag included; in a rehearsal a skipped gate is
+          # allowed, with a warning, but a gate that succeeded without
+          # running its smoke while the fleet is on is an error.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
@@ -4111,10 +4144,16 @@ jobs:
             in_pair="${in_pair}${j} "
             if [ "$BUILD_PROFILE" = release ]; then
               [ "$r" = success ] || { echo "::error::the ${j} gate did not succeed"; bad=1; }
-              if [ "$IS_PRERELEASE" = true ] && [ "${j#gate-cpanel-smoke-}" != "$j" ]; then continue; fi
               [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
             else
               [ "$r" = success ] || [ "$r" = skipped ] || bad=1
+              if [ "$ran" != true ]; then
+                if [ "$r" = success ] && [ "$FLEET_ENABLED" = true ]; then
+                  echo "::error::${j} succeeded but did not run its smoke; a real run would fail"; bad=1
+                else
+                  echo "::warning::${j} did not run its smoke in this dry run (result ${r}): it is unproven, and a real run requires it"
+                fi
+              fi
             fi
           done
           while read -r a b; do
@@ -4145,6 +4184,16 @@ jobs:
         with:
           name: unsigned-windows
           path: ${{ runner.temp }}/adopted-extra/unsigned-windows
+
+      # A release candidate version holds its cPanel packages as
+      # rehearsal-ea4-* (outside the asset set); the adopting run re-uploaded
+      # them for the cPanel gates, and the re-hash below checks them too.
+      - name: Download the adopted rehearsal cPanel packages (adopted pre-release run)
+        if: ${{ env.ADOPTED == 'true' && env.IS_PRERELEASE == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rehearsal-ea4-*
+          path: ${{ runner.temp }}/adopted-extra
 
       # Every file of every adopted artifact is what the candidate sealed.
       - name: Re-hash the adopted artifacts (adopted run)

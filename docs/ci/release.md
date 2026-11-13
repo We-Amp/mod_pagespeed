@@ -264,11 +264,13 @@ After `validate`, the `candidate-seal` job (hosted, no environment, no secret)
 lists the artifacts of its own run through the Actions API, which is the
 source of names, ids and digests (matrix jobs do not aggregate outputs). It
 keeps the artifacts on the allowlist of `tools/ci/release_adopt.py` (the
-`asset-*` files, `unsigned-windows`, `msi-old`, `stock-el8`,
-`testdata-oldpkgs-*` and `release-assets`), fails on a missing allowlisted
+`asset-*` files, `rehearsal-ea4-el9` and `rehearsal-ea4-el8`,
+`unsigned-windows`, `msi-old`, `stock-el8`, `testdata-oldpkgs-*` and
+`release-assets`), fails on a missing allowlisted
 name and on any name that is neither sealed nor on the not-sealed list (`tree`,
 `tree-sidecar`, the per-distro nginx legs, `debug-*`,
-`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`), downloads each
+`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`,
+`rehearsal-ea4-el10`), downloads each
 by id, checks the zip against the API digest and records the hash of every
 file. `candidate-seal.json` (schema 2: `candidate`, `dry_run`, `tag`,
 `version`, `build_sha`, the artifact list and the hash of `SHA256SUMS`, and
@@ -277,7 +279,16 @@ pinned optimizer release's `SHA256SUMS` as `optimizer_sums_sha256`, which
 `optimizer-fetch` outputs after it verified the file against the pin) is
 uploaded as `candidate-seal`. The job refuses to seal when the run's own
 title or commit disagree with the version job. A release candidate version
-has no cPanel packages, so those three are not required for it. In a candidate
+ships no cPanel package: in place of the three `asset-ea4-*` it must hold
+`rehearsal-ea4-el9` and `rehearsal-ea4-el8`, which its cPanel gates test and
+an adopting run copies for them (its `validate` downloads and re-hashes them);
+a final version holds no `rehearsal-ea4-*` and a pre-release no `asset-ea4-*`,
+and the seal refuses either. Transition: an `-rc.N` candidate run started
+before this rule reached `master` has no `rehearsal-ea4-*` and fails its seal
+(run a new candidate), and a pre-release tag on a commit from before it builds
+no `rehearsal-ea4-*`, so its cPanel gates fail at the package download (tag a
+newer commit).
+In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
 The artifacts API of a run spans all attempts, so a job that uploaded in an
@@ -443,7 +454,9 @@ passes no secret. The guards accept it only as a `schedule` or a
 exists, so the `version` job makes one up from the pinned optimizer release:
 `module-v<pinned version>-rehearsal.<run number>`. That is a pre-release
 (`1.19.0~rehearsal.7` in the packages), so it can never be taken for a
-release; the pin and version-pair checks warn as in a `-pre` dry run. The
+release; the pin and version-pair checks warn as in a `-pre` dry run. It
+builds the cPanel packages as `rehearsal-ea4-*` and runs both cPanel gates
+on them, at the rehearsal version even when the spec carries another. The
 `build_profile` is `rehearsal`, every job checks out the master commit, and
 no job of the `release` environment runs (each carries
 `rehearsal != 'true'` in its `if:`, enforced by
@@ -604,7 +617,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), its ProductVersion `MAJOR.MINOR.BUILD.<release.yml run number>` so a rebuild of the same version upgrades the installed one, and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
 | `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows`; in an adopting run first checks the installer against `msi-build`'s output, and its name carries the binding |
 | `gate-iis-msi-upgrade` | fleet-hyperv (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
-| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
+| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; a pre-release is tested like a release, with the `rehearsal-ea4-*` package |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
 | `package-smoke-deb`, `package-smoke-rpm` | fleet-heavy, pair | install, upgrade over a synthetic old version, version header, removal, in a Debian and a Rocky container |
 | `package-smoke-nginx` | fleet-heavy, pair | the from-source nginx smoke with the module tarball |
@@ -618,13 +631,15 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
-is not provisioned, and the cPanel gate skips on a pre-release (no package). So
+is not provisioned. So
 each gate workflow exposes an output `ran`, true only when the smoke actually
 executed. In a real run `validate` requires every gate to have succeeded and
-the installer gate and both cPanel gates (a release, not a pre-release) to have
+the installer gate and both cPanel gates (a pre-release tag included) to have
 reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
 real release needs the fleet enabled at that moment and the guests provisioned.
-A dry run accepts a skipped gate. A missing `ran` output counts as false.
+A dry run accepts a skipped gate and warns that it is unproven, but fails on
+a gate that succeeded without running its smoke while `FLEET_ENABLED` is
+`true` (a real run would fail on it). A missing `ran` output counts as false.
 
 Not done here on purpose: the publication of apt and yum repositories (the
 consumer pulls the release assets, see below), the signing of debs and rpms
@@ -786,7 +801,9 @@ required set (every package kind, suite and architecture above, the Windows inst
 named for the version, the sidecar pair and its debug files for both
 architectures and `sidecar-pair.json`, the optimizer pair, the source tarball, the SBOM and the
 VEX file; the cPanel packages of el9
-and el8 on a release, none on a pre-release).
+and el8 on a release, none on a pre-release; a pre-release builds them as
+`rehearsal-ea4-*` artifacts, outside the asset set, so the rehearsal exercises
+the cPanel build and gates).
 
 ## The asset contract
 
@@ -979,9 +996,13 @@ repository, which packs the pair into
 - A job that fails on a runner class is re-run alone with "Re-run failed
   jobs"; the `tree` artifact is kept for three days. After that, run the
   whole workflow again.
-- The cPanel jobs fail on a release when the stock rpm's name does not match
-  the spec: `%global mps_version` in `packaging/cpanel` must be bumped with the
-  module version.
+- The cPanel jobs fail, on a release and on a pre-release alike, when the stock
+  rpm's name does not match the spec (a pre-release's is `X.Y.Z~pre.N`): `%global mps_version` in `packaging/cpanel` must be bumped with the
+  module version. The weekly rehearsal is the exception: its version comes
+  from the optimizer pin and differs from the spec after a module-only
+  release, so the lane passes `--rehearsal` (from the version job's
+  `rehearsal` output) and the spec is built at the rehearsal version, with a
+  notice.
 
 ## The nginx.org rebuild lane
 
