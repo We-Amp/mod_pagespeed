@@ -37,6 +37,7 @@
 #include "pagespeed/kernel/html/html_lexer.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/html_page_limit.h"
 #include "pagespeed/kernel/html/html_writer_filter.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -2501,6 +2502,122 @@ TEST_F(HtmlParseTest, BufferEventsOnEventListener) {
     EXPECT_EQ(4, counter_that_stays_enabled.num_end_elements());
     EXPECT_EQ(2, counter_that_stays_enabled.num_char_elements());
   }
+}
+
+// Past the pass-through point the rest of a document is not parsed: it is
+// written exactly as it came in, as characters.
+class PassThroughCounter : public CountingCallbacksFilter {
+ public:
+  PassThroughCounter() : num_comments_(0) {}
+  int num_comments() const { return num_comments_; }
+
+ protected:
+  void StartDocument() override {
+    CountingCallbacksFilter::StartDocument();
+    num_comments_ = 0;
+  }
+  void Comment(HtmlCommentNode* comment) override { ++num_comments_; }
+
+ private:
+  int num_comments_;
+};
+
+class HtmlPassThroughTest : public HtmlParseTestNoBodyNoHtml {
+ protected:
+  HtmlPassThroughTest() { html_parse_.AddFilter(&counter_); }
+
+  // Parses input in pieces of at most piece bytes, flushing after each, with
+  // the rest passed through after limit bytes.
+  void ParseInPieces(StringPiece input, int64 limit, size_t piece) {
+    SetupWriter();
+    html_parse_.set_pass_through_after(limit);
+    html_parse_.StartParse("http://example.com/large.html");
+    for (size_t at = 0; at < input.size(); at += piece) {
+      html_parse_.ParseText(input.substr(at, piece));
+      html_parse_.Flush();
+    }
+    html_parse_.FinishParse();
+  }
+
+  PassThroughCounter counter_;
+};
+
+const char kPassThroughHead[] =
+    "<!doctype html><html><head><title>Notes</title>"
+    "<style>p { margin: 0 }</style></head><body><div><p class=first>One";
+const char kPassThroughTail[] =
+    "<p>Two<br><!-- note 3 --><pre>  four  </pre>"
+    "<script>if (a < b) { c(); }</script><p>Five</div></body></html>";
+
+TEST_F(HtmlPassThroughTest, NothingPastTheLimitIsParsed) {
+  const GoogleString head = kPassThroughHead;
+  const GoogleString input = StrCat(head, kPassThroughTail);
+  ParseInPieces(input, head.size(), input.size());
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_TRUE(html_parse_.passing_through());
+  // html, head, title, style, body, div and p: the tail adds no element,
+  // comment or end tag; the open elements are closed without output.
+  EXPECT_EQ(7, counter_.num_start_elements());
+  EXPECT_EQ(0, counter_.num_comments());
+}
+
+TEST_F(HtmlPassThroughTest, TheRestIsWrittenAsItCameWhereverTheLimitFalls) {
+  const GoogleString input = StrCat(kPassThroughHead, kPassThroughTail);
+  for (size_t limit = 0; limit <= input.size(); ++limit) {
+    for (size_t piece : {static_cast<size_t>(1), input.size()}) {
+      ParseInPieces(input, limit, piece);
+      EXPECT_EQ(input, output_buffer_)
+          << "limit " << limit << " piece " << piece;
+    }
+  }
+}
+
+TEST_F(HtmlPassThroughTest, TheLimitIsTakenBetweenTokens) {
+  const GoogleString head = kPassThroughHead;
+  const GoogleString input = StrCat(head, kPassThroughTail);
+  // In the middle of a tag: that element is still parsed, the next is not.
+  ParseInPieces(input, head.size() + 1, input.size());
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_EQ(8, counter_.num_start_elements());
+  // In the middle of a script: all of the script is parsed, nothing after it.
+  const size_t script = input.find("if (a");
+  ASSERT_NE(GoogleString::npos, script);
+  ParseInPieces(input, script, 3);
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_EQ(11, counter_.num_start_elements());
+  EXPECT_EQ(1, counter_.num_comments());
+}
+
+TEST_F(HtmlPassThroughTest, APageWithinTheLimitIsParsedWhole) {
+  const GoogleString input = StrCat(kPassThroughHead, kPassThroughTail);
+  ParseInPieces(input, input.size(), 5);
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_FALSE(html_parse_.passing_through());
+  EXPECT_EQ(12, counter_.num_start_elements());
+  EXPECT_EQ(1, counter_.num_comments());
+  // And at the page limit every port uses.
+  ParseInPieces(input, kHtmlPageLimitBytes, 5);
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_FALSE(html_parse_.passing_through());
+  EXPECT_EQ(12, counter_.num_start_elements());
+}
+
+TEST_F(HtmlPassThroughTest, CommentsPastTheLimitAreNotNodes) {
+  // A long run of comments costs a node each while it is parsed; past the
+  // limit it costs one piece of text per call, however many comments.
+  GoogleString input = "<html><body>";
+  for (int i = 0; i < 5000; ++i) {
+    StrAppend(&input, "<!-- note ", IntegerToString(i), " -->");
+  }
+  StrAppend(&input, "</body></html>");
+  const size_t limit = 1000;
+  const size_t piece = 100;
+  ParseInPieces(input, limit, piece);
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_GT(counter_.num_comments(), 10);
+  EXPECT_LT(counter_.num_comments(), 100);
+  EXPECT_LE(counter_.num_char_elements(),
+            static_cast<int>((input.size() - limit) / piece + 2));
 }
 
 // Checks that deleting nodes does not change the expected order of

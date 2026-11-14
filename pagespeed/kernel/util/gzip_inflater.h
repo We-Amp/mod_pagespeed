@@ -24,6 +24,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/html/html_page_limit.h"
 
 using z_stream = struct z_stream_s;
 
@@ -37,7 +38,7 @@ class GzipInflater {
 
   // The most that a compressed HTML response may inflate to on every port. A
   // response past it is cut off at that point, like a corrupt one.
-  static constexpr int64 kMaxInflatedHtmlBytes = 64 << 20;
+  static constexpr int64 kMaxInflatedHtmlBytes = kHtmlPageLimitBytes;
 
   explicit GzipInflater(InflateType type);
   ~GzipInflater();

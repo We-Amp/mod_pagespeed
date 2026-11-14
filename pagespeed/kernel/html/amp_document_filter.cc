@@ -99,6 +99,9 @@ void AmpDocumentFilter::Characters(HtmlCharactersNode* characters) {
     if (!contents.empty()) {
       discovered_->Run(false);
       is_known_ = true;
+    } else {
+      // Whitespace decides nothing either, so it counts toward the wait.
+      NoteUndecidedEvent(characters->contents().size());
     }
   }
 }

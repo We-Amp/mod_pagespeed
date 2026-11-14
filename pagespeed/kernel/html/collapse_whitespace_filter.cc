@@ -31,9 +31,9 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/html_parse.h"
 
 namespace net_instaweb {
-class HtmlParse;
 
 namespace {
 
@@ -65,7 +65,8 @@ bool IsSensitiveElement(const HtmlElement* element) {
 
 }  // namespace
 
-CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse) {
+CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse)
+    : html_parse_(html_parse) {
   for (size_t i = 1; i < std::size(kSensitiveTags); ++i) {
     DCHECK(kSensitiveTags[i - 1] < kSensitiveTags[i]);
   }
@@ -90,7 +91,8 @@ void CollapseWhitespaceFilter::EndElement(HtmlElement* element) {
 }
 
 void CollapseWhitespaceFilter::Characters(HtmlCharactersNode* characters) {
-  if (sensitive_stack_.empty()) {
+  // Text passed through unparsed can hold any markup, pre included.
+  if (sensitive_stack_.empty() && !html_parse_->passing_through()) {
     // Mutate the contents-string in-place for speed.
     GoogleString* contents = characters->mutable_contents();
     // It is safe to directly mutate the bytes in the string because

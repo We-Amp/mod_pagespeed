@@ -36,6 +36,7 @@
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/html_page_limit.h"
 #include "pagespeed/kernel/html/html_parse.h"
 
 namespace net_instaweb {
@@ -307,7 +308,9 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
       content_type_(kContentTypeXml),  // Not HTML until StartParse().
       size_limit_exceeded_(false),
       skip_parsing_(false),
-      size_limit_(-1) {
+      size_limit_(-1),
+      passing_through_(false),
+      pass_through_after_(kHtmlPageLimitBytes) {
 #ifndef NDEBUG
   CHECK_KEYWORD_SET_ORDERING(kImplicitlyClosedHtmlTags);
   CHECK_KEYWORD_SET_ORDERING(kNonBriefTerminatedTags);
@@ -816,6 +819,11 @@ void HtmlLexer::EvalScriptTag(char c) {
   }
 }
 
+void HtmlLexer::PassThrough(const char* text, int size) {
+  literal_.append(text, size);
+  EmitLiteral();
+}
+
 // Emits raw uninterpreted characters.
 void HtmlLexer::EmitLiteral() {
   if (!literal_.empty()) {
@@ -1005,6 +1013,7 @@ void HtmlLexer::StartParse(const StringPiece& id,
   size_limit_exceeded_ = false;
   skip_parsing_ = false;
   num_bytes_parsed_ = 0;
+  passing_through_ = false;
   script_escape_state_ = HtmlCommentEscapeState::kNone;
   discard_until_start_state_for_error_recovery_ = false;
   // clear buffers
@@ -1253,6 +1262,13 @@ void HtmlLexer::EmitDirective() {
 }
 
 void HtmlLexer::Parse(const char* text, int size) {
+  if (passing_through_) {
+    if (size > 0) {
+      PassThrough(text, size);
+    }
+    return;
+  }
+  const int64 parsed_before = num_bytes_parsed_;
   num_bytes_parsed_ += size;
   if (size_limit_ > 0 && num_bytes_parsed_ > size_limit_) {
     size_limit_exceeded_ = true;
@@ -1261,6 +1277,21 @@ void HtmlLexer::Parse(const char* text, int size) {
   for (int i = 0; i < size; ++i) {
     if (skip_parsing_) {
       // Return without doing anything if skip_parsing_ is true.
+      return;
+    }
+
+    // Past pass_through_after_ the rest of the document is not parsed. It
+    // switches over between tokens, outside any literal element, where all
+    // that is pending is text, so every byte from here on is written exactly
+    // as it came in. The elements still open stay open, and are closed at the
+    // end without writing anything.
+    if (pass_through_after_ >= 0 && parsed_before + i >= pass_through_after_ &&
+        state_ == START) {
+      passing_through_ = true;
+      html_parse_->Warning(id_.c_str(), line_,
+                           "HTML past %lld bytes is served unoptimized",
+                           static_cast<long long>(pass_through_after_));
+      PassThrough(text + i, size - i);
       return;
     }
     char c = text[i];

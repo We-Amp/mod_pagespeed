@@ -1,0 +1,1 @@
+- Very large HTML pages are optimized up to a size limit and served unchanged past it, which reduces the memory a single large page takes. Affected: 2.8.2 and earlier. Update recommended.

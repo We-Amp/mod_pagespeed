@@ -53,6 +53,7 @@ class CollapseWhitespaceFilter : public EmptyHtmlFilter {
   const char* Name() const override { return "CollapseWhitespace"; }
 
  private:
+  HtmlParse* html_parse_;
   // Open elements whose whitespace is kept, innermost last.
   std::vector<const HtmlElement*> sensitive_stack_;
 

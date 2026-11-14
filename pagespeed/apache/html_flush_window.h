@@ -39,6 +39,15 @@ bool FlushWouldRelease(const Driver& driver) {
   return !driver.EventsAreHeldBack();
 }
 
+// Whether the rewritten output held for the client is sent on now, rather than
+// at the next flush from the origin or at the end of the response. Output is
+// only held once a window has been flushed (or when the body is not HTML), so
+// a page of at most one window still goes out whole at the end, and a larger
+// one goes out as its windows are done instead of being held to the end.
+inline bool HeldOutputIsSentOn(size_t held_bytes) {
+  return held_bytes >= kHtmlFlushWindowBytes;
+}
+
 // Cuts the bytes handed to the parser into windows and flushes between them.
 //
 // The input of one call can be any size (a single bucket can hold a whole

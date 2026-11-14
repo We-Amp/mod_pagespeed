@@ -450,6 +450,48 @@ TEST(InstawebContextSourcePinTest, AFlushWritesThePopulatedHeaders) {
       << "a flush with no output returns before the headers are written";
 }
 
+TEST(HtmlHeldOutputTest, OutputIsSentOnOnceItIsAWindow) {
+  // A page of at most one window is never flushed, so it holds no output
+  // until its end and goes out whole, as before.
+  EXPECT_FALSE(HeldOutputIsSentOn(0));
+  EXPECT_FALSE(HeldOutputIsSentOn(kHtmlFlushWindowBytes - 1));
+  EXPECT_TRUE(HeldOutputIsSentOn(kHtmlFlushWindowBytes));
+  EXPECT_TRUE(HeldOutputIsSentOn(64 * kHtmlFlushWindowBytes));
+}
+
+TEST(InstawebContextSourcePinTest, HeldOutputIsPassedOnBeforeTheEnd) {
+  // Output held past a window goes downstream while the body is still being
+  // read, and an error from the next filter stops the loop as at a flush.
+  // This needs a live httpd request to execute, so it is pinned by reading
+  // the source.
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  GoogleString source;
+  const GoogleString path =
+      StrCat(GTestSrcDir(), "/pagespeed/apache/mod_instaweb.cc");
+  ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  const size_t rewrite = source.find("if (operation == REWRITE) {");
+  ASSERT_NE(GoogleString::npos, rewrite);
+  const size_t rewrite_end =
+      source.find("} else if (operation == FLUSH)", rewrite);
+  ASSERT_NE(GoogleString::npos, rewrite_end);
+  EXPECT_NE(
+      GoogleString::npos,
+      source.substr(rewrite, rewrite_end - rewrite).find("HeldOutputIsSentOn("))
+      << "held output is no longer sent on before the end";
+  const size_t data = source.find("REWRITE, buf, bytes);");
+  ASSERT_NE(GoogleString::npos, data);
+  const size_t data_end =
+      source.find("} else if (APR_BUCKET_IS_EOS(bucket))", data);
+  ASSERT_NE(GoogleString::npos, data_end);
+  const GoogleString branch = source.substr(data, data_end - data);
+  const size_t pass = branch.find("ap_pass_brigade(filter->next");
+  EXPECT_NE(GoogleString::npos, pass)
+      << "the output of a data bucket is no longer passed on";
+  EXPECT_NE(GoogleString::npos, branch.find("return false;", pass))
+      << "an error passing it on no longer stops the loop";
+}
+
 TEST(InstawebContextSourcePinTest, TheLookupClassifiesFromTheRequestHeaders) {
   // The helper above is only worth something if the lookup calls it.  That
   // call site needs a live httpd request to execute, so it is pinned by
