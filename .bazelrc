@@ -381,6 +381,10 @@ build:ci-build --per_file_copt=//pagespeed/.*,//net/.*,//test/.*,//base/.*,//thi
 # Third-party code is not ours to fix; keep first-party diagnostics
 # unchanged (same boundary the macOS build uses).
 build:ci-build --per_file_copt=external/.*@-w
+# Protoc-generated sources are not hand-authored; keep them out of the
+# enforcement (warnings there are protobuf/protoc territory, and e.g.
+# -Winvalidoffsetof in generated .pb.cc fails builds on some platforms).
+build:ci-build --per_file_copt=.*\.pb\.cc@-w
 
 build:ci-asan --config=clang-asan
 build:ci-asan --action_env=CC=clang --action_env=CXX=clang++
