@@ -207,6 +207,8 @@ void ResponseHeaders::Clear() {
 
   HttpResponseHeaders* proto = mutable_proto();
   proto->set_browser_cacheable(false);  // accurate iff !cache_fields_dirty_
+  proto->set_proxy_cacheable(false);
+  proto->clear_cache_ttl_ms();
   proto->set_requires_proxy_revalidation(false);
   proto->set_requires_browser_revalidation(false);
   proto->clear_expiration_time_ms();
