@@ -63,6 +63,7 @@ stage_install_debian() {
   chmod 755 "${STAGEDIR}/DEBIAN/postrm"
   install -m 644 "${BUILDDIR}/install/debian/conffiles" \
     "${STAGEDIR}/DEBIAN/conffiles"
+  stage_doctor
   process_template "${BUILDDIR}/install/common/pagespeed.load.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"

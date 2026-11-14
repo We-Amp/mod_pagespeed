@@ -539,6 +539,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash pagespeed/system/console/check-no-drift.sh
 
+      # pagespeed-doctor carries copies of the option names, the removed and
+      # deprecated options and the deprecated filters; they must match the
+      # C++ source.
+      - name: pagespeed-doctor tables are in sync with the source
+        if: ${{ !cancelled() }}
+        run: python3 -I test/doctor/doctor_tables.py --check
+
       # Security gates: SBOM drift (the committed SPDX must match what
       # MODULE.bazel.lock, bazel/repositories.bzl and the bundled console
       # dependencies produce today), module version drift, notices drift, OpenVEX format, and a grype scan of the
