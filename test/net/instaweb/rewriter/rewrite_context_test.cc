@@ -48,8 +48,10 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/simple_text_filter.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
+#include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -57,6 +59,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -3548,6 +3551,100 @@ TEST_F(RewriteContextTest, LoadSheddingTest) {
 
   STLDeleteElements(&outputs);
   STLDeleteElements(&fetchers);
+
+  rewrite_driver()->WaitForShutDown();
+}
+
+// A fetch that signals a condition variable when done, so the test can wait
+// for it with a bound instead of hanging if it never completes.
+class SignalingStringAsyncFetch : public StringAsyncFetch {
+ public:
+  SignalingStringAsyncFetch(const RequestContextPtr& ctx, GoogleString* out,
+                            ThreadSystem* thread_system)
+      : StringAsyncFetch(ctx, out),
+        mutex_(thread_system->NewMutex()),
+        cond_(mutex_->NewCondvar()),
+        signaled_(false) {}
+
+  void HandleDone(bool success) override {
+    StringAsyncFetch::HandleDone(success);
+    ScopedMutex lock(mutex_.get());
+    signaled_ = true;
+    cond_->Signal();
+  }
+
+  // Returns true if the fetch completed within roughly timeout_ms of
+  // wall-clock time.
+  bool WaitForDone(int64 timeout_ms) {
+    const int64 kStepMs = 50;
+    ScopedMutex lock(mutex_.get());
+    for (int64 waited_ms = 0; !signaled_ && waited_ms < timeout_ms;
+         waited_ms += kStepMs) {
+      cond_->TimedWait(kStepMs);
+    }
+    return signaled_;
+  }
+
+ private:
+  std::unique_ptr<AbstractMutex> mutex_;
+  std::unique_ptr<ThreadSystem::Condvar> cond_;
+  bool signaled_;
+};
+
+// A fetch of an on-the-fly (cache-extended) resource must not queue behind
+// expensive work on the low-priority pool: unlike rewritten resources, it
+// has no deadline fallback that would bound the wait.
+TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
+  server_context()->low_priority_rewrite_workers()->SetLoadSheddingThreshold(
+      1);
+
+  InitResources();
+
+  // Wedge the only low-priority worker with the combining filter.
+  InitCombiningFilter(0);
+  combining_filter_->set_prefix("|");
+  WorkerTestBase::SyncPoint rewrite_reached(server_context()->thread_system());
+  WorkerTestBase::SyncPoint resume_rewrite(server_context()->thread_system());
+  combining_filter_->set_rewrite_signal_on(&rewrite_reached);
+  combining_filter_->set_rewrite_block_on(&resume_rewrite);
+
+  GoogleString combined_url =
+      Encode(kTestDomain, CombiningFilter::kFilterId, "0", "a.css", "css");
+  GoogleString out_combine;
+  StringAsyncFetch combine_fetch(CreateRequestContext(), &out_combine);
+  rewrite_driver()->FetchResource(combined_url, &combine_fetch);
+  rewrite_reached.Wait();
+
+  // Fetch a cache-extended resource on a separate driver while the
+  // low-priority worker is still blocked.
+  GoogleString out_ce;
+  RequestContextPtr ctx =
+      RequestContext::NewTestRequestContext(server_context()->thread_system());
+  SignalingStringAsyncFetch ce_fetch(ctx, &out_ce,
+                                     server_context()->thread_system());
+  RewriteDriver* ce_driver = server_context()->NewRewriteDriver(ctx);
+  ce_driver->FetchResource(
+      Encode(kTestDomain, RewriteOptions::kCacheExtenderId, "0", "a.css",
+             "css"),
+      &ce_fetch);
+
+  bool done_while_wedged = ce_fetch.WaitForDone(10 * Timer::kSecondMs);
+
+  // Release the wedged worker either way so that a failure does not hang.
+  resume_rewrite.Notify();
+  ce_driver->WaitForCompletion();
+  ce_driver->Cleanup();
+
+  EXPECT_TRUE(done_while_wedged)
+      << "cache-extended fetch waited for the low-priority worker";
+  EXPECT_TRUE(ce_fetch.success());
+  EXPECT_EQ(" a ", out_ce);
+  EXPECT_FALSE(ce_fetch.response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(0, server_context()
+                   ->rewrite_stats()
+                   ->num_rewrites_dropped()
+                   ->Get(TimedVariable::START));
 
   rewrite_driver()->WaitForShutDown();
 }

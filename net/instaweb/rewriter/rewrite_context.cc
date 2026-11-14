@@ -2847,7 +2847,13 @@ void RewriteContext::StartRewriteForFetch() {
     // set OptimizationOnly() to false).
     InvokeRewriteFunction* call_rewrite =
         new InvokeRewriteFunction(this, 0, output);
-    if (CanFetchFallbackToOriginal(kFallbackDiscretional)) {
+    // On-the-fly resources (such as cache-extended ones) are cheap to
+    // reconstruct, and FetchContext::SetupDeadlineAlarm() never arms a
+    // deadline fallback for them. On the low-priority queue such a fetch
+    // would have nothing to bound its wait behind expensive work (image
+    // optimization), so it runs on the normal rewrite sequence instead.
+    if (kind() != kOnTheFlyResource &&
+        CanFetchFallbackToOriginal(kFallbackDiscretional)) {
       // To avoid rewrites from delaying fetches, we try to fallback to the
       // original version if rewriting takes too long.
       fetch_->SetupDeadlineAlarm();
