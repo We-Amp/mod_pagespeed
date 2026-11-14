@@ -239,3 +239,7 @@ build:ci-linux-arm64 --nostamp
 # the selected tree exists, and clang ignores nonexistent include dirs.
 build:ci-linux-arm64 --copt="-Ithird_party/aprutil/gen/arch/linux/arm64/include/"
 build:ci-linux-arm64 --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"
+# First-party warnings fail this leg, mirroring the x64 full-tier build's
+# ci-build lines; the generated-code exclusion is in the same block.
+build:ci-linux-arm64 --per_file_copt=//pagespeed/.*,//net/.*,//test/.*,//base/.*,//third_party/.*,//tools/.*@-Werror,-ferror-limit=0
+build:ci-linux-arm64 --per_file_copt=external/.*@-w
