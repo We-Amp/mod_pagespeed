@@ -176,7 +176,7 @@ void ApacheServerContext::CollapseConfigOverlaysAndComputeSignatures() {
 }
 
 bool ApacheServerContext::PoolDestroyed() {
-  DCHECK_EQ(num_active_rewrite_drivers(), 0);
+  DCHECK_EQ(num_active_rewrite_drivers(), 0u);
   return apache_factory_->PoolDestroyed(this);
 }
 

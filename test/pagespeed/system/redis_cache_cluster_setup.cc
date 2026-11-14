@@ -80,7 +80,7 @@ StringVector GetNodeConfig(TcpConnectionForTesting* conn) {
   for (StringPiece line : lines) {
     StringPieceVector fields;
     SplitStringPieceToVector(line, " ", &fields, true /* omit_empty_strings */);
-    CHECK_GE(fields.size(), 8);
+    CHECK_GE(fields.size(), 8u);
     GoogleString node_descr;
     // See http://redis.io/commands/cluster-nodes. We take three fields
     // from node description (node id, ip:port, master/slave) plus
@@ -99,7 +99,7 @@ void ResetConfiguration(StringVector* node_ids, std::vector<int>* ports,
                         ConnectionList* connections) {
   // TODO(cheesy): These should be collapsed onto a single vector of
   // struct { conn, port, node_id }.
-  CHECK_EQ(6, connections->size());
+  CHECK_EQ(6u, connections->size());
   CHECK_EQ(connections->size(), ports->size());
   CHECK_EQ(connections->size(), node_ids->size());
 
@@ -241,7 +241,7 @@ bool LoadConfiguration(StringVector* node_ids, std::vector<int>* ports,
   CHECK_EQ(port_strs.size(), id_strs.size()) << "REDIS_CLUSTER_PORTS and "
                                                 "REDIS_CLUSTER_IDS have "
                                                 "different amount of items";
-  CHECK_EQ(port_strs.size(), 6) << "Six Redis Cluster nodes are expected";
+  CHECK_EQ(port_strs.size(), 6u) << "Six Redis Cluster nodes are expected";
 
   for (auto port_str : port_strs) {
     int port;
