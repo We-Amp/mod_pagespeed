@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -50,6 +51,7 @@
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/sequence.h"
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
@@ -1696,6 +1698,168 @@ TEST_F(CacheUrlAsyncFetcherTest, CacheVaryForNonHtml) {
                                   request_headers_with_cookies);
 
   lru_cache_.Clear();
+}
+
+// gzip is the only content coding the cache can undo for a client that did
+// not ask for it, so a response in any other coding is not stored.
+TEST_F(CacheUrlAsyncFetcherTest, ResponseInNonGzipContentCodingIsNotCached) {
+  mutable_vary_headers_.Add(HttpAttributes::kVary, "Accept-Encoding");
+  for (const char* coding :
+       {"br", "zstd", "deflate", "br, gzip", "gzip, gzip"}) {
+    mutable_vary_headers_.Replace(HttpAttributes::kContentEncoding, coding);
+    mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+    ExpectNoCache(vary_url_, vary_body_);
+    lru_cache_.Clear();
+  }
+  // A response without a real coding is still stored.
+  mutable_vary_headers_.Replace(HttpAttributes::kContentEncoding, "identity");
+  mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+  ExpectCache(vary_url_, vary_body_);
+  lru_cache_.Clear();
+}
+
+// A gzip response is stored once and adapted to each client on a hit:
+// served as stored to a client that accepts gzip, inflated for one that
+// does not.
+TEST_F(CacheUrlAsyncFetcherTest, SingleGzipResponseIsCachedAndAdapted) {
+  const GoogleString url = "http://www.example.com/gzipped.css";
+  const char kStyles[] = ".a { color: red; } .b { color: blue; }";
+  GoogleString gzipped;
+  StringWriter writer(&gzipped);
+  ASSERT_TRUE(GzipInflater::Deflate(kStyles, GzipInflater::kGzip, &writer));
+  ResponseHeaders gzip_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &gzip_headers);
+  gzip_headers.Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  gzip_headers.ComputeCaching();
+  mock_fetcher_.SetResponse(url, gzip_headers, gzipped);
+  // Keep gzip in the cache rather than inflating it on the way in.
+  http_cache_->SetCompressionLevel(9);
+
+  struct Expectation {
+    bool accepts_gzip;
+    int origin_fetches;
+    const char* content_encoding;
+    StringPiece body;
+  };
+  const Expectation kSteps[] = {
+      {true, 1, HttpAttributes::kGzip, gzipped},  // Miss: filled from origin.
+      {true, 0, HttpAttributes::kGzip, gzipped},  // Hit, as stored.
+      {false, 0, nullptr, kStyles},               // Hit, inflated.
+  };
+  for (const Expectation& step : kSteps) {
+    ClearStats();
+    RequestContextPtr context(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    context->SetAcceptsGzip(step.accepts_gzip);
+    StringAsyncFetch fetch(context);
+    if (step.accepts_gzip) {
+      fetch.request_headers()->Add(HttpAttributes::kAcceptEncoding,
+                                   HttpAttributes::kGzip);
+    }
+    cache_fetcher_->Fetch(url, &handler_, &fetch);
+    ASSERT_TRUE(fetch.done());
+    EXPECT_TRUE(fetch.success());
+    EXPECT_EQ(step.origin_fetches, counting_fetcher_.fetch_count());
+    EXPECT_STREQ(step.content_encoding, fetch.response_headers()->Lookup1(
+                                            HttpAttributes::kContentEncoding));
+    EXPECT_EQ(step.body, fetch.buffer());
+  }
+}
+
+// A cache-filling fetch asks the origin for gzip or for no content coding.
+TEST_F(CacheUrlAsyncFetcherTest, CacheFillingFetchAsksOriginForGzipOrNothing) {
+  const struct {
+    const char* client_offers;
+    const char* origin_receives;
+  } kCases[] = {
+      {"gzip, deflate, br", "gzip"},
+      {"br;q=1.0, gzip", "gzip"},
+      {"br, zstd", ""},
+      {"deflate", ""},
+      {"", ""},
+  };
+  for (const auto& c : kCases) {
+    lru_cache_.Clear();
+    ClearStats();
+    StringAsyncFetch fetch(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    if (*c.client_offers != '\0') {
+      fetch.request_headers()->Add(HttpAttributes::kAcceptEncoding,
+                                   c.client_offers);
+    }
+    cache_fetcher_->Fetch(cache_css_url_, &handler_, &fetch);
+    ASSERT_TRUE(fetch.done()) << c.client_offers;
+    EXPECT_EQ(1, counting_fetcher_.fetch_count()) << c.client_offers;
+    EXPECT_EQ(c.origin_receives, mock_fetcher_.last_accept_encoding())
+        << c.client_offers;
+  }
+}
+
+// The background freshen of an entry about to expire carries the client's
+// request headers too, and is held to the same rule.
+TEST_F(CacheUrlAsyncFetcherTest, BackgroundFreshenAsksOriginForGzipOrNothing) {
+  ClearStats();
+  FetchAndValidate(cache_url_, empty_request_headers_, true, HttpStatus::kOK,
+                   cache_body_, kBackendFetch, true);
+  cache_fetcher_->set_proactively_freshen_user_facing_request(true);
+  timer_.AdvanceMs(ttl_ms_ - 3 * Timer::kMinuteMs);
+
+  ClearStats();
+  RequestHeaders client_headers;
+  client_headers.Add(HttpAttributes::kAcceptEncoding, "zstd, gzip, br");
+  FetchAndValidate(cache_url_, client_headers, true, HttpStatus::kOK,
+                   cache_body_, kBackendFetch, true);
+  // Served from the cache; the only origin request is the freshen.
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
+  EXPECT_EQ("gzip", mock_fetcher_.last_accept_encoding());
+}
+
+// A stored copy in a coding the cache cannot adapt, as written before the
+// cache refused to store one, is never served: neither as a hit nor as the
+// stale fallback when the origin fails.  It is fetched again instead.
+TEST_F(CacheUrlAsyncFetcherTest, StoredCopyInOtherCodingIsFetchedAgain) {
+  const char kStoredCopy[] = "stored copy in another coding";
+  ResponseHeaders coded_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &coded_headers);
+  coded_headers.Add(HttpAttributes::kVary, HttpAttributes::kAcceptEncoding);
+  coded_headers.Add(HttpAttributes::kContentEncoding, "br");
+  coded_headers.ComputeCaching();
+  RequestHeaders::Properties no_properties;
+  http_cache_->Put(cache_css_url_, fragment_, no_properties,
+                   ResponseHeaders::kRespectVaryOnResources, &coded_headers,
+                   kStoredCopy, &handler_);
+
+  ClearStats();
+  StringAsyncFetch fresh_fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  cache_fetcher_->Fetch(cache_css_url_, &handler_, &fresh_fetch);
+  ASSERT_TRUE(fresh_fetch.done());
+  EXPECT_TRUE(fresh_fetch.success());
+  EXPECT_EQ(cache_body_, fresh_fetch.buffer());
+  EXPECT_FALSE(
+      fresh_fetch.response_headers()->Has(HttpAttributes::kContentEncoding));
+  EXPECT_EQ(0, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+
+  // Stale: with the origin failing, the stale copy must not be the fallback.
+  lru_cache_.Clear();
+  http_cache_->Put(cache_css_url_, fragment_, no_properties,
+                   ResponseHeaders::kRespectVaryOnResources, &coded_headers,
+                   kStoredCopy, &handler_);
+  timer_.AdvanceMs(200 * Timer::kSecondMs);
+  mock_fetcher_.Disable();
+  ClearStats();
+  StringAsyncFetch stale_fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  cache_fetcher_->Fetch(cache_css_url_, &handler_, &stale_fetch);
+  ASSERT_TRUE(stale_fetch.done());
+  EXPECT_FALSE(stale_fetch.success());
+  EXPECT_EQ(StringPiece::npos,
+            StringPiece(stale_fetch.buffer()).find(kStoredCopy));
+  EXPECT_EQ(0, cache_fetcher_->fallback_responses_served()->Get());
+  mock_fetcher_.Enable();
 }
 
 TEST_F(CacheUrlAsyncFetcherTest, CacheVaryForHtml) {

@@ -1,0 +1,1 @@
+- **Resources proxied through MapProxyDomain are fetched from the mapped host with gzip or no compression.** A visitor whose browser also offers brotli or zstd receives the resource gzipped, or uncompressed when gzip is not offered; a mapped host that answers in another compression anyway is passed through to that visitor and not cached or optimized.

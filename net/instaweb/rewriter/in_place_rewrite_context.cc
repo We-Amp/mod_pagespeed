@@ -328,6 +328,14 @@ bool RecordingFetch::CanInPlaceRewrite() {
     return false;
   }
 
+  // The rewriters can only see through gzip, and their output is served
+  // without the input's Content-Encoding.
+  if (response_headers()->HasContentCodingOtherThanSingleGzip()) {
+    VLOG(2) << "CanInPlaceRewrite false. Unsupported Content-Encoding. Url: "
+            << resource_->url();
+    return false;
+  }
+
   // Note that this only checks the length, not the caching headers; the
   // latter are checked in IsProxyCacheable.
   if (!cache_value_writer_.CheckCanCacheElseClear(response_headers())) {
