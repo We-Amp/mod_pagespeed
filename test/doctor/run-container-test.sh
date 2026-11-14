@@ -18,10 +18,11 @@
 set -euo pipefail
 IMAGE="${1:-ubuntu:24.04}"
 NAME="${NAME:-fwn-doctor-nginx}"
+ANAME="${ANAME:-fwn-doctor-apache}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-docker rm -f "$NAME" >/dev/null 2>&1 || true
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+docker rm -f "$NAME" "$ANAME" >/dev/null 2>&1 || true
+trap 'docker rm -f "$NAME" "$ANAME" >/dev/null 2>&1 || true' EXIT
 
 # CAP_SYS_ADMIN (and no AppArmor profile) lets the doctor shield the cache
 # with a private mount namespace during the config test; the direct path is
@@ -29,7 +30,8 @@ trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
 docker run --rm -d --name "$NAME" --memory 1g --cap-add SYS_ADMIN \
   --security-opt apparmor=unconfined -v "$ROOT:/src:ro" "$IMAGE" sleep 3600 >/dev/null
 
-docker exec -i "$NAME" bash -s <<'INNER'
+rc_nginx=0
+docker exec -i "$NAME" bash -s <<'INNER' || rc_nginx=$?
 set -u
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
@@ -240,6 +242,54 @@ check "not_writable: fix command quotes the path" "[ \"\$ARGS\" = \"\$(printf '2
 check "not_writable: nothing ran from the path" "[ ! -e /tmp/pwned ]"
 chown -R www-data: "$MAL"
 
+# --- module loaded, no pagespeed configuration: packaged defaults shielded --
+mkdir -p /tmp/held && mv /etc/nginx/conf.d/pagespeed.conf /etc/nginx/conf.d/psc-servers.conf /tmp/held/
+rm -rf /var/cache/ngx_pagespeed.held; mv /var/cache/ngx_pagespeed /var/cache/ngx_pagespeed.held
+run loaded_unconfigured '0|1|2'
+check "loaded_unconfigured: D03 ran shielded and passed" \
+  "[ \"\$(code_of D03)\" = 'pass null' ] && [ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+check "loaded_unconfigured: the would-be default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
+
+# --- pagespeed configured without any FileCachePath: fail closed ------------
+echo "pagespeed on;" > /etc/nginx/conf.d/pagespeed.conf
+run no_cache_path '0|1|2'
+check "no_cache_path: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "no_cache_path: reason names the missing FileCachePath" \
+  "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q 'no FileCachePath'"
+run no_cache_path_allowed '0|1|2' --allow-cache-writes
+check "no_cache_path --allow-cache-writes: the test runs, defaults shielded" \
+  "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ] && [ \"\$(code_of D03 | cut -d' ' -f1)\" != skip ]"
+check "no_cache_path: the would-be default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
+rm -f /etc/nginx/conf.d/pagespeed.conf
+
+# --- module not loaded at all: the only unshielded run ---------------------
+mv /etc/nginx/modules-enabled/50-mod-pagespeed.conf /tmp/held/
+run module_absent 2
+check "module_absent: config test ran unshielded (module not loaded)" \
+  "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = module_not_loaded ]"
+check "module_absent: D02 module_not_loaded" "[ \"\$(code_of D02)\" = 'fail module_not_loaded' ]"
+mv /tmp/held/50-mod-pagespeed.conf /etc/nginx/modules-enabled/
+mv /tmp/held/pagespeed.conf /tmp/held/psc-servers.conf /etc/nginx/conf.d/
+mv /var/cache/ngx_pagespeed.held /var/cache/ngx_pagespeed
+
+# --- --config (nginx -c), relative includes, caches that do not exist yet ----
+rm -rf /etc/nginx-alt && cp -a /etc/nginx /etc/nginx-alt && mkdir -p /etc/nginx-alt/alt.d
+sed -i 's|include /etc/nginx/conf.d/\*.conf;|include alt.d/*.conf;|' /etc/nginx-alt/nginx.conf
+cat > /etc/nginx-alt/alt.d/ps.conf <<'CONF'
+pagespeed on;
+pagespeed FileCachePath /srv/psc/altcache;
+server { listen 8090; root /var/www/html; pagespeed FileCachePath /srv/newtop/cache; }
+CONF
+rm -rf /srv/psc/altcache /srv/newtop
+run alt_config '1|2' --config /etc/nginx-alt/nginx.conf
+check "alt_config: D03 passed, shielded" \
+  "[ \"\$(code_of D03)\" = 'pass null' ] && [ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+check "alt_config: D11 saw the cache paths of the -c configuration" \
+  "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D11\") | .evidence[].path' | grep -qx /srv/psc/altcache"
+check "alt_config: shield verified against nginx -T" "[ \"\$(echo \"\$OUT\" | jq -r .config.shield_verified)\" = true ]"
+check "would-be caches (also under /srv) were not created on disk" "[ ! -e /srv/psc/altcache ] && [ ! -e /srv/newtop ]"
+rm -rf /etc/nginx-alt
+
 # --- server down ----------------------------------------------------------
 nginx -s stop; sleep 1
 run server_down 2
@@ -274,3 +324,78 @@ echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
 INNER
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+# ===========================================================================
+# Apache: ServerRoot, a directory include with a subdirectory, ${VAR}, and
+# the shield checked against DUMP_INCLUDES.
+docker run --rm -d --name "$ANAME" --memory 1g --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined -v "$ROOT:/src:ro" "$IMAGE" sleep 3600 >/dev/null
+rc_apache=0
+docker exec -i "$ANAME" bash -s <<'INNER' || rc_apache=$?
+set -u
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null
+apt-get install -y -qq --no-install-recommends curl ca-certificates jq \
+  >/dev/null 2>&1 || { echo "FAIL: apt prerequisites"; exit 1; }
+curl -fsSL https://packages.modpagespeed.com/install.sh | sh >/dev/null 2>&1 \
+  || { echo "FAIL: repository setup"; exit 1; }
+apt-get install -y -qq mod-pagespeed >/dev/null 2>&1 \
+  || { echo "FAIL: install mod-pagespeed"; exit 1; }
+echo "installed: $(dpkg-query -W -f='${Package} ${Version}' mod-pagespeed), apache2 $(dpkg-query -W -f='${Version}' apache2)"
+install -m 755 /src/install/common/pagespeed-doctor /usr/local/sbin/pagespeed-doctor
+D=/usr/local/sbin/pagespeed-doctor
+fail=0
+check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
+run() {
+  local name="$1"; shift
+  OUT=$("$D" --json "$@" 2>/dev/null); rc=$?
+  echo "== $name: exit $rc, verdict $(echo "$OUT" | jq -r .verdict 2>/dev/null)"
+  "$D" "$@" 2>&1 | sed 's/^/    /'
+  check "$name: one valid JSON document" "echo \"\$OUT\" | jq -e '.schema == \"pagespeed-doctor/1\"' >/dev/null"
+}
+code_of() { echo "$OUT" | jq -r --arg id "$1" '.checks[] | select(.id == $id) | "\(.status) \(.code)"'; }
+d11_has() { echo "$OUT" | jq -r '.checks[] | select(.id=="D11") | .evidence[].path' | grep -qxF -- "$1"; }
+mkdir -p /srv/psc
+apache2ctl start >/dev/null 2>&1; sleep 2
+find /var/cache/mod_pagespeed -user 0 -exec chown www-data: {} + 2>/dev/null
+
+run apache_default
+check "apache: D02 pass" "[ \"\$(code_of D02)\" = 'pass null' ]"
+check "apache: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+check "apache: D03 pass" "[ \"\$(code_of D03 | cut -d' ' -f1)\" = pass ] || [ \"\$(code_of D03 | cut -d' ' -f1)\" = warn ]"
+check "apache: shield verified against DUMP_INCLUDES" "[ \"\$(echo \"\$OUT\" | jq -r .config.shield_verified)\" = true ]"
+check "apache: D04 pass (X-Mod-Pagespeed)" "[ \"\$(code_of D04)\" = 'pass null' ]"
+check "apache: no root-owned file in the cache" "[ -z \"\$(find /var/cache/mod_pagespeed -user 0 ! -type d)\" ]"
+
+# A directory include (relative to ServerRoot) whose file sits in a subdirectory.
+mkdir -p /etc/apache2/psc.d/sub
+echo "ModPagespeedFileCachePath /srv/psc/sub-cache" > /etc/apache2/psc.d/sub/cache.conf
+echo "IncludeOptional psc.d" >> /etc/apache2/apache2.conf
+run apache_subdir
+check "subdir: D11 saw the cache path in the subdirectory" "d11_has /srv/psc/sub-cache"
+check "subdir: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+check "subdir: the would-be cache was not created" "[ ! -e /srv/psc/sub-cache ]"
+sed -i '/^IncludeOptional psc.d$/d' /etc/apache2/apache2.conf
+
+# ${VAR} the doctor cannot resolve: fail closed.
+echo 'IncludeOptional ${PSC_UNSET_VARIABLE}/extra.conf' >> /etc/apache2/apache2.conf
+run apache_var
+check "var: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "var: reason names the variable problem" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q 'VARIABLE'"
+sed -i '/PSC_UNSET_VARIABLE/d' /etc/apache2/apache2.conf
+
+# A non-default ServerRoot, named with --config.
+rm -rf /srv/aroot && cp -a /etc/apache2 /srv/aroot
+sed -i '1i ServerRoot "/srv/aroot"' /srv/aroot/apache2.conf
+echo "ModPagespeedFileCachePath /srv/psc/aroot-cache" > /srv/aroot/conf-enabled/zz-psc.conf
+run apache_serverroot --config /srv/aroot/apache2.conf
+check "serverroot: D11 saw the cache path under the custom ServerRoot" "d11_has /srv/psc/aroot-cache"
+check "serverroot: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+check "serverroot: the would-be cache was not created" "[ ! -e /srv/psc/aroot-cache ]"
+
+echo
+[ "$fail" = 0 ] && echo "ALL PASS (apache)" || echo "SOME FAILED (apache)"
+exit "$fail"
+INNER
+[ "$rc_nginx" = 0 ] && [ "$rc_apache" = 0 ]

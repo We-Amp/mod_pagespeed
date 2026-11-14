@@ -48,6 +48,7 @@ repeat.
 | `--port N` | the local port (default 80) |
 | `--url URL` | test this URL instead of `http://127.0.0.1/`; statistics are read only from localhost |
 | `--no-configtest` | do not run the config test (D03 is skipped) |
+| `--config FILE` | the server's main configuration file when it is not the default (`nginx -c FILE`, `httpd -f FILE`) |
 | `--allow-cache-writes` | run the config test even where it cannot be isolated from the cache directories (see below); it may then leave root-owned cache files, which D11 reports |
 | `--verbose` | show file:line evidence for passing checks too |
 
@@ -115,19 +116,50 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
   update checks, no telemetry.
 - **The config test leaves the cache alone, or does not run.** Run as root,
   a config test can leave a root-owned cache file the web server user cannot
-  replace (We-Amp/mod_pagespeed#780). The doctor first reads the configuration
-  files itself (following every include, running nothing) and collects each
-  `FileCachePath` and `DaemonVolumePath`, nested ones included. It then runs
-  the test in a private mount namespace with an empty scratch directory
-  mounted over each of them, so the real cache is not touched. Where that is
-  not possible (most containers, or a cache directory that cannot be
-  shielded), it does not run the test: D03 is skipped with code
-  `configtest_not_isolated`. `--allow-cache-writes` runs it anyway; the
-  doctor then lists root-owned cache files before and after and D11 reports
-  any the test created, with the `chown` that fixes them. Printed commands
-  quote every path taken from the configuration.
+  replace (We-Amp/mod_pagespeed#780). The doctor first reads the
+  configuration files itself, running nothing: the main file (`--config`,
+  else the server's default) and the files it includes, recursively, with
+  globs expanded, Apache directory includes followed into subdirectories,
+  and relative paths resolved against nginx's configuration directory or
+  Apache's `ServerRoot`. It collects each `FileCachePath` and
+  `DaemonVolumePath`, nested ones included, plus the packaged defaults. It
+  then runs the test in a private mount namespace: an empty scratch
+  directory is mounted over each existing cache directory, and an overlay
+  (writes to scratch, reads unchanged) over the nearest existing parent of
+  each cache directory that does not exist yet, so the real cache is not
+  touched. After the test it compares the cache directories of the effective
+  configuration (`nginx -T`, or the file list of Apache's `DUMP_INCLUDES`)
+  with what it shielded; a miss is reported by D11
+  (`configtest_unshielded`), and `config.shield_verified` says whether the
+  comparison could be made.
+- **Fail closed.** The test is not run, and D03 is skipped with code
+  `configtest_not_isolated`, when no private mount namespace is available
+  (most containers), a mount fails, a cache directory cannot be shielded, an
+  include path uses a `${VARIABLE}` the doctor cannot resolve, or pagespeed
+  is configured but no `FileCachePath` was found. `--allow-cache-writes`
+  runs it anyway; the doctor then lists root-owned cache files before and
+  after, and D11 reports any the test created, with the `chown` that fixes
+  them. The test runs without a shield only when the module is not loaded at
+  all. Printed commands quote every path taken from the configuration.
 - **Root gives the full result.** Without root the config test is skipped and
   some ownership checks are partial; the verdict says so.
+
+## Known limits
+
+- The static read follows `include` (nginx) and `Include` /
+  `IncludeOptional` (Apache). It does not evaluate Apache `<IfModule>`,
+  `<IfDefine>` or `Define`: it reads both branches, which can only add cache
+  directories to the shield. `${VARIABLE}` in an Apache include path is
+  resolved from the environment the doctor runs in; anything else makes the
+  config test fail closed.
+- Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
+  the main file, else from the server's compiled-in root.
+- A cache path containing a newline, or a missing one whose parent contains
+  `,`, `:` or `\`, cannot be shielded (fail closed).
+- An Apache build without `DUMP_INCLUDES`, or a config test that fails
+  before nginx prints its dump, leaves the shield unverified; D11 says so.
+- nginx started with `-p` (a prefix other than the compiled-in one) is not
+  detected; pass the main file with `--config`.
 
 Requirements: POSIX `sh`, `awk`, `sed`, `grep`, `find` and `curl`. `socat` or
 `python3` is used for the worker's health socket when present.

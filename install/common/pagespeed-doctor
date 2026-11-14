@@ -46,23 +46,32 @@
 #   1. It first reads the configuration files itself (the main file and
 #      every file it includes, followed recursively) without running the
 #      server, and collects every FileCachePath and DaemonVolumePath plus the
-#      packaged cache defaults. A directory that does not exist yet is
-#      represented by its nearest existing parent; nested directories are
-#      covered by their outermost one.
+#      packaged cache defaults (also when no cache path is configured but
+#      the module is loaded). Nested directories are covered by their
+#      outermost one. Relative includes resolve against nginx's
+#      configuration directory or Apache's ServerRoot; Apache directory
+#      includes are followed into subdirectories; --config names a
+#      non-default main file.
 #   2. It runs the test (`nginx -T`: one run gives the verdict and the
 #      effective configuration, read in memory and never printed; Apache:
 #      `-t -D DUMP_MODULES`) in a private mount namespace (`unshare`) with
-#      an empty scratch directory bind-mounted over each of those
-#      directories. Whatever the module creates lands in the scratch
-#      directory, which is deleted afterwards.
+#      an empty scratch directory bind-mounted over each existing one, and
+#      an overlay (writes to scratch, reads unchanged) over the nearest
+#      existing parent of each one that does not exist yet. Whatever the
+#      module creates lands in scratch, which is deleted afterwards.
 #   3. Fail closed: when a private mount namespace or a bind mount is not
-#      available (most containers), or a directory cannot be shielded, the
-#      test is NOT run and D03 is skipped with code configtest_not_isolated.
+#      available (most containers), a directory cannot be shielded, an
+#      include path uses a ${VARIABLE} the doctor cannot resolve, or
+#      pagespeed is configured without any FileCachePath, the test is NOT
+#      run and D03 is skipped with code configtest_not_isolated. Only when
+#      the module is not loaded at all does the test run unshielded.
 #      --allow-cache-writes runs it anyway; the doctor then lists root-owned
 #      cache files before and after and D11 reports what the test created.
-#   4. After a shielded `nginx -T`, the cache directories of the effective
-#      configuration are compared with the shielded ones; any the static
-#      read missed is reported by D11 (configtest_unshielded).
+#   4. After a shielded test, the cache directories of the effective
+#      configuration (`nginx -T`; Apache's DUMP_INCLUDES file list) are
+#      compared with the shielded ones; any the static read missed is
+#      reported by D11 (configtest_unshielded). When the server gives no
+#      such list, D11 says the shield could not be checked.
 #   5. --no-configtest skips the test (D03 is then skipped).
 #
 # Without root the config test is skipped: as another user it would fail on
@@ -109,6 +118,7 @@ OPT_PORT=""
 OPT_URL=""
 OPT_CONFIGTEST=1
 OPT_ALLOW_WRITES=0
+OPT_CONFIG=""
 OPT_VERBOSE=0
 
 # --json is honoured even for errors found while parsing the other options.
@@ -141,6 +151,8 @@ usage: pagespeed-doctor [options]
   --url URL           test this URL instead of http://127.0.0.1/ (the only
                       host contacted; statistics are read only on localhost)
   --no-configtest     do not run the server's config test (D03 is skipped)
+  --config FILE       the server's main configuration file, when it is not
+                      the default (nginx -c FILE, httpd -f FILE)
   --allow-cache-writes
                       run the config test even where it cannot be isolated
                       from the cache directories (it may then leave
@@ -173,6 +185,8 @@ while [ $# -gt 0 ]; do
     --url=*) OPT_URL="${1#*=}" ;;
     --no-configtest) OPT_CONFIGTEST=0 ;;
     --allow-cache-writes) OPT_ALLOW_WRITES=1 ;;
+    --config) [ $# -ge 2 ] || die_usage "--config needs a value"; OPT_CONFIG="$2"; shift ;;
+    --config=*) OPT_CONFIG="${1#*=}" ;;
     --verbose|-v) OPT_VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
     *) die_usage "unknown option: $1" ;;
@@ -185,6 +199,10 @@ case "$OPT_PORT" in ""|*[!0-9]*) [ -z "$OPT_PORT" ] || die_usage "--port must be
 case "$OPT_PATH" in /*) ;; *) die_usage "--path must start with /" ;; esac
 case "$OPT_HOST" in *[!A-Za-z0-9.:_-]*) die_usage "--host must be a host name" ;; esac
 case "$OPT_URL" in ""|http://*|https://*) ;; *) die_usage "--url must start with http:// or https://" ;; esac
+if [ -n "$OPT_CONFIG" ]; then
+  case "$OPT_CONFIG" in /*) ;; *) OPT_CONFIG="$(pwd)/$OPT_CONFIG" ;; esac
+  [ -f "$OPT_CONFIG" ] && [ -r "$OPT_CONFIG" ] || die_usage "--config: cannot read $OPT_CONFIG"
+fi
 
 progress() {
   # Progress goes to stderr so --json keeps stdout to one document.
@@ -307,12 +325,26 @@ if [ "$SERVER" = nginx ]; then
   NGINX_MODPATH=$(printf '%s' "$NGINX_V" | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' | head -n 1)
   NGINX_CONF=$(printf '%s' "$NGINX_V" | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p' | head -n 1)
   [ -n "$NGINX_CONF" ] || NGINX_CONF=/etc/nginx/nginx.conf
-  NGINX_CONFDIR=$(dirname "$NGINX_CONF")
+  # nginx -c FILE reads relative includes from FILE's directory.
+  [ -n "$OPT_CONFIG" ] && NGINX_CONF="$OPT_CONFIG"
+  NGINX_CONFDIR=$(dirname -- "$NGINX_CONF")
   HEADER_NAME="X-Page-Speed"
   PKG_MODULE="$PKG_NGINX"
   SERVICE_NAME=nginx
 else
   SERVER_VERSION=$("$APACHE_CTL" -v 2>/dev/null | sed -n 's|.*Apache/\([0-9.]*\).*|\1|p' | head -n 1)
+  # Compiled-in server root and main file (-V prints build settings and
+  # reads no configuration).
+  APACHE_V=$("$APACHE_CTL" -V 2>/dev/null || true)
+  APACHE_ROOT=$(printf '%s' "$APACHE_V" | sed -n 's/.*-D HTTPD_ROOT="\([^"]*\)".*/\1/p' | head -n 1)
+  APACHE_CONF=$(printf '%s' "$APACHE_V" | sed -n 's/.*-D SERVER_CONFIG_FILE="\([^"]*\)".*/\1/p' | head -n 1)
+  if [ "$APACHE_FLAVOR" = debian ]; then
+    : "${APACHE_ROOT:=/etc/apache2}"; : "${APACHE_CONF:=apache2.conf}"
+  else
+    : "${APACHE_ROOT:=/etc/httpd}"; : "${APACHE_CONF:=conf/httpd.conf}"
+  fi
+  case "$APACHE_CONF" in /*) ;; *) APACHE_CONF="$APACHE_ROOT/$APACHE_CONF" ;; esac
+  [ -n "$OPT_CONFIG" ] && APACHE_CONF="$OPT_CONFIG"
   HEADER_NAME="X-Mod-Pagespeed"
   PKG_MODULE="$PKG_APACHE"
   SERVICE_NAME=apache2
@@ -438,32 +470,60 @@ include_patterns() { # FILE
     }' "$1" 2>/dev/null
 }
 
+# Apache reads a directory named by Include, and every directory below it;
+# nginx's include takes files (globs) only.
 expand_include() { # PATTERN -> existing files, in the order the server reads them
-  if [ -d "$1" ]; then
-    for _g in "$1"/*; do [ -f "$_g" ] && printf '%s\n' "$_g"; done
-    return 0
-  fi
   _oifs=$IFS; IFS=$NL
   # Pathname expansion only (IFS is a newline): the pattern is never run.
   # shellcheck disable=SC2086
-  for _g in $1; do [ -f "$_g" ] && printf '%s\n' "$_g"; done
+  for _g in $1; do
+    if [ -f "$_g" ]; then
+      printf '%s\n' "$_g"
+    elif [ -d "$_g" ] && [ "$SERVER" = apache ]; then
+      find -L "$_g" -type f 2>/dev/null | sort
+    fi
+  done
   IFS=$_oifs
 }
 
+# Apache's ${NAME} in an include path, from the environment (Define is not
+# followed). Prints the resolved pattern, or returns 1.
+# shellcheck disable=SC2016 # literal ${ and }, not expansions
+resolve_vars() { # PATTERN
+  _rest="$1"; _out=""
+  while :; do
+    case "$_rest" in
+      *'${'*'}'*) ;;
+      *) printf '%s%s\n' "$_out" "$_rest"; return 0 ;;
+    esac
+    _pre=${_rest%%'${'*}; _rest=${_rest#*'${'}
+    _name=${_rest%%'}'*}; _rest=${_rest#*'}'}
+    case "$_name" in ""|*[!A-Za-z0-9_]*|[0-9]*) return 1 ;; esac
+    _val=$(printenv -- "$_name" 2>/dev/null) || return 1
+    _out="$_out$_pre$_val"
+  done
+}
+
 # The server's configuration files: the main file and everything it
-# includes, followed recursively, read without running the server.
+# includes (globs, and for Apache directories and their subdirectories),
+# followed recursively, read without running the server. Relative include
+# paths are resolved against nginx's configuration directory, or Apache's
+# ServerRoot (the directive in the main file, else the compiled-in root).
+# Include paths that cannot be resolved go to $TMP/cfg_unresolved.
+CFG_UNRESOLVED="$TMP/cfg_unresolved"
+: > "$CFG_UNRESOLVED"
 config_files() {
   if [ "$SERVER" = nginx ]; then
     _root="$NGINX_CONF"; _base="$NGINX_CONFDIR"
-  elif [ "$APACHE_FLAVOR" = debian ]; then
-    _root=/etc/apache2/apache2.conf; _base=/etc/apache2
   else
-    _root=/etc/httpd/conf/httpd.conf; _base=/etc/httpd
+    _root="$APACHE_CONF"; _base="$APACHE_ROOT"
+    _sr=$(awk '/^[ \t]*#/ { next } tolower($1) == "serverroot" && NF >= 2 { v = $2; gsub(/^"|"$/, "", v); print v; exit }' "$_root" 2>/dev/null)
+    [ -n "$_sr" ] && _base="$_sr"
   fi
   : > "$TMP/cfiles"
   printf '%s\n' "$_root" > "$TMP/ctodo"
   _n=0
-  while [ "$_n" -lt 1000 ] && [ -s "$TMP/ctodo" ]; do
+  while [ "$_n" -lt 2000 ] && [ -s "$TMP/ctodo" ]; do
     _n=$((_n + 1))
     _f=$(sed -n '1p' "$TMP/ctodo")
     sed '1d' "$TMP/ctodo" > "$TMP/ctodo.next"; mv "$TMP/ctodo.next" "$TMP/ctodo"
@@ -471,6 +531,10 @@ config_files() {
     [ -f "$_f" ] && [ -r "$_f" ] || continue
     printf '%s\n' "$_f" >> "$TMP/cfiles"
     include_patterns "$_f" | while IFS= read -r _p; do
+      if [ "$SERVER" = apache ]; then
+        _q=$(resolve_vars "$_p") || { printf '%s\n' "$_f" >> "$CFG_UNRESOLVED"; continue; }
+        _p="$_q"
+      fi
       case "$_p" in /*) ;; *) _p="$_base/$_p" ;; esac
       expand_include "$_p"
     done >> "$TMP/ctodo"
@@ -523,35 +587,70 @@ cache_dirs() { # configured cache directories (paths may hold any character but 
   } | sed 's|/*$||; s|^$|/|' | sort -u
 }
 
-# Directories to shield during the config test, in $TMP/shield (outermost
-# only). Returns 1 with SHIELD_ERROR set when one cannot be shielded.
+# Is the module loaded, going by the configuration files?
+module_referenced() {
+  if [ "$SERVER" = nginx ]; then
+    awk -F "$US" '$3 == "@load_module" && $4 ~ /ngx_pagespeed_module/ { f = 1 } END { exit !f }' "$CORPUS" && return 0
+    printf '%s' "$NGINX_V" | grep -q pagespeed
+  else
+    corpus_has @load_module
+  fi
+}
+pagespeed_configured() { awk -F "$US" 'substr($3, 1, 1) != "@" { f = 1 } END { exit !f }' "$CORPUS"; }
+
+# The shield for the config test, in $TMP/shield, one entry per line:
+#   "b PATH"  an existing cache directory: an empty scratch directory is
+#             bind-mounted over it;
+#   "o PATH"  the nearest existing parent of a cache directory that does not
+#             exist yet: an overlay (writes go to scratch, reads see the
+#             real files) is mounted over it, so the would-be directory is
+#             created in scratch only.
+# Outermost entries only. $TMP/shield.paths holds the bare paths.
+# Returns 1 with SHIELD_ERROR set when one cannot be shielded.
 SHIELD_ERROR=""
+NO_CACHE_PATH=0
 shield_plan() {
   : > "$TMP/shield.all"
-  {
-    cache_dirs
-    for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
-              /var/cache/pagespeed-optimizer; do
-      [ -d "$_d" ] && printf '%s\n' "$_d"
-    done
-  } > "$TMP/shield.cand"
+  cache_dirs > "$TMP/shield.cand"
+  if [ ! -s "$TMP/shield.cand" ]; then
+    # No cache path in the configuration, but the module is loaded: shield
+    # the packaged defaults, whether they exist yet or not.
+    NO_CACHE_PATH=1
+    if [ "$SERVER" = nginx ]; then
+      printf '%s\n' /var/cache/ngx_pagespeed /var/cache/pagespeed
+    else
+      printf '%s\n' /var/cache/mod_pagespeed
+    fi > "$TMP/shield.cand"
+  fi
+  for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
+            /var/cache/pagespeed-optimizer; do
+    [ -d "$_d" ] && printf '%s\n' "$_d" >> "$TMP/shield.cand"
+  done
   while IFS= read -r _c; do
     [ -n "$_c" ] || continue
     case "$_c" in /*) ;; *) SHIELD_ERROR="cache path is not absolute: $_c"; return 1 ;; esac
-    _p="$_c"
-    while [ ! -e "$_p" ]; do _p=$(dirname -- "$_p"); done
+    _p="$_c"; _kind=b
+    while [ ! -e "$_p" ]; do _p=$(dirname -- "$_p"); _kind=o; done
     _r=$(readlink -f -- "$_p" 2>/dev/null) || _r=""
     if [ -z "$_r" ] || [ ! -d "$_r" ]; then
       SHIELD_ERROR="cannot resolve the cache directory $_c"; return 1
     fi
-    case "$_r" in
-      /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
-        SHIELD_ERROR="the cache directory $_c does not exist yet and its parent $_r is too broad to shield"
-        return 1 ;;
+    case "$_kind:$_r" in
+      o:/|o:/proc|o:/sys|o:/dev|o:/proc/*|o:/sys/*|o:/dev/*|b:/)
+        SHIELD_ERROR="the cache directory $_c cannot be shielded (it would cover $_r)"; return 1 ;;
     esac
-    printf '%s\n' "$_r" >> "$TMP/shield.all"
+    # An overlay takes its paths in a comma/colon-separated option string.
+    case "$_kind:$_r" in
+      o:*[,:\\]*) SHIELD_ERROR="the parent directory of $_c has a character an overlay mount cannot take"; return 1 ;;
+    esac
+    printf '%s %s\n' "$_kind" "$_r" >> "$TMP/shield.all"
   done < "$TMP/shield.cand"
-  sort -u "$TMP/shield.all" | awk '{ for (k in kept) if (index($0, k "/") == 1) next; kept[$0] = 1; print }' > "$TMP/shield"
+  # Sort by path (a bind wins over an overlay on the same path), then keep
+  # outermost entries only.
+  awk '{ k = substr($0, 1, 1); p = substr($0, 3); if (!(p in kind) || k == "b") kind[p] = k }
+       END { for (p in kind) print p "\t" kind[p] }' "$TMP/shield.all" | sort | \
+    awk -F '\t' '{ for (k in kept) if (index($1, k "/") == 1) next; kept[$1] = 1; print $2 " " $1 }' > "$TMP/shield"
+  sed 's/^. //' "$TMP/shield" > "$TMP/shield.paths"
   return 0
 }
 
@@ -560,7 +659,7 @@ shielded() {
   _p="$1"
   while [ ! -e "$_p" ]; do _p=$(dirname -- "$_p"); done
   _r=$(readlink -f -- "$_p" 2>/dev/null) || return 1
-  awk -v p="$_r" '$0 == p || index(p, $0 "/") == 1 { f = 1 } END { exit !f }' "$TMP/shield"
+  awk -v p="$_r" '$0 == p || index(p, $0 "/") == 1 { f = 1 } END { exit !f }' "$TMP/shield.paths"
 }
 
 root_files_in() { # dir -> root-owned non-directories, bounded
@@ -572,21 +671,28 @@ root_files_in() { # dir -> root-owned non-directories, bounded
 
 CT_RAN=0          # 1 when the test ran
 CT_OK=0           # 1 when it passed
-CT_MODE="skipped" # namespace | no_cache_dirs | direct | skipped
+CT_MODE="skipped" # namespace | module_not_loaded | direct | skipped
+CT_VERIFIED=false # the shield was checked against the effective configuration
 CT_SKIP_REASON=""
 CT_SKIP_CODE=""
 CT_OUT="$TMP/configtest.err"
 CT_DUMP="$TMP/configtest.dump"
 CT_CREATED="$TMP/configtest.created"
 CT_UNSHIELDED="$TMP/configtest.unshielded"
-: > "$CT_OUT"; : > "$CT_DUMP"; : > "$CT_CREATED"; : > "$CT_UNSHIELDED"; : > "$TMP/shield"
+: > "$CT_OUT"; : > "$CT_DUMP"; : > "$CT_CREATED"; : > "$CT_UNSHIELDED"; : > "$TMP/shield"; : > "$TMP/shield.paths"
 
-configtest_cmd() {
+configtest_cmd() { # sets the positional parameters of the caller via CT_ARGS
   if [ "$SERVER" = nginx ]; then
-    echo "$NGINX_BIN -T"
+    if [ -n "$OPT_CONFIG" ]; then set -- "$NGINX_BIN" -c "$OPT_CONFIG" -T; else set -- "$NGINX_BIN" -T; fi
   else
-    echo "$APACHE_CTL -t -D DUMP_MODULES"
+    # DUMP_INCLUDES lists the files Apache read, to check the shield against.
+    if [ -n "$OPT_CONFIG" ]; then
+      set -- "$APACHE_CTL" -f "$OPT_CONFIG" -t -D DUMP_MODULES -D DUMP_INCLUDES
+    else
+      set -- "$APACHE_CTL" -t -D DUMP_MODULES -D DUMP_INCLUDES
+    fi
   fi
+  printf '%s\n' "$@" > "$TMP/ct_args"
 }
 
 not_isolated() { # REASON
@@ -603,7 +709,7 @@ run_configtest_direct() {
     _i=$((_i + 1)); root_files_in "$_d" | sort > "$TMP/before.$_i"
   done < "$TMP/shield.cand.real"
   # shellcheck disable=SC2086
-  $_to "$@" > "$CT_DUMP" 2> "$CT_OUT"
+  $_to "$@" > "$CT_DUMP" 2> "$CT_OUT" < /dev/null
   _rc=$?
   CT_RAN=1
   [ "$_rc" = 0 ] && CT_OK=1
@@ -619,24 +725,41 @@ run_configtest() {
   if [ "$IS_ROOT" != 1 ]; then CT_SKIP_REASON="needs root"; return; fi
   _to=""
   command -v timeout >/dev/null 2>&1 && _to="timeout 30"
-  # shellcheck disable=SC2046
-  set -- $(configtest_cmd)
+  configtest_cmd
+  _oifs=$IFS; IFS=$NL
+  # shellcheck disable=SC2046 # one argument per line
+  set -- $(cat "$TMP/ct_args")
+  IFS=$_oifs
+  # Existing cache directories, for the before/after listing of a direct run.
+  existing_cache_dirs() {
+    { cache_dirs; for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
+        /var/cache/pagespeed-optimizer; do printf '%s\n' "$_d"; done; } | \
+      while IFS= read -r _d; do [ -d "$_d" ] && printf '%s\n' "$_d"; done | sort -u
+  }
+  if ! module_referenced; then
+    # The module is not loaded at all: nothing of ours can write.
+    CT_MODE=module_not_loaded
+    existing_cache_dirs > "$TMP/shield.cand.real"
+    run_configtest_direct "$@"
+    return
+  fi
+  if [ -s "$CFG_UNRESOLVED" ]; then
+    _why="an include path in $(sort -u "$CFG_UNRESOLVED" | tr '\n' ' ' | sed 's/ $//') uses a \${VARIABLE} the doctor cannot resolve, so it cannot tell which cache directories the configuration names"
+    if [ "$OPT_ALLOW_WRITES" != 1 ]; then not_isolated "$_why"; return; fi
+  fi
   if ! shield_plan; then
     if [ "$OPT_ALLOW_WRITES" = 1 ]; then
       CT_MODE=direct
-      : > "$TMP/shield"
-      while IFS= read -r _d; do [ -d "$_d" ] && printf '%s\n' "$_d"; done < "$TMP/shield.cand" > "$TMP/shield.cand.real"
+      : > "$TMP/shield"; : > "$TMP/shield.paths"
+      existing_cache_dirs > "$TMP/shield.cand.real"
       run_configtest_direct "$@"
     else
       not_isolated "$SHIELD_ERROR"
     fi
     return
   fi
-  cp "$TMP/shield" "$TMP/shield.cand.real"
-  if [ ! -s "$TMP/shield" ]; then
-    # Nothing in the configuration the module could write into.
-    CT_MODE=no_cache_dirs
-    run_configtest_direct "$@"
+  if [ "$NO_CACHE_PATH" = 1 ] && pagespeed_configured && [ "$OPT_ALLOW_WRITES" != 1 ]; then
+    not_isolated "pagespeed is configured but no FileCachePath was found, so where the module writes is not known"
     return
   fi
   # PAGESPEED_DOCTOR_NO_NAMESPACE=1 behaves as if namespaces were unavailable
@@ -646,19 +769,24 @@ run_configtest() {
     NS_SCRATCH=$(mktemp -d "${DOCTOR_SCRATCH_DIR:-/var/tmp}/pagespeed-doctor-ns.XXXXXX" 2>/dev/null) || NS_SCRATCH=""
   fi
   if [ -n "$NS_SCRATCH" ]; then
-    # The inner shell reads the directory list from a file, one per line,
-    # and passes every path as a single argument: no path is ever parsed as
-    # shell code.
+    # The inner shell reads the shield from a file, one entry per line, and
+    # passes every path as a single argument: no path is ever parsed as
+    # shell code. Overlay scratch lives on a tmpfs inside the namespace.
     # shellcheck disable=SC2016 # expanded by the inner shell
     DOCTOR_NS_LIST="$TMP/shield" DOCTOR_NS_SCRATCH="$NS_SCRATCH" \
       $_to unshare --mount --propagation private sh -c '
         i=0
-        while IFS= read -r d; do
-          i=$((i + 1))
-          mkdir -p "$DOCTOR_NS_SCRATCH/$i" || exit 97
-          mount --bind "$DOCTOR_NS_SCRATCH/$i" "$d" || exit 97
+        while IFS= read -r e; do
+          i=$((i + 1)); k=${e%% *}; d=${e#* }; s="$DOCTOR_NS_SCRATCH/$i"
+          mkdir -p "$s" || exit 97
+          if [ "$k" = b ]; then
+            mount --bind "$s" "$d" || exit 97
+          else
+            mount -t tmpfs -o mode=0700 tmpfs "$s" && mkdir "$s/u" "$s/w" && \
+              mount -t overlay overlay -o "lowerdir=$d,upperdir=$s/u,workdir=$s/w" "$d" || exit 97
+          fi
         done < "$DOCTOR_NS_LIST"
-        exec "$@"' doctor "$@" > "$CT_DUMP" 2> "$CT_OUT"
+        exec "$@" < /dev/null' doctor "$@" > "$CT_DUMP" 2> "$CT_OUT"
     _rc=$?
     rm -rf "$NS_SCRATCH"; NS_SCRATCH=""
     if [ "$_rc" != 97 ]; then
@@ -667,17 +795,30 @@ run_configtest() {
       return
     fi
     : > "$CT_DUMP"; : > "$CT_OUT"
-    _why="a bind mount over a cache directory failed"
+    _why="a mount over a cache directory failed"
   else
     _why="no private mount namespace is available here"
   fi
   if [ "$OPT_ALLOW_WRITES" = 1 ]; then
     CT_MODE=direct
-    : > "$TMP/shield"
+    : > "$TMP/shield"; : > "$TMP/shield.paths"
+    existing_cache_dirs > "$TMP/shield.cand.real"
     run_configtest_direct "$@"
   else
     not_isolated "$_why"
   fi
+}
+
+# Apache: the files the config test actually read (DUMP_INCLUDES). Files the
+# static read missed are added to the corpus, so D11 checks their cache
+# directories against the shield. Sets CT_VERIFIED.
+apache_verify_includes() {
+  grep -q 'Included configuration files' "$CT_DUMP" 2>/dev/null || return 0
+  sed -n 's/^ *([0-9*]*) \(\/.*\)$/\1/p' "$CT_DUMP" | while IFS= read -r _f; do
+    grep -qxF -- "$_f" "$TMP/cfiles" || printf '%s\n' "$_f"
+  done > "$TMP/cfiles.missed"
+  while IFS= read -r _f; do build_corpus_static apache "$_f"; done < "$TMP/cfiles.missed"
+  CT_VERIFIED=true
 }
 
 # The first error line of the config test, and its file and line.
@@ -1366,8 +1507,10 @@ check_d11() {
     [ "$_status" = fail ] || { _status=warn; _code=configtest_unshielded; }
     _msgs="$_msgs; the config test ran without shielding $(tr '\n' ' ' < "$CT_UNSHIELDED" | sed 's/ $//') (found only in the effective configuration)"
     [ -n "$_hint" ] || _hint="Check those directories for root-owned files after a config test run as root."
+  elif [ "$CT_MODE" = namespace ] && [ "$CT_VERIFIED" = true ]; then
+    _msgs="$_msgs (config test ran with the cache shielded; shield checked against the effective configuration)"
   elif [ "$CT_MODE" = namespace ]; then
-    _msgs="$_msgs (config test ran with the cache shielded)"
+    _msgs="$_msgs (config test ran with the cache shielded; the shield could not be checked against the effective configuration because the server gave no list of what it read)"
   fi
   add_check D11 "$_title" "$_status" "$_code" S11 "$_msgs" "$_hint" "$_cmd" "$_mut" \
     "$DOCS/troubleshooting/#failed-to-open-cache-at" "" "$_ev" "" $(( $(now_ms) - _t0 ))
@@ -1460,6 +1603,9 @@ if [ "$SERVER" = nginx ] && [ "$CT_OK" = 1 ] && [ -s "$CT_DUMP" ]; then
   awk -v US="$US" -v syntax=nginx -v dump=1 -v allowlist="$VALUE_ALLOWLIST" \
     "$CORPUS_AWK" "$CT_DUMP" > "$CORPUS" 2>/dev/null
   CORPUS_SOURCE="effective configuration (nginx -T)"
+  CT_VERIFIED=true
+elif [ "$SERVER" = apache ] && [ "$CT_RAN" = 1 ]; then
+  apache_verify_includes
 fi
 # The nginx dump held every config file; it is not needed any more. (For
 # Apache it holds the DUMP_MODULES list, which D02 reads.)
@@ -1501,7 +1647,8 @@ if [ "$OPT_JSON" = 1 ]; then
     printf '},'
     printf '"target":{"url":%s,"host_header":%s},' "$(json_str "$(printf '%s' "$TARGET_URL" | sed 's/?.*//')")" \
       "$([ -n "$OPT_HOST" ] && json_str "$OPT_HOST" || echo null)"
-    printf '"config":{"source":%s,"config_test":%s},' "$(json_str "$CORPUS_SOURCE")" "$(json_str "$CT_MODE")"
+    printf '"config":{"source":%s,"config_test":%s,"shield_verified":%s},' "$(json_str "$CORPUS_SOURCE")" "$(json_str "$CT_MODE")" \
+      "$([ "$CT_MODE" = namespace ] && echo "$CT_VERIFIED" || echo false)"
     printf '"verdict":"%s","exit_code":%s,' "$VERDICT" "$EXIT"
     printf '"summary":{"pass":%s,"warn":%s,"fail":%s,"skip":%s},' "$N_PASS" "$N_WARN" "$N_FAIL" "$N_SKIP"
     printf '"checks":['
