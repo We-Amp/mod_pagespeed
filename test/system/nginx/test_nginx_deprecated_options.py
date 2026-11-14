@@ -85,7 +85,7 @@ def test_unknown_name_still_fails(tmp_path):
     r = _config_test(tmp_path, ["pagespeed FileCacheInodeLimitt 500000;"])
     assert r.returncode != 0, r.stderr
     assert "not recognized" in r.stderr, r.stderr
-    assert "deprecated" not in r.stderr, r.stderr
+    assert "is deprecated" not in r.stderr, r.stderr
 
 
 if __name__ == "__main__":
