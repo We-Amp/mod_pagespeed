@@ -3873,6 +3873,11 @@ GoogleString RewriteOptions::OptionsToString() const {
 
   output += "\nDomain Lawyer\n";
   StrAppend(&output, domain_lawyer_->ToString("  "));
+  // The proxy suffix and the caching wildcards below end without a newline;
+  // end each section with one so the next line starts on its own.
+  if (!output.empty() && output.back() != '\n') {
+    output += "\n";
+  }
   // TODO(mmohabey): Incorporate ToString() from the file_load_policy,
   // allow_resources, and retain_comments.
 
@@ -3894,7 +3899,7 @@ GoogleString RewriteOptions::OptionsToString() const {
       override_caching_wildcard_->Signature());
   if (!override_caching_wildcard_string.empty()) {
     StrAppend(&output, "\nOverride caching wildcards\n",
-              override_caching_wildcard_string);
+              override_caching_wildcard_string, "\n");
   }
 
   for (auto spec : experiment_specs_) {
