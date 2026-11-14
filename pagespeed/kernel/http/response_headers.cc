@@ -845,6 +845,13 @@ void ResponseHeaders::ComputeCaching() {
   } else {
     proto->set_expiration_time_ms(0);
     proto->set_proxy_cacheable(false);
+    // A response that is not cacheable has no lifetime and no implicit one,
+    // whatever an earlier computation on these headers found. The implicit
+    // mark is only cleared here: a cacheable recompute sees the max-age that
+    // the implicit lifetime wrote above as explicit, and the mark must
+    // survive that.
+    proto->set_cache_ttl_ms(0);
+    proto->clear_is_implicitly_cacheable();
   }
   cache_fields_dirty_ = false;
 }
