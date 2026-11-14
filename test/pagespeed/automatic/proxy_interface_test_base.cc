@@ -181,8 +181,12 @@ void MockFilter::EndDocument() {
   // We query IsBrowserCacheable for the HTML file only to ensure that
   // the test will crash if ComputeCaching() was never called.
   //
-  // All these HTML responses are Cache-Control: private.
-  EXPECT_TRUE(driver_->response_headers()->IsBrowserCacheable());
+  // All these HTML responses are Cache-Control: private. The origin serves
+  // them with max-age=0, so the rewritten HTML keeps a zero lifetime and is
+  // not browser cacheable.
+  EXPECT_FALSE(driver_->response_headers()->IsBrowserCacheable());
+  EXPECT_TRUE(driver_->response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
   PropertyPage* page = driver_->property_page();
   if (page != nullptr) {
     page->UpdateValue(driver_->server_context()->dom_cohort(), "num_elements",

@@ -918,7 +918,8 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   // of the rewritten resource.
   AddRequestAttribute(HttpAttributes::kIfNoneMatch, etag_);
   SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "", true, ttl_ms_ / 2, nullptr, 0);
+  // A bare 304 carries no caching headers, so it has no cache lifetime.
+  FetchAndCheckResponse(cache_jpg_url_, "", true, 0, nullptr, 0);
   EXPECT_EQ(HttpStatus::kNotModified, response_headers_.status_code());
   // We hit the metadata cache and find that the etag matches the hash of the
   // rewritten resource.
@@ -1656,10 +1657,10 @@ TEST_F(InPlaceRewriteContextTest, NonCacheableUrlRewriting) {
   options()->set_rewrite_uncacheable_resources(true);
   server_context()->ComputeSignature(options());
 
-  // The ttl is just a value in proto, actual cacheable values will be checked
-  // below.
+  // An uncacheable response has no cache lifetime; the cacheability itself
+  // is checked below.
   FetchAndCheckResponse(nocache_js_url_, StrCat(cache_body_, ":", "jm"),
-                        true /* success */, Timer::kYearMs /* ttl (ms) */,
+                        true /* success */, 0 /* ttl (ms) */,
                         etag_ /* etag */, timer()->NowMs());
 
   // Shouldn't be cacheable at all.

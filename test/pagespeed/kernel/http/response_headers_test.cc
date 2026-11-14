@@ -2073,6 +2073,7 @@ TEST_F(ResponseHeadersTest, RecomputeCachingResetsForceCachedState) {
   response_headers_.ComputeCaching();
   EXPECT_FALSE(response_headers_.IsProxyCacheable());
   EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
   EXPECT_FALSE(response_headers_.UpdateCacheHeadersIfForceCached());
 }
 
@@ -2099,6 +2100,88 @@ TEST_F(ResponseHeadersTest,
     if (v->find("private") != GoogleString::npos) has_private = true;
   }
   EXPECT_TRUE(has_private);
+}
+
+TEST_F(ResponseHeadersTest, RecomputeCachingClearsLifetimeWhenNoLongerCacheable) {
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.Add(HttpAttributes::kCacheControl, "max-age=600");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsBrowserCacheable());
+  EXPECT_EQ(600 * Timer::kSecondMs, response_headers_.cache_ttl_ms());
+
+  // The same headers object now describes a response that is not cacheable.
+  response_headers_.Replace(HttpAttributes::kCacheControl, "no-cache");
+  response_headers_.ComputeCaching();
+  EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.IsProxyCacheable());
+  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
+  EXPECT_EQ(0, response_headers_.CacheExpirationTimeMs());
+}
+
+TEST_F(ResponseHeadersTest, RecomputeCachingClearsImplicitWhenNoLongerCacheable) {
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+  EXPECT_TRUE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(response_headers_.implicit_cache_ttl_ms(),
+            response_headers_.cache_ttl_ms());
+
+  // The derived lifetime is replaced by one that forbids caching.
+  response_headers_.Replace(HttpAttributes::kCacheControl, "no-cache");
+  response_headers_.ComputeCaching();
+  EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
+}
+
+TEST_F(ResponseHeadersTest, RecomputeCachingKeepsImplicitAcrossUnrelatedChange) {
+  // ComputeCaching writes the implicit lifetime into the headers as a
+  // max-age. A later recompute (for example when the response is stored or
+  // read back) sees that max-age as explicit; the response must still be
+  // known as implicitly cacheable, because that is what the conditional
+  // refresh and the cache-serving paths act on.
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.is_implicitly_cacheable());
+
+  response_headers_.Add("X-Unrelated", "1");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+  EXPECT_TRUE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(response_headers_.implicit_cache_ttl_ms(),
+            response_headers_.cache_ttl_ms());
+}
+
+TEST_F(ResponseHeadersTest, RecomputeCachingWhenResponseBecomesCacheable) {
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.Add(HttpAttributes::kCacheControl, "no-cache");
+  response_headers_.ComputeCaching();
+  EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
+
+  response_headers_.Replace(HttpAttributes::kCacheControl, "max-age=600");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsBrowserCacheable());
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+  EXPECT_FALSE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(600 * Timer::kSecondMs, response_headers_.cache_ttl_ms());
+
+  // And back to no lifetime of its own: the implicit one applies.
+  response_headers_.RemoveAll(HttpAttributes::kCacheControl);
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+  EXPECT_TRUE(response_headers_.is_implicitly_cacheable());
+  EXPECT_EQ(response_headers_.implicit_cache_ttl_ms(),
+            response_headers_.cache_ttl_ms());
 }
 
 TEST_F(ResponseHeadersTest, ForceCachingForPrivate) {
