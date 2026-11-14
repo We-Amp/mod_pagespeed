@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -835,6 +836,115 @@ TEST_F(InPlaceResourceRecorderOriginCachingTest,
   ASSERT_EQ(kFoundResult,
             HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
   EXPECT_EQ(600 * Timer::kSecondMs, headers_out.cache_ttl_ms());
+}
+
+// The recorder captures the response the server produced for one client's
+// request, with that client's own Accept, Origin and User-Agent.  An answer
+// the origin says varies on any of them is that client's alone: with
+// RespectVary off (the default) it must still not be stored for the next
+// client, while answers that vary on nothing beyond Accept-Encoding still are.
+class InPlaceResourceRecorderVaryTest : public InPlaceResourceRecorderTest {
+ protected:
+  // Records kHello for a client that sends Accept and Origin, with `vary` as
+  // the response's Vary (none when empty); `full_headers_first` delivers the
+  // full headers up front, as nginx does.  When `origin_vary` is not null the
+  // seam also hands over the origin's caching headers, with that Vary (none
+  // when empty).  Returns what the cache holds.
+  HTTPCache::FindResult RecordWithVary(StringPiece vary,
+                                       bool full_headers_first,
+                                       const char* origin_vary = nullptr) {
+    ResponseHeaders headers;
+    SetDefaultLongCacheHeaders(&kContentTypeJpeg, &headers);
+    if (!vary.empty()) {
+      headers.Add(HttpAttributes::kVary, vary);
+    }
+    headers.ComputeCaching();
+
+    RequestHeaders client;
+    client.Add(HttpAttributes::kAccept, "image/webp,*/*");
+    client.Add(HttpAttributes::kOrigin, "http://one.example.com");
+    std::unique_ptr<InPlaceResourceRecorder> recorder(
+        new InPlaceResourceRecorder(
+            RequestContext::NewTestRequestContext(
+                server_context()->thread_system()),
+            kTestUrl, rewrite_driver_->CacheFragment(), client.GetProperties(),
+            kMaxResponseBytes, 4 /* max_concurrent_recordings */, http_cache(),
+            statistics(), message_handler()));
+    EXPECT_FALSE(recorder->http_options().respect_vary);
+    if (origin_vary != nullptr) {
+      ResponseHeaders origin;
+      origin.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+      if (*origin_vary != '\0') {
+        origin.Add(HttpAttributes::kVary, origin_vary);
+      }
+      recorder->SetOriginCachingHeaders(origin);
+    }
+    if (full_headers_first) {
+      recorder->ConsiderResponseHeaders(InPlaceResourceRecorder::kFullHeaders,
+                                        &headers);
+    } else {
+      ResponseHeaders prelim_headers;
+      prelim_headers.set_status_code(HttpStatus::kOK);
+      recorder->ConsiderResponseHeaders(
+          InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+    }
+    recorder->Write(kHello, message_handler());
+    recorder.release()->DoneAndSetHeaders(&headers,
+                                          true /* complete response */);
+
+    HTTPValue value_out;
+    ResponseHeaders headers_out;
+    return HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out);
+  }
+};
+
+TEST_F(InPlaceResourceRecorderVaryTest, AnswerVaryingOnTheRequestIsNotStored) {
+  for (bool full_headers_first : {false, true}) {
+    for (const char* vary : {"Accept", "Origin", "User-Agent", "accept",
+                             "Accept-Encoding, Accept", "*"}) {
+      SCOPED_TRACE(StrCat(vary, full_headers_first ? " full" : " prelim"));
+      lru_cache()->Clear();
+      ClearStats();
+      EXPECT_NE(kFoundResult, RecordWithVary(vary, full_headers_first));
+      EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+      EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+      ExpectTerminalInvariant();
+    }
+  }
+}
+
+// With the origin's caching headers handed over by the seam, the response is
+// judged as the server finalized it and again with the origin's fields in
+// place; a Vary on the request from either side refuses it.
+TEST_F(InPlaceResourceRecorderVaryTest,
+       AnswerVaryingOnTheRequestIsNotStoredWithOriginCachingHeaders) {
+  struct Case {
+    const char* server_vary;
+    const char* origin_vary;
+  };
+  for (const Case& c : {Case{"Accept", ""}, Case{"", "Origin"},
+                        Case{"Accept-Encoding", "User-Agent"}}) {
+    SCOPED_TRACE(StrCat("server=", c.server_vary, " origin=", c.origin_vary));
+    lru_cache()->Clear();
+    ClearStats();
+    EXPECT_NE(kFoundResult, RecordWithVary(c.server_vary, true, c.origin_vary));
+    EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+    EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+  }
+  // Control: neither side varies on the request.
+  lru_cache()->Clear();
+  ClearStats();
+  EXPECT_EQ(kFoundResult, RecordWithVary("Accept-Encoding", true, ""));
+}
+
+TEST_F(InPlaceResourceRecorderVaryTest, AnswerVaryingOnlyOnEncodingIsStored) {
+  for (const char* vary : {"", "Accept-Encoding"}) {
+    SCOPED_TRACE(vary);
+    lru_cache()->Clear();
+    ClearStats();
+    EXPECT_EQ(kFoundResult, RecordWithVary(vary, true));
+    EXPECT_EQ(1, IproVar("ipro_recorder_inserted_into_cache"));
+  }
 }
 
 }  // namespace

@@ -133,6 +133,9 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
     return num_proactively_freshen_user_facing_request_;
   }
 
+  // Governs cache lookups only.  A response this fetcher stores came from a
+  // fetch carrying the client's request headers, so it is stored only when
+  // it varies on nothing beyond Accept-Encoding, whatever this says.
   void set_respect_vary(bool x) { respect_vary_ = x; }
   bool respect_vary() const { return respect_vary_; }
 

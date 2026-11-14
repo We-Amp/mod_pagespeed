@@ -45,6 +45,7 @@
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/image_types.pb.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -652,6 +653,52 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizedFirstRequest) {
   // Second fetch hits the metadata cache and the rewritten resource is
   // served out.
   CheckWarmCache("second_fetch_2");
+}
+
+// When proxying, a resource whose response varies on the client's request
+// beyond Accept-Encoding is passed through as the origin sent it for this
+// client: not stored, not rewritten, and not loaded again by the module,
+// whose copy would otherwise be served to every client in its place.
+TEST_F(InPlaceRewriteContextTest, ProxiedAnswerVaryingOnRequestPassesThrough) {
+  Init();
+  for (const GoogleString* url :
+       {&cache_jpg_vary_origin_url_, &cache_jpg_vary_ua_url_}) {
+    SCOPED_TRACE(*url);
+    for (int i = 0; i < 2; ++i) {
+      ResetHeadersAndStats();
+      FetchAndCheckResponse(*url, cache_body_, true, ttl_ms_, nullptr,
+                            start_time_ms());
+      EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count()) << i;
+      EXPECT_EQ(0, http_cache()->cache_hits()->Get()) << i;
+      EXPECT_EQ(0, http_cache()->cache_inserts()->Get()) << i;
+      EXPECT_EQ(0, img_filter_->num_rewrites()) << i;
+    }
+  }
+}
+
+// A copy the module stored itself is not served by the proxying lookup either
+// when it varies on the request: the origin is asked for this client.
+TEST_F(InPlaceRewriteContextTest,
+       ProxiedLookupSkipsStoredCopyVaryingOnRequest) {
+  Init();
+  ResponseHeaders stored;
+  SetDefaultHeaders(kContentTypeJpeg.mime_type(), &stored);
+  stored.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  stored.Replace(HttpAttributes::kVary, "Origin");
+  stored.ComputeCaching();
+  HTTPValue value;
+  value.SetHeaders(&stored);
+  value.Write("module's copy", message_handler());
+  http_cache()->PutFetchedInput(
+      cache_jpg_vary_origin_url_, rewrite_driver_->CacheFragment(),
+      RequestHeaders::Properties(), kDefaultHttpOptionsForTests, &value,
+      message_handler());
+  ResetHeadersAndStats();
+  FetchAndCheckResponse(cache_jpg_vary_origin_url_, cache_body_, true, ttl_ms_,
+                        nullptr, start_time_ms());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(0, img_filter_->num_rewrites());
 }
 
 TEST_F(InPlaceRewriteContextTest, WaitForOptimizeWithDisabledFilter) {

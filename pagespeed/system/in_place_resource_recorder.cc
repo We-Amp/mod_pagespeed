@@ -301,11 +301,15 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   // caching headers: the final headers are judged as they stand here, and
   // again below with the origin's caching fields in their place, when the
   // seam supplied them.
+  //
+  // The recorded response is the one the server produced for THIS client's
+  // request, with its own Accept, Origin, User-Agent and so on.  An answer
+  // that varies on any of those belongs to this client only, so both checks
+  // refuse any Vary beyond Accept-Encoding whatever RespectVary says.
   const bool server_allows_storing =
       !has_origin_caching_headers() ||
       response_headers->IsProxyCacheable(
-          request_properties_,
-          ResponseHeaders::GetVaryOption(http_options_.respect_vary),
+          request_properties_, ResponseHeaders::kRespectVaryOnResources,
           ResponseHeaders::kNoValidator);
   ApplyOriginCachingHeaders(response_headers,
                             cache_control_set_ ? &cache_control_ : nullptr);
@@ -350,8 +354,7 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   bool is_cacheable =
       server_allows_storing &&
       response_headers->IsProxyCacheable(
-          request_properties_,
-          ResponseHeaders::GetVaryOption(http_options_.respect_vary),
+          request_properties_, ResponseHeaders::kRespectVaryOnResources,
           ResponseHeaders::kNoValidator);
   if (!is_cacheable) {
     DroppedAsUncacheable();
