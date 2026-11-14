@@ -1212,4 +1212,57 @@ TEST_F(RedisCacheTest, PasswordOnlyAuthUsesSingleArgumentForm) {
   EXPECT_EQ("*2\r\n$4\r\nAUTH\r\n$7\r\npw-4f2a\r\n", seen[0][0]);
 }
 
+// RedisTTLSec (archived upstream issue apache/incubator-pagespeed-mod#1704):
+// with a TTL configured, a write sets that expiry on the key (SETEX), so
+// Redis reports the keys as expiring. This covers the cache's own writes;
+// the directive's parsing and hand-off to the cache are not exercised here.
+TEST_F(RedisCacheTest, ConfiguredTtlIsSetOnEachWrite) {
+  std::vector<std::vector<GoogleString>> seen;
+  std::mutex seen_mutex;
+  cache_.emplace_back(new RedisCache(
+      "localhost", custom_server_port_, thread_system_.get(), &handler_,
+      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
+      /* ttl_sec= */ 3600));
+  custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
+      custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
+  ASSERT_TRUE(custom_server_->Start());
+  ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  cache_[0]->StartUp();
+  CheckPut(kSomeKey, kSomeValue);
+  CheckGet(kSomeKey, kSomeValue);
+  WaitForCustomServerShutdown();
+  std::lock_guard<std::mutex> lock(seen_mutex);
+  ASSERT_EQ(1u, seen.size());
+  ASSERT_GE(seen[0].size(), 2u);
+  EXPECT_THAT(seen[0][0], HasSubstr("SELECT"));
+  EXPECT_EQ(
+      "*4\r\n$5\r\nSETEX\r\n$7\r\nSomeKey\r\n$4\r\n3600\r\n"
+      "$9\r\nSomeValue\r\n",
+      seen[0][1]);
+}
+
+// Without RedisTTLSec a write sets no expiry, leaving eviction to the
+// server's own policy.
+TEST_F(RedisCacheTest, WithoutATtlAWriteSetsNoExpiry) {
+  std::vector<std::vector<GoogleString>> seen;
+  std::mutex seen_mutex;
+  cache_.emplace_back(new RedisCache(
+      "localhost", custom_server_port_, thread_system_.get(), &handler_,
+      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
+      kTTLSec));
+  custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
+      custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
+  ASSERT_TRUE(custom_server_->Start());
+  ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  cache_[0]->StartUp();
+  CheckPut(kSomeKey, kSomeValue);
+  CheckGet(kSomeKey, kSomeValue);
+  WaitForCustomServerShutdown();
+  std::lock_guard<std::mutex> lock(seen_mutex);
+  ASSERT_EQ(1u, seen.size());
+  ASSERT_GE(seen[0].size(), 2u);
+  EXPECT_EQ("*3\r\n$3\r\nSET\r\n$7\r\nSomeKey\r\n$9\r\nSomeValue\r\n",
+            seen[0][1]);
+}
+
 }  // namespace net_instaweb

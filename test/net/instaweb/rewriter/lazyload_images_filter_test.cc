@@ -794,6 +794,41 @@ TEST_F(LazyloadImagesFilterTest, AutoModeUsesNativeForModernUa) {
   EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
 }
 
+// A Lighthouse run (PageSpeed Insights) on a page whose critical-image beacon
+// data has not been gathered yet (archived upstream issue
+// apache/incubator-pagespeed-mod#2051): in the default mode the
+// below-the-fold images get the native loading="lazy" attribute, which
+// Lighthouse recognizes, and the first image is left eager to protect the
+// likely LCP image. This covers the markup the filter emits, not a
+// Lighthouse audit itself.
+TEST_F(LazyloadImagesFilterTest, LighthouseOnAColdPageGetsNativeLazyLoad) {
+  static const char* const kLighthouseUserAgents[] = {
+      "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) "
+      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile "
+      "Safari/537.36 Chrome-Lighthouse",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Chrome-Lighthouse",
+  };
+  TestCriticalImagesFinder* finder =
+      new TestCriticalImagesFinder(nullptr, statistics());
+  finder->set_available(CriticalImagesFinder::kNoDataYet);
+  server_context()->set_critical_images_finder(finder);
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  int run = 0;
+  for (const char* user_agent : kLighthouseUserAgents) {
+    SetCurrentUserAgent(user_agent);
+    ValidateExpected(
+        StrCat("lighthouse_cold_", run++),
+        "<body><img src=\"hero.jpg\"/><img src=\"1.jpg\"/>"
+        "<img src=\"2.jpg\"/></body>",
+        "<body><img src=\"hero.jpg\"/>"
+        "<img src=\"1.jpg\" loading=\"lazy\" decoding=\"async\"/>"
+        "<img src=\"2.jpg\" loading=\"lazy\" decoding=\"async\"/></body>");
+  }
+  EXPECT_EQ(4, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+}
+
 // Auto mode falls back to the js machinery for older user agents; the SetUp
 // user agent (Chrome 18) predates native lazyload support.
 TEST_F(LazyloadImagesFilterTest, AutoModeUsesJsForOldUa) {
