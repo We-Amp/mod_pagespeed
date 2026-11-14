@@ -234,5 +234,25 @@ TEST_F(FastWildcardGroupTest, IncrementalUpdate) {
   EXPECT_TRUE(group_.Match("Another complicated literal pattern", true));
 }
 
+TEST_F(FastWildcardGroupTest, FailedPatternIsTriedOncePerMatch) {
+  for (int i = 0; i < 16; ++i) {
+    group_.Disallow(StrCat("*/dir", IntegerToString(i), "/*"));
+  }
+  group_.Allow("*key.dat*");
+
+  // Many near-misses for one hashed pattern: each call must stay linear in
+  // the input.
+  GoogleString input;
+  for (int i = 0; i < 200000; ++i) {
+    input += "key.da|ey.dat|";
+  }
+
+  EXPECT_FALSE(group_.Match(input, false));
+  EXPECT_TRUE(group_.Match(StrCat(input, "key.dat"), false));
+  EXPECT_TRUE(group_.Match(StrCat(input, ".h"), false));
+  EXPECT_FALSE(group_.Match(StrCat(input, "/dir7/"), true));
+  EXPECT_TRUE(group_.Match(input, true));
+}
+
 }  // namespace
 }  // namespace net_instaweb

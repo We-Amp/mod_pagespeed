@@ -281,6 +281,11 @@ bool FastWildcardGroup::Match(const StringPiece& str, bool allow) const {
     uint64 rolling_hash = RollingHash(
         str.data(), 0,
         rolling_hash_length);  // NOLINT(bugprone-suspicious-stringview-data-usage)
+    // Wildcard::Match() looks at all of str, so its answer for a pattern is
+    // the same at every offset.  failed[i] records that wildcards_[i] has
+    // already been tried and did not match during this call; the vector stays
+    // empty until that first happens.
+    std::vector<bool> failed;
     // Uses signed arithmetic for correct comparison below.
     for (int ofs = 0;
          max_effective_index < exit_effective_index && ofs <= rolling_end;) {
@@ -304,9 +309,15 @@ bool FastWildcardGroup::Match(const StringPiece& str, bool allow) const {
           break;
         }
         if (rolling_hash == rolling_hashes_[index] &&
-            wildcards_[index]->Match(str)) {
-          max_effective_index = effective_indices_[index];
-          break;
+            (failed.empty() || !failed[index])) {
+          if (wildcards_[index]->Match(str)) {
+            max_effective_index = effective_indices_[index];
+            break;
+          }
+          if (failed.empty()) {
+            failed.resize(wildcards_.size());
+          }
+          failed[index] = true;
         }
       }
       if (++ofs <= rolling_end) {
