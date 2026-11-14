@@ -297,6 +297,15 @@ function isCacheKey(name: string, before: string): boolean {
   return /cache[_.-]?key["']?\s*[:=]\s*$/i.test(name) || (/^key["']?\s*[:=]/i.test(name) && /cache\s+$/i.test(before));
 }
 
+/**
+ * One SECRET_FIELD match: the value is replaced, except that a cache key keeps
+ * its value with the secret fields inside it replaced.
+ */
+function secretField(field: string, name: string, at: number, all: string): string {
+  if (!isCacheKey(name, all.slice(Math.max(0, at - 16), at))) return `${name}${REDACTED}`;
+  return `${name}${field.slice(name.length).replace(SECRET_FIELD, secretField)}`;
+}
+
 /** Header names whose values are secrets wherever they appear. */
 const SECRET_HEADER = /\b((?:set-)?cookie|(?:proxy-)?authorization|x-api-key|x-auth-token)(\s*[:=]\s*)\S[^\n]*/gi;
 
@@ -312,9 +321,7 @@ export function scrubSecrets(text: string): string {
     .replace(SECRET_HEADER, `$1$2${REDACTED}`)
     .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`)
     .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]*):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`)
-    .replace(SECRET_FIELD, (field, name: string, at: number, all: string) =>
-      isCacheKey(name, all.slice(Math.max(0, at - 16), at)) ? field : `${name}${REDACTED}`,
-    );
+    .replace(SECRET_FIELD, secretField);
 }
 
 /** True when the value of option `name` may be shown. */
@@ -323,9 +330,17 @@ function safeOption(name: string): boolean {
 }
 
 /**
+ * One `options=` pair as the module stores it: its parser splits the list on
+ * `,` and each pair on `=`, and keeps a pair only when that gives exactly a
+ * name and a value, so a stored value never holds `,`, `;` or `=`.
+ */
+const OPTION_PAIR = /^([A-Za-z][\w.-]*)=([^,;=]+)$/;
+
+/**
  * An `Experiment id=...;percent=...;options=Name=Value,...` line: the fields
- * that only carry numbers and filter ids stay, an option's value stays when
- * the option is known to be safe to share, and everything else is replaced.
+ * that only carry numbers and filter ids stay, and an option's value stays
+ * when the option is known to be safe to share. A pair of any other shape
+ * replaces the rest of its `options=` field, as it cannot be read reliably.
  */
 function redactExperiment(spec: string): string {
   return spec
@@ -334,18 +349,20 @@ function redactExperiment(spec: string): string {
       if (/^(?:id|slot|percent)=\d+$|^level=\w+$|^default$|^(?:enabled|disabled)=[\w,]*$|^matches_device_type=[a-z,]*$|^ga=[\w-]*$/.test(field)) {
         return field;
       }
-      if (field.startsWith("options=")) {
-        const pairs = field.slice("options=".length).split(",");
-        return `options=${pairs
-          .map((pair) => {
-            const m = /^([A-Za-z][\w.-]*)=/.exec(pair);
-            if (m === null) return REDACTED;
-            return safeOption(m[1]) ? pair : `${m[1]}=${REDACTED}`;
-          })
-          .join(",")}`;
+      if (!field.startsWith("options=")) {
+        const key = /^([a-z_]+)=/.exec(field);
+        return key === null ? REDACTED : `${key[1]}=${REDACTED}`;
       }
-      const key = /^([a-z_]+)=/.exec(field);
-      return key === null ? REDACTED : `${key[1]}=${REDACTED}`;
+      const kept: string[] = [];
+      for (const pair of field.slice("options=".length).split(",")) {
+        const m = OPTION_PAIR.exec(pair);
+        if (m === null) {
+          kept.push(REDACTED);
+          break;
+        }
+        kept.push(safeOption(m[1]) ? pair : `${m[1]}=${REDACTED}`);
+      }
+      return `options=${kept.join(",")}`;
     })
     .join(";");
 }
@@ -378,6 +395,18 @@ const CONFIG_SECTION =
  */
 export function redactConfig(text: string): string {
   let section = "";
+  const redactLine = (line: string): string => {
+    // A module that ends a section without a newline puts the next
+    // experiment on the same line, so one is looked for anywhere in it.
+    const experiment = line.indexOf("Experiment id=");
+    if (experiment > 0) return `${redactLine(line.slice(0, experiment))}${redactLine(line.slice(experiment))}`;
+    if (experiment === 0) return `Experiment ${redactExperiment(line.slice("Experiment ".length))}`;
+    if (line.startsWith("Proxy Suffix:")) return `Proxy Suffix: ${REDACTED}`;
+    if (section === "Domain Lawyer" && /^\s/.test(line)) return redactDomainLine(line);
+    const option = /^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/.exec(line);
+    if (option !== null && !safeOption(option[2])) return `${option[1]}${REDACTED}`;
+    return line;
+  };
   return text
     .split("\n")
     .map((line) => {
@@ -389,12 +418,7 @@ export function redactConfig(text: string): string {
         section = "";
         return line;
       }
-      if (line.startsWith("Proxy Suffix:")) return `Proxy Suffix: ${REDACTED}`;
-      if (line.startsWith("Experiment ")) return `Experiment ${redactExperiment(line.slice("Experiment ".length))}`;
-      if (section === "Domain Lawyer" && /^\s/.test(line)) return redactDomainLine(line);
-      const option = /^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/.exec(line);
-      if (option !== null && !safeOption(option[2])) return `${option[1]}${REDACTED}`;
-      return line;
+      return redactLine(line);
     })
     .join("\n");
 }

@@ -302,9 +302,42 @@ describe("redactConfig", () => {
       "Experiment id=7;slot=4;ga=UA-1-1;percent=50;level=CoreFilters;default;enabled=rj,ri;disabled=ah;" +
         "options=ImageMaxRewritesAtOnce=8,RedisUser=[redacted],NotAnOption=[redacted],[redacted];matches_device_type=mobile",
     );
+    // A pair the module could not have stored replaces the rest of its options= field, and only that.
+    expect(redactConfig("Experiment id=3;options=NotAnOption=x=y,EnableRewriting=leak;percent=5")).toBe(
+      "Experiment id=3;options=[redacted];percent=5",
+    );
+    expect(redactConfig("Experiment id=4;options=ImageMaxRewritesAtOnce=8,5=10,EnableRewriting=on;percent=5")).toBe(
+      "Experiment id=4;options=ImageMaxRewritesAtOnce=8,[redacted];percent=5",
+    );
+    expect(redactConfig("Experiment id=6;options=NotAnOption=x,EnableRewriting=on;percent=5")).toBe(
+      "Experiment id=6;options=NotAnOption=[redacted],EnableRewriting=on;percent=5",
+    );
+    expect(redactConfig("Experiment id=5;percent=5;options=ImageMaxRewritesAtOnce=8;matches_device_type=mobile")).toBe(
+      "Experiment id=5;percent=5;options=ImageMaxRewritesAtOnce=8;matches_device_type=mobile",
+    );
     expect(redactConfig('Experiment id=2;percent=10;alternate_origin_domain="a.example:80":"10.0.0.5:8080";x y')).toBe(
       "Experiment id=2;percent=10;alternate_origin_domain=[redacted];[redacted]",
     );
+  });
+  it("reads an experiment that a module put on the same line as the section before it", () => {
+    // The shape an older module writes: the caching wildcards and the proxy
+    // suffix end without a newline, so the first experiment follows on their line.
+    const config = [
+      "Domain Lawyer",
+      "  http://www.example.com/ Auth",
+      "Proxy Suffix: .proxy.internalExperiment id=1;percent=15;options=RedisUser=u,ImageMaxRewritesAtOnce=8",
+      "Override caching wildcards",
+      "*.example.com/*A,Experiment id=2;percent=15;options=NotAnOption=secret",
+      "Experiment id=3;percent=15;enabled=dj",
+    ].join("\n");
+    expect(redactConfig(config).split("\n")).toEqual([
+      "Domain Lawyer",
+      "  [redacted] Auth",
+      "Proxy Suffix: [redacted]Experiment id=1;percent=15;options=RedisUser=[redacted],ImageMaxRewritesAtOnce=8",
+      "Override caching wildcards",
+      "*.example.com/*A,Experiment id=2;percent=15;options=NotAnOption=[redacted]",
+      "Experiment id=3;percent=15;enabled=dj",
+    ]);
   });
   it("keeps the shape of the Domain Lawyer mappings and replaces every domain and host", () => {
     const config = [
@@ -411,6 +444,12 @@ describe("scrubSecrets and stripQueryStrings", () => {
   it("keep a cache key, and still replace a key", () => {
     const plain = "Cache key: rname/ic_x/http://a.example/b.png, cache_key=c1 CacheKey: k2";
     expect(scrubSecrets(plain)).toBe(plain);
+    expect(scrubSecrets("Cache key: http://a.example/b.png?token=t1 and cache_key=api_key=k1")).toBe(
+      "Cache key: http://a.example/b.png?token=[redacted] and cache_key=api_key=[redacted]",
+    );
+    // Inside a query string that is kept, and when query strings are removed.
+    expect(scrubSecrets("fetch /a.css?cache_key=token=t2&x=1 failed")).toBe("fetch /a.css?cache_key=token=[redacted]&x=1 failed");
+    expect(stripQueryStrings(scrubSecrets("fetch /a.css?cache_key=token=t2 failed"))).toBe("fetch /a.css?[query removed] failed");
     expect(scrubSecrets("key: k1 api_key=k2 signing key: k3")).toBe("key: [redacted] api_key=[redacted] signing key: [redacted]");
   });
   it("leave ordinary text alone", () => {
