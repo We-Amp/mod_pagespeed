@@ -25,8 +25,11 @@ public class ExceptionTests
     {
         var ex = new PageSpeedException(PageSpeedError.NotFound, "test");
 
-        // Without native library, fallback format is "PageSpeed error 1: test"
-        Assert.Contains("1", ex.Message);
+        // Fallback (no native lib): "PageSpeed error 1: test".
+        // Native lib loaded: "PS_ERR_NOT_FOUND: Not found (test)".
+        Assert.True(ex.Message.Contains("PageSpeed error 1") ||
+                    ex.Message.Contains("PS_ERR_NOT_FOUND"), ex.Message);
+        Assert.Contains("test", ex.Message);
     }
 
     [Fact]
@@ -42,9 +45,11 @@ public class ExceptionTests
     {
         var ex = new PageSpeedException(PageSpeedError.Internal, "");
 
-        // Fallback without detail: "PageSpeed error 99"
-        Assert.Contains("99", ex.Message);
-        Assert.DoesNotContain(":", ex.Message);
+        // Fallback: "PageSpeed error 99"; native: "PS_ERR_INTERNAL: Internal error".
+        Assert.True(ex.Message.Contains("PageSpeed error 99") ||
+                    ex.Message.Contains("PS_ERR_INTERNAL"), ex.Message);
+        // No detail suffix in either form.
+        Assert.DoesNotContain("(", ex.Message);
     }
 
     [Fact]
@@ -53,7 +58,8 @@ public class ExceptionTests
         var ex = new PageSpeedException(PageSpeedError.Ok, "unexpected");
 
         Assert.Equal(PageSpeedError.Ok, ex.ErrorCode);
-        Assert.Contains("0", ex.Message);
+        Assert.True(ex.Message.Contains("PageSpeed error 0") ||
+                    ex.Message.Contains("PS_OK"), ex.Message);
     }
 
     [Fact]
@@ -62,7 +68,8 @@ public class ExceptionTests
         var ex = new PageSpeedException(PageSpeedError.Internal, "something broke");
 
         Assert.Equal(PageSpeedError.Internal, ex.ErrorCode);
-        Assert.Contains("99", ex.Message);
+        Assert.True(ex.Message.Contains("PageSpeed error 99") ||
+                    ex.Message.Contains("PS_ERR_INTERNAL"), ex.Message);
         Assert.Contains("something broke", ex.Message);
     }
 
