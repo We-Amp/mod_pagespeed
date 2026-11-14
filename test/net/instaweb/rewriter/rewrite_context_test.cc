@@ -3586,7 +3586,7 @@ class SignalingStringAsyncFetch : public StringAsyncFetch {
   }
 
  private:
-  std::unique_ptr<AbstractMutex> mutex_;
+  std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
   std::unique_ptr<ThreadSystem::Condvar> cond_;
   bool signaled_;
 };
@@ -3595,8 +3595,7 @@ class SignalingStringAsyncFetch : public StringAsyncFetch {
 // expensive work on the low-priority pool: unlike rewritten resources, it
 // has no deadline fallback that would bound the wait.
 TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
-  server_context()->low_priority_rewrite_workers()->SetLoadSheddingThreshold(
-      1);
+  server_context()->low_priority_rewrite_workers()->SetLoadSheddingThreshold(1);
 
   InitResources();
 
@@ -3623,10 +3622,9 @@ TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
   SignalingStringAsyncFetch ce_fetch(ctx, &out_ce,
                                      server_context()->thread_system());
   RewriteDriver* ce_driver = server_context()->NewRewriteDriver(ctx);
-  ce_driver->FetchResource(
-      Encode(kTestDomain, RewriteOptions::kCacheExtenderId, "0", "a.css",
-             "css"),
-      &ce_fetch);
+  ce_driver->FetchResource(Encode(kTestDomain, RewriteOptions::kCacheExtenderId,
+                                  "0", "a.css", "css"),
+                           &ce_fetch);
 
   bool done_while_wedged = ce_fetch.WaitForDone(10 * Timer::kSecondMs);
 
@@ -3641,10 +3639,8 @@ TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
   EXPECT_EQ(" a ", out_ce);
   EXPECT_FALSE(ce_fetch.response_headers()->HasValue(
       HttpAttributes::kCacheControl, "private"));
-  EXPECT_EQ(0, server_context()
-                   ->rewrite_stats()
-                   ->num_rewrites_dropped()
-                   ->Get(TimedVariable::START));
+  EXPECT_EQ(0, server_context()->rewrite_stats()->num_rewrites_dropped()->Get(
+                   TimedVariable::START));
 
   rewrite_driver()->WaitForShutDown();
 }
