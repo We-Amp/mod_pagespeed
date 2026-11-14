@@ -12,9 +12,11 @@ name that was never an option keeps failing the configuration test.
 import os
 import pathlib
 import re
+import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.request
 
@@ -30,12 +32,15 @@ _OPTIONS_SOURCE = (
 DEPRECATED_SCOPES = dict(
     re.findall(r'AddDeprecatedProperty\(\s*"(\w+)"\s*,\s*(k\w+Scope)\s*\)', _OPTIONS_SOURCE.read_text())
 )
+# A call the pattern misses (qualified, or an unexpected shape) must fail loudly.
+_CALLS = _OPTIONS_SOURCE.read_text().count("AddDeprecatedProperty(")
 DEPRECATED = {name: "1" for name in DEPRECATED_SCOPES}
 SERVER_SCOPED = [n for n, s in DEPRECATED_SCOPES.items() if s == "kServerScope"]
 DIRECTORY_SCOPED = [n for n, s in DEPRECATED_SCOPES.items() if s == "kDirectoryScope"]
 
 
 def test_deprecated_list_was_derived():
+    assert len(DEPRECATED_SCOPES) == _CALLS, (len(DEPRECATED_SCOPES), _CALLS)
     assert SERVER_SCOPED and DIRECTORY_SCOPED, DEPRECATED_SCOPES
 
 
@@ -58,11 +63,19 @@ class _Instance:
 
     def __init__(self, tmp_path, http_lines=(), server_lines=(), location_lines=()):
         self.binary = os.environ["PAGESPEED_NGINX_BINARY"]
+        # The pytest tmp dir is 0700; a worker running as another user (root
+        # runs nginx workers as nobody) needs a readable tree, so use a
+        # world-readable directory of our own.
+        tmp_path = pathlib.Path(tempfile.mkdtemp(prefix="nginx-deprecated-"))
+        tmp_path.chmod(0o755)
         self.dir = tmp_path
         self.port = _free_port()
         (tmp_path / "cache").mkdir()
+        (tmp_path / "cache").chmod(0o777)
         (tmp_path / "www").mkdir()
+        (tmp_path / "www").chmod(0o755)
         (tmp_path / "www" / "index.html").write_text("<html><body>hi</body></html>")
+        (tmp_path / "www" / "index.html").chmod(0o644)
         self.log = tmp_path / "error.log"
         self.conf = tmp_path / "nginx.conf"
         self.conf.write_text(
@@ -96,15 +109,27 @@ http {{
         )
 
     def test(self):
-        return self._run("-t")
+        try:
+            return self._run("-t")
+        finally:
+            shutil.rmtree(self.dir, ignore_errors=True)
 
     def start(self):
         r = self._run()
         assert r.returncode == 0, r.stderr + self.log_text()
         return self
 
-    def pid(self):
-        return int((self.dir / "nginx.pid").read_text())
+    def pid(self, timeout=15.0):
+        """The daemonized master writes the pid file after the parent exits."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                pid = int((self.dir / "nginx.pid").read_text().strip())
+                os.kill(pid, 0)
+                return pid
+            except (OSError, ValueError):
+                time.sleep(0.1)
+        raise AssertionError("nginx master pid file never became valid\n" + self.log_text())
 
     def log_text(self):
         return self.log.read_text() if self.log.exists() else ""
@@ -115,8 +140,9 @@ http {{
     def stop(self):
         try:
             os.kill(self.pid(), signal.SIGTERM)
-        except (OSError, ValueError, FileNotFoundError):
+        except (OSError, ValueError, AssertionError):
             pass
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
 def _config_test(tmp_path, http_lines, location_lines=()):
