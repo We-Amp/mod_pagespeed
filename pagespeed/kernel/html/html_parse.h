@@ -402,10 +402,6 @@ class HtmlParse {
   // type and any HTML directives encountered so far).
   const DocType& doctype() const;
 
-  // The content type the current parse was started with (StartParseWithType).
-  // Only meaningful once a parse has started.
-  const ContentType& content_type() const;
-
   // Interface for any caller to report an error message via the message handler
   void Info(const char* filename, int line, const char* msg, ...)
       INSTAWEB_PRINTF_FORMAT(4, 5);
