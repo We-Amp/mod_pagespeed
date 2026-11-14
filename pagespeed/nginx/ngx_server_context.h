@@ -80,6 +80,10 @@ class NgxServerContext : public SystemServerContext {
 
   // This server's daemon adapter, or nullptr before the startup check has
   // run.  Borrowed; the record arm asks it for the per-process cache handle.
+  // SHARED by every server block of this configuration with the same
+  // socket and volume: CloseRecordCache() on it closes the handle for all
+  // of them, so only the worker-exit teardown, which closes every server's,
+  // calls it.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
   // The counters and decision log of DaemonHtmlCache report-only, built on
@@ -123,8 +127,10 @@ class NgxServerContext : public SystemServerContext {
   ngx_int_t ngx_http2_variable_index_;
 
   // In this order: the stats object borrows the adapter's bound library, so
-  // it must be destroyed first.
-  std::unique_ptr<DaemonAdapter> daemon_adapter_;
+  // it must be destroyed first.  Shared with the other server blocks of this
+  // configuration that name the same socket and volume (see
+  // NgxRewriteDriverFactory::daemon_adapter_pool()).
+  std::shared_ptr<DaemonAdapter> daemon_adapter_;
   std::once_flag daemon_html_reporter_once_;
   std::unique_ptr<DaemonHtmlReporter> daemon_html_reporter_;
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;

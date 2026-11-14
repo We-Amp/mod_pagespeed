@@ -54,9 +54,16 @@ bool NgxServerContext::RunDaemonStartupCheck() {
   // through the handler it is given. Use the factory's, the same handler the
   // factory itself logs module-init messages through.
   MessageHandler* handler = factory()->message_handler();
-  daemon_adapter_ = std::make_unique<DaemonAdapter>(
-      config->daemon_socket_path(), config->daemon_volume_path(), handler);
-  const bool ok = daemon_adapter_->StartupCheck() == DaemonStartupStatus::kOk;
+  // Shared with every other server block of this configuration that names
+  // the same socket and volume: one adapter, so each worker opens ONE
+  // handle on the volume (and starts its storage threads once) instead of
+  // one per server block.  The check itself runs once per pair; later
+  // server blocks reuse its verdict.
+  const DaemonAdapterPool::Checked checked =
+      ngx_factory_->daemon_adapter_pool()->GetOrCheck(
+          config->daemon_socket_path(), config->daemon_volume_path(), handler);
+  daemon_adapter_ = checked.adapter;
+  const bool ok = checked.status == DaemonStartupStatus::kOk;
   // Built whatever the verdict, and holding nothing open.  The serve arm
   // records exactly one class per response through it, and a null object
   // here would make "the daemon was not usable" and "this serve was not

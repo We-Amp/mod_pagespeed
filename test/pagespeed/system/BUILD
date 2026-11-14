@@ -567,6 +567,20 @@ pagespeed_cc_test(
     ],
 )
 
+# One optimizer-daemon adapter per distinct (socket, volume) pair, shared by
+# every server context that names it (issue #627). No I/O: the cases stay on
+# the adapter's unconfigured and half-configured paths.
+pagespeed_cc_test(
+    name = "daemon_adapter_pool_test",
+    srcs = ["daemon_adapter_pool_test.cc"],
+    size = "small",
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_health",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The record arm: the gate's rules, driven through the REAL client-library
 # binder against the real dlopen-able stand-in, so the peer's validation is
 # what answers rather than an in-process fake of it.

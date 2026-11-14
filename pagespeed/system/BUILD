@@ -198,10 +198,12 @@ cc_library(
     srcs = [
         "daemon_abi.cc",
         "daemon_adapter.cc",
+        "daemon_adapter_pool.cc",
     ],
     hdrs = [
         "daemon_abi.h",
         "daemon_adapter.h",
+        "daemon_adapter_pool.h",
     ],
     # daemon_health.h is NOT here -- see the :daemon_health target above.
     linkopts = select({
