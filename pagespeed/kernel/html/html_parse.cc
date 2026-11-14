@@ -1246,6 +1246,12 @@ bool HtmlParse::size_limit_exceeded() const {
   return lexer_->size_limit_exceeded();
 }
 
+void HtmlParse::set_pass_through_after(int64 x) {
+  lexer_->set_pass_through_after(x);
+}
+
+bool HtmlParse::passing_through() const { return lexer_->passing_through(); }
+
 bool HtmlParse::InsertComment(StringPiece unescaped) {
   HtmlElement* parent = nullptr;
 

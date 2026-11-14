@@ -1983,6 +1983,26 @@ TEST_F(RewriteDriverTest, NoPreRenderFiltersWhileBufferingEvents) {
   EXPECT_EQ(3, filter->num_comments());
 }
 
+// Past the parse limit a page's text is passed through, and whitespace there
+// still ends the wait for the document type, so flushes release it.
+TEST_F(RewriteDriverTest, ABlankTailPastTheLimitIsNotHeldBack) {
+  RewriteDriver* driver = rewrite_driver();
+  ResponseHeaders headers;
+  driver->set_response_headers_ptr(&headers);
+  driver->AddFilters();
+  ASSERT_TRUE(driver->StartParse("http://example.com/index.html"));
+  driver->set_pass_through_after(1000);
+  driver->ParseText("<!-- note 1 -->");
+  const GoogleString blank(8 * 1024, '\n');
+  for (int i = 0; i < 20; ++i) {
+    driver->ParseText(blank);
+    driver->Flush();
+  }
+  EXPECT_TRUE(driver->passing_through());
+  EXPECT_FALSE(driver->EventsAreHeldBack());
+  driver->FinishParse();
+}
+
 // A flush while events are buffered ends the headers' mutability, so the
 // Vary tokens the page depends on have to be in place by then.
 TEST_F(RewriteDriverTest, VaryTokensSurviveAFlushWhileBufferingEvents) {

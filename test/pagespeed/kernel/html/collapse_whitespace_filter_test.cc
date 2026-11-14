@@ -20,6 +20,8 @@
 #include "pagespeed/kernel/html/collapse_whitespace_filter.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_parse.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
@@ -60,6 +62,21 @@ TEST_F(CollapseWhitespaceFilterTest, NewlineTakesPrecedence) {
                    "    is good to see you</body>",
                    "<body>hello world, it\n"
                    "is good to see you</body>");
+}
+
+TEST_F(CollapseWhitespaceFilterTest, TextPassedThroughIsLeftAlone) {
+  // Past the parse limit the text can hold any markup, so a pre in it keeps
+  // its whitespace, and so does everything else there.
+  const GoogleString head = "<html><body>one   two<br>";
+  const GoogleString tail = "<pre>three   four</pre>five   six</body></html>";
+  SetupWriter();
+  html_parse_.set_pass_through_after(head.size());
+  html_parse_.StartParse("http://example.com/large.html");
+  html_parse_.ParseText(head);
+  html_parse_.Flush();
+  html_parse_.ParseText(tail);
+  html_parse_.FinishParse();
+  EXPECT_EQ(StrCat("<html><body>one two<br>", tail), output_buffer_);
 }
 
 TEST_F(CollapseWhitespaceFilterTest, DoNotCollapseWithinCode) {

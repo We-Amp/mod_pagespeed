@@ -96,6 +96,27 @@ TEST_F(AmpDocumentFilterTest, GivesUpWaitingAfterBufferingALot) {
   html_parse_.FinishParse();
 }
 
+TEST_F(AmpDocumentFilterTest, GivesUpWaitingAfterALotOfWhitespace) {
+  // Whitespace before the root element decides nothing either, so it counts
+  // toward the same limit as comments do.
+  html_parse_.StartParse("http://example.com/amp_doc_much_whitespace.html");
+  const GoogleString blank(AmpDocumentFilter::kMaxBufferedBytes / 4, ' ');
+  html_parse_.ParseText("<!-- note 1 -->");
+  html_parse_.ParseText(blank);
+  html_parse_.ParseText("<!-- note 2 -->");
+  html_parse_.Flush();
+  EXPECT_FALSE(disovered_called_);
+  for (int i = 0; i < 4; ++i) {
+    html_parse_.ParseText(blank);
+    html_parse_.ParseText("<!-- note -->");
+  }
+  html_parse_.Flush();
+  EXPECT_TRUE(disovered_called_);
+  EXPECT_FALSE(is_amp_);
+  html_parse_.ParseText("<html amp></html>");
+  html_parse_.FinishParse();
+}
+
 TEST_F(AmpDocumentFilterTest, IsAmpHtml) {
   RunWithEveryFlushPoint("<!doctype foo> <html amp><head/><body></body></html>",
                          true);

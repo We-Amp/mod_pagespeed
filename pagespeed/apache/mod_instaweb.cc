@@ -44,6 +44,7 @@
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/header_util.h"
+#include "pagespeed/apache/html_flush_window.h"
 #include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/apache/instaweb_handler.h"
 // clang-format off
@@ -244,7 +245,11 @@ apr_bucket* rewrite_html(InstawebContext* context, request_rec* request,
     context->Rewrite(buf, len);
   }
   if (operation == REWRITE) {
-    return nullptr;
+    // Once a window's worth of output is held it is sent on, headers first,
+    // so the response is not held whole until its end.
+    if (!HeldOutputIsSentOn(context->output().size())) {
+      return nullptr;
+    }
   } else if (operation == FLUSH) {
     context->Flush();
     // If the flush happens before any rewriting, don't fallthrough and
@@ -722,7 +727,13 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
     // Processed the bucket, now delete it.
     apr_bucket_delete(bucket);
     if (new_bucket != nullptr) {
+      // Output of a page larger than a window: pass it on now, without a
+      // FLUSH bucket, and stop on an error as a flush does.
       APR_BRIGADE_INSERT_TAIL(context_bucket_brigade, new_bucket);
+      *return_code = ap_pass_brigade(filter->next, context_bucket_brigade);
+      if (*return_code != APR_SUCCESS) {
+        return false;
+      }
     }
   } else if (APR_BUCKET_IS_EOS(bucket)) {
     if (context->daemon_html_capture() != nullptr) {
