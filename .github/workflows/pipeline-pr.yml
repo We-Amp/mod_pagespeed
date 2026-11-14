@@ -822,7 +822,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
-          sparse-checkout: pagespeed/system/console
+          # The option sources are read by the console's option-list drift test.
+          sparse-checkout: |
+            pagespeed/system/console
+            net/instaweb/rewriter/rewrite_options.cc
+            pagespeed/apache/apache_config.cc
+            pagespeed/envoy/envoy_rewrite_options.cc
+            pagespeed/nginx/ngx_rewrite_options.cc
+            pagespeed/system/system_rewrite_options.cc
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
