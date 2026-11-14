@@ -9,11 +9,12 @@
  * nothing is sent anywhere.
  *
  * The bundle is written to be pasted somewhere public. Query strings are
- * removed unless the operator keeps them; the configuration text is left out
- * unless the operator adds it, and then the values of options whose names
- * suggest a secret are replaced; client addresses in log lines are masked;
- * cookie and authorization header values and passwords inside addresses are
- * replaced everywhere. It ends with a list of what it left out.
+ * removed unless the operator keeps them, and fragments and path parameters
+ * always; the configuration text is left out unless the operator adds it, and
+ * then only the values of options known to be safe to share are kept; client
+ * addresses in log lines are masked; cookie and authorization header values,
+ * bearer tokens, fields named like a secret and passwords inside addresses
+ * are replaced everywhere. It ends with a list of what it left out.
  */
 
 import type {
@@ -27,6 +28,7 @@ import type {
 } from "$lib/api/types";
 import { ALERT_RULES, AlertTracker, failedChecks, optimizerStartMs, type AlertSeverity } from "$lib/alerts";
 import { PRODUCT_NAME } from "$lib/data/product-facts-console";
+import { SAFE_OPTION_NAMES } from "$lib/data/safe-option-names";
 import { DIALECTS, type Dialect } from "$lib/utils/dialect";
 import { formatDuration } from "$lib/utils/format";
 import { daemonAvailability, sampleOverview, toSnapshot, variablesOf } from "$lib/utils/overview";
@@ -169,6 +171,36 @@ function cap(s: string, max: number): string {
 export const QUERY_REMOVED = "?[query removed]";
 /** Replaces a value that was removed. */
 export const REDACTED = "[redacted]";
+/** Replaces a fragment that was removed. */
+export const FRAGMENT_REMOVED = "#[fragment removed]";
+/** Replaces path parameters (`;name=value`) that were removed. */
+export const PARAMETERS_REMOVED = ";[parameters removed]";
+
+/** An absolute URL or a path, up to the first space, quote or angle bracket. */
+const ADDRESS = /(?:\b[a-z][a-z0-9+.-]*:\/\/|(?<![\w.~-])\/)[^\s"'<>]+/gi;
+
+/**
+ * Remove the fragment and the path parameters of every address in `text`:
+ * `/a.css;jsessionid=X#top` becomes `/a.css;[parameters removed]#[fragment
+ * removed]`. The query string is left to stripQueryStrings, and punctuation
+ * that ends a sentence after the address stays.
+ */
+export function stripUrlParameters(text: string): string {
+  return text.replace(ADDRESS, (address) => {
+    const tail = /[.,;:!)\]]*$/.exec(address)?.[0] ?? "";
+    let rest = address.slice(0, address.length - tail.length);
+    let fragment = "";
+    const hash = rest.indexOf("#");
+    if (hash !== -1 && hash < rest.length - 1) {
+      rest = rest.slice(0, hash);
+      fragment = FRAGMENT_REMOVED;
+    }
+    const q = rest.indexOf("?");
+    const path = q === -1 ? rest : rest.slice(0, q);
+    const query = q === -1 ? "" : rest.slice(q);
+    return path.replace(/;[^/]*/g, PARAMETERS_REMOVED) + query + fragment + tail;
+  });
+}
 
 /**
  * Remove the query string of every address in `text`: an absolute URL or a
@@ -180,8 +212,7 @@ export function stripQueryStrings(text: string): string {
     .replace(
       /((?:\b[a-z][a-z0-9+.-]*:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]*?(?=[.,;:!)\]]*(?:[\s#"'<>]|$))/gi,
       `$1${QUERY_REMOVED}`,
-    )
-    .replace(/;jsessionid=[^\s?#/;"'<>]+/gi, `;jsessionid=${REDACTED}`);
+    );
 }
 
 /** Replaces a client address that was masked. */
@@ -232,31 +263,43 @@ export function maskClientAddresses(text: string): string {
 /** Option names that suggest a secret value. */
 const SECRET_NAME = /key|secret|passw(?:or)?d|passphrase|token|credential/i;
 
+/**
+ * A `name=value` or `name: value` field whose name ends like a secret
+ * (`token`, `api_key`, `password`, `auth`, `cookie`...), the name optionally
+ * quoted (JSON).
+ */
+const SECRET_FIELD =
+  /(?<![\w.-])((?:[A-Za-z][\w.-]*?)?(?:token|secret|passw(?:or)?d|pwd|passphrase|credentials?|auth|authorization|cookie|key)["']?\s*[:=]\s*)(?!\[redacted\])(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&"'<>)\]]+)/gi;
+
 /** Header names whose values are secrets wherever they appear. */
 const SECRET_HEADER = /\b((?:set-)?cookie|(?:proxy-)?authorization|x-api-key|x-auth-token)(\s*[:=]\s*)\S[^\n]*/gi;
 
 /**
  * Replace what is secret-looking anywhere in the bundle: cookie and
- * authorization header values, bearer tokens and the password inside an
- * address (`scheme://user:password@host`, `//user:password@host` or
+ * authorization header values, bearer tokens, the value of a field whose name
+ * ends like a secret (`token=`, `api_key:`, `"password":`) and the password
+ * inside an address (`scheme://user:password@host`, `//user:password@host` or
  * `user:password@host`), up to the last `@` before the host.
  */
 export function scrubSecrets(text: string): string {
   return text
     .replace(SECRET_HEADER, `$1$2${REDACTED}`)
     .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`)
-    .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]+):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`);
+    .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]+):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`)
+    .replace(SECRET_FIELD, `$1${REDACTED}`);
 }
 
 /**
- * The configuration text with the value of every option whose name suggests
- * a secret (key, secret, password, token, credential) replaced. The console
- * receives the module's option list (`Name (id)  value`); the module already
- * masks the options it knows are secret, so this is a second line of defence.
+ * The configuration text with the value of every option replaced unless the
+ * option is known to be safe to share (SAFE_OPTION_NAMES) and its name does
+ * not suggest a secret. The console receives the module's option list
+ * (`Name (id)  value`); the module already masks the options it marks
+ * secret, so this is a second line of defence, and an option this console
+ * does not know is replaced too.
  */
 export function redactConfig(text: string): string {
   return text.replace(/^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/gm, (line, head: string, name: string) =>
-    SECRET_NAME.test(name) ? `${head}${REDACTED}` : line,
+    SAFE_OPTION_NAMES.has(name) && !SECRET_NAME.test(name) ? line : `${head}${REDACTED}`,
   );
 }
 
@@ -343,18 +386,19 @@ function configLines(d: DiagnosticsData, options: DiagnosticsOptions): string[] 
   if (!options.configText) return [];
   if (d.configText === null) return ["", `Configuration: ${UNREAD}`];
   const text = redactConfig(d.configText).replace(/\s+$/, "");
-  return ["", "Configuration (values of options whose names suggest a secret are replaced):", text === "" ? "(empty)" : text];
+  return ["", "Configuration (values of options not known to be safe to share are replaced):", text === "" ? "(empty)" : text];
 }
 
 function leftOutLines(options: DiagnosticsOptions): string[] {
   return [
     "Left out of this bundle:",
     options.configText
-      ? "- the values of options whose names suggest a secret"
+      ? "- the values of options not known to be safe to share"
       : "- the configuration text (its SHA-256 is above)",
     ...(options.queryStrings ? [] : ["- query strings in addresses"]),
+    "- fragments and path parameters in addresses",
     "- client addresses in log lines",
-    "- cookie and authorization header values, passwords in addresses",
+    "- cookie and authorization header values, tokens, passwords",
     "- the addresses in the purge set",
     "- informational log lines, findings that need two readings",
   ];
@@ -391,7 +435,7 @@ export function diagnosticsText(
     "",
     ...leftOutLines(options),
   ];
-  const text = scrubSecrets(`${lines.join("\n")}\n`);
+  const text = scrubSecrets(stripUrlParameters(`${lines.join("\n")}\n`));
   return options.queryStrings ? text : stripQueryStrings(text);
 }
 

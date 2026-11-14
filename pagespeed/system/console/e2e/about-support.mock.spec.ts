@@ -254,7 +254,7 @@ test.describe("About and Support", () => {
     const text = await area.inputValue();
     expect(text).toMatch(/DownstreamCachePurgeSecret \(dcps\) +\[redacted\]\n/);
     expect(text).not.toContain("hunter2-example");
-    expect(text).toContain("- the values of options whose names suggest a secret\n");
+    expect(text).toContain("- the values of options not known to be safe to share\n");
   });
 
   test("Support: where to send the bundle, next to the buttons", async ({ page }) => {
