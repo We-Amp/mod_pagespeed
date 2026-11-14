@@ -5,7 +5,7 @@
  * The options whose values the diagnostics bundle may show: every option the
  * module registers, except the ones it marks secret and the ones whose value
  * can hold a credential or the address of a private server (ProxyAuth,
- * RemoteConfigurationUrl, MemcachedServers, RedisServer, TestProxy,
+ * RemoteConfigurationUrl, MemcachedServers, RedisServer, RedisUser, TestProxy,
  * TestProxySlurp). Any other name, including one added later, has its value
  * replaced. safe-option-names.test.ts checks this list against the module's
  * option sources.
@@ -181,7 +181,6 @@ export const SAFE_OPTION_NAMES: ReadonlySet<string> = new Set([
   "RedisReconnectionDelayMs",
   "RedisTTLSec",
   "RedisTimeoutUs",
-  "RedisUser",
   "RejectBlacklisted",
   "RejectBlacklistedStatusCode",
   "RemoteConfigurationTimeoutMs",

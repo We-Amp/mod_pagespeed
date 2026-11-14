@@ -176,6 +176,28 @@ export const FRAGMENT_REMOVED = "#[fragment removed]";
 /** Replaces path parameters (`;name=value`) that were removed. */
 export const PARAMETERS_REMOVED = ";[parameters removed]";
 
+/** How often `c` occurs in `s`. */
+function count(s: string, c: string): number {
+  return s.split(c).length - 1;
+}
+
+/**
+ * Split an address into the address and the punctuation that ends the
+ * sentence after it. A closing bracket that closes one opened inside the
+ * address belongs to the address.
+ */
+function splitTail(address: string): [string, string] {
+  let tail = /[.,;:!)\]]*$/.exec(address)?.[0] ?? "";
+  let body = address.slice(0, address.length - tail.length);
+  for (;;) {
+    const open: Record<string, number> = { ")": count(body, "(") - count(body, ")"), "]": count(body, "[") - count(body, "]") };
+    const i = [...tail].findIndex((c) => (open[c] ?? 0) > 0);
+    if (i === -1) return [body, tail];
+    body += tail.slice(0, i + 1);
+    tail = tail.slice(i + 1);
+  }
+}
+
 /** An absolute URL or a path, up to the first space, quote or angle bracket. */
 const ADDRESS = /(?:\b[a-z][a-z0-9+.-]*:\/\/|(?<![\w.~-])\/)[^\s"'<>]+/gi;
 
@@ -187,8 +209,8 @@ const ADDRESS = /(?:\b[a-z][a-z0-9+.-]*:\/\/|(?<![\w.~-])\/)[^\s"'<>]+/gi;
  */
 export function stripUrlParameters(text: string): string {
   return text.replace(ADDRESS, (address) => {
-    const tail = /[.,;:!)\]]*$/.exec(address)?.[0] ?? "";
-    let rest = address.slice(0, address.length - tail.length);
+    const [body, tail] = splitTail(address);
+    let rest = body;
     let fragment = "";
     const hash = rest.indexOf("#");
     if (hash !== -1 && hash < rest.length - 1) {
@@ -208,11 +230,10 @@ export function stripUrlParameters(text: string): string {
  * a sentence after the address stays.
  */
 export function stripQueryStrings(text: string): string {
-  return text
-    .replace(
-      /((?:\b[a-z][a-z0-9+.-]*:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]*?(?=[.,;:!)\]]*(?:[\s#"'<>]|$))/gi,
-      `$1${QUERY_REMOVED}`,
-    );
+  return text.replace(/((?:\b[a-z][a-z0-9+.-]*:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]*/gi, (address, path: string) => {
+    const [, tail] = splitTail(address);
+    return `${path}${QUERY_REMOVED}${tail}`;
+  });
 }
 
 /** Replaces a client address that was masked. */
@@ -261,7 +282,7 @@ export function maskClientAddresses(text: string): string {
 }
 
 /** Option names that suggest a secret value. */
-const SECRET_NAME = /key|secret|passw(?:or)?d|passphrase|token|credential/i;
+const SECRET_NAME = /key|secret|passw(?:or)?d|passphrase|token|credential|session|signature(?!s)|(?:^|[^a-z])si[gd]$/i;
 
 /**
  * A `name=value` or `name: value` field whose name ends like a secret
@@ -269,7 +290,12 @@ const SECRET_NAME = /key|secret|passw(?:or)?d|passphrase|token|credential/i;
  * quoted (JSON).
  */
 const SECRET_FIELD =
-  /(?<![\w.-])((?:[A-Za-z][\w.-]*?)?(?:token|secret|passw(?:or)?d|pwd|passphrase|credentials?|auth|authorization|cookie|key)["']?\s*[:=]\s*)(?!\[redacted\])(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&"'<>)\]]+)/gi;
+  /(?<![\w.-])((?:[A-Za-z][\w.-]*?)?(?:token|secret|passw(?:or)?d|pwd|passphrase|credentials?|auth|authorization|cookie|key|sig|signature|session(?:[_-]?id)?|sid)["']?\s*[:=]\s*)(?!\[redacted\])(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&"'<>)\]]+)/gi;
+
+/** A cache key is not a secret: `cache key: ...`, `cache_key=...`, `CacheKey: ...`. */
+function isCacheKey(name: string, before: string): boolean {
+  return /cache[_.-]?key["']?\s*[:=]\s*$/i.test(name) || (/^key["']?\s*[:=]/i.test(name) && /cache\s+$/i.test(before));
+}
 
 /** Header names whose values are secrets wherever they appear. */
 const SECRET_HEADER = /\b((?:set-)?cookie|(?:proxy-)?authorization|x-api-key|x-auth-token)(\s*[:=]\s*)\S[^\n]*/gi;
@@ -285,22 +311,92 @@ export function scrubSecrets(text: string): string {
   return text
     .replace(SECRET_HEADER, `$1$2${REDACTED}`)
     .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`)
-    .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]+):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`)
-    .replace(SECRET_FIELD, `$1${REDACTED}`);
+    .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]*):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`)
+    .replace(SECRET_FIELD, (field, name: string, at: number, all: string) =>
+      isCacheKey(name, all.slice(Math.max(0, at - 16), at)) ? field : `${name}${REDACTED}`,
+    );
 }
+
+/** True when the value of option `name` may be shown. */
+function safeOption(name: string): boolean {
+  return SAFE_OPTION_NAMES.has(name) && !SECRET_NAME.test(name);
+}
+
+/**
+ * An `Experiment id=...;percent=...;options=Name=Value,...` line: the fields
+ * that only carry numbers and filter ids stay, an option's value stays when
+ * the option is known to be safe to share, and everything else is replaced.
+ */
+function redactExperiment(spec: string): string {
+  return spec
+    .split(";")
+    .map((field) => {
+      if (/^(?:id|slot|percent)=\d+$|^level=\w+$|^default$|^(?:enabled|disabled)=[\w,]*$|^matches_device_type=[a-z,]*$|^ga=[\w-]*$/.test(field)) {
+        return field;
+      }
+      if (field.startsWith("options=")) {
+        const pairs = field.slice("options=".length).split(",");
+        return `options=${pairs
+          .map((pair) => {
+            const m = /^([A-Za-z][\w.-]*)=/.exec(pair);
+            if (m === null) return REDACTED;
+            return safeOption(m[1]) ? pair : `${m[1]}=${REDACTED}`;
+          })
+          .join(",")}`;
+      }
+      const key = /^([a-z_]+)=/.exec(field);
+      return key === null ? REDACTED : `${key[1]}=${REDACTED}`;
+    })
+    .join(";");
+}
+
+/**
+ * A Domain Lawyer line (`  name[ Auth][ RewriteDomain:x][ OriginDomain:x]
+ * [ Shards:{a, b}][ HostHeader:x]`): the mapping's shape stays, every domain
+ * and host is replaced, and a line of any other shape is replaced whole.
+ */
+function redactDomainLine(line: string): string {
+  const m =
+    /^(\s+)\S+((?: Auth| (?:RewriteDomain|ProxyDomain|OriginDomain|ProxyOriginDomain|HostHeader):\S+| Shards:\{[^}]*\})*)$/.exec(
+      line,
+    );
+  if (m === null) return `${/^\s*/.exec(line)?.[0] ?? ""}${REDACTED}`;
+  return `${m[1]}${REDACTED}${m[2].replace(/:(?:\{[^}]*\}|\S+)/g, `:${REDACTED}`)}`;
+}
+
+/** The section headings of the module's option list. */
+const CONFIG_SECTION =
+  /^(?:Filters|Options|Domain Lawyer|URL cache invalidation entries|Rejected request map|Override caching wildcards)$/;
 
 /**
  * The configuration text with the value of every option replaced unless the
  * option is known to be safe to share (SAFE_OPTION_NAMES) and its name does
  * not suggest a secret. The console receives the module's option list
- * (`Name (id)  value`); the module already masks the options it marks
- * secret, so this is a second line of defence, and an option this console
- * does not know is replaced too.
+ * (`Name (id)  value`, then the Domain Lawyer mappings and the experiments);
+ * the module already masks the options it marks secret, so this is a second
+ * line of defence, and an option this console does not know is replaced too.
  */
 export function redactConfig(text: string): string {
-  return text.replace(/^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/gm, (line, head: string, name: string) =>
-    SAFE_OPTION_NAMES.has(name) && !SECRET_NAME.test(name) ? line : `${head}${REDACTED}`,
-  );
+  let section = "";
+  return text
+    .split("\n")
+    .map((line) => {
+      if (CONFIG_SECTION.test(line)) {
+        section = line;
+        return line;
+      }
+      if (line.trim() === "") {
+        section = "";
+        return line;
+      }
+      if (line.startsWith("Proxy Suffix:")) return `Proxy Suffix: ${REDACTED}`;
+      if (line.startsWith("Experiment ")) return `Experiment ${redactExperiment(line.slice("Experiment ".length))}`;
+      if (section === "Domain Lawyer" && /^\s/.test(line)) return redactDomainLine(line);
+      const option = /^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/.exec(line);
+      if (option !== null && !safeOption(option[2])) return `${option[1]}${REDACTED}`;
+      return line;
+    })
+    .join("\n");
 }
 
 // ── The text ───────────────────────────────────────────────────────────

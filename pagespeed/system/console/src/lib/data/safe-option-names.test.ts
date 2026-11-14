@@ -5,7 +5,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { SAFE_OPTION_NAMES } from "./safe-option-names";
 
-/** The module sources that register options, from the repository root. */
+/**
+ * The module sources that register options, from the repository root. The
+ * console's CI job checks these out next to the console, so a moved or
+ * renamed source fails here instead of skipping the check.
+ */
 const SOURCES = [
   "net/instaweb/rewriter/rewrite_options.cc",
   "pagespeed/apache/apache_config.cc",
@@ -15,7 +19,6 @@ const SOURCES = [
 ];
 const ROOT = new URL("../../../../../../", import.meta.url);
 const paths = SOURCES.map((s) => new URL(s, ROOT));
-const present = paths.every((p) => existsSync(p));
 
 /** Every `kName[] = "Value"` constant in the option sources. */
 function constants(): Map<string, string> {
@@ -26,7 +29,11 @@ function constants(): Map<string, string> {
   return out;
 }
 
-describe.skipIf(!present)("SAFE_OPTION_NAMES against the module's option sources", () => {
+describe("SAFE_OPTION_NAMES against the module's option sources", () => {
+  it("finds every option source", () => {
+    for (const [i, p] of paths.entries()) expect(existsSync(p), SOURCES[i]).toBe(true);
+  });
+
   it("names only options the module defines", () => {
     const defined = new Set(constants().values());
     for (const n of SAFE_OPTION_NAMES) expect(defined.has(n), n).toBe(true);
@@ -49,7 +56,7 @@ describe.skipIf(!present)("SAFE_OPTION_NAMES against the module's option sources
 
 describe("SAFE_OPTION_NAMES", () => {
   it("leaves out the options whose value can hold a credential or a private server's address", () => {
-    for (const n of ["ProxyAuth", "RemoteConfigurationUrl", "MemcachedServers", "RedisServer", "TestProxy", "TestProxySlurp"]) {
+    for (const n of ["ProxyAuth", "RemoteConfigurationUrl", "MemcachedServers", "RedisServer", "RedisUser", "TestProxy", "TestProxySlurp"]) {
       expect(SAFE_OPTION_NAMES.has(n), n).toBe(false);
     }
   });

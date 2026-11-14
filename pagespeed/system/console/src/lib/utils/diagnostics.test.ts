@@ -192,7 +192,7 @@ describe("diagnosticsText", () => {
     expect(stripped).not.toMatch(/session=|v=1|x=1|q=2|k=v/);
     expect(stripped).toContain("- query strings in addresses\n");
     const kept = diagnosticsText(d, WHOLE, { queryStrings: true, configText: true });
-    expect(kept).toContain("a.css?v=1&session=abc failed.");
+    expect(kept).toContain("a.css?v=1&session=[redacted] failed.");
     expect(kept).not.toContain("- query strings in addresses");
   });
 
@@ -290,6 +290,49 @@ describe("redactConfig", () => {
       "  MemcachedServers (ams)  [redacted]\n  NotAnOption (nao)  [redacted]",
     );
     expect(redactConfig("Version: 15: on\nFilters\nah\tAdd Head")).toBe("Version: 15: on\nFilters\nah\tAdd Head");
+    expect(redactConfig("  RedisUser (rdu)  cache-user")).toBe("  RedisUser (rdu)  [redacted]");
+  });
+  it("keeps an experiment's numbers and filters, and an option value only when the option is safe to share", () => {
+    expect(
+      redactConfig(
+        "Experiment id=7;slot=4;ga=UA-1-1;percent=50;level=CoreFilters;default;enabled=rj,ri;disabled=ah;" +
+          "options=ImageMaxRewritesAtOnce=8,RedisUser=u,NotAnOption=v,2;matches_device_type=mobile",
+      ),
+    ).toBe(
+      "Experiment id=7;slot=4;ga=UA-1-1;percent=50;level=CoreFilters;default;enabled=rj,ri;disabled=ah;" +
+        "options=ImageMaxRewritesAtOnce=8,RedisUser=[redacted],NotAnOption=[redacted],[redacted];matches_device_type=mobile",
+    );
+    expect(redactConfig('Experiment id=2;percent=10;alternate_origin_domain="a.example:80":"10.0.0.5:8080";x y')).toBe(
+      "Experiment id=2;percent=10;alternate_origin_domain=[redacted];[redacted]",
+    );
+  });
+  it("keeps the shape of the Domain Lawyer mappings and replaces every domain and host", () => {
+    const config = [
+      "Options",
+      "  FileCachePath (afcp)  /var/cache/x",
+      "",
+      "Domain Lawyer",
+      "  http://www.example.com/ Auth RewriteDomain:http://cdn.example.com/ Shards:{http://s1.example.com/, http://s2.example.com/}",
+      "  http://origin.internal:8080/ Auth OriginDomain:http://10.0.0.5:8080/ HostHeader:www.example.com",
+      "  http://odd.example/ Something else",
+      "Proxy Suffix: .proxy.internal",
+      "",
+      "Override caching wildcards",
+      "  FileCachePath (afcp)  /kept",
+    ].join("\n");
+    expect(redactConfig(config).split("\n")).toEqual([
+      "Options",
+      "  FileCachePath (afcp)  /var/cache/x",
+      "",
+      "Domain Lawyer",
+      "  [redacted] Auth RewriteDomain:[redacted] Shards:[redacted]",
+      "  [redacted] Auth OriginDomain:[redacted] HostHeader:[redacted]",
+      "  [redacted]",
+      "Proxy Suffix: [redacted]",
+      "",
+      "Override caching wildcards",
+      "  FileCachePath (afcp)  /kept",
+    ]);
   });
 });
 
@@ -324,6 +367,10 @@ describe("scrubSecrets and stripQueryStrings", () => {
     expect(scrubSecrets("redis user:pass@redis.local:6379 down")).toBe("redis user:[redacted]@redis.local:6379 down");
     expect(scrubSecrets("[Error] [531] mail a@b.example at 10:04:00")).toBe("[Error] [531] mail a@b.example at 10:04:00");
   });
+  it("replace a password that has no user name", () => {
+    expect(scrubSecrets("redis://:s3cret@redis.local:6379/0 down")).toBe("redis://:[redacted]@redis.local:6379/0 down");
+    expect(scrubSecrets("connect :s3cret@redis.local:6379")).toBe("connect :[redacted]@redis.local:6379");
+  });
   it("replace a password after a comma or semicolon, without a scheme", () => {
     expect(scrubSecrets("upstreams a.example,user:pass@redis.local:6379")).toBe(
       "upstreams a.example,user:[redacted]@redis.local:6379",
@@ -354,8 +401,17 @@ describe("scrubSecrets and stripQueryStrings", () => {
       "x-auth=[redacted]; session_cookie=[redacted]; client_secret=[redacted]",
     );
     expect(scrubSecrets("Cookie: sid=abc")).toBe("Cookie: [redacted]");
+    expect(scrubSecrets("sig=a1 X-Amz-Signature=b2 session=c3 PHPSESSID=d4 JSESSIONID=e5 session_id=f6 sid: g7")).toBe(
+      "sig=[redacted] X-Amz-Signature=[redacted] session=[redacted] PHPSESSID=[redacted] JSESSIONID=[redacted] " +
+        "session_id=[redacted] sid: [redacted]",
+    );
     const plain = "Key counters (since the module started):\n  keyword: css\n  page=2 monkeys: 3 cache_hits: 4";
     expect(scrubSecrets(plain)).toBe(plain);
+  });
+  it("keep a cache key, and still replace a key", () => {
+    const plain = "Cache key: rname/ic_x/http://a.example/b.png, cache_key=c1 CacheKey: k2";
+    expect(scrubSecrets(plain)).toBe(plain);
+    expect(scrubSecrets("key: k1 api_key=k2 signing key: k3")).toBe("key: [redacted] api_key=[redacted] signing key: [redacted]");
   });
   it("leave ordinary text alone", () => {
     const plain = "Purging: enabled; 3 URLs in the purge set\n/var/cache/mod_pagespeed/ is fine? yes.";
@@ -365,6 +421,14 @@ describe("scrubSecrets and stripQueryStrings", () => {
   it("strip a query string up to the fragment and keep closing punctuation", () => {
     expect(stripQueryStrings("(see https://a.example/p?x=1).")).toBe("(see https://a.example/p?[query removed]).");
     expect(stripQueryStrings("/p?x=1#f")).toBe("/p?[query removed]#f");
+    expect(stripQueryStrings("[see /p?x=1].")).toBe("[see /p?[query removed]].");
+  });
+  it("strip the whole query when it holds brackets of its own", () => {
+    expect(stripQueryStrings(scrubSecrets("fetch /a?token=t1 failed"))).toBe("fetch /a?[query removed] failed");
+    expect(stripQueryStrings("/a?token=[redacted]")).toBe("/a?[query removed]");
+    expect(stripQueryStrings("(see /a?f[0]=1).")).toBe("(see /a?[query removed]).");
+    expect(stripQueryStrings("/a?f(x)")).toBe("/a?[query removed]");
+    expect(stripUrlParameters("/a;v=[1] next")).toBe("/a;[parameters removed] next");
   });
 });
 
