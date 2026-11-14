@@ -7,17 +7,18 @@
 // testdata/legacy_config/nginx.conf and apache.conf hold the directives people
 // wrote for those releases: the examples of the old documentation, the test
 // configurations of the archived repositories, configurations quoted in their
-// issues, and one line for every filter and option the 1.14.36.1 sources
-// registered that no example covers.  Each line carries the class it is
+// issues, and one line for every filter, and every option the 1.14.36.1
+// sources registered for that port, that no example covers.  Each line
+// carries the class it is
 // expected to fall in (see the header of the corpus files):
 //
 //   same             accepted, no warning;
 //   deprecated       accepted with a warning;
 //   changed-default  accepted, no warning (the note says which default moved);
 //   removed          refused: a known break, listed so it stays documented;
-//   never-loaded     refused, as it was by the 1.14 release: the old
-//                    documentation showed the directive for this port, but
-//                    the port never took it.  Not a break.
+//   never-loaded     refused, as it was by the 1.14 release: the option has
+//                    no help text, so httpd has no command for it.  Not a
+//                    break.
 //
 // The names of the known breaks are also listed in KnownRemoved() below, so
 // a new break cannot be waved through by editing the corpus alone.  As of
