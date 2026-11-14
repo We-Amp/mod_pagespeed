@@ -3393,6 +3393,62 @@ TEST_F(DaemonServeArmTest, TheBrotliCopysTagRevalidatesOnlyTheBrotliCopy) {
   EXPECT_FALSE(Serve(off).not_modified);
 }
 
+// Archived request: https://github.com/apache/incubator-pagespeed-mod/issues/1148
+// ("Support Brotli as an encoding scheme when client has Accept-Encoding").
+// With stored encodings on, an optimized script is sent to a client that
+// lists br as the stored brotli copy, to a gzip-only client as the stored
+// gzip copy, and to a client that lists neither uncoded; each coded serve
+// varies on Accept-Encoding and carries a validator of its own. The
+// stylesheet cases above cover the same for CSS.
+TEST_F(DaemonServeArmTest, AScriptIsServedAsTheStoredBrotliCopyWhenAsked) {
+  UseStylesheetFamily();
+  setenv("PS_STUB_READ_CONTENT_TYPE", "2", 1);  // kPsContentJs
+  setenv("PS_STUB_ORIGIN_CT", "text/javascript", 1);
+  auto script_request = [this](StringPiece accept_encoding) {
+    DaemonServeRequest request = CssRequest(accept_encoding);
+    request.url = "/a/app.js";
+    request.accept = "*/*";
+    return request;
+  };
+
+  const DaemonServeDecision br =
+      ServeEncoded(script_request("gzip, deflate, br"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, br.verdict);
+  EXPECT_EQ(kPsContentJs, br.ps_content_type);
+  EXPECT_EQ(0x88, br.alternate_id);
+  EXPECT_EQ("br", br.content_encoding);
+  EXPECT_EQ(152u, br.body.size());
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(br, true));
+
+  const DaemonServeDecision gzip = ServeEncoded(script_request("gzip"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, gzip.verdict);
+  EXPECT_EQ(0x48, gzip.alternate_id);
+  EXPECT_EQ("gzip", gzip.content_encoding);
+  EXPECT_EQ(88u, gzip.body.size());
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(gzip, true));
+
+  const DaemonServeDecision identity = ServeEncoded(script_request("identity"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, identity.verdict);
+  EXPECT_EQ(0x08, identity.alternate_id);
+  EXPECT_TRUE(identity.content_encoding.empty());
+  EXPECT_EQ(24u, identity.body.size());
+
+  // One validator per representation.
+  ASSERT_FALSE(br.etag.empty());
+  ASSERT_FALSE(gzip.etag.empty());
+  ASSERT_FALSE(identity.etag.empty());
+  EXPECT_NE(br.etag, gzip.etag);
+  EXPECT_NE(br.etag, identity.etag);
+  EXPECT_NE(gzip.etag, identity.etag);
+
+  // Off by default: with the switch off the brotli client gets the
+  // uncoded copy, as before.
+  const DaemonServeDecision off = Serve(script_request("gzip, deflate, br"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, off.verdict);
+  EXPECT_EQ(0x08, off.alternate_id);
+  EXPECT_TRUE(off.content_encoding.empty());
+}
+
 TEST_F(DaemonServeArmTest, ACodedServeIsRecordedAtTheBytesSent) {
   // The accounting every port performs, end to end: the hit is recorded
   // with the bytes that go on the wire -- the coded copy's -- against the
