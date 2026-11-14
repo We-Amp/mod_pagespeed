@@ -1734,7 +1734,7 @@ jobs:
     env:
       ARCH: arm64
       SO_ARCH: aarch64
-      BAZEL_CI_CONFIG: ci-linux-arm64
+      BAZEL_CI_CONFIG: ci-linux-arm64-release
       HARDEN_ISA: hardening-bti
     steps: *linux-build-steps
 
