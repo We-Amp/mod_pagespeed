@@ -1741,6 +1741,21 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 						len += 10; // should have content
 						break;
+					case HTTP_DATA_CHUNK_TYPE::HttpDataChunkTrailers:
+						// Trailer delivery in the HTTP Server API is reserved
+						// for a future release (the pTrailers fields must be
+						// NULL today), so a chunk of this kind is never
+						// delivered in pEntityChunks.
+						break;
+					case HTTP_DATA_CHUNK_TYPE::HttpDataChunkFromWinHttpFastForwarding:
+						// An internal WinHttp transport construct: its payload
+						// is all reserved bytes, and it never appears in a
+						// server-side response entity chunk.
+						break;
+					case HTTP_DATA_CHUNK_TYPE::HttpDataChunkMaximum:
+						// Sentinel that terminates the enumeration; never
+						// delivered as an actual chunk type.
+						break;
 					}
 
 				}
