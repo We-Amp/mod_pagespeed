@@ -139,6 +139,47 @@ TEST_F(HTTPValueTest, EmptyContentsFirst) {
   CheckResponseHeaders(check_headers);
 }
 
+// ResponseHeaders subclass that always fails serialization, the one way
+// to reach HTTPValue::SetHeaders' failure path in-process: the wire proto
+// has no required fields, so a genuine serialization failure is not
+// otherwise constructible at test scale.
+class UnserializableHeaders : public ResponseHeaders {
+ public:
+  bool WriteAsBinary(Writer* writer,
+                     MessageHandler* message_handler) override {
+    return false;
+  }
+};
+
+TEST_F(HTTPValueTest, SetHeadersFailedSerialization) {
+  HTTPValue value;
+  UnserializableHeaders headers;
+  FillResponseHeaders(&headers);
+  value.SetHeaders(&headers);
+  // The value must not hold a headerless-but-valid entry: it is cleared, so
+  // every read path reports no value rather than a response with no headers.
+  EXPECT_TRUE(value.Empty());
+  ResponseHeaders check_headers;
+  EXPECT_FALSE(value.ExtractHeaders(&check_headers, &message_handler_));
+  StringPiece body;
+  EXPECT_FALSE(value.ExtractContents(&body));
+}
+
+TEST_F(HTTPValueTest, SetHeadersFailedSerializationAfterContents) {
+  // Contents-first order: the failed SetHeaders must drop the stored body
+  // too.  Skipping only the append would leave a body-first value that
+  // still extracts empty-but-valid headers.
+  HTTPValue value;
+  value.Write("body", &message_handler_);
+  UnserializableHeaders headers;
+  value.SetHeaders(&headers);
+  EXPECT_TRUE(value.Empty());
+  ResponseHeaders check_headers;
+  EXPECT_FALSE(value.ExtractHeaders(&check_headers, &message_handler_));
+  StringPiece body;
+  EXPECT_FALSE(value.ExtractContents(&body));
+}
+
 TEST_F(HTTPValueTest, TestCopyOnWrite) {
   HTTPValue v1;
   v1.Write("Hello", &message_handler_);

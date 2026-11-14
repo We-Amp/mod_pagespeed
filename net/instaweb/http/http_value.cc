@@ -97,7 +97,22 @@ void HTTPValue::SetHeaders(ResponseHeaders* headers) {
   CopyOnWrite();
   GoogleString headers_string;
   StringWriter writer(&headers_string);
-  headers->WriteAsBinary(&writer, nullptr);
+  if (!headers->WriteAsBinary(&writer, nullptr)) {
+    // A failed serialization must not reach storage.  Storing the empty or
+    // partial blob would not fail the later read: the wire proto has no
+    // required fields, so an empty headers chunk parses back as a *valid*
+    // empty ResponseHeaders, and consumers would see a headerless response
+    // instead of a failed lookup.  Clear() leaves the value in the one state
+    // every reader already treats as "no value" (Empty() is true; Link(),
+    // ExtractHeaders() and ExtractContents() all fail cleanly).  It also
+    // covers the contents-first call order: once Write() has stored a body,
+    // merely skipping the append would leave a value that still extracts
+    // headers as empty-but-valid.
+    LOG(ERROR) << "Failed to serialize response headers; dropping the "
+                  "HTTPValue (headers and any stored contents).";
+    Clear();
+    return;
+  }
   if (storage_.empty()) {
     storage_.Append(&kHeadersFirst, 1);
     SetSizeOfFirstChunk(headers_string.size());
