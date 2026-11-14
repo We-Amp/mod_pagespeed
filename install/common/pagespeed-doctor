@@ -1628,6 +1628,15 @@ N_SKIP=$(awk -F "$US" '$3 == "skip"' "$CHECKS" | wc -l | tr -d ' ')
 if [ "$N_FAIL" -gt 0 ]; then VERDICT=not_working; EXIT=2
 elif [ "$N_WARN" -gt 0 ]; then VERDICT=working_with_warnings; EXIT=1
 else VERDICT=working; EXIT=0; fi
+# A config test that did not run means the doctor cannot vouch for the
+# configuration: a skipped D03 raises the verdict to at least a warning,
+# unlike checks that simply do not apply (D12 without a worker). D03 skipped
+# because D02 failed is already a failure.
+SKIP_NOTE=""
+if [ "$(status_of D03)" = skip ] && [ "$(status_of D02)" != fail ]; then
+  SKIP_NOTE="config test skipped: $(awk -F "$US" '$1 == "D03" { m = $6 } END { sub(/^skipped: /, "", m); print m }' "$CHECKS")"
+  if [ "$EXIT" = 0 ]; then VERDICT=working_with_warnings; EXIT=1; fi
+fi
 FIRST_FAIL=$(awk -F "$US" '$3 == "fail" { print $1; exit }' "$CHECKS")
 
 if [ "$OPT_JSON" = 1 ]; then
@@ -1650,7 +1659,8 @@ if [ "$OPT_JSON" = 1 ]; then
     printf '"config":{"source":%s,"config_test":%s,"shield_verified":%s},' "$(json_str "$CORPUS_SOURCE")" "$(json_str "$CT_MODE")" \
       "$([ "$CT_MODE" = namespace ] && echo "$CT_VERIFIED" || echo false)"
     printf '"verdict":"%s","exit_code":%s,' "$VERDICT" "$EXIT"
-    printf '"summary":{"pass":%s,"warn":%s,"fail":%s,"skip":%s},' "$N_PASS" "$N_WARN" "$N_FAIL" "$N_SKIP"
+    printf '"summary":{"pass":%s,"warn":%s,"fail":%s,"skip":%s,"notes":[%s]},' "$N_PASS" "$N_WARN" "$N_FAIL" "$N_SKIP" \
+      "$([ -n "$SKIP_NOTE" ] && json_str "$SKIP_NOTE")"
     printf '"checks":['
     _first=1
     while IFS="$US" read -r c_id c_title c_status c_code c_sig c_msg c_hint c_cmd c_mut c_doc c_dep c_evj c_evt c_dur _rest; do
@@ -1718,9 +1728,12 @@ done < "$CHECKS"
 printf '\n'
 case "$VERDICT" in
   working) printf 'Verdict: WORKING -- %s checks passed.\n' "$N_PASS" ;;
-  working_with_warnings) printf 'Verdict: WORKING WITH WARNINGS -- %s warning(s).\n' "$N_WARN" ;;
+  working_with_warnings)
+    if [ "$N_WARN" -gt 0 ]; then printf 'Verdict: WORKING WITH WARNINGS -- %s warning(s).\n' "$N_WARN"
+    else printf 'Verdict: WORKING WITH WARNINGS -- the configuration was not tested.\n'; fi ;;
   not_working) printf 'Verdict: NOT WORKING -- %s failure(s), %s warning(s). Fix %s first.\n' "$N_FAIL" "$N_WARN" "$FIRST_FAIL" ;;
 esac
+[ -n "$SKIP_NOTE" ] && printf '%s\n' "$SKIP_NOTE"
 [ "$IS_ROOT" = 1 ] || printf 'Some checks need root: run sudo pagespeed-doctor for the full result.\n'
 exit "$EXIT"
 

@@ -55,6 +55,13 @@ repeat.
 Exit codes: `0` all checks pass, `1` warnings only, `2` at least one failure,
 `3` the doctor could not run (bad option, no supported server).
 
+A skipped check normally does not change the verdict: it simply does not
+apply (D12 when no worker is configured). D03 is the exception. When the
+config test did not run (it could not be isolated, `--no-configtest`, or no
+root), the doctor cannot vouch for the configuration, so the verdict is at
+least `working_with_warnings` (exit 1), and the summary ends with
+`config test skipped: <reason>` (`summary.notes` in the JSON).
+
 ## JSON
 
 `--json` prints a document with `"schema": "pagespeed-doctor/1"`. Check ids,
@@ -83,7 +90,8 @@ scripts and coding agents should branch on `code`, not on `message`.
 ```
 
 `verdict` is `working`, `working_with_warnings` or `not_working` and matches
-`exit_code`. A skipped check carries `"reason"`. `fix.commands` are
+`exit_code`; `summary.notes` explains a verdict raised by a skipped config
+test. A skipped check carries `"reason"`. `fix.commands` are
 suggestions; the doctor never runs them, and a command that changes the
 system is marked `"mutates": true`.
 

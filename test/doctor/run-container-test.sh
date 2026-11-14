@@ -135,11 +135,14 @@ check "working: no printed command carries an unquoted path" "! echo \"\$HUM\" |
 # --- no private namespace: fail closed ---------------------------------------
 give_back
 export PAGESPEED_DOCTOR_NO_NAMESPACE=1
-run not_isolated "$WANT_OK"
+run not_isolated 1
 unset PAGESPEED_DOCTOR_NO_NAMESPACE
 check "not_isolated: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
 check "not_isolated: names --allow-cache-writes" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q -- '--allow-cache-writes'"
 check "not_isolated: config test not run, no root-owned file" "[ \"\$(root_files)\" = 0 ]"
+check "not_isolated: verdict raised to working_with_warnings" "[ \"\$(echo \"\$OUT\" | jq -r .verdict)\" = working_with_warnings ]"
+check "not_isolated: summary note names the skip" "echo \"\$OUT\" | jq -r '.summary.notes[0]' | grep -q '^config test skipped: cannot isolate'"
+check "not_isolated: text summary line" "echo \"\$HUM\" | grep -q '^config test skipped: cannot isolate'"
 
 # --- resources served private: D05 names the cause ------------------------
 for i in 1 2 3; do curl -s -o /dev/null http://127.0.0.1/cc.html; sleep 1; done
@@ -252,7 +255,8 @@ check "loaded_unconfigured: the would-be default cache was not created" "[ ! -e 
 
 # --- pagespeed configured without any FileCachePath: fail closed ------------
 echo "pagespeed on;" > /etc/nginx/conf.d/pagespeed.conf
-run no_cache_path '0|1|2'
+run no_cache_path '1|2'
+check "no_cache_path: verdict is not working" "[ \"\$(echo \"\$OUT\" | jq -r .verdict)\" != working ]"
 check "no_cache_path: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
 check "no_cache_path: reason names the missing FileCachePath" \
   "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q 'no FileCachePath'"
@@ -382,6 +386,7 @@ sed -i '/^IncludeOptional psc.d$/d' /etc/apache2/apache2.conf
 echo 'IncludeOptional ${PSC_UNSET_VARIABLE}/extra.conf' >> /etc/apache2/apache2.conf
 run apache_var
 check "var: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "var: summary note names the skipped config test" "echo \"\$OUT\" | jq -r '.summary.notes[0]' | grep -q '^config test skipped:'"
 check "var: reason names the variable problem" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q 'VARIABLE'"
 sed -i '/PSC_UNSET_VARIABLE/d' /etc/apache2/apache2.conf
 
