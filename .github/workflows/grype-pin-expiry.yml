@@ -1,0 +1,85 @@
+# Early warning for the pinned grype vulnerability DB (tools/sbom/grype-db-pin.json).
+#
+# The blocking dependency gate scans against that pin; the scheduled scan
+# turns red once `built + max_age_days` has passed. This weekly job fires
+# earlier: when fewer than WARN_DAYS remain it opens (or refreshes) ONE issue
+# that carries the current upstream archive's path/checksum/built, ready to
+# paste into the pin. It closes the issue once the pin is healthy again.
+#
+# An issue, not a pull request, by design: the default workflow token cannot
+# open pull requests here and a bot-authored PR would not start the required
+# checks, so a human (or a session) applies the bump and reviews it like any
+# dependency bump. No secrets needed.
+name: Grype pin expiry watch
+
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: grype-pin-expiry
+  cancel-in-progress: false
+
+env:
+  WARN_DAYS: '10'
+  ISSUE_TITLE: 'The pinned grype vulnerability DB is about to expire'
+
+jobs:
+  watch:
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the pin's remaining life
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pin=tools/sbom/grype-db-pin.json
+          built="$(jq -r .built "$pin")"
+          max_age="$(jq -r '.max_age_days // 14' "$pin")"
+          url_base="$(jq -r .url_base "$pin")"
+          expiry=$(( $(date -u -d "$built" +%s) + max_age * 86400 ))
+          left=$(( (expiry - $(date -u +%s)) / 86400 ))
+          expiry_iso="$(date -u -d "@$expiry" +%Y-%m-%dT%H:%MZ)"
+          echo "Pin built $built, expires $expiry_iso, ${left} day(s) left."
+          existing="$(gh issue list --state open --search "${ISSUE_TITLE} in:title" --json number --jq '.[0].number' || true)"
+
+          if [ "$left" -ge "$WARN_DAYS" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "The pin has ${left} day(s) left again. Auto-closing."
+            fi
+            exit 0
+          fi
+
+          latest="$(curl -fsSL --retry 3 "${url_base}/latest.json")"
+          path="$(jq -r .path <<<"$latest")"
+          checksum="$(jq -r .checksum <<<"$latest")"
+          lbuilt="$(jq -r .built <<<"$latest")"
+          body="$(cat <<MSG
+          The pin in \`tools/sbom/grype-db-pin.json\` was built ${built} and expires ${expiry_iso} (${left} day(s) left; \`max_age_days\` is ${max_age}). After that the scheduled scan goes red and release-lane security gates follow.
+
+          Current upstream build, from \`${url_base}/latest.json\`:
+
+          - \`path\`: \`${path}\`
+          - \`checksum\`: \`${checksum}\`
+          - \`built\`: \`${lbuilt}\`
+
+          To refresh: set those three fields in \`tools/sbom/grype-db-pin.json\` (leave the other fields as they are), run the blocking dependency scan against the new pin, and open a pull request. Apply the same pin to every repo that carries \`tools/sbom/\`. Auto-closes once the pin has ${WARN_DAYS} or more days left.
+          MSG
+          )"
+          body="$(sed 's/^          //' <<<"$body")"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still ${left} day(s) left as of $(date -u +%Y-%m-%dT%H:%MZ). Latest upstream build: \`${path}\`."
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$body"
+          fi
