@@ -265,3 +265,16 @@ build:ci-linux-arm64 --per_file_copt=.*css_parser.*@-Wno-sign-compare
 build:ci-linux-arm64 --per_file_copt=.*mod_instaweb\.cc@-Wno-cast-function-type-mismatch
 # Same generated-code exclusion as build:ci-build.
 build:ci-linux-arm64 --per_file_copt=.*\.pb\.cc@-w
+
+# =============================================================================
+# Release arm64 configuration
+# =============================================================================
+# The arm64 release packages build with the ci-linux-arm64 settings minus
+# the first-party warning enforcement above. The x64 release build uses
+# --config=ci, which does not treat warnings as errors, so a compiler
+# warning must not be able to fail a release build on arm64 only; builds
+# that enforce warnings keep using build:ci-linux-arm64.
+build:ci-linux-arm64-release --config=ci
+build:ci-linux-arm64-release --nostamp
+build:ci-linux-arm64-release --copt="-Ithird_party/aprutil/gen/arch/linux/arm64/include/"
+build:ci-linux-arm64-release --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"
