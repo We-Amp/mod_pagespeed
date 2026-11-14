@@ -706,6 +706,21 @@ pagespeed_cc_test(
 
 # The host a serve is recorded under: the optimizer's host-name rule and the
 # configured-names rule, with the shapes real servers and clients produce.
+# POSIX only: symbolic links, FIFOs and hard links.
+pagespeed_cc_test(
+    name = "file_owner_test",
+    srcs = ["file_owner_test.cc"],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//pagespeed/system:file_owner",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 pagespeed_cc_test(
     name = "serve_host_names_test",
     srcs = ["serve_host_names_test.cc"],

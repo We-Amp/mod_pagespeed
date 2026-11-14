@@ -51,10 +51,10 @@ const char SystemCachePath::kFileCacheSmall[] = "file_cache_small";
 // The SystemCachePath encapsulates a cache-sharing model where a user specifies
 // a file-cache path per virtual-host.  With each file-cache object we keep
 // a locking mechanism and an optional per-process LRUCache.
-SystemCachePath::SystemCachePath(const StringPiece& path,
-                                 const SystemRewriteOptions* config,
-                                 RewriteDriverFactory* factory,
-                                 AbstractSharedMem* shm_runtime)
+SystemCachePath::SystemCachePath(
+    const StringPiece& path, const SystemRewriteOptions* config,
+    RewriteDriverFactory* factory, AbstractSharedMem* shm_runtime,
+    const std::optional<CycloneCache::Config::Owner>& volume_owner)
     : path_(path.data(), path.size()),
       factory_(factory),
       shm_runtime_(shm_runtime),
@@ -142,6 +142,10 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   int small_tier_percent =
       std::min(50, std::max(0, config->file_cache_small_tier_percent()));
   cyclone_config.small_tier_percent = small_tier_percent;
+  // A server started as root creates the volume files here for workers that
+  // run as another user.  (They are not on the factory's created-paths list:
+  // Cyclone sets their owner.)
+  cyclone_config.owner = volume_owner;
 
   CycloneCache* cyclone_cache = new CycloneCache(
       cyclone_config, factory->statistics(), factory->message_handler());
@@ -151,13 +155,6 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   if (cyclone_cache->IsHealthy()) {
     cache_backend_ = cyclone_cache;
     cyclone_cache_ = cyclone_cache;
-    // Register cyclone.dat so Apache's post_config chown sweep fixes ownership.
-    factory->AddCreatedDirectory(cyclone_config.cache_path);
-    if (cyclone_cache->small_tier_active()) {
-      // The small-object tier is a physically separate volume file that needs
-      // the same ownership treatment.
-      factory->AddCreatedDirectory(StrCat(cyclone_config.cache_path, ".small"));
-    }
     file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
                                  factory->statistics());
     factory->TakeOwnership(file_cache_);

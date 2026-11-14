@@ -223,6 +223,38 @@ class CycloneCacheTest : public CacheTestBase {
   GoogleString cache_path_;
 };
 
+// A volume owned by the configured owner is used (the current user here).
+TEST_F(CycloneCacheTest, VolumeOwnedByTheConfiguredOwnerIsUsed) {
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_owner_self");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.owner = CycloneCache::Config::Owner{static_cast<uint32_t>(geteuid()),
+                                             static_cast<uint32_t>(getegid())};
+  for (int pass = 0; pass < 2; ++pass) {  // create, then reopen
+    SCOPED_TRACE(pass);
+    CycloneCache cache(config, stats_.get(), handler_.get());
+    EXPECT_TRUE(cache.IsHealthy());
+    cache.ShutDown();
+  }
+}
+
+// A volume owned by another user than the configured owner is not used: the
+// cache falls back instead of running on a file the workers cannot open.
+// (As root the file would be created for the owner instead.)
+TEST_F(CycloneCacheTest, VolumeOwnedByAnotherUserIsNotUsed) {
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "as root the volume is created for the owner";
+  }
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_owner_other");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.owner = CycloneCache::Config::Owner{
+      static_cast<uint32_t>(geteuid()) + 1, static_cast<uint32_t>(getegid())};
+  CycloneCache cache(config, stats_.get(), handler_.get());
+  EXPECT_FALSE(cache.IsHealthy());
+  cache.ShutDown();
+}
+
 // Basic test: verify the cache is healthy after initialization
 TEST_F(CycloneCacheTest, IsHealthy) {
   // Note: This test may fail if the Cyclone library is not available

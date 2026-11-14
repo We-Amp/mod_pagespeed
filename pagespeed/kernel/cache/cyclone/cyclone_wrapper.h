@@ -125,6 +125,14 @@ typedef struct CycloneCacheConfig {
   // CYCLONE_TIER_SMALL falls back to default routing - check
   // cyclone_cache_small_tier_active() after cyclone_cache_create().
   uint32_t small_tier_percent;
+
+  // POSIX: the user and group the volume files must belong to (ignored on
+  // Windows).  Non-zero has_owner sets it: the volume must then be a plain
+  // file owned by owner_uid, and a process running as root creates it for
+  // owner_uid:owner_gid.  Zero: no owner requirement.
+  int has_owner;
+  uint32_t owner_uid;
+  uint32_t owner_gid;
 } CycloneCacheConfig;
 
 // Statistics from the cache.

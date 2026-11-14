@@ -21,12 +21,14 @@
 #define PAGESPEED_SYSTEM_SYSTEM_CACHE_PATH_H_
 
 #include <memory>
+#include <optional>
 #include <set>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/util/copy_on_write.h"
 
 namespace net_instaweb {
@@ -34,7 +36,6 @@ namespace net_instaweb {
 class AbstractMutex;
 class AbstractSharedMem;
 class CacheInterface;
-class CycloneCache;
 class LRUCache;
 class MessageHandler;
 class NamedLockManager;
@@ -55,9 +56,12 @@ class SystemCachePath {
   static const char kFileCache[];
   static const char kFileCacheSmall[];
 
+  // `volume_owner`, when set, is the user the Cyclone volume files must
+  // belong to (see CycloneCache::Config::owner).
   SystemCachePath(const StringPiece& path, const SystemRewriteOptions* config,
-                  RewriteDriverFactory* factory,
-                  AbstractSharedMem* shm_runtime);
+                  RewriteDriverFactory* factory, AbstractSharedMem* shm_runtime,
+                  const std::optional<CycloneCache::Config::Owner>&
+                      volume_owner = std::nullopt);
   ~SystemCachePath();
 
   // Computes a key suitable for building a map to help share common cache
