@@ -70,7 +70,7 @@ class PageWorkBudgetTest : public RewriteTestBase {
   static GoogleString Script(char fill) {
     GoogleString script =
         StrCat("var s = '", GoogleString(kInputBytes - 12, fill), "';\n");
-    CHECK_EQ(kInputBytes, script.size());
+    CHECK_EQ(kInputBytes, static_cast<int>(script.size()));
     return script;
   }
 
@@ -79,7 +79,7 @@ class PageWorkBudgetTest : public RewriteTestBase {
     GoogleString css = StrCat(".c", IntegerToString(n), " { color: red; }\n");
     css.append(kInputBytes - css.size() - 1, ' ');
     css.append("\n");
-    CHECK_EQ(kInputBytes, css.size());
+    CHECK_EQ(kInputBytes, static_cast<int>(css.size()));
     return css;
   }
 

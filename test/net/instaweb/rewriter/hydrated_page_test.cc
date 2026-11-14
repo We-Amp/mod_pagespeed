@@ -88,7 +88,7 @@ TEST_F(HydratedPageTest, TextThatMentionsAMarkerIsNotAMarker) {
   options()->EnableFilter(RewriteOptions::kRewriteCss);
   rewrite_driver()->AddFilters();
   const char* const kUnmarked[] = {
-      "<pre>&lt;script id=\"__NEXT_DATA__\"&gt; /_next/static/a.js "
+      "<pre>&lt;script id=\"__NEXT_DATA__\"&gt; /_next/static/a.js ",
       "data-precedence window.__remixContext</pre>",
       "<pre>&lt;!--$--&gt;</pre>",
       "<p>/_nuxt/entry.css data-reactroot ng-version</p>",

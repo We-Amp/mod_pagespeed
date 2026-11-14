@@ -378,12 +378,31 @@ build:ci-build --action_env=CC=clang --action_env=CXX=clang++
 # warning before -Werror could fire, so third-party code cannot fail the
 # leg. Scoped per-file, mirroring the win-asan idiom.
 build:ci-build --per_file_copt=//pagespeed(/.*)?:.*,//net(/.*)?:.*,//test(/.*)?:.*,//base(/.*)?:.*,//third_party(/.*)?:.*,//tools(/.*)?:.*@-Werror,-ferror-limit=0
+# Escalate the enforced leg from -Wall to -Wextra. The -Wextra noise
+# classes already ruled out are scoped just below the external boundary
+# line; every other diagnostic -Wextra adds fails the leg.
+build:ci-build --copt=-Wextra
 # Third-party code is not ours to fix; keep first-party diagnostics
 # unchanged (same boundary the macOS build uses). Order matters: this
 # line must stay AFTER the -Werror line above - a few external repos
 # embed labels like //base/... that match the enforcement regex, and
 # the later -w is what keeps them unenforced.
 build:ci-build --per_file_copt=external/.*@-w
+# Unused parameters are interface noise, not bugs; suppressed by policy.
+build:ci-build --copt=-Wno-unused-parameter
+# gperf's generated .gp.cc files are machine-written, not hand-authored;
+# their missing field initializers are the generator's own style. Order
+# matters: this -Wno form must stay AFTER the -Werror line above.
+build:ci-build --per_file_copt=.*\.gp\.cc@-Wno-missing-field-initializers
+# The vendored css_parser keeps its own sign-compare findings; we do not
+# edit third-party sources. Order matters: this -Wno form must stay
+# AFTER the -Werror line above.
+build:ci-build --per_file_copt=.*css_parser.*@-Wno-sign-compare
+# The Apache AP_INIT_* module-command table casts typed handlers to the
+# generic function type the httpd module API itself defines; the idiom
+# is confined to one file. Order matters: this -Wno form must stay
+# AFTER the -Werror line above.
+build:ci-build --per_file_copt=.*mod_instaweb\.cc@-Wno-cast-function-type-mismatch
 # Protoc-generated sources are not hand-authored; keep them out of the
 # enforcement (warnings there are protobuf/protoc territory, and e.g.
 # -Winvalidoffsetof in generated .pb.cc fails builds on some platforms).

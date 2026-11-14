@@ -242,7 +242,7 @@ TEST_F(MemcachedCacheTest, SizeTest) {
   }
 
   for (int x = 0; x < 10; ++x) {
-    for (int i = kJustUnderThreshold / 2; i < kJustUnderThreshold - 10; ++i) {
+    for (size_t i = kJustUnderThreshold / 2; i < kJustUnderThreshold - 10; ++i) {
       GoogleString value(i, 'a');
       GoogleString key = StrCat("big", IntegerToString(i));
       CheckPut(key, value);
