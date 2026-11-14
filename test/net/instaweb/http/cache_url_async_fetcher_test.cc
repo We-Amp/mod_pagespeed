@@ -1966,6 +1966,131 @@ TEST_F(CacheUrlAsyncFetcherTest, StoredClientAnswerVaryingOnRequestIsAMiss) {
   lru_cache_.Clear();
 }
 
+// The answer to a request that carried a cookie may be that visitor's own:
+// it is stored for other requests only when the origin marks it shareable.
+TEST_F(CacheUrlAsyncFetcherTest, CookieRequestAnswerIsSharedOnlyWhenMarked) {
+  const char kUrl[] = "http://www.example.com/cookie/answer";
+  struct Case {
+    const char* content_type;
+    const char* cache_control;  // nullptr: none
+    bool stored_for_cookie;
+  };
+  const Case kCases[] = {
+      {"application/json", "max-age=600", false},
+      {"application/json", "public, max-age=600", true},
+      {"text/html", "max-age=600, s-maxage=600", true},
+      {"text/html", "max-age=600, s-maxage=600, s-maxage=600", false},
+      {"text/html", "max-age=600, s-maxage=abc", false},
+      {"application/unknown", "max-age=600", false},
+      {"image/png", "max-age=600", true},
+      {"text/css; charset=utf-8", "max-age=600", true},
+      {"image/png", nullptr, false},  // the implicit lifetime only
+  };
+  RequestHeaders cookie;
+  cookie.Add(HttpAttributes::kCookie, "session=1");
+  RequestHeaders empty_cookie;
+  empty_cookie.Add(HttpAttributes::kCookie, "");
+  ASSERT_TRUE(empty_cookie.GetProperties().has_cookie);
+  RequestHeaders cookie2;
+  cookie2.Add(HttpAttributes::kCookie2, "$Version=1");
+  RequestHeaders no_cookie;
+
+  for (const Case& c : kCases) {
+    for (const RequestHeaders* request :
+         {&cookie, &empty_cookie, &cookie2, &no_cookie}) {
+      SCOPED_TRACE(
+          StrCat(c.content_type, " / ",
+                 c.cache_control == nullptr ? "(none)" : c.cache_control,
+                 request == &no_cookie ? " / no cookie" : " / cookie"));
+      lru_cache_.Clear();
+      ResponseHeaders headers;
+      headers.SetStatusAndReason(HttpStatus::kOK);
+      headers.SetDate(timer_.NowMs());
+      headers.Add(HttpAttributes::kContentType, c.content_type);
+      if (c.cache_control != nullptr) {
+        headers.Add(HttpAttributes::kCacheControl, c.cache_control);
+      }
+      mock_fetcher_.SetResponse(kUrl, headers, "answer");
+      if (request == &no_cookie || c.stored_for_cookie) {
+        ExpectCacheWithRequestHeaders(kUrl, "answer", *request);
+      } else {
+        ExpectNoCacheWithRequestHeaders(kUrl, "answer", *request);
+      }
+    }
+  }
+  lru_cache_.Clear();
+}
+
+// A background freshen repeats the request that triggered it, cookie
+// included, and stores its answer under the same rule.
+TEST_F(CacheUrlAsyncFetcherTest, CookieTriggeredFreshenFollowsTheCookieRule) {
+  const char kUrl[] = "http://www.example.com/cookie/freshen.json";
+  ResponseHeaders headers;
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, "application/json");
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  mock_fetcher_.SetResponse(kUrl, headers, "anonymous answer");
+  // Stored for a request without a cookie.
+  ExpectCache(kUrl, "anonymous answer");
+
+  cache_fetcher_->set_proactively_freshen_user_facing_request(true);
+  timer_.AdvanceMs(ttl_ms_ - 3 * Timer::kMinuteMs);
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  mock_fetcher_.SetResponse(kUrl, headers, "this visitor's answer");
+
+  RequestHeaders cookie;
+  cookie.Add(HttpAttributes::kCookie, "session=1");
+  ClearStats();
+  // Served from the cache; the freshen it starts shares this request's log
+  // record, which records that its answer was not stored.
+  FetchAndValidate(kUrl, cookie, true, HttpStatus::kOK, "anonymous answer",
+                   kBackendFetch, false);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  // The freshen ran, with the cookie, and did not store its answer.
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(0, http_cache_->cache_inserts()->Get());
+  cache_fetcher_->set_proactively_freshen_user_facing_request(false);
+
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "anonymous answer", kBackendFetch, true);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(0, counting_fetcher_.fetch_count());
+  lru_cache_.Clear();
+}
+
+// An entry stored by an earlier version, without the current generation
+// stamp, may have been stored for a request that carried a cookie: it is not
+// served.  A current entry for the same response is.
+TEST_F(CacheUrlAsyncFetcherTest, ClientEntryFromAnEarlierVersionIsAMiss) {
+  const char kUrl[] = "http://www.example.com/cookie/earlier.png";
+  ResponseHeaders headers(http_options_);
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, "image/png");
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  headers.Add(HttpAttributes::kEtag, "\"earlier\"");
+  headers.ComputeCaching();
+  HTTPValue earlier;
+  earlier.SetHeaders(&headers);
+  earlier.Write("earlier answer", &handler_);
+  ASSERT_FALSE(earlier.IsCurrentClientEntry());
+  lru_cache_.Put(http_cache_->CompositeKey(kUrl, fragment_), earlier.share());
+  mock_fetcher_.SetResponse(kUrl, headers, "origin answer");
+
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "origin answer", kBackendFetch, true);
+  EXPECT_EQ(0, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  // The answer stored now carries the stamp and is served.
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "origin answer", kBackendFetch, true);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(0, counting_fetcher_.fetch_count());
+  lru_cache_.Clear();
+}
+
 TEST_F(CacheUrlAsyncFetcherTest, CacheVaryForHtml) {
   // The content type here is text/html. Unlike PNG and other resources, we
   // always respect Vary:Cookie on HTML even if RespectVary is off.

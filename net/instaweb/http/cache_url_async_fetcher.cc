@@ -115,6 +115,9 @@ class CachePutFetch : public SharedAsyncFetch {
                      req_properties_, ResponseHeaders::kRespectVaryOnResources,
                      ResponseHeaders::kHasValidator) &&
                  !headers->HasContentCodingOtherThanSingleGzip();
+    // An answer to a request that carried a cookie may be that visitor's
+    // own; it is shared only when the origin marks it shareable.
+    cacheable_ = cacheable_ && headers->MayShareForRequest(req_properties_);
     if (cacheable_) {
       // Make a copy of the headers which we will send to the
       // cache_value_writer_ later.
@@ -569,6 +572,12 @@ class CacheFindCallback : public HTTPCache::Callback {
     // entry stored before that rule is a miss here too, so a lookup is never
     // looser than the store.  Entries the module fetched itself keep the
     // configured RespectVary, applied by the cache before this call.
+    if (!http_value()->IsFetchedInput() &&
+        !http_value()->IsCurrentClientEntry()) {
+      // Stored by an earlier version, under looser rules (for example for a
+      // request that carried a cookie): never served.
+      return false;
+    }
     if (!http_value()->IsFetchedInput() &&
         headers.IsProxyCacheable(req_properties(), respect_vary_,
                                  ResponseHeaders::kHasValidator) &&

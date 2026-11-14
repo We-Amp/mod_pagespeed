@@ -306,11 +306,15 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   // request, with its own Accept, Origin, User-Agent and so on.  An answer
   // that varies on any of those belongs to this client only, so both checks
   // refuse any Vary beyond Accept-Encoding whatever RespectVary says.
+  //
+  // A response to a request that carried a cookie may be that visitor's own;
+  // both checks also require the origin to mark it shareable.
   const bool server_allows_storing =
       !has_origin_caching_headers() ||
-      response_headers->IsProxyCacheable(
-          request_properties_, ResponseHeaders::kRespectVaryOnResources,
-          ResponseHeaders::kNoValidator);
+      (response_headers->IsProxyCacheable(
+           request_properties_, ResponseHeaders::kRespectVaryOnResources,
+           ResponseHeaders::kNoValidator) &&
+       response_headers->MayShareForRequest(request_properties_));
   ApplyOriginCachingHeaders(response_headers,
                             cache_control_set_ ? &cache_control_ : nullptr);
 
@@ -355,7 +359,8 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
       server_allows_storing &&
       response_headers->IsProxyCacheable(
           request_properties_, ResponseHeaders::kRespectVaryOnResources,
-          ResponseHeaders::kNoValidator);
+          ResponseHeaders::kNoValidator) &&
+      response_headers->MayShareForRequest(request_properties_);
   if (!is_cacheable) {
     DroppedAsUncacheable();
     // Cache-Control forbids caching: an expected policy outcome, not a

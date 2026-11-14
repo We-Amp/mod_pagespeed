@@ -701,6 +701,31 @@ TEST_F(InPlaceRewriteContextTest,
   EXPECT_EQ(0, img_filter_->num_rewrites());
 }
 
+// A resource URL that does not decode as an optimized one is fetched in
+// place, as a proxy, with the visitor's own request.  When that request
+// carried a cookie, the answer is not stored unless the origin marks it
+// shareable.
+TEST_F(InPlaceRewriteContextTest,
+       UndecodableResourceFetchedWithCookieIsNotShared) {
+  Init();
+  const GoogleString url = "http://www.example.com/data.txt.pagespeed.zz.0.txt";
+  AddResponse(url, kContentTypeText, cache_body_, start_time_ms(), ttl_ms_, "",
+              "", kNoWriteToCache, kTransform);
+  for (bool with_cookie : {true, false}) {
+    SCOPED_TRACE(with_cookie ? "cookie" : "no cookie");
+    lru_cache()->Clear();
+    ResetHeadersAndStats();
+    if (with_cookie) {
+      AddRequestAttribute(HttpAttributes::kCookie, "session=1");
+    }
+    SetDriverRequestHeaders();
+    FetchAndCheckResponse(url, cache_body_, true, ttl_ms_, nullptr,
+                          start_time_ms());
+    EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+    EXPECT_EQ(with_cookie ? 0 : 1, http_cache()->cache_inserts()->Get());
+  }
+}
+
 TEST_F(InPlaceRewriteContextTest, WaitForOptimizeWithDisabledFilter) {
   // Wait for optimized but if the resource fails to optimize we should get
   // back the original resource.

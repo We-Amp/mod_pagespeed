@@ -331,6 +331,52 @@ TEST_F(DaemonIproRecorderTest, AnAuthorizedRequestMarkedPublicIsRecorded) {
   EXPECT_TRUE(outcome.stored);
 }
 
+// --- a cookie on the request: handed over only when the origin allows -----
+
+TEST_F(DaemonIproRecorderTest, ACookieRequestsUnmarkedResponseIsNotHandedOver) {
+  // The response the server produced for a visitor whose request carried a
+  // cookie may be that visitor's own.  A stylesheet with only the implicit
+  // lifetime is not marked shareable, so it never reaches the peer.
+  for (const RequestHeaders::Properties& cookie :
+       {RequestHeaders::Properties(true, false, false),
+        RequestHeaders::Properties(false, true, false)}) {
+    request_.request_properties = cookie;
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.RemoveAll(HttpAttributes::kCacheControl);
+    headers.ComputeCaching();
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    EXPECT_FALSE(outcome.gate_ran);
+    EXPECT_FALSE(outcome.stored);
+    EXPECT_EQ(GoogleString::npos, CallLog().find("write_original"));
+  }
+
+  // The same response for a request without a cookie gets past this module.
+  request_.request_properties = RequestHeaders::Properties(false, false, false);
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.RemoveAll(HttpAttributes::kCacheControl);
+  headers.ComputeCaching();
+  EXPECT_TRUE(Run(&headers, kBody).gate_ran);
+}
+
+TEST_F(DaemonIproRecorderTest, ACookieRequestsMarkedResponseIsHandedOver) {
+  // The control: a response the origin marked shareable is handed over for a
+  // cookie-bearing request as for any other.
+  request_.request_properties = RequestHeaders::Properties(true, false, false);
+  for (const char* cache_control :
+       {"max-age=600, public", "max-age=600, s-maxage=600"}) {
+    SCOPED_TRACE(cache_control);
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.Replace(HttpAttributes::kCacheControl, cache_control);
+    headers.ComputeCaching();
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    EXPECT_TRUE(outcome.gate_ran);
+    EXPECT_TRUE(outcome.stored);
+  }
+}
+
 // --- the recorded response is one client's: Vary beyond encoding refuses --
 
 TEST_F(DaemonIproRecorderTest, AVaryBeyondEncodingIsRefusedBeforeThePeer) {

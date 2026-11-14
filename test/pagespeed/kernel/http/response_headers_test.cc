@@ -2949,4 +2949,70 @@ TEST_F(ResponseHeadersTest, ClearForgetsEarlierCacheability) {
   EXPECT_EQ(0, response_headers_.cache_ttl_ms());
 }
 
+// A response to a request that carried a cookie is shareable when the origin
+// marked it so: a stylesheet, script or image needs a lifetime the origin
+// stated; anything else needs public or a single s-maxage above zero.
+TEST_F(ResponseHeadersTest, ShareableForCookieRequest) {
+  struct Case {
+    const char* content_type;   // nullptr: none
+    const char* cache_control;  // nullptr: none
+    bool with_expires;          // Expires 5 minutes after Date
+    bool shareable;
+  };
+  const Case kCases[] = {
+      // Static assets: an origin-stated lifetime.
+      {"text/css", "max-age=60", false, true},
+      {"Text/CSS; charset=utf-8", "max-age=60", false, true},
+      {"application/javascript", "s-maxage=60", false, true},
+      {"image/png", "private, max-age=60", false, true},
+      {"image/png", "max-age=0", false, false},
+      {"image/png", "public", false, false},
+      {"image/png", nullptr, false, false},        // implicit lifetime only
+      {"image/png", nullptr, true, true},          // Expires, no Cache-Control
+      {"image/png", "no-transform", true, false},  // Expires beside a line
+      {"image/", "max-age=60", false, false},      // not an image type
+      // Pages and everything else: public or a single s-maxage above zero.
+      {"application/json", "max-age=60", false, false},
+      {"application/json", "public, max-age=60", false, true},
+      {"text/html", "PUBLIC", false, true},
+      {"text/html", "s-maxage=60", false, true},
+      {"text/html", "s-maxage=0", false, false},
+      {"text/html", "s-maxage=abc", false, false},
+      {"text/html", "s-maxage=60, s-maxage=60", false, false},
+      {"text/html", nullptr, true, false},
+      {"application/xhtml+xml", "max-age=60", false, false},
+      {"text/plain", "max-age=60", false, false},
+      {nullptr, "max-age=60", false, false},
+      {"application/octet-stream", "s-maxage=1", false, true},
+  };
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(StrCat(c.content_type == nullptr ? "(none)" : c.content_type,
+                        " / ",
+                        c.cache_control == nullptr ? "(none)" : c.cache_control,
+                        c.with_expires ? " / expires" : ""));
+    ResponseHeaders headers;
+    headers.SetStatusAndReason(HttpStatus::kOK);
+    headers.SetDate(MockTimer::kApr_5_2010_ms);
+    if (c.content_type != nullptr) {
+      headers.Add(HttpAttributes::kContentType, c.content_type);
+    }
+    if (c.cache_control != nullptr) {
+      headers.Add(HttpAttributes::kCacheControl, c.cache_control);
+    }
+    if (c.with_expires) {
+      headers.SetTimeHeader(HttpAttributes::kExpires,
+                            MockTimer::kApr_5_2010_ms + 5 * Timer::kMinuteMs);
+    }
+    headers.ComputeCaching();
+    EXPECT_EQ(c.shareable, headers.IsShareableForCookieRequest());
+    // Without a cookie, anything may be shared as far as this rule goes.
+    EXPECT_TRUE(headers.MayShareForRequest(
+        RequestHeaders::Properties(false, false, false)));
+    EXPECT_EQ(c.shareable, headers.MayShareForRequest(
+                               RequestHeaders::Properties(true, false, false)));
+    EXPECT_EQ(c.shareable, headers.MayShareForRequest(
+                               RequestHeaders::Properties(false, true, false)));
+  }
+}
+
 }  // namespace net_instaweb

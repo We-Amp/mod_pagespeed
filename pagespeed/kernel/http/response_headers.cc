@@ -470,6 +470,108 @@ bool ResponseHeaders::IsProxyCacheable(
   return true;
 }
 
+namespace {
+
+// A delta-seconds value (RFC 9111 1.2.2): one or more digits, nothing else.
+bool ParseDeltaSeconds(StringPiece value, int64* seconds) {
+  if (value.empty()) {
+    return false;
+  }
+  int64 result = 0;
+  for (char c : value) {
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    if (result < (int64{1} << 40)) {  // Saturate; any large value is > 0.
+      result = result * 10 + (c - '0');
+    }
+  }
+  *seconds = result;
+  return true;
+}
+
+// Is this Content-Type a stylesheet, a script or an image?
+bool IsStaticAssetContentType(const char* content_type) {
+  if (content_type == nullptr) {
+    return false;
+  }
+  StringPiece media(content_type);
+  const size_t semicolon = media.find(';');
+  if (semicolon != StringPiece::npos) {
+    media = media.substr(0, semicolon);
+  }
+  TrimWhitespace(&media);
+  if (StringCaseStartsWith(media, "image/") && media.size() > 6) {
+    return true;
+  }
+  for (const char* type : {"text/css", "application/javascript",
+                           "text/javascript", "application/x-javascript",
+                           "application/ecmascript", "text/ecmascript"}) {
+    if (StringCaseEqual(media, type)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool ResponseHeaders::IsShareableForCookieRequest() const {
+  ConstStringStarVector values;
+  const bool has_cache_control = Lookup(HttpAttributes::kCacheControl, &values);
+  bool is_public = false;
+  int s_maxage_count = 0;
+  bool s_maxage_valid = false;
+  int64 s_maxage = 0;
+  int64 max_age = 0;
+  for (const GoogleString* value : values) {
+    if (value == nullptr) {
+      continue;
+    }
+    StringPiece directive(*value);
+    TrimWhitespace(&directive);
+    StringPiece name = directive;
+    StringPiece argument;
+    const size_t equals = directive.find('=');
+    if (equals != StringPiece::npos) {
+      name = directive.substr(0, equals);
+      argument = directive.substr(equals + 1);
+      TrimWhitespace(&name);
+      TrimWhitespace(&argument);
+    }
+    if (equals == StringPiece::npos && StringCaseEqual(name, "public")) {
+      is_public = true;
+    } else if (StringCaseEqual(name, "s-maxage")) {
+      ++s_maxage_count;
+      s_maxage = 0;
+      s_maxage_valid = ParseDeltaSeconds(argument, &s_maxage);
+    } else if (StringCaseEqual(name, "max-age")) {
+      int64 seconds = 0;
+      max_age = ParseDeltaSeconds(argument, &seconds) ? seconds : 0;
+    }
+  }
+
+  if (IsStaticAssetContentType(Lookup1(HttpAttributes::kContentType))) {
+    if (s_maxage_valid && s_maxage > 0) {
+      return true;
+    }
+    // ComputeCaching writes the implicit lifetime in as a max-age; that is
+    // not one the origin stated.
+    if (is_implicitly_cacheable()) {
+      return false;
+    }
+    if (has_cache_control) {
+      return max_age > 0;
+    }
+    int64 expires_ms = 0;
+    int64 date_ms = 0;
+    return ParseDateHeader(HttpAttributes::kExpires, &expires_ms) &&
+           ParseDateHeader(HttpAttributes::kDate, &date_ms) &&
+           expires_ms > date_ms;
+  }
+  return is_public || (s_maxage_count == 1 && s_maxage_valid && s_maxage > 0);
+}
+
 // Returns the ms-since-1970 absolute time when this resource
 // should be expired out of caches.
 int64 ResponseHeaders::CacheExpirationTimeMs() const {

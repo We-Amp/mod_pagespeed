@@ -3333,11 +3333,14 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
 
   StringPiece contents;
   ResponseHeaders* response_headers = data->response_headers();
-  bool usable =
-      (result.status == HTTPCache::kFound) &&
-      data->http_value()->ExtractContents(&contents) &&
-      (response_headers->status_code() == HttpStatus::kOK) &&
-      (!fallback_needs_fetched_input_ || data->http_value()->IsFetchedInput());
+  bool usable = (result.status == HTTPCache::kFound) &&
+                data->http_value()->ExtractContents(&contents) &&
+                (response_headers->status_code() == HttpStatus::kOK) &&
+                (data->http_value()->IsFetchedInput() ||
+                 // A response served to a client is a fallback only when it was
+                 // stored under the current rules.
+                 (!fallback_needs_fetched_input_ &&
+                  data->http_value()->IsCurrentClientEntry()));
   // De-alias a borrowed mmap view before the port write, exactly like
   // CacheUrlAsyncFetcher's hit serve (see the zero-copy note there): the
   // pin ('data', released when this function returns) must not be relied on

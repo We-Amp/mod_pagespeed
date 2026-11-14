@@ -343,13 +343,14 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     // The final headers are judged as they stand, and then again with the
     // origin's caching fields in their place when the seam supplied them:
     // storing needs both to allow it, and the stored lifetime is the shorter
-    // of the two (ApplyOriginCachingHeaders).  Vary is judged strictly, as
-    // below.
+    // of the two (ApplyOriginCachingHeaders).  Vary and a cookie on the
+    // request are judged as below.
     if (has_origin_caching_headers() &&
-        !response_headers->IsProxyCacheable(
-            request_.request_properties,
-            ResponseHeaders::kRespectVaryOnResources,
-            ResponseHeaders::kNoValidator)) {
+        (!response_headers->IsProxyCacheable(
+             request_.request_properties,
+             ResponseHeaders::kRespectVaryOnResources,
+             ResponseHeaders::kNoValidator) ||
+         !response_headers->MayShareForRequest(request_.request_properties))) {
       break;
     }
     ApplyOriginCachingHeaders(response_headers, cache_control_saved_
@@ -374,13 +375,19 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     //   kNoValidator        this path revalidates nothing, so it must not
     //       claim it can.
     //
+    // And, as the classic recorder does, a response to a request that carried
+    // a cookie may be that visitor's own: it is handed over only when the
+    // origin marks it shareable (ResponseHeaders::MayShareForRequest).  The
+    // peer is not told about the cookie, so this gate is the only one.
+    //
     // This is the FIRST of two gates. The peer's store-side predicate is the
     // second, and it is applied inside the record gate over the same
     // response. Strictest of both.
     if (!response_headers->IsProxyCacheable(
             request_.request_properties,
             ResponseHeaders::kRespectVaryOnResources,
-            ResponseHeaders::kNoValidator)) {
+            ResponseHeaders::kNoValidator) ||
+        !response_headers->MayShareForRequest(request_.request_properties)) {
       break;
     }
 

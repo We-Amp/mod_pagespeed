@@ -778,6 +778,39 @@ TEST_F(ServerContextTest, QueryOptionsWithInvalidUrl) {
 
 TEST_F(ServerContextTest, TestNamed) { TestNamed(); }
 
+// An optimized resource that was written but is no longer in the HTTP cache is
+// served from the written copy and stored again.  The cache's internal stamp
+// goes on the stored copy only, never on the response the client gets.
+TEST_F(ServerContextTest, WrittenOutputServedOutsideTheCacheIsNotStamped) {
+  GoogleString failure_reason;
+  OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
+      kUrlPrefix, RewriteOptions::kCssFilterId, "I.name", kRewrittenResource,
+      &failure_reason));
+  ASSERT_TRUE(output.get() != nullptr);
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(), "contents",
+                                      &kContentTypeCss, "utf-8", output.get()));
+  ASSERT_TRUE(output->IsWritten());
+  lru_cache()->Clear();
+
+  StringAsyncFetch fetch(CreateRequestContext());
+  ResponseHeaders served;
+  fetch.set_response_headers(&served);
+  EXPECT_TRUE(rewrite_driver()->FetchOutputResource(output, nullptr, &fetch));
+  rewrite_driver()->WaitForCompletion();
+  ASSERT_TRUE(fetch.done());
+  EXPECT_TRUE(fetch.success());
+  EXPECT_EQ("contents", fetch.buffer());
+  EXPECT_FALSE(served.Has(HTTPValue::kClientEntryHeader));
+  EXPECT_FALSE(output->response_headers()->Has(HTTPValue::kClientEntryHeader));
+
+  HTTPValue stored;
+  ResponseHeaders stored_headers;
+  ASSERT_EQ(kFoundResult, HttpBlockingFind(output->HttpCacheKey(), http_cache(),
+                                           &stored, &stored_headers));
+  EXPECT_TRUE(stored.IsCurrentClientEntry());
+  EXPECT_FALSE(stored_headers.Has(HTTPValue::kClientEntryHeader));
+}
+
 TEST_F(ServerContextTest, TestOutputInputUrl) {
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
   rewrite_driver()->AddFilters();

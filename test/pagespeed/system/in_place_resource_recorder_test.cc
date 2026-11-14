@@ -947,6 +947,77 @@ TEST_F(InPlaceResourceRecorderVaryTest, AnswerVaryingOnlyOnEncodingIsStored) {
   }
 }
 
+// The recorder stores the response the server produced for one visitor's
+// request.  When that request carried a cookie the response may be the
+// visitor's own: it is stored only when the origin marks it shareable.
+class InPlaceResourceRecorderCookieTest : public InPlaceResourceRecorderTest {
+ protected:
+  HTTPCache::FindResult Record(const RequestHeaders& request,
+                               const char* content_type,
+                               const char* cache_control) {
+    ResponseHeaders headers;
+    headers.SetStatusAndReason(HttpStatus::kOK);
+    headers.SetDate(timer()->NowMs());
+    headers.Add(HttpAttributes::kContentType, content_type);
+    if (cache_control != nullptr) {
+      headers.Add(HttpAttributes::kCacheControl, cache_control);
+    }
+    headers.ComputeCaching();
+    std::unique_ptr<InPlaceResourceRecorder> recorder(
+        new InPlaceResourceRecorder(
+            RequestContext::NewTestRequestContext(
+                server_context()->thread_system()),
+            kTestUrl, rewrite_driver_->CacheFragment(), request.GetProperties(),
+            kMaxResponseBytes, 4 /* max_concurrent_recordings */, http_cache(),
+            statistics(), message_handler()));
+    recorder->ConsiderResponseHeaders(InPlaceResourceRecorder::kFullHeaders,
+                                      &headers);
+    recorder->Write(kHello, message_handler());
+    recorder.release()->DoneAndSetHeaders(&headers,
+                                          true /* complete response */);
+    HTTPValue value_out;
+    ResponseHeaders headers_out;
+    return HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out);
+  }
+};
+
+TEST_F(InPlaceResourceRecorderCookieTest, StoredOnlyWhenTheOriginMarksIt) {
+  struct Case {
+    const char* content_type;
+    const char* cache_control;
+    bool stored_for_cookie;
+  };
+  const Case kCases[] = {
+      {"application/json", "max-age=600", false},
+      {"application/json", "public, max-age=600", true},
+      {"application/json", "max-age=600, s-maxage=600", true},
+      {"application/json", "max-age=600, s-maxage=600, s-maxage=600", false},
+      {"image/png", "max-age=600", true},
+      {"text/css", "max-age=600", true},
+      {"image/png", nullptr, false},  // the implicit lifetime only
+  };
+  RequestHeaders cookie;
+  cookie.Add(HttpAttributes::kCookie, "session=1");
+  RequestHeaders empty_cookie;
+  empty_cookie.Add(HttpAttributes::kCookie, "");
+  RequestHeaders no_cookie;
+  for (const Case& c : kCases) {
+    for (const RequestHeaders* request : {&cookie, &empty_cookie, &no_cookie}) {
+      SCOPED_TRACE(
+          StrCat(c.content_type, " / ",
+                 c.cache_control == nullptr ? "(none)" : c.cache_control,
+                 request == &no_cookie ? " / no cookie" : " / cookie"));
+      lru_cache()->Clear();
+      ClearStats();
+      const bool expect_stored = request == &no_cookie || c.stored_for_cookie;
+      EXPECT_EQ(expect_stored, Record(*request, c.content_type,
+                                      c.cache_control) == kFoundResult);
+      EXPECT_EQ(expect_stored ? 1 : 0,
+                IproVar("ipro_recorder_inserted_into_cache"));
+    }
+  }
+}
+
 }  // namespace
 
 }  // namespace net_instaweb
