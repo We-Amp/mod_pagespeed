@@ -130,19 +130,21 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
   globs expanded, Apache directory includes followed into subdirectories,
   and relative paths resolved against nginx's configuration directory or
   Apache's `ServerRoot`. It collects each `FileCachePath` and
-  `DaemonVolumePath`, nested ones included, plus the packaged defaults. It
-  then runs the test in a private mount namespace: an empty scratch
-  directory is mounted over each existing cache directory, and an overlay
-  (writes to scratch, reads unchanged) over the nearest existing parent of
-  each cache directory that does not exist yet, so the real cache is not
-  touched. After the test it compares the cache directories of the effective
+  `DaemonVolumePath`, nested ones included, plus the packaged default when
+  no cache path is configured. It then runs the test in a private mount
+  namespace with an empty scratch directory mounted over each cache
+  directory, so the real cache is not touched. Every one of those
+  directories must already exist: shielding a missing one would mean
+  covering its parent, and with it the logs, certificates and mounts there.
+  After the test it compares the cache directories of the effective
   configuration (`nginx -T`, or the file list of Apache's `DUMP_INCLUDES`)
   with what it shielded; a miss is reported by D11
   (`configtest_unshielded`), and `config.shield_verified` says whether the
   comparison could be made.
 - **Fail closed.** The test is not run, and D03 is skipped with code
   `configtest_not_isolated`, when no private mount namespace is available
-  (most containers), a mount fails, a cache directory cannot be shielded, an
+  (most containers), a mount fails, a cache directory does not exist yet
+  (the hint says which one to create, owned by the web server user), an
   include path uses a `${VARIABLE}` the doctor cannot resolve, or pagespeed
   is configured but no `FileCachePath` was found. `--allow-cache-writes`
   runs it anyway; the doctor then lists root-owned cache files before and
@@ -162,8 +164,10 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
   config test fail closed.
 - Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
   the main file, else from the server's compiled-in root.
-- A cache path containing a newline, or a missing one whose parent contains
-  `,`, `:` or `\`, cannot be shielded (fail closed).
+- A cache directory that does not exist yet is never shielded by covering
+  its parent: the test fails closed until the directory exists (it is
+  created at the first server start, or by hand). A cache path containing a
+  newline cannot be shielded either.
 - An Apache build without `DUMP_INCLUDES`, or a config test that fails
   before nginx prints its dump, leaves the shield unverified; D11 says so.
 - nginx started with `-p` (a prefix other than the compiled-in one) is not

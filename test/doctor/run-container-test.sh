@@ -49,7 +49,7 @@ SECRET1="FAKEsecretKEY0123456789abcdefXYZ"
 SECRET2="hunter2-fake-password"
 fail=0
 
-check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
+check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; return 1; fi; }
 
 cat > /var/www/html/index.html <<'HTML'
 <html><head><title>doctor test</title>
@@ -95,7 +95,8 @@ run() {
   HUM=$("$D" "$@" 2>&1)
   echo "== $name: exit $rc, verdict $(echo "$OUT" | jq -r .verdict 2>/dev/null)"
   echo "$HUM" | sed 's/^/    /'
-  check "$name: exit code $want" "[[ $rc =~ ^($want)\$ ]]"
+  check "$name: exit code $want" "[[ $rc =~ ^($want)\$ ]]" || \
+    echo "$OUT" | jq -r '.checks[] | "    json: \(.id) \(.status) \(.code) \(.message)"' 2>/dev/null
   check "$name: one valid JSON document" "echo \"\$OUT\" | jq -e '.schema == \"pagespeed-doctor/1\" and (.checks | length) == 6' >/dev/null"
   check "$name: JSON exit_code matches" "[ \"\$(echo \"\$OUT\" | jq .exit_code)\" = $rc ]"
   check "$name: no secret in JSON" "! echo \"\$OUT\" | grep -q -e '$SECRET1' -e '$SECRET2'"
@@ -218,6 +219,8 @@ nginx -s reload; sleep 1
 run switched_off 2
 check "off: D04 module_off" "[ \"\$(code_of D04)\" = 'fail module_off' ]"
 good_conf; nginx -s reload; sleep 1
+# Re-warm after the reload, so D05 sees optimized URLs again.
+for i in 1 2 3 4; do curl -s -o /dev/null http://127.0.0.1/; curl -s -o /dev/null http://127.0.0.1/style.css; sleep 1; done
 
 # --- root-owned cache file, config test without the namespace --------------
 touch /var/cache/ngx_pagespeed/root-owned.dat
@@ -245,13 +248,21 @@ check "not_writable: fix command quotes the path" "[ \"\$ARGS\" = \"\$(printf '2
 check "not_writable: nothing ran from the path" "[ ! -e /tmp/pwned ]"
 chown -R www-data: "$MAL"
 
-# --- module loaded, no pagespeed configuration: packaged defaults shielded --
+# --- module loaded, no pagespeed configuration --------------------------
+# The packaged default is the shield; while it does not exist the test
+# fails closed with a hint, once it exists the test runs shielded.
 mkdir -p /tmp/held && mv /etc/nginx/conf.d/pagespeed.conf /etc/nginx/conf.d/psc-servers.conf /tmp/held/
 rm -rf /var/cache/ngx_pagespeed.held; mv /var/cache/ngx_pagespeed /var/cache/ngx_pagespeed.held
+run loaded_unconfigured_nodir '1|2'
+check "loaded_unconfigured, default missing: clean skip with a create hint" \
+  "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ] && echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q '^Create /var/cache/ngx_pagespeed first'"
+check "loaded_unconfigured: the default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
+mkdir -p /var/cache/ngx_pagespeed && chown www-data: /var/cache/ngx_pagespeed
 run loaded_unconfigured '0|1|2'
-check "loaded_unconfigured: D03 ran shielded and passed" \
+check "loaded_unconfigured, default present: D03 ran shielded and passed" \
   "[ \"\$(code_of D03)\" = 'pass null' ] && [ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
-check "loaded_unconfigured: the would-be default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
+check "loaded_unconfigured: no root-owned file in the default cache" "[ -z \"\$(find /var/cache/ngx_pagespeed -user 0 ! -type d)\" ]"
+rm -rf /var/cache/ngx_pagespeed
 
 # --- pagespeed configured without any FileCachePath: fail closed ------------
 echo "pagespeed on;" > /etc/nginx/conf.d/pagespeed.conf
@@ -260,11 +271,10 @@ check "no_cache_path: verdict is not working" "[ \"\$(echo \"\$OUT\" | jq -r .ve
 check "no_cache_path: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
 check "no_cache_path: reason names the missing FileCachePath" \
   "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q 'no FileCachePath'"
+check "no_cache_path: the default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
 run no_cache_path_allowed '0|1|2' --allow-cache-writes
-check "no_cache_path --allow-cache-writes: the test runs, defaults shielded" \
-  "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ] && [ \"\$(code_of D03 | cut -d' ' -f1)\" != skip ]"
-check "no_cache_path: the would-be default cache was not created" "[ ! -e /var/cache/ngx_pagespeed ]"
-rm -f /etc/nginx/conf.d/pagespeed.conf
+check "no_cache_path --allow-cache-writes: the test runs" "[ \"\$(code_of D03 | cut -d' ' -f1)\" != skip ]"
+rm -f /etc/nginx/conf.d/pagespeed.conf; rm -rf /var/cache/ngx_pagespeed
 
 # --- module not loaded at all: the only unshielded run ---------------------
 mv /etc/nginx/modules-enabled/50-mod-pagespeed.conf /tmp/held/
@@ -276,7 +286,7 @@ mv /tmp/held/50-mod-pagespeed.conf /etc/nginx/modules-enabled/
 mv /tmp/held/pagespeed.conf /tmp/held/psc-servers.conf /etc/nginx/conf.d/
 mv /var/cache/ngx_pagespeed.held /var/cache/ngx_pagespeed
 
-# --- --config (nginx -c), relative includes, caches that do not exist yet ----
+# --- --config (nginx -c), relative includes ---------------------------------
 rm -rf /etc/nginx-alt && cp -a /etc/nginx /etc/nginx-alt && mkdir -p /etc/nginx-alt/alt.d
 sed -i 's|include /etc/nginx/conf.d/\*.conf;|include alt.d/*.conf;|' /etc/nginx-alt/nginx.conf
 cat > /etc/nginx-alt/alt.d/ps.conf <<'CONF'
@@ -285,14 +295,55 @@ pagespeed FileCachePath /srv/psc/altcache;
 server { listen 8090; root /var/www/html; pagespeed FileCachePath /srv/newtop/cache; }
 CONF
 rm -rf /srv/psc/altcache /srv/newtop
+run alt_config_nodir '1|2' --config /etc/nginx-alt/nginx.conf
+check "alt_config, caches missing: clean skip with a create hint" \
+  "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ] && echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q '^Create /srv/'"
+check "alt_config: the missing caches were not created" "[ ! -e /srv/psc/altcache ] && [ ! -e /srv/newtop ]"
+mkdir -p /srv/psc/altcache /srv/newtop/cache && chown -R www-data: /srv/psc/altcache /srv/newtop
 run alt_config '1|2' --config /etc/nginx-alt/nginx.conf
 check "alt_config: D03 passed, shielded" \
   "[ \"\$(code_of D03)\" = 'pass null' ] && [ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
 check "alt_config: D11 saw the cache paths of the -c configuration" \
   "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D11\") | .evidence[].path' | grep -qx /srv/psc/altcache"
 check "alt_config: shield verified against nginx -T" "[ \"\$(echo \"\$OUT\" | jq -r .config.shield_verified)\" = true ]"
-check "would-be caches (also under /srv) were not created on disk" "[ ! -e /srv/psc/altcache ] && [ ! -e /srv/newtop ]"
-rm -rf /etc/nginx-alt
+check "alt_config: no root-owned file in the -c caches" "[ -z \"\$(find /srv/psc/altcache /srv/newtop -user 0 ! -type d)\" ]"
+rm -rf /etc/nginx-alt /srv/newtop
+
+# --- reproduction 1: a big log next to a missing cache directory ----------
+# The cache directory's parent (/var) holds a 200 MB log nginx -T opens for
+# append. The doctor must not cover the parent: a clean, quick skip.
+mkdir -p /var/log/psc && head -c 200M /dev/zero > /var/log/psc/big.log
+cat > /etc/nginx/conf.d/zz-big.conf <<'CONF'
+access_log /var/log/psc/big.log;
+server { listen 8091; root /var/www/html; pagespeed FileCachePath /var/ngx_pagespeed_cache; }
+CONF
+rm -rf /var/ngx_pagespeed_cache
+t0=$(date +%s)
+run big_log '1|2'
+t1=$(date +%s)
+check "big_log: clean skip, not a failure" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "big_log: hint says create /var/ngx_pagespeed_cache" \
+  "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q '^Create /var/ngx_pagespeed_cache first'"
+check "big_log: both doctor runs took under 30 s" "[ \$((t1 - t0)) -lt 30 ]"
+check "big_log: the missing cache was not created" "[ ! -e /var/ngx_pagespeed_cache ]"
+rm -f /etc/nginx/conf.d/zz-big.conf; rm -rf /var/log/psc
+
+# --- reproduction 2: an include on a submount next to a missing cache ------
+mkdir -p /srv/psc/mnt && mount -t tmpfs -o size=1m tmpfs /srv/psc/mnt
+echo 'map $host $psc_from_mount { default 1; }' > /srv/psc/mnt/extra.conf
+cat > /etc/nginx/conf.d/zz-mnt.conf <<'CONF'
+include /srv/psc/mnt/extra.conf;
+server { listen 8092; root /var/www/html; pagespeed FileCachePath /srv/psc/mntcache; }
+CONF
+rm -rf /srv/psc/mntcache
+run submount_nodir '1|2'
+check "submount, cache missing: clean skip, not a failure" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "submount: the missing cache was not created" "[ ! -e /srv/psc/mntcache ]"
+mkdir -p /srv/psc/mntcache && chown www-data: /srv/psc/mntcache
+run submount '0|1|2'
+check "submount, cache present: D03 passes shielded (the include on the mount is read)" \
+  "[ \"\$(code_of D03)\" = 'pass null' ] && [ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
+rm -f /etc/nginx/conf.d/zz-mnt.conf; umount /srv/psc/mnt; rm -rf /srv/psc/mnt /srv/psc/mntcache
 
 # --- server down ----------------------------------------------------------
 nginx -s stop; sleep 1
@@ -364,6 +415,15 @@ mkdir -p /srv/psc
 apache2ctl start >/dev/null 2>&1; sleep 2
 find /var/cache/mod_pagespeed -user 0 -exec chown www-data: {} + 2>/dev/null
 
+# The optimizer worker (not started here: no systemd) creates its volume
+# directory on first start. Until then the doctor cannot shield it.
+rm -rf /var/cache/pagespeed-optimizer/v3
+run apache_volume_missing
+check "apache, worker volume missing: clean skip with a create hint" \
+  "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ] && echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q '^Create /var/cache/pagespeed-optimizer/v3 first'"
+mkdir -p /var/cache/pagespeed-optimizer/v3
+chown pagespeed:pagespeed /var/cache/pagespeed-optimizer/v3 2>/dev/null || true
+
 run apache_default
 check "apache: D02 pass" "[ \"\$(code_of D02)\" = 'pass null' ]"
 check "apache: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
@@ -376,10 +436,11 @@ check "apache: no root-owned file in the cache" "[ -z \"\$(find /var/cache/mod_p
 mkdir -p /etc/apache2/psc.d/sub
 echo "ModPagespeedFileCachePath /srv/psc/sub-cache" > /etc/apache2/psc.d/sub/cache.conf
 echo "IncludeOptional psc.d" >> /etc/apache2/apache2.conf
+mkdir -p /srv/psc/sub-cache && chown www-data: /srv/psc/sub-cache
 run apache_subdir
 check "subdir: D11 saw the cache path in the subdirectory" "d11_has /srv/psc/sub-cache"
 check "subdir: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
-check "subdir: the would-be cache was not created" "[ ! -e /srv/psc/sub-cache ]"
+check "subdir: no root-owned file in the cache" "[ -z \"\$(find /srv/psc/sub-cache -user 0 ! -type d)\" ]"
 sed -i '/^IncludeOptional psc.d$/d' /etc/apache2/apache2.conf
 
 # ${VAR} the doctor cannot resolve: fail closed.
@@ -394,10 +455,15 @@ sed -i '/PSC_UNSET_VARIABLE/d' /etc/apache2/apache2.conf
 rm -rf /srv/aroot && cp -a /etc/apache2 /srv/aroot
 sed -i '1i ServerRoot "/srv/aroot"' /srv/aroot/apache2.conf
 echo "ModPagespeedFileCachePath /srv/psc/aroot-cache" > /srv/aroot/conf-enabled/zz-psc.conf
+rm -rf /srv/psc/aroot-cache
+run apache_serverroot_nodir --config /srv/aroot/apache2.conf
+check "serverroot, cache missing: clean skip with a create hint" \
+  "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ] && echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q '^Create /srv/psc/aroot-cache first'"
+mkdir -p /srv/psc/aroot-cache && chown www-data: /srv/psc/aroot-cache
 run apache_serverroot --config /srv/aroot/apache2.conf
 check "serverroot: D11 saw the cache path under the custom ServerRoot" "d11_has /srv/psc/aroot-cache"
 check "serverroot: D03 ran shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
-check "serverroot: the would-be cache was not created" "[ ! -e /srv/psc/aroot-cache ]"
+check "serverroot: no root-owned file in the cache" "[ -z \"\$(find /srv/psc/aroot-cache -user 0 ! -type d)\" ]"
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS (apache)" || echo "SOME FAILED (apache)"

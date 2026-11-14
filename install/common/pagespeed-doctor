@@ -55,12 +55,15 @@
 #   2. It runs the test (`nginx -T`: one run gives the verdict and the
 #      effective configuration, read in memory and never printed; Apache:
 #      `-t -D DUMP_MODULES`) in a private mount namespace (`unshare`) with
-#      an empty scratch directory bind-mounted over each existing one, and
-#      an overlay (writes to scratch, reads unchanged) over the nearest
-#      existing parent of each one that does not exist yet. Whatever the
-#      module creates lands in scratch, which is deleted afterwards.
+#      an empty scratch directory bind-mounted over each of them. Whatever
+#      the module creates lands in scratch, which is deleted afterwards.
+#      Every directory to shield must already exist: a cache directory that
+#      does not exist yet could only be shielded by covering its parent,
+#      which would also catch logs, certificates and mounts there, so that
+#      case fails closed (create the directory first).
 #   3. Fail closed: when a private mount namespace or a bind mount is not
-#      available (most containers), a directory cannot be shielded, an
+#      available (most containers), a cache directory (or, with no cache
+#      path configured, the packaged default) does not exist yet, an
 #      include path uses a ${VARIABLE} the doctor cannot resolve, or
 #      pagespeed is configured without any FileCachePath, the test is NOT
 #      run and D03 is skipped with code configtest_not_isolated. Only when
@@ -598,29 +601,22 @@ module_referenced() {
 }
 pagespeed_configured() { awk -F "$US" 'substr($3, 1, 1) != "@" { f = 1 } END { exit !f }' "$CORPUS"; }
 
-# The shield for the config test, in $TMP/shield, one entry per line:
-#   "b PATH"  an existing cache directory: an empty scratch directory is
-#             bind-mounted over it;
-#   "o PATH"  the nearest existing parent of a cache directory that does not
-#             exist yet: an overlay (writes go to scratch, reads see the
-#             real files) is mounted over it, so the would-be directory is
-#             created in scratch only.
-# Outermost entries only. $TMP/shield.paths holds the bare paths.
-# Returns 1 with SHIELD_ERROR set when one cannot be shielded.
+# The shield for the config test, in $TMP/shield: existing cache
+# directories, one per line, outermost only; an empty scratch directory is
+# bind-mounted over each. $TMP/shield.paths is the same list.
+# Returns 1 with SHIELD_ERROR (and SHIELD_HINT) set when one cannot be
+# shielded -- in particular when a cache directory does not exist yet.
 SHIELD_ERROR=""
+SHIELD_HINT=""
 NO_CACHE_PATH=0
 shield_plan() {
   : > "$TMP/shield.all"
   cache_dirs > "$TMP/shield.cand"
   if [ ! -s "$TMP/shield.cand" ]; then
-    # No cache path in the configuration, but the module is loaded: shield
-    # the packaged defaults, whether they exist yet or not.
+    # No cache path in the configuration, but the module is loaded: the
+    # packaged default is where it would write.
     NO_CACHE_PATH=1
-    if [ "$SERVER" = nginx ]; then
-      printf '%s\n' /var/cache/ngx_pagespeed /var/cache/pagespeed
-    else
-      printf '%s\n' /var/cache/mod_pagespeed
-    fi > "$TMP/shield.cand"
+    if [ "$SERVER" = nginx ]; then echo /var/cache/ngx_pagespeed; else echo /var/cache/mod_pagespeed; fi > "$TMP/shield.cand"
   fi
   for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
             /var/cache/pagespeed-optimizer; do
@@ -629,28 +625,20 @@ shield_plan() {
   while IFS= read -r _c; do
     [ -n "$_c" ] || continue
     case "$_c" in /*) ;; *) SHIELD_ERROR="cache path is not absolute: $_c"; return 1 ;; esac
-    _p="$_c"; _kind=b
-    while [ ! -e "$_p" ]; do _p=$(dirname -- "$_p"); _kind=o; done
-    _r=$(readlink -f -- "$_p" 2>/dev/null) || _r=""
-    if [ -z "$_r" ] || [ ! -d "$_r" ]; then
+    if [ ! -d "$_c" ]; then
+      SHIELD_ERROR="the cache directory $_c does not exist yet"
+      SHIELD_HINT="Create $_c first, owned by the web server user, then run the doctor again; or rerun with --allow-cache-writes."
+      return 1
+    fi
+    _r=$(readlink -f -- "$_c" 2>/dev/null) || _r=""
+    if [ -z "$_r" ] || [ ! -d "$_r" ] || [ "$_r" = / ]; then
       SHIELD_ERROR="cannot resolve the cache directory $_c"; return 1
     fi
-    case "$_kind:$_r" in
-      o:/|o:/proc|o:/sys|o:/dev|o:/proc/*|o:/sys/*|o:/dev/*|b:/)
-        SHIELD_ERROR="the cache directory $_c cannot be shielded (it would cover $_r)"; return 1 ;;
-    esac
-    # An overlay takes its paths in a comma/colon-separated option string.
-    case "$_kind:$_r" in
-      o:*[,:\\]*) SHIELD_ERROR="the parent directory of $_c has a character an overlay mount cannot take"; return 1 ;;
-    esac
-    printf '%s %s\n' "$_kind" "$_r" >> "$TMP/shield.all"
+    printf '%s\n' "$_r" >> "$TMP/shield.all"
   done < "$TMP/shield.cand"
-  # Sort by path (a bind wins over an overlay on the same path), then keep
-  # outermost entries only.
-  awk '{ k = substr($0, 1, 1); p = substr($0, 3); if (!(p in kind) || k == "b") kind[p] = k }
-       END { for (p in kind) print p "\t" kind[p] }' "$TMP/shield.all" | sort | \
-    awk -F '\t' '{ for (k in kept) if (index($1, k "/") == 1) next; kept[$1] = 1; print $2 " " $1 }' > "$TMP/shield"
-  sed 's/^. //' "$TMP/shield" > "$TMP/shield.paths"
+  sort -u "$TMP/shield.all" | \
+    awk '{ for (k in kept) if (index($0, k "/") == 1) next; kept[$0] = 1; print }' > "$TMP/shield"
+  cp "$TMP/shield" "$TMP/shield.paths"
   return 0
 }
 
@@ -695,8 +683,10 @@ configtest_cmd() { # sets the positional parameters of the caller via CT_ARGS
   printf '%s\n' "$@" > "$TMP/ct_args"
 }
 
-not_isolated() { # REASON
+CT_SKIP_HINT=""
+not_isolated() { # REASON [HINT]
   CT_SKIP_CODE=configtest_not_isolated
+  CT_SKIP_HINT="${2:-}"
   CT_SKIP_REASON="cannot isolate the config test from the cache ($1); rerun with --allow-cache-writes to run it anyway"
 }
 
@@ -754,7 +744,11 @@ run_configtest() {
       existing_cache_dirs > "$TMP/shield.cand.real"
       run_configtest_direct "$@"
     else
-      not_isolated "$SHIELD_ERROR"
+      if [ "$NO_CACHE_PATH" = 1 ] && pagespeed_configured; then
+        not_isolated "pagespeed is configured but no FileCachePath was found, so where the module writes is not known"
+      else
+        not_isolated "$SHIELD_ERROR" "$SHIELD_HINT"
+      fi
     fi
     return
   fi
@@ -771,20 +765,15 @@ run_configtest() {
   if [ -n "$NS_SCRATCH" ]; then
     # The inner shell reads the shield from a file, one entry per line, and
     # passes every path as a single argument: no path is ever parsed as
-    # shell code. Overlay scratch lives on a tmpfs inside the namespace.
+    # shell code.
     # shellcheck disable=SC2016 # expanded by the inner shell
     DOCTOR_NS_LIST="$TMP/shield" DOCTOR_NS_SCRATCH="$NS_SCRATCH" \
       $_to unshare --mount --propagation private sh -c '
         i=0
-        while IFS= read -r e; do
-          i=$((i + 1)); k=${e%% *}; d=${e#* }; s="$DOCTOR_NS_SCRATCH/$i"
+        while IFS= read -r d; do
+          i=$((i + 1)); s="$DOCTOR_NS_SCRATCH/$i"
           mkdir -p "$s" || exit 97
-          if [ "$k" = b ]; then
-            mount --bind "$s" "$d" || exit 97
-          else
-            mount -t tmpfs -o mode=0700 tmpfs "$s" && mkdir "$s/u" "$s/w" && \
-              mount -t overlay overlay -o "lowerdir=$d,upperdir=$s/u,workdir=$s/w" "$d" || exit 97
-          fi
+          mount --bind "$s" "$d" || exit 97
         done < "$DOCTOR_NS_LIST"
         exec "$@" < /dev/null' doctor "$@" > "$CT_DUMP" 2> "$CT_OUT"
     _rc=$?
@@ -1086,6 +1075,7 @@ check_d03() {
   if [ "$CT_RAN" != 1 ]; then
     _hint="Run as root for the config test: sudo pagespeed-doctor"
     [ "$CT_SKIP_CODE" = configtest_not_isolated ] && _hint="Run the config test yourself and then give the cache back to the web server user, or rerun with --allow-cache-writes."
+    [ -n "$CT_SKIP_HINT" ] && _hint="$CT_SKIP_HINT"
     [ "$OPT_CONFIGTEST" = 0 ] && _hint=""
     add_check D03 "Config test" skip "$CT_SKIP_CODE" S1 "skipped: $CT_SKIP_REASON" "$_hint" "" false "" D02 "[]" "" 0
     return
