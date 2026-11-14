@@ -751,6 +751,84 @@ TEST_F(CacheExtenderTest, NoLinkCanonicalIfDomainMapComplexity) {
   EXPECT_FALSE(headers.Has(HttpAttributes::kLink));
 }
 
+// https://github.com/apache/incubator-pagespeed-ngx/issues/1535
+// ModifyCachingHeaders off leaves a page's own caching headers alone; a
+// cache-extended resource is still served with the long-lived public
+// headers, from the first fetch and after it is rebuilt from the origin.
+// (The nginx port's side of this is in ngx_caching_header_policy_test.)
+TEST_F(CacheExtenderTest, ExtendedResourceKeepsLongCacheWithoutModifyHeaders) {
+  options()->ClearSignatureForTesting();
+  options()->set_modify_caching_headers(false);
+  options()->set_critical_images_beacon_enabled(false);
+  InitTest(kShortTtlSec);
+  ValidateExpected(
+      "extend_without_modify_caching_headers",
+      GenerateHtml(kCssFile, "b.jpg", "c.js", kInput),
+      GenerateHtml(Encode(kCssSubdir, kFilterId, "0", kCssTail, "css"),
+                   Encode("", kFilterId, "0", "b.jpg", "jpg"),
+                   Encode("", kFilterId, "0", "c.js", "js"), kOutput));
+  for (bool rebuilt : {false, true}) {
+    SCOPED_TRACE(rebuilt ? "rebuilt" : "cached");
+    if (rebuilt) {
+      lru_cache()->Clear();
+    }
+    GoogleString content;
+    ResponseHeaders headers;
+    ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "b.jpg", "jpg", &content,
+                              &headers));
+    EXPECT_EQ(kImageData, content);
+    EXPECT_STREQ("max-age=31536000, public, immutable",
+                 headers.LookupJoined(HttpAttributes::kCacheControl));
+  }
+}
+
+// https://github.com/apache/incubator-pagespeed-ngx/issues/1709
+// An image on another host, proxied under a path of the site with
+// MapProxyDomain, is rewritten to a .pagespeed. URL under that path. The URL
+// keeps answering 200 with the image after its cache entries are gone and
+// after the origin's TTL has run out: it is fetched again from the origin.
+// Scope: the module-side rebuild path with a mock fetcher and an in-process
+// cache only; a shared memcache and a slow origin are not covered here.
+TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLoss) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  InitTest(kShortTtlSec);
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+  InitResource(origin_url, kContentTypeJpeg, kImageData, kShortTtlSec);
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  struct Step {
+    const char* name;
+    int64 advance_ms;
+    bool clear_cache;
+  };
+  const Step kSteps[] = {
+      {"cached", 0, false},
+      {"cache cleared", 0, true},
+      {"origin ttl expired and cache cleared",
+       2 * kShortTtlSec * Timer::kSecondMs, true},
+  };
+  for (const Step& step : kSteps) {
+    SCOPED_TRACE(step.name);
+    AdvanceTimeMs(step.advance_ms);
+    if (step.clear_cache) {
+      lru_cache()->Clear();
+    }
+    GoogleString content;
+    ResponseHeaders headers;
+    ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+    EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+    EXPECT_EQ(kImageData, content);
+  }
+}
+
 void CacheExtenderTest::TestCanonicalOnFallback(
     bool fallback_to_pagespeed_resource) {
   // Make sure canonical header is correct if we have to go through fallback
