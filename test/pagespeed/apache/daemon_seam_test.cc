@@ -68,7 +68,7 @@ TEST_F(DaemonSeamTest, PostConfigRunsTheStartupCheckAndCanRefuseTheStart) {
   ASSERT_NE(GoogleString::npos, post_config)
       << "the post-config hook has been renamed; this pin needs updating";
 
-  const size_t call = source.find("RunDaemonStartupCheck()", post_config);
+  const size_t call = source.find("RunDaemonStartupCheck(", post_config);
   ASSERT_NE(GoogleString::npos, call)
       << "post-config no longer resolves daemon health, so the serving path "
          "would have to probe per request";
@@ -1106,6 +1106,63 @@ TEST_F(DaemonSeamTest, TheServeBuilderHandsOverTheRawReloadHeaders) {
   EXPECT_NE(GoogleString::npos,
             body.find("request->pragma = RequestHeader("
                       "HttpAttributes::kPragma);"));
+}
+
+// Issue #627: every virtual host naming the same socket and volume shares one
+// adapter, so a child holds one handle on the volume -- and runs one set of
+// the storage layer's background threads -- however many virtual hosts use
+// it.  An adapter built per virtual host brings back idle CPU that grows with
+// the number of sites.
+TEST_F(DaemonSeamTest, VirtualHostsShareOneAdapterPerVolume) {
+  const auto flatten = [](const GoogleString& source) {
+    GoogleString flat;
+    for (const char c : source) {
+      if (!isspace(static_cast<unsigned char>(c))) flat.push_back(c);
+    }
+    return flat;
+  };
+  const GoogleString cc =
+      flatten(ReadSource("pagespeed/apache/apache_server_context.cc"));
+  const size_t check = cc.find(
+      "boolApacheServerContext::RunDaemonStartupCheck(DaemonAdapterPool*pool)"
+      "{");
+  ASSERT_NE(GoogleString::npos, check)
+      << "the startup check was renamed; this pin needs updating";
+  EXPECT_NE(GoogleString::npos, cc.find("pool->GetOrCheck(", check))
+      << "the server context must take its adapter from the pool";
+  EXPECT_EQ(GoogleString::npos, cc.find("make_unique<DaemonAdapter>"))
+      << "a per-virtual-host adapter opens one volume handle per host";
+  EXPECT_EQ(GoogleString::npos, cc.find("StartupCheck()==", check))
+      << "the pool runs the check once per pair; the context reuses it";
+  // A shared adapter keeps the handler of the first host that asked for its
+  // pair.  That moves no message only while every host logs through the
+  // factory's one handler; a per-host handler would need its own design.
+  EXPECT_EQ(1, CountSubstring(cc, "set_message_handler("));
+  EXPECT_NE(GoogleString::npos,
+            cc.find("set_message_handler(apache_factory_->message_handler());"))
+      << "virtual hosts no longer share the factory's message handler";
+  // Shared means the handle is too: closing it would close it for every host.
+  EXPECT_EQ(0, CountSubstring(cc, "CloseRecordCache("));
+
+  // One pool per post-config pass, so a graceful restart or re-read checks
+  // its configuration afresh rather than reusing an earlier verdict.
+  const GoogleString mod =
+      flatten(ReadSource("pagespeed/apache/mod_instaweb.cc"));
+  const size_t post_config = mod.find("intpagespeed_post_config(");
+  ASSERT_NE(GoogleString::npos, post_config)
+      << "the post-config hook has been renamed; this pin needs updating";
+  const size_t pool =
+      mod.find("DaemonAdapterPooldaemon_adapter_pool;", post_config);
+  ASSERT_NE(GoogleString::npos, pool)
+      << "post-config no longer builds its own adapter pool";
+  const size_t use =
+      mod.find("RunDaemonStartupCheck(&daemon_adapter_pool)", post_config);
+  ASSERT_NE(GoogleString::npos, use)
+      << "the startup check is not given the pass's pool";
+  EXPECT_LT(pool, use);
+  EXPECT_EQ(1, CountSubstring(mod, "DaemonAdapterPooldaemon_adapter_pool;"))
+      << "an adapter pool that outlives the pass would carry verdicts over";
+  EXPECT_EQ(0, CountSubstring(mod, "CloseRecordCache("));
 }
 
 }  // namespace

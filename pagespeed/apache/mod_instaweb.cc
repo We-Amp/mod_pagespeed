@@ -51,6 +51,7 @@
 #include "pagespeed/apache/mod_instaweb.h"
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_adapter_pool.h"
 #include "pagespeed/system/daemon_html_report.h"
 // clang-format on
 #include "pagespeed/kernel/base/basictypes.h"
@@ -1405,11 +1406,19 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
   // two sides would open different volume files, share nothing, and look
   // healthy while optimizing nothing.  Every other daemon problem degrades to
   // in-place optimization off with one loud line, and the server starts.
+  //
+  // Virtual hosts that name the same socket and volume share one adapter
+  // (#627): one handle on the volume per child, not one per virtual host.
+  // The pool is this pass's own and ends with it; the server contexts keep
+  // their adapters, and the children inherit them unopened.  Every pass --
+  // the second start-up read, a graceful restart, a re-read -- builds a new
+  // one, so no verdict carries over from an earlier configuration.
+  DaemonAdapterPool daemon_adapter_pool;
   for (SystemServerContext* system_server_context : server_contexts) {
     ApacheServerContext* server_context =
         dynamic_cast<ApacheServerContext*>(system_server_context);
     CHECK(server_context != nullptr);
-    if (!server_context->RunDaemonStartupCheck()) {
+    if (!server_context->RunDaemonStartupCheck(&daemon_adapter_pool)) {
       return HTTP_INTERNAL_SERVER_ERROR;
     }
   }

@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_adapter_pool.h"
 #include "pagespeed/system/daemon_html_report.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/serve_host_names.h"
@@ -76,14 +77,17 @@ class ApacheServerContext : public SystemServerContext {
   const ApacheConfig* global_config() const;
   bool InitPath(const GoogleString& path);
 
-  // Builds this server's optimizer-daemon adapter from its configuration and
-  // resolves its health, exactly once, at post-config time.  Returns false
-  // when the server must not start; the reason has already been logged.
+  // Takes this server's optimizer-daemon adapter from `pool`, which builds
+  // one per distinct (DaemonSocketPath, DaemonVolumePath) pair and resolves
+  // its health exactly once, at post-config time.  Returns false when the
+  // server must not start; the reason has already been logged.
   //
   // Must run after directives are parsed and before any request is served:
   // the serving path only ever reads the verdict, so that it neither probes
-  // nor logs per request.
-  bool RunDaemonStartupCheck();
+  // nor logs per request.  `pool` is the post-config pass's own: a new pass
+  // (the second start-up read, a graceful restart, a configuration re-read)
+  // brings a new pool, so the check runs again for every configuration.
+  bool RunDaemonStartupCheck(DaemonAdapterPool* pool);
 
   // This server's daemon health.  kNotConfigured until
   // RunDaemonStartupCheck() has run, which is also the correct answer for
@@ -97,7 +101,11 @@ class ApacheServerContext : public SystemServerContext {
   }
 
   // This server's daemon adapter, or nullptr before the startup check has
-  // run.  Borrowed; the record arm asks it for the per-process cache handle.
+  // run.  Borrowed; the record arm asks it for the per-process cache handle,
+  // which each child opens on its first use.  SHARED by every virtual host
+  // of this configuration with the same socket and volume, so that handle is
+  // too: nothing on this port calls CloseRecordCache(), and nothing may, as
+  // it would close the handle for all of them.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
   // The counters and decision log of DaemonHtmlCache report-only, built on
@@ -218,7 +226,10 @@ class ApacheServerContext : public SystemServerContext {
   std::unique_ptr<MeasurementProxyUrlNamer> measurement_url_namer_;
 
   std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
-  std::unique_ptr<DaemonAdapter> daemon_adapter_;
+  // Shared with the other virtual hosts of this configuration that name the
+  // same socket and volume; the serve-stats object below borrows the
+  // adapter's bound library, and this reference keeps it alive.
+  std::shared_ptr<DaemonAdapter> daemon_adapter_;
   std::once_flag daemon_html_reporter_once_;
   std::unique_ptr<DaemonHtmlReporter> daemon_html_reporter_;
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;

@@ -87,12 +87,24 @@ bool ApacheServerContext::InitPath(const GoogleString& path) {
   return ok;
 }
 
-bool ApacheServerContext::RunDaemonStartupCheck() {
+bool ApacheServerContext::RunDaemonStartupCheck(DaemonAdapterPool* pool) {
   const ApacheConfig* config = global_config();
-  daemon_adapter_ = std::make_unique<DaemonAdapter>(
-      config->daemon_socket_path(), config->daemon_volume_path(),
-      message_handler());
-  const bool ok = daemon_adapter_->StartupCheck() == DaemonStartupStatus::kOk;
+  // Shared with every other virtual host of this configuration that names
+  // the same socket and volume: one adapter, so each child opens ONE handle
+  // on the volume (and starts its storage threads once) instead of one per
+  // virtual host.  The check itself runs once per pair; later virtual hosts
+  // reuse its verdict.
+  //
+  // The adapter logs through the handler of the first virtual host that
+  // asks for the pair, and keeps it.  That changes no log: every virtual
+  // host logs through the factory's handler (see the constructor), which
+  // writes to the main server's error log and the shared message history.
+  DCHECK_EQ(message_handler(), apache_factory_->message_handler());
+  const DaemonAdapterPool::Checked checked =
+      pool->GetOrCheck(config->daemon_socket_path(),
+                       config->daemon_volume_path(), message_handler());
+  daemon_adapter_ = checked.adapter;
+  const bool ok = checked.status == DaemonStartupStatus::kOk;
   // Built whatever the verdict, and holding nothing open.  The serve arm
   // records exactly one class per response through it, and a null object
   // here would make "the daemon was not usable" and "this serve was not
