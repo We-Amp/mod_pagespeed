@@ -4,6 +4,8 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+Changed: in the ASP.NET Core middleware (WeAmp.PageSpeed.AspNetCore), a response fetched for a visitor whose request carries cookies is shared with other visitors only when the origin marks it shareable. A page (any response that is not a stylesheet, script or image) needs `Cache-Control: public` or a single `s-maxage` above zero; `s-maxage=0`, a malformed value, a repeated `s-maxage` or `must-revalidate` alone does not count. A cached page is served to a visitor with cookies only with the same mark; otherwise the request goes to the application. The same applies to the page's Markdown copy for agents and its Early Hints. A stylesheet, script or image fetched with cookies is cached only when the origin states its lifetime (`max-age`, `s-maxage`, or `Expires` without a `Cache-Control` header); the middleware's default lifetime does not apply. An empty `Cookie` header counts as a cookie. Sites whose pages are requested with cookies (for example analytics or consent cookies) and are not marked `public` see more requests reach the application; add `public` to pages that are the same for every visitor to keep them cached. Requests with an `Authorization` header are handled as before.
+
 Changed: the worker's `--help` output now lists the `--rsl-cap-*` options, which it already accepted.
 
 - Fixed a shared-cache issue that could serve a page personalised for one visitor to another visitor. Update recommended.

@@ -137,4 +137,10 @@ public class ConstantsTests
     {
         Assert.Equal(0x2000, CacheControlCcFlags.NoCacheBare);
     }
+
+    [Fact]
+    public void CacheControlCcFlags_SMaxageRepeated_Is0x4000()
+    {
+        Assert.Equal(0x4000, CacheControlCcFlags.SMaxageRepeated);
+    }
 }

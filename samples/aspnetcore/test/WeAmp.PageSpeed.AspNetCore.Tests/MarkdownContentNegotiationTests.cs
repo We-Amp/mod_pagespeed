@@ -148,11 +148,86 @@ public sealed class MarkdownContentNegotiationTests
         Assert.False(headers.ContainsKey("X-Robots-Tag"));
     }
 
+    // ── a request carrying a cookie ───────────────────────────────────
+
+    // The markdown copy has no Cache-Control of its own: for a request with a
+    // cookie, the recorded page's mark decides (public, or one s-maxage
+    // above zero), and without a recorded page it is not served.
+    [NativeLibTheory]
+    [InlineData(null, 0, false)]
+    [InlineData(CacheControlCcFlags.HeaderPresent | CacheControlCcFlags.MustRevalidate, 0, false)]
+    [InlineData(CacheControlCcFlags.HeaderPresent | CacheControlCcFlags.SMaxagePresent, 0, false)]
+    [InlineData(CacheControlCcFlags.HeaderPresent | CacheControlCcFlags.SMaxagePresent
+                | CacheControlCcFlags.SMaxageRepeated, 60, false)]
+    [InlineData(CacheControlCcFlags.HeaderPresent | CacheControlCcFlags.Public, 0, true)]
+    [InlineData(CacheControlCcFlags.HeaderPresent | CacheControlCcFlags.SMaxagePresent, 60, true)]
+    public async Task EntitledMarkdownRequestWithCookie_ServedOnlyWhenTheRecordedPageIsMarkedShared(
+        int? pageOriginCcFlags, int pageOriginSMaxage, bool expectMarkdown)
+    {
+        var cache = new MarkdownNegotiationCache(agentEntitled: 1)
+        {
+            RecordedPage = pageOriginCcFlags is int f
+                ? new NegotiationReadResult
+                {
+                    ContentMemory = HtmlBody,
+                    Mask = 0x08,
+                    ContentType = PageSpeedContentType.Html,
+                    OriginContentType = "text/html; charset=utf-8",
+                    OriginCcFlags = (ushort)f,
+                    OriginSMaxage = (uint)pageOriginSMaxage,
+                }
+                : null,
+        };
+        var (_, ct, body, headers) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/markdown",
+            cookie: "session=abc");
+
+        if (expectMarkdown)
+        {
+            Assert.Equal("text/markdown; charset=utf-8", ct);
+            Assert.Equal(MarkdownBody, body);
+        }
+        else
+        {
+            Assert.NotEqual("text/markdown; charset=utf-8", ct);
+            Assert.NotEqual(MarkdownBody, body);
+            Assert.NotEqual("HIT", headers["X-PageSpeed"].ToString());
+        }
+    }
+
+    // Control for the theory above: without a cookie the same request is
+    // served the markdown copy whatever the recorded page says.
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EntitledMarkdownRequestWithoutCookie_ServedWhateverTheRecordedPageSays(
+        bool recordedPage)
+    {
+        var cache = new MarkdownNegotiationCache(agentEntitled: 1)
+        {
+            RecordedPage = recordedPage
+                ? new NegotiationReadResult
+                {
+                    ContentMemory = HtmlBody,
+                    Mask = 0x08,
+                    ContentType = PageSpeedContentType.Html,
+                    OriginContentType = "text/html; charset=utf-8",
+                    OriginCcFlags = CacheControlCcFlags.HeaderPresent,
+                }
+                : null,
+        };
+        var (_, ct, body, _) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/markdown");
+
+        Assert.Equal("text/markdown; charset=utf-8", ct);
+        Assert.Equal(MarkdownBody, body);
+    }
+
     // ── harness ──────────────────────────────────────────────────────
 
     private async Task<(int Status, string? ContentType, byte[] Body, IHeaderDictionary Headers)>
         Serve(IPageSpeedCache cache, bool enableAgentOptimize, string accept,
-              string allowedHost = "localhost")
+              string allowedHost = "localhost", string? cookie = null)
     {
         var options = new PageSpeedOptions
         {
@@ -186,6 +261,7 @@ public sealed class MarkdownContentNegotiationTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("localhost");
         context.Request.Headers.Accept = accept;
+        if (cookie != null) context.Request.Headers.Cookie = cookie;
         var responseBody = new MemoryStream();
         context.Response.Body = responseBody;
 
@@ -226,8 +302,13 @@ public sealed class MarkdownContentNegotiationTests
 
         public int ReadSharedConfigAgentEntitled() => _agentEntitled;
 
+        // The page recorded for the URL (the default alternate, 0x08), or
+        // null for none.
+        public IReadResult? RecordedPage { get; init; }
+
         public IReadResult? ReadAlternate(
-            string url, string hostname, string scheme, byte alternateId) => null;
+            string url, string hostname, string scheme, byte alternateId) =>
+            alternateId == 0x08 ? RecordedPage : null;
         public IReadResult? ReadEarlyHints(string url, string hostname, string scheme) => null;
         public CacheWriter BeginWrite(
             string url, string hostname, string scheme, CacheWriteParams p) =>
@@ -250,7 +331,8 @@ public sealed class MarkdownContentNegotiationTests
         public string? OriginContentType { get; init; }
         public byte Flags { get; init; } = CacheFlags.HeadersClassified | CacheFlags.AnonymousRecorded;
         public bool NeedsRevalidation => false;
-        public ushort OriginCcFlags => 0;
+        public ushort OriginCcFlags { get; init; }
+        public uint OriginSMaxage { get; init; }
         public bool RevalidationRequired => false;
         public uint OriginContentLength { get; init; }
         public bool IsWorkerProcessed { get; init; }

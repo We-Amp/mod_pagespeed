@@ -238,6 +238,22 @@ public sealed class ReadResult : IReadResult
     }
 
     /// <summary>
+    /// The origin's s-maxage in seconds as recorded with the entry; 0 when
+    /// absent.
+    /// </summary>
+    public uint OriginSMaxage
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            bool added = false;
+            _handle.DangerousAddRef(ref added);
+            try { return NativePageSpeed.ReadOriginSMaxage(_handle.DangerousGetHandle()); }
+            finally { if (added) _handle.DangerousRelease(); }
+        }
+    }
+
+    /// <summary>
     /// Whether the origin response requires revalidation before serving.
     /// For a private cache (ASP.NET in-process), proxy-revalidate and s-maxage
     /// are ignored per RFC 9111 §5.2.2.9-10.

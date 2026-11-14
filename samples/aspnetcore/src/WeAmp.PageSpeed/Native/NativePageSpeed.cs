@@ -169,6 +169,10 @@ internal static partial class NativePageSpeed
     [LibraryImport(Lib, EntryPoint = "ps_read_origin_cc_flags")]
     internal static partial ushort ReadOriginCcFlags(IntPtr result);
 
+    // Origin s-maxage in seconds as recorded with the entry; 0 if absent.
+    [LibraryImport(Lib, EntryPoint = "ps_read_origin_s_maxage")]
+    internal static partial uint ReadOriginSMaxage(IntPtr result);
+
     // Re-stamp the read lease pinning this result's mmap borrow
     //. 1 = renewed; 0 = nothing to renew (RAM hit,
     // leases disabled, NULL/invalid). Holders keeping a result alive past

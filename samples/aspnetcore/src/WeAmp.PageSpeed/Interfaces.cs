@@ -24,6 +24,12 @@ public interface IReadResult : IDisposable
     ushort OriginCcFlags { get; }
 
     /// <summary>
+    /// The origin's <c>s-maxage</c> in seconds as recorded with the entry
+    /// (ps_read_origin_s_maxage); 0 when absent or not recorded.
+    /// </summary>
+    uint OriginSMaxage => 0;
+
+    /// <summary>
     /// Whether the origin response requires revalidation before serving.
     /// Derived from OriginCcFlags (PS_CC_ORIGIN_* bitfield) via
     /// ps_read_origin_cc_flags. For a private cache (ASP.NET in-process),

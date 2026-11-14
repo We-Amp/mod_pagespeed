@@ -19,6 +19,23 @@ internal static class NativeAssetsRequirement
     public static bool Required =>
         Environment.GetEnvironmentVariable(Variable) == "1";
 
+    /// <summary>
+    /// <see cref="Required"/>, or a CI run (the <c>CI</c> variable set to
+    /// anything but empty, <c>0</c> or <c>false</c>). Used by
+    /// <see cref="NativeLibTheoryAttribute"/>, so its tests cannot pass or
+    /// skip without the library on a build machine.
+    /// </summary>
+    public static bool RequiredOrCi
+    {
+        get
+        {
+            if (Required) return true;
+            var ci = Environment.GetEnvironmentVariable("CI");
+            return !string.IsNullOrEmpty(ci) && ci != "0" &&
+                   !ci.Equals("false", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     public static string SkipReason(string why) =>
         $"{why} Set {Variable}=1 to fail instead of skipping.";
 }
@@ -51,6 +68,24 @@ public sealed class NativeLibFactAttribute : FactAttribute
     public NativeLibFactAttribute()
     {
         if (NativeAssetsRequirement.Required) return;
+        if (!NativeLibAbsentFactAttribute.IsLibraryLoadable())
+            Skip = NativeAssetsRequirement.SkipReason(
+                "The native library (libpagespeed) is not loadable in this run.");
+    }
+}
+
+/// <summary>
+/// A theory that needs only the native library: skipped when the library is
+/// not loadable in this run, unless
+/// <see cref="NativeAssetsRequirement.RequiredOrCi"/> requires it (an explicit
+/// <see cref="NativeAssetsRequirement.Variable"/>=1, or a CI run), in which
+/// case the test runs and fails.
+/// </summary>
+public sealed class NativeLibTheoryAttribute : TheoryAttribute
+{
+    public NativeLibTheoryAttribute()
+    {
+        if (NativeAssetsRequirement.RequiredOrCi) return;
         if (!NativeLibAbsentFactAttribute.IsLibraryLoadable())
             Skip = NativeAssetsRequirement.SkipReason(
                 "The native library (libpagespeed) is not loadable in this run.");

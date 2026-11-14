@@ -186,6 +186,9 @@ public sealed class PageSpeedMiddleware
                 "Request classification failed, using default mask");
         }
 
+        // Read on the HIT, early-hints and record paths below.
+        bool requestHasCookie = CookieRequestCacheRule.RequestHasCookie(context.Request);
+
         // ── CACHE HIT fast path ──────────────────────────────────
         // Skip cache on force-refresh (Ctrl+F5: Cache-Control: no-cache
         // or Pragma: no-cache).
@@ -237,8 +240,16 @@ public sealed class PageSpeedMiddleware
                     // The response headers the application set when the entry was
                     // stored ride along with it. An entry that cannot be served
                     // with them is treated as a miss and refetched.
-                    var stored = ResolveStoredHeaders(
-                        cached, url, hostname, scheme, servedAgentMarkdown);
+                    // A request carrying a cookie is served only an entry the
+                    // origin marked public or gave one s-maxage above zero
+                    // (CookieRequestCacheRule); otherwise it goes to the
+                    // application.
+                    var stored = requestHasCookie &&
+                                 !StoredEntrySharedWithCookieRequest(
+                                     cached, url, hostname, scheme, servedAgentMarkdown)
+                        ? new StoredHeaders(false, null)
+                        : ResolveStoredHeaders(
+                            cached, url, hostname, scheme, servedAgentMarkdown);
                     if (stored.Usable)
                     {
                         if (ServeCacheHit(context, cached, url, hostname, scheme, mask,
@@ -268,7 +279,7 @@ public sealed class PageSpeedMiddleware
         // are not stored with the entry.
         var capture = new MissCapture(context.Response);
         var hintLinksBefore = context.Response.Headers.Link.ToArray();
-        AddEarlyHintLinkHeaders(context, url, hostname, scheme);
+        AddEarlyHintLinkHeaders(context, url, hostname, scheme, requestHasCookie);
         capture.OwnLinks.AddRange(SubtractLines(
             context.Response.Headers.Link.ToArray(), hintLinksBefore));
 
@@ -328,6 +339,13 @@ public sealed class PageSpeedMiddleware
         var responseContentType = context.Response.ContentType;
         var psContentType = ClassifyResponseContentType(responseContentType);
         var cacheControl = context.Response.Headers.CacheControl.ToString();
+
+        // A response to a request carrying a cookie is stored only when the
+        // origin opted in (CookieRequestCacheRule): a page needs public or
+        // one s-maxage above zero; a stylesheet, script or image needs a
+        // freshness lifetime the origin stated.
+        if (record && requestHasCookie)
+            record = CookieRequestMayStore(context.Response, cacheControl);
 
         switch (psContentType)
         {
@@ -741,6 +759,57 @@ public sealed class PageSpeedMiddleware
 
     private readonly record struct StoredHeaders(
         bool Usable, IReadOnlyList<KeyValuePair<string, string>>? Fields);
+
+    /// <summary>
+    /// May <paramref name="cached"/> be served to a request carrying a cookie
+    /// (CookieRequestCacheRule.CookieRequestMayServe)? Stylesheets, scripts
+    /// and images: yes. Anything else: only when the stored entry carries the
+    /// origin's public mark or one s-maxage above zero. The markdown copy
+    /// carries no Cache-Control of its own; the recorded page decides for it,
+    /// and without a recorded page it is not served.
+    /// </summary>
+    private bool StoredEntrySharedWithCookieRequest(
+        IReadResult cached, string url, string hostname, string scheme,
+        bool servedAgentMarkdown)
+    {
+        bool shared = servedAgentMarkdown
+            ? StoredPageSharedWithCookieRequest(url, hostname, scheme)
+            : CookieRequestCacheRule.CookieRequestMayServe(
+                requestHasCookie: true,
+                CookieRequestCacheRule.StoredEntryIsStaticAsset(
+                    cached.OriginContentType, cached.ContentType),
+                CookieRequestCacheRule.HtmlExplicitlyShared(
+                    cached.OriginCcFlags, cached.OriginSMaxage));
+        if (!shared)
+            _logger.LogDebug(
+                "Request for {Url} carries a cookie and the stored entry is not marked public or s-maxage; refetching",
+                url);
+        return shared;
+    }
+
+    /// <summary>
+    /// Does the page recorded for this URL carry the origin's public or
+    /// s-maxage mark? False when there is no recorded page or it cannot be
+    /// read.
+    /// </summary>
+    private bool StoredPageSharedWithCookieRequest(
+        string url, string hostname, string scheme)
+    {
+        try
+        {
+            using var page = _cache.ReadAlternate(url, hostname, scheme, (byte)DefaultMask);
+            return page != null &&
+                   CookieRequestCacheRule.CookieRequestMayServe(
+                       requestHasCookie: true, staticAsset: false,
+                       CookieRequestCacheRule.HtmlExplicitlyShared(
+                           page.OriginCcFlags, page.OriginSMaxage));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Reading the recorded page for {Url} failed", url);
+            return false;
+        }
+    }
 
     /// <summary>
     /// Decides how a cache entry is served with respect to the origin's
@@ -1240,27 +1309,7 @@ public sealed class PageSpeedMiddleware
             if (needsRevalidation) flags |= CacheFlags.NeedsRevalidation;
 
             // Parse origin Cache-Control to derive origin_cc_flags.
-            ushort originCcFlags = 0;
-            if (!string.IsNullOrEmpty(cacheControl))
-            {
-                var cc = new Native.NativeCacheControl
-                {
-                    StructSize = (nuint)Marshal.SizeOf<Native.NativeCacheControl>()
-                };
-
-                // cacheControl is the response's joined Cache-Control value
-                // (StringValues.ToString() -- multiple header lines join with
-                // ", ", which is exactly the RFC 9111 single-list form the
-                // parser walks, quoting included), so ONE call parses the list.
-                int err = Native.NativePageSpeed.ParseCacheControl(cacheControl, ref cc);
-                if (err != 0) // PS_OK
-                {
-                    _logger.LogDebug(
-                        "ParseCacheControl failed for '{Value}': {Err}",
-                        cacheControl, err);
-                }
-                originCcFlags = cc.CcFlags;
-            }
+            var origin = ParseOriginCacheControl(cacheControl);
 
             var writeParams = new CacheWriteParams
             {
@@ -1270,7 +1319,8 @@ public sealed class PageSpeedMiddleware
                 ContentType = contentType,
                 Flags = flags,
                 OriginContentType = responseContentType,
-                OriginCcFlags = originCcFlags,
+                OriginCcFlags = origin.Flags,
+                OriginSMaxage = origin.SMaxage,
             };
             using var writer = _cache.BeginWrite(
                 url, hostname, scheme, writeParams);
@@ -1355,12 +1405,19 @@ public sealed class PageSpeedMiddleware
     /// current response is fully generated.
     /// </summary>
     private void AddEarlyHintLinkHeaders(
-        HttpContext context, string url, string hostname, string scheme)
+        HttpContext context, string url, string hostname, string scheme,
+        bool requestHasCookie)
     {
         try
         {
             using var hints = _cache.ReadEarlyHints(url, hostname, scheme);
             if (hints == null) return;
+            // The hints were taken from the stored page, so a request
+            // carrying a cookie gets them only when that page would be
+            // served to it.
+            if (requestHasCookie && !StoredPageSharedWithCookieRequest(
+                    url, hostname, scheme))
+                return;
             AddLinkHeadersFromHints(context, hints.ContentMemory);
         }
         catch (Exception ex)
@@ -1390,6 +1447,52 @@ public sealed class PageSpeedMiddleware
         if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             return PageSpeedContentType.Image;
         return PageSpeedContentType.Other;
+    }
+
+    /// <summary>
+    /// The origin's Cache-Control as ps_parse_cache_control reports it: the
+    /// PS_CC_ORIGIN_* flags, max-age and s-maxage. All zero without a value.
+    /// </summary>
+    private (ushort Flags, uint MaxAge, uint SMaxage) ParseOriginCacheControl(
+        string? cacheControl)
+    {
+        if (string.IsNullOrEmpty(cacheControl)) return (0, 0, 0);
+        var cc = new Native.NativeCacheControl
+        {
+            StructSize = (nuint)Marshal.SizeOf<Native.NativeCacheControl>()
+        };
+
+        // cacheControl is the response's joined Cache-Control value
+        // (StringValues.ToString() -- multiple header lines join with
+        // ", ", which is exactly the RFC 9111 single-list form the
+        // parser walks, quoting included), so ONE call parses the list.
+        int err = Native.NativePageSpeed.ParseCacheControl(cacheControl, ref cc);
+        if (err != 0) // PS_OK
+        {
+            _logger.LogDebug(
+                "ParseCacheControl failed for '{Value}': {Err}",
+                cacheControl, err);
+        }
+        return (cc.CcFlags, cc.MaxAge, cc.SMaxage);
+    }
+
+    /// <summary>
+    /// The cookie rule's record-side answer for this response
+    /// (CookieRequestCacheRule.CookieRequestMayStore), from its Content-Type,
+    /// Cache-Control and, without a Cache-Control line, Expires.
+    /// </summary>
+    private bool CookieRequestMayStore(HttpResponse response, string? cacheControl)
+    {
+        var (flags, maxAge, sMaxage) = ParseOriginCacheControl(cacheControl);
+        CookieRequestCacheRule.FoldExpires(
+            ref flags, ref maxAge,
+            response.Headers.Expires.ToString(), response.Headers.Date.ToString(),
+            DateTimeOffset.UtcNow);
+        return CookieRequestCacheRule.CookieRequestMayStore(
+            requestHasCookie: true,
+            CookieRequestCacheRule.IsStaticAsset(response.ContentType),
+            CookieRequestCacheRule.HtmlExplicitlyShared(flags, sMaxage),
+            CookieRequestCacheRule.OriginStatesLifetime(flags, maxAge, sMaxage));
     }
 
     /// <summary>

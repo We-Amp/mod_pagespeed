@@ -17,6 +17,12 @@ public sealed class CacheWriteParams
     public string? OriginContentType { get; set; }
     public ushort OriginCcFlags { get; set; }
 
+    /// <summary>
+    /// The origin's <c>s-maxage</c> in seconds, as ps_parse_cache_control
+    /// reports it; 0 when absent.
+    /// </summary>
+    public uint OriginSMaxage { get; set; }
+
     internal NativeWriteParams ToNative()
     {
         var p = new NativeWriteParams();
@@ -27,6 +33,7 @@ public sealed class CacheWriteParams
         p.ContentType = (int)ContentType;
         p.Flags = Flags;
         p.OriginCcFlags = OriginCcFlags;
+        p.OriginSMaxage = OriginSMaxage;
         // OriginCt pointer must be pinned by caller before CacheWriteBegin.
         return p;
     }

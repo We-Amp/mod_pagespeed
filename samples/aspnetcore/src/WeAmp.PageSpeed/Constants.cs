@@ -89,4 +89,11 @@ public static class CacheControlCcFlags
     public const ushort PrivateBare = 0x0800;
     public const ushort NoCacheQualified = 0x1000;
     public const ushort NoCacheBare = 0x2000;
+
+    /// <summary>
+    /// More than one <c>s-maxage</c> directive (PS_CC_ORIGIN_S_MAXAGE_REPEATED).
+    /// Set together with <see cref="SMaxagePresent"/>; the value kept is the
+    /// last one. Such a response is not treated as explicitly shareable.
+    /// </summary>
+    public const ushort SMaxageRepeated = 0x4000;
 }
