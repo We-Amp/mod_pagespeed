@@ -433,6 +433,38 @@ jobs:
             "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-files.txt"
           jq -r '.[] | select(.status=="added") | .filename' \
             "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-added.txt"
+          jq -r '.[] | select(.status=="removed") | .filename' \
+            "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-removed.txt"
+          # Lines the change adds under a Security heading of the two note files.
+          : > "${RUNNER_TEMP}/pr-secadd.txt"
+          base_sha="$(gh api "${api}" --jq '.base.sha')"
+          head_sha="$(gh api "${api}" --jq '.head.sha')"
+          # A branch that predates the helper takes the tool from master.
+          h=tools/ci/with-default-branch-tool.sh
+          if [ ! -f "$h" ]; then
+            git fetch --quiet --depth=1 origin master
+            h="${RUNNER_TEMP}/with-default-branch-tool.sh"
+            git show "FETCH_HEAD:tools/ci/with-default-branch-tool.sh" > "$h"
+          fi
+          gate="$(bash "$h" --prefer-default tools/ci/check_release_note.sh)"
+          for f in CHANGELOG.md RELEASE_NOTES.md; do
+            : > "${RUNNER_TEMP}/sec-base.md"
+            : > "${RUNNER_TEMP}/sec-head.md"
+            if jq -e --arg f "$f" 'any(.[]; .filename == $f)' "${RUNNER_TEMP}/pr-files.json" >/dev/null; then
+              gh api -H 'Accept: application/vnd.github.raw' \
+                "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${base_sha}" \
+                > "${RUNNER_TEMP}/sec-base.md" 2>/dev/null || : > "${RUNNER_TEMP}/sec-base.md"
+              gh api -H 'Accept: application/vnd.github.raw' \
+                "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${head_sha}" \
+                > "${RUNNER_TEMP}/sec-head.md" 2>/dev/null || : > "${RUNNER_TEMP}/sec-head.md"
+              # Until master's copy has the helper there is nothing to compute.
+              if grep -q -e '--print-security-added' "$gate"; then
+                bash "$gate" --print-security-added \
+                  "${RUNNER_TEMP}/sec-base.md" "${RUNNER_TEMP}/sec-head.md" \
+                  >> "${RUNNER_TEMP}/pr-secadd.txt"
+              fi
+            fi
+          done
           gh api --paginate "${api}/commits" \
             --jq '.[].commit.message' > "${RUNNER_TEMP}/pr-haystack.txt"
           gh api "${api}" --jq '.body // ""' >> "${RUNNER_TEMP}/pr-haystack.txt"
@@ -456,10 +488,16 @@ jobs:
           fi
           # An older copy exists but rejects --added-from, so always use master's.
           gate="$(bash "$h" --prefer-default tools/ci/check_release_note.sh)"
+          extra=()
+          if grep -q -e '--removed-from' "$gate"; then
+            extra=(--removed-from "${RUNNER_TEMP}/pr-removed.txt" \
+                   --security-added-from "${RUNNER_TEMP}/pr-secadd.txt")
+          fi
           bash "$gate" \
             --files-from "${RUNNER_TEMP}/pr-files.txt" \
             --haystack-from "${RUNNER_TEMP}/pr-haystack.txt" \
-            --added-from "${RUNNER_TEMP}/pr-added.txt"
+            --added-from "${RUNNER_TEMP}/pr-added.txt" \
+            ${extra[@]+"${extra[@]}"}
 
       # html/ is the legacy documentation archive, published unchanged.
       - name: Legacy documentation archive is untouched

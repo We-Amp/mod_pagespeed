@@ -22,6 +22,13 @@ deletes them.
   `landing/<name>` branch whose description says
   `Release-Note: landing -- <why>` carries the fragments of every topic it
   lands. Both are needed; names are still checked.
+- Security entries (a `*.security.md` fragment, or a line added under a
+  Security heading of `CHANGELOG.md` or `RELEASE_NOTES.md`) land only together
+  with the release that ships the fix. A pull request adding one is refused
+  unless it is a release landing (above), or its description or a commit message
+  says `Release-Note: security-public -- <why>` (same separators and minimum
+  reason as the other markers). The release cut, which folds fragments into
+  `CHANGELOG.md` and deletes them, is not affected.
 
 ## Content
 

@@ -37,7 +37,8 @@
 # In CI the inputs come from the GitHub API instead of git, so the check works
 # on the shallow checkout the rest of the job already uses:
 #   bash tools/ci/check_release_note.sh --files-from FILE --haystack-from FILE \
-#        [--added-from FILE] [--head-ref BRANCH]
+#        [--added-from FILE] [--removed-from FILE]
+#        [--security-added-from FILE] [--head-ref BRANCH]
 # where --added-from lists the files the change ADDS (status "added"), and
 # --head-ref names the pull request's branch (default: $GITHUB_HEAD_REF, which
 # GitHub Actions sets on pull_request runs).
@@ -111,6 +112,52 @@ WAIVER_MIN_REASON=12
 LANDING_RE='^[[:space:]]*Release-Note:[[:space:]]*landing[[:space:]]*[-:–—]+[[:space:]]*'
 LANDING_BRANCH_RE='^landing/'
 
+# Security entries. A security changelog entry (a `*.security.md` fragment, or a
+# line added under a Security heading of CHANGELOG.md or RELEASE_NOTES.md) is
+# published text about a fix, so it lands only together with the release that
+# ships the fix. It is therefore refused on an ordinary pull request. It is
+# accepted when ANY ONE of these holds:
+#   - landing mode (the landing/ branch AND the landing marker above);
+#   - a line `Release-Note: security-public -- <why>` (same separators and
+#     minimum reason as the waiver) in the description or a commit message,
+#     for the rare entry that is deliberately public ahead of a release;
+#   - the release cut: the change deletes changelog.d/ fragments, which is what
+#     folding them into CHANGELOG.md looks like. This only excuses lines added
+#     to CHANGELOG.md or RELEASE_NOTES.md, never a newly added fragment.
+SECPUB_RE='^[[:space:]]*Release-Note:[[:space:]]*security-public[[:space:]]*[-:–—]+[[:space:]]*'
+
+# ---------------------------------------------------------------------------
+# Security-section extraction
+# ---------------------------------------------------------------------------
+#
+# print_security_added BASE_FILE HEAD_FILE
+#
+# Prints the non-blank lines that HEAD_FILE has under a Security heading
+# (a markdown heading whose text starts with "Security", through the next
+# heading of the same or a higher level) and BASE_FILE does not. A missing
+# file counts as empty.
+security_lines() {
+  [ -f "$1" ] || return 0
+  awk '
+    /^#+[[:space:]]/ {
+      match($0, /^#+/); lvl = RLENGTH
+      t = $0; sub(/^#+[[:space:]]+/, "", t)
+      if (insec && lvl <= seclvl) insec = 0
+      if (!insec && tolower(t) ~ /^security/) { insec = 1; seclvl = lvl }
+      next
+    }
+    insec && $0 !~ /^[[:space:]]*$/ { print }
+  ' "$1"
+}
+
+print_security_added() {
+  local base_tmp
+  base_tmp="$(mktemp)"
+  security_lines "$1" > "$base_tmp"
+  security_lines "$2" | grep -vxFf "$base_tmp" || true
+  rm -f "$base_tmp"
+}
+
 # ---------------------------------------------------------------------------
 # Core decision, kept pure so the self-test can drive every branch
 # ---------------------------------------------------------------------------
@@ -119,6 +166,9 @@ LANDING_BRANCH_RE='^landing/'
 # $2 -- waiver haystack (commit messages and/or PR body)
 # $3 -- newline-separated list of files the change ADDS (optional)
 # $4 -- the pull request's head branch (optional)
+# $5 -- newline-separated list of files the change DELETES (optional)
+# $6 -- lines the change adds under a Security heading of CHANGELOG.md or
+#       RELEASE_NOTES.md (optional; see print_security_added)
 #
 # 0 = pass, 1 = block.
 evaluate_release_note() {
@@ -126,6 +176,9 @@ evaluate_release_note() {
   local haystack="$2"
   local added="${3:-}"
   local head_ref="${4:-}"
+  local removed="${5:-}"
+  local sec_added="${6:-}"
+  local secpub_reason sec_frags sec_allowed="" cut=""
   local triggering note_touched waiver_line reason
   local bad_frag added_frags slugs dup_cat existing_frag landing="" landing_reason
 
@@ -156,6 +209,39 @@ evaluate_release_note() {
   fi
 
   added_frags="$(printf '%s\n' "$added" | grep -E "$FRAGMENT_RE" || true)"
+
+  # Security entries land only with a release landing (see SECPUB_RE above).
+  secpub_reason="$(printf '%s\n' "$haystack" | grep -iE "$SECPUB_RE" | head -n 1 \
+    | sed -E "s/$SECPUB_RE//I; s/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+\$//" || true)"
+  if [ -n "$landing" ]; then
+    sec_allowed=yes
+  elif [ "${#secpub_reason}" -ge "$WAIVER_MIN_REASON" ]; then
+    sec_allowed=yes
+  fi
+  if printf '%s\n' "$removed" | grep -qE "$FRAGMENT_RE"; then
+    cut=yes
+  fi
+  sec_frags="$(printf '%s\n' "$added_frags" | grep -E '\.security\.md$' || true)"
+  if [ -n "$sec_frags" ] && [ -z "$sec_allowed" ]; then
+    echo "" >&2
+    echo "FAILED: this change adds a security changelog fragment outside a release landing:" >&2
+    printf '%s\n' "$sec_frags" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Security changelog entries land only with the release that ships the fix:" >&2
+    echo "from a landing/<version> branch with 'Release-Note: landing -- <why>', or with" >&2
+    echo "'Release-Note: security-public -- <why>' (reason of at least $WAIVER_MIN_REASON characters)." >&2
+    return 1
+  fi
+  if [ -n "$(printf '%s' "$sec_added" | tr -d '[:space:]')" ] && [ -z "$sec_allowed" ] && [ -z "$cut" ]; then
+    echo "" >&2
+    echo "FAILED: this change adds lines under a Security heading outside a release landing or cut:" >&2
+    printf '%s\n' "$sec_added" | head -n 5 | cut -c1-100 | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Security changelog entries land only with the release that ships the fix:" >&2
+    echo "from a landing/<version> branch with 'Release-Note: landing -- <why>', or with" >&2
+    echo "'Release-Note: security-public -- <why>' (reason of at least $WAIVER_MIN_REASON characters)." >&2
+    return 1
+  fi
   if [ -n "$added_frags" ] && [ -n "$landing" ]; then
     slugs="$(printf '%s\n' "$added_frags" \
       | sed -E "s#^${FRAGMENT_DIR}/##; s#\\.(${FRAGMENT_CATEGORIES})\\.md\$##" | sort -u)"
@@ -512,6 +598,61 @@ self_test() {
     "$(printf 'changelog.d/Bad_Name.md\n%s\n' "$LA")" "landing/2.8.0-m1"
   lchk "landing: code, no fragment, no note  -> BLOCK" 1 "pagespeed/a.cc" "$LM" "" "landing/2.8.0-m1"
 
+  # --- security entries land only with a release landing ---
+
+  schk() {
+    local name="$1" want="$2" changed="$3" haystack="$4" added="$5" ref="$6" removed="$7" secadd="$8"
+    local got=0
+    n=$((n + 1))
+    evaluate_release_note "$changed" "$haystack" "$added" "$ref" "$removed" "$secadd" >/dev/null 2>&1 || got=$?
+    if [ "$got" -ne "$want" ]; then
+      echo "  FAIL  $name (wanted exit $want, got $got)" >&2
+      failures=$((failures + 1))
+    else
+      echo "  ok    $name"
+    fi
+  }
+  local SF=changelog.d/some-topic.security.md
+  local SPM="Release-Note: security-public -- advisory already published upstream"
+  local SLM="Release-Note: landing -- the 2.9.0 release landing"
+
+  schk "security fragment, normal branch     -> BLOCK" 1 "$SF" "" "$SF" "fix/some-topic" "" ""
+  schk "security fragment, no branch known   -> BLOCK" 1 "$SF" "" "$SF" "" "" ""
+  schk "security fragment, landing mode      -> pass" 0 "$SF" "$SLM" "$SF" "landing/2.9.0" "" ""
+  schk "security fragment, marker, no branch -> BLOCK" 1 "$SF" "$SLM" "$SF" "fix/x" "" ""
+  schk "security fragment, public marker     -> pass" 0 "$SF" "$SPM" "$SF" "fix/some-topic" "" ""
+  schk "public marker, colon separator       -> pass" 0 "$SF" "Release-Note: security-public: advisory already published upstream" "$SF" "x/y" "" ""
+  schk "public marker, no reason             -> BLOCK" 1 "$SF" "Release-Note: security-public --" "$SF" "fix/x" "" ""
+  schk "public marker, token reason          -> BLOCK" 1 "$SF" "Release-Note: security-public -- ok" "$SF" "fix/x" "" ""
+  schk "public marker only as a mention      -> BLOCK" 1 "$SF" "we may write Release-Note: security-public -- advisory already out" "$SF" "fix/x" "" ""
+  schk "non-security fragment, normal branch -> pass" 0 "changelog.d/some-topic.fixed.md" "" "changelog.d/some-topic.fixed.md" "fix/x" "" ""
+  schk "CHANGELOG security lines, normal     -> BLOCK" 1 "CHANGELOG.md" "" "" "fix/x" "" "- Hardened a parser."
+  schk "CHANGELOG security lines, landing    -> pass" 0 "CHANGELOG.md" "$SLM" "" "landing/2.9.0" "" "- Hardened a parser."
+  schk "CHANGELOG security lines, public mk  -> pass" 0 "CHANGELOG.md" "$SPM" "" "fix/x" "" "- Hardened a parser."
+  schk "CHANGELOG security lines, the cut    -> pass" 0 "$(printf 'CHANGELOG.md\n%s\n' "$SF")" "" "" "release/2.9.0" "$SF" "- Hardened a parser."
+  schk "cut cannot add a security fragment   -> BLOCK" 1 "$(printf 'CHANGELOG.md\n%s\nchangelog.d/old-topic.fixed.md\n' "$SF")" "" "$SF" "release/2.9.0" "changelog.d/old-topic.fixed.md" ""
+  schk "CHANGELOG without security lines     -> pass" 0 "CHANGELOG.md" "" "" "fix/x" "" ""
+
+  # print_security_added: only lines new under a Security heading count.
+  local sb sh
+  sb="$(mktemp)"; sh="$(mktemp)"
+  printf '## [1.0.0]\n\n### Security\n\n- old entry\n\n### Fixed\n\n- a fix\n' > "$sb"
+  printf '## [1.1.0]\n\n### Security\n\n- new entry\n\n### Fixed\n\n- another fix\n\n## [1.0.0]\n\n### Security\n\n- old entry\n\n### Fixed\n\n- a fix\n' > "$sh"
+  n=$((n + 1))
+  if [ "$(print_security_added "$sb" "$sh")" = "- new entry" ]; then
+    echo "  ok    security section diff: only the new line"
+  else
+    echo "  FAIL  security section diff: only the new line" >&2; failures=$((failures + 1))
+  fi
+  printf '## [1.1.0]\n\n### Fixed\n\n- another fix\n' > "$sh"
+  n=$((n + 1))
+  if [ -z "$(print_security_added "$sb" "$sh")" ] && [ -z "$(print_security_added "$sb" "$sb.missing")" ]; then
+    echo "  ok    security section diff: nothing new, missing file"
+  else
+    echo "  FAIL  security section diff: nothing new, missing file" >&2; failures=$((failures + 1))
+  fi
+  rm -f "$sb" "$sh"
+
   # End-to-end through the entry point, because the CI path and the fail-closed
   # branches live there rather than in the pure function above. A gate that
   # cannot see its input must go red, not quietly green.
@@ -597,6 +738,8 @@ HEAD="HEAD"
 FILES_FROM=""
 HAYSTACK_FROM=""
 ADDED_FROM=""
+REMOVED_FROM=""
+SECADD_FROM=""
 HEAD_REF="${GITHUB_HEAD_REF:-}"
 
 while [ $# -gt 0 ]; do
@@ -607,6 +750,9 @@ while [ $# -gt 0 ]; do
     --files-from) FILES_FROM="${2:-}"; shift 2 ;;
     --haystack-from) HAYSTACK_FROM="${2:-}"; shift 2 ;;
     --added-from) ADDED_FROM="${2:-}"; shift 2 ;;
+    --removed-from) REMOVED_FROM="${2:-}"; shift 2 ;;
+    --security-added-from) SECADD_FROM="${2:-}"; shift 2 ;;
+    --print-security-added) print_security_added "${2:-}" "${3:-}"; exit 0 ;;
     --head-ref) HEAD_REF="${2:-}"; shift 2 ;;
     -h|--help)
       sed -n '6,43p' "${BASH_SOURCE[0]}"
@@ -643,7 +789,19 @@ if [ -n "$FILES_FROM" ]; then
     fi
     ADDED="$(cat "$ADDED_FROM")"
   fi
-  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$ADDED" "$HEAD_REF"
+  REMOVED=""
+  SECADD=""
+  for pair in "REMOVED:$REMOVED_FROM" "SECADD:$SECADD_FROM"; do
+    var="${pair%%:*}"; f="${pair#*:}"
+    [ -n "$f" ] || continue
+    if [ ! -f "$f" ]; then
+      echo "FAILED: input file '$f' does not exist." >&2
+      echo "This check cannot run, so it is failing rather than passing silently." >&2
+      exit 1
+    fi
+    printf -v "$var" '%s' "$(cat "$f")"
+  done
+  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$ADDED" "$HEAD_REF" "$REMOVED" "$SECADD"
   exit $?
 fi
 
@@ -667,5 +825,14 @@ CHANGED="$(git diff --no-renames --name-only "$MERGE_BASE" "$HEAD")"
 COMMIT_MESSAGES="$(git log --format='%B' "$MERGE_BASE..$HEAD")"
 HAYSTACK="$(printf '%s\n%s\n' "$COMMIT_MESSAGES" "${PR_BODY:-}")"
 ADDED="$(git diff --no-renames --diff-filter=A --name-only "$MERGE_BASE" "$HEAD")"
+REMOVED="$(git diff --no-renames --diff-filter=D --name-only "$MERGE_BASE" "$HEAD")"
+SECADD=""
+for f in CHANGELOG.md RELEASE_NOTES.md; do
+  b="$(mktemp)"; h="$(mktemp)"
+  git show "$MERGE_BASE:$f" > "$b" 2>/dev/null || : > "$b"
+  git show "$HEAD:$f" > "$h" 2>/dev/null || : > "$h"
+  SECADD="$SECADD$(print_security_added "$b" "$h")"$'\n'
+  rm -f "$b" "$h"
+done
 
-evaluate_release_note "$CHANGED" "$HAYSTACK" "$ADDED" "$HEAD_REF"
+evaluate_release_note "$CHANGED" "$HAYSTACK" "$ADDED" "$HEAD_REF" "$REMOVED" "$SECADD"
