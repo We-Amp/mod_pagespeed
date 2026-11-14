@@ -313,6 +313,17 @@ describe("scrubSecrets and stripQueryStrings", () => {
     expect(scrubSecrets("redis user:pass@redis.local:6379 down")).toBe("redis user:[redacted]@redis.local:6379 down");
     expect(scrubSecrets("[Error] [531] mail a@b.example at 10:04:00")).toBe("[Error] [531] mail a@b.example at 10:04:00");
   });
+  it("replace a password after a comma or semicolon, without a scheme", () => {
+    expect(scrubSecrets("upstreams a.example,user:pass@redis.local:6379")).toBe(
+      "upstreams a.example,user:[redacted]@redis.local:6379",
+    );
+    expect(scrubSecrets("cache=memcached;user:pass@mc.local:11211")).toBe("cache=memcached;user:[redacted]@mc.local:11211");
+  });
+  it("replace bearer tokens of any length", () => {
+    expect(scrubSecrets("Bearer abc123")).toBe("Bearer [redacted]");
+    expect(scrubSecrets("sent bearer x.y-z_1 to origin")).toBe("sent bearer [redacted] to origin");
+    expect(scrubSecrets("Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig")).toBe("Bearer [redacted]");
+  });
   it("strip jsessionid path parameters with the query string", () => {
     expect(stripQueryStrings("/a.css;jsessionid=ABC123?x=1 and /b;JSESSIONID=Z9")).toBe(
       "/a.css;jsessionid=[redacted]?[query removed] and /b;jsessionid=[redacted]",

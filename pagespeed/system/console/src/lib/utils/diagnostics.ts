@@ -244,7 +244,7 @@ const SECRET_HEADER = /\b((?:set-)?cookie|(?:proxy-)?authorization|x-api-key|x-a
 export function scrubSecrets(text: string): string {
   return text
     .replace(SECRET_HEADER, `$1$2${REDACTED}`)
-    .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{16,}/gi, `$1 ${REDACTED}`)
+    .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`)
     .replace(/(^|[\s"'(<[=]|\/\/)([^\s/:@"'<>]+):[^\s/"'<>]*@(?=[\w[])/gim, `$1$2:${REDACTED}@`);
 }
 
