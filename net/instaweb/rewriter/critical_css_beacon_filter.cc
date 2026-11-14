@@ -119,12 +119,16 @@ void CriticalCssBeaconFilter::Summarize(Stylesheet* stylesheet,
 void CriticalCssBeaconFilter::AppendSelectorsInitJs(
     GoogleString* script, const StringSet& selectors) {
   StrAppend(script, "pagespeed.selectors=[");
-  for (StringSet::const_iterator i = selectors.begin(); i != selectors.end();
-       ++i) {
-    if (i != selectors.begin()) {
+  bool first = true;
+  for (const GoogleString& selector : selectors) {
+    if (!SelectorFitsScript(selector)) {
+      continue;
+    }
+    if (!first) {
       StrAppend(script, ",");
     }
-    EscapeToJsStringLiteral(*i, true /* quote */, script);
+    first = false;
+    EscapeToJsStringLiteral(selector, true /* quote */, script);
   }
   StrAppend(script, "];");
 }
@@ -157,6 +161,11 @@ void CriticalCssBeaconFilter::AppendBeaconInitJs(const BeaconMetadata& metadata,
       ");");
 }
 
+bool CriticalCssBeaconFilter::SelectorFitsScript(StringPiece selector) {
+  return selector.find('<') == StringPiece::npos &&
+         selector.find("]]>") == StringPiece::npos;
+}
+
 void CriticalCssBeaconFilter::SummariesDone() {
   // We parse each summary back into component selectors from its
   // comma-separated string, using a StringSet to remove duplicates (they'll be
@@ -175,6 +184,11 @@ void CriticalCssBeaconFilter::SummariesDone() {
         // Don't beacon if we're still waiting for critical selector data.
         return;
       case kSummaryOk: {
+        // A summary that could be read as markup in the script is left out,
+        // whatever cache it came from (see SelectorFitsScript).
+        if (summary_info.data.find('<') != GoogleString::npos) {
+          continue;
+        }
         // Include the selectors in the beacon
         StringPieceVector temp;
         SplitStringPieceToVector(summary_info.data, ",", &temp,

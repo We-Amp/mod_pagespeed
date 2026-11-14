@@ -305,6 +305,7 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
       tag_start_line_(-1),
       script_escape_state_(HtmlCommentEscapeState::kNone),
       discard_until_start_state_for_error_recovery_(false),
+      content_type_(kContentTypeXml),  // Not HTML until StartParse().
       size_limit_exceeded_(false),
       skip_parsing_(false),
       size_limit_(-1),
@@ -342,6 +343,7 @@ void HtmlLexer::EvalStart(char c) {
     state_ = TAG;
     discard_until_start_state_for_error_recovery_ = false;
     tag_start_line_ = line_;
+    tag_start_byte_offset_ = current_byte_offset_;
   } else {
     state_ = START;
   }
@@ -988,6 +990,8 @@ void HtmlLexer::MakeElement() {
     }
     element_ = html_parse_->NewElement(Parent(), token_);
     element_->set_begin_line_number(tag_start_line_);
+    element_->set_begins_in_first_1024_bytes(tag_start_byte_offset_ >= 0 &&
+                                             tag_start_byte_offset_ < 1024);
     token_.clear();
   }
 }
@@ -1012,6 +1016,8 @@ void HtmlLexer::StartParse(const StringPiece& id,
   size_limit_exceeded_ = false;
   skip_parsing_ = false;
   num_bytes_parsed_ = 0;
+  current_byte_offset_ = -1;
+  tag_start_byte_offset_ = -1;
   passing_through_ = false;
   script_escape_state_ = HtmlCommentEscapeState::kNone;
   discard_until_start_state_for_error_recovery_ = false;
@@ -1294,6 +1300,7 @@ void HtmlLexer::Parse(const char* text, int size) {
       return;
     }
     char c = text[i];
+    current_byte_offset_ = parsed_before + i;
     if (c == '\n') {
       ++line_;
     }

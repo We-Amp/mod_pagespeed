@@ -51,6 +51,7 @@ class HtmlLexer {
 
   // Initialize a new parse session, id is only used for error messages.
   void StartParse(const StringPiece& id, const ContentType& content_type);
+  const ContentType& content_type() const { return content_type_; }
 
   // Parse a chunk of text, adding events to the parser by calling
   // html_parse_->AddEvent(...).
@@ -328,6 +329,10 @@ class HtmlLexer {
   // this once it has started or ended an HtmlElement.
   bool skip_parsing_;
   int64 num_bytes_parsed_;
+  // Offsets in the document of the byte being lexed and of the '<' that
+  // started the current tag (-1 when there is none).
+  int64 current_byte_offset_ = -1;
+  int64 tag_start_byte_offset_ = -1;
   int64 size_limit_;
   bool passing_through_;
   int64 pass_through_after_;

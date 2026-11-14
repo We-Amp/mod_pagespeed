@@ -26,6 +26,7 @@
 #include "net/instaweb/rewriter/public/css_hierarchy.h"
 #include "net/instaweb/rewriter/public/css_resource_slot.h"
 #include "net/instaweb/rewriter/public/css_url_encoder.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -40,6 +41,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/util/url_segment_encoder.h"
 
@@ -203,6 +205,9 @@ class CssFilter : public RewriteFilter {
 
   // The charset extracted from a meta tag, if any.
   GoogleString meta_tag_charset_;
+  // The charset the meta tags seen so far declare, as inline styles count it
+  // (see InlineStyleModeForDocument).
+  InlineStyleMetaCharset inline_style_meta_charset_;
 
   // Filters we delegate to.
   CacheExtender* cache_extender_;
@@ -278,7 +283,8 @@ class CssFilter::Context : public SingleRewriteContext {
   ~Context() override;
 
   // Setup rewriting for inline, attribute, or external CSS.
-  void SetupInlineRewrite(HtmlElement* style_element, HtmlCharactersNode* text);
+  void SetupInlineRewrite(HtmlElement* style_element, HtmlCharactersNode* text,
+                          InlineStyleMode mode);
   void SetupAttributeRewrite(HtmlElement* element, HtmlElement::Attribute* src,
                              InlineCssKind inline_css_kind);
   void SetupExternalRewrite(HtmlElement* element, const GoogleUrl& base_gurl,
@@ -363,6 +369,16 @@ class CssFilter::Context : public SingleRewriteContext {
     return (rewrite_inline_attribute_ != nullptr);
   }
 
+  // Whether what is being rewritten is the text of an inline <style>.
+  bool IsInsideStyleTag() const {
+    return rewrite_inline_element_ != nullptr && !IsInlineAttribute();
+  }
+
+  // Replaces *text, the rewritten CSS of an inline <style> or style
+  // attribute, with the text to write. Returns false when it must not be
+  // written.
+  bool PrepareInlineText(GoogleString* text) const;
+
   // Determine the appropriate image inlining threshold based upon whether we're
   // in an html file (<style> tag or style= attribute) or in an external css
   // file.
@@ -408,6 +424,10 @@ class CssFilter::Context : public SingleRewriteContext {
   // and whether we've noticed any URLs). Only valid if the other
   // rewrite_inline_ fields reflect us doing inline rewriting.
   InlineCssKind rewrite_inline_css_kind_;
+
+  // How CSS may be written into the document of an inline <style>, taken
+  // in SetupInlineRewrite().
+  InlineStyleMode inline_style_mode_;
 
   // Information needed for nested rewrites or finishing up serialization.
   int64 in_text_size_;

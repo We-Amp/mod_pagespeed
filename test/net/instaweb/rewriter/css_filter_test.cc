@@ -29,7 +29,9 @@
 #include "net/instaweb/http/public/logging_proto.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/rewriter/public/data_url_input_resource.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
+#include "net/instaweb/rewriter/public/inline_resource_slot.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -38,14 +40,20 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/data_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
+#include "test/net/instaweb/rewriter/prepared_style_text_recorder.h"
 #include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/net/instaweb/rewriter/test_url_namer.h"
@@ -3112,6 +3120,273 @@ TEST_F(CssFilterTest, InlineStyleThatWouldHoldMarkupIsLeftAlone) {
   ValidateNoChanges("frameset",
                     "<frameset><style>*[title=\"\\3C frame\\3E\"] "
                     "{ color : red }</style></frameset>");
+}
+
+// Inline <style> elements holding a '<' that cannot be read as markup, on
+// HTML pages that declare a supported charset.
+class CssFilterLessThanTest : public CssFilterTest {
+ protected:
+  void SetPageType(StringPiece content_type) {
+    rewrite_driver()->set_response_headers_ptr(&response_headers_);
+    response_headers_.Replace(HttpAttributes::kContentType, content_type);
+    response_headers_.ComputeCaching();
+  }
+
+  // The text of the first <style> after rewriting `html`.
+  GoogleString StyleText(StringPiece id, StringPiece html) {
+    Parse(id, html);
+    const size_t start = output_buffer_.find("<style>");
+    const size_t end = output_buffer_.find("</style>");
+    if (start == GoogleString::npos || end == GoogleString::npos) {
+      ADD_FAILURE() << output_buffer_;
+      return "";
+    }
+    return output_buffer_.substr(start + 7, end - start - 7);
+  }
+};
+
+const char kInlineLessThanCss[] =
+    "@property --x { syntax: \"<length>\"; inherits: false; "
+    "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }";
+
+TEST_F(CssFilterLessThanTest, InlineStyleWithLessThanSign) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected(
+      "html", StrCat("<style>", kInlineLessThanCss, "</style>"),
+      "<style>@property --x { syntax: \"\\3c length>\"; inherits: false; "
+      "initial-value: 0px }@media (width < 600px){p{margin:0}}</style>");
+}
+
+TEST_F(CssFilterLessThanTest, LessThanSignNeedsADeclaredSupportedCharset) {
+  SetPageType("text/html");
+  ValidateNoChanges("undeclared",
+                    StrCat("<style>", kInlineLessThanCss, "</style>"));
+  SetPageType("text/html; charset=gbk");
+  ValidateNoChanges("gbk", StrCat("<style>", kInlineLessThanCss, "</style>"));
+  SetPageType("text/html");
+  ValidateNoChanges("meta_after",
+                    StrCat("<style>", kInlineLessThanCss,
+                           "</style><meta charset=\"utf-8\">"));
+  ValidateExpected(
+      "meta_before",
+      StrCat("<meta charset=\"utf-8\"><style>", kInlineLessThanCss,
+             "</style>"),
+      "<meta charset=\"utf-8\"><style>@property --x { syntax: "
+      "\"\\3c length>\"; inherits: false; initial-value: 0px }"
+      "@media (width < 600px){p{margin:0}}</style>");
+}
+
+TEST_F(CssFilterLessThanTest, XhtmlWithLessThanSignIsNotRewritten) {
+  SetPageType("application/xhtml+xml; charset=utf-8");
+  ValidateNoChanges("xhtml", StrCat("<style>", kInlineLessThanCss, "</style>"));
+}
+
+// What the serializer decodes is prepared again on the way out.
+TEST_F(CssFilterLessThanTest, DecodedEscapesArePreparedAgain) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected("selector",
+                   "<style>li[title=\"1\\3C 2\\3E 0\"]{color:blue}</style>",
+                   "<style>li[title=\"1\\3c 2>0\"]{color:#00f}</style>");
+  ValidateExpected("id_start_escape", "<style>#\\3Cnav{margin:2px}</style>",
+                   "<style>#\\3c nav{margin:2px}</style>");
+}
+
+// An escaped '<' in an identifier, before a digit. Pinned as it is written
+// today.
+TEST_F(CssFilterLessThanTest, EscapedIdentifierBeforeDigitIsPinned) {
+  SetPageType("text/html; charset=utf-8");
+  const GoogleString text =
+      StyleText("ident_digit", "<style>.a\\3c 1 { color : red }</style>");
+  EXPECT_EQ(".a\\3c 1{color:red}", text);
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+}
+
+// Escaping that costs more than minifying saves leaves the style alone.
+TEST_F(CssFilterLessThanTest, EscapedSizeCountsForTheGain) {
+  options()->ClearSignatureForTesting();
+  options()->set_always_rewrite_css(false);
+  server_context()->ComputeSignature(options());
+  SetPageType("text/html; charset=utf-8");
+  ValidateNoChanges("no_gain", "<style>a{content:\"<<<<\"} </style>");
+  ValidateExpected("gain", "<style>a{content:\"<\"}         </style>",
+                   "<style>a{content:\"\\3c \"}</style>");
+}
+
+// A style attribute keeps any '<' out, as before.
+TEST_F(CssFilterLessThanTest, StyleAttributeWithLessThanSignIsLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributes);
+  server_context()->ComputeSignature(options());
+  ValidateNoChanges("attribute",
+                    "<div style='content: \"<b>\" ; color: red'/>");
+}
+
+// Where a link or style can be, and text that would be markup there. Covers
+// every placement and payload of the markup placement tests of inline_css,
+// prioritize_critical_css and rewrite_css.
+struct MarkupPlacement {
+  const char* id;
+  const char* before;
+  const char* after;
+  const char* end_tag;  // its own end tag, as a payload
+};
+const MarkupPlacement kMarkupPlacements[] = {
+    {"top", "", "", "</head>"},
+    {"noembed", "<noembed>", "</noembed>", "</noembed>"},
+    {"noframes", "<noframes>", "</noframes>", "</noframes>"},
+    {"textarea", "<textarea/>", "", "</textarea>"},
+    {"select", "<select>", "</select>", "</select>"},
+    {"frameset", "<frameset>", "</frameset>", "</frameset>"},
+    {"noscript", "<noscript>", "</noscript>", "</noscript>"},
+};
+const char* const kMarkupPayloads[] = {"", "</style>", "</STYLE >", "<input>",
+                                       "<frame>", "<!--"};
+
+// On a page that declares UTF-8: a payload in a string is written so it is no
+// longer markup, wherever the style is; the same payload outside a string
+// leaves the style as it is.
+TEST_F(CssFilterLessThanTest, MarkupPlacementsAreRewrittenSafelyOrLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  int n = 0;
+  for (const MarkupPlacement& p : kMarkupPlacements) {
+    for (const char* payload_or_empty : kMarkupPayloads) {
+      const StringPiece payload =
+          *payload_or_empty == '\0' ? p.end_tag : payload_or_empty;
+      // The payload as the style's text holds it: escaped in a string (the
+      // serializer decodes it), and as a raw '<' in a string.
+      GoogleString escaped(payload.data(), payload.size());
+      GlobalReplaceSubstring("<", "\\3C ", &escaped);
+      const GoogleString kept[] = {
+          StrCat("*[title=\"", escaped, "\"] { color : red }"),
+          StrCat("*[title=\"", payload, "\"] { color : red }"),
+      };
+      // A raw closing style tag would end the element in the source.
+      const bool raw_ok = !StringCaseStartsWith(payload, "</style");
+      for (const GoogleString& css : kept) {
+        if (!raw_ok && css.find(payload) != GoogleString::npos) {
+          continue;
+        }
+        Parse(StrCat("k", IntegerToString(n++)),
+              StrCat(p.before, "<style>", css, "</style>", p.after));
+        const size_t start = output_buffer_.find("<style>");
+        const size_t end = output_buffer_.find("</style>", start);
+        ASSERT_NE(GoogleString::npos, start) << output_buffer_;
+        ASSERT_NE(GoogleString::npos, end) << output_buffer_;
+        const GoogleString text =
+            output_buffer_.substr(start + 7, end - start - 7);
+        EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml))
+            << p.id << ": " << text;
+        EXPECT_EQ(GoogleString::npos, text.find('<')) << p.id << ": " << text;
+        EXPECT_NE(GoogleString::npos, text.find("color:red")) << p.id << ": "
+                                                              << text;
+      }
+      if (payload == "<!--") {
+        // Outside a string this is a CSS token the parser drops, as it did
+        // before.
+        ValidateExpected(StrCat("b", IntegerToString(n++)),
+                         StrCat(p.before, "<style>* { color : red }", payload,
+                                "</style>", p.after),
+                         StrCat(p.before, "<style>*{color:red}</style>",
+                                p.after));
+      } else if (raw_ok) {
+        // The same payload outside a string.
+        ValidateNoChanges(StrCat("b", IntegerToString(n++)),
+                          StrCat(p.before, "<style>* { color : red }", payload,
+                                 "</style>", p.after));
+      }
+      if (raw_ok) {
+        ValidateNoChanges(StrCat("b", IntegerToString(n++)),
+                          StrCat(p.before, "<style>@huh { a: ", payload,
+                                 "; }* { color : red }</style>", p.after));
+      }
+    }
+  }
+}
+
+// Outside a string, a comment opener in an inline style is a CSS token the
+// parser drops: it is not in the text written.
+TEST_F(CssFilterLessThanTest, CommentOpenerOutsideAStringIsDropped) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected("cdo", "<style><!-- * { color : red } --></style>",
+                   "<style>*{color:red}</style>");
+  ValidateExpected("cdo_after", "<style>* { color : red }<!--</style>",
+                   "<style>*{color:red}</style>");
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("<!--")) << output_buffer_;
+}
+
+// The text written into an inline style is exactly what InlineStyleText
+// prepared.
+TEST_F(CssFilterLessThanTest, WrittenTextIsPreparedText) {
+  SetPageType("text/html; charset=utf-8");
+  const char* const kCss[] = {
+      "a { margin : 0 }",
+      "@property --x { syntax: \"<length>\"; inherits: false; "
+      "initial-value: 0px }",
+      "@media (width < 600px) { a { margin : 0 } }",
+      "a { content : \"\\3C/style\\3E\\3C b\\3E\" }",
+      ".a\\3C b { color : red }",
+      "a { content : '<' } b { color : red }",
+  };
+  int n = 0;
+  for (const char* css : kCss) {
+    PreparedStyleTextRecorder recorder;
+    const GoogleString text =
+        StyleText(StrCat("p", IntegerToString(n++)),
+                  StrCat("<style>", css, "</style>"));
+    EXPECT_TRUE(recorder.WasPrepared(text)) << css << ": " << text;
+    EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml)) << text;
+    EXPECT_NE(GoogleString(css), text) << "not rewritten";
+  }
+}
+
+// The output of Tailwind CSS 4 as an inline style.
+TEST_F(CssFilterLessThanTest, TailwindV4InlineStyleIsRewritten) {
+  StdioFileSystem stdio_file_system;
+  GoogleString css;
+  ASSERT_TRUE(stdio_file_system.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, "tailwind_v4.css").c_str(), &css,
+      message_handler()));
+  SetPageType("text/html; charset=utf-8");
+  PreparedStyleTextRecorder recorder;
+  const GoogleString text =
+      StyleText("tailwind", StrCat("<style>", css, "</style>"));
+  EXPECT_NE(css, text);
+  EXPECT_TRUE(recorder.WasPrepared(text));
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+  EXPECT_NE(GoogleString::npos, text.find("\\3c percentage>")) << text;
+}
+
+// The text a slot writes into a style element must pass the check for the
+// document; otherwise the element keeps its text.
+TEST_F(CssFilterLessThanTest, SlotWritesOnlyTextThatPassesTheCheck) {
+  struct Case {
+    const char* css;
+    InlineStyleMode mode;
+    bool written;
+  };
+  const Case kCases[] = {
+      {"a{b:c}", InlineStyleMode::kStrict, true},
+      {"@media (a < 1px){b{c:d}}", InlineStyleMode::kHtml, true},
+      {"@media (a < 1px){b{c:d}}", InlineStyleMode::kStrict, false},
+      {"a{b:c}</style>", InlineStyleMode::kHtml, false},
+      {"a{b:\"<c\"}", InlineStyleMode::kHtml, false},
+  };
+  for (const Case& c : kCases) {
+    GoogleString data_url;
+    DataUrl(kContentTypeCss, PLAIN, c.css, &data_url);
+    ResourcePtr resource(DataUrlInputResource::Make(data_url, rewrite_driver()));
+    ASSERT_TRUE(resource.get() != nullptr);
+    resource->response_headers()->ComputeCaching();
+    HtmlCharactersNode* node =
+        rewrite_driver()->NewCharactersNode(nullptr, "original");
+    InlineResourceSlotPtr slot(
+        new InlineResourceSlot(resource, node, "test", c.mode));
+    slot->Render();
+    EXPECT_EQ(c.written ? GoogleString(c.css) : GoogleString("original"),
+              node->contents())
+        << c.css;
+  }
 }
 
 }  // namespace

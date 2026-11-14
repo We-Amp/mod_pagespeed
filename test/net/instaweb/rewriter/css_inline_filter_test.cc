@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/css_inline_filter.h"
 
+#include <algorithm>
+
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -29,13 +31,17 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
+#include "test/net/instaweb/rewriter/prepared_style_text_recorder.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -936,6 +942,331 @@ TEST_F(CssInlineMarkupPlacementTest, StartTag) {
 
 TEST_F(CssInlineMarkupPlacementTest, CommentOpener) {
   ExpectExternal("comment", "a{margin:0}/*<!--*/", "", "");
+}
+
+// Stylesheets with a '<' that cannot be read as markup, on HTML pages that
+// declare a supported charset.
+class CssInlineLessThanTest : public CssInlineFilterTest {
+ protected:
+  void SetPageType(StringPiece content_type) {
+    rewrite_driver()->set_response_headers_ptr(&response_headers_);
+    response_headers_.Replace(HttpAttributes::kContentType, content_type);
+    response_headers_.ComputeCaching();
+  }
+
+  // Inlines `css` from a link between `before` and `after`. Returns the text
+  // of the <style> written in its place, or "UNCHANGED" when the page was
+  // left as it was. Each call uses its own stylesheet URL.
+  GoogleString Inline(StringPiece id, StringPiece css, StringPiece before = "",
+                      StringPiece after = "") {
+    if (!filter_added_) {
+      AddFilter(RewriteOptions::kInlineCss);
+      filter_added_ = true;
+    }
+    const GoogleString url = StrCat(id, ".css");
+    SetResponseWithDefaultHeaders(url, kContentTypeCss, css, 100);
+    const GoogleString input =
+        StrCat(before, "<link rel='stylesheet' href='", url, "'>", after);
+    // The page is at the top of the site, whatever directory the
+    // stylesheet is in.
+    GoogleString page_id(id);
+    std::replace(page_id.begin(), page_id.end(), '/', '_');
+    Parse(page_id, input);
+    if (output_buffer_ == input) {
+      return "UNCHANGED";
+    }
+    const size_t start = output_buffer_.find("<style>");
+    const size_t end = output_buffer_.find("</style>");
+    EXPECT_NE(GoogleString::npos, start) << output_buffer_;
+    EXPECT_NE(GoogleString::npos, end) << output_buffer_;
+    if (start == GoogleString::npos || end == GoogleString::npos) {
+      return "NO STYLE";
+    }
+    EXPECT_EQ(StrCat(before, "<style>"), output_buffer_.substr(0, start + 7));
+    EXPECT_EQ(StrCat("</style>", after), output_buffer_.substr(end));
+    return output_buffer_.substr(start + 7, end - start - 7);
+  }
+
+  // What InlineStyleText makes of `css` for an HTML page.
+  static GoogleString Prepared(StringPiece css) {
+    InlineStyleText out;
+    EXPECT_TRUE(InlineStyleText::Prepare(css, InlineStyleMode::kHtml, &out,
+                                         nullptr))
+        << css;
+    return out.text();
+  }
+
+  bool filter_added_ = false;
+};
+
+const char kLessThanCss[] =
+    "@property --tw-shadow-alpha{syntax:\"<percentage>\";inherits:false;"
+    "initial-value:100%}"
+    "@media (width < 600px){a{margin:0}}"
+    "@media (width<48rem){b{margin:0}}"
+    "td[headers=\"<x\"]{padding:3px}";
+
+TEST_F(CssInlineLessThanTest, StylesheetWithLessThanSignIsInlined) {
+  SetPageType("text/html; charset=utf-8");
+  const GoogleString text = Inline("lt", kLessThanCss);
+  EXPECT_EQ(
+      "@property --tw-shadow-alpha{syntax:\"\\3c percentage>\";"
+      "inherits:false;initial-value:100%}"
+      "@media (width < 600px){a{margin:0}}"
+      "@media (width<48rem){b{margin:0}}"
+      "td[headers=\"\\3c x\"]{padding:3px}",
+      text);
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+}
+
+// Only a page that declares a supported charset gets it.
+TEST_F(CssInlineLessThanTest, LessThanSignNeedsADeclaredSupportedCharset) {
+  SetPageType("text/html");
+  EXPECT_EQ("UNCHANGED", Inline("none", kLessThanCss));
+  SetPageType("text/html; charset=shift_jis");
+  EXPECT_EQ("UNCHANGED", Inline("sjis", kLessThanCss));
+  SetPageType("text/html; charset=iso-2022-jp");
+  EXPECT_EQ("UNCHANGED", Inline("jis", kLessThanCss));
+  SetPageType("text/html; charset=windows-1252");
+  EXPECT_EQ(Prepared(kLessThanCss), Inline("cp1252", kLessThanCss));
+  SetPageType("text/html; charset=ISO-8859-1");
+  EXPECT_EQ(Prepared(kLessThanCss), Inline("latin1", kLessThanCss));
+}
+
+TEST_F(CssInlineLessThanTest, MetaCharsetBeforeTheLinkCounts) {
+  SetPageType("text/html");
+  EXPECT_EQ(Prepared(kLessThanCss),
+            Inline("meta_before", kLessThanCss, "<meta charset=\"utf-8\">"));
+  EXPECT_EQ("UNCHANGED",
+            Inline("meta_after", kLessThanCss, "", "<meta charset=\"utf-8\">"));
+}
+
+TEST_F(CssInlineLessThanTest, XhtmlWithLessThanSignIsNotInlined) {
+  SetPageType("application/xhtml+xml; charset=utf-8");
+  EXPECT_EQ("UNCHANGED", Inline("xhtml", kLessThanCss));
+}
+
+// The decision is cached per kind of page.
+TEST_F(CssInlineLessThanTest, KindOfPageIsPartOfTheCachedDecision) {
+  SetPageType("text/html");
+  EXPECT_EQ("UNCHANGED", Inline("shared", kLessThanCss));
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_EQ(Prepared(kLessThanCss), Inline("shared", kLessThanCss));
+  SetPageType("text/html");
+  EXPECT_EQ("UNCHANGED", Inline("shared", kLessThanCss));
+}
+
+// The size limit applies to the text as written.
+TEST_F(CssInlineLessThanTest, LimitAppliesToTheWrittenText) {
+  const char kCss[] = "a{content:\"<<<<\"}";  // 17 bytes, 29 written
+  options()->set_css_inline_max_bytes(20);
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_EQ("UNCHANGED", Inline("limit", kCss));
+}
+
+// The text is prepared after its URLs are resolved against the page.
+TEST_F(CssInlineLessThanTest, TextIsPreparedAfterUrlResolution) {
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_EQ("a{background:url(dir/b.png)}b{content:\"\\3c x\"}",
+            Inline("dir/resolved",
+                   "a{background:url(b.png)}b{content:\"<x\"}"));
+}
+
+// Where a link can be, and text that would be markup there. Covers every
+// placement and payload of CssInlineMarkupPlacementTest and of the matching
+// critical CSS and inline style tests.
+struct MarkupPlacement {
+  const char* id;
+  const char* before;
+  const char* after;
+  const char* end_tag;  // its own end tag, as a payload
+};
+const MarkupPlacement kMarkupPlacements[] = {
+    {"top", "", "", "</head>"},
+    {"noembed", "<noembed>", "</noembed>", "</noembed>"},
+    {"noframes", "<noframes>", "</noframes>", "</noframes>"},
+    {"textarea", "<textarea/>", "", "</textarea>"},
+    {"select", "<select>", "</select>", "</select>"},
+    {"frameset", "<frameset>", "</frameset>", "</frameset>"},
+    {"noscript", "<noscript>", "</noscript>", "</noscript>"},
+};
+const char* const kMarkupPayloads[] = {"", "</style>", "</STYLE >", "<input>",
+                                       "<frame>", "<!--"};
+
+// On a page that declares UTF-8: a payload in a comment or a string is
+// written so it is no longer markup (or the link is left alone), wherever the
+// link is; the same payload outside them keeps the link.
+TEST_F(CssInlineLessThanTest, MarkupPlacementsAreInlinedSafelyOrKept) {
+  SetPageType("text/html; charset=utf-8");
+  int n = 0;
+  for (const MarkupPlacement& p : kMarkupPlacements) {
+    for (const char* payload_or_empty : kMarkupPayloads) {
+      const StringPiece payload =
+          *payload_or_empty == '\0' ? p.end_tag : payload_or_empty;
+      const GoogleString kept[] = {
+          StrCat("a{margin:0}/*", payload, "*/"),
+          StrCat("a{content:\"", payload, "\"}"),
+      };
+      for (const GoogleString& css : kept) {
+        const GoogleString text =
+            Inline(StrCat("k", IntegerToString(n++)), css, p.before, p.after);
+        if (text != "UNCHANGED") {
+          EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml))
+              << p.id << ": " << text;
+          EXPECT_EQ(Prepared(css), text) << p.id;
+          EXPECT_EQ(GoogleString::npos, text.find('<')) << p.id << ": " << text;
+        } else {
+          // Only a link the filter never inlines is left alone.
+          EXPECT_STREQ("noscript", p.id) << css;
+        }
+      }
+      EXPECT_EQ("UNCHANGED", Inline(StrCat("b", IntegerToString(n++)),
+                                    StrCat("a{margin:0}", payload), p.before,
+                                    p.after))
+          << p.id << ": " << payload;
+    }
+  }
+}
+
+// Only the first meta tag that declares a charset counts, and only within the
+// first 1024 bytes of the document.
+TEST_F(CssInlineLessThanTest, OnlyAnEarlyFirstMetaCharsetCounts) {
+  SetPageType("text/html");
+  const GoogleString filler = StrCat("<!--", GoogleString(1100, 'x'), "-->");
+  EXPECT_EQ("UNCHANGED",
+            Inline("late_meta", kLessThanCss,
+                   StrCat(filler, "<meta charset=\"utf-8\">")));
+  EXPECT_EQ("UNCHANGED",
+            Inline("second_meta", kLessThanCss,
+                   "<meta charset=\"shift_jis\"><meta charset=\"utf-8\">"));
+  EXPECT_EQ("UNCHANGED", Inline("unknown_label", kLessThanCss,
+                                "<meta charset=\"iso-8859-12\">"));
+  EXPECT_EQ(Prepared(kLessThanCss),
+            Inline("first_with_charset", kLessThanCss,
+                   "<meta name=\"a\" content=\"b\"><meta charset=\"utf-8\">"));
+  EXPECT_EQ(Prepared(kLessThanCss),
+            Inline("http_equiv", kLessThanCss,
+                   "<meta http-equiv=\"Content-Type\" "
+                   "content=\"text/html; charset=windows-1252\">"));
+  // The response headers come first.
+  SetPageType("text/html; charset=shift_jis");
+  EXPECT_EQ("UNCHANGED", Inline("header_first", kLessThanCss,
+                                "<meta charset=\"utf-8\">"));
+}
+
+// A byte order mark other than UTF-8's keeps the strict rule; one alone
+// declares nothing.
+TEST_F(CssInlineLessThanTest, ByteOrderMark) {
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_EQ("UNCHANGED", Inline("utf16le", kLessThanCss, "\xff\xfe"));
+  EXPECT_EQ("UNCHANGED", Inline("utf16be", kLessThanCss, "\xfe\xff"));
+  EXPECT_EQ(Prepared(kLessThanCss), Inline("utf8", kLessThanCss, "\xef\xbb\xbf"));
+  SetPageType("text/html");
+  EXPECT_EQ("UNCHANGED", Inline("utf8_alone", kLessThanCss, "\xef\xbb\xbf"));
+}
+
+// The output of Tailwind CSS 4 (tailwindcss 4.3.5, unminified, for a page
+// using a few utilities and variants).
+TEST_F(CssInlineLessThanTest, TailwindV4StylesheetIsInlined) {
+  StdioFileSystem stdio_file_system;
+  GoogleString css;
+  ASSERT_TRUE(stdio_file_system.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, "tailwind_v4.css").c_str(), &css,
+      message_handler()));
+  ASSERT_NE(GoogleString::npos, css.find("syntax: \"<percentage>\""));
+  ASSERT_NE(GoogleString::npos, css.find("@media (width < 48rem)"));
+  options()->set_css_inline_max_bytes(1 << 20);
+  SetPageType("text/html; charset=utf-8");
+  PreparedStyleTextRecorder recorder;
+  const GoogleString text = Inline("tailwind", css);
+  ASSERT_NE("UNCHANGED", text);
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+  EXPECT_TRUE(recorder.WasPrepared(text));
+  EXPECT_NE(GoogleString::npos, text.find("syntax: \"\\3c percentage>\""));
+  EXPECT_NE(GoogleString::npos, text.find("@media (width < 48rem)"));
+  EXPECT_NE(GoogleString::npos, text.find("@media (width >= 40rem)"));
+}
+
+// Stylesheets for the tests that compare what is written with what was
+// prepared.
+const char* const kParityCss[] = {
+    "a{margin:0}",
+    "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}",
+    "@media (width < 600px){a{margin:0}}@media (400px<=width<=700px){b{c:d}}",
+    "a{content:\"</style><b>\"}/*<!-- <i> -->*/",
+    ".a\\<b{color:red}a{b:url(x<y)}",
+    "a{content:'<'}b{content:\"\\3c\"}",
+    "a{margin:0}</style>",
+    "a{margin:0}<b>",
+    "@media (width<calc(1px + 1em)){a{margin:0}}",
+    "<!--a{margin:0}-->",
+};
+
+// What is written is exactly what InlineStyleText prepared, and the link is
+// left alone exactly when it refuses.
+TEST_F(CssInlineLessThanTest, WrittenTextIsPreparedText) {
+  SetPageType("text/html; charset=utf-8");
+  int n = 0;
+  for (const char* css : kParityCss) {
+    PreparedStyleTextRecorder recorder;
+    const GoogleString text = Inline(StrCat("p", IntegerToString(n++)), css);
+    InlineStyleText expected;
+    if (InlineStyleText::Prepare(css, InlineStyleMode::kHtml, &expected,
+                                 nullptr)) {
+      EXPECT_EQ(expected.text(), text) << css;
+      EXPECT_TRUE(recorder.WasPrepared(text)) << css;
+    } else {
+      EXPECT_EQ("UNCHANGED", text) << css;
+      EXPECT_LT(0, recorder.refusals()) << css;
+    }
+  }
+}
+
+// With response headers that are never finalized, and no Content-Type in
+// them (as on Apache), the type the parse was started with decides.
+class CssInlineUnfinalizedHeadersTest : public CssInlineFilterTest {
+ protected:
+  GoogleString InlineWithParseType(const ContentType& type) {
+    server_context()->set_response_headers_finalized(false);
+    AddFilter(RewriteOptions::kInlineCss);
+    SetResponseWithDefaultHeaders("foo.css", kContentTypeCss,
+                                  "@media (width < 600px){a{margin:0}}", 100);
+    SetupWriter();
+    rewrite_driver()->StartParseWithType(StrCat(kTestDomain, "x.html"), type);
+    rewrite_driver()->ParseText(
+        "<meta charset=\"utf-8\"><link rel='stylesheet' href='foo.css'>");
+    rewrite_driver()->FinishParse();
+    return output_buffer_;
+  }
+};
+
+TEST_F(CssInlineUnfinalizedHeadersTest, HtmlParseInlinesLessThanSign) {
+  EXPECT_EQ(
+      "<meta charset=\"utf-8\"><style>@media (width < 600px){a{margin:0}}"
+      "</style>",
+      InlineWithParseType(kContentTypeHtml));
+}
+
+TEST_F(CssInlineUnfinalizedHeadersTest, XhtmlParseKeepsTheLink) {
+  EXPECT_EQ("<meta charset=\"utf-8\"><link rel='stylesheet' href='foo.css'>",
+            InlineWithParseType(kContentTypeXhtml));
+}
+
+TEST_F(CssInlineUnfinalizedHeadersTest, OtherParseTypeKeepsTheLink) {
+  EXPECT_EQ("<meta charset=\"utf-8\"><link rel='stylesheet' href='foo.css'>",
+            InlineWithParseType(kContentTypeXml));
+}
+
+// A link in SVG or MathML is not an HTML link element, so it is left alone.
+TEST_F(CssInlineLessThanTest, ForeignLinkIsLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  AddFilter(RewriteOptions::kInlineCss);
+  filter_added_ = true;
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, "a{margin:0}", 100);
+  ValidateNoChanges("svg",
+                    "<svg><link rel='stylesheet' href='foo.css'></svg>");
+  ValidateNoChanges("math",
+                    "<math><link rel='stylesheet' href='foo.css'></math>");
 }
 
 }  // namespace

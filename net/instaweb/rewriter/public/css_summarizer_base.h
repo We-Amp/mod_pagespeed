@@ -23,12 +23,14 @@
 #include <memory>
 #include <vector>
 
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 
 namespace Css {
 
@@ -86,7 +88,8 @@ class CssSummarizerBase : public RewriteFilter {
     SummaryInfo()
         : state(kSummaryStillPending),
           is_external(false),
-          is_inside_noscript(false) {}
+          is_inside_noscript(false),
+          inline_style_mode(InlineStyleMode::kStrict) {}
 
     // data actually computed by the subclass's Summarize method. Make sure to
     // check state == kSummaryOk before using it.
@@ -119,6 +122,10 @@ class CssSummarizerBase : public RewriteFilter {
 
     // True if the style was included inside a noscript section.
     bool is_inside_noscript;
+
+    // How CSS may be written into the page where the style is, taken when
+    // the style was seen.
+    InlineStyleMode inline_style_mode;
   };
 
   // This method should be overridden in case the subclass's summary computation
@@ -147,6 +154,13 @@ class CssSummarizerBase : public RewriteFilter {
   // HTML parser state.
   virtual void Summarize(Css::Stylesheet* stylesheet,
                          GoogleString* out) const = 0;
+
+  // Whether this filter writes its summaries into the page only as the text
+  // of a <style> element, prepared there with InlineStyleText for that page.
+  // Then a summary is kept when InlineStyleText could write it into an HTML
+  // page. Otherwise (the default) a summary that holds a '<' is dropped. Called
+  // on a rewrite thread.
+  virtual bool SummariesAreStyleText() const { return false; }
 
   // This can be optionally overridden to modify a CSS element based on a
   // successfully computed summary. It might not be invoked if cached
@@ -265,6 +279,10 @@ class CssSummarizerBase : public RewriteFilter {
   std::vector<int> canceled_summaries_;  // guarded by progress_lock_
 
   HtmlElement* style_element_;  // The element we are in, or NULL.
+
+  // The charset the meta tags seen so far declare (see
+  // InlineStyleModeForDocument).
+  InlineStyleMetaCharset meta_charset_;
 
   Variable* num_css_used_for_critical_css_computation_;
   Variable* num_css_not_used_for_critical_css_computation_;

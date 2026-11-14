@@ -80,6 +80,11 @@ class CriticalCssBeaconFilter : public CssSummarizerBase {
 
   // Selectors are inlined into javascript.
   bool IntendedForInlining() const override { return true; }
+
+  // Whether `selector` may be written into the inline script of the beacon:
+  // it holds no '<' and no text the script could not carry. Checked for every
+  // selector as it is written, whatever cache its summary came from.
+  static bool SelectorFitsScript(StringPiece selector);
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
  protected:
