@@ -91,5 +91,34 @@ TEST_F(DaemonAdapterPoolTest, AdapterOutlivesThePool) {
   EXPECT_EQ(DaemonHealth::kNotConfigured, held->health());
 }
 
+TEST_F(DaemonAdapterPoolTest, TheFirstCallersHandlerIsTheOneKept) {
+  // A shared adapter logs through the handler it was built with; a later
+  // context's handler is not used.  The Apache port relies on every
+  // virtual host passing the same handler, so no message changes log.
+  MockMessageHandler later(new NullMutex);
+  const DaemonAdapterPool::Checked first =
+      pool_.GetOrCheck("/run/a.sock", "", &handler_);
+  const DaemonAdapterPool::Checked again =
+      pool_.GetOrCheck("/run/a.sock", "", &later);
+  EXPECT_EQ(first.adapter.get(), again.adapter.get());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_EQ(0, later.TotalMessages());
+}
+
+TEST_F(DaemonAdapterPoolTest, ANewPoolChecksAgain) {
+  // A configuration re-read (an Apache graceful restart, an nginx reload)
+  // builds a new pool: the pair gets a new adapter with its own verdict,
+  // not the previous configuration's.
+  DaemonAdapterPool reread;
+  const DaemonAdapterPool::Checked before =
+      pool_.GetOrCheck("/run/a.sock", "", &handler_);
+  const DaemonAdapterPool::Checked after =
+      reread.GetOrCheck("/run/a.sock", "", &handler_);
+  ASSERT_NE(nullptr, after.adapter);
+  EXPECT_NE(before.adapter.get(), after.adapter.get());
+  EXPECT_EQ(DaemonHealth::kUnavailable, after.adapter->health());
+  EXPECT_EQ(1u, reread.size());
+}
+
 }  // namespace
 }  // namespace net_instaweb

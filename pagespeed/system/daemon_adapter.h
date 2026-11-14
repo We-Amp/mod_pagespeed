@@ -572,17 +572,18 @@ class DaemonAdapter {
   // THE BOUND, and what it costs.  Each set-aside handle keeps one deleted
   // volume file open and mapped, so its disk space and this process's
   // address space for it are held until the process ends.  The bound is per
-  // adapter, and a server has one adapter per virtual host that uses the
-  // daemon (nginx and IIS share one across every server block or site that
-  // names the same socket and volume): each of them follows the daemon through kMaxVolumeReplacements
-  // replacements; the next one sets the handle aside like the others and
-  // then stops: nothing is handed out any more, in-place optimization is
-  // off for that virtual host in this process until it ends, and one error
-  // line says so.  At that point it holds kMaxVolumeReplacements + 1
-  // replaced volumes.  Disk: up to five times the configured cache size on
-  // the host, whatever the number of processes and virtual hosts (they all
-  // hold the same deleted files).  Address space: up to five times the
-  // cache size per virtual host, in each worker process.
+  // adapter, and a server has one adapter per distinct socket and volume
+  // pair: the server blocks, virtual hosts or sites that name the same pair
+  // share one.  Each adapter follows the daemon through
+  // kMaxVolumeReplacements replacements; the next one sets the handle aside
+  // like the others and then stops: nothing is handed out any more,
+  // in-place optimization is off for every host on that adapter in this
+  // process until it ends, and one error line says so.  At that point it
+  // holds kMaxVolumeReplacements + 1 replaced volumes.  Disk: up to five
+  // times the configured cache size on the host, whatever the number of
+  // processes and hosts (they all hold the same deleted files).  Address
+  // space: up to five times the cache size per adapter, in each worker
+  // process.
   static constexpr int64_t kVolumeGenerationCheckIntervalMs = 1000;
   static constexpr int kMaxVolumeReplacements = 4;
 
