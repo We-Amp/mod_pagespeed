@@ -3594,10 +3594,21 @@ class SignalingStringAsyncFetch : public StringAsyncFetch {
 // A fetch of an on-the-fly (cache-extended) resource must not queue behind
 // expensive work on the low-priority pool: unlike rewritten resources, it
 // has no deadline fallback that would bound the wait.
+//
+// With a load-shedding threshold of 1 and a second low-priority fetch queued
+// next to it, a cache-extended fetch that still went through the low-priority
+// queue would make the pool shed one of the two, so no rewrite may be dropped.
 TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
   server_context()->low_priority_rewrite_workers()->SetLoadSheddingThreshold(1);
 
+  const char kCss[] = " * { display: none; } ";
+  const char kMinifiedCss[] = "*{display:none}";
   InitResources();
+  SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kCss,
+                                Timer::kYearMs / Timer::kSecondMs);
+  TimedVariable* dropped =
+      server_context()->rewrite_stats()->num_rewrites_dropped();
+  const int64 dropped_before = dropped->Get(TimedVariable::START);
 
   // Wedge the only low-priority worker with the combining filter.
   InitCombiningFilter(0);
@@ -3626,12 +3637,23 @@ TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
                                   "0", "a.css", "css"),
                            &ce_fetch);
 
+  // A CSS minification fetch, which does belong on the low-priority queue.
+  GoogleString out_cf;
+  RequestContextPtr cf_ctx =
+      RequestContext::NewTestRequestContext(server_context()->thread_system());
+  StringAsyncFetch cf_fetch(cf_ctx, &out_cf);
+  RewriteDriver* cf_driver = server_context()->NewRewriteDriver(cf_ctx);
+  cf_driver->FetchResource(Encode(kTestDomain, "cf", "0", "x.css", "css"),
+                           &cf_fetch);
+
   bool done_while_wedged = ce_fetch.WaitForDone(10 * Timer::kSecondMs);
 
   // Release the wedged worker either way so that a failure does not hang.
   resume_rewrite.Notify();
   ce_driver->WaitForCompletion();
   ce_driver->Cleanup();
+  cf_driver->WaitForCompletion();
+  cf_driver->Cleanup();
 
   EXPECT_TRUE(done_while_wedged)
       << "cache-extended fetch waited for the low-priority worker";
@@ -3639,8 +3661,10 @@ TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
   EXPECT_EQ(" a ", out_ce);
   EXPECT_FALSE(ce_fetch.response_headers()->HasValue(
       HttpAttributes::kCacheControl, "private"));
-  EXPECT_EQ(0, server_context()->rewrite_stats()->num_rewrites_dropped()->Get(
-                   TimedVariable::START));
+  EXPECT_EQ(kMinifiedCss, out_cf);
+  EXPECT_FALSE(cf_fetch.response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(dropped_before, dropped->Get(TimedVariable::START));
 
   rewrite_driver()->WaitForShutDown();
 }
