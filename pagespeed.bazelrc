@@ -243,5 +243,7 @@ build:ci-linux-arm64 --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"
 # ci-build lines; the generated-code exclusion is in the same block.
 build:ci-linux-arm64 --per_file_copt=//pagespeed(/.*)?:.*,//net(/.*)?:.*,//test(/.*)?:.*,//base(/.*)?:.*,//third_party(/.*)?:.*,//tools(/.*)?:.*@-Werror,-ferror-limit=0
 build:ci-linux-arm64 --per_file_copt=external/.*@-w
+# Order matters as in build:ci-build: the external -w must stay after
+# the -Werror line above.
 # Same generated-code exclusion as build:ci-build.
 build:ci-linux-arm64 --per_file_copt=.*\.pb\.cc@-w

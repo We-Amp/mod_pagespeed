@@ -379,7 +379,10 @@ build:ci-build --action_env=CC=clang --action_env=CXX=clang++
 # leg. Scoped per-file, mirroring the win-asan idiom.
 build:ci-build --per_file_copt=//pagespeed(/.*)?:.*,//net(/.*)?:.*,//test(/.*)?:.*,//base(/.*)?:.*,//third_party(/.*)?:.*,//tools(/.*)?:.*@-Werror,-ferror-limit=0
 # Third-party code is not ours to fix; keep first-party diagnostics
-# unchanged (same boundary the macOS build uses).
+# unchanged (same boundary the macOS build uses). Order matters: this
+# line must stay AFTER the -Werror line above - a few external repos
+# embed labels like //base/... that match the enforcement regex, and
+# the later -w is what keeps them unenforced.
 build:ci-build --per_file_copt=external/.*@-w
 # Protoc-generated sources are not hand-authored; keep them out of the
 # enforcement (warnings there are protobuf/protoc territory, and e.g.
