@@ -1076,10 +1076,6 @@ bool HtmlParse::TagAllowsBriefTermination(HtmlName::Keyword keyword) const {
 
 const DocType& HtmlParse::doctype() const { return lexer_->doctype(); }
 
-const ContentType& HtmlParse::content_type() const {
-  return lexer_->content_type();
-}
-
 void HtmlParse::InfoV(const char* file, int line, const char* msg,
                       va_list args) {
   message_handler_->InfoV(file, line, msg, args);

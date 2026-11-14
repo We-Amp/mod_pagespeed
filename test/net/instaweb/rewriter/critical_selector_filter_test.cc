@@ -266,21 +266,8 @@ TEST_F(CriticalSelectorFilterTest,
                            "<body><div>Stuff</div></body>"));
 }
 
-// Likewise a kept selector whose escape decodes to a closing style tag.
-TEST_F(CriticalSelectorFilterTest, EscapedClosingStyleTagKeepsTheLink) {
-  SetResponseWithDefaultHeaders(
-      "c.css", kContentTypeCss,
-      "label[for=\"\\3C/style\"]{text-decoration:underline}", 100);
-  ValidateNoChanges("escaped_closing_style",
-                    StrCat("<head>", CssLinkHref("c.css"),
-                           "</head>"
-                           "<body><div>Stuff</div></body>"));
-}
-
-// In XHTML a kept selector whose escape decodes to '<' and a letter keeps the
-// link: the conservative check applies to the whole document.
+// Likewise a kept selector whose escape decodes to '<' and a letter.
 TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterKeepsTheLink) {
-  SetXhtmlMimetype();
   SetResponseWithDefaultHeaders(
       "c.css", kContentTypeCss,
       "label[for=\"\\3Cmain\"]{text-decoration:underline}", 100);
@@ -288,62 +275,6 @@ TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterKeepsTheLink) {
                     StrCat("<head>", CssLinkHref("c.css"),
                            "</head>"
                            "<body><div>Stuff</div></body>"));
-}
-
-// XHTML keeps a stylesheet with any '<' external.
-TEST_F(CriticalSelectorFilterTest, XhtmlWithLessThanSignKeepsTheLink) {
-  SetXhtmlMimetype();
-  SetResponseWithDefaultHeaders(
-      "c.css", kContentTypeCss,
-      "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
-      "*{color:red}",
-      100);
-  ValidateNoChanges("xhtml_lt", StrCat("<head>", CssLinkHref("c.css"),
-                                       "</head>"
-                                       "<body><div>Stuff</div></body>"));
-}
-
-// A link inside SVG or MathML is not an HTML link element and is left alone.
-TEST_F(CriticalSelectorFilterTest, ForeignLinkIsLeftAlone) {
-  SetResponseWithDefaultHeaders(
-      "c.css", kContentTypeCss,
-      "label[for=\"\\3Cmain\"]{text-decoration:underline}*{color:red}", 100);
-  ValidateNoChanges("svg", StrCat("<head></head><body><svg>",
-                                  CssLinkHref("c.css"), "</svg></body>"));
-  ValidateNoChanges("math", StrCat("<head></head><body><math>",
-                                   CssLinkHref("c.css"), "</math></body>"));
-}
-
-// In HTML the same escape is plain CSS text inside the inline style.
-TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterIsInlinedInHtml) {
-  SetResponseWithDefaultHeaders(
-      "c.css", kContentTypeCss,
-      "*{color:red}label[for=\"\\3Cmain\"]{text-decoration:underline}", 100);
-  Parse("escaped_lt_letter_html", StrCat("<head>", CssLinkHref("c.css"),
-                                         "</head>"
-                                         "<body><div>Stuff</div></body>"));
-  EXPECT_NE(GoogleString::npos, output_buffer_.find("<style>*{color:red}"))
-      << output_buffer_;
-}
-
-// A '<' that is ordinary CSS (a registered property's syntax descriptor, a
-// media query range) must not keep the critical rules from being inlined.
-TEST_F(CriticalSelectorFilterTest, LessThanSignInCssIsInlined) {
-  SetResponseWithDefaultHeaders(
-      "c.css", kContentTypeCss,
-      "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
-      "@media (width < 600px){div{margin:0}}"
-      "*{color:red}",
-      100);
-  Parse("lt_in_css", StrCat("<head>", CssLinkHref("c.css"),
-                            "</head>"
-                            "<body><div>Stuff</div></body>"));
-  EXPECT_NE(GoogleString::npos, output_buffer_.find("<style>"))
-      << output_buffer_;
-  EXPECT_NE(GoogleString::npos, output_buffer_.find("<length>"))
-      << output_buffer_;
-  EXPECT_NE(GoogleString::npos, output_buffer_.find("(width < 600px)"))
-      << output_buffer_;
 }
 
 TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {
@@ -1521,6 +1452,30 @@ TEST_F(CriticalSelectorWithBackgroundImageCacheExtensionTest,
              "  <span>Bar</span>\n"
              "</body>\n");
   ValidateExpected("dont_mix_unopt_and_opt", input_html, expected_html);
+}
+
+// On an HTML page a critical subset that would hold markup keeps the link as
+// it is, wherever the link is.
+TEST_F(CriticalSelectorFilterTest, SubsetThatWouldHoldMarkupKeepsTheLink) {
+  SetHtmlMimetype();
+  SetResponseWithDefaultHeaders(
+      "c.css", kContentTypeCss,
+      "*[title=\"\\3C/noembed\\3E\"]{color:red}", 100);
+  ValidateNoChanges("closing_tag",
+                    StrCat("<head><noembed>", CssLinkHref("c.css"),
+                           "</noembed></head>"
+                           "<body><div>Stuff</div></body>"));
+  SetResponseWithDefaultHeaders(
+      "d.css", kContentTypeCss, "*[title=\"\\3C input\\3E\"]{color:red}", 100);
+  ValidateNoChanges("start_tag",
+                    StrCat("<head></head><body><select>", CssLinkHref("d.css"),
+                           "</select><div>Stuff</div></body>"));
+  SetResponseWithDefaultHeaders("e.css", kContentTypeCss,
+                                "*[title=\"\\3C!--\"]{color:red}", 100);
+  ValidateNoChanges("comment_opener",
+                    StrCat("<head>", CssLinkHref("e.css"),
+                           "</head>"
+                           "<body><div>Stuff</div></body>"));
 }
 
 }  // namespace

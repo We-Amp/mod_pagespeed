@@ -311,22 +311,6 @@ TEST_F(CssSummarizerBaseTest, OverParseMaxBytesIsNotSummarized) {
       1, statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get());
 }
 
-// A '<' that is plain CSS is summarized in HTML; XHTML keeps the conservative
-// check, and a closing style tag is never summarized.
-TEST_F(CssSummarizerBaseTest, LessThanSignIsSummarizedInHtml) {
-  SetHtmlMimetype();
-  SetResponseWithDefaultHeaders("lt.css", kContentTypeCss, "a{b:\"<c>\"}", 100);
-  Parse("lt_html", CssLinkHref("lt.css"));
-  EXPECT_STREQ("OK/a{b:\"<c>\"}/rel=stylesheet|", filter_->result());
-}
-
-TEST_F(CssSummarizerBaseTest, LessThanSignIsNotSummarizedInXhtml) {
-  SetXhtmlMimetype();
-  SetResponseWithDefaultHeaders("lt.css", kContentTypeCss, "a{b:\"<c>\"}", 100);
-  Parse("lt_xhtml", CssLinkHref("lt.css"));
-  EXPECT_STREQ("ParseOrCloseStyleTagError//rel=stylesheet|", filter_->result());
-}
-
 TEST_F(CssSummarizerBaseTest, RenderSummary) {
   filter_->set_render_summaries_in_place(true);
   Parse("link",

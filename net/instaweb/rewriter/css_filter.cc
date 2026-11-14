@@ -211,7 +211,6 @@ CssFilter::Context::Context(CssFilter* filter, RewriteDriver* driver,
       rewrite_inline_char_node_(nullptr),
       rewrite_inline_attribute_(nullptr),
       rewrite_inline_css_kind_(kInsideStyleTag),
-      conservative_markup_check_(true),
       in_text_size_(-1) {
   initial_css_base_gurl_.Reset(filter_->decoded_base_url());
   DCHECK(initial_css_base_gurl_.IsWebValid());
@@ -368,8 +367,6 @@ void CssFilter::Context::SetupInlineRewrite(HtmlElement* style_element,
   rewrite_inline_element_ = style_element;
   rewrite_inline_char_node_ = text;
   rewrite_inline_css_kind_ = kInsideStyleTag;
-  conservative_markup_check_ =
-      CssInlineFilter::NeedsConservativeMarkupCheck(Driver());
 }
 
 void CssFilter::Context::SetupAttributeRewrite(HtmlElement* element,
@@ -741,15 +738,12 @@ void CssFilter::Context::Harvest() {
       ServerContext* server_context = FindServerContext();
       server_context->MergeNonCachingResponseHeaders(input_resource_,
                                                      output_resource_);
-    } else if (CssInlineFilter::MayBreakInlineStyle(
-                   out_text, conservative_markup_check_)) {
+    } else if (CssInlineFilter::MayContainMarkup(out_text)) {
       // Leave the element unchanged when the serialized CSS could read as
-      // markup (or, in an HTML <style>, end the element early).
+      // markup.
       ok = false;
       mutable_output_partition(0)->add_debug_message(
-          conservative_markup_check_
-              ? "CSS not rewritten since it contains a less-than sign"
-              : "CSS not rewritten since it contains a closing style tag");
+          "CSS not rewritten since it contains a less-than sign");
     } else {
       mutable_output_partition(0)->set_inlined_data(out_text);
       mutable_output_partition(0)->set_is_inline_output_resource(true);
@@ -893,9 +887,6 @@ GoogleString CssFilter::Context::CacheKeySuffix() const {
         const Hasher* hasher = FindServerContext()->lock_hasher();
         StrAppend(&suffix, "_@",
                   hasher->Hash(initial_css_base_gurl_.AllExceptLeaf()));
-        if (!conservative_markup_check_) {
-          StrAppend(&suffix, "_n");
-        }
         break;
       }
 

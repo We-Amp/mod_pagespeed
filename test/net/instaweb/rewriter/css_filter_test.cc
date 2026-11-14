@@ -730,43 +730,12 @@ TEST_F(CssFilterTest, DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
       << output_buffer_;
 }
 
-// In XHTML, CSS that could read as markup after a rewrite is left as it was.
+// CSS that could read as markup after a rewrite is left as it was.
 TEST_F(CssFilterTest, InlineStyleDoesNotGainLiteralMarkup) {
-  SetXhtmlMimetype();
   ValidateNoChanges("selector",
                     "<style>li[title=\"1\\3C 2\\3E 0\"]{color:blue}</style>");
   ValidateNoChanges("charset", "<style>@charset \"\\3Cpre\";</style>");
   ValidateNoChanges("id_start_escape", "<style>#\\3Cnav{margin:2px}</style>");
-}
-
-// In HTML only a closing style tag is kept out of an inline <style>.
-TEST_F(CssFilterTest, InlineStyleWithClosingTagEscapeIsLeftAlone) {
-  SetHtmlMimetype();
-  ValidateNoChanges("closing_tag",
-                    "<style>a{content:\"\\3C/style\\3E\"}</style>");
-}
-
-// A '<' that is plain CSS (Tailwind 4 @property, media query ranges) does not
-// stop an inline <style> from being minified in HTML, but does in XHTML.
-TEST_F(CssFilterTest, InlineStyleWithLessThanSign) {
-  static const char kCss[] =
-      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
-      "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }"
-      "</style>";
-  SetHtmlMimetype();
-  ValidateExpected(
-      "html", kCss,
-      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
-      "initial-value: 0px }@media (width < 600px){p{margin:0}}</style>");
-}
-
-TEST_F(CssFilterTest, InlineStyleWithLessThanSignInXhtml) {
-  SetXhtmlMimetype();
-  ValidateNoChanges(
-      "xhtml",
-      "<style>@property --x { syntax: \"<length>\"; inherits: false; "
-      "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }"
-      "</style>");
 }
 
 // An inline <style> without markup characters is still minified.
@@ -3128,6 +3097,21 @@ TEST_F(CssFilterTestUrlNamer, AbsolutifyWithBom) {
       "do_absolutify_with_bom_without", css_input, expected_output,
       true /* expect_unparseable_section */, false /* enable_image_rewriting */,
       true /* enable_proxy_mode */, false /* enable_mapping_and_sharding */);
+}
+
+// On an HTML page an inline <style> whose rewritten text would hold markup is
+// left alone, wherever it is.
+TEST_F(CssFilterTest, InlineStyleThatWouldHoldMarkupIsLeftAlone) {
+  SetHtmlMimetype();
+  ValidateNoChanges("noscript",
+                    "<noscript><style>*[title=\"\\3C/noscript\\3E\"] "
+                    "{ color : red }</style></noscript>");
+  ValidateNoChanges("select",
+                    "<select><style>*[title=\"\\3C input\\3E\"] "
+                    "{ color : red }</style></select>");
+  ValidateNoChanges("frameset",
+                    "<frameset><style>*[title=\"\\3C frame\\3E\"] "
+                    "{ color : red }</style></frameset>");
 }
 
 }  // namespace
