@@ -36,8 +36,8 @@ kubectl get pods -n <namespace> -l app.kubernetes.io/name=pagespeed   # Helm: RE
 
 | Surface        | Header            | Value                                   | Processes                                |
 | -------------- | ----------------- | --------------------------------------- | ---------------------------------------- |
-| Apache, cPanel | `X-Mod-Pagespeed` | the module version                      | the module; the worker when installed    |
-| nginx, IIS     | `X-Page-Speed`    | the module version                      | the module; the worker when attached     |
+| Apache, cPanel | `X-Mod-Pagespeed` | `on` (the version with ExposeVersionInHeaders) | the module; the worker when installed    |
+| nginx, IIS     | `X-Page-Speed`    | `on` (the version with ExposeVersionInHeaders) | the module; the worker when attached     |
 | Docker, Helm   | `X-PageSpeed`     | `MISS`, `HIT`, `STALE` or `REVALIDATED` | the module and the worker                |
 | ASP.NET Core   | `X-PageSpeed`     | `MISS`, then `HIT`                      | the middleware and its in-process worker |
 
@@ -76,7 +76,7 @@ Retry at most 3 times a few seconds apart. Use a URL that returns an HTML page
 (`text/html`); the Docker and Helm proxies add the header only to a 2xx
 response, and the ASP.NET Core middleware only to HTML it rewrites.
 
-- `X-Mod-Pagespeed` or `X-Page-Speed` with a version: the module is loaded and
+- `X-Mod-Pagespeed` or `X-Page-Speed` (value `on`, or the version): the module is loaded and
   `pagespeed on` applies to that site.
 - `X-PageSpeed: MISS`: the module is active. `HIT` on a later request means the
   worker wrote the optimized variant. `MISS` on every request:

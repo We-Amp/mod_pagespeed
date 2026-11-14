@@ -57,8 +57,10 @@ Filters are turned on in that file: https://modpagespeed.com/docs/configuration/
 curl -s -o /dev/null -D - '<site-url>/?mps-verify=agent' | grep -i '^x-mod-pagespeed:'
 ```
 
-Pass: one `X-Mod-Pagespeed: <version>` line; the header is on every HTML
-response the module handles. No header:
+Pass: one `X-Mod-Pagespeed` line, normally `X-Mod-Pagespeed: on`; match on
+presence, not on a value (the value is the version only with
+`ModPagespeedExposeVersionInHeaders on`, or whatever `ModPagespeedXHeaderValue`
+sets). The header is on every HTML response the module handles. No header:
 https://modpagespeed.com/docs/troubleshooting/#no-x-mod-pagespeed-or-x-page-speed-header
 
 ## 5. Rollback

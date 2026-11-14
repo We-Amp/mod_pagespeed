@@ -114,7 +114,7 @@ https://modpagespeed.com/docs/iis-configuration/
 (Invoke-WebRequest '<site-url>/?mps-verify=agent' -UseBasicParsing).Headers['X-Page-Speed']
 ```
 
-Pass: the module version is printed; the header is on every HTML response the
+Pass: a value is printed, normally `on` (the version only with `ExposeVersionInHeaders on`); the header is on every HTML response the
 module handles. A new per-site file is picked up on the next request; if
 nothing is printed, run `iisreset` once and verify again. Still nothing:
 https://modpagespeed.com/docs/troubleshooting/#no-x-mod-pagespeed-or-x-page-speed-header

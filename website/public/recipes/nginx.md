@@ -106,7 +106,9 @@ https://modpagespeed.com/docs/installation-module/#native-nginx-module.
 curl -s -o /dev/null -D - '<site-url>/?mps-verify=agent' | grep -i '^x-page-speed:'
 ```
 
-Pass: one `X-Page-Speed: <version>` line; the header is on every HTML response
+Pass: one `X-Page-Speed` line, normally `X-Page-Speed: on`; match on presence,
+not on a value (the value is the version only with `ExposeVersionInHeaders on`,
+or whatever `XHeaderValue` sets). The header is on every HTML response
 the module handles. No header:
 https://modpagespeed.com/docs/troubleshooting/#no-x-mod-pagespeed-or-x-page-speed-header
 
