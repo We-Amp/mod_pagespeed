@@ -541,7 +541,10 @@ export function buildModuleDirectives(moduleSrc, warnings) {
       valueType: null,
       args: 'value',
       default: null,
-      description: 'Removed option; the name is still accepted and ignored.',
+      description:
+        d.origin === 'apache'
+          ? 'Removed option; the name is still accepted and ignored.'
+          : 'Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.',
       descriptionSource: 'generator',
       descriptionByPlatform: {},
       platforms: d.origin === 'apache' ? ['apache'] : ['apache', 'nginx'],

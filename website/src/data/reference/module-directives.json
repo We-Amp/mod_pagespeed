@@ -2568,7 +2568,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -2602,7 +2602,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -2636,7 +2636,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -2670,7 +2670,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -3838,7 +3838,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -3872,7 +3872,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "server",
       "valueType": null,
@@ -7219,7 +7219,7 @@
         "query": false
       },
       "since": null,
-      "description": "Removed option; the name is still accepted and ignored.",
+      "description": "Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.",
       "descriptionSource": "generator",
       "scope": "directory",
       "valueType": null,

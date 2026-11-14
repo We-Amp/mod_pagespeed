@@ -3,11 +3,11 @@ title: 'Migrate from ngx_pagespeed'
 description: 'Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed 2 nginx module: what carries over.'
 order: 13
 group: 'Upgrade and migrate'
-lastUpdated: 2026-10-30
+lastUpdated: 2026-11-14
 datePublished: 2026-10-08
 faq:
   - q: 'Do my pagespeed directives carry over from ngx_pagespeed?'
-    a: 'Yes. The native nginx module keeps the `pagespeed` directive surface and the classic filter names. Every directive loads; a handful of long-inert filters and experimental options are accepted and ignored with a warning, and four directives are new.'
+    a: 'Yes. The native nginx module keeps the `pagespeed` directive surface and the classic filter names. Every directive loads; a handful of long-inert filters and experimental options are accepted and ignored with a warning, and four directives are new. The exception is seven removed names that stop nginx from starting (listed under Configuration compatibility); remove them.'
   - q: 'Why does nginx refuse to load the new module?'
     a: 'Each module build is pinned to the exact nginx version your distribution ships. An nginx from another repository, including the one a third-party ngx_pagespeed package was built against, has a different version string and nginx refuses the module. Run the stock nginx, or contact us for a matching build.'
 ---
@@ -76,6 +76,7 @@ repository and set two directives; see
 | Directives and filters                                                                                                                                                                                                                             | Status in mod_pagespeed 2                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `pagespeed on/off`, `RewriteLevel`, `EnableFilters`, `DisableFilters`, `ForbidFilters`, `Domain`, `MapOriginDomain`, `MapRewriteDomain`, `MapProxyDomain`, `LoadFromFile`, the admin and statistics paths, `FetchHttps`, `UseNativeFetcher` and the rest of the [configuration reference](/docs/configuration/) | Carry over unchanged                                                                                                          |
+| `DistributeFetches`, `DistributedRewriteKey`, `DistributedRewriteServers`, `DistributedRewriteTimeoutMs`, `FileCacheCleanIntervalMs`, `FileCacheInodeLimit` and `MaxPrefetchJsElements` | Removed. Unlike Apache, which warns and carries on, nginx does not recognize these names: `nginx -t` fails with `directive "FileCacheInodeLimit" not recognized` and nginx will not start. Delete the lines; none has a replacement. The disk cache stays within `FileCacheSizeKb` |
 | `FileCachePath`                                                                                                                                                                                                                                    | Accepted; the module keeps its Cyclone volume under it                                                                        |
 | `ShardDomain`                                                                                                                                                                                                                                      | Works, logs a deprecation warning: sharding hurts with HTTP/2 and HTTP/3. Remove it                                           |
 | `UseExperimentalJsMinifier`                                                                                                                                                                                                                        | Accepted and ignored; the tokenizer-based minifier is the only one, the legacy minifier was removed                           |
@@ -85,7 +86,7 @@ repository and set two directives; see
 | `insert_ga`, `AnalyticsID`                                                                                                                                                                                                                         | Deprecated with a warning: Universal Analytics stopped processing hits in 2023                                                |
 | `DaemonSocketPath`, `DaemonVolumePath`, `DaemonApiSocketPath`, `DaemonServeStoredEncodings`                                                                                                                                                        | New: hand in-place optimization to the optimizer worker                                                                       |
 
-No directive was renamed. The `.pagespeed.` resource URLs, the `X-Page-Speed`
+Apart from the seven removed names above, no directive was renamed. Run `sudo nginx -t` before you restart: it prints every deprecation warning and stops at the first directive it rejects. The `.pagespeed.` resource URLs, the `X-Page-Speed`
 header and the beacon paths are unchanged, so existing CDN rules keep working.
 
 ## The cache

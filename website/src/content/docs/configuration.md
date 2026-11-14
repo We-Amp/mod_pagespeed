@@ -3123,7 +3123,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### DistributedRewriteServers {#distributedrewriteservers}
 
@@ -3131,7 +3131,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### DistributedRewriteTimeoutMs {#distributedrewritetimeoutms}
 
@@ -3139,7 +3139,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### DistributeFetches {#distributefetches}
 
@@ -3147,7 +3147,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### ExperimentalCentralControllerPort {#experimentalcentralcontrollerport}
 
@@ -3196,7 +3196,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### FileCacheInodeLimit {#filecacheinodelimit}
 
@@ -3204,7 +3204,7 @@ Removed option; the name is still accepted and ignored.
 - **Default:** —
 - **Context:** Apache: server config, virtual host · nginx: http, server
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### GeneratedFilePrefix {#generatedfileprefix}
 
@@ -3298,7 +3298,7 @@ Deprecated and ignored (configured the mobilize filter).
 - **Default:** —
 - **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
 
-Removed option; the name is still accepted and ignored.
+Removed option. Apache still accepts the name and ignores it, with a warning. nginx does not recognize it: `nginx -t` fails and nginx will not start until you remove the line. It has no replacement.
 
 #### NumShards {#numshards}
 
