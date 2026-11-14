@@ -35,6 +35,7 @@ extern "C" {
 #include <set>
 
 #include "pagespeed/kernel/base/md5_hasher.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/daemon_adapter_pool.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
@@ -151,6 +152,13 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
     return false;
   }
 
+  // Returns true the first time a given deprecated option name is seen
+  // (case-insensitively) by this factory, so the deprecation warning is logged
+  // once per name per configuration load rather than once per occurrence.
+  bool FirstUseOfDeprecatedOption(StringPiece name) {
+    return deprecated_options_seen_.insert(name.as_string()).second;
+  }
+
  private:
   bool threads_started_;
   NgxMessageHandler* ngx_message_handler_;
@@ -177,6 +185,7 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   bool shut_down_;
   int worker_process_count_;
   DaemonAdapterPool daemon_adapter_pool_;
+  StringSetInsensitive deprecated_options_seen_;
 
   NgxRewriteDriverFactory(const NgxRewriteDriverFactory&) = delete;
   NgxRewriteDriverFactory& operator=(const NgxRewriteDriverFactory&) = delete;
