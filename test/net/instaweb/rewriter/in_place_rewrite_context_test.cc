@@ -1113,6 +1113,37 @@ TEST_F(InPlaceRewriteContextTest, CacheablePngUrlRewritingFails) {
   CheckWarmCache("second_fetch_7");
 }
 
+// A resource the optimizer cannot improve, from an origin that gives it a
+// one-year lifetime (archived upstream issue
+// apache/incubator-pagespeed-mod#1485): only the serve before the in-place
+// decision carries the injected s-maxage. Once the rewrite is recorded as not
+// applicable, every later serve keeps the origin's full lifetime and has no
+// s-maxage. This covers the in-place rewrite context only; the nginx and
+// Apache adapters' header handling is not exercised here.
+TEST_F(InPlaceRewriteContextTest, UnimprovableResourceLosesSMaxAgeOnceDecided) {
+  Init();
+  const GoogleString url = "http://www.example.com/already_optimal.png";
+  AddResponse(url, kContentTypePng, cache_body_, start_time_ms(),
+              Timer::kYearMs, original_etag_, "", kWriteToCache, kTransform);
+  img_filter_->set_enabled(false);
+
+  FetchAndCheckResponse(url, cache_body_, true, kInjectedSMaxAgeMs,
+                        original_etag_, start_time_ms());
+  EXPECT_TRUE(
+      response_headers_.HasValue(HttpAttributes::kCacheControl, "s-maxage=10"))
+      << response_headers_.ToString();
+
+  for (int i = 0; i < 3; ++i) {
+    ResetHeadersAndStats();
+    FetchAndCheckResponse(url, cache_body_, true, Timer::kYearMs,
+                          original_etag_, start_time_ms());
+    EXPECT_EQ(GoogleString::npos,
+              response_headers_.LookupJoined(HttpAttributes::kCacheControl)
+                  .find("s-maxage"))
+        << "serve " << i + 2 << ": " << response_headers_.ToString();
+  }
+}
+
 TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingSucceeds) {
   Init();
   // First serve streams the not-yet-optimized bytes.
