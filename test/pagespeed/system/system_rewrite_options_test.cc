@@ -474,6 +474,39 @@ TEST_F(SystemRewriteOptionsTest, RedisPasswordIsRedactedInOptionsOutput) {
   EXPECT_THAT(output, ::testing::HasSubstr("cache-user"));
 }
 
+// CustomFetchHeader is a two-argument option kept outside the property
+// registry, so it cannot be marked secret. Its value often is one (an
+// authorization header for the origin), and the admin Configuration page and
+// the console's diagnostics bundle show OptionsToString(): it must never print
+// a custom fetch header, also after the options are merged or cloned.
+TEST_F(SystemRewriteOptionsTest, CustomFetchHeaderValueNeverInOptionsOutput) {
+  GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
+  const char kValue[] = "Bearer cfh-s3cret-value-9b1e";
+  ASSERT_EQ(options_.ParseAndSetOptionFromName2(
+                RewriteOptions::kCustomFetchHeader, "Authorization", kValue,
+                &msg, &handler),
+            RewriteOptions::kOptionOk);
+  ASSERT_EQ(1, options_.num_custom_fetch_headers());
+  EXPECT_EQ(kValue, options_.custom_fetch_header(0)->value);
+  options_.set_file_cache_path("/var/cache/cfh-marker");
+
+  GoogleString output = options_.OptionsToString();
+  EXPECT_THAT(output, ::testing::HasSubstr("/var/cache/cfh-marker"));
+  EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("cfh-s3cret")));
+
+  SystemRewriteOptions merged("merged", &thread_system_);
+  merged.Merge(options_);
+  ASSERT_EQ(1, merged.num_custom_fetch_headers());
+  EXPECT_THAT(merged.OptionsToString(),
+              ::testing::Not(::testing::HasSubstr("cfh-s3cret")));
+
+  std::unique_ptr<SystemRewriteOptions> clone(options_.Clone());
+  ASSERT_EQ(1, clone->num_custom_fetch_headers());
+  EXPECT_THAT(clone->OptionsToString(),
+              ::testing::Not(::testing::HasSubstr("cfh-s3cret")));
+}
+
 TEST_F(SystemRewriteOptionsTest, RedisServerUnixSocket) {
   GoogleString msg;
   MockMessageHandler handler(thread_system_.NewMutex());
