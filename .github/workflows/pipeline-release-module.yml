@@ -4478,6 +4478,22 @@ jobs:
       RELEASE_KEY_FPR: 411DEFDB571351D2B25AEFCC9C02B5BDCCE75313
       TAG: ${{ needs.version.outputs.tag }}
     steps:
+      # The Sigstore certificate and the attestations record the run's ref
+      # (the caller's github.ref), and the verify commands in SECURITY.md name
+      # the release tag. A real run started any other way (a dispatch from a
+      # branch) would produce a signature those commands refuse, so it stops
+      # here, before anything is signed. Dispatch from the tag instead:
+      # gh workflow run release.yml --ref <tag> -f tag=<tag> -f dry_run=false
+      - name: The run's ref is the release tag
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/module-v*) ;;
+            *) echo "::error::a real run signs and attests from a module-v* tag ref, not '${GITHUB_REF}'; nothing was signed. Push the tag, or dispatch with --ref ${TAG}"; exit 1 ;;
+          esac
+          [ "$GITHUB_REF" = "refs/tags/${TAG}" ] \
+            || { echo "::error::the run's ref '${GITHUB_REF}' is not the release tag refs/tags/${TAG}; nothing was signed"; exit 1; }
+
       - name: Download the validated asset set
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -4655,16 +4671,16 @@ jobs:
           cosign verify-blob assets/SHA256SUMS --bundle signature/SHA256SUMS.sigstore.json \
             --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-github-workflow-ref "$GITHUB_REF"
+            --certificate-github-workflow-ref "refs/tags/${TAG}"
           one="assets/$(head -n 1 "${RUNNER_TEMP}/attest/packages.txt")"
           gh attestation verify "$one" --repo "$GITHUB_REPOSITORY" \
-            --cert-identity "$IDENTITY" --source-ref "$GITHUB_REF"
+            --cert-identity "$IDENTITY" --source-ref "refs/tags/${TAG}"
           gh attestation verify "$one" --repo "$GITHUB_REPOSITORY" \
-            --cert-identity "$IDENTITY" --source-ref "$GITHUB_REF" \
+            --cert-identity "$IDENTITY" --source-ref "refs/tags/${TAG}" \
             --predicate-type https://spdx.dev/Document/v2.3
           gh attestation verify assets/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --cert-identity "$IDENTITY" --source-ref "$GITHUB_REF"
-          echo "Sigstore signature and attestations verified against the pinned workflow identity (${GITHUB_REF})" >> "$GITHUB_STEP_SUMMARY"
+            --cert-identity "$IDENTITY" --source-ref "refs/tags/${TAG}"
+          echo "Sigstore signature and attestations verified against the pinned workflow identity and refs/tags/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the signatures
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

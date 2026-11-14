@@ -518,8 +518,11 @@ It does everything a dry run does, and then, in this order:
    SBOM attestation binding the SPDX SBOM to each module package; signs
    `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`); and verifies the
    bundle and the attestations against the signer identity
-   `pipeline-release-module.yml@refs/heads/master` and the run's ref, as a
-   user would. The pinned optimizer packages are not attested here: their
+   `pipeline-release-module.yml@refs/heads/master` and the release tag, as a
+   user would. Its first step refuses a run whose ref (`github.ref`, which
+   the certificate records) is not `refs/tags/<the tag>`, before anything is
+   signed: a dispatched real run must be started with `--ref <tag>`, so the
+   documented verify commands always name the tag. The pinned optimizer packages are not attested here: their
    attestations are in the pagespeed-optimizer repository. In an adopting
    run the attestation names the releasing run; `manifest.json`, an attested
    subject, names the candidate run that built the files (`build_run_id`).
