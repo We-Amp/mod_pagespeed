@@ -124,6 +124,10 @@ AGNOSTIC_FLAGS = {
     "-Wall", "-Wextra",
     "-w",
     "-Werror", "-ferror-limit=0",
+    # scoped -Wextra suppressions on the enforced CI legs (valid for C
+    # and C++ alike; see the build:ci-build block in .bazelrc)
+    "-Wno-unused-parameter", "-Wno-missing-field-initializers",
+    "-Wno-sign-compare", "-Wno-cast-function-type-mismatch",
     "-Wno-deprecated-declarations",
     "-Wno-unknown-warning-option",
     # debug-info level: valid for C and C++ alike (sanitizer configs use it

@@ -242,8 +242,26 @@ build:ci-linux-arm64 --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"
 # First-party warnings fail this leg, mirroring the x64 full-tier build's
 # ci-build lines; the generated-code exclusion is in the same block.
 build:ci-linux-arm64 --per_file_copt=//pagespeed(/.*)?:.*,//net(/.*)?:.*,//test(/.*)?:.*,//base(/.*)?:.*,//third_party(/.*)?:.*,//tools(/.*)?:.*@-Werror,-ferror-limit=0
+# Same -Wextra escalation as build:ci-build, with the same scoped
+# exclusions in the same order below.
+build:ci-linux-arm64 --copt=-Wextra
 build:ci-linux-arm64 --per_file_copt=external/.*@-w
 # Order matters as in build:ci-build: the external -w must stay after
 # the -Werror line above.
+# Unused parameters are interface noise, not bugs; suppressed by policy.
+build:ci-linux-arm64 --copt=-Wno-unused-parameter
+# gperf's generated .gp.cc files are machine-written, not hand-authored;
+# their missing field initializers are the generator's own style. Order
+# matters: this -Wno form must stay AFTER the -Werror line above.
+build:ci-linux-arm64 --per_file_copt=.*\.gp\.cc@-Wno-missing-field-initializers
+# The vendored css_parser keeps its own sign-compare findings; we do not
+# edit third-party sources. Order matters: this -Wno form must stay
+# AFTER the -Werror line above.
+build:ci-linux-arm64 --per_file_copt=.*css_parser.*@-Wno-sign-compare
+# The Apache AP_INIT_* module-command table casts typed handlers to the
+# generic function type the httpd module API itself defines; the idiom
+# is confined to one file. Order matters: this -Wno form must stay
+# AFTER the -Werror line above.
+build:ci-linux-arm64 --per_file_copt=.*mod_instaweb\.cc@-Wno-cast-function-type-mismatch
 # Same generated-code exclusion as build:ci-build.
 build:ci-linux-arm64 --per_file_copt=.*\.pb\.cc@-w
