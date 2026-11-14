@@ -27,6 +27,7 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <map>  // for map<>::const_iterator
 #include <memory>
@@ -93,6 +94,8 @@ const char kRewriteContextLockPrefix[] = "rc:";
 const int kOtherDependencyPartitionIndex = -1;
 // How many inputs of a resource fetch are loaded at the same time.
 const int kMaxConcurrentFetchInputs = 4;
+// The smallest well-formed gzip stream.
+const size_t kMinGzipBytes = 18;
 
 }  // namespace
 
@@ -862,7 +865,9 @@ class RewriteContext::FetchContext {
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
       if (output_resource_->hash() == requested_hash_) {
-        response_headers->CopyFrom(*(output_resource_->response_headers()));
+        // The body below is the uncompressed one, so the headers must
+        // describe that one as well.
+        response_headers->CopyFrom(*(output_resource_->UncompressedHeaders()));
         // Use the most conservative Cache-Control considering all inputs.
         AdjustCacheControl();
         // The requested URL committed to exactly this content by
@@ -881,9 +886,8 @@ class RewriteContext::FetchContext {
               response_headers);
         }
         StringPiece contents = output_resource_->ExtractUncompressedContents();
-        async_fetch_->set_content_length(contents.size());
-        async_fetch_->HeadersComplete();
-        ok = async_fetch_->Write(contents, handler_);
+        ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
+                                                async_fetch_, handler_);
       } else if (rewrite_context_->FailOnHashMismatch()) {
         FailForHashMismatch();
         return;
@@ -891,7 +895,7 @@ class RewriteContext::FetchContext {
         // Our rewrite produced a different hash than what was requested;
         // we better not give it an ultra-long TTL.
         StringPiece contents = output_resource_->ExtractUncompressedContents();
-        FetchFallbackDone(contents, output_resource_->response_headers());
+        FetchFallbackDone(contents, output_resource_->UncompressedHeaders());
         return;
       }
     } else {
@@ -906,7 +910,10 @@ class RewriteContext::FetchContext {
           // TODO(sligocki): Log variable for number of failed rewrites in
           // fetch path.
 
-          response_headers->CopyFrom(*input_resource->response_headers());
+          // The original is served uncompressed (see below), so take the
+          // headers that describe the uncompressed body, not those of a
+          // compressed stored copy.
+          response_headers->CopyFrom(*input_resource->UncompressedHeaders());
           if (rewrite_context_->num_output_partitions() >= 1) {
             // output_partition() returns &partitions_->partition(i) — address
             // of a protobuf element, never null when index is in range.
@@ -961,7 +968,7 @@ class RewriteContext::FetchContext {
   // serve the original. In this case, we serve it out, but with shorter headers
   // than usual.
   void FetchFallbackDone(const StringPiece& contents,
-                         ResponseHeaders* headers) {
+                         const ResponseHeaders* headers) {
     CancelDeadlineAlarm();
     if (detached_) {
       rewrite_context_->Driver()->DetachedFetchComplete();
@@ -3562,11 +3569,56 @@ bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
   if (!IsFallbackContentTypeAllowed(output_url_base, async_fetch, handler)) {
     return false;
   }
+  return WriteWholeResponse(output_url_base, contents, async_fetch, handler);
+}
 
+bool RewriteContext::WriteWholeResponse(StringPiece url, StringPiece contents,
+                                        AsyncFetch* async_fetch,
+                                        MessageHandler* handler) {
+  return CompleteWholeResponseHeaders(url, contents, async_fetch, handler) &&
+         async_fetch->Write(contents, handler);
+}
+
+bool RewriteContext::CompleteWholeResponseHeaders(StringPiece url,
+                                                  StringPiece contents,
+                                                  AsyncFetch* async_fetch,
+                                                  MessageHandler* handler) {
+  ResponseHeaders* headers = async_fetch->response_headers();
+  const char* mismatch = nullptr;
+  int64 declared_length = 0;
+  if (headers->FindContentLength(&declared_length) &&
+      declared_length != static_cast<int64>(contents.size())) {
+    mismatch = "its Content-Length is not the length of the body";
+  } else if (headers->IsGzipped() &&
+             (contents.size() < kMinGzipBytes ||
+              static_cast<unsigned char>(contents[0]) != 0x1f ||
+              static_cast<unsigned char>(contents[1]) != 0x8b)) {
+    // 18 bytes is the smallest gzip member: a 10-byte header, an empty
+    // deflate block and the 8-byte trailer.
+    mismatch = "it is labelled gzip but the body is not gzip";
+  }
+  if (mismatch != nullptr) {
+    // Log the first occurrence and then one in every 1024.
+    static std::atomic<int64> mismatches{0};
+    int64 seen = mismatches.fetch_add(1, std::memory_order_relaxed);
+    if ((seen % 1024) == 0) {
+      handler->Message(kWarning,
+                       "Refusing to serve %s: %s (%s-byte body, %s such "
+                       "responses so far)",
+                       url.as_string().c_str(), mismatch,
+                       Integer64ToString(contents.size()).c_str(),
+                       Integer64ToString(seen + 1).c_str());
+    }
+    headers->Clear();
+    headers->SetStatusAndReason(HttpStatus::kInternalServerError);
+    headers->SetContentLength(0);
+    async_fetch->set_content_length(0);
+    async_fetch->HeadersComplete();
+    return false;
+  }
   async_fetch->set_content_length(contents.size());
   async_fetch->HeadersComplete();
-
-  return async_fetch->Write(contents, handler);
+  return true;
 }
 
 AsyncFetch* RewriteContext::async_fetch() {

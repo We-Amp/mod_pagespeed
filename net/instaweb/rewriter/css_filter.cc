@@ -77,8 +77,10 @@
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
@@ -278,10 +280,6 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
     return false;
   }
 
-  // Do not set the content length, since we may need to mutate the
-  // content as we stream out the bytes to correct for URL changes.
-  async_fetch->HeadersComplete();
-
   DCHECK_EQ(1, num_slots());
   ResourcePtr input_resource(slot(0)->resource());
   DCHECK(input_resource.get() != nullptr);
@@ -292,29 +290,46 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
   GoogleUrl css_trim_gurl_to_use;
   GetCssTrimUrlToUse(input_resource, output_url_base, &css_trim_gurl_to_use);
 
-  bool ret = false;
-  switch (Driver()->ResolveCssUrls(css_base_gurl_to_use,
-                                   css_trim_gurl_to_use.Spec(), input_contents,
-                                   async_fetch, handler)) {
-    case RewriteDriver::kNoResolutionNeeded:
-    case RewriteDriver::kWriteFailed:
-      // If kNoResolutionNeeded, we just write out the input_contents, because
-      // nothing needed to be changed.
-      //
-      // If kWriteFailed, this means that the URLs couldn't be transformed
-      // (or that writer->Write() actually failed ... I think this shouldn't
-      // generally happen). So, we just push out the unedited original,
-      // figuring that must be better than nothing.
-      //
-      // TODO(sligocki): In the fetch path ResolveCssUrls should never fail
-      // to transform URLs. We should just absolutify all the ones we can.
-      ret = async_fetch->Write(input_contents, handler);
-      break;
-    case RewriteDriver::kSuccess:
-      ret = true;
-      break;
+  // The URLs in the stylesheet may need correcting for the URL it is served
+  // under. Correction works on the stylesheet's text, so a compressed copy is
+  // inflated first; if it cannot be, it is served as stored, with the headers
+  // that describe it. The corrected text is resolved before the headers go
+  // out, so they can describe it. If no URL needs changing, or they cannot be
+  // changed, the input is served as it is, with its own headers.
+  ResponseHeaders* headers = async_fetch->response_headers();
+  StringPiece text = input_contents;
+  GoogleString inflated;
+  const bool compressed = headers->IsGzipped();
+  if (compressed) {
+    StringWriter inflate_writer(&inflated);
+    int64 limit = FindServerContext()
+                      ->global_options()
+                      ->max_cacheable_response_content_length();
+    if (!GzipInflater::InflateWithLimit(
+            input_contents, GzipInflater::kGzip,
+            limit < 0 ? static_cast<size_t>(-1) : static_cast<size_t>(limit),
+            &inflate_writer)) {
+      return WriteWholeResponse(output_url_base, input_contents, async_fetch,
+                                handler);
+    }
+    text = inflated;
   }
-  return ret;
+  GoogleString resolved;
+  StringWriter resolved_writer(&resolved);
+  if (Driver()->ResolveCssUrls(
+          css_base_gurl_to_use, css_trim_gurl_to_use.Spec(), text,
+          &resolved_writer, handler) != RewriteDriver::kSuccess) {
+    return WriteWholeResponse(output_url_base, input_contents, async_fetch,
+                              handler);
+  }
+  if (compressed) {
+    headers->Remove(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+    headers->SetContentLength(resolved.size());
+    headers->ComputeCaching();
+  } else if (headers->Has(HttpAttributes::kContentLength)) {
+    headers->SetContentLength(resolved.size());
+  }
+  return WriteWholeResponse(output_url_base, resolved, async_fetch, handler);
 }
 
 bool CssFilter::Context::PolicyPermitsRendering() const {

@@ -424,7 +424,7 @@ void InPlaceRewriteContext::Harvest() {
         // prepare the output here. Most of this is translated from
         // RewriteContext::FetchContext::FetchDone
         output_resource_->response_headers()->CopyFrom(
-            *(nested_resource->response_headers()));
+            *(nested_resource->UncompressedHeaders()));
         Writer* writer =
             output_resource_->BeginWrite(Driver()->message_handler());
         writer->Write(nested_resource->ExtractUncompressedContents(),
@@ -677,10 +677,10 @@ class NonHttpResourceCallback : public Resource::AsyncCallback {
   void Done(bool lock_failure, bool resource_ok) override {
     if (!lock_failure && resource_ok) {
       async_fetch_->response_headers()->CopyFrom(
-          *resource()->response_headers());
-      async_fetch_->Write(resource()->ExtractUncompressedContents(),
-                          message_handler_);
-      async_fetch_->Done(true);
+          *resource()->UncompressedHeaders());
+      async_fetch_->Done(RewriteContext::WriteWholeResponse(
+          resource()->url(), resource()->ExtractUncompressedContents(),
+          async_fetch_, message_handler_));
     } else {
       // TODO(jmarantz): If we're in proxy mode, we must always
       // produce the result.  If we're in origin mode, it's OK to fail.

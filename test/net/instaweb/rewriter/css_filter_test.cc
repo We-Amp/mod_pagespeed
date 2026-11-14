@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/html_node.h"
@@ -51,6 +52,10 @@
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/prepared_style_text_recorder.h"
@@ -553,6 +558,253 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   EXPECT_TRUE(out_headers.FindContentLength(&content_length));
   EXPECT_EQ(STATIC_STRLEN(kCss), content_length);
   EXPECT_FALSE(out_headers.IsGzipped());
+}
+
+// With the HTTP cache storing compressed copies (HttpCacheCompressionLevel
+// above zero), .pagespeed. stylesheets requested by a client that accepts
+// gzip must come back consistent: the declared coding is the body's coding,
+// a Content-Length is the number of bytes sent, and the decoded body is the
+// stylesheet.
+class CssFilterGzipConsistencyTest : public CssFilterTestCustomOptions {
+ protected:
+  // Fetches `url` as a client that sends "Accept-Encoding: gzip" (or, with
+  // `accept_gzip` false, no Accept-Encoding), checks the response is
+  // consistent, and returns the decoded body in `decoded` and whether the
+  // body was gzip in `gzipped`. Returns whether the fetch succeeded.
+  bool FetchConsistent(const GoogleString& url, bool accept_gzip,
+                       GoogleString* decoded, bool* gzipped = nullptr) {
+    RequestHeaders request_headers;
+    PopulateRequestHeaders(&request_headers);
+    if (accept_gzip) {
+      request_headers.Replace(HttpAttributes::kAcceptEncoding,
+                              HttpAttributes::kGzip);
+    } else {
+      request_headers.RemoveAll(HttpAttributes::kAcceptEncoding);
+    }
+    rewrite_driver()->SetRequestHeaders(request_headers);
+    GoogleString raw;
+    StringAsyncFetch async_fetch(rewrite_driver()->request_context(), &raw);
+    async_fetch.set_request_headers(&request_headers);
+    ResponseHeaders response;
+    async_fetch.set_response_headers(&response);
+    bool fetched = rewrite_driver()->FetchResource(url, &async_fetch);
+    rewrite_driver()->WaitForShutDown();
+    ClearRewriteDriver();
+    EXPECT_EQ(fetched, async_fetch.done());
+    if (!fetched || !async_fetch.success()) {
+      return false;
+    }
+    int64 content_length = 0;
+    if (response.FindContentLength(&content_length)) {
+      EXPECT_EQ(static_cast<int64>(raw.size()), content_length)
+          << "Content-Length is not the number of bytes sent for " << url;
+    }
+    // Some servers frame the response with this length instead.
+    if (async_fetch.content_length_known()) {
+      EXPECT_EQ(static_cast<int64>(raw.size()), async_fetch.content_length())
+          << "the length passed on is not the number of bytes sent for " << url;
+    }
+    decoded->clear();
+    if (gzipped != nullptr) {
+      *gzipped = response.IsGzipped();
+    }
+    if (response.IsGzipped()) {
+      EXPECT_TRUE(accept_gzip) << "gzip sent to a client without gzip";
+      StringWriter writer(decoded);
+      EXPECT_TRUE(GzipInflater::Inflate(raw, GzipInflater::kGzip, &writer))
+          << "labelled gzip but the body is not gzip for " << url;
+    } else {
+      *decoded = raw;
+    }
+    return true;
+  }
+
+  bool FetchAcceptingGzip(const GoogleString& url, GoogleString* decoded) {
+    return FetchConsistent(url, true, decoded);
+  }
+
+  // How many times a rewrite of a stylesheet was attempted and found it over
+  // CssParseMaxBytes; flat once the failure is remembered.
+  int64 ParseMaxBytesExceeded() {
+    return statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get();
+  }
+
+  static GoogleString WithoutWhitespace(StringPiece in) {
+    GoogleString out;
+    for (char c : in) {
+      if (!IsHtmlSpace(c)) {
+        out.push_back(c);
+      }
+    }
+    return out;
+  }
+
+  // Puts `css` at `url` and loads it once, so the HTTP cache holds the
+  // compressed copy the module's own fetch stores.
+  void SeedCompressedInput(const GoogleString& url, StringPiece css) {
+    ResponseHeaders headers;
+    DefaultResponseHeaders(kContentTypeCss, 5000, &headers);
+    SetFetchResponse(url, headers, css);
+    ResourcePtr input(
+        rewrite_driver()->CreateInputResourceAbsoluteUncheckedForTestsOnly(
+            url));
+    MockResourceCallback callback(input, server_context()->thread_system());
+    input->LoadAsync(Resource::kReportFailureIfNotCacheable,
+                     rewrite_driver()->request_context(), &callback);
+    ASSERT_TRUE(callback.done());
+    ASSERT_TRUE(callback.success());
+    ClearRewriteDriver();
+  }
+};
+
+// The rewrite fails (here: the stylesheet is over CssParseMaxBytes), so the
+// original stylesheet is served in its place, from the compressed cache
+// entry, on the first request and on the requests after it.
+TEST_F(CssFilterGzipConsistencyTest, FailedRewriteServesAConsistentOriginal) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { color: red; }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    EXPECT_EQ(css, decoded);
+  }
+  // Only the first request tried the rewrite; the others served the
+  // remembered failure's original from the cache.
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+}
+
+// As above, but the stylesheet's resources are mapped to another domain, so
+// its relative URLs are corrected on the way out and the body is longer than
+// the stored original. Gzip and plain clients get the same stylesheet.
+TEST_F(CssFilterGzipConsistencyTest,
+       FailedRewriteWithCorrectedUrlsIsConsistent) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png); }\n");
+  }
+  GoogleString expected;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".rule", IntegerToString(i),
+              " { background: url(http://cdn.example.com/i", IntegerToString(i),
+              ".png); }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  options()->EnableFilter(RewriteOptions::kRewriteDomains);
+  options()->WriteableDomainLawyer()->AddRewriteDomainMapping(
+      "http://cdn.example.com", kTestDomain, message_handler());
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    EXPECT_EQ(expected, decoded);
+  }
+}
+
+// With a URL naming scheme that serves resources under another host and
+// path, the original's relative URLs are made absolute on the way out. After
+// the first request the failed rewrite is remembered and the original is
+// served from the compressed cache entry; gzip and plain clients still get
+// the same corrected stylesheet, with headers that describe it.
+class CssFilterGzipConsistencyUrlNamerTest
+    : public CssFilterGzipConsistencyTest {
+ public:
+  CssFilterGzipConsistencyUrlNamerTest() { SetUseTestUrlNamer(true); }
+};
+
+TEST_F(CssFilterGzipConsistencyUrlNamerTest,
+       RememberedFailureServesCorrectedUrlsToEveryClient) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png); }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  GoogleString first;
+  for (int i = 0; i < 5; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    if (i == 0) {
+      first = decoded;
+      EXPECT_NE(css, first);
+      for (int j = 0; j < 64; ++j) {
+        EXPECT_TRUE(StringPiece(first).find(
+                        StrCat("url(http://test.com/i", IntegerToString(j),
+                               ".png)")) != StringPiece::npos)
+            << j;
+      }
+    } else {
+      EXPECT_EQ(first, decoded);
+    }
+  }
+  // Only the first request tried the rewrite.
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+}
+
+// A minified combination of two stylesheets, requested under a combination
+// hash that is not the current one, repeatedly, with both inputs in the
+// compressed cache.
+TEST_F(CssFilterGzipConsistencyTest, MismatchedCombinationIsConsistent) {
+  GoogleString css_a;
+  GoogleString css_b;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css_a, ".a", IntegerToString(i), " { color: red; }\n");
+    StrAppend(&css_b, ".b", IntegerToString(i), " { color: blue; }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css_a);
+  SeedCompressedInput("http://test.com/b.css", css_b);
+
+  GoogleString expected;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".a", IntegerToString(i), "{color:red}");
+  }
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".b", IntegerToString(i), "{color:#00f}");
+  }
+  const GoogleString url =
+      Encode(kTestDomain, "cf", "0",
+             Encode("", "cc", "1", MultiUrl("a.css", "b.css"), "css"), "css");
+  for (int i = 0; i < 3; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchAcceptingGzip(url, &decoded));
+    // Minified or not, the content is the two stylesheets, in order.
+    if (decoded != expected) {
+      EXPECT_EQ(WithoutWhitespace(StrCat(css_a, css_b)),
+                WithoutWhitespace(decoded));
+    }
+  }
 }
 
 // Builds a stylesheet of exactly `size` bytes out of numbered rulesets and
