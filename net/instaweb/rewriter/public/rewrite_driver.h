@@ -722,7 +722,8 @@ class RewriteDriver : public HtmlParse {
   // Get/set the charset of the containing HTML page. See scan_filter.cc for
   // an explanation of how this is determined, but NOTE that the determined
   // charset can change as more of the HTML is seen, in particular after a
-  // meta tag.
+  // meta tag. A rewrite is decided by the charset known at hand-off, so take a
+  // copy when handing it off.
   StringPiece containing_charset() { return containing_charset_; }
   void set_containing_charset(const StringPiece charset) {
     charset.CopyToString(&containing_charset_);
