@@ -36,3 +36,4 @@ most often miss; it does not duplicate `CLAUDE.md`.
   If nothing observable changed, waive it with a reason (≥12 chars) in a commit
   message or the PR body: `Release-Note: none - <why this is invisible to users>`.
   Check first: `bash tools/ci/check_release_note.sh --base origin/master --head HEAD`.
+- **Security fixes are not opened as public pull requests or issues;** follow `SECURITY.md`.
