@@ -573,7 +573,8 @@ class DaemonAdapter {
   // volume file open and mapped, so its disk space and this process's
   // address space for it are held until the process ends.  The bound is per
   // adapter, and a server has one adapter per virtual host that uses the
-  // daemon: each of them follows the daemon through kMaxVolumeReplacements
+  // daemon (nginx and IIS share one across every server block or site that
+  // names the same socket and volume): each of them follows the daemon through kMaxVolumeReplacements
   // replacements; the next one sets the handle aside like the others and
   // then stops: nothing is handed out any more, in-place optimization is
   // off for that virtual host in this process until it ends, and one error

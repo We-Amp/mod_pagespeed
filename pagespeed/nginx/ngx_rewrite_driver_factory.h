@@ -35,6 +35,7 @@ extern "C" {
 #include <set>
 
 #include "pagespeed/kernel/base/md5_hasher.h"
+#include "pagespeed/system/daemon_adapter_pool.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
 namespace net_instaweb {
@@ -132,6 +133,13 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void ShutDownMessageHandlers() override;
 
+  // The optimizer-daemon adapters of this configuration, one per distinct
+  // (DaemonSocketPath, DaemonVolumePath) pair: every server block naming the
+  // same pair shares one adapter, so a worker holds one handle on a volume
+  // however many server blocks use it.  A reload builds a new factory, and
+  // with it a new pool, so the start-up check runs again per configuration.
+  DaemonAdapterPool* daemon_adapter_pool() { return &daemon_adapter_pool_; }
+
   void SetCircularBuffer(SharedCircularBuffer* buffer) override;
 
   bool SetProcessScriptVariables(ProcessScriptVariablesMode mode) {
@@ -168,6 +176,7 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   bool process_script_variables_set_;
   bool shut_down_;
   int worker_process_count_;
+  DaemonAdapterPool daemon_adapter_pool_;
 
   NgxRewriteDriverFactory(const NgxRewriteDriverFactory&) = delete;
   NgxRewriteDriverFactory& operator=(const NgxRewriteDriverFactory&) = delete;

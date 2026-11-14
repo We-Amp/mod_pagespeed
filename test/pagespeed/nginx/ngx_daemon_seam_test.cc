@@ -1524,6 +1524,26 @@ TEST_F(NgxDaemonSeamTest, TheServerContextInitialisesItsFactoryPointer) {
                            "list";
 }
 
+// Issue #627: every server block naming the same socket and volume shares
+// one adapter, so a worker holds one handle on the volume -- and runs one set
+// of the storage layer's background threads -- however many server blocks
+// use it.  An adapter built per server block brings back idle CPU that grows
+// with the number of sites.
+TEST_F(NgxDaemonSeamTest, ServerBlocksShareOneAdapterPerVolume) {
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxServerContextCc));
+  const size_t check =
+      cc.find("boolNgxServerContext::RunDaemonStartupCheck(){");
+  ASSERT_NE(GoogleString::npos, check)
+      << "the startup check was renamed; this pin needs updating";
+  EXPECT_NE(GoogleString::npos,
+            cc.find("ngx_factory_->daemon_adapter_pool()->GetOrCheck(", check))
+      << "the server context must take its adapter from the factory's pool";
+  EXPECT_EQ(GoogleString::npos, cc.find("make_unique<DaemonAdapter>"))
+      << "a per-server-block adapter opens one volume handle per block";
+  EXPECT_EQ(GoogleString::npos, cc.find("StartupCheck()==", check))
+      << "the pool runs the check once per pair; the context reuses it";
+}
+
 TEST_F(NgxDaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   // The shared serve-counting rule moves the total and its per-class split
