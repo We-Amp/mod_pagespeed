@@ -20,6 +20,7 @@ import {
   optimizerLine,
   redactConfig,
   scrubSecrets,
+  stripUrlParameters,
   stripQueryStrings,
   type DiagnosticsApi,
   type DiagnosticsData,
@@ -117,8 +118,9 @@ describe("diagnosticsText", () => {
         "Left out of this bundle:",
         "- the configuration text (its SHA-256 is above)",
         "- query strings in addresses",
+        "- fragments and path parameters in addresses",
         "- client addresses in log lines",
-        "- cookie and authorization header values, passwords in addresses",
+        "- cookie and authorization header values, tokens, passwords",
         "- the addresses in the purge set",
         "- informational log lines, findings that need two readings",
         "",
@@ -185,7 +187,7 @@ describe("diagnosticsText", () => {
     const stripped = diagnosticsText(d, WHOLE, { queryStrings: false, configText: true });
     expect(stripped).toContain("Fetch of https://www.example.test/a.css?[query removed] failed.\n");
     expect(stripped).toContain("/b.js?[query removed] is slow");
-    expect(stripped).toContain("Look at https://example.com/?[query removed]#top.");
+    expect(stripped).toContain("Look at https://example.com/?[query removed]#[fragment removed].");
     expect(stripped).toContain("ModPagespeedMapOriginDomain http://origin.example.test/?[query removed]");
     expect(stripped).not.toMatch(/session=|v=1|x=1|q=2|k=v/);
     expect(stripped).toContain("- query strings in addresses\n");
@@ -205,6 +207,8 @@ describe("diagnosticsText", () => {
         "  RedisPassword (rdp)                 p4ssw0rd",
         "  ApiToken (at)                       tok-123456",
         "  SomeCredential (sc)                 abc def",
+        "  ProxyAuth (prxa)                    SessionCookie=c0okie-val",
+        "  SomeFutureOption (sfo)              unknown-value",
       ].join("\n"),
     });
     const off = diagnosticsText(d, WHOLE);
@@ -212,15 +216,19 @@ describe("diagnosticsText", () => {
     expect(off).not.toContain("DaemonSocketPath");
     expect(off).toContain("- the configuration text (its SHA-256 is above)\n");
     const on = diagnosticsText(d, WHOLE, { queryStrings: false, configText: true });
-    expect(on).toContain("Configuration (values of options whose names suggest a secret are replaced):\nOptions\n");
+    expect(on).toContain("Configuration (values of options not known to be safe to share are replaced):\nOptions\n");
     expect(on).toContain(`  DaemonSocketPath (dmsp)             /run/${marker}.sock\n`);
     expect(on).toContain("  UrlSigningKey (usk)                 [redacted]\n");
     expect(on).toContain("  DownstreamCachePurgeSecret (dcps)   [redacted]\n");
     expect(on).toContain("  RedisPassword (rdp)                 [redacted]\n");
     expect(on).toContain("  ApiToken (at)                       [redacted]\n");
     expect(on).toContain("  SomeCredential (sc)                 [redacted]\n");
-    for (const secret of ["s3cr3t-signing-value", "hunter2", "p4ssw0rd", "tok-123456", "abc def"]) expect(on).not.toContain(secret);
-    expect(on).toContain("- the values of options whose names suggest a secret\n");
+    expect(on).toContain("  ProxyAuth (prxa)                    [redacted]\n");
+    expect(on).toContain("  SomeFutureOption (sfo)              [redacted]\n");
+    for (const secret of ["s3cr3t-signing-value", "hunter2", "p4ssw0rd", "tok-123456", "abc def", "c0okie-val", "unknown-value"]) {
+      expect(on).not.toContain(secret);
+    }
+    expect(on).toContain("- the values of options not known to be safe to share\n");
   });
 
   it("never carries cookies, authorization values or passwords in addresses", () => {
@@ -270,13 +278,16 @@ describe("diagnosticsText", () => {
 });
 
 describe("redactConfig", () => {
-  it("replaces only values of options whose names suggest a secret, in the module's option list", () => {
+  it("keeps only the values of options known to be safe to share, in the module's option list", () => {
     expect(redactConfig("  FileCachePath (afcp)  /var/cache/x\n  SslCertDirectory (assld)  /etc/ssl")).toBe(
       "  FileCachePath (afcp)  /var/cache/x\n  SslCertDirectory (assld)  /etc/ssl",
     );
     expect(redactConfig("  CacheKeyPrefix (ckp)  abc")).toBe("  CacheKeyPrefix (ckp)  [redacted]");
-    expect(redactConfig("  AdminPassword (ap)  x y z\n  FetcherProxy (afp)  ***")).toBe(
-      "  AdminPassword (ap)  [redacted]\n  FetcherProxy (afp)  ***",
+    expect(redactConfig("  AdminPassword (ap)  x y z\n  FetchProxy (afp)  ***")).toBe(
+      "  AdminPassword (ap)  [redacted]\n  FetchProxy (afp)  [redacted]",
+    );
+    expect(redactConfig("  MemcachedServers (ams)  cache1.internal:11211\n  NotAnOption (nao)  v")).toBe(
+      "  MemcachedServers (ams)  [redacted]\n  NotAnOption (nao)  [redacted]",
     );
     expect(redactConfig("Version: 15: on\nFilters\nah\tAdd Head")).toBe("Version: 15: on\nFilters\nah\tAdd Head");
   });
@@ -324,10 +335,27 @@ describe("scrubSecrets and stripQueryStrings", () => {
     expect(scrubSecrets("sent bearer x.y-z_1 to origin")).toBe("sent bearer [redacted] to origin");
     expect(scrubSecrets("Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig")).toBe("Bearer [redacted]");
   });
-  it("strip jsessionid path parameters with the query string", () => {
-    expect(stripQueryStrings("/a.css;jsessionid=ABC123?x=1 and /b;JSESSIONID=Z9")).toBe(
-      "/a.css;jsessionid=[redacted]?[query removed] and /b;jsessionid=[redacted]",
+  it("strip path parameters and fragments, and leave the query string to stripQueryStrings", () => {
+    expect(stripUrlParameters("/a.css;jsessionid=ABC123?x=1 and /b;JSESSIONID=Z9")).toBe(
+      "/a.css;[parameters removed]?x=1 and /b;[parameters removed]",
     );
+    expect(stripUrlParameters("see https://a.example/p;v=1/q.js#access_token=abc.")).toBe(
+      "see https://a.example/p;[parameters removed]/q.js#[fragment removed].",
+    );
+    expect(stripQueryStrings(stripUrlParameters("/p?x=1#f and /q#"))).toBe("/p?[query removed]#[fragment removed] and /q#");
+    const plain = "[Error] [531] 10:04:00; data:image/png;base64,AA== at /var/log/a.log; done";
+    expect(stripUrlParameters(plain)).toBe(plain);
+  });
+  it("replace the value of a field whose name ends like a secret", () => {
+    expect(scrubSecrets("fetch failed: token=abc123&page=2")).toBe("fetch failed: token=[redacted]&page=2");
+    expect(scrubSecrets("api_key: k-99 then")).toBe("api_key: [redacted] then");
+    expect(scrubSecrets('{"password": "hunter2", "user": "ann"}')).toBe('{"password": [redacted], "user": "ann"}');
+    expect(scrubSecrets("x-auth=s3cr3t; session_cookie='c v'; client_secret=z")).toBe(
+      "x-auth=[redacted]; session_cookie=[redacted]; client_secret=[redacted]",
+    );
+    expect(scrubSecrets("Cookie: sid=abc")).toBe("Cookie: [redacted]");
+    const plain = "Key counters (since the module started):\n  keyword: css\n  page=2 monkeys: 3 cache_hits: 4";
+    expect(scrubSecrets(plain)).toBe(plain);
   });
   it("leave ordinary text alone", () => {
     const plain = "Purging: enabled; 3 URLs in the purge set\n/var/cache/mod_pagespeed/ is fine? yes.";
