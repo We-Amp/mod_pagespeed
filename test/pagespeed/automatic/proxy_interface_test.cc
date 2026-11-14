@@ -801,6 +801,36 @@ TEST_F(ProxyInterfaceTest, RedirectWithDifferentOtherQueryStillGetsParams) {
                              "http://www.example.com/a?x=2"));
 }
 
+// https://github.com/apache/incubator-pagespeed-mod/issues/1622
+// A site answers /?PageSpeed=noscript with a permanent redirect to the same
+// page without the parameter, to keep it out of search indexes. The client
+// gets that Location as the origin wrote it, absolute or relative, so the
+// redirect ends on the clean URL.
+TEST_F(ProxyInterfaceTest, PermanentRedirectDroppingNoscriptReachesCleanUrl) {
+  struct Case {
+    const char* origin_url;
+    const char* location;
+  };
+  const Case kCases[] = {
+      {"http://www.example.com/", "http://www.example.com/"},
+      {"http://www.example.com/shop/", "/shop/"},
+  };
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(c.location);
+    GoogleString get_text;
+    RequestHeaders request_headers;
+    ResponseHeaders set_headers, get_headers;
+    set_headers.Add(HttpAttributes::kContentType, kContentTypeHtml.mime_type());
+    set_headers.Add(HttpAttributes::kLocation, c.location);
+    set_headers.SetStatusAndReason(HttpStatus::kMovedPermanently);
+    mock_url_fetcher_.SetResponse(c.origin_url, set_headers, "");
+    FetchFromProxy(StrCat(c.origin_url, "?PageSpeed=noscript"), request_headers,
+                   true, &get_text, &get_headers);
+    EXPECT_EQ(HttpStatus::kMovedPermanently, get_headers.status_code());
+    EXPECT_STREQ(c.location, get_headers.Lookup1(HttpAttributes::kLocation));
+  }
+}
+
 TEST_F(ProxyInterfaceTest, RedirectOptionNameCaseIsIgnoredWhenReAdding) {
   // The option name after the PageSpeed prefix is case-insensitive in
   // requests, so a Location that spells it differently already carries it.
