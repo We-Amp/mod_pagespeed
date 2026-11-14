@@ -24,6 +24,7 @@
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/inline_rewrite_context.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
@@ -39,6 +40,7 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 
@@ -61,20 +63,25 @@ class CssInlineFilter::Context : public InlineRewriteContext {
     // Taken now, while the page is parsed: the cache key and the decision in
     // ShouldInline() are both made later and must see the same page charset.
     filter->driver()->containing_charset().CopyToString(&htmls_charset_);
+    // Likewise how CSS may be written into this document.
+    mode_ = InlineStyleModeForDocument(filter->driver(), filter->meta_charset_);
   }
 
   bool ShouldInline(const ResourcePtr& resource,
                     GoogleString* reason) const override {
     return filter_->ShouldInline(resource, attrs_charset_, htmls_charset_,
-                                 reason);
+                                 mode_, reason);
   }
 
   // ShouldInline() depends on the charsets of the page and of the <link>
   // element, not only on the stylesheet, so pages that differ in either must
   // not share a metadata cache entry. Both values are page text, so they enter
-  // the key as a hash.
+  // the key as a hash. The decision also depends on the mode (and on the
+  // rules of InlineStyleText, through their version).
   GoogleString CacheKeySuffix() const override {
-    GoogleString charsets = StrCat(htmls_charset_, "/", attrs_charset_);
+    GoogleString charsets =
+        StrCat(htmls_charset_, "/", attrs_charset_, "/",
+               kInlineStyleScanVersion, InlineStyleModeKey(mode_));
     LowerString(&charsets);
     return FindServerContext()->lock_hasher()->Hash(charsets);
   }
@@ -86,7 +93,7 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   void RenderInline(const ResourcePtr& resource, const StringPiece& text,
                     HtmlElement* element) override {
     filter_->RenderInline(resource, *(output_partition(0)), base_url_, text,
-                          element);
+                          mode_, element);
   }
 
   ResourcePtr CreateResource(const char* url, bool* is_authorized) override {
@@ -103,6 +110,7 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   GoogleUrl base_url_;
   GoogleString attrs_charset_;
   GoogleString htmls_charset_;
+  InlineStyleMode mode_;
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -121,11 +129,15 @@ void CssInlineFilter::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumCssInlined);
 }
 
-void CssInlineFilter::StartDocumentImpl() { in_body_ = false; }
+void CssInlineFilter::StartDocumentImpl() {
+  in_body_ = false;
+  meta_charset_.Clear();
+}
 
 CssInlineFilter::~CssInlineFilter() {}
 
 void CssInlineFilter::StartElementImpl(HtmlElement* element) {
+  meta_charset_.NoteElement(*element);
   if (element->keyword() == HtmlName::kBody) {
     in_body_ = true;
   }
@@ -194,30 +206,37 @@ ResourcePtr CssInlineFilter::CreateResource(const char* url,
                              is_authorized);
 }
 
-bool CssInlineFilter::MayContainMarkup(StringPiece contents) {
-  return contents.find('<') != StringPiece::npos;
-}
-
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
                                    const StringPiece& attrs_charset,
                                    const StringPiece& htmls_charset,
+                                   InlineStyleMode mode,
                                    GoogleString* reason) const {
-  // If the contents are bigger than our threshold, don't inline.
   StringPiece contents(resource->ExtractUncompressedContents());
-  if (contents.size() > size_threshold_bytes_) {
+  // If the contents are bigger than our threshold, don't inline. The text
+  // written is never shorter than the contents, so check those first.
+  auto too_big = [this, reason]() {
     *reason = StrCat("CSS not inlined since it's bigger than ",
                      Integer64ToString(size_threshold_bytes_), " bytes");
     return false;
+  };
+  if (contents.size() > size_threshold_bytes_) {
+    return too_big();
+  }
+  // Not if the contents could not be written into a <style> element of this
+  // document. The text is prepared again at render time, from the final
+  // bytes; here it decides, and gives the size that is written.
+  InlineStyleText prepared;
+  const bool can_write =
+      InlineStyleText::Prepare(contents, mode, &prepared, nullptr);
+  if (can_write && prepared.text().size() > size_threshold_bytes_) {
+    return too_big();
   }
   // Also don't inline if it looks gzipped.
   if (GzipInflater::HasGzipMagicBytes(contents)) {
     *reason = "CSS not inlined because it appears to be gzip-encoded";
     return false;
   }
-  // And also not if the contents contain a '<' anywhere. If we inline an
-  // external stylesheet containing, say, a "</style>", the <style> tag will be
-  // ended early.
-  if (MayContainMarkup(contents)) {
+  if (!can_write) {
     *reason = "CSS not inlined since it contains a less-than sign";
     return false;
   }
@@ -258,7 +277,7 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
                                    const CachedResult& /* cached */,
                                    const GoogleUrl& base_url,
                                    const StringPiece& contents,
-                                   HtmlElement* element) {
+                                   InlineStyleMode mode, HtmlElement* element) {
   MessageHandler* message_handler = driver()->message_handler();
 
   // Absolutify the URLs in the CSS -- relative URLs will break otherwise.
@@ -290,6 +309,15 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
     return;
   }
 
+  // The bytes written are the final ones, after URL resolution, whatever the
+  // cache held.
+  InlineStyleText prepared;
+  if (!InlineStyleText::Prepare(rewritten_contents, mode, &prepared, nullptr)) {
+    driver()->InsertDebugComment(
+        "CSS not inlined since it contains a less-than sign", element);
+    return;
+  }
+
   // Inline the CSS.
   HtmlElement* style_element =
       driver()->NewElement(element->parent(), HtmlName::kStyle);
@@ -297,8 +325,7 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
     DCHECK(false) << "!driver()->ReplaceNode(element, style_element)";
     return;
   }
-  driver()->AppendChild(
-      style_element, driver()->NewCharactersNode(element, rewritten_contents));
+  AppendInlineStyleText(driver(), style_element, prepared);
 
   // Copy over most attributes from the original link, discarding those that
   // we convert (href, rel), and dropping those that are irrelevant (type).

@@ -52,9 +52,15 @@ class MinifyExcerptFilter : public CssSummarizerBase {
       : CssSummarizerBase(driver),
         render_summaries_in_place_(false),
         will_not_render_summaries_in_place_(false),
-        include_base_(false) {}
+        include_base_(false),
+        summaries_are_style_text_(false) {}
 
   const char* Name() const override { return "Minify10"; }
+
+  bool SummariesAreStyleText() const override {
+    return summaries_are_style_text_;
+  }
+  void set_summaries_are_style_text(bool x) { summaries_are_style_text_ = x; }
   const char* id() const override { return "csr"; }
 
   bool MustSummarize(HtmlElement* element) const override {
@@ -159,6 +165,7 @@ class MinifyExcerptFilter : public CssSummarizerBase {
   bool render_summaries_in_place_;
   bool will_not_render_summaries_in_place_;
   bool include_base_;
+  bool summaries_are_style_text_;
 };
 
 class CssSummarizerBaseTest : public RewriteTestBase {
@@ -502,6 +509,46 @@ TEST_F(CssSummarizerBaseWithCombinerFilterTest, BaseAcrossPaths) {
              "a.css"
              "|--></html>"),
       output_buffer_);
+}
+
+// A summary that is not written as <style> text is dropped when it holds a
+// '<', on every kind of page.
+TEST_F(CssSummarizerBaseTest, SummaryWithLessThanSignIsDropped) {
+  SetHtmlMimetype();
+  SetResponseWithDefaultHeaders("lt.css", kContentTypeCss, "a{b:\"<c>\"}", 100);
+  Parse("lt_html", CssLinkHref("lt.css"));
+  EXPECT_STREQ("ParseOrCloseStyleTagError//rel=stylesheet|", filter_->result());
+}
+
+// A summary written as <style> text is kept the same way on every kind of
+// page; where it is written, it is prepared for that page.
+TEST_F(CssSummarizerBaseTest, StyleTextSummaryWithLessThanSignIsKept) {
+  filter_->set_summaries_are_style_text(true);
+  SetHtmlMimetype();
+  SetResponseWithDefaultHeaders("lt.css", kContentTypeCss, "a{b:\"<c>\"}", 100);
+  Parse("lt_html", CssLinkHref("lt.css"));
+  EXPECT_STREQ("OK/a{b:\"<c>\"}/rel=stylesheet|", filter_->result());
+}
+
+TEST_F(CssSummarizerBaseTest, StyleTextSummaryWithLessThanSignIsKeptInXhtml) {
+  filter_->set_summaries_are_style_text(true);
+  SetXhtmlMimetype();
+  SetResponseWithDefaultHeaders("lt.css", kContentTypeCss, "a{b:\"<c>\"}", 100);
+  Parse("lt_xhtml", CssLinkHref("lt.css"));
+  EXPECT_STREQ("OK/a{b:\"<c>\"}/rel=stylesheet|", filter_->result());
+}
+
+TEST_F(CssSummarizerBaseTest, StyleTextSummaryThatCouldReadAsMarkupIsDropped) {
+  filter_->set_summaries_are_style_text(true);
+  SetHtmlMimetype();
+  // In a string, the same text is kept.
+  SetResponseWithDefaultHeaders("s.css", kContentTypeCss, "@a{b:\"<c>\"}", 100);
+  SetResponseWithDefaultHeaders("m.css", kContentTypeCss, "@a{b:<c>}", 100);
+  Parse("markup", StrCat(CssLinkHref("s.css"), CssLinkHref("m.css")));
+  EXPECT_STREQ(
+      "OK/@a{b:\"<c>\"/rel=stylesheet|"
+      "ParseOrCloseStyleTagError//rel=stylesheet|",
+      filter_->result());
 }
 
 }  // namespace

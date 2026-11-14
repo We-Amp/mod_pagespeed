@@ -29,10 +29,10 @@
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
-#include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_minify.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -50,6 +50,7 @@
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_parse.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
@@ -697,8 +698,10 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
     }
   }
 
-  // Check the bytes that are actually written, whatever produced them.
-  if (CssInlineFilter::MayContainMarkup(*css_to_use)) {
+  // Prepare the bytes that are actually written, whatever produced them.
+  InlineStyleText prepared;
+  if (!InlineStyleText::Prepare(*css_to_use, summary.inline_style_mode,
+                                &prepared, nullptr)) {
     return;
   }
 
@@ -727,9 +730,7 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
                              css_util::StringifyMediaVector(relevant_media));
     }
     driver()->InsertNodeBeforeNode(element, style_element);
-    HtmlCharactersNode* content =
-        driver()->NewCharactersNode(style_element, *css_to_use);
-    driver()->AppendChild(style_element, content);
+    AppendInlineStyleText(driver(), style_element, prepared);
   }
 
   // The script that turns deferred stylesheets on, once per document and

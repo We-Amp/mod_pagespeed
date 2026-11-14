@@ -26,10 +26,12 @@ namespace net_instaweb {
 
 InlineResourceSlot::InlineResourceSlot(const ResourcePtr& resource,
                                        HtmlCharactersNode* char_node,
-                                       StringPiece location)
+                                       StringPiece location,
+                                       InlineStyleMode mode)
     : ResourceSlot(resource),
       char_node_(char_node),
-      location_(location.data(), location.size()) {}
+      location_(location.data(), location.size()),
+      mode_(mode) {}
 
 InlineResourceSlot::~InlineResourceSlot() {}
 
@@ -41,8 +43,12 @@ void InlineResourceSlot::Render() {
     DCHECK(resource()->loaded());
     DCHECK(!resource()->response_headers()->cache_fields_dirty());
     if (char_node_ != nullptr && resource()->loaded()) {
-      resource()->ExtractUncompressedContents().CopyToString(
-          char_node_->mutable_contents());
+      // The text may come from a cache; it is written only if it may be.
+      StringPiece contents = resource()->ExtractUncompressedContents();
+      if (!IsSafeInlineStyleText(contents, mode_)) {
+        return;
+      }
+      contents.CopyToString(char_node_->mutable_contents());
     }
   }
 }

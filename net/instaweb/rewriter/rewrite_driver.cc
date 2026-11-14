@@ -451,6 +451,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   refs_before_base_ = false;
   other_base_problem_ = false;
   containing_charset_.clear();
+  document_bom_charset_.clear();
   fully_rewrite_on_flush_ = false;
   fast_blocking_rewrite_ = true;
   num_inline_preview_images_ = 0;
@@ -2464,9 +2465,10 @@ HtmlResourceSlotPtr RewriteDriver::GetSlot(const ResourcePtr& resource,
 }
 
 InlineResourceSlotPtr RewriteDriver::GetInlineSlot(
-    const ResourcePtr& resource, HtmlCharactersNode* char_node) {
+    const ResourcePtr& resource, HtmlCharactersNode* char_node,
+    InlineStyleMode mode) {
   InlineResourceSlotPtr slot(
-      new InlineResourceSlot(resource, char_node, UrlLine()));
+      new InlineResourceSlot(resource, char_node, UrlLine(), mode));
   std::pair<InlineResourceSlotSet::iterator, bool> iter_inserted =
       inline_slots_.insert(slot);
   if (!iter_inserted.second) {

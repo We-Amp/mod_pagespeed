@@ -36,10 +36,13 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
+#include "test/net/instaweb/rewriter/prepared_style_text_recorder.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -1476,6 +1479,192 @@ TEST_F(CriticalSelectorFilterTest, SubsetThatWouldHoldMarkupKeepsTheLink) {
                     StrCat("<head>", CssLinkHref("e.css"),
                            "</head>"
                            "<body><div>Stuff</div></body>"));
+}
+
+// Critical CSS with a '<' that cannot be read as markup, on HTML pages that
+// declare a supported charset.
+class CriticalSelectorLessThanTest : public CriticalSelectorFilterTest {
+ protected:
+  void SetPageType(StringPiece content_type) {
+    rewrite_driver()->set_response_headers_ptr(&response_headers_);
+    response_headers_.Replace(HttpAttributes::kContentType, content_type);
+    response_headers_.ComputeCaching();
+  }
+
+  // Parses `html` and returns the text of the first <style> written, or
+  // "UNCHANGED" when the page was left as it was.
+  GoogleString InlinedText(StringPiece id, StringPiece html) {
+    Parse(id, html);
+    if (output_buffer_ == AddHtmlBody(html)) {
+      return "UNCHANGED";
+    }
+    const size_t start = output_buffer_.find("<style>");
+    if (start == GoogleString::npos) {
+      ADD_FAILURE() << output_buffer_;
+      return "NO STYLE";
+    }
+    const size_t end = output_buffer_.find("</style>", start);
+    if (end == GoogleString::npos) {
+      ADD_FAILURE() << output_buffer_;
+      return "NO STYLE";
+    }
+    return output_buffer_.substr(start + 7, end - start - 7);
+  }
+
+  GoogleString Page(StringPiece css_url, StringPiece before = "",
+                    StringPiece after = "") {
+    return StrCat("<head>", before, CssLinkHref(css_url), after,
+                  "</head><body><div>Stuff</div></body>");
+  }
+};
+
+const char kCriticalLessThanCss[] =
+    "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
+    "@media (width < 600px){div{margin:0}}"
+    "*{color:red}";
+
+TEST_F(CriticalSelectorLessThanTest, LessThanSignInCssIsInlined) {
+  SetPageType("text/html; charset=utf-8");
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, kCriticalLessThanCss,
+                                100);
+  const GoogleString text = InlinedText("lt_in_css", Page("c.css"));
+  EXPECT_NE(GoogleString::npos, text.find("\"\\3c length>\"")) << text;
+  EXPECT_NE(GoogleString::npos, text.find("(width < 600px)")) << text;
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml)) << text;
+}
+
+TEST_F(CriticalSelectorLessThanTest, LessThanSignNeedsADeclaredSupportedCharset) {
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, kCriticalLessThanCss,
+                                100);
+  SetPageType("text/html");
+  ValidateNoChanges("undeclared", Page("c.css"));
+  SetPageType("text/html; charset=shift_jis");
+  ValidateNoChanges("sjis", Page("c.css"));
+  // A meta tag ahead of the link declares it; one after it does not.
+  SetPageType("text/html");
+  ValidateNoChanges("meta_after", Page("c.css", "", "<meta charset=\"utf-8\">"));
+  const GoogleString text =
+      InlinedText("meta", Page("c.css", "<meta charset=\"utf-8\">"));
+  EXPECT_NE(GoogleString::npos, text.find("\"\\3c length>\"")) << text;
+}
+
+TEST_F(CriticalSelectorLessThanTest, XhtmlWithLessThanSignKeepsTheLink) {
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, kCriticalLessThanCss,
+                                100);
+  SetPageType("application/xhtml+xml; charset=utf-8");
+  ValidateNoChanges("xhtml", Page("c.css"));
+}
+
+// Where a link or style can be, and text that would be markup there. Covers
+// every placement and payload of the markup placement tests of inline_css,
+// prioritize_critical_css and rewrite_css.
+struct MarkupPlacement {
+  const char* id;
+  const char* before;
+  const char* after;
+  const char* end_tag;  // its own end tag, as a payload
+};
+const MarkupPlacement kMarkupPlacements[] = {
+    {"top", "", "", "</head>"},
+    {"noembed", "<noembed>", "</noembed>", "</noembed>"},
+    {"noframes", "<noframes>", "</noframes>", "</noframes>"},
+    {"textarea", "<textarea/>", "", "</textarea>"},
+    {"select", "<select>", "</select>", "</select>"},
+    {"frameset", "<frameset>", "</frameset>", "</frameset>"},
+    {"noscript", "<noscript>", "</noscript>", "</noscript>"},
+};
+const char* const kMarkupPayloads[] = {"", "</style>", "</STYLE >", "<input>",
+                                       "<frame>", "<!--"};
+
+// On a page that declares UTF-8: a payload in a string is written so it is no
+// longer markup (or the link is left alone), wherever the link is; the same
+// payload outside a string, in a region the parser keeps as it is, keeps the
+// link.
+TEST_F(CriticalSelectorLessThanTest, MarkupPlacementsAreInlinedSafelyOrKept) {
+  SetPageType("text/html; charset=utf-8");
+  int n = 0;
+  for (const MarkupPlacement& p : kMarkupPlacements) {
+    for (const char* payload_or_empty : kMarkupPayloads) {
+      const StringPiece payload =
+          *payload_or_empty == '\0' ? p.end_tag : payload_or_empty;
+      const GoogleString kept[] = {
+          StrCat("*[title=\"", payload, "\"]{color:red}"),
+          StrCat("@huh { a: \"", payload, "\"; }*{color:red}"),
+      };
+      for (const GoogleString& css : kept) {
+        const GoogleString url = StrCat("k", IntegerToString(n++), ".css");
+        SetResponseWithDefaultHeaders(url, kContentTypeCss, css, 100);
+        const GoogleString text =
+            InlinedText(url, Page(url, p.before, p.after));
+        if (text != "UNCHANGED") {
+          EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml))
+              << p.id << ": " << text;
+          EXPECT_EQ(GoogleString::npos, text.find('<')) << p.id << ": " << text;
+          EXPECT_NE(GoogleString::npos, text.find("\\3c ")) << p.id << ": "
+                                                            << text;
+        } else {
+          // Only a link the filter never defers is left alone.
+          EXPECT_STREQ("noscript", p.id) << css;
+        }
+      }
+      const GoogleString url = StrCat("b", IntegerToString(n++), ".css");
+      SetResponseWithDefaultHeaders(
+          url, kContentTypeCss, StrCat("@huh { a: ", payload, "; }*{color:red}"),
+          100);
+      ValidateNoChanges(url, Page(url, p.before, p.after));
+    }
+  }
+}
+
+// The critical subset written is exactly what InlineStyleText prepared.
+TEST_F(CriticalSelectorLessThanTest, WrittenTextIsPreparedText) {
+  SetPageType("text/html; charset=utf-8");
+  const char* const kCss[] = {
+      "*{color:red}",
+      "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
+      "*{color:red}",
+      "@media (width < 600px){div{margin:0}}*{color:red}",
+      "*[title=\"</style><b>\"]{color:red}",
+      "@huh { a: \"<!--\"; }*{color:red}",
+      "div{content:'<'}*{color:red}",
+  };
+  int n = 0;
+  for (const char* css : kCss) {
+    const GoogleString url = StrCat("p", IntegerToString(n++), ".css");
+    SetResponseWithDefaultHeaders(url, kContentTypeCss, css, 100);
+    PreparedStyleTextRecorder recorder;
+    const GoogleString text = InlinedText(url, Page(url));
+    ASSERT_NE("UNCHANGED", text) << css;
+    EXPECT_TRUE(recorder.WasPrepared(text)) << css << ": " << text;
+    EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml)) << text;
+  }
+}
+
+// A summary cached on one kind of page is written for another only as that
+// page allows.
+TEST_F(CriticalSelectorLessThanTest, SummaryIsPreparedForEachPage) {
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, kCriticalLessThanCss,
+                                100);
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_NE("UNCHANGED", InlinedText("first", Page("c.css")));
+  SetPageType("text/html");
+  ValidateNoChanges("undeclared", Page("c.css"));
+  ResetDriver();
+  SetPageType("application/xhtml+xml; charset=utf-8");
+  ValidateNoChanges("xhtml", Page("c.css"));
+  ResetDriver();
+  SetPageType("text/html; charset=utf-8");
+  EXPECT_NE("UNCHANGED", InlinedText("again", Page("c.css")));
+}
+
+// A link inside SVG or MathML is not an HTML link element and is left alone.
+TEST_F(CriticalSelectorLessThanTest, ForeignLinkIsLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, "*{color:red}", 100);
+  ValidateNoChanges("svg", StrCat("<head></head><body><svg>",
+                                  CssLinkHref("c.css"), "</svg></body>"));
+  ValidateNoChanges("math", StrCat("<head></head><body><math>",
+                                   CssLinkHref("c.css"), "</math></body>"));
 }
 
 }  // namespace

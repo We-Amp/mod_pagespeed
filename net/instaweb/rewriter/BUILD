@@ -168,6 +168,7 @@ cc_library(
         "inline_output_resource.cc",
         "inline_resource_slot.cc",
         "inline_rewrite_context.cc",
+        "inline_style_util.cc",
         "input_info_utils.cc",
         "named_lock_schedule_rewrite_controller.cc",
         "option_context.cc",
@@ -287,6 +288,7 @@ cc_library(
         "public/inline_output_resource.h",
         "public/inline_resource_slot.h",
         "public/inline_rewrite_context.h",
+        "public/inline_style_util.h",
         "public/input_info_utils.h",
         "public/insert_amp_link_filter.h",
         "public/insert_dns_prefetch_filter.h",
@@ -521,4 +523,15 @@ cc_library(
         "//pagespeed/opt/ads",
         "//third_party/css_parser",
     ],
+)
+
+# The rewriter sources, for the test that keeps every writer of CSS into the
+# page on the prepared path (//test/net/instaweb/rewriter:inline_style_writers_test).
+filegroup(
+    name = "inline_style_writer_lint_sources",
+    srcs = glob([
+        "*.cc",
+        "public/*.h",
+    ]),
+    visibility = ["//test/net/instaweb/rewriter:__pkg__"],
 )

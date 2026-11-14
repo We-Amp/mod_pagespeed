@@ -724,6 +724,13 @@ class RewriteDriver : public HtmlParse {
   // charset can change as more of the HTML is seen, in particular after a
   // meta tag.
   StringPiece containing_charset() { return containing_charset_; }
+
+  // The charset of the byte order mark the document starts with, or empty
+  // when it starts without one. Set by ScanFilter.
+  StringPiece document_bom_charset() const { return document_bom_charset_; }
+  void set_document_bom_charset(StringPiece charset) {
+    charset.CopyToString(&document_bom_charset_);
+  }
   void set_containing_charset(const StringPiece charset) {
     charset.CopyToString(&containing_charset_);
   }
@@ -738,9 +745,12 @@ class RewriteDriver : public HtmlParse {
   // Creates and registers an inline resource slot for rewriting.
   // If this is the first time called for this position, a new slot will be
   // returned. On subsequent calls, the original slot will be returned so
-  // that rewrites are propagated between filters.
+  // that rewrites are propagated between filters. `mode` is how text may be
+  // written into the style element that holds char_node (see
+  // InlineResourceSlot).
   InlineResourceSlotPtr GetInlineSlot(const ResourcePtr& resource,
-                                      HtmlCharactersNode* char_node);
+                                      HtmlCharactersNode* char_node,
+                                      InlineStyleMode mode);
 
   // Creates and registers an inline attribute resource slot for rewriting.
   // If this is the first time called for this position, a new slot will be
@@ -1514,6 +1524,7 @@ class RewriteDriver : public HtmlParse {
 
   // The charset of the containing HTML page.
   GoogleString containing_charset_;
+  GoogleString document_bom_charset_;
 
   // Copies properties from the request headers to the request context,
   // if both are non-null.

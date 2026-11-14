@@ -21,6 +21,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_INLINE_RESOURCE_SLOT_H_
 
 #include "net/instaweb/rewriter/public/resource_slot.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 
 namespace net_instaweb {
 
@@ -33,8 +34,11 @@ namespace net_instaweb {
 class InlineResourceSlot : public ResourceSlot {
  public:
   // TODO(sligocki): Construct resource in this function??
+  // `mode` is how text may be written into the <style> element that holds
+  // char_node: Render() writes only text that IsSafeInlineStyleText() accepts
+  // for it, and otherwise leaves the node as it is.
   InlineResourceSlot(const ResourcePtr& resource, HtmlCharactersNode* char_node,
-                     StringPiece location);
+                     StringPiece location, InlineStyleMode mode);
 
   // Debug information should be placed next to <style> or <script> block
   // surrounding the Characters node.
@@ -50,6 +54,7 @@ class InlineResourceSlot : public ResourceSlot {
  private:
   HtmlCharactersNode* char_node_;
   const GoogleString location_;
+  const InlineStyleMode mode_;
 
   InlineResourceSlot(const InlineResourceSlot&) = delete;
   InlineResourceSlot& operator=(const InlineResourceSlot&) = delete;

@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -105,6 +104,11 @@ void CssInlineImportToLinkFilter::ResetState() {
 }
 
 namespace {
+
+// The check kept for the text left in an existing style: any '<'.
+bool HasLessThanSign(StringPiece text) {
+  return text.find('<') != StringPiece::npos;
+}
 
 // Extract the given style's media attribute, if any. Fail if can't decode it.
 bool ExtractMediaFromStyle(const HtmlElement* style_element,
@@ -248,10 +252,8 @@ void CssInlineImportToLinkFilter::InlineImportToLinkStyle() {
       const GoogleString& contents = style_characters_->contents();
       const size_t offset = parser.CurrentOffset();
       if (offset <= contents.size() &&
-          CssInlineFilter::MayContainMarkup(
-              StringPiece(contents).substr(0, offset)) &&
-          CssInlineFilter::MayContainMarkup(
-              StringPiece(contents).substr(offset))) {
+          HasLessThanSign(StringPiece(contents).substr(0, offset)) &&
+          HasLessThanSign(StringPiece(contents).substr(offset))) {
         ok = false;
       }
     }
