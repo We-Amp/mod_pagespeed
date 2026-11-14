@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
+#include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -32,6 +33,7 @@
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
@@ -1161,6 +1163,96 @@ TEST_F(JsCombineFilterTest, AllDifferentCharsets) {
   EXPECT_EQ(kJsUrl2, scripts[1].url);
   EXPECT_EQ(kJsUrl3, scripts[2].url);
   EXPECT_EQ(kJsUrl4, scripts[3].url);
+}
+
+// A combination is decided by the charset known at hand-off: a <meta charset>
+// in a later flush window does not change the decision for scripts handed off
+// before it. Here a.js names its charset and b.js takes the page's, which is
+// not known yet when they are handed off.
+TEST_F(JsCombineFilterTest,
+       CharsetFromLaterFlushWindowDoesNotReachCombination) {
+  const GoogleString scripts_html =
+      StrCat("<script src=", kJsUrl1, " charset=us-ascii></script>",
+             "<script src=", kJsUrl2, "></script>");
+  const char kMeta[] = "<meta charset=\"us-ascii\">";
+
+  // The fetches, and so the partitioning, complete only after the whole page
+  // has been parsed.
+  SetupWaitFetcher();
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  SetupWriter();
+  html_parse()->StartParse(kTestDomain);
+  html_parse()->ParseText(StrCat("<head>", scripts_html));
+  html_parse()->Flush();
+  html_parse()->ParseText(StrCat(kMeta, "</head>"));
+  html_parse()->FinishParse();
+  CallFetcherCallbacks();
+
+  // The decision is in the metadata cache now. A page with the same scripts
+  // and no charset gets it: the two do not match there either, so they stay
+  // apart. Had the partitioning seen the late <meta>, they would be combined.
+  scripts.clear();
+  ClearStats();
+  Parse("no_page_charset", StrCat("<head>", scripts_html, "</head>"));
+  // The cached decision was used: no metadata cache miss and no fetch.
+  EXPECT_EQ(0,
+            server_context()->rewrite_stats()->cached_output_misses()->Get());
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  // With the <meta> in the same flush window as the scripts, they match and
+  // are combined.
+  lru_cache()->Clear();
+  scripts.clear();
+  const GoogleString meta_first_html =
+      StrCat("<head>", kMeta, scripts_html, "</head>");
+  Parse("meta_first_fetch", meta_first_html);
+  CallFetcherCallbacks();
+  scripts.clear();
+  Parse("meta_first", meta_first_html);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+}
+
+// Two pages in different charsets reference the same scripts. a.js names its
+// charset and b.js takes the page's, so they match on one page and not on the
+// other. Whichever page is rewritten first, each page gets its own decision:
+// it is not carried from one page to the other through the metadata cache.
+TEST_F(JsCombineFilterTest, PagesInDifferentCharsetsDoNotShareDecision) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  const GoogleString scripts_html =
+      StrCat("<script src=", kJsUrl1, " charset=iso-8859-1></script>",
+             "<script src=", kJsUrl2, "></script>");
+  const GoogleString latin1_page =
+      StrCat("<head><meta charset=\"iso-8859-1\">", scripts_html, "</head>");
+  const GoogleString utf8_page =
+      StrCat("<head><meta charset=\"utf-8\">", scripts_html, "</head>");
+
+  Parse("latin1_first", latin1_page);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  scripts.clear();
+  Parse("utf8_second", utf8_page);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  lru_cache()->Clear();
+  scripts.clear();
+  Parse("utf8_first", utf8_page);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+  scripts.clear();
+  Parse("latin1_second", latin1_page);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
 }
 
 TEST_F(JsCombineFilterTest, BomMismatch) {

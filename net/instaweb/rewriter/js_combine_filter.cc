@@ -51,9 +51,11 @@
 #include "net/instaweb/rewriter/public/url_partnership.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
@@ -93,7 +95,7 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
 
     // Get the charset for the given resource.
     StringPiece this_charset = RewriteFilter::GetCharsetForScript(
-        resource, attribute_charset_, rewrite_driver_->containing_charset());
+        resource, attribute_charset_, containing_charset_);
 
     // This resource's charset must match that of the combination so far.
     // TODO(matterbury): Correctly handle UTF-16 and UTF-32 without the BE/LE
@@ -192,6 +194,14 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
     attribute_charset_ = charset;
   }
 
+  // Set the charset of the page the scripts are combined for. The owning
+  // filter sets it when it hands the combination off, so the combination is
+  // decided by the charset known at hand-off.
+  void set_containing_charset(StringPiece charset) {
+    charset.CopyToString(&containing_charset_);
+  }
+  StringPiece containing_charset() const { return containing_charset_; }
+
  private:
   using CodeBlockMap = std::map<const Resource*, JavascriptCodeBlock*>;
 
@@ -214,6 +224,8 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   // since it's set just before that's called and its life past that is not
   // guaranteed.
   StringPiece attribute_charset_;
+  // The charset of the page as it was when the combination was handed off.
+  GoogleString containing_charset_;
   // The charset of the combination so far.
   StringPiece combined_charset_;
 
@@ -408,10 +420,21 @@ class JsCombineFilter::Context : public RewriteContext {
   // rewrites of the same inputs read.
   bool FetchWritesPartition() const override { return false; }
 
+  // Which scripts may be combined depends on the page's charset and on each
+  // <script> element's charset attribute, not only on the scripts, so pages
+  // that differ in any of them must not share a metadata cache entry. These
+  // values are page text, so they enter the key as a hash.
   GoogleString CacheKeySuffix() const override {
-    // Updated to make sure certain bugfixes actually deploy, and we don't
-    // end up using old broken cached version.
-    return "v6";
+    GoogleString charsets;
+    StrAppend(&charsets, IntegerToString(combiner_.containing_charset().size()),
+              ":", combiner_.containing_charset());
+    for (const GoogleString& charset : elements_charsets_) {
+      StrAppend(&charsets, "/", IntegerToString(charset.size()), ":", charset);
+    }
+    LowerString(&charsets);
+    // The version is updated to make sure certain bugfixes actually deploy,
+    // and we don't end up using old broken cached version.
+    return StrCat("v7_", FindServerContext()->lock_hasher()->Hash(charsets));
   }
 
  private:
@@ -841,6 +864,9 @@ void JsCombineFilter::NextCombination() {
   // after scripts were already accumulated into the context.
   if (!context_->empty() && driver()->content_security_policy().PermitsEval() &&
       CspPermitsInlineScript()) {
+    // The combination is decided by the charset known at hand-off.
+    context_->combiner()->set_containing_charset(
+        driver()->containing_charset());
     driver()->InitiateRewrite(context_.release());
     context_.reset(MakeContext());
   }
