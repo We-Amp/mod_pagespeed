@@ -42,6 +42,74 @@ def read(rel):
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+SCOPE_RANK = {"kQueryScope": 0, "kDirectoryScope": 1, "kServerScope": 2,
+              "kLegacyProcessScope": 3, "kProcessScopeStrict": 3}
+SCOPE_RE = r"(kQueryScope|kDirectoryScope|kServerScope|kLegacyProcessScope|kProcessScopeStrict)"
+
+
+def strip_prefix(v):
+    if v.startswith("ModPagespeed") and len(v) > len("ModPagespeed"):
+        return v[len("ModPagespeed"):]
+    return v
+
+
+def scopes():
+    """Option name -> narrowest place nginx accepts it: 3 = http {} only,
+    2 = http {} or server {}. Mirrors NgxRewriteOptions::GetOptionScope and
+    SystemRewriteDriverFactory::ParseAndSetOption1/2 (kLegacyProcessScope
+    counts as http {} only, as nginx enforces it)."""
+    files = SOURCES + ["net/instaweb/rewriter/rewrite_options_properties.inc"]
+    const = {}
+    for rel in files:
+        for m in re.finditer(
+                r'const char (?:[A-Za-z]+::)?(k[A-Za-z0-9]+)\[\]\s*=\s*"([A-Z][A-Za-z0-9]+)"',
+                read(rel)):
+            const.setdefault(m.group(1), m.group(2))
+    rank = {}
+
+    def put(name, r):
+        name = strip_prefix(name)
+        rank[name] = max(rank.get(name, 0), r)
+
+    for rel in files:
+        s = read(rel)
+        # A name constant directly followed by its scope (X-macro table,
+        # AddBaseProperty, add_ngx_option, the scoped AddSystemProperty).
+        for m in re.finditer(r"\b(?:\w+::)?(k[A-Z]\w*),\s*(?:\w+::)?" + SCOPE_RE + r"\b", s):
+            if m.group(1) in const:
+                put(const[m.group(1)], SCOPE_RANK[m.group(2)])
+        # AddSystemProperty without a scope argument means kServerScope.
+        for m in re.finditer(r"AddSystemProperty\((.*?)\);", s, re.S):
+            body = m.group(1)
+            if re.search(SCOPE_RE, body):
+                continue
+            for k in re.findall(r"\b(?:\w+::)?(k[A-Z]\w*)\b", body):
+                if k in const:
+                    put(const[k], 2)
+                    break
+    ngx = read("pagespeed/nginx/ngx_rewrite_options.cc")
+    for arr, r in (("server_only_options", 2), ("main_only_options", 3)):
+        m = re.search(arr + r"\[\]\s*=\s*\{(.*?)\};", ngx, re.S)
+        if not m:
+            sys.exit(f"doctor_tables: {arr} not found in ngx_rewrite_options.cc")
+        for name in re.findall(r'"([A-Za-z]+)"', m.group(1)):
+            put(name, r)
+    fac = read("pagespeed/system/system_rewrite_driver_factory.cc")
+    m = re.search(r"First check the scope\.(.*?)if \(!process_scope\)", fac, re.S)
+    if not m:
+        sys.exit("doctor_tables: the factory's global-option check moved")
+    for k in re.findall(r"StringCaseEqual\(option,\s*(k\w+)\)", m.group(1)):
+        if k in const:
+            put(const[k], 3)
+    m = re.search(r"ParseAndSetOption2\((.*?)\n}", fac, re.S)
+    for k in re.findall(r"StringCaseEqual\(option,\s*(k\w+)\)\)\s*\{\s*if \(!process_scope\)",
+                        m.group(1) if m else ""):
+        if k in const:
+            put(const[k], 3)
+    put("ProcessScriptVariables", 3)
+    return rank
+
+
 def tables():
     valid, removed = set(EXTRA_VALID), set()
     filters = set()
@@ -68,8 +136,11 @@ def tables():
     for w in WARN_ONLY:
         if f'"{w}"' not in all_src:
             sys.exit(f"doctor_tables: {w} is no longer in the source; update WARN_ONLY")
+    rank = scopes()
     return {
         "option-names": sorted(valid, key=str.lower),
+        "process-scope-options": sorted((n for n, r in rank.items() if r == 3), key=str.lower),
+        "server-scope-options": sorted((n for n, r in rank.items() if r == 2), key=str.lower),
         "removed-options": sorted(removed, key=str.lower),
         "deprecated-options": sorted(WARN_ONLY, key=str.lower),
         "deprecated-filters": sorted(filters),

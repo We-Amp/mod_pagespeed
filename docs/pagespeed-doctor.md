@@ -31,7 +31,7 @@ repeat.
 | ID | Check | Fails or warns when |
 |----|-------|---------------------|
 | D02 | Module loaded | the module is not loaded, is loaded twice (for example an old `load_module` line next to the package's `modules-enabled/50-mod-pagespeed.conf`), its file is missing, or it was built for another nginx version |
-| D03 | Config test | `nginx -T` / `apachectl -t` fails. A pagespeed option in the failing line is classified: removed, renamed, misspelled (with the closest valid name), set in the wrong block, or given the wrong arguments. When the test passes, deprecated options and filters still in the configuration are listed once each (warning) |
+| D03 | Config test | `nginx -T` / `apachectl -t` fails. A pagespeed option in the failing line is classified: removed, misspelled (with the closest valid name), set in the wrong block (with where it belongs), or given the wrong arguments. Any other error is reported by class and file:line only (`evidence[].error_class`), never by its text. When the test passes, deprecated options and filters still in the configuration are listed once each (warning) |
 | D04 | Module answering | the test page has no `X-Page-Speed` (nginx) or `X-Mod-Pagespeed` (Apache) header; the likely reason follows: `pagespeed off`/`standby`, no `pagespeed on`, not an HTML page, or the Apache output filter missing |
 | D05 | Optimizing | the page has no optimized (`.pagespeed.`) URLs compared with its `?PageSpeed=off` copy. The statistics name the cause when there is one (resources with `Cache-Control: private/no-store`, unauthorized domains, fetch failures); otherwise it is a warning, because optimization is progressive: request the page again and re-run |
 | D11 | Cache directory | a `FileCachePath` (or the optimizer volume directory) is not writable by the web server user, holds root-owned files, or sits on a file system over 90% full |
@@ -48,6 +48,7 @@ repeat.
 | `--port N` | the local port (default 80) |
 | `--url URL` | test this URL instead of `http://127.0.0.1/`; statistics are read only from localhost |
 | `--no-configtest` | do not run the config test (D03 is skipped) |
+| `--allow-cache-writes` | run the config test even where it cannot be isolated from the cache directories (see below); it may then leave root-owned cache files, which D11 reports |
 | `--verbose` | show file:line evidence for passing checks too |
 
 Exit codes: `0` all checks pass, `1` warnings only, `2` at least one failure,
@@ -86,15 +87,16 @@ suggestions; the doctor never runs them, and a command that changes the
 system is marked `"mutates": true`.
 
 Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
-`module_version_mismatch` (D02); `directive_removed`, `directive_renamed`,
+`module_version_mismatch` (D02); `directive_removed`,
 `directive_typo`, `directive_unknown`, `directive_scope`,
 `directive_arguments`, `directive_value_invalid`, `config_test_failed`,
-`directive_deprecated` (D03); `server_not_reachable`, `header_missing`,
+`directive_deprecated`, and `configtest_not_isolated` on a skipped D03; `server_not_reachable`, `header_missing`,
 `module_off`, `module_standby`, `module_not_enabled`, `not_html`,
 `output_filter_missing` (D04); `nothing_to_optimize`, `not_optimized_yet`,
 `cache_control_not_rewritable`, `domain_not_authorized`,
 `resource_fetch_failures` (D05); `cache_dir_missing`,
-`cache_dir_not_writable`, `root_owned_cache_files`, `cache_disk_full` (D11);
+`cache_dir_not_writable`, `root_owned_cache_files`, `cache_disk_full`,
+`configtest_unshielded` (D11);
 `worker_not_running`, `worker_unreachable`, `user_not_in_group`,
 `worker_socket_denied`, `worker_health_missing`, `worker_degraded`,
 `worker_unhealthy`, `worker_health_unknown` (D12).
@@ -111,13 +113,19 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
 - **Local only.** It talks to `127.0.0.1` (or the `--url` you give), local
   Unix sockets and local files, always without a proxy. No DNS lookups, no
   update checks, no telemetry.
-- **The config test leaves the cache alone.** Run as root, a config test can
-  leave a root-owned cache file the web server user cannot replace
-  (We-Amp/mod_pagespeed#780). Where it can (root on a host), the doctor runs
-  the test in a private mount namespace with an empty scratch directory over
-  each cache directory, so the real cache is not touched. Where it cannot
-  (most containers), it lists root-owned cache files before and after the test
-  and reports any the test created, with the `chown` that fixes them.
+- **The config test leaves the cache alone, or does not run.** Run as root,
+  a config test can leave a root-owned cache file the web server user cannot
+  replace (We-Amp/mod_pagespeed#780). The doctor first reads the configuration
+  files itself (following every include, running nothing) and collects each
+  `FileCachePath` and `DaemonVolumePath`, nested ones included. It then runs
+  the test in a private mount namespace with an empty scratch directory
+  mounted over each of them, so the real cache is not touched. Where that is
+  not possible (most containers, or a cache directory that cannot be
+  shielded), it does not run the test: D03 is skipped with code
+  `configtest_not_isolated`. `--allow-cache-writes` runs it anyway; the
+  doctor then lists root-owned cache files before and after and D11 reports
+  any the test created, with the `chown` that fixes them. Printed commands
+  quote every path taken from the configuration.
 - **Root gives the full result.** Without root the config test is skipped and
   some ownership checks are partial; the verdict says so.
 

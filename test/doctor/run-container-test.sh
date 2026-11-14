@@ -71,9 +71,20 @@ pagespeed FileCachePath /var/cache/ngx_pagespeed;
 pagespeed StatisticsPath /ngx_pagespeed_statistics;
 pagespeed RedisPassword "$SECRET2";
 CONF
+  # Per-server caches: a custom path, one nested inside it, and one whose
+  # name carries a quote and a command substitution (must never run).
+  cat > /etc/nginx/conf.d/psc-servers.conf <<'CONF'
+server { listen 8081; root /var/www/html; pagespeed FileCachePath /srv/psc/custom; }
+server { listen 8082; root /var/www/html; pagespeed FileCachePath /srv/psc/custom/nested; }
+server { listen 8083; root /var/www/html; pagespeed FileCachePath "/srv/psc/it's'$(touch /tmp/pwned)"; }
+CONF
   mkdir -p /var/cache/ngx_pagespeed
   chown -R www-data: /var/cache/ngx_pagespeed
 }
+give_back() { # hand every cache tree back to the worker user
+  find /var/cache/ngx_pagespeed /srv/psc -user 0 -exec chown www-data: {} + 2>/dev/null
+}
+root_files() { find /var/cache/ngx_pagespeed /srv/psc -user 0 ! -type d 2>/dev/null | wc -l; }
 
 # run NAME EXPECTED_EXIT [doctor args...] -> leaves $OUT (json) and $HUM
 run() {
@@ -98,8 +109,8 @@ nginx
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null http://127.0.0.1/; curl -s -o /dev/null http://127.0.0.1/style.css; sleep 1; done
 # nginx -t and the nginx start above ran as root (mod_pagespeed#780); hand the
 # cache back to the worker so the next assertion measures the doctor alone.
-echo "root-owned cache files after nginx -t + start as root: $(find /var/cache/ngx_pagespeed -user 0 ! -type d | wc -l)"
-find /var/cache/ngx_pagespeed -user 0 -exec chown www-data: {} +
+echo "root-owned cache files after nginx -t + start as root: $(root_files) ($(find /srv/psc -user 0 ! -type d 2>/dev/null | wc -l) under /srv/psc)"
+give_back
 echo "statistics: HTTP $(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1/ngx_pagespeed_statistics')"
 # A build host's nearly full disk is a real D11 warning, not a test failure.
 DISK_FULL=$(df -P /var/cache/ngx_pagespeed | awk 'NR == 2 { sub(/%/, "", $5); print ($5 > 90) ? 1 : 0 }')
@@ -113,7 +124,20 @@ check "working: D05 pass" "[ \"\$(code_of D05)\" = 'pass null' ]"
 check "working: D11 $WANT_D11" "[ \"\$(code_of D11)\" = '$WANT_D11' ]"
 check "working: D05 read the statistics" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D05\") | .message' | grep -q 'statistics at /ngx_pagespeed_statistics'"
 check "working: config test shielded" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = namespace ]"
-check "working: no root-owned file left by the doctor" "[ -z \"\$(find /var/cache/ngx_pagespeed -user 0 ! -type d)\" ]"
+check "working: no root-owned file left by the doctor (all 4 cache paths)" "[ \"\$(root_files)\" = 0 ]"
+check "working: D11 checked all 4 cache paths" "[ \"\$(echo \"\$OUT\" | jq '.checks[] | select(.id==\"D11\") | .evidence | length')\" = 4 ]"
+check "working: D11 says shielded" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D11\") | .message' | grep -q 'shielded'"
+check "working: the quote/substitution path never ran" "[ ! -e /tmp/pwned ]"
+check "working: no printed command carries an unquoted path" "! echo \"\$HUM\" | grep -q 'chown -R [^ ]* /srv'"
+
+# --- no private namespace: fail closed ---------------------------------------
+give_back
+export PAGESPEED_DOCTOR_NO_NAMESPACE=1
+run not_isolated "$WANT_OK"
+unset PAGESPEED_DOCTOR_NO_NAMESPACE
+check "not_isolated: D03 skipped configtest_not_isolated" "[ \"\$(code_of D03)\" = 'skip configtest_not_isolated' ]"
+check "not_isolated: names --allow-cache-writes" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .reason' | grep -q -- '--allow-cache-writes'"
+check "not_isolated: config test not run, no root-owned file" "[ \"\$(root_files)\" = 0 ]"
 
 # --- resources served private: D05 names the cause ------------------------
 for i in 1 2 3; do curl -s -o /dev/null http://127.0.0.1/cc.html; sleep 1; done
@@ -150,7 +174,25 @@ good_conf
 sed -i 's|^\(\s*server_name _;\)|\1\n\tpagespeed UseNativeFetcher on;|' /etc/nginx/sites-enabled/default
 run scope 2
 check "scope: D03 directive_scope" "[ \"\$(code_of D03)\" = 'fail directive_scope' ]"
+check "scope: hint says http {} only" "echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | .fix.hint' | grep -q 'http {} block only'"
 sed -i '/pagespeed UseNativeFetcher on;/d' /etc/nginx/sites-enabled/default
+
+# --- top-level-only option inside a server block ------------------------------
+sed -i 's|^\(\s*server_name _;\)|\1\n\tpagespeed ProcessScriptVariables on;|' /etc/nginx/sites-enabled/default
+run top_level_only 2
+check "top_level_only: D03 directive_scope" "[ \"\$(code_of D03)\" = 'fail directive_scope' ]"
+sed -i '/pagespeed ProcessScriptVariables on;/d' /etc/nginx/sites-enabled/default
+
+# --- other config errors: class and file:line only, never the text -----------
+echo "add_header X-Leak \"$SECRET1\" a b c;" > /etc/nginx/conf.d/zz-leak.conf
+run generic_wrong_arguments 2
+check "generic: config_test_failed / wrong_arguments / add_header" \
+  "[ \"\$(echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | \"\\(.code) \\(.evidence[0].error_class) \\(.evidence[0].directive)\"')\" = 'config_test_failed wrong_arguments add_header' ]"
+echo "$SECRET1 on;" > /etc/nginx/conf.d/zz-leak.conf
+run generic_unknown_directive 2
+check "generic: unknown_directive, directive not echoed" \
+  "[ \"\$(echo \"\$OUT\" | jq -r '.checks[] | select(.id==\"D03\") | \"\\(.evidence[0].error_class) \\(.evidence[0].directive)\"')\" = 'unknown_directive null' ]"
+rm -f /etc/nginx/conf.d/zz-leak.conf
 
 # --- module not loaded ----------------------------------------------------
 mv /etc/nginx/modules-enabled/50-mod-pagespeed.conf /tmp/50-mod-pagespeed.conf
@@ -175,20 +217,28 @@ good_conf; nginx -s reload; sleep 1
 # --- root-owned cache file, config test without the namespace --------------
 touch /var/cache/ngx_pagespeed/root-owned.dat
 export PAGESPEED_DOCTOR_NO_NAMESPACE=1
-run root_owned 1
+run root_owned 1 --allow-cache-writes
 unset PAGESPEED_DOCTOR_NO_NAMESPACE
 check "root_owned: D11 root_owned_cache_files" "[ \"\$(code_of D11)\" = 'warn root_owned_cache_files' ]"
 check "root_owned: chown fix offered, marked mutating" \
   "echo \"\$OUT\" | jq -e '.checks[] | select(.id==\"D11\") | .fix.commands[0].mutates == true' >/dev/null"
 check "root_owned: config test ran directly" "[ \"\$(echo \"\$OUT\" | jq -r .config.config_test)\" = direct ]"
 rm -f /var/cache/ngx_pagespeed/root-owned.dat
-find /var/cache/ngx_pagespeed -user 0 -exec chown www-data: {} +
+give_back
 
-# --- not writable ---------------------------------------------------------
-chown root: /var/cache/ngx_pagespeed; chmod 755 /var/cache/ngx_pagespeed
+# --- not writable: the directory whose name carries a quote ----------------
+MAL="/srv/psc/it's'\$(touch /tmp/pwned)"
+chown root: "$MAL"; chmod 755 "$MAL"
 run not_writable 2
 check "not_writable: D11 cache_dir_not_writable" "[ \"\$(code_of D11)\" = 'fail cache_dir_not_writable' ]"
-chown -R www-data: /var/cache/ngx_pagespeed
+# The printed fix must be one quoted command: evaluating it with printf in
+# place of chown gives exactly the user and the path, and runs nothing.
+CMD=$(echo "$OUT" | jq -r '.checks[] | select(.id=="D11") | .fix.commands[0].command')
+echo "    fix command: $CMD"
+ARGS=$(bash -c "set -- ${CMD#chown -R }; printf '%s\n' \"\$#\" \"\$1\" \"\$2\"")
+check "not_writable: fix command quotes the path" "[ \"\$ARGS\" = \"\$(printf '2\nwww-data:\n%s' \"\$MAL\")\" ]"
+check "not_writable: nothing ran from the path" "[ ! -e /tmp/pwned ]"
+chown -R www-data: "$MAL"
 
 # --- server down ----------------------------------------------------------
 nginx -s stop; sleep 1
@@ -198,6 +248,11 @@ check "down: D04 server_not_reachable" "[ \"\$(code_of D04)\" = 'fail server_not
 # --- bad flag -------------------------------------------------------------
 "$D" --bogus >/dev/null 2>&1; rc=$?
 check "bad flag exits 3" "[ $rc -eq 3 ]"
+OUT=$("$D" --bogus --json 2>/dev/null); rc=$?
+check "bad flag with --json: exit 3 and a doctor_error document" \
+  "[ $rc -eq 3 ] && echo \"\$OUT\" | jq -e '.verdict == \"doctor_error\" and .exit_code == 3' >/dev/null"
+OUT=$("$D" --json --server bogus 2>/dev/null); rc=$?
+check "bad --server with --json: exit 3 and JSON" "[ $rc -eq 3 ] && echo \"\$OUT\" | jq -e .error >/dev/null"
 
 # --- packaging: build a .deb from this tree around the installed module ----
 mkdir -p /tmp/pkg && cp /usr/lib/nginx/modules/ngx_pagespeed_module.so /tmp/pkg/
