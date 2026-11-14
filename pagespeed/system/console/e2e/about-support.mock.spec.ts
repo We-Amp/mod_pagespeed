@@ -246,7 +246,7 @@ test.describe("About and Support", () => {
     await expect(config).not.toBeChecked();
 
     await keep.check();
-    await expect(area).toHaveValue(/a\.css\?session=abc123 failed/);
+    await expect(area).toHaveValue(/a\.css\?session=\[redacted\] failed/);
     await keep.uncheck();
 
     await config.check();
