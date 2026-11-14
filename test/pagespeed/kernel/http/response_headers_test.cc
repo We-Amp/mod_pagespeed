@@ -2895,4 +2895,22 @@ TEST_F(ResponseHeadersTest, ReasonPhraseMatchesStatus) {
   EXPECT_STREQ("Temporary Redirect", response_headers_.reason_phrase());
 }
 
+// Clear() leaves nothing of an earlier cacheable response: the cleared headers
+// are neither browser- nor proxy-cacheable and carry no lifetime.
+TEST_F(ResponseHeadersTest, ClearForgetsEarlierCacheability) {
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+  response_headers_.ComputeCaching();
+  ASSERT_TRUE(response_headers_.IsBrowserCacheable());
+  ASSERT_TRUE(response_headers_.IsProxyCacheable());
+  ASSERT_EQ(600 * Timer::kSecondMs, response_headers_.cache_ttl_ms());
+
+  response_headers_.Clear();
+  EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.IsProxyCacheable());
+  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
+}
+
 }  // namespace net_instaweb
