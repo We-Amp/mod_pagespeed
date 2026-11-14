@@ -599,7 +599,7 @@ class RewriteDriver : public HtmlParse {
       const StringPiece& filter_id, const StringPiece& name,
       OutputResourceKind kind, GoogleString* failure_reason) {
     return CreateOutputResourceWithPath(mapped_path, unmapped_path,
-                                        decoded_base_url_.AllExceptLeaf(),
+                                        decoded_base_url().AllExceptLeaf(),
                                         filter_id, name, kind, failure_reason);
   }
 
@@ -687,7 +687,14 @@ class RewriteDriver : public HtmlParse {
   // Returns the appropriate base gurl to be used for resolving hrefs
   // in the document.  Note that HtmlParse::google_url() is the URL
   // for the HTML file and is used for printing html syntax errors.
-  const GoogleUrl& base_url() const { return base_url_; }
+  //
+  // The returned reference stays valid until the driver is cleared, even if a
+  // later <base> tag sets a new base URL, so it may be used by rewrites that
+  // run on other threads.  The same holds for decoded_base_url() and
+  // decoded_base().
+  const GoogleUrl& base_url() const {
+    return base_urls_snapshot_.load(std::memory_order_acquire)->base_url;
+  }
 
   // The URL that was requested if FetchResource was called.
   StringPiece fetch_url() const { return fetch_url_; }
@@ -695,8 +702,11 @@ class RewriteDriver : public HtmlParse {
   // Returns the decoded version of base_gurl() in case it was encoded by a
   // non-default UrlNamer (for the default UrlNamer this returns the same value
   // as base_url()).  Required when fetching a resource by its encoded name.
-  const GoogleUrl& decoded_base_url() const { return decoded_base_url_; }
-  StringPiece decoded_base() const { return decoded_base_url_.Spec(); }
+  const GoogleUrl& decoded_base_url() const {
+    return base_urls_snapshot_.load(std::memory_order_acquire)
+        ->decoded_base_url;
+  }
+  StringPiece decoded_base() const { return decoded_base_url().Spec(); }
 
   // Quick way to tell if the document url is https (ie was fetched via https).
   bool IsHttps() const { return google_url().SchemeIs("https"); }
@@ -1400,9 +1410,14 @@ class RewriteDriver : public HtmlParse {
   // test code and from FetchResource.
   void SetBaseUrlForFetch(const StringPiece& url);
 
-  // Saves a decoding of the Base URL in decoded_base_url_.  Use this
-  // whenever updating base_url_.
-  void SetDecodedUrlFromBase();
+  // Publishes url, together with its decoding, as a new immutable version of
+  // the base URLs.  Earlier versions stay alive until ClearBaseUrls().  Must
+  // only be called from the HTML-parse thread, or before a fetch starts.
+  void SetBaseUrl(const GoogleUrl& url);
+
+  // Drops all base URL versions and publishes an empty one.  Must only be
+  // called when no rewrite can still read the base URLs.
+  void ClearBaseUrls();
 
   // The rewrite_mutex is owned by the scheduler.
   AbstractMutex* rewrite_mutex() const LOCK_RETURNED(scheduler_->mutex()) {
@@ -1632,14 +1647,26 @@ class RewriteDriver : public HtmlParse {
   // this.
   bool write_property_cache_dom_cohort_;
 
-  // URL of the HTML pages being rewritten in the HTML flow or the
-  // of the resource being rewritten in the resource flow.
-  GoogleUrl base_url_;
+  struct BaseUrls {
+    // URL of the HTML pages being rewritten in the HTML flow or the
+    // of the resource being rewritten in the resource flow.
+    GoogleUrl base_url;
 
-  // In the resource flow, the URL requested may not have the same
-  // base as the original resource. decoded_base_url_ stores the base
-  // of the original (un-rewritten) resource.
-  GoogleUrl decoded_base_url_;
+    // In the resource flow, the URL requested may not have the same
+    // base as the original resource. decoded_base_url stores the base
+    // of the original (un-rewritten) resource.
+    GoogleUrl decoded_base_url;
+  };
+
+  // Currently active base URLs, stored copy-on-write like the CSP context
+  // below.  Setting a base URL publishes a fresh immutable version through
+  // SetBaseUrl() instead of changing the current one in place.  Superseded
+  // versions are kept until Clear(), so a reference or StringPiece obtained
+  // earlier stays valid until the driver is cleared.  base_urls_versions_ is
+  // only touched on the HTML-parse thread (or before a fetch starts); readers
+  // go through the atomic snapshot.
+  std::vector<std::unique_ptr<BaseUrls>> base_urls_versions_;
+  std::atomic<const BaseUrls*> base_urls_snapshot_{nullptr};
 
   // This is the URL that is being fetched in a fetch path (not valid in HTML
   // path).
