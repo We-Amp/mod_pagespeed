@@ -26,6 +26,7 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/logging_proto.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
@@ -1032,6 +1033,56 @@ TEST_F(ImageRewriteTest, FetchFromOtherDirectoryKeepsPageUrl) {
   const GoogleString page_png = Encode("dir/", "ic", "0", kBikePngFile, "png");
   ValidateExpected("other_dir", StrCat("<img src=\"dir/", kBikePngFile, "\">"),
                    StrCat("<img src=\"", page_png, "\">"));
+}
+
+// Archived reports:
+//   https://github.com/apache/incubator-pagespeed-ngx/issues/1319
+//   https://github.com/apache/incubator-pagespeed-ngx/issues/1686
+// Optimized image URLs (.pagespeed.ic.) answered 404 and kept answering 404
+// after the origin had recovered: one failed fetch of the original image was
+// remembered as if the image were missing. A fetch that fails, or that the
+// origin answers 5xx, is now retried after a short window, so the optimized
+// URL is served again once the origin is back.
+TEST_F(ImageRewriteTest, OptimizedImageRecoversAfterTheOriginFails) {
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+  const GoogleString original = StrCat(kTestDomain, kBikePngFile);
+  const GoogleString optimized =
+      Encode(kTestDomain, "ic", "0", kBikePngFile, "png");
+  const int64 kTransientTtlMs =
+      http_cache()->failure_caching_ttl_sec(kFetchStatusTransientError) *
+      Timer::kSecondMs;
+  ASSERT_LT(kTransientTtlMs, options()->metadata_input_errors_cache_ttl_ms());
+
+  for (const bool times_out : {true, false}) {
+    SCOPED_TRACE(times_out ? "fetch fails" : "origin answers 503");
+    lru_cache()->Clear();
+    ResponseHeaders failed;
+    SetDefaultLongCacheHeaders(&kContentTypePng, &failed);
+    if (times_out) {
+      // What the fetcher hands back when it gives up: a 404 it made up,
+      // no body, and Done(false).
+      failed.SetStatusAndReason(HttpStatus::kNotFound);
+      SetFetchResponse(original, failed, "");
+      mock_url_fetcher()->SetResponseFailure(original);
+    } else {
+      failed.SetStatusAndReason(HttpStatus::kUnavailable);
+      SetFetchResponse(original, failed, "");
+    }
+    GoogleString content;
+    EXPECT_FALSE(FetchResourceUrl(optimized, &content));
+
+    // The origin recovers. Past the short window the optimized URL is
+    // served, long before a genuinely missing image would be looked at
+    // again.
+    AddFileToMockFetcher(original, kBikePngFile, kContentTypePng, 100);
+    AdvanceTimeMs(kTransientTtlMs + Timer::kSecondMs);
+    content.clear();
+    ResponseHeaders response;
+    EXPECT_TRUE(FetchResourceUrl(optimized, &content, &response));
+    EXPECT_EQ(HttpStatus::kOK, response.status_code());
+    EXPECT_FALSE(content.empty());
+  }
 }
 
 TEST_F(ImageRewriteTest, ImgSrcSet) {
