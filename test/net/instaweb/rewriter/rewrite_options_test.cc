@@ -2699,6 +2699,32 @@ TEST_F(RewriteOptionsTest, ExperimentOptionsTestCssInlineWithIllegalOptions) {
   EXPECT_EQ(1024L, options_.css_inline_max_bytes());
 }
 
+// The caching wildcards and the proxy suffix are written without a newline of
+// their own; each experiment must still start a line, so a reader that takes
+// "Experiment " at the start of a line sees every one.
+TEST_F(RewriteOptionsTest, ExperimentLinesStartALineAfterEverySection) {
+  SetupTestExperimentSpecs();
+  options_.AddOverrideCacheTtl("*.example.com/*");
+  options_.WriteableDomainLawyer()->set_proxy_suffix(".proxy.example");
+
+  GoogleString options_string = options_.OptionsToString();
+  StringPieceVector lines;
+  SplitStringPieceToVector(options_string, "\n", &lines, true);
+  int experiments = 0;
+  for (auto line : lines) {
+    if (line.starts_with("Experiment ")) {
+      ++experiments;
+    } else {
+      EXPECT_EQ(StringPiece::npos, line.find("Experiment id=")) << line;
+    }
+  }
+  EXPECT_EQ(options_.num_experiments(), experiments);
+  EXPECT_NE(GoogleString::npos,
+            options_string.find("\n*.example.com/*A,\n"));
+  EXPECT_NE(GoogleString::npos,
+            options_string.find("\nProxy Suffix: .proxy.example\n"));
+}
+
 TEST_F(RewriteOptionsTest, ExperimentOptionsTestMultipleOptions) {
   SetupTestExperimentSpecs();
   options_.SetExperimentState(6);
