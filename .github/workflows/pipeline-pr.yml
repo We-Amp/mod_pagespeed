@@ -431,7 +431,7 @@ jobs:
           gh api --paginate "${api}/files" > "${RUNNER_TEMP}/pr-files.json"
           jq -r '.[] | .filename, (.previous_filename // empty)' \
             "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-files.txt"
-          jq -r '.[] | select(.status=="added") | .filename' \
+          jq -r '.[] | select(.status=="added" or .status=="renamed" or .status=="copied") | .filename' \
             "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-added.txt"
           jq -r '.[] | select(.status=="removed") | .filename' \
             "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-removed.txt"
@@ -451,12 +451,22 @@ jobs:
             : > "${RUNNER_TEMP}/sec-base.md"
             : > "${RUNNER_TEMP}/sec-head.md"
             if jq -e --arg f "$f" 'any(.[]; .filename == $f)' "${RUNNER_TEMP}/pr-files.json" >/dev/null; then
-              gh api -H 'Accept: application/vnd.github.raw' \
-                "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${base_sha}" \
-                > "${RUNNER_TEMP}/sec-base.md" 2>/dev/null || : > "${RUNNER_TEMP}/sec-base.md"
-              gh api -H 'Accept: application/vnd.github.raw' \
-                "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${head_sha}" \
-                > "${RUNNER_TEMP}/sec-head.md" 2>/dev/null || : > "${RUNNER_TEMP}/sec-head.md"
+              fstatus="$(jq -r --arg f "$f" '.[] | select(.filename == $f) | .status' "${RUNNER_TEMP}/pr-files.json")"
+              # The base copy may be missing only when this change adds the file.
+              if ! gh api -H 'Accept: application/vnd.github.raw' \
+                  "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${base_sha}" \
+                  > "${RUNNER_TEMP}/sec-base.md" 2>/dev/null; then
+                [ "$fstatus" = "added" ] || { echo "cannot read base ${f}" >&2; exit 1; }
+                : > "${RUNNER_TEMP}/sec-base.md"
+              fi
+              # The head copy must be readable (unless the change deletes the file).
+              if [ "$fstatus" = "removed" ]; then
+                : > "${RUNNER_TEMP}/sec-head.md"
+              else
+                gh api -H 'Accept: application/vnd.github.raw' \
+                  "repos/${GITHUB_REPOSITORY}/contents/${f}?ref=${head_sha}" \
+                  > "${RUNNER_TEMP}/sec-head.md"
+              fi
               # Until master's copy has the helper there is nothing to compute.
               if grep -q -e '--print-security-added' "$gate"; then
                 bash "$gate" --print-security-added \

@@ -27,8 +27,10 @@ deletes them.
   with the release that ships the fix. A pull request adding one is refused
   unless it is a release landing (above), or its description or a commit message
   says `Release-Note: security-public -- <why>` (same separators and minimum
-  reason as the other markers). The release cut, which folds fragments into
-  `CHANGELOG.md` and deletes them, is not affected.
+  reason as the other markers). Editing an existing Security line counts as
+  adding it and needs the same marker. The release cut, which folds fragments into
+  `CHANGELOG.md` and deletes them (it removes security fragments, adds none and
+  changes `net/instaweb/public/VERSION`), is not affected.
 
 ## Content
 

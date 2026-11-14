@@ -121,9 +121,11 @@ LANDING_BRANCH_RE='^landing/'
 #   - a line `Release-Note: security-public -- <why>` (same separators and
 #     minimum reason as the waiver) in the description or a commit message,
 #     for the rare entry that is deliberately public ahead of a release;
-#   - the release cut: the change deletes changelog.d/ fragments, which is what
-#     folding them into CHANGELOG.md looks like. This only excuses lines added
-#     to CHANGELOG.md or RELEASE_NOTES.md, never a newly added fragment.
+#   - the release cut: the change removes at least one *.security.md fragment,
+#     adds no fragment, and changes net/instaweb/public/VERSION, which is what
+#     folding fragments into CHANGELOG.md for a release looks like. This only
+#     excuses lines added to CHANGELOG.md or RELEASE_NOTES.md.
+VERSION_FILE="net/instaweb/public/VERSION"
 SECPUB_RE='^[[:space:]]*Release-Note:[[:space:]]*security-public[[:space:]]*[-:–—]+[[:space:]]*'
 
 # ---------------------------------------------------------------------------
@@ -218,7 +220,11 @@ evaluate_release_note() {
   elif [ "${#secpub_reason}" -ge "$WAIVER_MIN_REASON" ]; then
     sec_allowed=yes
   fi
-  if printf '%s\n' "$removed" | grep -qE "$FRAGMENT_RE"; then
+  # The cut: removes at least one security fragment, adds no fragment, and
+  # moves the version file.
+  if printf '%s\n' "$removed" | grep -qE '^changelog\.d/.*\.security\.md$' \
+      && [ -z "$added_frags" ] \
+      && printf '%s\n' "$changed" | grep -qFx "$VERSION_FILE"; then
     cut=yes
   fi
   sec_frags="$(printf '%s\n' "$added_frags" | grep -E '\.security\.md$' || true)"
@@ -629,8 +635,12 @@ self_test() {
   schk "CHANGELOG security lines, normal     -> BLOCK" 1 "CHANGELOG.md" "" "" "fix/x" "" "- Hardened a parser."
   schk "CHANGELOG security lines, landing    -> pass" 0 "CHANGELOG.md" "$SLM" "" "landing/2.9.0" "" "- Hardened a parser."
   schk "CHANGELOG security lines, public mk  -> pass" 0 "CHANGELOG.md" "$SPM" "" "fix/x" "" "- Hardened a parser."
-  schk "CHANGELOG security lines, the cut    -> pass" 0 "$(printf 'CHANGELOG.md\n%s\n' "$SF")" "" "" "release/2.9.0" "$SF" "- Hardened a parser."
-  schk "cut cannot add a security fragment   -> BLOCK" 1 "$(printf 'CHANGELOG.md\n%s\nchangelog.d/old-topic.fixed.md\n' "$SF")" "" "$SF" "release/2.9.0" "changelog.d/old-topic.fixed.md" ""
+  local VF=net/instaweb/public/VERSION
+  schk "CHANGELOG security lines, the cut    -> pass" 0 "$(printf 'CHANGELOG.md\n%s\n%s\n' "$SF" "$VF")" "" "" "release/2.9.0" "$SF" "- Hardened a parser."
+  schk "cut without the version file         -> BLOCK" 1 "$(printf 'CHANGELOG.md\n%s\n' "$SF")" "" "" "release/2.9.0" "$SF" "- Hardened a parser."
+  schk "cut removing only a non-security frag-> BLOCK" 1 "$(printf 'CHANGELOG.md\n%s\n' "$VF")" "" "" "x/y" "changelog.d/a-topic.fixed.md" "- Hardened a parser."
+  schk "swap a .fixed.md for a Security line -> BLOCK" 1 "$(printf 'CHANGELOG.md\nchangelog.d/a-topic.fixed.md\n')" "" "" "fix/x" "changelog.d/a-topic.fixed.md" "- Hardened a parser."
+  schk "cut adding a fragment                -> BLOCK" 1 "$(printf 'CHANGELOG.md\n%s\n%s\nchangelog.d/new-topic.fixed.md\n' "$SF" "$VF")" "" "changelog.d/new-topic.fixed.md" "release/2.9.0" "$SF" "- Hardened a parser."
   schk "CHANGELOG without security lines     -> pass" 0 "CHANGELOG.md" "" "" "fix/x" "" ""
 
   # print_security_added: only lines new under a Security heading count.
