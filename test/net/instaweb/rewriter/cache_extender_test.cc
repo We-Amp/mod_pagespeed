@@ -787,6 +787,8 @@ TEST_F(CacheExtenderTest, ExtendedResourceKeepsLongCacheWithoutModifyHeaders) {
 // MapProxyDomain, is rewritten to a .pagespeed. URL under that path. The URL
 // keeps answering 200 with the image after its cache entries are gone and
 // after the origin's TTL has run out: it is fetched again from the origin.
+// Scope: the module-side rebuild path with a mock fetcher and an in-process
+// cache only; a shared memcache and a slow origin are not covered here.
 TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLoss) {
   const char kOrigin[] = "http://images.example.org/";
   const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
