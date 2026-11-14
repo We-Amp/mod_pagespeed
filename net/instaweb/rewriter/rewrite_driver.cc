@@ -1455,17 +1455,17 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
           driver_->server_context()->ApplyRewrittenUrlCacheControl(
               response_headers);
         }
-        async_fetch_->set_content_length(content.size());
         async_fetch_->FixCacheControlForGoogleCache();
-        async_fetch_->HeadersComplete();
         // value->share() is owned heap storage by construction (share()
         // collapses any mapped view first); mapped bytes never ride the
         // WriteShared path -- their protection window is bounded, and they
         // go through WriteMapped with their keepalive instead.
-        success =
-            alias_serve
-                ? async_fetch_->WriteMapped(content, mapped_keepalive, handler_)
-                : async_fetch_->WriteShared(content, value->share(), handler_);
+        success = RewriteContext::CompleteWholeResponseHeaders(
+                      canonical_url_, content, async_fetch_, handler_) &&
+                  (alias_serve ? async_fetch_->WriteMapped(
+                                     content, mapped_keepalive, handler_)
+                               : async_fetch_->WriteShared(
+                                     content, value->share(), handler_));
       }
       async_fetch_->Done(success);
       driver_->FetchComplete();
@@ -1476,7 +1476,7 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         // FetchOutputResource() somehow got called on an already written
         // resource object (while the cache somehow decided not to store it).
         content = output_resource_->ExtractUncompressedContents();
-        response_headers->CopyFrom(*output_resource_->response_headers());
+        response_headers->CopyFrom(*output_resource_->UncompressedHeaders());
         ServerContext* server_context = driver_->server_context();
         HTTPCache* http_cache = server_context->http_cache();
         http_cache->Put(canonical_url_, driver_->CacheFragment(),
@@ -1490,7 +1490,8 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         if (!driver_->is_nested()) {
           server_context->ApplyRewrittenUrlCacheControl(response_headers);
         }
-        async_fetch_->Done(async_fetch_->Write(content, handler_));
+        async_fetch_->Done(RewriteContext::WriteWholeResponse(
+            canonical_url_, content, async_fetch_, handler_));
         driver_->FetchComplete();
       } else {
         // Use the filter to reconstruct.

@@ -56,6 +56,7 @@
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -68,6 +69,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/older_result_cache.h"
@@ -291,6 +293,81 @@ TEST_F(RewriteContextTest, TrimOnTheFlyOptimizable) {
   ClearStats();
   EXPECT_EQ(0, fetch_successes_->Get());  // no more fetches.
   EXPECT_EQ(0, fetch_failures_->Get());
+}
+
+// A whole-body response goes out with the length it declares.
+TEST_F(RewriteContextTest, WholeResponseWithMatchingLengthIsServed) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->SetContentLength(10);
+  EXPECT_TRUE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", "0123456789", &fetch, message_handler()));
+  EXPECT_TRUE(fetch.headers_complete());
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_EQ("0123456789", body);
+  int64 declared = 0;
+  EXPECT_TRUE(headers->FindContentLength(&declared));
+  EXPECT_EQ(10, declared);
+  EXPECT_EQ(10, fetch.content_length());
+}
+
+// When the declared length is not the length of the body, neither is sent:
+// the response becomes a 500 with an empty body.
+TEST_F(RewriteContextTest, WholeResponseWithOtherLengthIsRefused) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->SetContentLength(4);
+  EXPECT_FALSE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", "0123456789", &fetch, message_handler()));
+  EXPECT_TRUE(fetch.headers_complete());
+  EXPECT_EQ(HttpStatus::kInternalServerError, headers->status_code());
+  EXPECT_TRUE(body.empty());
+  EXPECT_FALSE(headers->Has(HttpAttributes::kContentEncoding));
+  int64 declared = -1;
+  EXPECT_TRUE(headers->FindContentLength(&declared));
+  EXPECT_EQ(0, declared);
+  EXPECT_EQ(0, fetch.content_length());
+}
+
+// A body labelled gzip must be gzip, whether or not a length is declared.
+TEST_F(RewriteContextTest, WholeResponseLabelledGzipOverPlainBodyIsRefused) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->ComputeCaching();
+  ASSERT_FALSE(headers->Has(HttpAttributes::kContentLength));
+  EXPECT_FALSE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", ".a { color: red; } .b { color: blue; }", &fetch,
+      message_handler()));
+  EXPECT_EQ(HttpStatus::kInternalServerError, headers->status_code());
+  EXPECT_TRUE(body.empty());
+  EXPECT_FALSE(headers->IsGzipped());
+}
+
+// A gzip body under a gzip label goes out as it is.
+TEST_F(RewriteContextTest, WholeResponseLabelledGzipOverGzipBodyIsServed) {
+  GoogleString gzipped;
+  StringWriter writer(&gzipped);
+  ASSERT_TRUE(GzipInflater::Deflate(".a { color: red; }", GzipInflater::kGzip,
+                                    &writer));
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->SetContentLength(gzipped.size());
+  EXPECT_TRUE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", gzipped, &fetch, message_handler()));
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_EQ(gzipped, body);
+  EXPECT_TRUE(headers->IsGzipped());
 }
 
 // The OutputPartitions metadata protobuf is parsed straight off the (possibly

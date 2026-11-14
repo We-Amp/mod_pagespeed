@@ -338,6 +338,25 @@ class RewriteContext {
   // Initializes statistics.
   static void InitStats(Statistics* stats);
 
+  // Completes the headers of `async_fetch` and writes `contents` as the whole
+  // body. If the headers do not describe `contents` -- they declare another
+  // Content-Length, or say gzip over a body that is not gzip -- the response
+  // is replaced with a bodiless 500 instead, so a response never declares a
+  // length or coding its body does not have. Returns whether `contents` was
+  // written.
+  static bool WriteWholeResponse(StringPiece url, StringPiece contents,
+                                 AsyncFetch* async_fetch,
+                                 MessageHandler* handler);
+
+  // The header half of WriteWholeResponse, for callers that write `contents`
+  // themselves: on success the headers are complete and the caller writes
+  // exactly `contents`; on failure the bodiless 500 has been sent and the
+  // caller writes nothing.
+  static bool CompleteWholeResponseHeaders(StringPiece url,
+                                           StringPiece contents,
+                                           AsyncFetch* async_fetch,
+                                           MessageHandler* handler);
+
  protected:
   using GoogleUrlStarVector = std::vector<GoogleUrl*>;
 
