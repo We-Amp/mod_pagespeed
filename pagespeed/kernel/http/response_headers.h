@@ -279,6 +279,12 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   bool IsGzipped() const;
   bool WasGzippedLast() const;
 
+  // Determines whether Content-Encoding lists anything beyond a single gzip
+  // (identity aside): br, zstd, deflate, an unknown token, or gzip twice.
+  // The HTTP cache, like Resource, can only undo one layer of gzip, so such a
+  // body is only good for the client that negotiated it.
+  bool HasContentCodingOtherThanSingleGzip() const;
+
   // Get ContentType. NULL if none set or it isn't in our predefined set of
   // known content types.
   const ContentType* DetermineContentType() const;

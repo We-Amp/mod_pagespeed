@@ -1658,6 +1658,69 @@ TEST_F(InPlaceRecordedInputTest, OptimizesWhatTheModuleFetched) {
   EXPECT_EQ("fetched:cf", FetchInPlace());
 }
 
+// A stylesheet the origin sends in a coding the rewriters cannot decode is
+// served to each client as the origin sent it, coding header included.  It
+// is not stored, so every request goes to the origin, and it is never
+// optimized.
+TEST_F(InPlaceRewriteContextTest, CssInUndecodableCodingIsServedAsSent) {
+  Init();
+  const GoogleString url = "http://www.example.com/coded.css";
+  ResponseHeaders headers;
+  SetDefaultHeaders(kContentTypeCss.mime_type(), &headers);
+  headers.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  headers.Add(HttpAttributes::kContentEncoding, "zstd");
+  mock_url_fetcher()->SetResponse(url, headers, cache_body_);
+
+  int total_origin_fetches = 0;
+  for (const char* round : {"first", "repeat"}) {
+    ResetHeadersAndStats();
+    FetchAndCheckResponse(url, cache_body_, true, ttl_ms_, nullptr,
+                          start_time_ms());
+    EXPECT_STREQ("zstd",
+                 response_headers_.Lookup1(HttpAttributes::kContentEncoding))
+        << round;
+    total_origin_fetches += counting_url_async_fetcher()->fetch_count();
+    EXPECT_EQ(0, http_cache()->cache_hits()->Get()) << round;
+    EXPECT_EQ(0, http_cache()->cache_inserts()->Get()) << round;
+    EXPECT_EQ(0, css_filter_->num_rewrites()) << round;
+  }
+  EXPECT_EQ(2, total_origin_fetches);
+}
+
+// A copy of a stylesheet in a coding the cache cannot adapt, stored before
+// that was refused on the way in, is neither served nor used as the input
+// of the optimization: the stylesheet is fetched again, and the optimized
+// result is built from what the origin sends now.
+TEST_F(InPlaceRewriteContextTest,
+       StoredCssInOtherCodingIsNotServedOrRewritten) {
+  Init();
+  EnableCachePurge();
+  const char kStoredCopy[] = "stored copy in another coding";
+  ResponseHeaders coded_headers;
+  SetDefaultHeaders(kContentTypeCss.mime_type(), &coded_headers);
+  coded_headers.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  coded_headers.Add(HttpAttributes::kContentEncoding, "br");
+  coded_headers.ComputeCaching();
+  http_cache()->Put(cache_css_url_, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                    &coded_headers, kStoredCopy, message_handler());
+
+  // Served path: the origin's own bytes, not the stored copy.
+  FetchAndCheckResponse(cache_css_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
+  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kContentEncoding));
+  EXPECT_LE(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, css_filter_->num_rewrites());
+
+  // Rewrite input: the optimized result is the origin's stylesheet, rewritten.
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
 TEST_F(InPlaceRewriteContextTest, NonCacheableUrlNoRewriting) {
   Init();
   FetchAndCheckResponse(nocache_html_url_, nocache_body_, true, 0, nullptr,

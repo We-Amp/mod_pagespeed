@@ -106,8 +106,12 @@ class CachePutFetch : public SharedAsyncFetch {
           "max-age=" + Integer64ToString(headers->implicit_cache_ttl_ms()));
     }
     headers->ComputeCaching();
+    // IsProxyCacheable lets Vary: Accept-Encoding through because the cache
+    // can add and remove gzip for each client.  It can do that for no other
+    // content coding, so a body in one is not stored under the URL.
     cacheable_ = headers->IsProxyCacheable(req_properties_, respect_vary_,
-                                           ResponseHeaders::kHasValidator);
+                                           ResponseHeaders::kHasValidator) &&
+                 !headers->HasContentCodingOtherThanSingleGzip();
     if (cacheable_) {
       // Make a copy of the headers which we will send to the
       // cache_value_writer_ later.
@@ -240,6 +244,16 @@ AsyncFetch* MakeCachePutAndConditionalFetch(const CachePutSettings& settings,
       put_fetch->request_headers()->Lookup1(HttpAttributes::kIfNoneMatch);
   if (etag != nullptr && StringCaseStartsWith(etag, HTTPCache::kEtagPrefix)) {
     put_fetch->request_headers()->RemoveAll(HttpAttributes::kIfNoneMatch);
+  }
+
+  // The response is stored under the URL alone, so ask the origin only for
+  // what the cache can adapt per client: gzip or nothing.
+  RequestHeaders* request_headers = put_fetch->request_headers();
+  if (request_headers->AcceptsGzip()) {
+    request_headers->Replace(HttpAttributes::kAcceptEncoding,
+                             HttpAttributes::kGzip);
+  } else {
+    request_headers->RemoveAll(HttpAttributes::kAcceptEncoding);
   }
 
   ConditionalSharedAsyncFetch* conditional_fetch =

@@ -194,7 +194,13 @@ class HTTPCacheCallback : public CacheInterface::Callback {
         // time full-flush that would impact clean cache entries.
         // Once the caches are all clean, the Sanitize call will be a
         // relatively fast check.
-        !headers->Sanitize()) {
+        !headers->Sanitize() &&
+        // The cache adapts a stored copy to each client by adding or
+        // removing one layer of gzip.  A copy in any other content coding,
+        // such as one stored before that was enforced on the way in, is
+        // only good for the client that negotiated it: treat it as a MISS,
+        // for serving and as a fallback alike, so it is fetched again.
+        !headers->HasContentCodingOtherThanSingleGzip()) {
       // While stale responses can potentially be used in case of fetch
       // failures, responses invalidated via a cache flush should never be
       // returned under any scenario.

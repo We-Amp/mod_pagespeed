@@ -928,6 +928,24 @@ bool ResponseHeaders::WasGzippedLast() const {
   return false;
 }
 
+bool ResponseHeaders::HasContentCodingOtherThanSingleGzip() const {
+  ConstStringStarVector v;
+  if (!Lookup(HttpAttributes::kContentEncoding, &v)) {
+    return false;
+  }
+  int num_gzip = 0;
+  for (const GoogleString* coding : v) {
+    if (coding == nullptr || coding->empty() ||
+        StringCaseEqual(*coding, "identity")) {
+      continue;
+    }
+    if (!StringCaseEqual(*coding, HttpAttributes::kGzip) || ++num_gzip > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // TODO(sligocki): Perhaps we should take in a URL here and use that to
 // guess Content-Type as well. See Resource::DetermineContentType().
 void ResponseHeaders::DetermineContentTypeAndCharset(

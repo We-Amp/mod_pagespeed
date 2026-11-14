@@ -122,6 +122,7 @@ void MockUrlFetcher::Clear() {
   {
     ScopedMutex lock(mutex_.get());
     last_referer_.clear();
+    last_accept_encoding_.clear();
   }
 }
 
@@ -190,6 +191,8 @@ void MockUrlFetcher::Fetch(const GoogleString& url_in,
       } else {
         last_referer_ = referer;
       }
+      last_accept_encoding_ =
+          request_headers.LookupJoined(HttpAttributes::kAcceptEncoding);
     }
     ResponseMap::iterator iter = response_map_.find(url);
     if (iter != response_map_.end()) {
