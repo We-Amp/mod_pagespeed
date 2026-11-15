@@ -1838,14 +1838,14 @@ exit "$EXIT"
 #: ImageWebpRecompressionQuality ImageWebpRecompressionQualityForSmallScreens
 #: ImgInlineMaxBytes ImgMaxRewritesAtOnce ImplicitCacheTtlMs
 #: IncreaseSpeedTracking InlineOnlyCriticalImages
-#: InlineResourcesWithoutExplicitAuthorization InPlacePreemptiveRewriteCss
-#: InPlacePreemptiveRewriteCssImages InPlacePreemptiveRewriteImages
-#: InPlacePreemptiveRewriteJavascript InPlaceResourceOptimization
-#: InPlaceRewriteDeadlineMs InPlaceSMaxAgeSec InPlaceWaitForOptimized
-#: InstallCrashHandler JpegQualityForSaveData JpegRecompressionQuality
-#: JpegRecompressionQualityForSmallScreens JsInlineMaxBytes JsOutlineMinBytes
-#: JsPreserveURLs LazyloadImagesAfterOnload LazyloadImagesBlankUrl
-#: LazyloadImagesMode LazyloadImagesSkipFirst Library
+#: InlineResourcesWithoutExplicitAuthorization InPlaceCorsGuard
+#: InPlacePreemptiveRewriteCss InPlacePreemptiveRewriteCssImages
+#: InPlacePreemptiveRewriteImages InPlacePreemptiveRewriteJavascript
+#: InPlaceResourceOptimization InPlaceRewriteDeadlineMs InPlaceSMaxAgeSec
+#: InPlaceWaitForOptimized InstallCrashHandler JpegQualityForSaveData
+#: JpegRecompressionQuality JpegRecompressionQualityForSmallScreens
+#: JsInlineMaxBytes JsOutlineMinBytes JsPreserveURLs LazyloadImagesAfterOnload
+#: LazyloadImagesBlankUrl LazyloadImagesMode LazyloadImagesSkipFirst Library
 #: ListOutstandingUrlsOnError LoadFromFile LoadFromFileCacheTtlMs
 #: LoadFromFileMatch LoadFromFileRule LoadFromFileRuleMatch
 #: LogBackgroundRewrite LogDir LogMobilizationSamples LogRewriteTiming
