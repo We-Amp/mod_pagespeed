@@ -829,6 +829,33 @@ TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLoss) {
   }
 }
 
+// A LoadFromFile prefix that also covers a MapProxyDomain path must not make
+// the proxied resource be read from local disk when it is rebuilt: the file
+// does not exist there, the content lives on the proxied origin.
+TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLossWithFileLoad) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/nonexistent-dir/");
+  InitTest(kShortTtlSec);
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+  InitResource(origin_url, kContentTypeJpeg, kImageData, kShortTtlSec);
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
 void CacheExtenderTest::TestCanonicalOnFallback(
     bool fallback_to_pagespeed_resource) {
   // Make sure canonical header is correct if we have to go through fallback

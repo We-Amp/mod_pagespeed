@@ -1797,17 +1797,20 @@ ResourcePtr RewriteDriver::CreateInputResourceUnchecked(
     // Note: type may be NULL if url has an unexpected or malformed extension.
     const ContentType* type = NameExtensionToContentType(url.LeafSansQuery());
     GoogleString filename;
-    if (options()->file_load_policy()->ShouldLoadFromFile(url, &filename)) {
+    // A URL under a MapProxyDomain path lives on the proxied origin, not on
+    // local disk, so a LoadFromFile prefix that also covers it must not apply.
+    GoogleString mapped_url;
+    GoogleString host_header;
+    bool is_proxy = false;
+    options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
+                                             &is_proxy);
+    if (!is_proxy &&
+        options()->file_load_policy()->ShouldLoadFromFile(url, &filename)) {
       resource.reset(new FileInputResource(this, type, url_string, filename));
     } else {
-      // If the scheme is https and the fetcher doesn't support https, map
-      // the URL to what will ultimately be fetched to see if that will be
-      // http, in which case the fetcher will be able to handle it.
-      GoogleString mapped_url;
-      GoogleString host_header;
-      bool is_proxy = false;
-      options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
-                                               &is_proxy);
+      // If the scheme is https and the fetcher doesn't support https, check
+      // the mapped URL to see if that will be http, in which case the
+      // fetcher will be able to handle it.
       GoogleUrl mapped_gurl(mapped_url);
       if (mapped_gurl.SchemeIs("http") ||
           (mapped_gurl.SchemeIs("https") &&
