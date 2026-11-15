@@ -22,6 +22,7 @@
 
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -39,6 +40,7 @@
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -1165,16 +1167,17 @@ TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithChangedInput) {
   SimulateJsResource(kJsUrl1, "// changed\nvar a=1;");
 
   GoogleString out;
-  ASSERT_TRUE(FetchResourceUrl(url, &out));
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
   EXPECT_EQ(StrCat("var ", kLegacyVar1, " = \"var a=1;\";\n", "var ",
                    kLegacyVar2, " = ", kMinifiedEscapedJs2, ";\n"),
             out);
+  // Not what the URL names, so not publicly cacheable.
+  EXPECT_FALSE(headers.IsProxyCacheable());
 }
 
-// A page rewritten by this version (and the versions since jm-inside-jc
-// stopped being emitted) still evaluates the names the fetched combination
-// declares, before and after a cache loss, and when the combined inputs fall
-// back to their originals.
+// A page rewritten by this version evaluates the names the fetched
+// combination declares after a cache loss.
 TEST_F(JsFilterAndCombineFilterTest, PageNamesMatchFetchedCombination) {
   ScriptInfoVector scripts;
   PrepareToCollectScriptsInto(&scripts);
@@ -1195,6 +1198,66 @@ TEST_F(JsFilterAndCombineFilterTest, PageNamesMatchFetchedCombination) {
   EXPECT_EQ(StrCat("var ", var1, " = ", kMinifiedEscapedJs1, ";\n", "var ",
                    var2, " = ", kMinifiedEscapedJs2, ";\n"),
             out);
+}
+
+// Checks that a fetched combination is only lines of the form
+// var <identifier> = <double-quoted string literal>;
+static void ExpectOnlyNamesAndLiterals(StringPiece out) {
+  StringPieceVector lines;
+  SplitStringPieceToVector(out, "\n", &lines, true /* omit empty */);
+  EXPECT_FALSE(lines.empty());
+  for (StringPiece line : lines) {
+    ASSERT_TRUE(line.starts_with("var mod_pagespeed_")) << line;
+    size_t name_end = line.find(" = \"");
+    ASSERT_NE(StringPiece::npos, name_end) << line;
+    for (char c : line.substr(4, name_end - 4)) {
+      EXPECT_TRUE(IsAsciiAlphaNumeric(c) || c == '_' || c == '$') << line;
+    }
+    StringPiece literal = line.substr(name_end + 3);
+    ASSERT_TRUE(literal.ends_with("\";")) << line;
+    literal = literal.substr(1, literal.size() - 3);
+    for (size_t i = 0; i < literal.size(); ++i) {
+      if (literal[i] == '\\') {
+        ++i;  // An escape: the next character is part of it.
+        continue;
+      }
+      EXPECT_NE('"', literal[i]) << line;
+      EXPECT_NE('\r', literal[i]) << line;
+    }
+    GoogleString lower(literal.data(), literal.size());
+    LowerString(&lower);
+    EXPECT_EQ(GoogleString::npos, lower.find("</script")) << line;
+  }
+}
+
+// Input URLs come from the requested combined URL, which the client
+// chooses. Whatever they contain, the combination's text is only hashed
+// identifiers and escaped string literals.
+TEST_F(JsCombineFilterTest, HostileInputUrlsYieldOnlyNamesAndLiterals) {
+  // The test encoder takes no '/', so "</script" is spelled with %2F.
+  const char kHostile1[] = "q\"u'o\\te<%2Fscript>\n.js";
+  const char kHostile2[] = "x<%2Fscript><script>alert(1).js";
+  const GoogleString url = Encode(
+      kTestDomain, "jc", "0", MultiUrl(kHostile1, kJsUrl2, kHostile2), "js");
+  // One cannot be fetched; serve the other, under whatever URL the requested
+  // name resolves to.
+  const GoogleString hostile1_url =
+      GoogleUrl(GoogleUrl(kTestDomain), kHostile1).Spec().as_string();
+  SimulateJsResourceOnDomain("", hostile1_url, "var unused;");
+  mock_url_fetcher()->SetResponseFailure(hostile1_url);
+  SimulateJsResource(
+      GoogleUrl(GoogleUrl(kTestDomain), kHostile2).PathAndLeaf().substr(1),
+      "var h = \"</script><script>\\\"\";\n");
+  GoogleString out;
+  ResponseHeaders headers;
+  if (FetchResourceUrl(url, &out, &headers)) {
+    EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+    EXPECT_EQ(3, std::count(out.begin(), out.end(), '\n')) << out;
+    ExpectOnlyNamesAndLiterals(out);
+  } else {
+    // Refusing the request is also acceptable; nothing is served then.
+    EXPECT_NE(HttpStatus::kOK, headers.status_code());
+  }
 }
 
 // A combination served without some of its inputs is always private.
