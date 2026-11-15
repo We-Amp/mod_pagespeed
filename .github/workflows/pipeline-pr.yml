@@ -3184,8 +3184,8 @@ jobs:
       # the first attempt failed on holds that runner, without testing, until
       # its sibling leg has started on another runner (so the sibling cannot
       # be given the same runner), then ends green; with no other runner in
-      # the hold limit (10 minutes; vars.IIS_RETRY_HOLD_MINUTES, 1 to 45) it fails with
-      # a plain message. The limit is short on purpose: a second IIS runner
+      # the hold limit (10 minutes; vars.IIS_RETRY_HOLD_MINUTES, 1 to 45) it
+      # fails with a plain message. The limit is short on purpose: a second IIS runner
       # that is online and idle takes the sibling within seconds, while with
       # only one runner online the hold can never end and a long limit only
       # stalls the merge group. The runners API needs an organization admin
@@ -3238,7 +3238,7 @@ jobs:
               if (-not $placed) { Start-Sleep -Seconds 15 }
             }
             if (-not $placed) {
-              Write-Host "::error::no other IIS runner took the retry within $holdMinutes minutes; $($env:RUNNER_NAME) just failed for a reason of the host and the retry needs a second fleet-iis runner online. Re-run all jobs when another IIS runner is online."
+              Write-Host "::error::no other IIS runner took the retry within $holdMinutes minutes; $($env:RUNNER_NAME) just failed for a reason of the host and the retry needs a second fleet-iis runner online. Re-run all jobs when another IIS runner is online. Note: the host probe may miss listeners from WSL in mirrored networking mode."
               exit 1
             }
             Write-Host "this leg landed on $($env:RUNNER_NAME), where the first attempt failed; the other leg tests on $placed"
