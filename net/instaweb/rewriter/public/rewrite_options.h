@@ -1017,6 +1017,9 @@ class RewriteOptions {
     FilterSet enabled_filters() const { return enabled_filters_; }
     FilterSet disabled_filters() const { return disabled_filters_; }
     OptionSet filter_options() const { return filter_options_; }
+    bool has_alternate_origin_domains() const {
+      return !alternate_origin_domains_.empty();
+    }
     bool matches_device_type(UserAgentMatcher::DeviceType type) const;
     bool use_default() const { return use_default_; }
     GoogleString ToString() const;
@@ -1565,7 +1568,9 @@ class RewriteOptions {
   bool OptionValue(StringPiece option_name, const char** id, bool* was_set,
                    GoogleString* value) const;
 
-  // Set all of the options to their values specified in the option set.
+  // Set all of the options to their values specified in the option set, the
+  // options= component of an ExperimentSpec.  As ExperimentSpec is a
+  // directory-scope directive, options of a wider scope are refused.
   // Returns true if all options in the set were successful, false if not.
   bool SetOptionsFromName(const OptionSet& option_set, MessageHandler* handler);
 
@@ -1720,6 +1725,15 @@ class RewriteOptions {
   // may make the server inline or flatten less, never more than its
   // configuration allows.
   void LimitSizeThresholdsTo(const RewriteOptions& ceiling);
+  // For options set by a configuration source that the server configuration
+  // does not trust with resource use, such as an .htaccess file on a shared
+  // host: replaces each per-document or per-resource work bound
+  // (CssParseMaxBytes, DebugOutputMaxBytes, MaxHtmlParseBytes,
+  // ImageResolutionLimitBytes) that is looser than the value in `ceiling`
+  // with that value.  "No limit" (zero or less, where the option reads it
+  // so) counts as looser than any positive ceiling.  Such a source may
+  // tighten these bounds, never loosen them.
+  void LimitWorkBoundsTo(const RewriteOptions& ceiling);
   int64 css_inline_max_bytes() const { return css_inline_max_bytes_.value(); }
   void set_css_inline_max_bytes(int64 x) {
     set_option(x, &css_inline_max_bytes_);
@@ -3627,6 +3641,13 @@ class RewriteOptions {
   };
 
   struct OptionIdCompare;
+
+  // Replaces *mine with bound when it is looser.  With
+  // zero_or_less_is_unlimited, a value <= 0 means "no limit": looser than
+  // any positive bound, and a bound <= 0 caps nothing.  See
+  // LimitWorkBoundsTo().
+  static void LimitWorkBound(Option<int64>* mine, int64 bound,
+                             bool zero_or_less_is_unlimited);
 
   // Enum type used to record what action must be taken to resolve conflicts
   // between "preserve URLs" and "extend cache" directives at different levels

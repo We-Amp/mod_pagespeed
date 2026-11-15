@@ -1684,6 +1684,12 @@ static const char* CmdOptions(const cmd_parms* cmd, void* data,
              "context";
     }
   }
+  // Apache parses .htaccess files with cmd->pool == cmd->temp_pool, which
+  // ap_check_cmd_context(NOT_IN_HTACCESS) tests.
+  if (ap_check_cmd_context(const_cast<cmd_parms*>(cmd), NOT_IN_HTACCESS) !=
+      nullptr) {
+    config->mark_set_from_htaccess();
+  }
   *config_out = config;
   return nullptr;
 }
@@ -1815,8 +1821,15 @@ static const char* ParseDirective(cmd_parms* cmd, void* data, const char* arg) {
     }
 
     // See whether generic RewriteOptions name handling can figure this one out.
+    // An .htaccess file is a directory-level source: parse an ExperimentSpec
+    // there at directory scope, which refuses its fetch-steering components
+    // as the fetch directives themselves are refused.
     RewriteOptions::OptionSettingResult result =
-        config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
+        (StringCaseEqual(option, RewriteOptions::kExperimentSpec) &&
+         ap_check_cmd_context(cmd, NOT_IN_HTACCESS) != nullptr)
+            ? config->ParseAndSetOptionFromNameWithScope(
+                  option, arg, RewriteOptions::kDirectoryScope, &msg, handler)
+            : config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
     if (result == RewriteOptions::kOptionNameUnknown) {
       // RewriteOptions didn't know; try the driver factory.
       // TODO(morlovich): It may be cleaner to not have process-scope options
@@ -2057,10 +2070,17 @@ static const char* ParseDirective3(cmd_parms* cmd, void* data, const char* arg1,
   AP_INIT_TAKE3(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
                 NULL, OR_ALL, help)
 
-// APACHE_CONFIG_OPTION for 2 or 3 arguments
-#define APACHE_CONFIG_DIR_OPTION23(name, help)                               \
+// Directives that steer the server's own fetches: where a resource is
+// fetched from and with which request headers.  They are accepted in the
+// configuration the operator writes (server, <VirtualHost>, <Directory>,
+// <Location>) but not in .htaccess, as a fetch made for one site fills a
+// cache that other sites on the same server read.
+#define APACHE_CONFIG_FETCH_OPTION2(name, help)                             \
+  AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
+                NULL, RSRC_CONF | ACCESS_CONF, help)
+#define APACHE_CONFIG_FETCH_OPTION23(name, help)                             \
   AP_INIT_TAKE23(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
-                 NULL, OR_ALL, help)
+                 NULL, RSRC_CONF | ACCESS_CONF, help)
 
 static const command_rec mod_pagespeed_filter_cmds[] = {
     // Special conditional op.
@@ -2166,13 +2186,13 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION2(
         kModPagespeedAddResourceHeader,
         "add_resource_header_name add_resource_header_value"),
-    APACHE_CONFIG_DIR_OPTION2(kModPagespeedCustomFetchHeader,
-                              "custom_header_name custom_header_value"),
-    APACHE_CONFIG_DIR_OPTION23(
+    APACHE_CONFIG_FETCH_OPTION2(kModPagespeedCustomFetchHeader,
+                                "custom_header_name custom_header_value"),
+    APACHE_CONFIG_FETCH_OPTION23(
         kModPagespeedMapOriginDomain,
         "to_domain from_domain[,from_domain]* [host_header]"),
-    APACHE_CONFIG_DIR_OPTION23(kModPagespeedMapProxyDomain,
-                               "proxy_domain origin_domain [to_domain]"),
+    APACHE_CONFIG_FETCH_OPTION23(kModPagespeedMapProxyDomain,
+                                 "proxy_domain origin_domain [to_domain]"),
     APACHE_CONFIG_DIR_OPTION2(kModPagespeedMapRewriteDomain,
                               "to_domain from_domain[,from_domain]*"),
     APACHE_CONFIG_DIR_OPTION2(kModPagespeedShardDomain,

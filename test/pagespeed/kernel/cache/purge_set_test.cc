@@ -84,6 +84,31 @@ TEST_F(PurgeSetTest, EvictionsOnUpdateNewEntries) {
   }
 }
 
+TEST_F(PurgeSetTest, PutWithoutEvictionRefusesWhatDoesNotFit) {
+  // Each record costs its key plus 8 bytes: two 42-byte records fit in 100.
+  const GoogleString key1(34, '1'), key2(34, '2'), key3(34, '3');
+  ASSERT_TRUE(purge_set_.PutWithoutEviction(key1, 10));
+  ASSERT_TRUE(purge_set_.PutWithoutEviction(key2, 20));
+  EXPECT_FALSE(purge_set_.PutWithoutEviction(key3, 30));
+
+  // Nothing was evicted, so the global invalidation timestamp did not move
+  // and the third key was not recorded.
+  EXPECT_FALSE(purge_set_.has_global_invalidation_timestamp_ms());
+  EXPECT_TRUE(purge_set_.IsValid("other", 1));
+  EXPECT_FALSE(purge_set_.IsValid(key1, 10));
+  EXPECT_FALSE(purge_set_.IsValid(key2, 20));
+  EXPECT_TRUE(purge_set_.IsValid(key3, 1));
+
+  // A newer purge of a key already in the set replaces its record.
+  ASSERT_TRUE(purge_set_.PutWithoutEviction(key1, 40));
+  EXPECT_FALSE(purge_set_.IsValid(key1, 40));
+  EXPECT_FALSE(purge_set_.has_global_invalidation_timestamp_ms());
+
+  // Put still evicts, as before.
+  ASSERT_TRUE(purge_set_.Put(key3, 50));
+  EXPECT_TRUE(purge_set_.has_global_invalidation_timestamp_ms());
+}
+
 TEST_F(PurgeSetTest, Merge) {
   ASSERT_TRUE(purge_set_.UpdateGlobalInvalidationTimestampMs(10));
   ASSERT_TRUE(purge_set_.Put("b", 50));
