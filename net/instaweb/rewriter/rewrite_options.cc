@@ -2571,6 +2571,7 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
 
   // Assume all goes well; if not, set result accordingly.
   result = RewriteOptions::kOptionOk;
+  NullMessageHandler null_handler;
 
   // Avoid adding more options like this.  All new options should be set via
   // RewriteOptions::AddProperty.  If you have to add one here, also add it to
@@ -2622,6 +2623,15 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
             "effect. Remove the directive.");
       }
     }
+  } else if (StringCaseEqual(name, kExperimentSpec) &&
+             max_scope < kServerScope &&
+             ExperimentSpec(arg, this, &null_handler)
+                 .has_alternate_origin_domains()) {
+    // alternate_origin_domain= changes where resources are fetched from, like
+    // MapOriginDomain, so a directory-level source (an .htaccess file, a
+    // remote configuration line) may not set it.
+    *msg = "alternate_origin_domain is not allowed at directory scope";
+    result = RewriteOptions::kOptionValueInvalid;
   } else if (StringCaseEqual(name, kExperimentSpec)) {
     ExperimentSpec* spec = AddExperimentSpec(arg, handler);
     if (spec == nullptr) {

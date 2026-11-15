@@ -1013,6 +1013,9 @@ class RewriteOptions {
     FilterSet enabled_filters() const { return enabled_filters_; }
     FilterSet disabled_filters() const { return disabled_filters_; }
     OptionSet filter_options() const { return filter_options_; }
+    bool has_alternate_origin_domains() const {
+      return !alternate_origin_domains_.empty();
+    }
     bool matches_device_type(UserAgentMatcher::DeviceType type) const;
     bool use_default() const { return use_default_; }
     GoogleString ToString() const;
