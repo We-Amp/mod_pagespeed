@@ -807,6 +807,56 @@ TEST_F(CssFilterGzipConsistencyTest, MismatchedCombinationIsConsistent) {
   }
 }
 
+// A stylesheet requested under a hash that is not the current one, and under
+// a name that puts it one directory above its input, is answered from what
+// the cache holds, with its relative URLs corrected for the directory it is
+// served from, so the body is longer than the stored one. The response
+// declares, and passes on, the length of the body it sends: for clients with
+// and without gzip, both for a stylesheet the filter optimized and for one it
+// could not.
+TEST_F(CssFilterGzipConsistencyTest,
+       OtherDirectoryFallbackDeclaresTheSentLength) {
+  const GoogleString small_css = ".a { background: url(i.png) }\n";
+  GoogleString large_css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&large_css, ".r", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png) }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  // The small stylesheet is optimized; the large one is over the limit, so
+  // its original is served in its place.
+  options()->set_css_parse_max_bytes(256);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+
+  const struct {
+    const char* leaf;
+    const GoogleString* css;
+  } kCases[] = {{"small.css", &small_css}, {"large.css", &large_css}};
+  for (const auto& c : kCases) {
+    SCOPED_TRACE(c.leaf);
+    SeedCompressedInput(StrCat(kTestDomain, "dir/", c.leaf), *c.css);
+    // Its own optimized URL first, so the cache holds the outcome.
+    GoogleString decoded;
+    ASSERT_TRUE(FetchAcceptingGzip(
+        StrCat(kTestDomain, Encode("dir/", "cf", "0", c.leaf, "css")),
+        &decoded));
+
+    const GoogleString leaf = c.leaf;
+    GoogleString url = Encode(kTestDomain, "cf", "1", leaf, "css");
+    url.replace(url.find(leaf), leaf.size(), StrCat("dir,_", leaf));
+    for (int i = 0; i < 4; ++i) {
+      SCOPED_TRACE(i);
+      ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+      EXPECT_NE(StringPiece::npos, StringPiece(decoded).find("url(dir/i"))
+          << decoded;
+      EXPECT_EQ(StringPiece::npos, StringPiece(decoded).find("url(i"))
+          << decoded;
+    }
+  }
+}
+
 // Builds a stylesheet of exactly `size` bytes out of numbered rulesets and
 // trailing whitespace, and stores its minified form in `minified`.
 GoogleString MakeCssOfSize(int64 size, GoogleString* minified) {
