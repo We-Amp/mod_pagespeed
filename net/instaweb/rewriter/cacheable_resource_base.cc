@@ -167,17 +167,16 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
   void StartFetch(UrlAsyncFetcher* fetcher, MessageHandler* handler) override {
     fetch_url_ = url();
     fetcher_ = fetcher;
+    // The result of this fetch is stored for every client, so the request must
+    // not depend on who asked: the visitor's Referer is never forwarded.  The
+    // page's origin (scheme, host and port, never userinfo, path or query) is
+    // sent instead, when the base URL is a valid http or https URL.
     if (!request_headers()->Has(HttpAttributes::kReferer)) {
-      if (IsBackgroundFetch()) {
-        // Set referer for background fetching, if the referer is missing.
-        request_headers()->Add(HttpAttributes::kReferer,
-                               driver_->base_url().Spec());
-      } else if (driver_->request_headers() != nullptr) {
-        const char* referer_str =
-            driver_->request_headers()->Lookup1(HttpAttributes::kReferer);
-        if (referer_str != nullptr) {
-          request_headers()->Add(HttpAttributes::kReferer, referer_str);
-        }
+      const GoogleUrl& base = driver_->base_url();
+      if (base.IsWebValid()) {
+        request_headers()->Add(
+            HttpAttributes::kReferer,
+            StrCat(base.Scheme(), "://", base.HostAndPort(), "/"));
       }
     }
 

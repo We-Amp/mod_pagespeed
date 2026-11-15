@@ -2150,31 +2150,33 @@ TEST_F(ServerContextTest, FillInPartitionInputInfo) {
 }
 
 // Test of referer for BackgroundFetch: When the resource fetching request
-// header misses referer, we set the driver base url as its referer.
+// header misses referer, we set the driver base url's origin as its referer.
 TEST_F(ServerContextTest, TestRefererBackgroundFetch) {
   RefererTest(nullptr, true);
-  EXPECT_EQ(rewrite_driver()->base_url().Spec(),
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
             mock_url_fetcher()->last_referer());
 }
 
 // Test of referer for NonBackgroundFetch: When the resource fetching request
-// header misses referer and the original request referer header misses, no
-// referer would be added.
+// header misses referer and the original request referer header misses, the
+// base url's origin is sent.
 TEST_F(ServerContextTest, TestRefererNonBackgroundFetch) {
   RequestHeaders headers;
   RefererTest(&headers, false);
-  EXPECT_EQ("", mock_url_fetcher()->last_referer());
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
+            mock_url_fetcher()->last_referer());
 }
 
 // Test of referer for NonBackgroundFetch: When the resource fetching request
-// header misses referer but the original request header has referer set, we set
-// this referer as the referer of resource fetching request.
+// header misses referer but the original request header has referer set, the
+// visitor's referer is not forwarded; the base url's origin is sent.
 TEST_F(ServerContextTest, TestRefererNonBackgroundFetchWithDriverRefer) {
   RequestHeaders headers;
   const char kReferer[] = "http://other.com/";
   headers.Add(HttpAttributes::kReferer, kReferer);
   RefererTest(&headers, false);
-  EXPECT_EQ(kReferer, mock_url_fetcher()->last_referer());
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
+            mock_url_fetcher()->last_referer());
 }
 
 // Regression test for RewriteTestBase::DefaultResponseHeaders, which is based
