@@ -17,6 +17,9 @@
 # network of that name.
 set -u
 
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
+
 PREFIX="${CI_NET_PREFIX:-ci-net-}"
 MAX_AGE="${CI_NET_MAX_AGE_SECS:-7200}"
 
@@ -76,6 +79,7 @@ selftest() {
     docker network create --label ci-net-selftest=1 "$nw" >/dev/null || return 1
   done
   if [ -n "$img" ]; then
+    docker_pull_retry "$img" || return 1
     SELFTEST_CID=$(docker run -d --network "$busy" "$img" sleep 120) || return 1
   fi
   sleep 7
