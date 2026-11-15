@@ -3669,6 +3669,134 @@ TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
   rewrite_driver()->WaitForShutDown();
 }
 
+// Fetches of rewritten resources that go through the low-priority rewrite
+// queue. These tests pin how such a fetch behaves while the queue's only
+// worker is busy, with an explicitly negative rewrite deadline and for a
+// combined resource.
+class RewriteContextFetchQueueTest : public RewriteContextTest {
+ protected:
+  static const char kCss[];
+  static const char kMinifiedCss[];
+
+  // Occupies the only low-priority worker with the combining filter, and
+  // returns once that rewrite has started.
+  void WedgeLowPriorityWorker() {
+    InitResources();
+    SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kCss,
+                                  Timer::kYearMs / Timer::kSecondMs);
+    SetResponseWithDefaultHeaders("y.css", kContentTypeCss, kCss,
+                                  Timer::kYearMs / Timer::kSecondMs);
+    InitCombiningFilter(0);
+    EnableDebug();
+    combining_filter_->set_prefix("|");
+    rewrite_reached_.reset(
+        new WorkerTestBase::SyncPoint(server_context()->thread_system()));
+    resume_rewrite_.reset(
+        new WorkerTestBase::SyncPoint(server_context()->thread_system()));
+    combining_filter_->set_rewrite_signal_on(rewrite_reached_.get());
+    combining_filter_->set_rewrite_block_on(resume_rewrite_.get());
+
+    wedge_fetch_.reset(
+        new StringAsyncFetch(CreateRequestContext(), &wedge_out_));
+    rewrite_driver()->FetchResource(
+        Encode(kTestDomain, CombiningFilter::kFilterId, "0", "a.css", "css"),
+        wedge_fetch_.get());
+    rewrite_reached_->Wait();
+  }
+
+  // Starts a fetch of url on its own driver.
+  void StartFetch(const GoogleString& url) {
+    RequestContextPtr ctx = RequestContext::NewTestRequestContext(
+        server_context()->thread_system());
+    fetch_.reset(new SignalingStringAsyncFetch(
+        ctx, &out_, server_context()->thread_system()));
+    driver_ = server_context()->NewRewriteDriver(ctx);
+    driver_->FetchResource(url, fetch_.get());
+  }
+
+  // Lets the wedged worker go on, and waits for everything to finish.
+  void Release() {
+    resume_rewrite_->Notify();
+    driver_->WaitForCompletion();
+    driver_->Cleanup();
+    rewrite_driver()->WaitForShutDown();
+  }
+
+  std::unique_ptr<WorkerTestBase::SyncPoint> rewrite_reached_;
+  std::unique_ptr<WorkerTestBase::SyncPoint> resume_rewrite_;
+  GoogleString wedge_out_;
+  std::unique_ptr<StringAsyncFetch> wedge_fetch_;
+  GoogleString out_;
+  std::unique_ptr<SignalingStringAsyncFetch> fetch_;
+  RewriteDriver* driver_ = nullptr;
+};
+
+const char RewriteContextFetchQueueTest::kCss[] = " * { display: none; } ";
+const char RewriteContextFetchQueueTest::kMinifiedCss[] = "*{display:none}";
+
+// Documented behaviour: with a negative rewrite deadline PageSpeed waits
+// indefinitely for an optimization, so the fetch of a rewritten resource
+// is not answered until its own rewrite has run. The rewrite is queued
+// behind the busy worker.
+TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitsForRewrite) {
+  options()->set_rewrite_deadline_ms(-1);
+  WedgeLowPriorityWorker();
+  Variable* alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  const int64 alarms_before = alarms->Get();
+
+  StartFetch(Encode(kTestDomain, "cf", "0", "x.css", "css"));
+  bool done_while_busy = fetch_->WaitForDone(500);
+
+  // Release the worker either way so that a failure does not hang.
+  Release();
+
+  EXPECT_FALSE(done_while_busy);
+  EXPECT_TRUE(fetch_->success());
+  EXPECT_EQ(kMinifiedCss, out_);
+  EXPECT_FALSE(fetch_->response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(alarms_before, alarms->Get());
+}
+
+// A fetch of a combined resource waits for its inputs to be optimized. While
+// the worker is busy the fetch is not answered, and once released the result
+// is the combined optimized content and is cacheable.
+TEST_F(RewriteContextFetchQueueTest, CombinedResourceFetchWaitsForRewrite) {
+  // Use the regular CSS filters for the combined resource and its inputs.
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  WedgeLowPriorityWorker();
+  Variable* alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  const int64 alarms_before = alarms->Get();
+
+  GoogleString url = Encode(kTestDomain, "cc", "0",
+                            MultiUrl(Encode("", "cf", "0", "x.css", "css"),
+                                     Encode("", "cf", "0", "y.css", "css")),
+                            "css");
+  StartFetch(url);
+  bool done_while_busy = fetch_->WaitForDone(500);
+
+  Release();
+
+  EXPECT_FALSE(done_while_busy);
+  EXPECT_TRUE(fetch_->success());
+  EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), out_);
+  EXPECT_FALSE(fetch_->response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(alarms_before, alarms->Get());
+
+  // The result was stored, so it is now served from the cache.
+  GoogleString again;
+  ResponseHeaders headers;
+  ClearStats();
+  EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
+  EXPECT_EQ(out_, again);
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
 TEST_F(RewriteContextTest, CombinationFetchMissing) {
   InitCombiningFilter(0);
   EnableDebug();
