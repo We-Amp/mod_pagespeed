@@ -76,6 +76,10 @@ class CriticalImagesFinder {
   // render response for the page.
   static const char kRenderedImageDimensionsProperty[];
 
+  // The number of beacon results that must have been merged into the stored
+  // rendered image sizes before any of them is used.
+  static const int kMinBeaconsForRenderedDimensions = 3;
+
   CriticalImagesFinder(const PropertyCache::Cohort* cohort, Statistics* stats);
   virtual ~CriticalImagesFinder();
 
