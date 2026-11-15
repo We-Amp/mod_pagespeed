@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/query_params.h"
@@ -473,11 +474,11 @@ bool RewriteQuery::MayHaveCustomOptions(
   }
   if (req_headers != nullptr &&
       (req_headers->Has(HttpAttributes::kXPsaClientOptions) ||
-       req_headers->HasValue(HttpAttributes::kCacheControl, "no-transform"))) {
+       req_headers->HasCacheControlDirective("no-transform"))) {
     return true;
   }
   if ((resp_headers != nullptr) &&
-      resp_headers->HasValue(HttpAttributes::kCacheControl, "no-transform")) {
+      resp_headers->HasCacheControlDirective("no-transform")) {
     return true;
   }
   return false;
@@ -540,7 +541,7 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
                              true /* omit_empty_strings */);
     for (auto& pair : pairs) {
       TrimWhitespace(&pair);
-      if (pair == "no-transform") {
+      if (CachingHeaders::ElementHasDirective(pair, "no-transform")) {
         // TODO(jmarantz): A .pagespeed resource should return un-optimized
         // content with "Cache-Control: no-transform".
         options->set_enabled(RewriteOptions::kEnabledStandby);

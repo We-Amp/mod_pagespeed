@@ -33,6 +33,7 @@
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/kernel/http/http.pb.h"
 #include "pagespeed/kernel/http/http_names.h"
 
@@ -291,6 +292,18 @@ bool Headers<Proto>::HasValueCaseInsensitive(const StringPiece& name,
   Lookup(name, &values);
   for (auto iter : values) {
     if (StringCaseEqual(value, *iter)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <class Proto>
+bool Headers<Proto>::HasCacheControlDirective(StringPiece name) const {
+  ConstStringStarVector values;
+  Lookup(HttpAttributes::kCacheControl, &values);
+  for (auto iter : values) {
+    if (CachingHeaders::ElementHasDirective(*iter, name)) {
       return true;
     }
   }

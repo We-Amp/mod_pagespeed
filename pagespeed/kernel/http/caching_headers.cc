@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/http/caching_headers.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "base/logging.h"
@@ -44,6 +45,88 @@ CachingHeaders::CachingHeaders(int status_code)
       expires_invalid_(false) {}
 
 CachingHeaders::~CachingHeaders() {}
+
+// static
+bool CachingHeaders::ParseLifetimeSeconds(StringPiece value, int* seconds) {
+  if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+    value = value.substr(1, value.size() - 2);
+  }
+  if (value.empty()) {
+    return false;
+  }
+  int64 result = 0;
+  for (char c : value) {
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    if (result <= kint32max) {
+      result = result * 10 + (c - '0');
+    }
+  }
+  *seconds = static_cast<int>(std::min<int64>(result, kint32max));
+  return true;
+}
+
+// static
+CachingHeaders::LifetimeDirective CachingHeaders::ReadLifetimeDirective(
+    StringPiece element) {
+  LifetimeDirective result;
+  TrimWhitespace(&element);
+  const bool joined = element.find(';') != StringPiece::npos;
+  const size_t equals = element.find('=');
+  StringPiece name = element.substr(0, equals);
+  StringPiece trimmed_name = name;
+  TrimWhitespace(&trimmed_name);
+  const char* exact_name = nullptr;
+  if (StringCaseStartsWith(trimmed_name, "max-age")) {
+    result.name = LifetimeDirective::kMaxAge;
+    exact_name = "max-age";
+  } else if (StringCaseStartsWith(trimmed_name, "s-maxage")) {
+    result.name = LifetimeDirective::kSMaxAge;
+    exact_name = "s-maxage";
+  }
+  if (exact_name != nullptr) {
+    result.embedded = joined;
+    result.readable =
+        !joined && equals != StringPiece::npos &&
+        StringCaseEqual(name, exact_name) &&
+        ParseLifetimeSeconds(element.substr(equals + 1), &result.seconds);
+    return result;
+  }
+  // Not a lifetime by name.  A lifetime anywhere else in the element cannot
+  // be read either, so it is reported as unreadable.
+  if (joined || element.find('"') != StringPiece::npos) {
+    GoogleString lower = element.as_string();
+    LowerString(&lower);
+    if (lower.find("max-age") != GoogleString::npos) {
+      result.name = LifetimeDirective::kMaxAge;
+    } else if (lower.find("s-maxage") != GoogleString::npos) {
+      result.name = LifetimeDirective::kSMaxAge;
+    }
+    result.embedded = true;
+  }
+  return result;
+}
+
+// static
+bool CachingHeaders::ElementHasDirective(StringPiece element,
+                                         StringPiece name) {
+  StringPieceVector pieces;
+  SplitStringPieceToVector(element, ";", &pieces, true);
+  for (StringPiece piece : pieces) {
+    TrimWhitespace(&piece);
+    if (StringCaseEqual(piece, name)) {
+      return true;
+    }
+    if (piece.size() > name.size() && StringCaseStartsWith(piece, name)) {
+      const char next = piece[name.size()];
+      if (next == '=' || next == ' ' || next == '\t') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 // Lazy getters
 
@@ -276,42 +359,48 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
     parsed_cache_control_ = true;
     StringPieceVector values;
     if (Lookup(HttpAttributes::kCacheControl, &values)) {
-      for (auto value : values) {
-        // Cache-Control directive names are case-insensitive (RFC 7234 5.2),
-        // so "No-Store" must be honored exactly like "no-store".
-        if (StringCaseEqual(value, "public")) {
+      for (StringPiece element : values) {
+        TrimWhitespace(&element);
+        // Only a well-formed lifetime is read; any other makes the response
+        // stale.  Repeated lifetimes take the shortest.
+        LifetimeDirective lifetime = ReadLifetimeDirective(element);
+        if (lifetime.name != LifetimeDirective::kNone) {
+          if (!lifetime.readable) {
+            cache_control_parse_error_ = true;
+          } else if (lifetime.name == LifetimeDirective::kMaxAge) {
+            if (!max_age_seconds_.has_value() ||
+                lifetime.seconds < max_age_seconds_.value()) {
+              max_age_seconds_.set_value(lifetime.seconds);
+            }
+          } else if (!s_max_age_seconds_.has_value() ||
+                     lifetime.seconds < s_max_age_seconds_.value()) {
+            s_max_age_seconds_.set_value(lifetime.seconds);
+          }
+        }
+        if (StringCaseEqual(element, "public")) {
           public_ = true;
-        } else if (StringCaseStartsWith(value, "private")) {
-          // See http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html :
-          // "private" [ "=" <"> 1#field-name <"> ] ; Section 14.9.1
-          // So we must use 'starts_with' rather than test for equality.
-          private_ = true;
-        } else if (StringCaseStartsWith(value, "no-cache")) {
-          // "no-cache" [ "=" <"> 1#field-name <"> ]; Section 14.9.1
-          no_cache_ = true;
-        } else if (StringCaseEqual(value, "no-store")) {
-          no_store_ = true;
-        } else if (StringCaseStartsWith(value, "s-maxage=")) {
-          int s_max_age_value = 0;
-          StringPiece s_max_age_piece =
-              value.substr(STATIC_STRLEN("s-maxage="));
-          if (StringToInt(s_max_age_piece, &s_max_age_value)) {
-            s_max_age_seconds_.set_value(s_max_age_value);
-          } else {
-            cache_control_parse_error_ = true;
+        }
+        // Restrictive directives count wherever they appear in an element.
+        // Cache-Control directive names are case-insensitive (RFC 7234 5.2).
+        StringPieceVector pieces;
+        SplitStringPieceToVector(element, ";", &pieces, true);
+        for (StringPiece value : pieces) {
+          TrimWhitespace(&value);
+          if (StringCaseStartsWith(value, "private")) {
+            // See http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html :
+            // "private" [ "=" <"> 1#field-name <"> ] ; Section 14.9.1
+            // So we must use 'starts_with' rather than test for equality.
+            private_ = true;
+          } else if (StringCaseStartsWith(value, "no-cache")) {
+            // "no-cache" [ "=" <"> 1#field-name <"> ]; Section 14.9.1
+            no_cache_ = true;
+          } else if (StringCaseEqual(value, "no-store")) {
+            no_store_ = true;
+          } else if (StringCaseEqual(value, "must-revalidate")) {
+            must_revalidate_ = true;
+          } else if (StringCaseEqual(value, "proxy-revalidate")) {
+            proxy_revalidate_ = true;
           }
-        } else if (StringCaseStartsWith(value, "max-age=")) {
-          int max_age_value = 0;
-          StringPiece max_age_piece = value.substr(STATIC_STRLEN("max-age="));
-          if (StringToInt(max_age_piece, &max_age_value)) {
-            max_age_seconds_.set_value(max_age_value);
-          } else {
-            cache_control_parse_error_ = true;
-          }
-        } else if (StringCaseEqual(value, "must-revalidate")) {
-          must_revalidate_ = true;
-        } else if (StringCaseEqual(value, "proxy-revalidate")) {
-          proxy_revalidate_ = true;
         }
       }
     }
@@ -342,6 +431,13 @@ bool CachingHeaders::ComputeHasExplicitNoCacheDirective() {
 
   if (expires_invalid_) {
     // An invalid Expires header (e.g. Expires: 0) means do not cache.
+    return true;
+  }
+
+  if (cache_control_parse_error_) {
+    // Likewise a max-age or s-maxage whose value does not parse: it may have
+    // forbidden reuse, so it must not count as absent, which would let a
+    // likely-static response be cached by heuristics (RFC 9111 4.2.1).
     return true;
   }
 

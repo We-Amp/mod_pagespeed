@@ -2807,6 +2807,77 @@ TEST_F(ResponseHeadersTest, ApplySMaxAge) {
   }
 }
 
+// ApplySMaxAge reads lifetimes the way the cache does: a lifetime it cannot
+// read stops the merge, quoted values count, repeated ones take the
+// shortest, and restrictive directives count after a semicolon.
+TEST_F(ResponseHeadersTest, ApplySMaxAgeReadsLifetimesLikeTheCache) {
+  GoogleString updated = "untouched";
+  for (const char* cache_control :
+       {"max-age=abc", "public, max-age=", "max-age=\"0\"", "max-age =600",
+        "max-age", "public; max-age=600", "max-age=600;",
+        "no-store; max-age=600", "max-age=600, x-ext; private",
+        "max-age=600, No-Transform; x-ext", "max-age=600, s-maxage",
+        "no-cache=\"set-cookie\", max-age=600"}) {
+    EXPECT_FALSE(ResponseHeaders::ApplySMaxAge(300, cache_control, &updated))
+        << cache_control;
+  }
+  EXPECT_EQ("untouched", updated);
+
+  EXPECT_TRUE(ResponseHeaders::ApplySMaxAge(300, "max-age=\"600\"", &updated));
+  EXPECT_EQ("max-age=\"600\", s-maxage=300", updated);
+  EXPECT_TRUE(ResponseHeaders::ApplySMaxAge(300, "s-maxage=\"600\"", &updated));
+  EXPECT_EQ("s-maxage=300", updated);
+  updated = "untouched";
+  EXPECT_FALSE(
+      ResponseHeaders::ApplySMaxAge(300, "max-age=600, max-age=100", &updated));
+  EXPECT_EQ("untouched", updated);
+}
+
+// A script whose only lifetime directive cannot be read is not stored for
+// other clients under the implicit lifetime.
+TEST_F(ResponseHeadersTest, UnreadableMaxAgeIsNotImplicitlyCacheable) {
+  for (const char* cache_control :
+       {"max-age=\"0\"", "max-age=0.0", "max-age=600, s-maxage=\"0\"",
+        "no-store; max-age=600", "max-age =0", "max-age", "public; max-age=600",
+        "max-age=\"6;0\""}) {
+    response_headers_.Clear();
+    response_headers_.SetStatusAndReason(HttpStatus::kOK);
+    response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+    response_headers_.Add(HttpAttributes::kContentType, "text/javascript");
+    response_headers_.Add(HttpAttributes::kCacheControl, cache_control);
+    response_headers_.ComputeCaching();
+    EXPECT_FALSE(response_headers_.IsBrowserCacheable()) << cache_control;
+    EXPECT_FALSE(response_headers_.IsProxyCacheable()) << cache_control;
+    EXPECT_FALSE(response_headers_.is_implicitly_cacheable()) << cache_control;
+  }
+}
+
+// Restrictive directives survive a rewrite in any spelling an origin may
+// use, including joined to another with a semicolon.
+TEST_F(ResponseHeadersTest, RestrictiveDirectivesSurviveRewriteWhenJoined) {
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "x-ext; No-Store, no-transform;x-other");
+  EXPECT_STREQ(", no-transform, no-store",
+               response_headers_.CacheControlValuesToPreserve(false));
+}
+
+// HasCacheControlDirective matches a directive by name, never as part of a
+// longer token.
+TEST_F(ResponseHeadersTest, HasCacheControlDirectiveMatchesByName) {
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "x-ext; No-Store, no-transform;x-other");
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-store"));
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-transform"));
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("private"));
+
+  response_headers_.Clear();
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "no-storex, x-no-transform, no-cache=\"a\"");
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("no-store"));
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("no-transform"));
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-cache"));
+}
+
 TEST_F(ResponseHeadersTest, CombineContentTypes) {
   // No usable original value: the fresh one is stored as-is.
   ResponseHeaders empty_headers;

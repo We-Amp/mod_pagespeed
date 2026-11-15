@@ -140,8 +140,7 @@ bool Resource::IsSafeToRewrite(bool rewrite_uncacheable,
                    ? "Cached content expired, "
                    : "Invalid or uncacheable content, "));
   } else if (disable_rewrite_on_no_transform_ &&
-             response_headers_.HasValue(HttpAttributes::kCacheControl,
-                                        "no-transform")) {
+             response_headers_.HasCacheControlDirective("no-transform")) {
     StrAppend(reason, "Cache-control: no-transform, ");
   } else if (response_headers_.Lookup1(HttpAttributes::kXSendfile) ||
              response_headers_.Lookup1(HttpAttributes::kXAccelRedirect)) {

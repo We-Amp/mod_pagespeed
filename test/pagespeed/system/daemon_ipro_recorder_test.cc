@@ -720,6 +720,22 @@ TEST_F(DaemonIproRecorderOriginCachingTest,
   EXPECT_EQ(GoogleString::npos, log.find("max_age=300 ")) << log;
 }
 
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnUnreadableServerLifetimeStillLimitsTheOrigins) {
+  // A server lifetime that cannot be read still counts as the server's
+  // statement, and it allows no lifetime at all: the origin's is not stored.
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+  origin_caching_ = &origin;
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, "x-ext; max-age=60");
+  origin_caching_ = nullptr;
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=600 ")) << log;
+}
+
 TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {
   // Decided from the PRELIMINARY headers, before the body is buffered: what
   // arrives after an upstream has encoded it is the encoded form, and storing
