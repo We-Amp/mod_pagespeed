@@ -517,6 +517,7 @@ jobs:
       js: ${{ steps.diff.outputs.js }}
       etag: ${{ steps.diff.outputs.etag }}
       tnginx: ${{ steps.diff.outputs.tnginx }}
+      dotnet: ${{ steps.diff.outputs.dotnet }}
       website: ${{ steps.diff.outputs.website }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
@@ -638,6 +639,7 @@ jobs:
           js=false
           etag=false
           tnginx=false
+          dotnet=false
           website=false
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             changed="${RUNNER_TEMP}/changed-files.txt"
@@ -662,6 +664,13 @@ jobs:
             if grep -qE '^(src/nginx/|lib/cache/|lib/classify/|lib/base/|src/proto/|src/crypto/webbotauth/|src/worker/shared_config\.|src/worker/serve_stats\.|src/worker/async_css_loader\.|tools/seed-test-cache\.cc$|t/|tools/docker-test-nginx\.sh$|docker/Dockerfile$|docker/nginx-version\.txt$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
               tnginx=true
             fi
+            # The .NET test projects: the managed packages and their tests,
+            # the native library and worker they load (lib/, src/), the
+            # console SPA the AspNetCore package embeds (tools/workbench/),
+            # the job's script and this workflow.
+            if grep -qE '^(samples/aspnetcore/|lib/|src/|tools/workbench/|tools/ci/dotnet-tests\.sh$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
+              dotnet=true
+            fi
             # The website gate (website.yml, the `website` job below): the
             # site, the facts it shares with the product, its own workflow and
             # the product sources its generated references come from.
@@ -669,20 +678,22 @@ jobs:
               website=true
             fi
           elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # A dispatch runs the whole PR tier, so the ETag subset and the
-            # Test::Nginx suite run too (the CSS and JS smokes stay pull
-            # request only).
+            # A dispatch runs the whole PR tier, so the ETag subset, the
+            # Test::Nginx suite and the .NET tests run too (the CSS and JS
+            # smokes stay pull request only).
             etag=true
             tnginx=true
+            dotnet=true
           fi
           {
             echo "css=${css}"
             echo "js=${js}"
             echo "etag=${etag}"
             echo "tnginx=${tnginx}"
+            echo "dotnet=${dotnet}"
             echo "website=${website}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: css=${css} js=${js} etag=${etag} tnginx=${tnginx} website=${website}"
+          echo "path filters: css=${css} js=${js} etag=${etag} tnginx=${tnginx} dotnet=${dotnet} website=${website}"
 
   # The website gate (website.yml) for a pull request or merge group that
   # changes the site or the sources it is generated from: build, unit tests,
@@ -1707,6 +1718,70 @@ jobs:
             grep -E '^t/[^ ]+\.t \.+|^Files=|^Result:' "${LOG}" || true
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # The two .NET test projects under samples/aspnetcore/test
+  # (WeAmp.PageSpeed.Tests and WeAmp.PageSpeed.AspNetCore.Tests) on net8.0
+  # and net10.0, against the Linux Build bundle's libpagespeed.so and
+  # factory_worker: nothing native is built here. tools/ci/dotnet-tests.sh
+  # builds the embedded console SPA and runs the tests in containers with
+  # CI=true, so a native-dependent test fails instead of skipping when the
+  # library does not load. Skipped, not failed, when none of the paths of the
+  # `dotnet` output changed (samples/aspnetcore/, lib/, src/,
+  # tools/workbench/, the script and this file), and skipped on a push to
+  # main, where the diff is not computed; a dispatch runs it. The nightly
+  # runs it on every night's build.
+  dotnet-tests:
+    permissions:
+      contents: read
+    name: .NET tests (WeAmp.PageSpeed, AspNetCore)
+    needs: [changes, linux-build]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || needs.changes.outputs.route != 'fleet' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-light' }}
+    if: ${{ needs.changes.outputs.dotnet == 'true' }}
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      # A per-job directory, never a shared runner path.
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/dotnet-bundle
+
+      - name: Verify the build bundle
+        run: |
+          cd "${RUNNER_TEMP}/dotnet-bundle"
+          sha256sum -c --quiet checksums.sha256
+
+      - name: Run the .NET tests
+        run: |
+          set -o pipefail
+          rc=0
+          tools/ci/dotnet-tests.sh "${RUNNER_TEMP}/dotnet-bundle" "${RUNNER_TEMP}/dotnet-results" || rc=$?
+          {
+            echo "## .NET tests"
+            echo ""
+            cat "${RUNNER_TEMP}/dotnet-results/summary.md" 2>/dev/null || echo "No summary: the run stopped before the results."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${rc}"
+
+      - name: Upload the test results
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dotnet-test-results-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dotnet-results/*.trx
+          retention-days: 7
 
   lint:
     permissions:

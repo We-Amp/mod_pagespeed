@@ -15,7 +15,7 @@
 #                 socket or run privileged containers):
 #                 stress-x64, production-tests-x64, realworld-tests-x64,
 #                 e2e-tests-x64, daemon-rig-soak-x64
-#   fleet-light   async-css-probe-rendered
+#   fleet-light   async-css-probe-rendered, dotnet-tests-x64
 #   hosted arm64  periodic-build-arm64 and the arm64 legs: stress,
 #                 production-tests, realworld-tests, e2e-tests,
 #                 workbench-playwright
@@ -2007,6 +2007,64 @@ jobs:
             grep -E '^t/[^ ]+\.t \.+|^Files=|^Result:' "${LOG}" || true
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # The two .NET test projects (WeAmp.PageSpeed.Tests and
+  # WeAmp.PageSpeed.AspNetCore.Tests) on net8.0 and net10.0 against the
+  # night's optimized x64 libpagespeed.so and factory_worker. The PR tier
+  # runs them only when their paths change; this catches what the path
+  # filter cannot see. Same script as the dotnet-tests job of
+  # pipeline-pr.yml; nothing native is built here.
+  dotnet-tests-x64:
+    permissions:
+      contents: read
+    name: .NET tests (WeAmp.PageSpeed, AspNetCore, x64)
+    needs: periodic-build-x64
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-light' }}
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      # A per-job directory, never a shared runner path.
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nightly-ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/dotnet-bundle
+
+      - name: Verify the build bundle
+        run: |
+          cd "${RUNNER_TEMP}/dotnet-bundle"
+          sha256sum -c --quiet checksums.sha256
+
+      - name: Run the .NET tests
+        run: |
+          set -o pipefail
+          rc=0
+          tools/ci/dotnet-tests.sh "${RUNNER_TEMP}/dotnet-bundle" "${RUNNER_TEMP}/dotnet-results" || rc=$?
+          {
+            echo "## .NET tests (nightly, x64)"
+            echo ""
+            cat "${RUNNER_TEMP}/dotnet-results/summary.md" 2>/dev/null || echo "No summary: the run stopped before the results."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${rc}"
+
+      - name: Upload the test results
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-dotnet-test-results-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dotnet-results/*.trx
+          retention-days: 7
 
   async-css-probe-rendered:
     permissions:
