@@ -355,6 +355,8 @@ const char RewriteOptions::kCycloneRamCacheKb[] = "CycloneRamCacheKb";
 const char RewriteOptions::kAsyncMetadataL2Writes[] = "AsyncMetadataL2Writes";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
+const char RewriteOptions::kNegativeDeadlineFetchWaitMs[] =
+    "NegativeDeadlineFetchWaitMs";
 const char RewriteOptions::kFileCacheCleanSizeKb[] = "FileCacheSizeKb";
 const char RewriteOptions::kFileCachePath[] = "FileCachePath";
 const char RewriteOptions::kFileCacheSmallTierPercent[] =
@@ -563,6 +565,9 @@ const int RewriteOptions::kDefaultRewriteDeadlineMs = 20;
 #endif
 [[maybe_unused]] const int kValgrindWaitForRewriteMs = 1000;
 const int RewriteOptions::kDefaultPropertyCacheHttpStatusStabilityThreshold = 5;
+// The one place that says how long a fetch waits when the rewrite deadline is
+// negative. See RewriteContext::NegativeDeadlineFetchWaitMs().
+const int RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs = 1000;
 
 const int RewriteOptions::kDefaultMaxRewriteInfoLogSize = 150;
 
@@ -2395,9 +2400,22 @@ bool RewriteOptions::SetOptionsFromName(const OptionSet& option_set,
                                         MessageHandler* handler) {
   bool ret = true;
   for (const auto& name_value : option_set) {
+    // The set is the options= component of an ExperimentSpec, a
+    // directory-scope directive (.htaccess, a location block, a remote
+    // configuration line), so it may set only what a directory-scope
+    // directive may set.
+    GoogleString error_detail;
+    OptionSettingResult result = SetOptionFromNameInternal(
+        name_value.first, name_value.second, kDirectoryScope /* max_scope */,
+        &error_detail);
     GoogleString msg;
-    OptionSettingResult result =
-        SetOptionFromName(name_value.first, name_value.second, &msg);
+    if (result == kOptionNameUnknown && !error_detail.empty()) {
+      // Known option, wider scope: say so rather than "not found".
+      msg = error_detail;
+    } else {
+      FormatSetOptionMessage(result, name_value.first, name_value.second,
+                             error_detail, &msg);
+    }
     if (result != kOptionOk) {
       handler->Message(kWarning, "Failed to set %s to %s (%s)",
                        name_value.first.c_str(), name_value.second.c_str(),

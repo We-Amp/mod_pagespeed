@@ -1,1 +1,0 @@
-- With a negative rewrite deadline (RewriteDeadlinePerFlushMs or InPlaceRewriteDeadlineMs), a request for a resource that has to be rebuilt also waits for the background optimization queue.

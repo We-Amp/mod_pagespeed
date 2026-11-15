@@ -1659,6 +1659,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kMetadataCacheStalenessThresholdMs,
       RewriteOptions::kMinImageSizeLowResolutionBytes,
       RewriteOptions::kMinResourceCacheTimeToRewriteMs,
+      RewriteOptions::kNegativeDeadlineFetchWaitMs,
       RewriteOptions::kModifyCachingHeaders,
       RewriteOptions::kNoop,
       RewriteOptions::kNoTransformOptimizedImages,
@@ -4492,6 +4493,67 @@ TEST_F(RewriteOptionsTest, ImageMaxAnimatedFramesNotSettableFromQuery) {
                 RewriteOptions::kImageMaxAnimatedFrames, "50",
                 RewriteOptions::kDirectoryScope, &msg, &handler));
   EXPECT_EQ(50, options.image_max_animated_frames());
+}
+
+// How long a fetch with a negative rewrite deadline waits is set in the server
+// or virtual-host configuration only: not by a request, an .htaccess file, an
+// ExperimentSpec arm or remote configuration, and never above the blocking
+// fetch timeout.
+TEST_F(RewriteOptionsTest, NegativeDeadlineFetchWaitIsServerScopeOnly) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  const char* const name = RewriteOptions::kNegativeDeadlineFetchWaitMs;
+  RewriteOptions options(&thread_system_);
+  EXPECT_EQ(1000, RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+  const RewriteOptions::PropertyBase* property =
+      RewriteOptions::LookupOptionByName(name);
+  ASSERT_TRUE(property != nullptr);
+  EXPECT_EQ(RewriteOptions::kServerScope, property->scope());
+
+  // Not from a query or a request header (the same scope as a URL option).
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.SetOptionFromQuery(name, "60000"));
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "60000", RewriteOptions::kQueryScope, &msg, &handler));
+  // Not from .htaccess or a directory block.
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "60000", RewriteOptions::kDirectoryScope, &msg,
+                &handler));
+  // Not from remote configuration.
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.SetOptionFromRemoteConfig(name, "60000"));
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+
+  // Not from an ExperimentSpec arm: the spec that sets it is invalid, and if
+  // it is kept all the same, applying the experiment leaves it alone.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=10;default;options=NegativeDeadlineFetchWaitMs="
+                "60000",
+                &msg, &handler));
+  if (options.GetExperimentSpec(1) != nullptr) {
+    options.SetExperimentState(1);
+  }
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+
+  // From the server configuration, yes; never more than the blocking fetch
+  // timeout, never negative.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "300", RewriteOptions::kServerScope, &msg, &handler));
+  EXPECT_EQ(300, options.negative_deadline_fetch_wait_ms());
+  options.set_blocking_fetch_timeout_ms(2000);
+  options.set_negative_deadline_fetch_wait_ms(60000);
+  EXPECT_EQ(2000, options.negative_deadline_fetch_wait_ms());
+  options.set_negative_deadline_fetch_wait_ms(-5);
+  EXPECT_EQ(0, options.negative_deadline_fetch_wait_ms());
 }
 
 TEST_F(RewriteOptionsTest, ParseFloats) {

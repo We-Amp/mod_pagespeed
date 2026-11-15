@@ -164,6 +164,12 @@ class RewriteContext {
   // The debug message on an element left unrewritten for that reason.
   static const char kPageBudgetDebugMessage[];
   static const char kNumDeadlineAlarmInvocations[];
+
+  // With a negative rewrite deadline a fetch does not wait for ever for a
+  // rewrite: it waits at most this long (the NegativeDeadlineFetchWaitMs
+  // option) and then serves the original, with a short private lifetime. See
+  // FetchContext::SetupDeadlineAlarm().
+  int64 NegativeDeadlineFetchWaitMs() const;
   static const char kHashMismatchMessage[];
 
   // Used to pass the result of the metadata cache lookups. Recipient must
@@ -695,6 +701,19 @@ class RewriteContext {
   // alarm in FetchContext::SetupDeadlineAlarm(). Subclasses may configure the
   // deadline based on rewrite type, e.g., IPRO vs. HTML-path.
   virtual int64 GetRewriteDeadlineAlarmMs() const;
+
+  // A fetch of a combination that has to rebuild its inputs may serve the
+  // unoptimized original of an input that is slow to rebuild, if the output
+  // does not depend on which version of the input it got. The combined output
+  // is then private and is not stored. Returns false when the output names its
+  // inputs by their content hash (combined JavaScript), because the original
+  // has a different hash and so a different name. Such a fetch waits at most
+  // CombinedFetchCapMs() and then fails with a retryable error.
+  virtual bool FetchInputsMayFallBack() const { return true; }
+
+  // Upper bound of the wait of a combination fetch with a negative rewrite
+  // deadline whose inputs may not fall back: the blocking fetch timeout.
+  int64 CombinedFetchCapMs() const;
 
   // Should the context call LockForCreation before checking the cache?
   virtual bool CreationLockBeforeStartFetch() const;
