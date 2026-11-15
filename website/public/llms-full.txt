@@ -4279,14 +4279,14 @@ To see which filters your own pages would benefit from, run them through a
   `—` that the directive has no value of its own.
 - **Context** lists where the directive may appear. On Apache: the server
   config, a `<VirtualHost>`, a `<Directory>`/`<Location>` block, `.htaccess`.
-  On nginx: the `http`, `server` and `location` blocks. On IIS, shown for the
-  IIS-only directives: `pagespeed.config`, and whether the directive may also
-  appear under a match rule. "Also per request"
+  On nginx: the `http`, `server` and `location` blocks. On IIS:
+  `pagespeed.config`, and whether the directive may also appear under a match
+  rule. "Also per request"
   marks the options that can also be set on a single request with a
   `PageSpeed…` query parameter or header.
 - **Platform** appears when a directive exists on one server only. An option
-  whose block says the source carries no help text is accepted by nginx but
-  is not registered as an Apache directive.
+  whose block says the source carries no help text is accepted by nginx and
+  IIS but is not registered as an Apache directive.
 - A **since** version is not shown: the module source does not record the
   release a directive first appeared in. Additions are listed per release in
   the [release notes](https://modpagespeed.com/docs/release-notes/).
@@ -4487,17 +4487,17 @@ Areas: [Enabling and filter selection](https://modpagespeed.com/docs/configurati
 
 #### Allow
 
-- **Syntax:** `ModPagespeedAllow wildcard` (Apache) · `pagespeed Allow wildcard;` (nginx)
+- **Syntax:** `ModPagespeedAllow wildcard` (Apache) · `pagespeed Allow wildcard;` (nginx) · `pagespeed Allow wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allows optimization of resources whose URL matches the wildcard. Later Allow and Disallow directives override earlier ones.
 
 #### DisableFilters
 
-- **Syntax:** `ModPagespeedDisableFilters filter[,filter...]` (Apache) · `pagespeed DisableFilters filter[,filter...];` (nginx)
+- **Syntax:** `ModPagespeedDisableFilters filter[,filter...]` (Apache) · `pagespeed DisableFilters filter[,filter...];` (nginx) · `pagespeed DisableFilters filter[,filter...]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Comma-separated list of disabled filters
 
@@ -4505,9 +4505,9 @@ See [Filter selection](https://modpagespeed.com/docs/filter-selection/#disablefi
 
 #### Disallow
 
-- **Syntax:** `ModPagespeedDisallow wildcard` (Apache) · `pagespeed Disallow wildcard;` (nginx)
+- **Syntax:** `ModPagespeedDisallow wildcard` (Apache) · `pagespeed Disallow wildcard;` (nginx) · `pagespeed Disallow wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Excludes resources (and pages) whose URL matches the wildcard from optimization.
 
@@ -4517,17 +4517,17 @@ reverse-proxy shape; see
 
 #### EnableAggressiveRewritersForMobile
 
-- **Syntax:** `ModPagespeedEnableAggressiveRewritersForMobile on|off` (Apache) · `pagespeed EnableAggressiveRewritersForMobile on|off;` (nginx)
+- **Syntax:** `ModPagespeedEnableAggressiveRewritersForMobile on|off` (Apache) · `pagespeed EnableAggressiveRewritersForMobile on|off;` (nginx) · `pagespeed EnableAggressiveRewritersForMobile on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allows defer_javascript and defer_iframe for mobile browsers
 
 #### EnableFilters
 
-- **Syntax:** `ModPagespeedEnableFilters filter[,filter...]` (Apache) · `pagespeed EnableFilters filter[,filter...];` (nginx)
+- **Syntax:** `ModPagespeedEnableFilters filter[,filter...]` (Apache) · `pagespeed EnableFilters filter[,filter...];` (nginx) · `pagespeed EnableFilters filter[,filter...]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Comma-separated list of enabled filters
 
@@ -4537,18 +4537,17 @@ interaction with `RewriteLevel`.
 
 #### EnableRewriting
 
-- **Syntax:** `pagespeed EnableRewriting on|off|unplugged|standby;` (nginx)
+- **Syntax:** `pagespeed EnableRewriting on|off|unplugged|standby;` (nginx) · `pagespeed EnableRewriting on|off|unplugged|standby` (IIS)
 - **Default:** `on`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ForbidAllDisabledFilters
 
-- **Syntax:** `ModPagespeedForbidAllDisabledFilters on|off` (Apache) · `pagespeed ForbidAllDisabledFilters on|off;` (nginx)
+- **Syntax:** `ModPagespeedForbidAllDisabledFilters on|off` (Apache) · `pagespeed ForbidAllDisabledFilters on|off;` (nginx) · `pagespeed ForbidAllDisabledFilters on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Prevents the use of disabled filters
 
@@ -4556,9 +4555,9 @@ See [Filter selection](https://modpagespeed.com/docs/filter-selection/#forbidall
 
 #### ForbidFilters
 
-- **Syntax:** `ModPagespeedForbidFilters filter[,filter...]` (Apache) · `pagespeed ForbidFilters filter[,filter...];` (nginx)
+- **Syntax:** `ModPagespeedForbidFilters filter[,filter...]` (Apache) · `pagespeed ForbidFilters filter[,filter...];` (nginx) · `pagespeed ForbidFilters filter[,filter...]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Comma-separated list of forbidden filters
 
@@ -4567,25 +4566,25 @@ parameter. See [Filter selection](https://modpagespeed.com/docs/filter-selection
 
 #### pagespeed / ModPagespeed
 
-- **Syntax:** `ModPagespeed on|off|unplugged|standby` (Apache) · `pagespeed on|off|unplugged|standby;` (nginx)
+- **Syntax:** `ModPagespeed on|off|unplugged|standby` (Apache) · `pagespeed on|off|unplugged|standby;` (nginx) · `pagespeed on|off|unplugged|standby` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The module switch. on optimizes; standby serves already-optimized .pagespeed. resources and answers query-parameter requests but optimizes no new traffic; unplugged intercepts nothing (on nginx, off is an alias for unplugged). unplugged can only be set at the top level or in a virtual host. nginx needs an explicit pagespeed on; in the server block.
 
 #### RewriteDeadlinePerFlushMs
 
-- **Syntax:** `ModPagespeedRewriteDeadlinePerFlushMs number` (Apache) · `pagespeed RewriteDeadlinePerFlushMs number;` (nginx)
+- **Syntax:** `ModPagespeedRewriteDeadlinePerFlushMs number` (Apache) · `pagespeed RewriteDeadlinePerFlushMs number;` (nginx) · `pagespeed RewriteDeadlinePerFlushMs number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Time to wait for resource optimization (per flush window) beforefalling back to the original resource for the request.
 
 #### RewriteLevel
 
-- **Syntax:** `ModPagespeedRewriteLevel CoreFilters|PassThrough|OptimizeForBandwidth|MobilizeFilters|TestingCoreFilters|AllFilters` (Apache) · `pagespeed RewriteLevel CoreFilters|PassThrough|OptimizeForBandwidth|MobilizeFilters|TestingCoreFilters|AllFilters;` (nginx)
+- **Syntax:** `ModPagespeedRewriteLevel CoreFilters|PassThrough|OptimizeForBandwidth|MobilizeFilters|TestingCoreFilters|AllFilters` (Apache) · `pagespeed RewriteLevel CoreFilters|PassThrough|OptimizeForBandwidth|MobilizeFilters|TestingCoreFilters|AllFilters;` (nginx) · `pagespeed RewriteLevel CoreFilters|PassThrough|OptimizeForBandwidth|MobilizeFilters|TestingCoreFilters|AllFilters` (IIS)
 - **Default:** `CoreFilters`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Base level of rewriting (PassThrough, CoreFilters)
 
@@ -4598,17 +4597,17 @@ project's own testing. See [Filter selection](https://modpagespeed.com/docs/filt
 
 #### RewriteRandomDropPercentage
 
-- **Syntax:** `ModPagespeedRewriteRandomDropPercentage number` (Apache) · `pagespeed RewriteRandomDropPercentage number;` (nginx)
+- **Syntax:** `ModPagespeedRewriteRandomDropPercentage number` (Apache) · `pagespeed RewriteRandomDropPercentage number;` (nginx) · `pagespeed RewriteRandomDropPercentage number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The percentage of time that pagespeed should randomly drop an opportunity to optimize an image. The value should be an integer between 0 and 100 inclusive.
 
 #### RewriteUncacheableResources
 
-- **Syntax:** `ModPagespeedRewriteUncacheableResources on|off` (Apache) · `pagespeed RewriteUncacheableResources on|off;` (nginx)
+- **Syntax:** `ModPagespeedRewriteUncacheableResources on|off` (Apache) · `pagespeed RewriteUncacheableResources on|off;` (nginx) · `pagespeed RewriteUncacheableResources on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Allow optimization of uncacheable resources in the in-place rewriting mode.
 
@@ -4618,33 +4617,33 @@ Allow optimization of uncacheable resources in the in-place rewriting mode.
 
 #### AcceptInvalidSignatures
 
-- **Syntax:** `ModPagespeedAcceptInvalidSignatures on|off` (Apache) · `pagespeed AcceptInvalidSignatures on|off;` (nginx)
+- **Syntax:** `ModPagespeedAcceptInvalidSignatures on|off` (Apache) · `pagespeed AcceptInvalidSignatures on|off;` (nginx) · `pagespeed AcceptInvalidSignatures on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Accept resources with invalid signatures.
 
 #### AccessControlAllowOrigins
 
-- **Syntax:** `ModPagespeedAccessControlAllowOrigins value` (Apache) · `pagespeed AccessControlAllowOrigins value;` (nginx)
+- **Syntax:** `ModPagespeedAccessControlAllowOrigins value` (Apache) · `pagespeed AccessControlAllowOrigins value;` (nginx) · `pagespeed AccessControlAllowOrigins value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Comma separated list of origins that are allowed to make cross-origin requests
 
 #### AddOptionsToUrls
 
-- **Syntax:** `ModPagespeedAddOptionsToUrls on|off` (Apache) · `pagespeed AddOptionsToUrls on|off;` (nginx)
+- **Syntax:** `ModPagespeedAddOptionsToUrls on|off` (Apache) · `pagespeed AddOptionsToUrls on|off;` (nginx) · `pagespeed AddOptionsToUrls on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Add query-params with configuration adjustments to rewritten URLs.
 
 #### AddResourceHeader
 
-- **Syntax:** `ModPagespeedAddResourceHeader name value` (Apache) · `pagespeed AddResourceHeader name value;` (nginx)
+- **Syntax:** `ModPagespeedAddResourceHeader name value` (Apache) · `pagespeed AddResourceHeader name value;` (nginx) · `pagespeed AddResourceHeader name value` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Adds a custom HTTP header to every optimized resource the module serves. Repeatable, up to 20 headers.
 
@@ -4667,50 +4666,49 @@ pagespeed AddResourceHeader "X-Custom" "value";
 
 #### AgentOptimize
 
-- **Syntax:** `ModPagespeedAgentOptimize on|off` (Apache) · `pagespeed AgentOptimize on|off;` (nginx)
+- **Syntax:** `ModPagespeedAgentOptimize on|off` (Apache) · `pagespeed AgentOptimize on|off;` (nginx) · `pagespeed AgentOptimize on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Recognize Accept: text/markdown agent requests and add Vary: Accept on HTML. This flag is the only gate: no license or entitlement check sits behind it. 1.1 always serves optimized HTML (no markdown render).
 
 #### AllowLoggingUrlsInLogRecord
 
-- **Syntax:** `pagespeed AllowLoggingUrlsInLogRecord on|off;` (nginx)
+- **Syntax:** `pagespeed AllowLoggingUrlsInLogRecord on|off;` (nginx) · `pagespeed AllowLoggingUrlsInLogRecord on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### AllowOptionsToBeSetByCookies
 
-- **Syntax:** `ModPagespeedAllowOptionsToBeSetByCookies on|off` (Apache) · `pagespeed AllowOptionsToBeSetByCookies on|off;` (nginx)
+- **Syntax:** `ModPagespeedAllowOptionsToBeSetByCookies on|off` (Apache) · `pagespeed AllowOptionsToBeSetByCookies on|off;` (nginx) · `pagespeed AllowOptionsToBeSetByCookies on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow options to be set by cookies in addition to query parameters and request headers.
 
 #### CombineAcrossPaths
 
-- **Syntax:** `ModPagespeedCombineAcrossPaths on|off` (Apache) · `pagespeed CombineAcrossPaths on|off;` (nginx)
+- **Syntax:** `ModPagespeedCombineAcrossPaths on|off` (Apache) · `pagespeed CombineAcrossPaths on|off;` (nginx) · `pagespeed CombineAcrossPaths on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow combining resources from different paths
 
 #### DisableBackgroundFetchesForBots
 
-- **Syntax:** `ModPagespeedDisableBackgroundFetchesForBots on|off` (Apache) · `pagespeed DisableBackgroundFetchesForBots on|off;` (nginx)
+- **Syntax:** `ModPagespeedDisableBackgroundFetchesForBots on|off` (Apache) · `pagespeed DisableBackgroundFetchesForBots on|off;` (nginx) · `pagespeed DisableBackgroundFetchesForBots on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Disable pre-emptive background fetches on bot requests.
 
 #### DisableRewriteOnNoTransform
 
-- **Syntax:** `ModPagespeedDisableRewriteOnNoTransform on|off` (Apache) · `pagespeed DisableRewriteOnNoTransform on|off;` (nginx)
+- **Syntax:** `ModPagespeedDisableRewriteOnNoTransform on|off` (Apache) · `pagespeed DisableRewriteOnNoTransform on|off;` (nginx) · `pagespeed DisableRewriteOnNoTransform on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If false, resource is rewritten even if no-transform header is set
 
@@ -4737,17 +4735,17 @@ Force buffering of non-html fetch responses rather than streaming
 
 #### HideRefererUsingMeta
 
-- **Syntax:** `ModPagespeedHideRefererUsingMeta on|off` (Apache) · `pagespeed HideRefererUsingMeta on|off;` (nginx)
+- **Syntax:** `ModPagespeedHideRefererUsingMeta on|off` (Apache) · `pagespeed HideRefererUsingMeta on|off;` (nginx) · `pagespeed HideRefererUsingMeta on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Hides the referer by adding meta tag to the HTML
 
 #### HonorCsp
 
-- **Syntax:** `ModPagespeedHonorCsp on|off` (Apache) · `pagespeed HonorCsp on|off;` (nginx)
+- **Syntax:** `ModPagespeedHonorCsp on|off` (Apache) · `pagespeed HonorCsp on|off;` (nginx) · `pagespeed HonorCsp on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Controls whether PageSpeed should pay attention to Content-Security-Policy directives
 
@@ -4760,17 +4758,17 @@ the policy disallows inline script.
 
 #### InlineResourcesWithoutExplicitAuthorization
 
-- **Syntax:** `ModPagespeedInlineResourcesWithoutExplicitAuthorization value` (Apache) · `pagespeed InlineResourcesWithoutExplicitAuthorization value;` (nginx)
+- **Syntax:** `ModPagespeedInlineResourcesWithoutExplicitAuthorization value` (Apache) · `pagespeed InlineResourcesWithoutExplicitAuthorization value;` (nginx) · `pagespeed InlineResourcesWithoutExplicitAuthorization value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Specifies the resource types that can be inlined into HTML even if they do not belong to explicitly authorized domains.
 
 #### ModifyCachingHeaders
 
-- **Syntax:** `ModPagespeedModifyCachingHeaders on|off` (Apache) · `pagespeed ModifyCachingHeaders on|off;` (nginx)
+- **Syntax:** `ModPagespeedModifyCachingHeaders on|off` (Apache) · `pagespeed ModifyCachingHeaders on|off;` (nginx) · `pagespeed ModifyCachingHeaders on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Set to false to disallow mod_pagespeed from editing HTML Cache-Control headers. This is not safe in general and can cause the incorrect versions of HTML to be served to users. Rewritten HTML names the request headers its image URLs depend on (Accept, Save-Data, User-Agent) in Vary even when this is off, so a shared cache that honours Vary keeps the variants apart; caches that ignore Vary need their own cache key or a bypass for HTML.
 
@@ -4780,26 +4778,25 @@ disabling it can cause stale optimized content to be served.
 
 #### ObliviousPagespeedUrls
 
-- **Syntax:** `pagespeed ObliviousPagespeedUrls on|off;` (nginx)
+- **Syntax:** `pagespeed ObliviousPagespeedUrls on|off;` (nginx) · `pagespeed ObliviousPagespeedUrls on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### OptionCookiesDurationMs
 
-- **Syntax:** `ModPagespeedOptionCookiesDurationMs number` (Apache) · `pagespeed OptionCookiesDurationMs number;` (nginx)
+- **Syntax:** `ModPagespeedOptionCookiesDurationMs number` (Apache) · `pagespeed OptionCookiesDurationMs number;` (nginx) · `pagespeed OptionCookiesDurationMs number` (IIS)
 - **Default:** `600000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The max-age in ms of cookies that set PageSpeed options.
 
 #### PreserveSubresourceHints
 
-- **Syntax:** `ModPagespeedPreserveSubresourceHints on|off` (Apache) · `pagespeed PreserveSubresourceHints on|off;` (nginx)
+- **Syntax:** `ModPagespeedPreserveSubresourceHints on|off` (Apache) · `pagespeed PreserveSubresourceHints on|off;` (nginx) · `pagespeed PreserveSubresourceHints on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Keep original subresource hints in place.
 
@@ -4814,35 +4811,33 @@ CookieName[=Value][:RedirectUrl] -- checks proxy requests for CookieName. If Coo
 
 #### RejectBlacklisted
 
-- **Syntax:** `pagespeed RejectBlacklisted on|off;` (nginx)
+- **Syntax:** `pagespeed RejectBlacklisted on|off;` (nginx) · `pagespeed RejectBlacklisted on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### RejectBlacklistedStatusCode
 
-- **Syntax:** `pagespeed RejectBlacklistedStatusCode number;` (nginx)
+- **Syntax:** `pagespeed RejectBlacklistedStatusCode number;` (nginx) · `pagespeed RejectBlacklistedStatusCode number` (IIS)
 - **Default:** `403`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### RequestOptionOverride
 
-- **Syntax:** `ModPagespeedRequestOptionOverride value` (Apache) · `pagespeed RequestOptionOverride value;` (nginx)
+- **Syntax:** `ModPagespeedRequestOptionOverride value` (Apache) · `pagespeed RequestOptionOverride value;` (nginx) · `pagespeed RequestOptionOverride value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Token passed in URL to enable pagespeed options in params.
 
 #### RespectVary
 
-- **Syntax:** `ModPagespeedRespectVary on|off` (Apache) · `pagespeed RespectVary on|off;` (nginx)
+- **Syntax:** `ModPagespeedRespectVary on|off` (Apache) · `pagespeed RespectVary on|off;` (nginx) · `pagespeed RespectVary on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Whether to respect Vary headers for resources. Vary is always respected for HTML.
 
@@ -4851,50 +4846,49 @@ not rewritten.
 
 #### RespectXForwardedProto
 
-- **Syntax:** `ModPagespeedRespectXForwardedProto on|off` (Apache) · `pagespeed RespectXForwardedProto on|off;` (nginx)
+- **Syntax:** `ModPagespeedRespectXForwardedProto on|off` (Apache) · `pagespeed RespectXForwardedProto on|off;` (nginx) · `pagespeed RespectXForwardedProto on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Whether to respect the X-Forwarded-Proto header.
 
 #### ServeStaleIfFetchError
 
-- **Syntax:** `pagespeed ServeStaleIfFetchError on|off;` (nginx)
+- **Syntax:** `pagespeed ServeStaleIfFetchError on|off;` (nginx) · `pagespeed ServeStaleIfFetchError on|off` (IIS)
 - **Default:** `on`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ServeStaleWhileRevalidateThresholdSec
 
-- **Syntax:** `ModPagespeedServeStaleWhileRevalidateThresholdSec number` (Apache) · `pagespeed ServeStaleWhileRevalidateThresholdSec number;` (nginx)
+- **Syntax:** `ModPagespeedServeStaleWhileRevalidateThresholdSec number` (Apache) · `pagespeed ServeStaleWhileRevalidateThresholdSec number;` (nginx) · `pagespeed ServeStaleWhileRevalidateThresholdSec number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Threshold for serving serving stale responses while revalidating in background. 0 means don't serve stale content.Note: Stale response will be served only for non-html requests.
 
 #### ServeXhrAccessControlHeaders
 
-- **Syntax:** `ModPagespeedServeXhrAccessControlHeaders on|off` (Apache) · `pagespeed ServeXhrAccessControlHeaders on|off;` (nginx)
+- **Syntax:** `ModPagespeedServeXhrAccessControlHeaders on|off` (Apache) · `pagespeed ServeXhrAccessControlHeaders on|off;` (nginx) · `pagespeed ServeXhrAccessControlHeaders on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Serve access control headers with response headers
 
 #### StickyQueryParameters
 
-- **Syntax:** `ModPagespeedStickyQueryParameters value` (Apache) · `pagespeed StickyQueryParameters value;` (nginx)
+- **Syntax:** `ModPagespeedStickyQueryParameters value` (Apache) · `pagespeed StickyQueryParameters value;` (nginx) · `pagespeed StickyQueryParameters value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The token that must be set by the PageSpeedStickyQueryParameters query parameter/header in a request to enable the setting of cookies for all other PageSpeed query parameters/headers in the request. Blank means it is disabled.
 
 #### SupportNoScriptEnabled
 
-- **Syntax:** `ModPagespeedSupportNoScriptEnabled on|off` (Apache) · `pagespeed SupportNoScriptEnabled on|off;` (nginx)
+- **Syntax:** `ModPagespeedSupportNoScriptEnabled on|off` (Apache) · `pagespeed SupportNoScriptEnabled on|off;` (nginx) · `pagespeed SupportNoScriptEnabled on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Support for clients with no script support, in filters that insert new javascript.
 
@@ -4908,17 +4902,17 @@ Add X-Original-Content-Length headers to rewritten resources
 
 #### UrlSigningKey
 
-- **Syntax:** `ModPagespeedUrlSigningKey value` (Apache) · `pagespeed UrlSigningKey value;` (nginx)
+- **Syntax:** `ModPagespeedUrlSigningKey value` (Apache) · `pagespeed UrlSigningKey value;` (nginx) · `pagespeed UrlSigningKey value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Key used for signing .pagespeed resource URLs.
 
 #### XHeaderValue
 
-- **Syntax:** `ModPagespeedXHeaderValue value` (Apache) · `pagespeed XHeaderValue value;` (nginx)
+- **Syntax:** `ModPagespeedXHeaderValue value` (Apache) · `pagespeed XHeaderValue value;` (nginx) · `pagespeed XHeaderValue value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Set the value for the X-Mod-Pagespeed HTTP header
 
@@ -4935,115 +4929,113 @@ restores the module version string.
 
 #### CacheSmallImagesUnrewritten
 
-- **Syntax:** `pagespeed CacheSmallImagesUnrewritten on|off;` (nginx)
+- **Syntax:** `pagespeed CacheSmallImagesUnrewritten on|off;` (nginx) · `pagespeed CacheSmallImagesUnrewritten on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### InPlacePreemptiveRewriteCss
 
-- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteCss on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteCss on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteCss on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteCss on|off;` (nginx) · `pagespeed InPlacePreemptiveRewriteCss on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If set, issue preemptive rewrites of CSS on the HTML path when configured to use IPRO.
 
 #### InPlacePreemptiveRewriteCssImages
 
-- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteCssImages on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteCssImages on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteCssImages on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteCssImages on|off;` (nginx) · `pagespeed InPlacePreemptiveRewriteCssImages on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If set, issue preemptive rewrites of CSS images on the IPRO serving path.
 
 #### InPlacePreemptiveRewriteImages
 
-- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteImages on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteImages on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteImages on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteImages on|off;` (nginx) · `pagespeed InPlacePreemptiveRewriteImages on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If set, issue preemptive rewrites of images on the HTML path when configured to use IPRO.
 
 #### InPlacePreemptiveRewriteJavascript
 
-- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteJavascript on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteJavascript on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlacePreemptiveRewriteJavascript on|off` (Apache) · `pagespeed InPlacePreemptiveRewriteJavascript on|off;` (nginx) · `pagespeed InPlacePreemptiveRewriteJavascript on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If set, issue preemptive rewrites of JS on the HTML path when configured to use IPRO.
 
 #### InPlaceResourceOptimization
 
-- **Syntax:** `ModPagespeedInPlaceResourceOptimization on|off` (Apache) · `pagespeed InPlaceResourceOptimization on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlaceResourceOptimization on|off` (Apache) · `pagespeed InPlaceResourceOptimization on|off;` (nginx) · `pagespeed InPlaceResourceOptimization on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow rewriting resources even when they are fetched over non-pagespeed URLs.
 
 #### InPlaceRewriteDeadlineMs
 
-- **Syntax:** `ModPagespeedInPlaceRewriteDeadlineMs number` (Apache) · `pagespeed InPlaceRewriteDeadlineMs number;` (nginx)
+- **Syntax:** `ModPagespeedInPlaceRewriteDeadlineMs number` (Apache) · `pagespeed InPlaceRewriteDeadlineMs number;` (nginx) · `pagespeed InPlaceRewriteDeadlineMs number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Time to wait for an in-place resource optimization beforefalling back to the original resource for the request.
 
 #### InPlaceSMaxAgeSec
 
-- **Syntax:** `ModPagespeedInPlaceSMaxAgeSec number` (Apache) · `pagespeed InPlaceSMaxAgeSec number;` (nginx)
+- **Syntax:** `ModPagespeedInPlaceSMaxAgeSec number` (Apache) · `pagespeed InPlaceSMaxAgeSec number;` (nginx) · `pagespeed InPlaceSMaxAgeSec number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 What to set s-maxage to on not-yet-optimized ipro resources
 
 #### InPlaceWaitForOptimized
 
-- **Syntax:** `ModPagespeedInPlaceWaitForOptimized on|off` (Apache) · `pagespeed InPlaceWaitForOptimized on|off;` (nginx)
+- **Syntax:** `ModPagespeedInPlaceWaitForOptimized on|off` (Apache) · `pagespeed InPlaceWaitForOptimized on|off;` (nginx) · `pagespeed InPlaceWaitForOptimized on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Wait for optimizations to complete
 
 #### IproMaxConcurrentRecordings
 
-- **Syntax:** `ModPagespeedIproMaxConcurrentRecordings number` (Apache) · `pagespeed IproMaxConcurrentRecordings number;` (nginx)
+- **Syntax:** `ModPagespeedIproMaxConcurrentRecordings number` (Apache) · `pagespeed IproMaxConcurrentRecordings number;` (nginx) · `pagespeed IproMaxConcurrentRecordings number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Limit allowed number of IPRO recordings
 
 #### IproMaxResponseBytes
 
-- **Syntax:** `ModPagespeedIproMaxResponseBytes number` (Apache) · `pagespeed IproMaxResponseBytes number;` (nginx)
+- **Syntax:** `ModPagespeedIproMaxResponseBytes number` (Apache) · `pagespeed IproMaxResponseBytes number;` (nginx) · `pagespeed IproMaxResponseBytes number` (IIS)
 - **Default:** `10485760`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Limit allowed size of IPRO responses. Set to 0 for unlimited.
 
 #### NoTransformOptimizedImages
 
-- **Syntax:** `ModPagespeedNoTransformOptimizedImages on|off` (Apache) · `pagespeed NoTransformOptimizedImages on|off;` (nginx)
+- **Syntax:** `ModPagespeedNoTransformOptimizedImages on|off` (Apache) · `pagespeed NoTransformOptimizedImages on|off;` (nginx) · `pagespeed NoTransformOptimizedImages on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Add no-transform header to cache-control for optimized images
 
 #### ProactivelyFreshenUserFacingRequest
 
-- **Syntax:** `pagespeed ProactivelyFreshenUserFacingRequest on|off;` (nginx)
+- **Syntax:** `pagespeed ProactivelyFreshenUserFacingRequest on|off;` (nginx) · `pagespeed ProactivelyFreshenUserFacingRequest on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ProactiveResourceFreshening
 
-- **Syntax:** `ModPagespeedProactiveResourceFreshening on|off` (Apache) · `pagespeed ProactiveResourceFreshening on|off;` (nginx)
+- **Syntax:** `ModPagespeedProactiveResourceFreshening on|off` (Apache) · `pagespeed ProactiveResourceFreshening on|off;` (nginx) · `pagespeed ProactiveResourceFreshening on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 If true, allows proactive freshening of inputs to the resource when they are close to expiry.
 
@@ -5053,138 +5045,137 @@ If true, allows proactive freshening of inputs to the resource when they are clo
 
 #### ClientDomainRewrite
 
-- **Syntax:** `ModPagespeedClientDomainRewrite on|off` (Apache) · `pagespeed ClientDomainRewrite on|off;` (nginx)
+- **Syntax:** `ModPagespeedClientDomainRewrite on|off` (Apache) · `pagespeed ClientDomainRewrite on|off;` (nginx) · `pagespeed ClientDomainRewrite on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow rewrite_domains to rewrite urls on the client side.
 
 #### CssPreserveURLs
 
-- **Syntax:** `ModPagespeedCssPreserveURLs on|off` (Apache) · `pagespeed CssPreserveURLs on|off;` (nginx)
+- **Syntax:** `ModPagespeedCssPreserveURLs on|off` (Apache) · `pagespeed CssPreserveURLs on|off;` (nginx) · `pagespeed CssPreserveURLs on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Disable the rewriting of CSS URLs.
 
 #### Domain
 
-- **Syntax:** `ModPagespeedDomain domain` (Apache) · `pagespeed Domain domain;` (nginx)
+- **Syntax:** `ModPagespeedDomain domain` (Apache) · `pagespeed Domain domain;` (nginx) · `pagespeed Domain domain` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Authorizes the module to fetch and rewrite resources on this domain.
 
 #### DomainRewriteCookies
 
-- **Syntax:** `ModPagespeedDomainRewriteCookies on|off` (Apache) · `pagespeed DomainRewriteCookies on|off;` (nginx)
+- **Syntax:** `ModPagespeedDomainRewriteCookies on|off` (Apache) · `pagespeed DomainRewriteCookies on|off;` (nginx) · `pagespeed DomainRewriteCookies on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow rewrite_domains to rewrite domains in Set-Cookie headers.
 
 #### DomainRewriteHyperlinks
 
-- **Syntax:** `ModPagespeedDomainRewriteHyperlinks on|off` (Apache) · `pagespeed DomainRewriteHyperlinks on|off;` (nginx)
+- **Syntax:** `ModPagespeedDomainRewriteHyperlinks on|off` (Apache) · `pagespeed DomainRewriteHyperlinks on|off;` (nginx) · `pagespeed DomainRewriteHyperlinks on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow rewrite_domains to rewrite <form> and <a> tags in addition to resource tags.
 
 #### DomainShardCount
 
-- **Syntax:** `pagespeed DomainShardCount number;` (nginx)
+- **Syntax:** `pagespeed DomainShardCount number;` (nginx) · `pagespeed DomainShardCount number` (IIS)
 - **Default:** `0`
-- **Context:** nginx: http, server, location · also per request (query parameter)
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 _The module source carries no help text for this option._
 
 #### ImagePreserveURLs
 
-- **Syntax:** `ModPagespeedImagePreserveURLs on|off` (Apache) · `pagespeed ImagePreserveURLs on|off;` (nginx)
+- **Syntax:** `ModPagespeedImagePreserveURLs on|off` (Apache) · `pagespeed ImagePreserveURLs on|off;` (nginx) · `pagespeed ImagePreserveURLs on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Disable the rewriting of Image URLs.
 
 #### JsPreserveURLs
 
-- **Syntax:** `ModPagespeedJsPreserveURLs on|off` (Apache) · `pagespeed JsPreserveURLs on|off;` (nginx)
+- **Syntax:** `ModPagespeedJsPreserveURLs on|off` (Apache) · `pagespeed JsPreserveURLs on|off;` (nginx) · `pagespeed JsPreserveURLs on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Disable the rewriting of Javascript URLs.
 
 #### LoadFromFile
 
-- **Syntax:** `ModPagespeedLoadFromFile url_prefix filename_prefix` (Apache) · `pagespeed LoadFromFile url_prefix filename_prefix;` (nginx)
+- **Syntax:** `ModPagespeedLoadFromFile url_prefix filename_prefix` (Apache) · `pagespeed LoadFromFile url_prefix filename_prefix;` (nginx) · `pagespeed LoadFromFile url_prefix filename_prefix` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Serves resources under a URL prefix straight from the filesystem instead of fetching them over HTTP. Access control: files served through a mapping are read directly from disk, so the web server's own access rules for those paths (Apache `<Directory>`, `<Files>` and `Require`; nginx `location` allow/deny and authentication) are not applied to them. To control access per path, use `LoadFromFileRule Disallow` for a filename prefix or `LoadFromFileRuleMatch Disallow` for a filename pattern; a disallowed file is fetched over HTTP instead, where the web server's rules apply as usual. If a path should not be reachable at all, do not map it.
 
 #### LoadFromFileCacheTtlMs
 
-- **Syntax:** `ModPagespeedLoadFromFileCacheTtlMs number` (Apache) · `pagespeed LoadFromFileCacheTtlMs number;` (nginx)
+- **Syntax:** `ModPagespeedLoadFromFileCacheTtlMs number` (Apache) · `pagespeed LoadFromFileCacheTtlMs number;` (nginx) · `pagespeed LoadFromFileCacheTtlMs number` (IIS)
 - **Default:** `300000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Time in milliseconds to cache resources loaded from file that lack an Expires or Cache-Control header. If not explicitly set, defaults to using the value set by implicit_cache_ttl_ms
 
 #### LoadFromFileMatch
 
-- **Syntax:** `ModPagespeedLoadFromFileMatch url_regexp filename_prefix` (Apache) · `pagespeed LoadFromFileMatch url_regexp filename_prefix;` (nginx)
+- **Syntax:** `ModPagespeedLoadFromFileMatch url_regexp filename_prefix` (Apache) · `pagespeed LoadFromFileMatch url_regexp filename_prefix;` (nginx) · `pagespeed LoadFromFileMatch url_regexp filename_prefix` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 LoadFromFile with a regular expression on the URL and a replacement filename prefix.
 
 #### LoadFromFileRule
 
-- **Syntax:** `ModPagespeedLoadFromFileRule Allow|Disallow filename_prefix` (Apache) · `pagespeed LoadFromFileRule Allow|Disallow filename_prefix;` (nginx)
+- **Syntax:** `ModPagespeedLoadFromFileRule Allow|Disallow filename_prefix` (Apache) · `pagespeed LoadFromFileRule Allow|Disallow filename_prefix;` (nginx) · `pagespeed LoadFromFileRule Allow|Disallow filename_prefix` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Allows or disallows loading from file for a filename prefix after a LoadFromFile mapping.
 
 #### LoadFromFileRuleMatch
 
-- **Syntax:** `ModPagespeedLoadFromFileRuleMatch Allow|Disallow filename_regexp` (Apache) · `pagespeed LoadFromFileRuleMatch Allow|Disallow filename_regexp;` (nginx)
+- **Syntax:** `ModPagespeedLoadFromFileRuleMatch Allow|Disallow filename_regexp` (Apache) · `pagespeed LoadFromFileRuleMatch Allow|Disallow filename_regexp;` (nginx) · `pagespeed LoadFromFileRuleMatch Allow|Disallow filename_regexp` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 LoadFromFileRule with a regular expression on the filename.
 
 #### MapOriginDomain
 
-- **Syntax:** `ModPagespeedMapOriginDomain to_domain from_domain[,from_domain...] [host_header]` (Apache) · `pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header];` (nginx)
+- **Syntax:** `ModPagespeedMapOriginDomain to_domain from_domain[,from_domain...] [host_header]` (Apache) · `pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header];` (nginx) · `pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Fetches resources for the public domain(s) from the origin domain instead, optionally sending a different Host header.
 
 #### MapProxyDomain
 
-- **Syntax:** `ModPagespeedMapProxyDomain proxy_domain origin_domain [to_domain]` (Apache) · `pagespeed MapProxyDomain proxy_domain origin_domain [to_domain];` (nginx)
+- **Syntax:** `ModPagespeedMapProxyDomain proxy_domain origin_domain [to_domain]` (Apache) · `pagespeed MapProxyDomain proxy_domain origin_domain [to_domain];` (nginx) · `pagespeed MapProxyDomain proxy_domain origin_domain [to_domain]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Proxies and optimizes resources from a separate origin domain under a path of this site.
 
 #### MapRewriteDomain
 
-- **Syntax:** `ModPagespeedMapRewriteDomain to_domain from_domain[,from_domain...]` (Apache) · `pagespeed MapRewriteDomain to_domain from_domain[,from_domain...];` (nginx)
+- **Syntax:** `ModPagespeedMapRewriteDomain to_domain from_domain[,from_domain...]` (Apache) · `pagespeed MapRewriteDomain to_domain from_domain[,from_domain...];` (nginx) · `pagespeed MapRewriteDomain to_domain from_domain[,from_domain...]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Rewrites optimized resource URLs from the listed domains onto another domain (for example a CDN hostname).
 
 #### MaxSegmentLength
 
-- **Syntax:** `ModPagespeedMaxSegmentLength number` (Apache) · `pagespeed MaxSegmentLength number;` (nginx)
+- **Syntax:** `ModPagespeedMaxSegmentLength number` (Apache) · `pagespeed MaxSegmentLength number;` (nginx) · `pagespeed MaxSegmentLength number` (IIS)
 - **Default:** `1024`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum size of a URL segment.
 
@@ -5192,18 +5183,17 @@ Why and when to lower it is in [URL segment length limits](https://modpagespeed.
 
 #### MaxUrlSize
 
-- **Syntax:** `pagespeed MaxUrlSize number;` (nginx)
+- **Syntax:** `pagespeed MaxUrlSize number;` (nginx) · `pagespeed MaxUrlSize number` (IIS)
 - **Default:** `2083`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### PreserveUrlRelativity
 
-- **Syntax:** `ModPagespeedPreserveUrlRelativity on|off` (Apache) · `pagespeed PreserveUrlRelativity on|off;` (nginx)
+- **Syntax:** `ModPagespeedPreserveUrlRelativity on|off` (Apache) · `pagespeed PreserveUrlRelativity on|off;` (nginx) · `pagespeed PreserveUrlRelativity on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Keep rewritten URLs as relative as the original resource URL was.
 
@@ -5212,41 +5202,41 @@ converted to absolute URLs.
 
 #### ProxySuffix
 
-- **Syntax:** `ModPagespeedProxySuffix suffix` (Apache) · `pagespeed ProxySuffix suffix;` (nginx)
+- **Syntax:** `ModPagespeedProxySuffix suffix` (Apache) · `pagespeed ProxySuffix suffix;` (nginx) · `pagespeed ProxySuffix suffix` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Sets up a proxy suffix to be used when slurping.
 
 #### RemoteConfigurationTimeoutMs
 
-- **Syntax:** `ModPagespeedRemoteConfigurationTimeoutMs number` (Apache) · `pagespeed RemoteConfigurationTimeoutMs number;` (nginx)
+- **Syntax:** `ModPagespeedRemoteConfigurationTimeoutMs number` (Apache) · `pagespeed RemoteConfigurationTimeoutMs number;` (nginx) · `pagespeed RemoteConfigurationTimeoutMs number` (IIS)
 - **Default:** `1000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Timeout for fetch of remote configuration file.
 
 #### RemoteConfigurationUrl
 
-- **Syntax:** `ModPagespeedRemoteConfigurationUrl value` (Apache) · `pagespeed RemoteConfigurationUrl value;` (nginx)
+- **Syntax:** `ModPagespeedRemoteConfigurationUrl value` (Apache) · `pagespeed RemoteConfigurationUrl value;` (nginx) · `pagespeed RemoteConfigurationUrl value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 URL of site from which to pull remote configuration files
 
 #### ShardDomain
 
-- **Syntax:** `ModPagespeedShardDomain from_domain shard_domain[,shard_domain...]` (Apache) · `pagespeed ShardDomain from_domain shard_domain[,shard_domain...];` (nginx)
+- **Syntax:** `ModPagespeedShardDomain from_domain shard_domain[,shard_domain...]` (Apache) · `pagespeed ShardDomain from_domain shard_domain[,shard_domain...];` (nginx) · `pagespeed ShardDomain from_domain shard_domain[,shard_domain...]` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Spreads optimized resource URLs for a domain across the listed shard domains.
 
 #### StaticAssetCDN
 
-- **Syntax:** `ModPagespeedStaticAssetCDN value` (Apache) · `pagespeed StaticAssetCDN value;` (nginx)
+- **Syntax:** `ModPagespeedStaticAssetCDN value` (Apache) · `pagespeed StaticAssetCDN value;` (nginx) · `pagespeed StaticAssetCDN value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Configures serving of helper scripts from external URLs rather than from compiled-in versions via static handler.
 
@@ -5263,9 +5253,9 @@ libraries and images some filters inject). The default is `/pagespeed_static/`.
 
 #### UrlValuedAttribute
 
-- **Syntax:** `ModPagespeedUrlValuedAttribute element attribute category` (Apache) · `pagespeed UrlValuedAttribute element attribute category;` (nginx)
+- **Syntax:** `ModPagespeedUrlValuedAttribute element attribute category` (Apache) · `pagespeed UrlValuedAttribute element attribute category;` (nginx) · `pagespeed UrlValuedAttribute element attribute category` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Declares an extra element attribute that holds a URL, with the resource category (image, script, stylesheet, otherResource, hyperlink) it should be treated as.
 
@@ -5285,17 +5275,17 @@ On nginx: Set the unix socket path of the optimizer worker's management API, bac
 
 #### DaemonHtmlCache
 
-- **Syntax:** `ModPagespeedDaemonHtmlCache off|report-only` (Apache) · `pagespeed DaemonHtmlCache off|report-only;` (nginx)
+- **Syntax:** `ModPagespeedDaemonHtmlCache off|report-only` (Apache) · `pagespeed DaemonHtmlCache off|report-only;` (nginx) · `pagespeed DaemonHtmlCache off|report-only` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 HTML on the optimizer worker path: off (default), or report-only, which reports whether each HTML response could be stored and changes nothing else.
 
 #### DaemonHtmlMaxBytes
 
-- **Syntax:** `ModPagespeedDaemonHtmlMaxBytes number` (Apache) · `pagespeed DaemonHtmlMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedDaemonHtmlMaxBytes number` (Apache) · `pagespeed DaemonHtmlMaxBytes number;` (nginx) · `pagespeed DaemonHtmlMaxBytes number` (IIS)
 - **Default:** `5242880`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Largest HTML body DaemonHtmlCache considers storable, in bytes. Values above 16 MiB count as 16 MiB.
 
@@ -5349,9 +5339,9 @@ volume under its `--cache-dir`; see
 
 #### RulePackFile
 
-- **Syntax:** `ModPagespeedRulePackFile value` (Apache) · `pagespeed RulePackFile value;` (nginx)
+- **Syntax:** `ModPagespeedRulePackFile value` (Apache) · `pagespeed RulePackFile value;` (nginx) · `pagespeed RulePackFile value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Path of the rule pack file the rule_packs filter applies.
 
@@ -5363,25 +5353,25 @@ once). The packs run in the order of the lines. A virtual host that sets
 
 #### RulePackMode
 
-- **Syntax:** `ModPagespeedRulePackMode report|enforce` (Apache) · `pagespeed RulePackMode report|enforce;` (nginx)
+- **Syntax:** `ModPagespeedRulePackMode report|enforce` (Apache) · `pagespeed RulePackMode report|enforce;` (nginx) · `pagespeed RulePackMode report|enforce` (IIS)
 - **Default:** `report`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Mode of the rule_packs filter: report (default) records what the rules would do; enforce lets enforcing rules change the page.
 
 #### RulePackRequireSigned
 
-- **Syntax:** `ModPagespeedRulePackRequireSigned on|off` (Apache) · `pagespeed RulePackRequireSigned on|off;` (nginx)
+- **Syntax:** `ModPagespeedRulePackRequireSigned on|off` (Apache) · `pagespeed RulePackRequireSigned on|off;` (nginx) · `pagespeed RulePackRequireSigned on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Refuse rule packs that are not signed with a key listed by RulePackTrustKey.
 
 #### RulePackTrustKey
 
-- **Syntax:** `ModPagespeedRulePackTrustKey key_id base64_public_key` (Apache) · `pagespeed RulePackTrustKey key_id base64_public_key;` (nginx)
+- **Syntax:** `ModPagespeedRulePackTrustKey key_id base64_public_key` (Apache) · `pagespeed RulePackTrustKey key_id base64_public_key;` (nginx) · `pagespeed RulePackTrustKey key_id base64_public_key` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Trust rule packs signed with this key: <key id> <base64 Ed25519 public key>
 
@@ -5573,9 +5563,9 @@ Verified-bot registry: comma-separated keyid=name pairs.
 
 #### AdminDomains
 
-- **Syntax:** `ModPagespeedAdminDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed AdminDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedAdminDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed AdminDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed AdminDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the per-host admin pages: Allow or Disallow a domain wildcard. Default: Allow \*.
 
@@ -5599,9 +5589,9 @@ Auto-create the LogDir if missing (on|off, default on).
 
 #### ConsoleDomains
 
-- **Syntax:** `ModPagespeedConsoleDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed ConsoleDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedConsoleDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed ConsoleDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed ConsoleDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the console page: Allow or Disallow a domain wildcard. Default: Allow \*.
 
@@ -5616,9 +5606,9 @@ Set the console path. Ex: /pagespeed_console
 
 #### GlobalAdminDomains
 
-- **Syntax:** `ModPagespeedGlobalAdminDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed GlobalAdminDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedGlobalAdminDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed GlobalAdminDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed GlobalAdminDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the global admin pages: Allow or Disallow a domain wildcard. Default: Allow \*.
 
@@ -5633,9 +5623,9 @@ Set the global admin path. Ex: /pagespeed_global_admin
 
 #### GlobalStatisticsDomains
 
-- **Syntax:** `ModPagespeedGlobalStatisticsDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed GlobalStatisticsDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedGlobalStatisticsDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed GlobalStatisticsDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed GlobalStatisticsDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the global statistics page: Allow or Disallow a domain wildcard. Default: Allow \*.
 
@@ -5681,43 +5671,41 @@ Enable it only while debugging fetch problems; it is noisy in production.
 
 #### LogBackgroundRewrite
 
-- **Syntax:** `pagespeed LogBackgroundRewrite on|off;` (nginx)
+- **Syntax:** `pagespeed LogBackgroundRewrite on|off;` (nginx) · `pagespeed LogBackgroundRewrite on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 _The module source carries no help text for this option._
 
 #### LogDir
 
-- **Syntax:** `ModPagespeedLogDir value` (Apache) · `pagespeed LogDir value;` (nginx)
+- **Syntax:** `ModPagespeedLogDir value` (Apache) · `pagespeed LogDir value;` (nginx) · `pagespeed LogDir value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Directory to store logs in.
 
 #### LogRewriteTiming
 
-- **Syntax:** `ModPagespeedLogRewriteTiming on|off` (Apache) · `pagespeed LogRewriteTiming on|off;` (nginx)
+- **Syntax:** `ModPagespeedLogRewriteTiming on|off` (Apache) · `pagespeed LogRewriteTiming on|off;` (nginx) · `pagespeed LogRewriteTiming on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Whether or not to report timing information about HtmlParse.
 
 #### LogUrlIndices
 
-- **Syntax:** `ModPagespeedLogUrlIndices on|off` (Apache) · `pagespeed LogUrlIndices on|off;` (nginx)
+- **Syntax:** `ModPagespeedLogUrlIndices on|off` (Apache) · `pagespeed LogUrlIndices on|off;` (nginx) · `pagespeed LogUrlIndices on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Whether or not to log URL indices for rewriter applications.
 
 #### MaxRewriteInfoLogSize
 
-- **Syntax:** `pagespeed MaxRewriteInfoLogSize number;` (nginx)
+- **Syntax:** `pagespeed MaxRewriteInfoLogSize number;` (nginx) · `pagespeed MaxRewriteInfoLogSize number` (IIS)
 - **Default:** `150`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
@@ -5731,9 +5719,9 @@ Size in bytes of the in-memory message history shown on the messages page; 0 dis
 
 #### MessagesDomains
 
-- **Syntax:** `ModPagespeedMessagesDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed MessagesDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedMessagesDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed MessagesDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed MessagesDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the message history page: Allow or Disallow a domain wildcard. Default: Allow \*.
 
@@ -5748,73 +5736,73 @@ Set the messages path. Ex: /ngx_pagespeed_message
 
 #### ReportUnloadTime
 
-- **Syntax:** `ModPagespeedReportUnloadTime on|off` (Apache) · `pagespeed ReportUnloadTime on|off;` (nginx)
+- **Syntax:** `ModPagespeedReportUnloadTime on|off` (Apache) · `pagespeed ReportUnloadTime on|off;` (nginx) · `pagespeed ReportUnloadTime on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated, no effect: the beacon is now sent on page-hide, which covers pre-onload abandonment without breaking bfcache.
 
 #### SlowFileLatencyUs
 
-- **Syntax:** `ModPagespeedSlowFileLatencyUs number` (Apache) · `pagespeed SlowFileLatencyUs number;` (nginx)
+- **Syntax:** `ModPagespeedSlowFileLatencyUs number` (Apache) · `pagespeed SlowFileLatencyUs number;` (nginx) · `pagespeed SlowFileLatencyUs number` (IIS)
 - **Default:** `50000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Maximum time in microseconds to allow for file operations before logging and bumping a stat
 
 #### Statistics
 
-- **Syntax:** `ModPagespeedStatistics on|off` (Apache) · `pagespeed Statistics on|off;` (nginx)
+- **Syntax:** `ModPagespeedStatistics on|off` (Apache) · `pagespeed Statistics on|off;` (nginx) · `pagespeed Statistics on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Whether to collect cross-process statistics.
 
 #### StatisticsDomains
 
-- **Syntax:** `ModPagespeedStatisticsDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed StatisticsDomains Allow|Disallow domain_wildcard;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsDomains Allow|Disallow domain_wildcard` (Apache) · `pagespeed StatisticsDomains Allow|Disallow domain_wildcard;` (nginx) · `pagespeed StatisticsDomains Allow|Disallow domain_wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server, location
+- **Context:** Apache: server config, virtual host · nginx: http, server, location · IIS: pagespeed.config, outside match rules
 
 Access control for the per-host statistics page: Allow or Disallow a domain wildcard. Default: Allow \*.
 
 #### StatisticsLogging
 
-- **Syntax:** `ModPagespeedStatisticsLogging on|off` (Apache) · `pagespeed StatisticsLogging on|off;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsLogging on|off` (Apache) · `pagespeed StatisticsLogging on|off;` (nginx) · `pagespeed StatisticsLogging on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Whether to log statistics if they're being collected.
 
 #### StatisticsLoggingChartsCSS
 
-- **Syntax:** `ModPagespeedStatisticsLoggingChartsCSS value` (Apache) · `pagespeed StatisticsLoggingChartsCSS value;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsLoggingChartsCSS value` (Apache) · `pagespeed StatisticsLoggingChartsCSS value;` (nginx) · `pagespeed StatisticsLoggingChartsCSS value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Where to find an offline copy of the Google Charts Tools API CSS.
 
 #### StatisticsLoggingChartsJS
 
-- **Syntax:** `ModPagespeedStatisticsLoggingChartsJS value` (Apache) · `pagespeed StatisticsLoggingChartsJS value;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsLoggingChartsJS value` (Apache) · `pagespeed StatisticsLoggingChartsJS value;` (nginx) · `pagespeed StatisticsLoggingChartsJS value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Where to find an offline copy of the Google Charts Tools API JS.
 
 #### StatisticsLoggingIntervalMs
 
-- **Syntax:** `ModPagespeedStatisticsLoggingIntervalMs number` (Apache) · `pagespeed StatisticsLoggingIntervalMs number;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsLoggingIntervalMs number` (Apache) · `pagespeed StatisticsLoggingIntervalMs number;` (nginx) · `pagespeed StatisticsLoggingIntervalMs number` (IIS)
 - **Default:** `600000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 How often to log statistics, in milliseconds.
 
 #### StatisticsLoggingMaxFileSizeKb
 
-- **Syntax:** `ModPagespeedStatisticsLoggingMaxFileSizeKb number` (Apache) · `pagespeed StatisticsLoggingMaxFileSizeKb number;` (nginx)
+- **Syntax:** `ModPagespeedStatisticsLoggingMaxFileSizeKb number` (Apache) · `pagespeed StatisticsLoggingMaxFileSizeKb number;` (nginx) · `pagespeed StatisticsLoggingMaxFileSizeKb number` (IIS)
 - **Default:** `1024`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Max size for statistics logging file.
 
@@ -5829,9 +5817,9 @@ Set the statistics path. Ex: /ngx_pagespeed_statistics
 
 #### StrictAdminAccess
 
-- **Syntax:** `ModPagespeedStrictAdminAccess on|off` (Apache) · `pagespeed StrictAdminAccess on|off;` (nginx)
+- **Syntax:** `ModPagespeedStrictAdminAccess on|off` (Apache) · `pagespeed StrictAdminAccess on|off;` (nginx) · `pagespeed StrictAdminAccess on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 OPT-IN, default off. When on, the admin, statistics, console and message handlers deny non-loopback clients unless an explicit \*Domains allowlist is configured. The loopback decision uses the validated client connection IP, not the Host header. When off (default) access checks behave exactly as before.
 
@@ -5861,357 +5849,353 @@ If true, keep track of statistics per VHost and not just globally
 
 #### AvifAnimatedRecompressionQuality
 
-- **Syntax:** `ModPagespeedAvifAnimatedRecompressionQuality number` (Apache) · `pagespeed AvifAnimatedRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedAvifAnimatedRecompressionQuality number` (Apache) · `pagespeed AvifAnimatedRecompressionQuality number;` (nginx) · `pagespeed AvifAnimatedRecompressionQuality number` (IIS)
 - **Default:** `50`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten animated avif images [-1,100], 100 refers to best quality, -1 uses ImageRecompressionQuality.
 
 #### AvifQualityForSaveData
 
-- **Syntax:** `ModPagespeedAvifQualityForSaveData number` (Apache) · `pagespeed AvifQualityForSaveData number;` (nginx)
+- **Syntax:** `ModPagespeedAvifQualityForSaveData number` (Apache) · `pagespeed AvifQualityForSaveData number;` (nginx) · `pagespeed AvifQualityForSaveData number` (IIS)
 - **Default:** `45`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality for the images which will be optimized to lossy AVIF format in the Save-Data mode. Use a value in [0,100] to explicitly set the quality. Use -1 to ignore the Save-Data header.
 
 #### AvifRecompressionQuality
 
-- **Syntax:** `ModPagespeedAvifRecompressionQuality number` (Apache) · `pagespeed AvifRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedAvifRecompressionQuality number` (Apache) · `pagespeed AvifRecompressionQuality number;` (nginx) · `pagespeed AvifRecompressionQuality number` (IIS)
 - **Default:** `60`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten avif images [-1,100], 100 refers to best quality, -1 uses ImageRecompressionQuality.
 
 #### AvifRecompressionQualityForSmallScreens
 
-- **Syntax:** `ModPagespeedAvifRecompressionQualityForSmallScreens number` (Apache) · `pagespeed AvifRecompressionQualityForSmallScreens number;` (nginx)
+- **Syntax:** `ModPagespeedAvifRecompressionQualityForSmallScreens number` (Apache) · `pagespeed AvifRecompressionQualityForSmallScreens number;` (nginx) · `pagespeed AvifRecompressionQualityForSmallScreens number` (IIS)
 - **Default:** `50`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten avif images for small screens. [-1,100], 100 refers to best quality, -1 falls back to AvifRecompressionQuality.
 
 #### AvifTimeoutMs
 
-- **Syntax:** `ModPagespeedAvifTimeoutMs number` (Apache) · `pagespeed AvifTimeoutMs number;` (nginx)
+- **Syntax:** `ModPagespeedAvifTimeoutMs number` (Apache) · `pagespeed AvifTimeoutMs number;` (nginx) · `pagespeed AvifTimeoutMs number` (IIS)
 - **Default:** `5000`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Timeout for AVIF still-image encoding, in milliseconds; the encoder speed is derived from this budget.
 
 #### CriticalImagesBeaconEnabled
 
-- **Syntax:** `ModPagespeedCriticalImagesBeaconEnabled on|off` (Apache) · `pagespeed CriticalImagesBeaconEnabled on|off;` (nginx)
+- **Syntax:** `ModPagespeedCriticalImagesBeaconEnabled on|off` (Apache) · `pagespeed CriticalImagesBeaconEnabled on|off;` (nginx) · `pagespeed CriticalImagesBeaconEnabled on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Enable insertion of client-side critical image detection js for image optimization filters.
 
 #### CssImageInlineMaxBytes
 
-- **Syntax:** `ModPagespeedCssImageInlineMaxBytes number` (Apache) · `pagespeed CssImageInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedCssImageInlineMaxBytes number` (Apache) · `pagespeed CssImageInlineMaxBytes number;` (nginx) · `pagespeed CssImageInlineMaxBytes number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Number of bytes below which CSS images will be inlined.
 
 #### DocumentImageInlineMaxBytes
 
-- **Syntax:** `ModPagespeedDocumentImageInlineMaxBytes number` (Apache) · `pagespeed DocumentImageInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedDocumentImageInlineMaxBytes number` (Apache) · `pagespeed DocumentImageInlineMaxBytes number;` (nginx) · `pagespeed DocumentImageInlineMaxBytes number` (IIS)
 - **Default:** `4194304`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Most image bytes inlined into one document; further images are left as links.
 
 #### EnableLazyLoadHighResImages
 
-- **Syntax:** `pagespeed EnableLazyLoadHighResImages on|off;` (nginx)
+- **Syntax:** `pagespeed EnableLazyLoadHighResImages on|off;` (nginx) · `pagespeed EnableLazyLoadHighResImages on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ImageInlineMaxBytes
 
-- **Syntax:** `ModPagespeedImageInlineMaxBytes number` (Apache) · `pagespeed ImageInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedImageInlineMaxBytes number` (Apache) · `pagespeed ImageInlineMaxBytes number;` (nginx) · `pagespeed ImageInlineMaxBytes number` (IIS)
 - **Default:** `3072`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Number of bytes below which images will be inlined.
 
 #### ImageJpegNumProgressiveScans
 
-- **Syntax:** `ModPagespeedImageJpegNumProgressiveScans number` (Apache) · `pagespeed ImageJpegNumProgressiveScans number;` (nginx)
+- **Syntax:** `ModPagespeedImageJpegNumProgressiveScans number` (Apache) · `pagespeed ImageJpegNumProgressiveScans number;` (nginx) · `pagespeed ImageJpegNumProgressiveScans number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of progressive scans [1,10] to emit when rewriting images as ten-scan progressive jpegs. A value of -1 outputs all progressive scans.
 
 #### ImageJpegNumProgressiveScansForSmallScreens
 
-- **Syntax:** `ModPagespeedImageJpegNumProgressiveScansForSmallScreens number` (Apache) · `pagespeed ImageJpegNumProgressiveScansForSmallScreens number;` (nginx)
+- **Syntax:** `ModPagespeedImageJpegNumProgressiveScansForSmallScreens number` (Apache) · `pagespeed ImageJpegNumProgressiveScansForSmallScreens number;` (nginx) · `pagespeed ImageJpegNumProgressiveScansForSmallScreens number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of progressive scans [1,10] to emit when rewriting images asten-scan progressive jpegs for small screens. A value of -1 falls back to kImageJpegNumProgressiveScans.
 
 #### ImageLimitOptimizedPercent
 
-- **Syntax:** `ModPagespeedImageLimitOptimizedPercent number` (Apache) · `pagespeed ImageLimitOptimizedPercent number;` (nginx)
+- **Syntax:** `ModPagespeedImageLimitOptimizedPercent number` (Apache) · `pagespeed ImageLimitOptimizedPercent number;` (nginx) · `pagespeed ImageLimitOptimizedPercent number` (IIS)
 - **Default:** `100`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Replace images whose size after recompression is less than the given percent of original image size; 100 means replace if smaller.
 
 #### ImageLimitRenderedAreaPercent
 
-- **Syntax:** `ModPagespeedImageLimitRenderedAreaPercent number` (Apache) · `pagespeed ImageLimitRenderedAreaPercent number;` (nginx)
+- **Syntax:** `ModPagespeedImageLimitRenderedAreaPercent number` (Apache) · `pagespeed ImageLimitRenderedAreaPercent number;` (nginx) · `pagespeed ImageLimitRenderedAreaPercent number` (IIS)
 - **Default:** `95`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Limit on percentage of rendered image wxh to the original image wxh that should be stored in the property cache. This is to avoid corner cases where rounding off decreases the rendered image size by a few pixels.
 
 #### ImageLimitResizeAreaPercent
 
-- **Syntax:** `ModPagespeedImageLimitResizeAreaPercent number` (Apache) · `pagespeed ImageLimitResizeAreaPercent number;` (nginx)
+- **Syntax:** `ModPagespeedImageLimitResizeAreaPercent number` (Apache) · `pagespeed ImageLimitResizeAreaPercent number;` (nginx) · `pagespeed ImageLimitResizeAreaPercent number` (IIS)
 - **Default:** `100`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Consider resizing images whose area in pixels is less than the given percent of original image area; 100 means replace if smaller.
 
 #### ImageMaxAnimatedFrames
 
-- **Syntax:** `ModPagespeedImageMaxAnimatedFrames number` (Apache) · `pagespeed ImageMaxAnimatedFrames number;` (nginx)
+- **Syntax:** `ModPagespeedImageMaxAnimatedFrames number` (Apache) · `pagespeed ImageMaxAnimatedFrames number;` (nginx) · `pagespeed ImageMaxAnimatedFrames number` (IIS)
 - **Default:** `200`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum number of frames in an animated image that will be converted. Animations with more frames are served unconverted. 0 or a negative value disables the limit.
 
 #### ImageMaxRewritesAtOnce
 
-- **Syntax:** `ModPagespeedImageMaxRewritesAtOnce number` (Apache) · `pagespeed ImageMaxRewritesAtOnce number;` (nginx)
+- **Syntax:** `ModPagespeedImageMaxRewritesAtOnce number` (Apache) · `pagespeed ImageMaxRewritesAtOnce number;` (nginx) · `pagespeed ImageMaxRewritesAtOnce number` (IIS)
 - **Default:** `8`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Set bound on number of images being rewritten at one time (0 = unbounded).
 
 #### ImageProvenanceCarry
 
-- **Syntax:** `ModPagespeedImageProvenanceCarry on|off` (Apache) · `pagespeed ImageProvenanceCarry on|off;` (nginx)
+- **Syntax:** `ModPagespeedImageProvenanceCarry on|off` (Apache) · `pagespeed ImageProvenanceCarry on|off;` (nginx) · `pagespeed ImageProvenanceCarry on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Provenance carry-through: when true (and PreserveImageProvenance is on), PNG images carrying a C2PA / Content Credentials manifest are recompressed AND their original manifest chunks (caBX/iTXt) are carried into the optimized output unmodified, keeping both the byte savings and the provenance. (Manifest-bearing JPEGs already carry their APP11/JUMBF through recompression under PreserveImageProvenance.) Cases where the carrier cannot be preserved byte-exactly -- resize, format conversion (PNG->JPEG/WebP), GIF, or extraction failure -- fall back to the default detect-and-skip pass-through. No effect when PreserveImageProvenance is false.
 
 #### ImageRecompressionQuality
 
-- **Syntax:** `ModPagespeedImageRecompressionQuality number` (Apache) · `pagespeed ImageRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedImageRecompressionQuality number` (Apache) · `pagespeed ImageRecompressionQuality number;` (nginx) · `pagespeed ImageRecompressionQuality number` (IIS)
 - **Default:** `85`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality parameter for recompressing images [-1,100], 100 refers to best quality, -1 disables lossy compression. JpegRecompressionQuality and WebpRecompressionQuality override this.
 
 #### ImageResolutionLimitBytes
 
-- **Syntax:** `ModPagespeedImageResolutionLimitBytes number` (Apache) · `pagespeed ImageResolutionLimitBytes number;` (nginx)
+- **Syntax:** `ModPagespeedImageResolutionLimitBytes number` (Apache) · `pagespeed ImageResolutionLimitBytes number;` (nginx) · `pagespeed ImageResolutionLimitBytes number` (IIS)
 - **Default:** `33554432`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum byte size of an image for optimization
 
 #### InlineOnlyCriticalImages
 
-- **Syntax:** `ModPagespeedInlineOnlyCriticalImages on|off` (Apache) · `pagespeed InlineOnlyCriticalImages on|off;` (nginx)
+- **Syntax:** `ModPagespeedInlineOnlyCriticalImages on|off` (Apache) · `pagespeed InlineOnlyCriticalImages on|off;` (nginx) · `pagespeed InlineOnlyCriticalImages on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Inline only critical images
 
 #### JpegQualityForSaveData
 
-- **Syntax:** `ModPagespeedJpegQualityForSaveData number` (Apache) · `pagespeed JpegQualityForSaveData number;` (nginx)
+- **Syntax:** `ModPagespeedJpegQualityForSaveData number` (Apache) · `pagespeed JpegQualityForSaveData number;` (nginx) · `pagespeed JpegQualityForSaveData number` (IIS)
 - **Default:** `50`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality for the images which will be optimized to JPEG format in the Save-Data mode. Use a value in [0,100] to explicitly set the quality. Use -1 to ignore the Save-Data header.
 
 #### JpegRecompressionQuality
 
-- **Syntax:** `ModPagespeedJpegRecompressionQuality number` (Apache) · `pagespeed JpegRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedJpegRecompressionQuality number` (Apache) · `pagespeed JpegRecompressionQuality number;` (nginx) · `pagespeed JpegRecompressionQuality number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality parameter for recompressing jpeg images [-1,100], 100 is lossless, -1 uses ImageRecompressionQuality
 
 #### JpegRecompressionQualityForSmallScreens
 
-- **Syntax:** `ModPagespeedJpegRecompressionQualityForSmallScreens number` (Apache) · `pagespeed JpegRecompressionQualityForSmallScreens number;` (nginx)
+- **Syntax:** `ModPagespeedJpegRecompressionQualityForSmallScreens number` (Apache) · `pagespeed JpegRecompressionQualityForSmallScreens number;` (nginx) · `pagespeed JpegRecompressionQualityForSmallScreens number` (IIS)
 - **Default:** `70`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality parameter for recompressing jpeg images for small screens. [-1,100], 100 refers to best quality, -1 falls back to ImageJpegRecompressionQuality.
 
 #### LazyloadImagesAfterOnload
 
-- **Syntax:** `ModPagespeedLazyloadImagesAfterOnload on|off` (Apache) · `pagespeed LazyloadImagesAfterOnload on|off;` (nginx)
+- **Syntax:** `ModPagespeedLazyloadImagesAfterOnload on|off` (Apache) · `pagespeed LazyloadImagesAfterOnload on|off;` (nginx) · `pagespeed LazyloadImagesAfterOnload on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Wait until page onload before loading lazy images
 
 #### LazyloadImagesBlankUrl
 
-- **Syntax:** `ModPagespeedLazyloadImagesBlankUrl value` (Apache) · `pagespeed LazyloadImagesBlankUrl value;` (nginx)
+- **Syntax:** `ModPagespeedLazyloadImagesBlankUrl value` (Apache) · `pagespeed LazyloadImagesBlankUrl value;` (nginx) · `pagespeed LazyloadImagesBlankUrl value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 URL of image used to display prior to loading the lazy image. Empty means use a site-local copy.
 
 #### LazyloadImagesMode
 
-- **Syntax:** `ModPagespeedLazyloadImagesMode auto|native|js` (Apache) · `pagespeed LazyloadImagesMode auto|native|js;` (nginx)
+- **Syntax:** `ModPagespeedLazyloadImagesMode auto|native|js` (Apache) · `pagespeed LazyloadImagesMode auto|native|js;` (nginx) · `pagespeed LazyloadImagesMode auto|native|js` (IIS)
 - **Default:** `auto`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 How to lazyload images: 'native' annotates non-critical images with loading="lazy", 'js' uses the JavaScript loader, and 'auto' (the default) picks per user agent.
 
 #### LazyloadImagesSkipFirst
 
-- **Syntax:** `ModPagespeedLazyloadImagesSkipFirst number` (Apache) · `pagespeed LazyloadImagesSkipFirst number;` (nginx)
+- **Syntax:** `ModPagespeedLazyloadImagesSkipFirst number` (Apache) · `pagespeed LazyloadImagesSkipFirst number;` (nginx) · `pagespeed LazyloadImagesSkipFirst number` (IIS)
 - **Default:** `1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of leading images to leave untouched when critical image data is unavailable, protecting likely LCP candidates.
 
 #### MaxImageSizeLowResolutionBytes
 
-- **Syntax:** `ModPagespeedMaxImageSizeLowResolutionBytes number` (Apache) · `pagespeed MaxImageSizeLowResolutionBytes number;` (nginx)
+- **Syntax:** `ModPagespeedMaxImageSizeLowResolutionBytes number` (Apache) · `pagespeed MaxImageSizeLowResolutionBytes number;` (nginx) · `pagespeed MaxImageSizeLowResolutionBytes number` (IIS)
 - **Default:** `1048576`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum image size below which low resolution image is generated.
 
 #### MaxInlinedPreviewImagesIndex
 
-- **Syntax:** `ModPagespeedMaxInlinedPreviewImagesIndex number` (Apache) · `pagespeed MaxInlinedPreviewImagesIndex number;` (nginx)
+- **Syntax:** `ModPagespeedMaxInlinedPreviewImagesIndex number` (Apache) · `pagespeed MaxInlinedPreviewImagesIndex number;` (nginx) · `pagespeed MaxInlinedPreviewImagesIndex number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of first N images for which low resolution image is generated. Negative values result in generation for all images.
 
 #### MaxLowResImageSizeBytes
 
-- **Syntax:** `pagespeed MaxLowResImageSizeBytes number;` (nginx)
+- **Syntax:** `pagespeed MaxLowResImageSizeBytes number;` (nginx) · `pagespeed MaxLowResImageSizeBytes number` (IIS)
 - **Default:** `-1`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### MaxLowResToHighResImageSizePercentage
 
-- **Syntax:** `pagespeed MaxLowResToHighResImageSizePercentage number;` (nginx)
+- **Syntax:** `pagespeed MaxLowResToHighResImageSizePercentage number;` (nginx) · `pagespeed MaxLowResToHighResImageSizePercentage number` (IIS)
 - **Default:** `100`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### MinImageSizeLowResolutionBytes
 
-- **Syntax:** `ModPagespeedMinImageSizeLowResolutionBytes number` (Apache) · `pagespeed MinImageSizeLowResolutionBytes number;` (nginx)
+- **Syntax:** `ModPagespeedMinImageSizeLowResolutionBytes number` (Apache) · `pagespeed MinImageSizeLowResolutionBytes number;` (nginx) · `pagespeed MinImageSizeLowResolutionBytes number` (IIS)
 - **Default:** `3072`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Minimum image size above which low resolution image is generated.
 
 #### PreserveImageProvenance
 
-- **Syntax:** `ModPagespeedPreserveImageProvenance on|off` (Apache) · `pagespeed PreserveImageProvenance on|off;` (nginx)
+- **Syntax:** `ModPagespeedPreserveImageProvenance on|off` (Apache) · `pagespeed PreserveImageProvenance on|off;` (nginx) · `pagespeed PreserveImageProvenance on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Preserve C2PA/Content-Credentials provenance metadata (JPEG APP11/JUMBF) through image optimization. On by default; independent of EXIF stripping.
 
 #### ProgressiveJpegMinBytes
 
-- **Syntax:** `ModPagespeedProgressiveJpegMinBytes number` (Apache) · `pagespeed ProgressiveJpegMinBytes number;` (nginx)
+- **Syntax:** `ModPagespeedProgressiveJpegMinBytes number` (Apache) · `pagespeed ProgressiveJpegMinBytes number;` (nginx) · `pagespeed ProgressiveJpegMinBytes number` (IIS)
 - **Default:** `10240`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Minimum size in bytes for converting a jpeg to progressive
 
 #### ResponsiveImageDensities
 
-- **Syntax:** `ModPagespeedResponsiveImageDensities value` (Apache) · `pagespeed ResponsiveImageDensities value;` (nginx)
+- **Syntax:** `ModPagespeedResponsiveImageDensities value` (Apache) · `pagespeed ResponsiveImageDensities value;` (nginx) · `pagespeed ResponsiveImageDensities value` (IIS)
 - **Default:** `1.5,2,3`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Comma separated list of screen densities to target with ResponsiveImageFilter srcsets.
 
 #### ServeRewrittenAvifUrlsToAnyAgent
 
-- **Syntax:** `ModPagespeedServeRewrittenAvifUrlsToAnyAgent on|off` (Apache) · `pagespeed ServeRewrittenAvifUrlsToAnyAgent on|off;` (nginx)
+- **Syntax:** `ModPagespeedServeRewrittenAvifUrlsToAnyAgent on|off` (Apache) · `pagespeed ServeRewrittenAvifUrlsToAnyAgent on|off;` (nginx) · `pagespeed ServeRewrittenAvifUrlsToAnyAgent on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Serve rewritten .avif images to any user-agent
 
 #### ServeRewrittenWebpUrlsToAnyAgent
 
-- **Syntax:** `ModPagespeedServeRewrittenWebpUrlsToAnyAgent on|off` (Apache) · `pagespeed ServeRewrittenWebpUrlsToAnyAgent on|off;` (nginx)
+- **Syntax:** `ModPagespeedServeRewrittenWebpUrlsToAnyAgent on|off` (Apache) · `pagespeed ServeRewrittenWebpUrlsToAnyAgent on|off;` (nginx) · `pagespeed ServeRewrittenWebpUrlsToAnyAgent on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Serve rewritten .webp images to any user-agent
 
 #### UseBlankImageForInlinePreview
 
-- **Syntax:** `ModPagespeedUseBlankImageForInlinePreview on|off` (Apache) · `pagespeed UseBlankImageForInlinePreview on|off;` (nginx)
+- **Syntax:** `ModPagespeedUseBlankImageForInlinePreview on|off` (Apache) · `pagespeed UseBlankImageForInlinePreview on|off;` (nginx) · `pagespeed UseBlankImageForInlinePreview on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Use a blank image for inline preview
 
 #### WebpAnimatedRecompressionQuality
 
-- **Syntax:** `ModPagespeedWebpAnimatedRecompressionQuality number` (Apache) · `pagespeed WebpAnimatedRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedWebpAnimatedRecompressionQuality number` (Apache) · `pagespeed WebpAnimatedRecompressionQuality number;` (nginx) · `pagespeed WebpAnimatedRecompressionQuality number` (IIS)
 - **Default:** `70`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten animated webp images [-1,100], 100 refers to best quality, -1 uses ImageRecompressionQuality.
 
 #### WebpQualityForSaveData
 
-- **Syntax:** `ModPagespeedWebpQualityForSaveData number` (Apache) · `pagespeed WebpQualityForSaveData number;` (nginx)
+- **Syntax:** `ModPagespeedWebpQualityForSaveData number` (Apache) · `pagespeed WebpQualityForSaveData number;` (nginx) · `pagespeed WebpQualityForSaveData number` (IIS)
 - **Default:** `50`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Set quality for the images which will be optimized to lossy WebP format in the Save-Data mode. Use a value in [0,100] to explicitly set the quality. Use -1 to ignore the Save-Data header.
 
 #### WebpRecompressionQuality
 
-- **Syntax:** `ModPagespeedWebpRecompressionQuality number` (Apache) · `pagespeed WebpRecompressionQuality number;` (nginx)
+- **Syntax:** `ModPagespeedWebpRecompressionQuality number` (Apache) · `pagespeed WebpRecompressionQuality number;` (nginx) · `pagespeed WebpRecompressionQuality number` (IIS)
 - **Default:** `80`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten webp images [-1,100], 100 refers to best quality, -1 uses ImageRecompressionQuality.
 
 #### WebpRecompressionQualityForSmallScreens
 
-- **Syntax:** `ModPagespeedWebpRecompressionQualityForSmallScreens number` (Apache) · `pagespeed WebpRecompressionQualityForSmallScreens number;` (nginx)
+- **Syntax:** `ModPagespeedWebpRecompressionQualityForSmallScreens number` (Apache) · `pagespeed WebpRecompressionQualityForSmallScreens number;` (nginx) · `pagespeed WebpRecompressionQualityForSmallScreens number` (IIS)
 - **Default:** `70`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Quality for rewritten webp images for small screens. [-1,100], 100 refers to best quality, -1 falls back to WebpRecompressionQuality.
 
 #### WebpTimeoutMs
 
-- **Syntax:** `pagespeed WebpTimeoutMs number;` (nginx)
+- **Syntax:** `pagespeed WebpTimeoutMs number;` (nginx) · `pagespeed WebpTimeoutMs number` (IIS)
 - **Default:** `-1`
-- **Context:** nginx: http
-- **Platform:** nginx only
+- **Context:** nginx: http · IIS: pagespeed.config, outside match rules
 
 _The module source carries no help text for this option._
 
@@ -6221,26 +6205,25 @@ _The module source carries no help text for this option._
 
 #### AlwaysRewriteCss
 
-- **Syntax:** `pagespeed AlwaysRewriteCss on|off;` (nginx)
+- **Syntax:** `pagespeed AlwaysRewriteCss on|off;` (nginx) · `pagespeed AlwaysRewriteCss on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### CriticalCssAboveTheFoldOnly
 
-- **Syntax:** `ModPagespeedCriticalCssAboveTheFoldOnly on|off` (Apache) · `pagespeed CriticalCssAboveTheFoldOnly on|off;` (nginx)
+- **Syntax:** `ModPagespeedCriticalCssAboveTheFoldOnly on|off` (Apache) · `pagespeed CriticalCssAboveTheFoldOnly on|off;` (nginx) · `pagespeed CriticalCssAboveTheFoldOnly on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Makes prioritize_critical_css inline only the rules for content in the first screen instead of the rules for the whole page. The inline block is smaller; content further down may be shown partly styled until the full stylesheet has arrived.
 
 #### CssFlattenMaxBytes
 
-- **Syntax:** `ModPagespeedCssFlattenMaxBytes number` (Apache) · `pagespeed CssFlattenMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedCssFlattenMaxBytes number` (Apache) · `pagespeed CssFlattenMaxBytes number;` (nginx) · `pagespeed CssFlattenMaxBytes number` (IIS)
 - **Default:** `1024000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of bytes below which stylesheets will be flattened.
 
@@ -6251,57 +6234,57 @@ could also be set per request.
 
 #### CssInlineMaxBytes
 
-- **Syntax:** `ModPagespeedCssInlineMaxBytes number` (Apache) · `pagespeed CssInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedCssInlineMaxBytes number` (Apache) · `pagespeed CssInlineMaxBytes number;` (nginx) · `pagespeed CssInlineMaxBytes number` (IIS)
 - **Default:** `2048`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Number of bytes below which stylesheets will be inlined.
 
 #### CssOutlineMinBytes
 
-- **Syntax:** `ModPagespeedCssOutlineMinBytes number` (Apache) · `pagespeed CssOutlineMinBytes number;` (nginx)
+- **Syntax:** `ModPagespeedCssOutlineMinBytes number` (Apache) · `pagespeed CssOutlineMinBytes number;` (nginx) · `pagespeed CssOutlineMinBytes number` (IIS)
 - **Default:** `3000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of bytes above which inline CSS resources will be outlined.
 
 #### CssParseMaxBytes
 
-- **Syntax:** `ModPagespeedCssParseMaxBytes number` (Apache) · `pagespeed CssParseMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedCssParseMaxBytes number` (Apache) · `pagespeed CssParseMaxBytes number;` (nginx) · `pagespeed CssParseMaxBytes number` (IIS)
 - **Default:** `2097152`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Largest stylesheet, in bytes, that the CSS rewriter will parse; larger ones are passed through unmodified (<= 0 for no limit).
 
 #### GoogleFontCssInlineMaxBytes
 
-- **Syntax:** `ModPagespeedGoogleFontCssInlineMaxBytes number` (Apache) · `pagespeed GoogleFontCssInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedGoogleFontCssInlineMaxBytes number` (Apache) · `pagespeed GoogleFontCssInlineMaxBytes number;` (nginx) · `pagespeed GoogleFontCssInlineMaxBytes number` (IIS)
 - **Default:** `49152`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Number of bytes below which Google Font stylesheets will be inlined.
 
 #### MaxCombinedCssBytes
 
-- **Syntax:** `ModPagespeedMaxCombinedCssBytes number` (Apache) · `pagespeed MaxCombinedCssBytes number;` (nginx)
+- **Syntax:** `ModPagespeedMaxCombinedCssBytes number` (Apache) · `pagespeed MaxCombinedCssBytes number;` (nginx) · `pagespeed MaxCombinedCssBytes number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Maximum size allowed for the combined CSS resource.
 
 #### PermitIdsForCssCombining
 
-- **Syntax:** `ModPagespeedPermitIdsForCssCombining wildcard` (Apache) · `pagespeed PermitIdsForCssCombining wildcard;` (nginx)
+- **Syntax:** `ModPagespeedPermitIdsForCssCombining wildcard` (Apache) · `pagespeed PermitIdsForCssCombining wildcard;` (nginx) · `pagespeed PermitIdsForCssCombining wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Allow combining CSS files with IDs matching wildcard
 
 #### TestOnlyPrioritizeCriticalCssDontApplyOriginalCss
 
-- **Syntax:** `ModPagespeedTestOnlyPrioritizeCriticalCssDontApplyOriginalCss on|off` (Apache) · `pagespeed TestOnlyPrioritizeCriticalCssDontApplyOriginalCss on|off;` (nginx)
+- **Syntax:** `ModPagespeedTestOnlyPrioritizeCriticalCssDontApplyOriginalCss on|off` (Apache) · `pagespeed TestOnlyPrioritizeCriticalCssDontApplyOriginalCss on|off;` (nginx) · `pagespeed TestOnlyPrioritizeCriticalCssDontApplyOriginalCss on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Stops the prioritize_critical_css filter from invoking its JavaScript that applies all the 'hidden' CSS at onload. Intended for testing.
 
@@ -6311,9 +6294,9 @@ Stops the prioritize_critical_css filter from invoking its JavaScript that appli
 
 #### AvoidRenamingIntrospectiveJavascript
 
-- **Syntax:** `ModPagespeedAvoidRenamingIntrospectiveJavascript on|off` (Apache) · `pagespeed AvoidRenamingIntrospectiveJavascript on|off;` (nginx)
+- **Syntax:** `ModPagespeedAvoidRenamingIntrospectiveJavascript on|off` (Apache) · `pagespeed AvoidRenamingIntrospectiveJavascript on|off;` (nginx) · `pagespeed AvoidRenamingIntrospectiveJavascript on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Don't combine, inline, cache extend, or otherwise modify javascript in ways that require changing the URL if we see introspection in the form of document.getElementsByTagName('script').
 
@@ -6328,50 +6311,49 @@ Drops the script-variable directive lines inherited from the enclosing block, so
 
 #### EnableDeferJsExperimental
 
-- **Syntax:** `ModPagespeedEnableDeferJsExperimental on|off` (Apache) · `pagespeed EnableDeferJsExperimental on|off;` (nginx)
+- **Syntax:** `ModPagespeedEnableDeferJsExperimental on|off` (Apache) · `pagespeed EnableDeferJsExperimental on|off;` (nginx) · `pagespeed EnableDeferJsExperimental on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Enable experimental options in defer javascript.
 
 #### EnablePrioritizingScripts
 
-- **Syntax:** `pagespeed EnablePrioritizingScripts on|off;` (nginx)
+- **Syntax:** `pagespeed EnablePrioritizingScripts on|off;` (nginx) · `pagespeed EnablePrioritizingScripts on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### JsInlineMaxBytes
 
-- **Syntax:** `ModPagespeedJsInlineMaxBytes number` (Apache) · `pagespeed JsInlineMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedJsInlineMaxBytes number` (Apache) · `pagespeed JsInlineMaxBytes number;` (nginx) · `pagespeed JsInlineMaxBytes number` (IIS)
 - **Default:** `2048`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Number of bytes below which javascript will be inlined.
 
 #### JsOutlineMinBytes
 
-- **Syntax:** `ModPagespeedJsOutlineMinBytes number` (Apache) · `pagespeed JsOutlineMinBytes number;` (nginx)
+- **Syntax:** `ModPagespeedJsOutlineMinBytes number` (Apache) · `pagespeed JsOutlineMinBytes number;` (nginx) · `pagespeed JsOutlineMinBytes number` (IIS)
 - **Default:** `3000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of bytes above which inline Javascript resources willbe outlined.
 
 #### Library
 
-- **Syntax:** `ModPagespeedLibrary bytes md5 canonical_url` (Apache) · `pagespeed Library bytes md5 canonical_url;` (nginx)
+- **Syntax:** `ModPagespeedLibrary bytes md5 canonical_url` (Apache) · `pagespeed Library bytes md5 canonical_url;` (nginx) · `pagespeed Library bytes md5 canonical_url` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Recognizes a JavaScript library by size and hash so canonicalize_javascript_libraries can replace it with the given canonical URL.
 
 #### MaxCombinedJsBytes
 
-- **Syntax:** `ModPagespeedMaxCombinedJsBytes number` (Apache) · `pagespeed MaxCombinedJsBytes number;` (nginx)
+- **Syntax:** `ModPagespeedMaxCombinedJsBytes number` (Apache) · `pagespeed MaxCombinedJsBytes number;` (nginx) · `pagespeed MaxCombinedJsBytes number` (IIS)
 - **Default:** `92160`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum size allowed for the combined JavaScript resource.
 
@@ -6390,9 +6372,9 @@ Evaluate nginx script variables ($var) in pagespeed directive arguments at reque
 
 #### AsyncMetadataL2Writes
 
-- **Syntax:** `ModPagespeedAsyncMetadataL2Writes on|off` (Apache) · `pagespeed AsyncMetadataL2Writes on|off;` (nginx)
+- **Syntax:** `ModPagespeedAsyncMetadataL2Writes on|off` (Apache) · `pagespeed AsyncMetadataL2Writes on|off;` (nginx) · `pagespeed AsyncMetadataL2Writes on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Defer the metadata cache's blocking L2 (disk) write off the rewrite critical path onto a single-thread write-behind queue. Reads and the shared-memory L1 write stay synchronous, so same-machine read-your-writes is preserved. Experimental; off by default.
 
@@ -6415,42 +6397,41 @@ optimizing. See
 
 #### AwaitPcacheLookup
 
-- **Syntax:** `pagespeed AwaitPcacheLookup on|off;` (nginx)
+- **Syntax:** `pagespeed AwaitPcacheLookup on|off;` (nginx) · `pagespeed AwaitPcacheLookup on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 _The module source carries no help text for this option._
 
 #### CacheFlushFilename
 
-- **Syntax:** `ModPagespeedCacheFlushFilename value` (Apache) · `pagespeed CacheFlushFilename value;` (nginx)
+- **Syntax:** `ModPagespeedCacheFlushFilename value` (Apache) · `pagespeed CacheFlushFilename value;` (nginx) · `pagespeed CacheFlushFilename value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Name of file to check for timestamp updates used to flush cache. This file will be relative to the ModPagespeedFileCachePath if it does not begin with a slash.
 
 #### CacheFlushPollIntervalSec
 
-- **Syntax:** `ModPagespeedCacheFlushPollIntervalSec number` (Apache) · `pagespeed CacheFlushPollIntervalSec number;` (nginx)
+- **Syntax:** `ModPagespeedCacheFlushPollIntervalSec number` (Apache) · `pagespeed CacheFlushPollIntervalSec number;` (nginx) · `pagespeed CacheFlushPollIntervalSec number` (IIS)
 - **Default:** `5`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Number of seconds to wait between polling for cache-flush requests
 
 #### CacheFragment
 
-- **Syntax:** `ModPagespeedCacheFragment value` (Apache) · `pagespeed CacheFragment value;` (nginx)
+- **Syntax:** `ModPagespeedCacheFragment value` (Apache) · `pagespeed CacheFragment value;` (nginx) · `pagespeed CacheFragment value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Set a cache fragment to allow servers with different hostnames to share a cache. Allowed: letters, numbers, underscores, and hyphens.
 
 #### CompressMetadataCache
 
-- **Syntax:** `ModPagespeedCompressMetadataCache on|off` (Apache) · `pagespeed CompressMetadataCache on|off;` (nginx)
+- **Syntax:** `ModPagespeedCompressMetadataCache on|off` (Apache) · `pagespeed CompressMetadataCache on|off;` (nginx) · `pagespeed CompressMetadataCache on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Whether to compress cache entries before writing them to memory or disk.
 
@@ -6464,123 +6445,121 @@ Creates a named shared-memory metadata cache of the given size for the virtual h
 
 #### CycloneRamCacheKb
 
-- **Syntax:** `ModPagespeedCycloneRamCacheKb number` (Apache) · `pagespeed CycloneRamCacheKb number;` (nginx)
+- **Syntax:** `ModPagespeedCycloneRamCacheKb number` (Apache) · `pagespeed CycloneRamCacheKb number;` (nginx) · `pagespeed CycloneRamCacheKb number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the size, in KB, of Cyclone's internal RAM cache tier, decoupled from LRUCacheKbPerProcess. 0 (the default) disables the RAM tier -- reads are served from the memory-mapped volume, which the OS page cache already keeps hot; -1 inherits LRUCacheKbPerProcess.
 
 #### CycloneZeroCopy
 
-- **Syntax:** `ModPagespeedCycloneZeroCopy on|off` (Apache) · `pagespeed CycloneZeroCopy on|off;` (nginx)
+- **Syntax:** `ModPagespeedCycloneZeroCopy on|off` (Apache) · `pagespeed CycloneZeroCopy on|off;` (nginx) · `pagespeed CycloneZeroCopy on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Serve HTTP cache hits directly from the Cyclone cache's memory-mapped storage without copying the payload (zero-copy). Off by default on every port; set it on explicitly to opt in.
 
 #### CycloneZeroCopyServe
 
-- **Syntax:** `ModPagespeedCycloneZeroCopyServe on|off` (Apache) · `pagespeed CycloneZeroCopyServe on|off;` (nginx)
+- **Syntax:** `ModPagespeedCycloneZeroCopyServe on|off` (Apache) · `pagespeed CycloneZeroCopyServe on|off;` (nginx) · `pagespeed CycloneZeroCopyServe on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Carry memory-mapped Cyclone cache-hit bytes into the port output buffer by reference (aliased) instead of copying them; the serve safely copies the tail out before a cache eviction can overwrite it. Engages only once CycloneZeroCopy maps cache values; on Apache the aliased serve is experimental and activates only when this option is explicitly set. Apache aliases only plain-HTTP/1.x main-request 200s of at least 16KB served verbatim (no Range, no deflate/ssl/http2 or other transforming filter), and bytes an output filter parks for a slow client are copied out at that point; everything else serves a verified copy.
 
 #### DefaultCacheHtml
 
-- **Syntax:** `pagespeed DefaultCacheHtml on|off;` (nginx)
+- **Syntax:** `pagespeed DefaultCacheHtml on|off;` (nginx) · `pagespeed DefaultCacheHtml on|off` (IIS)
 - **Default:** `off`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### DefaultSharedMemoryCacheKB
 
-- **Syntax:** `ModPagespeedDefaultSharedMemoryCacheKB number` (Apache) · `pagespeed DefaultSharedMemoryCacheKB number;` (nginx)
+- **Syntax:** `ModPagespeedDefaultSharedMemoryCacheKB number` (Apache) · `pagespeed DefaultSharedMemoryCacheKB number;` (nginx) · `pagespeed DefaultSharedMemoryCacheKB number` (IIS)
 - **Default:** `51200`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Size of the default shared memory cache used by all virtual hosts that don't use CreateSharedMemoryMetadataCache. Set to 0 to turn off the default shared memory cache.
 
 #### DownstreamCachePurgeLocationPrefix
 
-- **Syntax:** `ModPagespeedDownstreamCachePurgeLocationPrefix host:port/path` (Apache) · `pagespeed DownstreamCachePurgeLocationPrefix host:port/path;` (nginx)
+- **Syntax:** `ModPagespeedDownstreamCachePurgeLocationPrefix host:port/path` (Apache) · `pagespeed DownstreamCachePurgeLocationPrefix host:port/path;` (nginx) · `pagespeed DownstreamCachePurgeLocationPrefix host:port/path` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The host:port/path prefix to be used for purging requests from the downstream cache.
 
 #### DownstreamCachePurgeMethod
 
-- **Syntax:** `ModPagespeedDownstreamCachePurgeMethod value` (Apache) · `pagespeed DownstreamCachePurgeMethod value;` (nginx)
+- **Syntax:** `ModPagespeedDownstreamCachePurgeMethod value` (Apache) · `pagespeed DownstreamCachePurgeMethod value;` (nginx) · `pagespeed DownstreamCachePurgeMethod value` (IIS)
 - **Default:** `PURGE`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Method to be used for purging responses from the downstream cache
 
 #### DownstreamCacheRebeaconingKey
 
-- **Syntax:** `ModPagespeedDownstreamCacheRebeaconingKey value` (Apache) · `pagespeed DownstreamCacheRebeaconingKey value;` (nginx)
+- **Syntax:** `ModPagespeedDownstreamCacheRebeaconingKey value` (Apache) · `pagespeed DownstreamCacheRebeaconingKey value;` (nginx) · `pagespeed DownstreamCacheRebeaconingKey value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 The key used to authenticate rebeaconing requests from downstream caches. The value specified for this key in the pagespeed server config should be used in the caching layer configuration also.
 
 #### DownstreamCacheRewrittenPercentageThreshold
 
-- **Syntax:** `ModPagespeedDownstreamCacheRewrittenPercentageThreshold number` (Apache) · `pagespeed DownstreamCacheRewrittenPercentageThreshold number;` (nginx)
+- **Syntax:** `ModPagespeedDownstreamCacheRewrittenPercentageThreshold number` (Apache) · `pagespeed DownstreamCacheRewrittenPercentageThreshold number;` (nginx) · `pagespeed DownstreamCacheRewrittenPercentageThreshold number` (IIS)
 - **Default:** `95`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Threshold for percentage of rewriting to be finished before the response is served out and simultaneously stored in the downstream cache, beyond which the response will not be purged from the cache evenif more rewriting is possible now
 
 #### EnableCachePurge
 
-- **Syntax:** `ModPagespeedEnableCachePurge on|off` (Apache) · `pagespeed EnableCachePurge on|off;` (nginx)
+- **Syntax:** `ModPagespeedEnableCachePurge on|off` (Apache) · `pagespeed EnableCachePurge on|off;` (nginx) · `pagespeed EnableCachePurge on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Allows individual resources to be flushed; adding some overhead to the metadata cache
 
 #### FileCachePath
 
-- **Syntax:** `ModPagespeedFileCachePath value` (Apache) · `pagespeed FileCachePath value;` (nginx)
+- **Syntax:** `ModPagespeedFileCachePath value` (Apache) · `pagespeed FileCachePath value;` (nginx) · `pagespeed FileCachePath value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the path for file cache
 
 #### FileCacheSizeKb
 
-- **Syntax:** `ModPagespeedFileCacheSizeKb number` (Apache) · `pagespeed FileCacheSizeKb number;` (nginx)
+- **Syntax:** `ModPagespeedFileCacheSizeKb number` (Apache) · `pagespeed FileCacheSizeKb number;` (nginx) · `pagespeed FileCacheSizeKb number` (IIS)
 - **Default:** `1048576`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the target size (in kilobytes) for file cache
 
 #### FileCacheSmallTierPercent
 
-- **Syntax:** `ModPagespeedFileCacheSmallTierPercent number` (Apache) · `pagespeed FileCacheSmallTierPercent number;` (nginx)
+- **Syntax:** `ModPagespeedFileCacheSmallTierPercent number` (Apache) · `pagespeed FileCacheSmallTierPercent number;` (nginx) · `pagespeed FileCacheSmallTierPercent number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Percentage of the file cache carved out as a separate small-object volume that protects metadata and property entries from payload churn. 0 disables the tier; values are clamped to [0, 50]. Below roughly 256 MB of total file cache the tier disables itself and entries share the main volume. Applies in the default shared-memory metadata cache configuration; with the shm metadata cache disabled, metadata stays on the main volume.
 
 #### FinderPropertiesCacheExpirationTimeMs
 
-- **Syntax:** `ModPagespeedFinderPropertiesCacheExpirationTimeMs number` (Apache) · `pagespeed FinderPropertiesCacheExpirationTimeMs number;` (nginx)
+- **Syntax:** `ModPagespeedFinderPropertiesCacheExpirationTimeMs number` (Apache) · `pagespeed FinderPropertiesCacheExpirationTimeMs number;` (nginx) · `pagespeed FinderPropertiesCacheExpirationTimeMs number` (IIS)
 - **Default:** `7200000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Number of ms that beacon results for the critical selector finders should be considered valid.
 
 #### FinderPropertiesCacheRefreshTimeMs
 
-- **Syntax:** `pagespeed FinderPropertiesCacheRefreshTimeMs number;` (nginx)
+- **Syntax:** `pagespeed FinderPropertiesCacheRefreshTimeMs number;` (nginx) · `pagespeed FinderPropertiesCacheRefreshTimeMs number` (IIS)
 - **Default:** `5400000`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
@@ -6594,206 +6573,201 @@ Ignore HTTP cache headers and TTLs
 
 #### HttpCacheCompressionLevel
 
-- **Syntax:** `ModPagespeedHttpCacheCompressionLevel number` (Apache) · `pagespeed HttpCacheCompressionLevel number;` (nginx)
+- **Syntax:** `ModPagespeedHttpCacheCompressionLevel number` (Apache) · `pagespeed HttpCacheCompressionLevel number;` (nginx) · `pagespeed HttpCacheCompressionLevel number` (IIS)
 - **Default:** `9`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Compression level for HTTPCache. [-1-9] where 0 is off, 1 is minimumcompression, and 9 (the default) is maximum compression.
 
 #### ImplicitCacheTtlMs
 
-- **Syntax:** `ModPagespeedImplicitCacheTtlMs number` (Apache) · `pagespeed ImplicitCacheTtlMs number;` (nginx)
+- **Syntax:** `ModPagespeedImplicitCacheTtlMs number` (Apache) · `pagespeed ImplicitCacheTtlMs number;` (nginx) · `pagespeed ImplicitCacheTtlMs number` (IIS)
 - **Default:** `300000`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Time in milliseconds to cache resources that lack an Expires or Cache-Control header
 
 #### LRUCacheByteLimit
 
-- **Syntax:** `ModPagespeedLRUCacheByteLimit number` (Apache) · `pagespeed LRUCacheByteLimit number;` (nginx)
+- **Syntax:** `ModPagespeedLRUCacheByteLimit number` (Apache) · `pagespeed LRUCacheByteLimit number;` (nginx) · `pagespeed LRUCacheByteLimit number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the maximum byte size entry to store in the per-process in-memory LRU cache
 
 #### LRUCacheKbPerProcess
 
-- **Syntax:** `ModPagespeedLRUCacheKbPerProcess number` (Apache) · `pagespeed LRUCacheKbPerProcess number;` (nginx)
+- **Syntax:** `ModPagespeedLRUCacheKbPerProcess number` (Apache) · `pagespeed LRUCacheKbPerProcess number;` (nginx) · `pagespeed LRUCacheKbPerProcess number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the total size, in KB, of the per-process in-memory LRU cache
 
 #### MaxCacheableContentLength
 
-- **Syntax:** `ModPagespeedMaxCacheableContentLength number` (Apache) · `pagespeed MaxCacheableContentLength number;` (nginx)
+- **Syntax:** `ModPagespeedMaxCacheableContentLength number` (Apache) · `pagespeed MaxCacheableContentLength number;` (nginx) · `pagespeed MaxCacheableContentLength number` (IIS)
 - **Default:** `16777216`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Maximum length of a cacheable response content. To remove this limit, use -1.
 
 #### MaxHtmlCacheTimeMs
 
-- **Syntax:** `pagespeed MaxHtmlCacheTimeMs number;` (nginx)
+- **Syntax:** `pagespeed MaxHtmlCacheTimeMs number;` (nginx) · `pagespeed MaxHtmlCacheTimeMs number` (IIS)
 - **Default:** `0`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### MemcachedServers
 
-- **Syntax:** `ModPagespeedMemcachedServers value` (Apache) · `pagespeed MemcachedServers value;` (nginx)
+- **Syntax:** `ModPagespeedMemcachedServers value` (Apache) · `pagespeed MemcachedServers value;` (nginx) · `pagespeed MemcachedServers value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Comma-separated list of servers e.g. host1:port1,host2:port2
 
 #### MemcachedThreads
 
-- **Syntax:** `ModPagespeedMemcachedThreads number` (Apache) · `pagespeed MemcachedThreads number;` (nginx)
+- **Syntax:** `ModPagespeedMemcachedThreads number` (Apache) · `pagespeed MemcachedThreads number;` (nginx) · `pagespeed MemcachedThreads number` (IIS)
 - **Default:** `1`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Number of background threads to use to run memcached fetches
 
 #### MemcachedTimeoutUs
 
-- **Syntax:** `ModPagespeedMemcachedTimeoutUs number` (Apache) · `pagespeed MemcachedTimeoutUs number;` (nginx)
+- **Syntax:** `ModPagespeedMemcachedTimeoutUs number` (Apache) · `pagespeed MemcachedTimeoutUs number;` (nginx) · `pagespeed MemcachedTimeoutUs number` (IIS)
 - **Default:** `500000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Maximum time in microseconds to allow for memcached transactions
 
 #### MetadataCacheStalenessThresholdMs
 
-- **Syntax:** `pagespeed MetadataCacheStalenessThresholdMs number;` (nginx)
+- **Syntax:** `pagespeed MetadataCacheStalenessThresholdMs number;` (nginx) · `pagespeed MetadataCacheStalenessThresholdMs number` (IIS)
 - **Default:** `0`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### MinResourceCacheTimeToRewriteMs
 
-- **Syntax:** `pagespeed MinResourceCacheTimeToRewriteMs number;` (nginx)
+- **Syntax:** `pagespeed MinResourceCacheTimeToRewriteMs number;` (nginx) · `pagespeed MinResourceCacheTimeToRewriteMs number` (IIS)
 - **Default:** `0`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### NonCacheablesForCachePartialHtml
 
-- **Syntax:** `pagespeed NonCacheablesForCachePartialHtml value;` (nginx)
+- **Syntax:** `pagespeed NonCacheablesForCachePartialHtml value;` (nginx) · `pagespeed NonCacheablesForCachePartialHtml value` (IIS)
 - **Default:** `(empty)`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### OverrideCachingTtlMs
 
-- **Syntax:** `pagespeed OverrideCachingTtlMs number;` (nginx)
+- **Syntax:** `pagespeed OverrideCachingTtlMs number;` (nginx) · `pagespeed OverrideCachingTtlMs number` (IIS)
 - **Default:** `-1`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### PubliclyCacheMismatchedHashesExperimental
 
-- **Syntax:** `ModPagespeedPubliclyCacheMismatchedHashesExperimental on|off` (Apache) · `pagespeed PubliclyCacheMismatchedHashesExperimental on|off;` (nginx)
+- **Syntax:** `ModPagespeedPubliclyCacheMismatchedHashesExperimental on|off` (Apache) · `pagespeed PubliclyCacheMismatchedHashesExperimental on|off;` (nginx) · `pagespeed PubliclyCacheMismatchedHashesExperimental on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 When serving a request for a .pagespeed. URL with the wrong hash, allow public caching based on the origin TTL.
 
 #### PurgeMethod
 
-- **Syntax:** `ModPagespeedPurgeMethod value` (Apache) · `pagespeed PurgeMethod value;` (nginx)
+- **Syntax:** `ModPagespeedPurgeMethod value` (Apache) · `pagespeed PurgeMethod value;` (nginx) · `pagespeed PurgeMethod value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 HTTP method used for Cache Purge requests. Typically this is set to PURGE, but you must ensure that only authorized clients have access to this method.
 
 #### RedisDatabaseIndex
 
-- **Syntax:** `ModPagespeedRedisDatabaseIndex number` (Apache) · `pagespeed RedisDatabaseIndex number;` (nginx)
+- **Syntax:** `ModPagespeedRedisDatabaseIndex number` (Apache) · `pagespeed RedisDatabaseIndex number;` (nginx) · `pagespeed RedisDatabaseIndex number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Redis server database index selection
 
 #### RedisPassword
 
-- **Syntax:** `ModPagespeedRedisPassword value` (Apache) · `pagespeed RedisPassword value;` (nginx)
+- **Syntax:** `ModPagespeedRedisPassword value` (Apache) · `pagespeed RedisPassword value;` (nginx) · `pagespeed RedisPassword value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Password sent with AUTH after every Redis connect
 
 #### RedisReconnectionDelayMs
 
-- **Syntax:** `ModPagespeedRedisReconnectionDelayMs number` (Apache) · `pagespeed RedisReconnectionDelayMs number;` (nginx)
+- **Syntax:** `ModPagespeedRedisReconnectionDelayMs number` (Apache) · `pagespeed RedisReconnectionDelayMs number;` (nginx) · `pagespeed RedisReconnectionDelayMs number` (IIS)
 - **Default:** `1000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Time to wait after unsuccessful reconnection before another attempt (ms)
 
 #### RedisServer
 
-- **Syntax:** `ModPagespeedRedisServer value` (Apache) · `pagespeed RedisServer value;` (nginx)
+- **Syntax:** `ModPagespeedRedisServer value` (Apache) · `pagespeed RedisServer value;` (nginx) · `pagespeed RedisServer value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Redis server to use in format: <host>[:<port>] or unix:/<socket path>
 
 #### RedisTimeoutUs
 
-- **Syntax:** `ModPagespeedRedisTimeoutUs number` (Apache) · `pagespeed RedisTimeoutUs number;` (nginx)
+- **Syntax:** `ModPagespeedRedisTimeoutUs number` (Apache) · `pagespeed RedisTimeoutUs number;` (nginx) · `pagespeed RedisTimeoutUs number` (IIS)
 - **Default:** `50000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Timeout for all Redis operations and connection (us)
 
 #### RedisTTLSec
 
-- **Syntax:** `ModPagespeedRedisTTLSec number` (Apache) · `pagespeed RedisTTLSec number;` (nginx)
+- **Syntax:** `ModPagespeedRedisTTLSec number` (Apache) · `pagespeed RedisTTLSec number;` (nginx) · `pagespeed RedisTTLSec number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Redis key TTL to use (seconds)
 
 #### RedisUser
 
-- **Syntax:** `ModPagespeedRedisUser value` (Apache) · `pagespeed RedisUser value;` (nginx)
+- **Syntax:** `ModPagespeedRedisUser value` (Apache) · `pagespeed RedisUser value;` (nginx) · `pagespeed RedisUser value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Redis ACL user for AUTH (used together with RedisPassword)
 
 #### SharedMemoryLocks
 
-- **Syntax:** `ModPagespeedSharedMemoryLocks on|off` (Apache) · `pagespeed SharedMemoryLocks on|off;` (nginx)
+- **Syntax:** `ModPagespeedSharedMemoryLocks on|off` (Apache) · `pagespeed SharedMemoryLocks on|off;` (nginx) · `pagespeed SharedMemoryLocks on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Use shared memory for internal named lock service
 
 #### ShmMetadataCacheCheckpointIntervalSec
 
-- **Syntax:** `ModPagespeedShmMetadataCacheCheckpointIntervalSec number` (Apache) · `pagespeed ShmMetadataCacheCheckpointIntervalSec number;` (nginx)
+- **Syntax:** `ModPagespeedShmMetadataCacheCheckpointIntervalSec number` (Apache) · `pagespeed ShmMetadataCacheCheckpointIntervalSec number;` (nginx) · `pagespeed ShmMetadataCacheCheckpointIntervalSec number` (IIS)
 - **Default:** `300`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 How often to checkpoint the shared memory metadata cache to disk. Set to 0 to turn off checkpointing.
 
 #### UseFallbackPropertyCacheValues
 
-- **Syntax:** `ModPagespeedUseFallbackPropertyCacheValues on|off` (Apache) · `pagespeed UseFallbackPropertyCacheValues on|off;` (nginx)
+- **Syntax:** `ModPagespeedUseFallbackPropertyCacheValues on|off` (Apache) · `pagespeed UseFallbackPropertyCacheValues on|off;` (nginx) · `pagespeed UseFallbackPropertyCacheValues on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 If this is set to true, fallback values will be used from property cache if actual value is not present. Here fallback values means properties which are shared across all requests which have same url if query paramaters are removed. Example: http://www.test.com?a=1 and http://www.test.com?a=2 share same fallback properties though they are two different urls.
 
@@ -6803,33 +6777,33 @@ If this is set to true, fallback values will be used from property cache if actu
 
 #### BlockingRewriteKey
 
-- **Syntax:** `ModPagespeedBlockingRewriteKey value` (Apache) · `pagespeed BlockingRewriteKey value;` (nginx)
+- **Syntax:** `ModPagespeedBlockingRewriteKey value` (Apache) · `pagespeed BlockingRewriteKey value;` (nginx) · `pagespeed BlockingRewriteKey value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 If the X-PSA-Pagespeed-Blocking-Rewrite header is present, and its value matches the configured value, ensure that all rewrites are completed before sending the response to the client.
 
 #### BlockingRewriteRefererUrls
 
-- **Syntax:** `ModPagespeedBlockingRewriteRefererUrls wildcard` (Apache) · `pagespeed BlockingRewriteRefererUrls wildcard;` (nginx)
+- **Syntax:** `ModPagespeedBlockingRewriteRefererUrls wildcard` (Apache) · `pagespeed BlockingRewriteRefererUrls wildcard;` (nginx) · `pagespeed BlockingRewriteRefererUrls wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 wildcard_spec for referer urls which trigger blocking rewrites
 
 #### CustomFetchHeader
 
-- **Syntax:** `ModPagespeedCustomFetchHeader name value` (Apache) · `pagespeed CustomFetchHeader name value;` (nginx)
+- **Syntax:** `ModPagespeedCustomFetchHeader name value` (Apache) · `pagespeed CustomFetchHeader name value;` (nginx) · `pagespeed CustomFetchHeader name value` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Adds a request header to every fetch the module makes to an origin.
 
 #### DangerPermitFetchFromUnknownHosts
 
-- **Syntax:** `ModPagespeedDangerPermitFetchFromUnknownHosts on|off` (Apache) · `pagespeed DangerPermitFetchFromUnknownHosts on|off;` (nginx)
+- **Syntax:** `ModPagespeedDangerPermitFetchFromUnknownHosts on|off` (Apache) · `pagespeed DangerPermitFetchFromUnknownHosts on|off;` (nginx) · `pagespeed DangerPermitFetchFromUnknownHosts on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Disable security checks that prohibit fetching from hostnames mod_pagespeed does not know about
 
@@ -6844,33 +6818,33 @@ Experimental measurement proxy mode (Apache only).
 
 #### FetcherTimeOutMs
 
-- **Syntax:** `ModPagespeedFetcherTimeOutMs number` (Apache) · `pagespeed FetcherTimeOutMs number;` (nginx)
+- **Syntax:** `ModPagespeedFetcherTimeOutMs number` (Apache) · `pagespeed FetcherTimeOutMs number;` (nginx) · `pagespeed FetcherTimeOutMs number` (IIS)
 - **Default:** `5000`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, match rules
 
 Set internal fetcher timeout in milliseconds
 
 #### FetchHttps
 
-- **Syntax:** `ModPagespeedFetchHttps value` (Apache) · `pagespeed FetchHttps value;` (nginx)
+- **Syntax:** `ModPagespeedFetchHttps value` (Apache) · `pagespeed FetchHttps value;` (nginx) · `pagespeed FetchHttps value` (IIS)
 - **Default:** `enable`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Controls direct fetching of HTTPS resources. Value is comma-separated list of keywords: enable,disable,allow_self_signed,allow_unknown_certificate_authority,allow_certificate_not_yet_valid
 
 #### FetchProxy
 
-- **Syntax:** `ModPagespeedFetchProxy value` (Apache) · `pagespeed FetchProxy value;` (nginx)
+- **Syntax:** `ModPagespeedFetchProxy value` (Apache) · `pagespeed FetchProxy value;` (nginx) · `pagespeed FetchProxy value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the fetch proxy
 
 #### FetchWithGzip
 
-- **Syntax:** `ModPagespeedFetchWithGzip on|off` (Apache) · `pagespeed FetchWithGzip on|off;` (nginx)
+- **Syntax:** `ModPagespeedFetchWithGzip on|off` (Apache) · `pagespeed FetchWithGzip on|off;` (nginx) · `pagespeed FetchWithGzip on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host (tolerated) · nginx: http
+- **Context:** Apache: server config, virtual host (tolerated) · nginx: http · IIS: pagespeed.config, outside match rules
 
 Request http content from origin servers using gzip
 
@@ -6885,65 +6859,65 @@ Maximum number of requests the native fetcher sends over one keep-alive connecti
 
 #### RateLimitBackgroundFetches
 
-- **Syntax:** `ModPagespeedRateLimitBackgroundFetches on|off` (Apache) · `pagespeed RateLimitBackgroundFetches on|off;` (nginx)
+- **Syntax:** `ModPagespeedRateLimitBackgroundFetches on|off` (Apache) · `pagespeed RateLimitBackgroundFetches on|off;` (nginx) · `pagespeed RateLimitBackgroundFetches on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Rate-limit the number of background HTTP fetches done at once
 
 #### SlurpDirectory
 
-- **Syntax:** `ModPagespeedSlurpDirectory value` (Apache) · `pagespeed SlurpDirectory value;` (nginx)
+- **Syntax:** `ModPagespeedSlurpDirectory value` (Apache) · `pagespeed SlurpDirectory value;` (nginx) · `pagespeed SlurpDirectory value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Directory from which to read slurped resources
 
 #### SlurpFlushLimit
 
-- **Syntax:** `ModPagespeedSlurpFlushLimit number` (Apache) · `pagespeed SlurpFlushLimit number;` (nginx)
+- **Syntax:** `ModPagespeedSlurpFlushLimit number` (Apache) · `pagespeed SlurpFlushLimit number;` (nginx) · `pagespeed SlurpFlushLimit number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the maximum byte size for the slurped content to hold before a flush
 
 #### SlurpReadOnly
 
-- **Syntax:** `ModPagespeedSlurpReadOnly on|off` (Apache) · `pagespeed SlurpReadOnly on|off;` (nginx)
+- **Syntax:** `ModPagespeedSlurpReadOnly on|off` (Apache) · `pagespeed SlurpReadOnly on|off;` (nginx) · `pagespeed SlurpReadOnly on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Only read from the slurped directory, fail to fetch URLs not already in the slurped directory
 
 #### SslCertDirectory
 
-- **Syntax:** `ModPagespeedSslCertDirectory value` (Apache) · `pagespeed SslCertDirectory value;` (nginx)
+- **Syntax:** `ModPagespeedSslCertDirectory value` (Apache) · `pagespeed SslCertDirectory value;` (nginx) · `pagespeed SslCertDirectory value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Directory to find SSL certificates.
 
 #### SslCertFile
 
-- **Syntax:** `ModPagespeedSslCertFile value` (Apache) · `pagespeed SslCertFile value;` (nginx)
+- **Syntax:** `ModPagespeedSslCertFile value` (Apache) · `pagespeed SslCertFile value;` (nginx) · `pagespeed SslCertFile value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 File with SSL certificates.
 
 #### TestProxy
 
-- **Syntax:** `ModPagespeedTestProxy on|off` (Apache) · `pagespeed TestProxy on|off;` (nginx)
+- **Syntax:** `ModPagespeedTestProxy on|off` (Apache) · `pagespeed TestProxy on|off;` (nginx) · `pagespeed TestProxy on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Direct non-PageSpeed URLs to a fetcher, acting as a simple proxy. Meant for test use only
 
 #### TestProxySlurp
 
-- **Syntax:** `ModPagespeedTestProxySlurp value` (Apache) · `pagespeed TestProxySlurp value;` (nginx)
+- **Syntax:** `ModPagespeedTestProxySlurp value` (Apache) · `pagespeed TestProxySlurp value;` (nginx) · `pagespeed TestProxySlurp value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 If set, the fetcher used by the TestProxy mode will be a readonly slurp fetcher from the given directory
 
@@ -6965,76 +6939,73 @@ fetches.
 
 #### AmpLinkPattern
 
-- **Syntax:** `pagespeed AmpLinkPattern value;` (nginx)
+- **Syntax:** `pagespeed AmpLinkPattern value;` (nginx) · `pagespeed AmpLinkPattern value` (IIS)
 - **Default:** `(empty)`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### BeaconReinstrumentTimeSec
 
-- **Syntax:** `ModPagespeedBeaconReinstrumentTimeSec number` (Apache) · `pagespeed BeaconReinstrumentTimeSec number;` (nginx)
+- **Syntax:** `ModPagespeedBeaconReinstrumentTimeSec number` (Apache) · `pagespeed BeaconReinstrumentTimeSec number;` (nginx) · `pagespeed BeaconReinstrumentTimeSec number` (IIS)
 - **Default:** `5`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 How often (in seconds) to reinstrument pages with beacons. This is used for both critical image beaconing, and for the prioritize_critical_css filter.
 
 #### BeaconUrl
 
-- **Syntax:** `ModPagespeedBeaconUrl value` (Apache) · `pagespeed BeaconUrl value;` (nginx)
+- **Syntax:** `ModPagespeedBeaconUrl value` (Apache) · `pagespeed BeaconUrl value;` (nginx) · `pagespeed BeaconUrl value` (IIS)
 - **Default:** `/mod_pagespeed_beacon`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 URL for beacon callback injected by add_instrumentation.
 
 #### EnableExtendedInstrumentation
 
-- **Syntax:** `ModPagespeedEnableExtendedInstrumentation on|off` (Apache) · `pagespeed EnableExtendedInstrumentation on|off;` (nginx)
+- **Syntax:** `ModPagespeedEnableExtendedInstrumentation on|off` (Apache) · `pagespeed EnableExtendedInstrumentation on|off;` (nginx) · `pagespeed EnableExtendedInstrumentation on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 If set to true, addition instrumentation js is added to that page that the beacon can collect more information.
 
 #### FlushBufferLimitBytes
 
-- **Syntax:** `pagespeed FlushBufferLimitBytes number;` (nginx)
+- **Syntax:** `pagespeed FlushBufferLimitBytes number;` (nginx) · `pagespeed FlushBufferLimitBytes number` (IIS)
 - **Default:** `102400`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### FlushHtml
 
-- **Syntax:** `ModPagespeedFlushHtml on|off` (Apache) · `pagespeed FlushHtml on|off;` (nginx)
+- **Syntax:** `ModPagespeedFlushHtml on|off` (Apache) · `pagespeed FlushHtml on|off;` (nginx) · `pagespeed FlushHtml on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Enable auto-flush heuristics for HTML in full proxy mode
 
 #### FollowFlushes
 
-- **Syntax:** `ModPagespeedFollowFlushes on|off` (Apache) · `pagespeed FollowFlushes on|off;` (nginx)
+- **Syntax:** `ModPagespeedFollowFlushes on|off` (Apache) · `pagespeed FollowFlushes on|off;` (nginx) · `pagespeed FollowFlushes on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Attempt to mirror incoming flushes for html streams in the output when ProxyFetch is used.
 
 #### IdleFlushTimeMs
 
-- **Syntax:** `pagespeed IdleFlushTimeMs number;` (nginx)
+- **Syntax:** `pagespeed IdleFlushTimeMs number;` (nginx) · `pagespeed IdleFlushTimeMs number` (IIS)
 - **Default:** `10`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### LowercaseHtmlNames
 
-- **Syntax:** `ModPagespeedLowercaseHtmlNames on|off` (Apache) · `pagespeed LowercaseHtmlNames on|off;` (nginx)
+- **Syntax:** `ModPagespeedLowercaseHtmlNames on|off` (Apache) · `pagespeed LowercaseHtmlNames on|off;` (nginx) · `pagespeed LowercaseHtmlNames on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Lowercase tag and attribute names for HTML.
 
@@ -7042,17 +7013,17 @@ When enabled, HTML tag and attribute names are lowercased during parsing.
 
 #### MaxHtmlParseBytes
 
-- **Syntax:** `ModPagespeedMaxHtmlParseBytes number` (Apache) · `pagespeed MaxHtmlParseBytes number;` (nginx)
+- **Syntax:** `ModPagespeedMaxHtmlParseBytes number` (Apache) · `pagespeed MaxHtmlParseBytes number;` (nginx) · `pagespeed MaxHtmlParseBytes number` (IIS)
 - **Default:** `-1`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Maximum number of bytes of HTML that we parse, before redirecting to ?ModPagespeed=off
 
 #### RetainComment
 
-- **Syntax:** `ModPagespeedRetainComment wildcard` (Apache) · `pagespeed RetainComment wildcard;` (nginx)
+- **Syntax:** `ModPagespeedRetainComment wildcard` (Apache) · `pagespeed RetainComment wildcard;` (nginx) · `pagespeed RetainComment wildcard` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Retain HTML comments matching wildcard, even with remove_comments enabled
 
@@ -7062,9 +7033,9 @@ Retain HTML comments matching wildcard, even with remove_comments enabled
 
 #### DebugOutputMaxBytes
 
-- **Syntax:** `ModPagespeedDebugOutputMaxBytes number` (Apache) · `pagespeed DebugOutputMaxBytes number;` (nginx)
+- **Syntax:** `ModPagespeedDebugOutputMaxBytes number` (Apache) · `pagespeed DebugOutputMaxBytes number;` (nginx) · `pagespeed DebugOutputMaxBytes number` (IIS)
 - **Default:** `1048576`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Most bytes of debug comments written into one document (0 = unbounded).
 
@@ -7092,9 +7063,9 @@ resolves per server, and when to override it, is in
 
 #### PublicAdminAccess
 
-- **Syntax:** `ModPagespeedPublicAdminAccess on|off` (Apache) · `pagespeed PublicAdminAccess on|off;` (nginx)
+- **Syntax:** `ModPagespeedPublicAdminAccess on|off` (Apache) · `pagespeed PublicAdminAccess on|off;` (nginx) · `pagespeed PublicAdminAccess on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 OPT-IN, default off. Declares that the admin pages are reachable from the network on purpose. When on, the loopback warning for admin handlers is replaced by one informational line, and the console shows an informational finding instead of the exposure warning. Access control is unchanged.
 
@@ -7104,51 +7075,49 @@ OPT-IN, default off. Declares that the admin pages are reachable from the networ
 
 #### EnrollExperiment
 
-- **Syntax:** `ModPagespeedEnrollExperiment number` (Apache) · `pagespeed EnrollExperiment number;` (nginx)
+- **Syntax:** `ModPagespeedEnrollExperiment number` (Apache) · `pagespeed EnrollExperiment number;` (nginx) · `pagespeed EnrollExperiment number` (IIS)
 - **Default:** `-2`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Assign users to a specific experiment setting.
 
 #### ExperimentCookieDurationMs
 
-- **Syntax:** `pagespeed ExperimentCookieDurationMs number;` (nginx)
+- **Syntax:** `pagespeed ExperimentCookieDurationMs number;` (nginx) · `pagespeed ExperimentCookieDurationMs number` (IIS)
 - **Default:** `604800000`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ExperimentSlot
 
-- **Syntax:** `pagespeed ExperimentSlot number;` (nginx)
+- **Syntax:** `pagespeed ExperimentSlot number;` (nginx) · `pagespeed ExperimentSlot number` (IIS)
 - **Default:** `1`
-- **Context:** nginx: http, server, location
-- **Platform:** nginx only
+- **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
 
 #### ExperimentSpec
 
-- **Syntax:** `ModPagespeedExperimentSpec spec` (Apache) · `pagespeed ExperimentSpec spec;` (nginx)
+- **Syntax:** `ModPagespeedExperimentSpec spec` (Apache) · `pagespeed ExperimentSpec spec;` (nginx) · `pagespeed ExperimentSpec spec` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Configuration for one side of an experiment in the form: 'id= ;enabled= ;disabled= ;ga= ;percent= ...' The 'ga=' component is accepted for compatibility and ignored.
 
 #### Noop
 
-- **Syntax:** `ModPagespeedNoop number` (Apache) · `pagespeed Noop number;` (nginx)
+- **Syntax:** `ModPagespeedNoop number` (Apache) · `pagespeed Noop number;` (nginx) · `pagespeed Noop number` (IIS)
 - **Default:** `0`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Meaningless integer option for browser cache-busting in query-params
 
 #### RunExperiment
 
-- **Syntax:** `ModPagespeedRunExperiment on|off` (Apache) · `pagespeed RunExperiment on|off;` (nginx)
+- **Syntax:** `ModPagespeedRunExperiment on|off` (Apache) · `pagespeed RunExperiment on|off;` (nginx) · `pagespeed RunExperiment on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Run an experiment to test the effectiveness of rewriters.
 
@@ -7158,17 +7127,17 @@ Run an experiment to test the effectiveness of rewriters.
 
 #### DetectHydratedPages
 
-- **Syntax:** `ModPagespeedDetectHydratedPages on|off` (Apache) · `pagespeed DetectHydratedPages on|off;` (nginx)
+- **Syntax:** `ModPagespeedDetectHydratedPages on|off` (Apache) · `pagespeed DetectHydratedPages on|off;` (nginx) · `pagespeed DetectHydratedPages on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Keep stylesheet and script URLs and inline styles unchanged on pages a client-side framework will hydrate. Server-wide only.
 
 #### ExposeVersionInHeaders
 
-- **Syntax:** `ModPagespeedExposeVersionInHeaders on|off` (Apache) · `pagespeed ExposeVersionInHeaders on|off;` (nginx)
+- **Syntax:** `ModPagespeedExposeVersionInHeaders on|off` (Apache) · `pagespeed ExposeVersionInHeaders on|off;` (nginx) · `pagespeed ExposeVersionInHeaders on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Report the product version in the X-Mod-Pagespeed / X-Page-Speed response header instead of the generic value "on". Server-wide only; an explicit XHeaderValue still wins.
 
@@ -7178,17 +7147,17 @@ Report the product version in the X-Mod-Pagespeed / X-Page-Speed response header
 
 #### AllowVaryOn
 
-- **Syntax:** `ModPagespeedAllowVaryOn value` (Apache) · `pagespeed AllowVaryOn value;` (nginx)
+- **Syntax:** `ModPagespeedAllowVaryOn value` (Apache) · `pagespeed AllowVaryOn value;` (nginx) · `pagespeed AllowVaryOn value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored: it no longer affects in-place optimization. With the optimizer worker attached, in-place images are served in the format the request's Accept header selects, with Vary: Accept.
 
 #### AnalyticsID
 
-- **Syntax:** `ModPagespeedAnalyticsID value` (Apache) · `pagespeed AnalyticsID value;` (nginx)
+- **Syntax:** `ModPagespeedAnalyticsID value` (Apache) · `pagespeed AnalyticsID value;` (nginx) · `pagespeed AnalyticsID value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the insert_ga filter).
 
@@ -7203,17 +7172,17 @@ Removed option; the name is still accepted and ignored.
 
 #### ContentExperimentID
 
-- **Syntax:** `ModPagespeedContentExperimentID value` (Apache) · `pagespeed ContentExperimentID value;` (nginx)
+- **Syntax:** `ModPagespeedContentExperimentID value` (Apache) · `pagespeed ContentExperimentID value;` (nginx) · `pagespeed ContentExperimentID value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the insert_ga filter).
 
 #### ContentExperimentVariantID
 
-- **Syntax:** `ModPagespeedContentExperimentVariantID value` (Apache) · `pagespeed ContentExperimentVariantID value;` (nginx)
+- **Syntax:** `ModPagespeedContentExperimentVariantID value` (Apache) · `pagespeed ContentExperimentVariantID value;` (nginx) · `pagespeed ContentExperimentVariantID value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the insert_ga filter).
 
@@ -7260,33 +7229,33 @@ Removed option. Apache still accepts the name and ignores it, with a warning. ng
 
 #### ExperimentalCentralControllerPort
 
-- **Syntax:** `ModPagespeedExperimentalCentralControllerPort value` (Apache) · `pagespeed ExperimentalCentralControllerPort value;` (nginx)
+- **Syntax:** `ModPagespeedExperimentalCentralControllerPort value` (Apache) · `pagespeed ExperimentalCentralControllerPort value;` (nginx) · `pagespeed ExperimentalCentralControllerPort value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Deprecated and ignored: the experimental gRPC central controller was removed
 
 #### ExperimentalPopularityContestMaxInFlight
 
-- **Syntax:** `ModPagespeedExperimentalPopularityContestMaxInFlight number` (Apache) · `pagespeed ExperimentalPopularityContestMaxInFlight number;` (nginx)
+- **Syntax:** `ModPagespeedExperimentalPopularityContestMaxInFlight number` (Apache) · `pagespeed ExperimentalPopularityContestMaxInFlight number;` (nginx) · `pagespeed ExperimentalPopularityContestMaxInFlight number` (IIS)
 - **Default:** `10`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Deprecated and ignored: the experimental gRPC central controller was removed
 
 #### ExperimentalPopularityContestMaxQueueSize
 
-- **Syntax:** `ModPagespeedExperimentalPopularityContestMaxQueueSize number` (Apache) · `pagespeed ExperimentalPopularityContestMaxQueueSize number;` (nginx)
+- **Syntax:** `ModPagespeedExperimentalPopularityContestMaxQueueSize number` (Apache) · `pagespeed ExperimentalPopularityContestMaxQueueSize number;` (nginx) · `pagespeed ExperimentalPopularityContestMaxQueueSize number` (IIS)
 - **Default:** `1000`
-- **Context:** Apache: server config · nginx: http
+- **Context:** Apache: server config · nginx: http · IIS: pagespeed.config, outside match rules
 
 Deprecated and ignored: the experimental gRPC central controller was removed
 
 #### ExperimentVariable
 
-- **Syntax:** `ModPagespeedExperimentVariable slot` (Apache) · `pagespeed ExperimentVariable slot;` (nginx)
+- **Syntax:** `ModPagespeedExperimentVariable slot` (Apache) · `pagespeed ExperimentVariable slot;` (nginx) · `pagespeed ExperimentVariable slot` (IIS)
 - **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the insert_ga filter).
 
@@ -7378,9 +7347,9 @@ Former name of ImageMaxRewritesAtOnce; accepted and mapped to it.
 
 #### IncreaseSpeedTracking
 
-- **Syntax:** `ModPagespeedIncreaseSpeedTracking on|off` (Apache) · `pagespeed IncreaseSpeedTracking on|off;` (nginx)
+- **Syntax:** `ModPagespeedIncreaseSpeedTracking on|off` (Apache) · `pagespeed IncreaseSpeedTracking on|off;` (nginx) · `pagespeed IncreaseSpeedTracking on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the insert_ga filter).
 
@@ -7395,9 +7364,9 @@ Removed option; the name is still accepted and ignored.
 
 #### LogMobilizationSamples
 
-- **Syntax:** `ModPagespeedLogMobilizationSamples on|off` (Apache) · `pagespeed LogMobilizationSamples on|off;` (nginx)
+- **Syntax:** `ModPagespeedLogMobilizationSamples on|off` (Apache) · `pagespeed LogMobilizationSamples on|off;` (nginx) · `pagespeed LogMobilizationSamples on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored (configured the mobilize filter).
 
@@ -7420,9 +7389,9 @@ Removed option; the name is still accepted and ignored.
 
 #### PrivateNotVaryForIE
 
-- **Syntax:** `ModPagespeedPrivateNotVaryForIE on|off` (Apache) · `pagespeed PrivateNotVaryForIE on|off;` (nginx)
+- **Syntax:** `ModPagespeedPrivateNotVaryForIE on|off` (Apache) · `pagespeed PrivateNotVaryForIE on|off;` (nginx) · `pagespeed PrivateNotVaryForIE on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored: in-place optimized resources are no longer downgraded to Cache-Control: private for Internet Explorer. With the optimizer worker attached, in-place images vary by the request's Accept header and carry Vary: Accept.
 
@@ -7455,17 +7424,17 @@ Removed option; the name is still accepted and ignored.
 
 #### UseAnalyticsJs
 
-- **Syntax:** `ModPagespeedUseAnalyticsJs on|off` (Apache) · `pagespeed UseAnalyticsJs on|off;` (nginx)
+- **Syntax:** `ModPagespeedUseAnalyticsJs on|off` (Apache) · `pagespeed UseAnalyticsJs on|off;` (nginx) · `pagespeed UseAnalyticsJs on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · also per request (query parameter)
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules · also per request (query parameter)
 
 Deprecated and ignored (configured the insert_ga filter).
 
 #### UseExperimentalJsMinifier
 
-- **Syntax:** `ModPagespeedUseExperimentalJsMinifier on|off` (Apache) · `pagespeed UseExperimentalJsMinifier on|off;` (nginx)
+- **Syntax:** `ModPagespeedUseExperimentalJsMinifier on|off` (Apache) · `pagespeed UseExperimentalJsMinifier on|off;` (nginx) · `pagespeed UseExperimentalJsMinifier on|off` (IIS)
 - **Default:** `on`
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Deprecated and ignored: the legacy JavaScript minifier was removed; the tokenizer-based minifier is the only JavaScript minifier
 

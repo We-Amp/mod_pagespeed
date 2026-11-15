@@ -4,7 +4,7 @@
 import eslintPluginAstro from 'eslint-plugin-astro';
 
 export default [
-  { ignores: ['.astro/**'] },
+  { ignores: ['.astro/**', 'dist/**'] },
   ...eslintPluginAstro.configs.recommended,
   {
     rules: {

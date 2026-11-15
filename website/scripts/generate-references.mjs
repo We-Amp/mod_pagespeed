@@ -844,6 +844,22 @@ export function buildModuleDirectives(moduleSrc, warnings) {
       );
   }
 
+  // IIS reads its configuration through IisRewriteOptions, a
+  // SystemRewriteOptions subclass, and passes every directive it does not
+  // handle itself to ParseAndSetOptionFromName{1,2,3}
+  // (pagespeed/iis/iis_rewrite_options.cpp). So every option and shared
+  // directive that RewriteOptions or SystemRewriteOptions registers works on
+  // IIS as well. Factory-level and port-specific names do not.
+  for (const d of byName.values()) {
+    if (
+      (d.kind === 'option' || d.kind === 'directive') &&
+      (d.origin === 'rewrite_options' || d.origin === 'system') &&
+      !d.platforms.includes('iis')
+    ) {
+      d.platforms.push('iis');
+    }
+  }
+
   // Prose from the docs overlay fills in where the source has only a syntax
   // hint or nothing at all.
   for (const d of byName.values()) {
