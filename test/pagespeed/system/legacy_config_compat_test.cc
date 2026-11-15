@@ -532,9 +532,26 @@ RewriteOptions::OptionScope NgxOptionScope(const NgxTables& t,
   return RewriteOptions::kDirectoryScope;
 }
 
+// True when `arg` holds a `$` that does not start a variable name. nginx's
+// script compile refuses that ("invalid variable name"); `$ps_dollar` is the
+// documented spelling for a literal trailing dollar.
+bool HasBareDollar(StringPiece arg) {
+  for (size_t i = 0; i < arg.size(); ++i) {
+    if (arg[i] != '$') continue;
+    const char next = i + 1 < arg.size() ? arg[i + 1] : '\0';
+    if (!(next == '{' || next == '_' || (next >= '0' && next <= '9') ||
+          (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `script_variables` tracks whether ProcessScriptVariables on/all was seen
+// earlier in the file; when set, LoadFromFile* arguments are script-compiled.
 Result ApplyNginx(const Directive& d, const NgxTables& t,
                   SystemRewriteOptions* options, OptionParsingFactory* factory,
-                  RecordingHandler* handler) {
+                  RecordingHandler* handler, bool script_variables = false) {
   handler->Clear();
   RewriteOptions::ResetDeprecatedFilterWarnings();
   StringPiece directive = d.args[0];
@@ -542,6 +559,14 @@ Result ApplyNginx(const Directive& d, const NgxTables& t,
     directive.remove_prefix(strlen("ModPagespeed"));
   }
   Result refused;
+  if (script_variables && StringCaseStartsWith(directive, "LoadFromFile")) {
+    for (size_t i = 1; i < d.args.size(); ++i) {
+      if (HasBareDollar(d.args[i])) {
+        refused.message = "invalid variable name";
+        return refused;
+      }
+    }
+  }
   if (NgxOptionScope(t, *options, directive) > d.scope) {
     refused.message = "cannot be set at this scope";
     return refused;
@@ -1121,11 +1146,17 @@ TEST_F(LegacyConfigCompatTest, NginxDirectivesKeepLoading) {
   ASSERT_FALSE(tables.server_only.empty());
   std::unique_ptr<OptionParsingFactory> factory = NewFactory();
   RecordingHandler handler;
+  bool script_variables = false;
   Check("nginx", corpus, [&](const Directive& d) {
+    if (d.args.size() == 2 &&
+        StringCaseEqual(d.args[0], "ProcessScriptVariables")) {
+      script_variables = !StringCaseEqual(d.args[1], "off");
+    }
     // NgxRewriteOptions derives from SystemRewriteOptions and adds only the
     // options read from its source above.
     SystemRewriteOptions options("legacy-nginx", &thread_system_);
-    return ApplyNginx(d, tables, &options, factory.get(), &handler);
+    return ApplyNginx(d, tables, &options, factory.get(), &handler,
+                      script_variables);
   });
 }
 
@@ -1186,6 +1217,8 @@ TEST_F(LegacyConfigCompatTest, NginxRefusalsAreSeen) {
     RewriteOptions::OptionScope scope;
   };
   for (const Case& c : {
+           Case{"LoadFromFileRuleMatch Disallow \\.php$",
+                RewriteOptions::kServerScope},
            Case{"NoSuchOptionEver on", RewriteOptions::kServerScope},
            Case{"FileCacheSizeKb lots", RewriteOptions::kServerScope},
            Case{"UseNativeFetcher on", RewriteOptions::kServerScope},
@@ -1196,10 +1229,21 @@ TEST_F(LegacyConfigCompatTest, NginxRefusalsAreSeen) {
     d.args = Words(c.line);
     d.scope = c.scope;
     SystemRewriteOptions options("legacy-nginx", &thread_system_);
+    // Script variables are on, so a bare trailing `$` is refused as in nginx.
     EXPECT_EQ(Outcome::kRefused,
-              ApplyNginx(d, tables, &options, factory.get(), &handler).outcome)
+              ApplyNginx(d, tables, &options, factory.get(), &handler, true)
+                  .outcome)
         << c.line;
   }
+  // The documented spelling is accepted.
+  Directive ok;
+  ok.text = "LoadFromFileRuleMatch Disallow \\.php$ps_dollar";
+  ok.args = Words(ok.text.c_str());
+  ok.scope = RewriteOptions::kServerScope;
+  SystemRewriteOptions options("legacy-nginx", &thread_system_);
+  EXPECT_NE(Outcome::kRefused,
+            ApplyNginx(ok, tables, &options, factory.get(), &handler, true)
+                .outcome);
 }
 
 // Every filter name and compound filter name the 1.14.36.1 release knew is in
