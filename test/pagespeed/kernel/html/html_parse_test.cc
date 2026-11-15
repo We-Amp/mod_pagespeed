@@ -530,9 +530,9 @@ TEST_F(HtmlParseTestNoBodyNoHtml, SizeLimit) {
 }
 
 // Pathologically deep element nesting (e.g. <div> x 50,000) must not be able
-// to grow the lexer's element_stack_ without bound.  Once HtmlLexer hits
-// kMaxNestingDepth it stops parsing the remainder of the document, so the
-// serialized output is truncated well short of the input nesting.
+// to grow the lexer's element_stack_ without bound.  Past kMaxNestingDepth the
+// rest of the document is passed through as text (see HtmlPassThroughTest),
+// so the output is the input.
 TEST_F(HtmlParseTestNoBodyNoHtml, MaxNestingDepthGuard) {
   const int kDepth = HtmlLexer::kMaxNestingDepth;
   const int kInputDivs = kDepth + 1000;
@@ -547,12 +547,9 @@ TEST_F(HtmlParseTestNoBodyNoHtml, MaxNestingDepthGuard) {
 
   Parse("deep_nesting", input);
 
-  // The guard tripped: we did not serialize all kInputDivs open tags.  Without
-  // the cap the output would contain exactly kInputDivs "<div>" substrings.
-  const int open_divs = CountSubstring(output_buffer_, "<div>");
-  EXPECT_LT(open_divs, kInputDivs);
-  // We stop at the cap, so the depth never materially exceeds it.
-  EXPECT_LE(open_divs, kDepth);
+  EXPECT_TRUE(html_parse_.passing_through());
+  EXPECT_EQ(input, output_buffer_);
+  EXPECT_EQ(kInputDivs, CountSubstring(output_buffer_, "<div>"));
 }
 
 // A single oversized token (e.g. an unclosed comment) must not be able to
@@ -2600,6 +2597,48 @@ TEST_F(HtmlPassThroughTest, APageWithinTheLimitIsParsedWhole) {
   EXPECT_EQ(input, output_buffer_);
   EXPECT_FALSE(html_parse_.passing_through());
   EXPECT_EQ(12, counter_.num_start_elements());
+}
+
+// Past the nesting cap the element that would go deeper is not created, and
+// it and the rest of the page are written as they came, wherever the input is
+// cut into pieces: nothing after the cap is lost.
+TEST_F(HtmlPassThroughTest, ContentPastTheNestingCapIsWritten) {
+  const int kDepth = HtmlLexer::kMaxNestingDepth;
+  GoogleString input = "<html><body>";
+  for (int i = 0; i < kDepth + 100; ++i) {
+    input += "<span>";
+  }
+  input += "inside";
+  for (int i = 0; i < kDepth + 100; ++i) {
+    input += "</span>";
+  }
+  input += "<p>after</p><script>a()</script></body></html>";
+  for (size_t piece :
+       {static_cast<size_t>(1), static_cast<size_t>(7), input.size()}) {
+    ParseInPieces(input, -1, piece);
+    EXPECT_EQ(input, output_buffer_) << "piece " << piece;
+    EXPECT_TRUE(html_parse_.passing_through());
+    // html, body and the spans up to the cap.
+    EXPECT_EQ(kDepth, counter_.num_start_elements()) << "piece " << piece;
+  }
+}
+
+// The element at the cap can be brief-closed or a literal element: neither is
+// created, and nothing is closed or read as its content.
+TEST_F(HtmlPassThroughTest, ElementAtTheNestingCapIsWrittenAsText) {
+  const int kDepth = HtmlLexer::kMaxNestingDepth;
+  GoogleString open, close;
+  for (int i = 0; i < kDepth; ++i) {
+    open += "<div>";
+    close += "</div>";
+  }
+  for (const char* at_cap :
+       {"<x/>y", "<textarea><b>z</b></textarea>", "<br>w"}) {
+    const GoogleString input = StrCat(open, at_cap, close, "<p>after</p>");
+    ParseInPieces(input, -1, input.size());
+    EXPECT_EQ(input, output_buffer_) << at_cap;
+    EXPECT_EQ(kDepth, counter_.num_start_elements()) << at_cap;
+  }
 }
 
 TEST_F(HtmlPassThroughTest, CommentsPastTheLimitAreNotNodes) {

@@ -930,18 +930,27 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
     }
   }
 
+  // Guard against pathologically deep nesting (e.g. <div> x 50,000), which
+  // would otherwise grow element_stack_ without bound.  The element that
+  // would go past the cap is not created: its start tag, still in literal_,
+  // and the rest of the document are passed through as text (see Parse()),
+  // so the page is served whole.  The elements still open stay open, and are
+  // closed at the end without writing anything.
+  if (static_cast<int>(element_stack_.size()) - kStartStack >=
+      kMaxNestingDepth) {
+    passing_through_ = true;
+    html_parse_->Warning(id_.c_str(), line_,
+                         "HTML nested deeper than %d elements is served "
+                         "unoptimized from here",
+                         kMaxNestingDepth);
+    element_ = nullptr;  // Never added to the event stream.
+    state_ = START;
+    return;
+  }
+
   literal_.clear();
   html_parse_->AddElement(element_, tag_start_line_);
   if (size_limit_exceeded_) {
-    skip_parsing_ = true;
-  }
-
-  // Guard against pathologically deep nesting (e.g. <div> x 50,000), which
-  // would otherwise grow element_stack_ without bound.  Once we hit the cap we
-  // stop parsing the remainder of the document, mirroring the size_limit_
-  // behavior above.  We still push this element so the stack stays consistent
-  // for the close-out in FinishParse().
-  if (static_cast<int>(element_stack_.size()) >= kMaxNestingDepth) {
     skip_parsing_ = true;
   }
 
@@ -1173,7 +1182,8 @@ void HtmlLexer::FinishAttribute(char c, bool has_value, bool brief_close) {
       MakeAttribute(has_value);
     }
     EmitTagOpen(!brief_close);
-    if (brief_close) {
+    // When the nesting cap refused the element there is nothing to close.
+    if (brief_close && !passing_through_) {
       EmitTagBriefClose();
     }
 
@@ -1421,6 +1431,12 @@ void HtmlLexer::Parse(const char* text, int size) {
       case BOGUS_COMMENT:
         EvalBogusComment(c);
         break;
+    }
+    if (passing_through_) {
+      // The nesting cap refused an element (see EmitTagOpen()): its start tag
+      // is still in literal_, and goes out as text with everything after it.
+      PassThrough(text + i + 1, size - i - 1);
+      return;
     }
   }
 }
