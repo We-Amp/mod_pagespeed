@@ -546,13 +546,6 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     driver()->InfoHere("Script is inlined version of %s",
                        library_url.as_string().c_str());
   }
-  // Minification can join adjacent brackets into "]]>", which is not allowed
-  // in XHTML character data; keep the original script in that case.
-  const bool joins_cdata_end =
-      code_block.successfully_rewritten() &&
-      driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml &&
-      code_block.rewritten_code().find("]]>") != StringPiece::npos &&
-      script->find("]]>") == GoogleString::npos;
   // Minification must not change where an HTML parser ends the element (see
   // JsInlineFilter::RenderInline); keep the original script if it could.
   const bool moves_element_end =
@@ -562,13 +555,35 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
        (code_block.rewritten_code().find("<!--") != StringPiece::npos &&
         FindIgnoreCase(code_block.rewritten_code(), "<script") !=
             StringPiece::npos));
-  if (!code_block.successfully_rewritten() || joins_cdata_end ||
-      moves_element_end) {
+  if (!code_block.successfully_rewritten() || moves_element_end) {
     config_->did_not_shrink()->Add(1);
     return;
   }
+  // Unless the minified code is wrapped in CDATA below, it goes out as it is,
+  // so in a document that may be XML, what an XML parser acts on must survive
+  // minification. Minification can join adjacent brackets into "]]>", and it
+  // drops a "<![CDATA[" or "]]>" that was inside a JavaScript comment, which
+  // leaves a section open or the script exposed to the XML parser. An XML
+  // comment hides a script the same way, and is dropped too; "<!--" is common
+  // in HTML scripts, so it only counts in a document known to be XHTML: by its
+  // response headers, or, where those are never finalized (as on Apache), by
+  // the type the parse was started with.
+  const RewriteDriver::XhtmlStatus xhtml_status =
+      driver()->MimeTypeXhtmlStatus();
+  const bool changes_xml_markers =
+      xhtml_status != RewriteDriver::kIsNotXhtml &&
+      (CountSubstring(code_block.rewritten_code(), "<![CDATA[") !=
+           CountSubstring(*script, "<![CDATA[") ||
+       CountSubstring(code_block.rewritten_code(), "]]>") !=
+           CountSubstring(*script, "]]>"));
+  const bool known_xhtml =
+      driver()->server_context()->response_headers_finalized()
+          ? xhtml_status == RewriteDriver::kIsXhtml
+          : driver()->content_type().IsXmlLike();
+  const bool drops_xml_comment =
+      known_xhtml && script->find("<!--") != GoogleString::npos;
   // Replace the old script string with the new, minified one.
-  if ((driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) &&
+  if ((xhtml_status != RewriteDriver::kIsNotXhtml) &&
       (script->find("<![CDATA[") != StringPiece::npos) &&
       !code_block.rewritten_code().starts_with("<![CDATA")) {  // See Issue 542.
     // Minifier strips leading and trailing CDATA comments from scripts.
@@ -581,6 +596,9 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     }
     script->clear();
     StrAppend(script, "//<![CDATA[\n", code_block.rewritten_code(), "\n//]]>");
+  } else if (changes_xml_markers || drops_xml_comment) {
+    config_->did_not_shrink()->Add(1);
+    return;
   } else {
     // Swap in the minified code to replace the original code.
     code_block.SwapRewrittenString(script);
