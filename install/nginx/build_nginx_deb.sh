@@ -169,7 +169,7 @@ install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.
 cat > "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf" <<SNIP
 # ngx_pagespeed dynamic module (We-Amp mod_pagespeed ${VERSION}).
 # Auto-included by a distribution's nginx via /etc/nginx/modules-enabled/;
-# nginx.org builds need `include /etc/nginx/modules-enabled/*.conf;` in nginx.conf.
+# nginx.org builds need an "include /etc/nginx/modules-enabled/*.conf;" line in nginx.conf.
 load_module modules/ngx_pagespeed_module.so;
 SNIP
 chmod 644 "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf"
