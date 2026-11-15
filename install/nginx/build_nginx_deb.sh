@@ -161,13 +161,15 @@ install -m 755 -d \
 install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.so"
 
 # nginx.org module-package layout: ship the load_module snippet in
-# modules-available/ and symlink it into modules-enabled/, which stock noble's
-# nginx.conf auto-includes (`include /etc/nginx/modules-enabled/*.conf;`).
+# modules-available/ and symlink it into modules-enabled/, which the stock
+# Debian/Ubuntu nginx.conf auto-includes (nginx.org's does not; see
+# nginx_package_docs.sh) (`include /etc/nginx/modules-enabled/*.conf;`).
 # A high-numbered prefix keeps load ordering predictable relative to other
 # nginx-module-* packages (PageSpeed is an aux filter; load late).
 cat > "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf" <<SNIP
 # ngx_pagespeed dynamic module (We-Amp mod_pagespeed ${VERSION}).
-# Auto-included by stock noble nginx via /etc/nginx/modules-enabled/.
+# Auto-included by a distribution's nginx via /etc/nginx/modules-enabled/;
+# nginx.org builds need an "include /etc/nginx/modules-enabled/*.conf;" line in nginx.conf.
 load_module modules/ngx_pagespeed_module.so;
 SNIP
 chmod 644 "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf"
