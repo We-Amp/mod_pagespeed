@@ -1412,6 +1412,67 @@ TEST_F(JsCombineFilterTest, PagesInDifferentCharsetsDoNotShareDecision) {
   VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
 }
 
+// Each script is wrapped in a string literal escaped byte by byte, and the
+// combination is decoded in the page's charset. In Big5 the character U+529F
+// is the bytes A5 5C, whose second byte is also a backslash, so the escaper
+// would change what the script means: a script in such a charset is not
+// combined. ASCII scripts on the same page still are.
+TEST_F(JsCombineFilterTest, NonAsciiScriptOnMultibytePageIsNotCombined) {
+  const char kBig5Url[] = "big5.js";
+  SimulateJsResource(kBig5Url, "var s = \"\xA5\x5Cn\"; var t = 1;");
+  const char kBig5Page[] = "<head><meta charset=\"Big5\"></head>";
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "big5.html"),
+           StrCat(kBig5Page, "<script src=", kBig5Url, "></script>",
+                  "<script src=", kJsUrl2, "></script>"));
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kBig5Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "big5_ascii.html"),
+           StrCat(kBig5Page, TestHtml()));
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+}
+
+// A UTF-8 script is combined on a UTF-8 page, where none of its escaped bytes
+// is part of a longer character, but not on a page in another charset or in
+// none, which the browser then guesses.
+TEST_F(JsCombineFilterTest, NonAsciiUtf8ScriptIsCombinedOnlyOnUtf8Page) {
+  const char kUtf8Url[] = "utf8.js";
+  SimulateJsResource(kUtf8Url, "var s = \"caf\xC3\xA9\"; var t = 1;");
+  const GoogleString scripts_html =
+      StrCat("<script src=", kUtf8Url, " charset=utf-8></script>",
+             "<script src=", kJsUrl2, " charset=utf-8></script>");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "utf8.html"),
+           StrCat("<head><meta charset=\"utf-8\"></head>", scripts_html));
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kUtf8Url, kJsUrl2));
+  VerifyUse(scripts[1], kUtf8Url);
+  VerifyUse(scripts[2], kJsUrl2);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "sjis.html"),
+           StrCat("<head><meta charset=\"Shift_JIS\"></head>", scripts_html));
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kUtf8Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "nocharset.html"), scripts_html);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kUtf8Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+}
+
 TEST_F(JsCombineFilterTest, BomMismatch) {
   GoogleString html_url = StrCat(kTestDomain, "bom.html");
   GoogleString x_js_url = "x.js";
