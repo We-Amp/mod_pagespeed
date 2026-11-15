@@ -172,6 +172,10 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
 - In the static read, an unquoted `#` right after a `}`, as in `${b}#x;`,
   starts a comment, so the rest of that line is skipped, including any
   statement after it on the same line.
+- In the static read, an unquoted `{` or `}` ends a statement. A value that
+  contains `${name}`, such as `/var/${b}/x`, is not read correctly, and that
+  directive is not checked. Quote such a value (`"/var/${b}/x"`), which the
+  static read then reads as one word, or check it by hand.
 - Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
   the main file, else from the server's compiled-in root.
 - A cache directory that does not exist yet is never shielded by covering
