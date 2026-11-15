@@ -343,6 +343,23 @@ bool RecordingFetch::CanInPlaceRewrite() {
   }
   if (type->type() == ContentType::kCss || type->IsJsLike() ||
       type->IsImage()) {
+    // When proxying, the response was fetched with the client's own request
+    // headers.  One that varies on them beyond Accept-Encoding is passed
+    // through as it is: not rewritten, and not loaded again by the module,
+    // whose copy would then be served to every client in its place.
+    if (proxy_mode_ &&
+        response_headers()->IsProxyCacheable(
+            request_headers()->GetProperties(),
+            ResponseHeaders::kIgnoreVaryOnResources,
+            ResponseHeaders::kNoValidator) &&
+        !response_headers()->IsProxyCacheable(
+            request_headers()->GetProperties(),
+            ResponseHeaders::kRespectVaryOnResources,
+            ResponseHeaders::kNoValidator)) {
+      VLOG(2) << "CanInPlaceRewrite false: the proxied response varies on the "
+              << "request. Url: " << resource_->url();
+      return false;
+    }
     RewriteDriver* driver = context_->Driver();
     HTTPCache* const cache = driver->server_context()->http_cache();
     if (response_headers()->IsProxyCacheable(
@@ -723,6 +740,10 @@ void InPlaceRewriteContext::StartFetchReconstruction() {
         // Since we are proxying resources to user, we want to fetch it even
         // if there is a kRecentFetchNotCacheable message in the cache.
         cache_fetcher_->set_ignore_recent_fetch_failed(true);
+        // A stored copy that varies on the request beyond Accept-Encoding is
+        // not served to this client, whoever fetched it; the origin is asked
+        // with the client's own headers instead (see CanInPlaceRewrite).
+        cache_fetcher_->set_respect_vary(true);
       } else {
         cache_fetcher_.reset(Driver()->CreateCacheOnlyFetcher());
         // Since we are not proxying resources to user, we can respect
