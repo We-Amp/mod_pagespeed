@@ -3,7 +3,7 @@ title: 'ASP.NET Core settings'
 description: 'Configuration reference for the mod_pagespeed ASP.NET Core middleware: appsettings.json PageSpeed options, cache and worker settings, and hot reload.'
 order: 28
 group: 'Configure'
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-15
 ---
 
 The mod_pagespeed ASP.NET Core middleware (`WeAmp.PageSpeed.AspNetCore`) is
@@ -259,9 +259,9 @@ routes keep their own rules.
 #### Check an existing deployment
 
 Every release since 2.0.13 serves the console and all six `/v1/*` paths this
-way, with no fix release yet; 2.0.4 through 2.0.12 served the console and a
-smaller set of proxied paths, also without authentication. From outside your
-network:
+way. The middleware does not authenticate these paths, so gate them as shown
+above. 2.0.4 through 2.0.12 served the console and a smaller set of proxied
+paths, also without authentication. From outside your network:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://<your-domain>/v1/config

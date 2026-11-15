@@ -3,7 +3,7 @@ title: 'Migrate from ModPageSpeed 2.0'
 description: 'Move a ModPageSpeed 2.0 Docker Compose or Helm deployment to mod_pagespeed: unprivileged worker, loopback-bound API, configuration carries over.'
 order: 11
 group: 'Upgrade and migrate'
-lastUpdated: 2026-11-14
+lastUpdated: 2026-11-15
 faq:
   - q: 'Do I have to recreate my cache volume?'
     a: 'No. On its first start, the optimizer worker (2.1.0 and later) migrates a volume created by 2.0 in place: it adopts the cache files into the unprivileged `pagespeed` user and keeps the warm cache, deleting nothing. Native-package installs are different: there the cache lives in a versioned directory and a package upgrade starts it cold by design.'
@@ -11,7 +11,7 @@ faq:
     a: 'No — migrate on your own schedule. Migrating earlier moves you onto the current release sooner.'
 ---
 
-mod_pagespeed 2 converges the mod_pagespeed lineage and the ModPageSpeed 2.0
+The current mod_pagespeed converges the mod_pagespeed lineage and the ModPageSpeed 2.0
 engine into one product. If you run 2.0 today, the engine you rely on continues
 as the **optimizer worker** of mod_pagespeed. The migration upgrades the deployment around
 it rather than rebuilding it: your nginx directives and worker flags carry

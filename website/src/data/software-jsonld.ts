@@ -49,7 +49,7 @@ export const PRODUCT_JSONLD_ID = `${WEBSITE}/#software`;
 // The 2.0 line is not listed: it is a separate line with its own releases
 // (releases-2.0), and it stays on the Brand (organization.ts) instead.
 export const PRODUCT_ALTERNATE_NAMES = [
-  // The major line, the form the copy uses to contrast with 1.x.
+  // The major line, kept as an alternate name people search for.
   `${PRODUCT_DISPLAY_NAME} 2`,
   // The nginx module's historical name, still the most searched.
   'ngx_pagespeed',

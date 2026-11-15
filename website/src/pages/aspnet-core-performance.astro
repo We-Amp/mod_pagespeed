@@ -10,7 +10,6 @@ import {
   PKG_SIDECAR,
   SIDECAR_NGINX_VERSION,
   ASPNETCORE_RIDS,
-  V1_LINE,
   V2_GA_DATE,
   FREE_TO_RUN_LINE,
 } from '../data/product-facts.mjs';
@@ -72,7 +71,7 @@ const faqEntries = [
   },
   {
     q: 'I have an IISpeed license. What do I move to?',
-    a: `IISpeed is deprecated, and its license transfers free to mod_pagespeed 2. Install the signed IIS MSI if you want to stay on classic IIS and run the module there. If you are on ASP.NET Core, the ${PKG_ASPNETCORE} NuGet middleware — the ASP.NET Core form of mod_pagespeed 2 — is the documented path. The IIS port adopted the IISpeed codebase wholesale, so the optimization behavior is the one you already ran.`,
+    a: `IISpeed is deprecated, and its license transfers free to mod_pagespeed. Install the signed IIS MSI if you want to stay on classic IIS and run the module there. If you are on ASP.NET Core, the ${PKG_ASPNETCORE} NuGet middleware — the ASP.NET Core form of mod_pagespeed — is the documented path. The IIS port adopted the IISpeed codebase wholesale, so the optimization behavior is the one you already ran.`,
   },
   {
     q: 'Will a server-side optimizer fix my INP or layout shift?',
@@ -463,8 +462,8 @@ app.Run();`;
           >
             {PKG_SIDECAR} on NuGet
           </a>{' '}
-          &mdash; the out-of-process {V1_LINE} sidecar (bundles nginx {SIDECAR_NGINX_VERSION}) for
-          teams that want the 1.15 optimizer behind a .NET reverse proxy
+          &mdash; the out-of-process sidecar (bundles nginx {SIDECAR_NGINX_VERSION}): the current
+          mod_pagespeed module, run behind Kestrel
         </li>
       </ul>
 

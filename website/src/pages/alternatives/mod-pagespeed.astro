@@ -16,14 +16,14 @@ const faq = [
   },
   {
     q: 'What replaces mod_pagespeed?',
-    a: 'mod_pagespeed 2, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    a: 'The current mod_pagespeed, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
   },
   {
     q: 'Can I still use mod_pagespeed 1.13.35.2?',
     a: "Yes, and it still installs. It also hasn't taken a security patch in years, won't build against current Apache, has no AVIF, and ships a build toolchain that wants Bazel 0.x and Python 2. If your threat model accepts unpatched dependencies, you can keep running it.",
   },
   {
-    q: 'Which platform do I run mod_pagespeed 2 on?',
+    q: 'Which platform do I run the current mod_pagespeed on?',
     a: 'Apache and nginx: the native in-process module with the familiar config surface, the classic filter set, and the built-in admin console, plus the optimizer worker for variant-aware caching and zero-copy serving (and, in the reverse-proxy deployment, SVG auto-vectorization). The Apache packages install the configuration that points the module at the worker; the native nginx module uses it once two directives point it there. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
   },
 ];
@@ -62,8 +62,8 @@ const jsonLd = [
       <p>
         <code class="rounded bg-bg-elevated px-1 py-0.5 text-base">mod_pagespeed</code>, the
         open-source web optimization module originally developed at Google, is no longer actively
-        developed. If you're replacing it, mod_pagespeed 2 from We-Amp carries the work forward
-        &mdash; the native module plus the optimizer worker.
+        developed. If you're replacing it, the current mod_pagespeed from We-Amp carries the work
+        forward &mdash; the native module plus the optimizer worker.
       </p>
     </Fragment>
     <div class="mt-6 flex flex-wrap gap-3">
@@ -168,7 +168,7 @@ const jsonLd = [
         Public development going quiet did not mean the work stopped. We-Amp kept PageSpeed
         maintained privately through those years, supporting its commercial IISpeed customers
         without a gap and tracking new compilers, OS releases, and image codecs as they landed. That
-        continuously maintained line is what ships today as mod_pagespeed 2, back in the public
+        continuously maintained line is what ships today as mod_pagespeed, back in the public
         package repositories.
       </p>
 
@@ -199,13 +199,14 @@ const jsonLd = [
         </li>
       </ul>
 
-      <h2>mod_pagespeed 2 &mdash; the native module and the optimizer worker</h2>
+      <h2>The current mod_pagespeed &mdash; the native module and the optimizer worker</h2>
       <p>
-        mod_pagespeed 2 is one product with two moving parts. The native module loads in-process and
-        handles the request; the <code>pagespeed-optimizer</code> worker does the heavy work outside
-        it. The worker reads originals from a shared Cyclone cache, generates up to 37 variants per
-        asset (WebP, AVIF, viewport sizes, pixel densities, save-data, plus SVG for eligible
-        images), and writes them back. The serving side returns cache hits via zero-copy
+        The current mod_pagespeed is one product with two moving parts. The native module loads
+        in-process and handles the request; the <code>pagespeed-optimizer</code> worker does the
+        heavy work outside it. The worker reads originals from a shared Cyclone cache, generates up
+        to 37 variants per asset (WebP, AVIF, viewport sizes, pixel densities, save-data, plus SVG
+        for eligible images), and writes them back. The serving side returns cache hits via
+        zero-copy
         <code>mmap</code>. On the deb and rpm channels the two install and upgrade together as a
         matching pair, and the Apache packages install the configuration that points the module at
         the worker. The nginx module package does not pull the worker in: install
@@ -269,7 +270,7 @@ ModPagespeedFileCachePath /var/cache/mod_pagespeed`}</code></pre>
         <thead>
           <tr>
             <th>Your stack</th>
-            <th>How mod_pagespeed 2 installs</th>
+            <th>How mod_pagespeed installs</th>
           </tr>
         </thead>
         <tbody>
@@ -314,11 +315,11 @@ ModPagespeedFileCachePath /var/cache/mod_pagespeed`}</code></pre>
 
       <h2>Migration</h2>
       <p>
-        The mod_pagespeed 2 directive surface is the same as 1.13.35.2 &mdash; most installs are a
-        package swap, and the module reports a version mismatch with its worker loudly instead of
-        absorbing it. Container deployments configure the reverse proxy instead, which is a smaller
-        surface than an inline module. See <a href="/docs/getting-started/">getting started</a> for
-        both install paths, and the{' '}
+        The current mod_pagespeed directive surface is the same as 1.13.35.2 &mdash; most installs
+        are a package swap, and the module reports a version mismatch with its worker loudly instead
+        of absorbing it. Container deployments configure the reverse proxy instead, which is a
+        smaller surface than an inline module. See{' '}
+        <a href="/docs/getting-started/">getting started</a> for both install paths, and the{' '}
         <a href="/blog/mod-pagespeed-alternatives/">deeper comparison</a>
         for how it lines up against other tools.
       </p>

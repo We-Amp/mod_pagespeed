@@ -3,7 +3,7 @@ title: 'Choose a cache mode: safe vs aggressive'
 description: 'Safe or aggressive Cache-Control for optimized responses in mod_pagespeed, plus the module cache reference: Cyclone, memcached, Redis, purging, IPRO.'
 order: 23
 group: 'Configure'
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-15
 ---
 
 mod_pagespeed transforms your origin's content — optimizing images, minifying
@@ -305,7 +305,7 @@ pagespeed CycloneRamCacheKb 8192
 
 ### Zero-copy serving
 
-Two related options reduce or skip the per-request copy of cached response bodies. Zero-copy serving is **opt-in on all three platforms** while it accrues production soak; on-by-default is planned for a future revision.
+Two related options reduce or skip the per-request copy of cached response bodies. Zero-copy serving is **opt-in on all three platforms**.
 
 **`CycloneZeroCopy`** reads cached hits directly from the memory-mapped cache file without copying the payload. It is off by default on every platform and is the switch that opts a server in.
 

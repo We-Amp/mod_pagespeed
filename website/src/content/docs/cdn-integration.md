@@ -3,7 +3,7 @@ title: 'Integrate with a CDN'
 description: 'Run mod_pagespeed behind Cloudflare, CloudFront or Fastly: how Vary headers affect edge caching, per-CDN cache-key settings and keeping hit rates high.'
 order: 24
 group: 'Configure'
-lastUpdated: 2026-11-13
+lastUpdated: 2026-11-15
 ---
 
 mod_pagespeed runs behind any CDN. The one thing to get right is how your CDN
@@ -52,6 +52,11 @@ capability classes that mod_pagespeed actually uses.
   visitor got and serves it to every device class.
 - **CSS/JS** is unaffected — it uses only `Vary: Accept-Encoding`, which CDNs
   handle well.
+
+The [safe cache mode](/docs/cache-modes/) limits the cost of low CDN hit rates:
+its short TTLs and ETag-based 304 revalidation keep the bandwidth overhead
+small. See [cache-control headers](/docs/cache-control/) for the TTL and
+revalidation directives behind this behavior.
 
 ## Image format and the Accept header {#image-format-negotiation}
 
@@ -245,21 +250,3 @@ Have the proxy overwrite the header rather than append to it, and do not expose 
 **3. Send `.pagespeed.` requests to the server that runs the module.** When you serve resources from a CDN hostname with [`MapRewriteDomain`](/docs/domain-configuration/#maprewritedomain), that hostname's origin must be the server that runs the module, because only the module can answer a `.pagespeed.` request. A CDN that pulls from a separate storage bucket gets a 404 for them (see [Why does a `.pagespeed.` URL return 404?](/docs/troubleshooting/#optimized-resources-return-404)). Authorize the CDN hostname with [`Domain`](/docs/configuration/#domain) so that the module may fetch and rewrite the resources named under it.
 
 **Caching the HTML in front of the module.** The module sends HTML so that shared caches do not keep it. If a CDN or cache in front is meant to store rewritten HTML, read [Downstream caching with nginx proxy_cache and Varnish](/docs/downstream-caching/) first: it explains how to key the cache and how the module purges stale pages. For images behind a CDN, key on the normalized `Accept` header as described [above](#image-format-negotiation).
-
-## Future directions
-
-We are evaluating these approaches to improve CDN compatibility:
-
-- **Configurable Vary strategy** — A directive to remove User-Agent from Vary
-  for operators behind CDNs that handle device classification themselves.
-- **Client Hints** — Using `Sec-CH-Mobile`, `Sec-CH-Viewport-Width`, and
-  `Sec-CH-DPR` instead of User-Agent parsing. Modern standard but not
-  universally supported yet.
-- **Custom capability header** — Emitting an `X-PS-Cap` header with the
-  normalized capability class, enabling CDN cache key customization.
-
-For now, the [safe cache mode](/docs/cache-modes/) mitigates the worst impact of
-CDN cache misses — even with low CDN hit rates, the short TTLs and ETag-based
-304 revalidation keep bandwidth overhead minimal. See
-[cache-control headers](/docs/cache-control/) for the TTL and revalidation
-directives behind this behavior.

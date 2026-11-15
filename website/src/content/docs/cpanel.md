@@ -4,7 +4,7 @@ description: 'Install, uninstall and maintain mod_pagespeed on cPanel / EasyApac
 order: 6
 group: 'Install'
 datePublished: 2026-05-20
-lastUpdated: 2026-10-20
+lastUpdated: 2026-11-15
 ---
 
 mod_pagespeed ships as a signed EasyApache 4 RPM, `ea-apache24-mod_pagespeed`, served from `packages.modpagespeed.com`. This is the package name Google's archived [apache/incubator-pagespeed-cpanel](https://github.com/apache/incubator-pagespeed-cpanel) repo used before it went dormant; We-Amp maintains the EA4 build today.
@@ -90,7 +90,7 @@ sudo rm -f /etc/yum.repos.d/modpagespeed-ea4.repo
 
 Any third-party EA4 module — `ea-apache24-mod_pagespeed` included — blocks `cpanel/elevate` OS-major upgrades (for example EL8 → EL9 or EL9 → EL10), the same way `mod_passenger` does. cPanel's elevate preflight stops on the installed package; the upgrade does not start.
 
-Because mod_pagespeed is built for **both EL8 and EL9**, an EL8 → EL9 upgrade has a target-OS package waiting — you reinstall the EL9 build after elevate finishes (an EL8-only module would leave you with nothing to reinstall). The remove-before / reinstall-after flow below is still required, because elevate's preflight halts on any third-party module regardless of whether a target-OS build exists.
+Because mod_pagespeed is built for **EL8, EL9 and EL10**, an EL8 → EL9 or EL9 → EL10 upgrade has a target-OS package waiting — you reinstall the build for the new release after elevate finishes (a module built for one release only would leave you with nothing to reinstall). The remove-before / reinstall-after flow below is still required, because elevate's preflight halts on any third-party module regardless of whether a target-OS build exists.
 
 Remove the module before the upgrade window and reinstall after:
 

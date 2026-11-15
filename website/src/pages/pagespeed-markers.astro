@@ -194,7 +194,7 @@ const faqEntries = [
   },
   {
     q: 'Is mod_pagespeed still maintained?',
-    a: "Yes. mod_pagespeed 2 is the maintained continuation of the open-source module, kept up by We-Amp — the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation — with CVE patches. It keeps the same directives and filter names, so existing configuration carries over. It is one product in two parts: the module, in-process in Apache, nginx or IIS, and the optimizer worker introduced by the 2.0 re-architecture, which optimizes off the request path; with the worker paired to the Apache or nginx module, and in the reverse-proxy deployment, both parts map the same Cyclone cache. The IIS package ships as a signed installer on the mod_pagespeed GitHub release. In reverse-proxy mode the module fronts any HTTP origin, and the same product also ships as ASP.NET Core middleware.",
+    a: "Yes. The current mod_pagespeed is the maintained continuation of the open-source module, kept up by We-Amp — the team that helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation — with CVE patches. It keeps the same directives and filter names, so existing configuration carries over. It is one product in two parts: the module, in-process in Apache, nginx or IIS, and the optimizer worker introduced by the 2.0 re-architecture, which optimizes off the request path; with the worker paired to the Apache or nginx module, and in the reverse-proxy deployment, both parts map the same Cyclone cache. The IIS package ships as a signed installer on the mod_pagespeed GitHub release. In reverse-proxy mode the module fronts any HTTP origin, and the same product also ships as ASP.NET Core middleware.",
   },
 ];
 
@@ -338,11 +338,11 @@ const faqJsonLd = {
       <div class="rounded-card border border-interactive/40 bg-interactive/10 p-6 md:p-8">
         <h2 class="h2-section text-text-body">Stay on a maintained build</h2>
         <p class="mt-3 text-text-body">
-          If you are seeing these markers, you have a PageSpeed module in the request path.
-          mod_pagespeed 2 is the maintained continuation of the open-source module, kept up with CVE
-          patches by We-Amp — the team that helped build ngx_pagespeed and maintained mod_pagespeed.
-          It uses the same directives and filter names, so existing configuration carries over. The
-          whole line is {LICENSE_CLAUSE}: free to install and run in production.
+          If you are seeing these markers, you have a PageSpeed module in the request path. The
+          current mod_pagespeed is the maintained continuation of the open-source module, kept up
+          with CVE patches by We-Amp — the team that helped build ngx_pagespeed and maintained
+          mod_pagespeed. It uses the same directives and filter names, so existing configuration
+          carries over. The whole line is {LICENSE_CLAUSE}: free to install and run in production.
         </p>
         <div class="mt-6 flex flex-wrap gap-3">
           <a href="/download/" class="btn-primary" data-umami-event="cta_markers_upgrade">

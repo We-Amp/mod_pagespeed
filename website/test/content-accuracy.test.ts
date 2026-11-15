@@ -539,6 +539,13 @@ const RETIRED_LABEL_PENDING: Record<string, number> = existsSync(RETIRED_LABEL_P
   ? (JSON.parse(readFileSync(RETIRED_LABEL_PENDING_FILE, 'utf8')).sources ?? {})
   : {};
 
+// The lines that keep the "mod_pagespeed 2" shorthand (rule l): history and
+// records only, one exact line each.
+const SHORTHAND_ALLOW_FILE = path.join(WEBSITE_ROOT, 'scripts/product-name-shorthand-allow.json');
+const SHORTHAND_ALLOW_LINES: Array<{ file: string; line: string; why: string }> = JSON.parse(
+  readFileSync(SHORTHAND_ALLOW_FILE, 'utf8'),
+).lines;
+
 const DENYLIST: DenyRule[] = [
   {
     id: 'a-phantom-2.0-v1.0.0-label',
@@ -1470,8 +1477,8 @@ const DENYLIST: DenyRule[] = [
   {
     id: 'k-retired-2.1-product-label',
     // RULE (owner ruling, 2026-10-20): the product is plain "mod_pagespeed".
-    // "2.1" is retired as a product label. "mod_pagespeed 2" is the form for
-    // contrasting with the 1.x lineage, and an exact three-part version,
+    // "2.1" is retired as a product label. "The current mod_pagespeed" is the
+    // form for contrasting with the 1.x lineage (rule l), and an exact three-part version,
     // rendered from the release manifest, is for release facts (download,
     // install output, release notes, advisories). The name followed by "2.1"
     // as a label tells a reader there is a 2.1 product to go and find, and
@@ -1490,7 +1497,7 @@ const DENYLIST: DenyRule[] = [
     // The rename itself is a separate change: `pending` lists the hits that
     // were there when this rule landed (scripts/retired-label-pending.json,
     // whose `pages` half feeds the built-output lint's rule of the same name).
-    why: 'The product is mod_pagespeed, with no version (owner ruling, 2026-10-20). "2.1" is retired as a product label: write "mod_pagespeed", "mod_pagespeed 2" only to contrast with the 1.x line, and an exact three-part version from the release manifest where the version is the point. Allowed: exact versions (2.1.0), version-scoped phrases that do not follow the name ("since 2.1.0"), identifiers and slugs, and the 2.1.0 release notes and announcement post.',
+    why: 'The product is mod_pagespeed, with no version (owner ruling, 2026-10-20). "2.1" is retired as a product label: write "mod_pagespeed", "the current mod_pagespeed" to contrast with the 1.x line, and an exact three-part version from the release manifest where the version is the point. Allowed: exact versions (2.1.0), version-scoped phrases that do not follow the name ("since 2.1.0"), identifiers and slugs, and the 2.1.0 release notes and announcement post.',
     re: new RegExp(
       [
         // The label in prose, any case, underscore or space; not the start of
@@ -1532,11 +1539,59 @@ const DENYLIST: DenyRule[] = [
     variantsGood: [
       'mod_pagespeed 2.1.0 converged the module line and the optimizer worker.',
       'mod_pagespeed 2.5.0 is the current release.',
-      'mod_pagespeed 2 is a drop-in for 1.14 and 1.15 configurations.',
+      'The current mod_pagespeed is a drop-in for 1.14 and 1.15 configurations.',
       'Since 2.1.0 the worker drops privileges at startup.',
       'The 2.1.0 notes are at /docs/release-notes-2-1/.',
       "const rel = await getRelease('2.1');",
       'Migrate from ModPageSpeed 2.0: see /docs/migrating-to-2-1/.',
+    ],
+  },
+  {
+    id: 'l-mod_pagespeed-2-shorthand',
+    // RULE (owner ruling, 2026-11-15): "mod_pagespeed 2" is not a product name
+    // either. Write "mod_pagespeed", or "the current mod_pagespeed" where the
+    // copy contrasts it with the 1.x line. The shorthand stays only where the
+    // text is history or a record: dated blog posts, release notes, the 2026
+    // rows of the project timelines, and the JSON-LD alternate name. Those
+    // lines are listed one by one in scripts/product-name-shorthand-allow.json,
+    // so a new use fails, in a blog post too.
+    //
+    // The second branch catches the shorthand assembled from the constants,
+    // `${PRODUCT_NAME} 2` or its {{…}} template form.
+    why: 'The product is mod_pagespeed (owner ruling, 2026-11-15). Write "mod_pagespeed", or "the current mod_pagespeed" to contrast with 1.x; an exact version (2.8.1) where the version is the point. Kept uses (history, records) are listed line by line in scripts/product-name-shorthand-allow.json.',
+    re: new RegExp(
+      [
+        // The shorthand in prose: the name and a bare major "2", not the start
+        // of a version ("2.8.1") or a longer number.
+        /\bmod[_ ]pagespeed 2(?![.\d])/.source,
+        // The shorthand assembled from the constants.
+        /\bPRODUCT_(?:DISPLAY_)?NAME\}{1,2} 2(?![.\d])/.source,
+      ].join('|'),
+      'i',
+    ),
+    // The generated agent files repeat the docs and blog text verbatim; their
+    // prose is scanned at its sources (the docs and blog bodies,
+    // src/data/agent-files.mjs, the templates).
+    exemptFile: (rel) => rel === 'public/llms.txt' || rel === 'public/llms-full.txt',
+    exemptFileExpectation: ['public/llms-full.txt', 'public/llms.txt'],
+    exemptLines: SHORTHAND_ALLOW_LINES,
+    bad: 'mod_pagespeed 2 keeps the same directives and filter names.',
+    good: 'The current mod_pagespeed keeps the same directives and filter names; 2.8.1 is the newest release.',
+    variantsBad: [
+      'Install mod_pagespeed 2 on Debian 12.',
+      'The maintained line is <span class="whitespace-nowrap">mod_pagespeed 2</span>.',
+      "q: 'Is mod_pagespeed 2 a drop-in replacement?'",
+      'Its license transfers to mod_pagespeed 2, free of charge.',
+      'MOD_PAGESPEED 2 is open source.',
+      'const NAME = `${PRODUCT_NAME} 2`;',
+      '{{PRODUCT_NAME}} 2 converges the lineage.',
+    ],
+    variantsGood: [
+      'mod_pagespeed 2.8.1 is the current release.',
+      'mod_pagespeed 2.1.0 converged the module line and the optimizer worker.',
+      'mod_pagespeed 1.15 users upgrade in place.',
+      'mod_pagespeed 20 times faster is not a claim we make.',
+      'The current mod_pagespeed runs on Apache and nginx.',
     ],
   },
 ];

@@ -1,12 +1,12 @@
 ---
 title: 'Migrate from the archived Google module'
-description: 'Move from the archived mod_pagespeed or ngx_pagespeed binaries to mod_pagespeed 2: package swap, what maps to what, cache, rollback.'
+description: 'Move from the archived mod_pagespeed or ngx_pagespeed binaries to the current mod_pagespeed: package swap, what maps to what, cache, rollback.'
 order: 15
 group: 'Upgrade and migrate'
-lastUpdated: 2026-11-14
+lastUpdated: 2026-11-15
 datePublished: 2026-10-08
 faq:
-  - q: 'Is mod_pagespeed 2 a drop-in replacement for the archived module?'
+  - q: 'Is the current mod_pagespeed a drop-in replacement for the archived module?'
     a: 'Yes. It continues the same codebase, keeps the `pagespeed` and `ModPagespeed` directive surface and the classic filter names, and loads in process on Apache and nginx. Your configuration, `.htaccess` directives included, carries over, with seven removed option names to delete on nginx (see the next answer).'
   - q: 'What do I lose?'
     a: 'No working feature. A handful of long-inert filters and experimental options are accepted and ignored with a warning, and the old file cache is left in place while the new Cyclone cache warms up. One exception: on nginx, seven removed option names (`FileCacheInodeLimit`, `FileCacheCleanIntervalMs`, `MaxPrefetchJsElements`, `DistributeFetches` and the three `DistributedRewrite*` names) stop nginx from starting until you delete them; Apache only warns.'
@@ -15,7 +15,7 @@ faq:
 mod_pagespeed is an open-source project originally developed at Google. It was
 donated to the Apache Software Foundation in 2017, the Incubator podling
 retired in 2023, and the repositories became read-only in 2025; the 1.13.35.2
-binaries still install but have had no security fixes since. mod_pagespeed 2,
+binaries still install but have had no security fixes since. The current mod_pagespeed,
 developed by We-Amp B.V. and not affiliated with or endorsed by Google,
 continues that codebase: same
 directives, same filter names, built against current Apache and nginx, with

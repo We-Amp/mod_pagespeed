@@ -12,14 +12,14 @@ const jsonLd = {
   name: 'About — mod_pagespeed',
   url: 'https://modpagespeed.com/about/',
   description:
-    'The team behind mod_pagespeed 2, introduced as ModPageSpeed 2.0: We-Amp B.V., a Dutch software company founded in 2012 that helped build ngx_pagespeed and maintained mod_pagespeed, and today maintains the PageSpeed optimization lineage — led by Otto van der Schaaf, an Apache PageSpeed (incubating) committer who release-managed its only Apache release, 1.14.36.1, and an Apache Traffic Server PMC member since 2012.',
+    'The team behind mod_pagespeed and its 2.0 re-architecture, introduced as ModPageSpeed 2.0: We-Amp B.V., a Dutch software company founded in 2012 that helped build ngx_pagespeed and maintained mod_pagespeed, and today maintains the PageSpeed optimization lineage — led by Otto van der Schaaf, an Apache PageSpeed (incubating) committer who release-managed its only Apache release, 1.14.36.1, and an Apache Traffic Server PMC member since 2012.',
   mainEntity: ORGANIZATION,
 };
 ---
 
 <BaseLayout
   title="About — mod_pagespeed"
-  description="Built by We-Amp B.V. — a Dutch web-optimization company that helped build ngx_pagespeed and maintains mod_pagespeed 2, home of IISpeed's IIS integration."
+  description="Built by We-Amp B.V. — a Dutch web-optimization company that helped build ngx_pagespeed and maintains mod_pagespeed, home of IISpeed's IIS integration."
   jsonLd={jsonLd}
 >
   {/* Hero */}
@@ -100,9 +100,9 @@ const jsonLd = {
         </a>
         . The codebase has shipped optimization code since Google's first release in 2010, and
         We-Amp has worked on it since 2012, across Apache, nginx, Envoy and IIS ports of the 1.x
-        line. The 2.0 re-architecture was We-Amp's independent rebuild, and mod_pagespeed 2 brings
-        it together with the module as one product: one shared optimization core, one Cyclone Cache
-        library underneath both parts.
+        line. The 2.0 re-architecture was We-Amp's independent rebuild, and the current
+        mod_pagespeed brings it together with the module as one product: one shared optimization
+        core, one Cyclone Cache library underneath both parts.
       </p>
       <p>
         Self-hosted software fits the way we work: you run the binary on your infrastructure, you
@@ -206,8 +206,8 @@ const jsonLd = {
       </a>
     </div>
     <p class="mt-10 text-xs text-text-annotation max-w-2xl">
-      mod_pagespeed is an open-source project originally developed at Google. mod_pagespeed 2 is
-      developed by We-Amp B.V. and is not affiliated with or endorsed by Google.
+      mod_pagespeed is an open-source project originally developed at Google. The current
+      mod_pagespeed is developed by We-Amp B.V. and is not affiliated with or endorsed by Google.
     </p>
   </section>
 </BaseLayout>

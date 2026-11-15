@@ -86,13 +86,12 @@ const rel21DockerTag = dockerTag(rel21);
 // now 11 entries long); apache_versions stays manifest-derived so the version
 // floor cannot drift.
 
-// One unified integration list. ASP.NET Core (2.0 middleware + 1.15 sidecar) is
+// One unified integration list. ASP.NET Core (in-process middleware + sidecar) is
 // merged in alongside the native-server modules so the page has a single "pick
 // your integration" grid, not a separate .NET section. requirements + the umami
 // event live on each entry so the grid renders straight from this array. `id`
 // is the card's anchor, so other pages can link straight to one integration.
-// `product` is set only where a card is not the current release: the chip
-// above the grid names the current one once.
+// Every card is the current release: the chip above the grid names it once.
 // Row order: current-line native integrations first (Apache, nginx), then
 // Docker, Helm, IIS, the ASP.NET Core middleware, and the sidecar.
 const integrations = [
@@ -166,13 +165,12 @@ const integrations = [
   {
     id: 'sidecar',
     name: 'ASP.NET Core Sidecar',
-    product: 'mod_pagespeed 1.15',
     badge: 'NuGet · Linux',
     description:
-      'WeAmp.PageSpeed.Sidecar adds the 1.15 module to your Kestrel app via middleware, with a bundled nginx optimizer on loopback behind it. One dotnet add package pulls the native binaries.',
-    note: 'Now GA. Want the classic 1.x nginx-module behavior under .NET? Start here.',
+      'WeAmp.PageSpeed.Sidecar adds the current mod_pagespeed module to your Kestrel app via middleware, with a bundled nginx optimizer on loopback behind it. One dotnet add package pulls the native binaries.',
+    note: 'Now GA. Want the classic nginx-module behavior under .NET? Start here.',
     requirements: '.NET 8 or .NET 10 on Linux (linux-x64, linux-arm64).',
-    href: '/docs/aspnet-getting-started/#the-115-sidecar-weamppagespeedsidecar',
+    href: '/docs/aspnet-getting-started/#the-sidecar-weamppagespeedsidecar',
     cta: 'Sidecar guide',
     umamiEvent: 'cta_download_aspnet_sidecar',
   },
@@ -259,9 +257,6 @@ const jsonLd = await productJsonLd({
                 {integration.name}
               </a>
             </h3>
-            {integration.product && (
-              <span class="text-small font-semibold text-text-body">{integration.product}</span>
-            )}
           </div>
           <p class="mt-2 text-micro font-semibold uppercase tracking-wide text-text-body">
             {integration.badge}

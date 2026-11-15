@@ -1,18 +1,18 @@
 ---
 title: 'Migrate from mod_pagespeed 1.15'
-description: 'Move a 1.15 install to mod_pagespeed 2 in place: one package upgrade brings the optimizer worker, configuration carries over, the old cache stays.'
+description: 'Move a 1.15 install to the current mod_pagespeed in place: one package upgrade adds the optimizer worker, configuration carries over, the old cache stays.'
 order: 12
 group: 'Upgrade and migrate'
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-15
 datePublished: 2026-10-08
 faq:
   - q: 'Does my 1.15 configuration carry over?'
-    a: 'Yes. mod_pagespeed 2 keeps the same directives and the same filter names; 1.14 and 1.15 configurations load unchanged. The Apache packages add one file, `pagespeed_daemon.conf`, which points the module at the optimizer worker.'
+    a: 'Yes. The current mod_pagespeed keeps the same directives and the same filter names; 1.14 and 1.15 configurations load unchanged. The Apache packages add one file, `pagespeed_daemon.conf`, which points the module at the optimizer worker.'
   - q: 'Is the cache purged?'
-    a: 'No. The mod_pagespeed 2 optimizer worker opens its own volume under `/var/cache/pagespeed-optimizer/v3` and never touches the Cyclone volume a 1.15 install kept under its file-cache path. The first requests are cold; the old file stays where it is and makes a rollback warm.'
+    a: 'No. The optimizer worker opens its own volume under `/var/cache/pagespeed-optimizer/v3` and never touches the Cyclone volume a 1.15 install kept under its file-cache path. The first requests are cold; the old file stays where it is and makes a rollback warm.'
 ---
 
-The move from a 1.15 install is a package upgrade in place. mod_pagespeed 2
+The move from a 1.15 install is a package upgrade in place. The current mod_pagespeed
 continues the 1.15 module lineage on top of a separate optimizer worker, keeps
 the same directives and the same filter names, and installs from the same
 signed repository your 1.15 packages came from. Your configuration carries
@@ -20,7 +20,7 @@ over; what you gain is the worker.
 
 ## What changes
 
-| In 1.15                                           | In mod_pagespeed 2                                                                                                                                                         |
+| In 1.15                                           | In the current mod_pagespeed                                                                                                                                                         |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | The module optimizes in process                   | The module still serves and rewrites in process; the `pagespeed-optimizer` worker builds optimized variants beside it and the module serves them from the shared cache |
 | One package per web server                        | The Apache module package depends on `pagespeed-optimizer` at the same version; one upgrade command moves both                                                   |
@@ -73,7 +73,7 @@ remove it before upgrading, or install with
 ## The cache
 
 Nothing is purged. A 1.15 install stores its cache in a Cyclone volume under
-the module's file-cache path; the mod_pagespeed 2 optimizer worker opens its own volume under
+the module's file-cache path; the optimizer worker opens its own volume under
 `/var/cache/pagespeed-optimizer/v3` and never touches the old file. The first
 requests after the upgrade are misses and the cache refills as traffic
 arrives, so pick a quiet hour if your origin is sensitive to that. Both files
@@ -89,7 +89,7 @@ confident you will not roll back.
   the duration; plan a maintenance window. See
   [Install on IIS](/docs/install-iis/#install-the-module).
 - **Debian 11 (bullseye).** The repository's bullseye suite carries the 1.15.0
-  module packages; the mod_pagespeed 2 packages need Debian 12 or newer.
+  module packages; the current packages need Debian 12 or newer.
 - **cPanel EasyApache 4 (EL8).** The module runs without the optimizer worker.
 
 ## Verify

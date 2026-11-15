@@ -3,7 +3,7 @@ title: 'Use the web console'
 description: 'Inspect cache contents, monitor live throughput and bandwidth savings, and hot-reload configuration from the mod_pagespeed web console at /console/.'
 order: 53
 group: 'Operate'
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-15
 ---
 
 The web console is a SvelteKit application served directly by the worker
@@ -15,8 +15,8 @@ The console runs on the same machine as your worker and is accessible only
 from your network. It loads no third-party scripts and makes no outbound network requests.
 
 <img
-  src="/images/console-savings.png"
-  alt="mod_pagespeed web console dashboard showing total bandwidth saved, cache hit counters, and live throughput and health charts"
+  src="/images/worker-console-dashboard.png"
+  alt="The worker web console Dashboard after a few minutes of sample traffic: total bandwidth saved (109.5 MB, a 67% reduction), counters for notifications, variants written, compression, errors, connections, thread pool, cache and cache hits, and Activity charts for throughput, cache entries and size, and errors and thread pool"
   width="1440"
   height="900"
   loading="lazy"
@@ -24,7 +24,7 @@ from your network. It loads no third-party scripts and makes no outbound network
 />
 
 :::tip[See it live]
-The [read-only web console](https://we-amp.com/console/) runs on our own production deployment — the dashboard above shows real optimization stats from the traffic that deployment serves. It runs in [public demo mode](#public-demo-mode), so you can browse every view without a login.
+[Our console](https://we-amp.com/pagespeed_global_admin/) runs on our own production deployment and is open to read. The dashboard above is this web console on a test worker with sample traffic.
 :::
 
 ## Accessing the console

@@ -15,7 +15,7 @@ const faq: Array<{ q: string; a: string; html?: string }> = [
   },
   {
     q: 'Is the Google PageSpeed module still available?',
-    a: 'Only as an archive. The original code is read-only on GitHub (apache/incubator-pagespeed-mod), and the 1.13.35.2 binaries still install, without security patches. The maintained continuation, mod_pagespeed 2, installs from signed apt and yum packages for Apache and nginx, with the same directives and filter names.',
+    a: 'Only as an archive. The original code is read-only on GitHub (apache/incubator-pagespeed-mod), and the 1.13.35.2 binaries still install, without security patches. The maintained continuation, the current mod_pagespeed, installs from signed apt and yum packages for Apache and nginx, with the same directives and filter names.',
   },
   {
     q: 'Where did the PageSpeed browser extension go?',
@@ -28,7 +28,7 @@ const faq: Array<{ q: string; a: string; html?: string }> = [
   },
   {
     q: 'What replaces the Google PageSpeed Module?',
-    a: 'mod_pagespeed 2, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    a: 'The current mod_pagespeed, actively maintained by We-Amp: the native in-process module for Apache and nginx, with the same configuration syntax, the classic filter set, and the built-in admin console, plus an optimizer worker, paired with the Apache or nginx module or in the reverse-proxy deployment, for variant-aware caching and zero-copy serving, and for SVG auto-vectorization in the reverse-proxy deployment. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
   },
   {
     q: 'Should I still use PageSpeed Insights?',
@@ -36,15 +36,15 @@ const faq: Array<{ q: string; a: string; html?: string }> = [
   },
   {
     q: 'Can mod_pagespeed fix the issues that PageSpeed Insights flags?',
-    a: "Most of the technical ones — yes. mod_pagespeed 2 minifies CSS/JS, serves WebP and AVIF image variants, serves viewport-matched image sizes, auto-vectorizes eligible images to SVG with the Apache module or the reverse-proxy deployment, and caches per client capability. The remaining items PSI flags are typically application-level (third-party scripts, slow server responses, heavy JavaScript) which a server module can't address.",
+    a: "Most of the technical ones — yes. mod_pagespeed minifies CSS/JS, serves WebP and AVIF image variants, serves viewport-matched image sizes, auto-vectorizes eligible images to SVG with the Apache module or the reverse-proxy deployment, and caches per client capability. The remaining items PSI flags are typically application-level (third-party scripts, slow server responses, heavy JavaScript) which a server module can't address.",
   },
   {
     q: 'What is the best Google PageSpeed module alternative in 2026?',
-    a: 'The most direct alternative is a maintained continuation of the same module rather than a different product. mod_pagespeed 2 from We-Amp keeps the pagespeed directive surface and the classic filter names of open-source mod_pagespeed and ngx_pagespeed, so an existing configuration carries over — swap the packages and keep your config. It installs as a native in-process module on Apache and nginx from the signed apt/yum repository, or runs as a Docker / nginx reverse proxy in front of any HTTP origin, with ongoing CVE patches and support for current server releases. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
+    a: 'The most direct alternative is a maintained continuation of the same module rather than a different product. The current mod_pagespeed from We-Amp keeps the pagespeed directive surface and the classic filter names of open-source mod_pagespeed and ngx_pagespeed, so an existing configuration carries over — swap the packages and keep your config. It installs as a native in-process module on Apache and nginx from the signed apt/yum repository, or runs as a Docker / nginx reverse proxy in front of any HTTP origin, with ongoing CVE patches and support for current server releases. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.',
   },
   {
     q: "Is there a maintained Google PageSpeed alternative that's a drop-in replacement?",
-    a: 'Yes. Because mod_pagespeed 2 continues the original codebase, it is a drop-in path for stranded mod_pagespeed and ngx_pagespeed deployments: the native module loads in-process, keeps the pagespeed directive surface and the classic filter names, and runs your existing configuration. The difference from the archived Google binaries is that it builds against current Apache and nginx, receives security patches, and is actively developed. If you want measurement rather than optimization, route to /analyze instead, a separate, complementary tool.',
+    a: 'Yes. Because the current mod_pagespeed continues the original codebase, it is a drop-in path for stranded mod_pagespeed and ngx_pagespeed deployments: the native module loads in-process, keeps the pagespeed directive surface and the classic filter names, and runs your existing configuration. The difference from the archived Google binaries is that it builds against current Apache and nginx, receives security patches, and is actively developed. If you want measurement rather than optimization, route to /analyze instead, a separate, complementary tool.',
   },
 ];
 
@@ -82,7 +82,7 @@ const jsonLd = [
 
 <BaseLayout
   title="What is the Google PageSpeed module, and what replaced it"
-  description="The Google PageSpeed module (mod_pagespeed, ngx_pagespeed) optimized pages on the server. It is archived; mod_pagespeed 2 is its maintained continuation."
+  description="The Google PageSpeed module (mod_pagespeed, ngx_pagespeed) optimized pages on the server. It is archived; the current mod_pagespeed carries it on."
   jsonLd={jsonLd}
 >
   <PageHero
@@ -170,9 +170,10 @@ const jsonLd = [
         in years, and ngx_pagespeed does not build against current nginx.
       </p>
       <p>
-        The maintained version is mod_pagespeed 2: signed apt and yum packages for Apache and nginx,
-        a Docker image and a Helm chart, with the same directives and filter names, so an existing
-        configuration carries over. <a href="/docs/getting-started/">Install it</a>, or read
+        The maintained version is the current mod_pagespeed: signed apt and yum packages for Apache
+        and nginx, a Docker image and a Helm chart, with the same directives and filter names, so an
+        existing configuration carries over. <a href="/docs/getting-started/">Install it</a>, or
+        read
         <a href="/docs/migrate-from-google-mod-pagespeed/">migrating from the archived module</a>.
       </p>
 
@@ -203,7 +204,7 @@ const jsonLd = [
         <a href="/mod-pagespeed-still-maintained/">is mod_pagespeed still maintained?</a>.
       </p>
 
-      <h2>The maintained continuation: mod_pagespeed 2</h2>
+      <h2>The maintained continuation: the current mod_pagespeed</h2>
       <p>
         We-Amp B.V. &mdash; the team that helped build ngx_pagespeed, maintained mod_pagespeed, and
         drove the project's Apache incubation &mdash; develops it. The optimization libraries that
@@ -214,7 +215,7 @@ const jsonLd = [
 
       <h2>The native module and the optimizer worker</h2>
       <p>
-        mod_pagespeed 2 loads into your server as a native in-process module on Apache and nginx. It
+        mod_pagespeed loads into your server as a native in-process module on Apache and nginx. It
         keeps the <code>pagespeed</code> directive surface, the classic filter set &mdash;
         <code>combine_css</code>, <code>combine_javascript</code>, image spriting, in-place resource
         optimization, domain mapping &mdash; and the built-in admin console, so an existing
@@ -236,7 +237,7 @@ const jsonLd = [
         <a href="/docs/installation-module/#native-nginx-module">nginx install steps</a> show.
       </p>
 
-      <pre><code>{`# Apache — the native mod_pagespeed 2 module
+      <pre><code>{`# Apache — the native mod_pagespeed module
 # The package enables it; on Debian/Ubuntu run sudo a2enmod pagespeed if it was disabled
 ModPagespeed on`}</code></pre>
 
@@ -249,7 +250,7 @@ ModPagespeed on`}</code></pre>
         <thead>
           <tr>
             <th>Your stack</th>
-            <th>How mod_pagespeed 2 installs</th>
+            <th>How mod_pagespeed installs</th>
           </tr>
         </thead>
         <tbody>
@@ -313,7 +314,7 @@ dotnet add package WeAmp.PageSpeed.AspNetCore`}</code></pre>
         <thead>
           <tr>
             <th>PSI (diagnostic)</th>
-            <th>mod_pagespeed 2 (server-side fix)</th>
+            <th>mod_pagespeed (server-side fix)</th>
           </tr>
         </thead>
         <tbody>
@@ -359,7 +360,7 @@ dotnet add package WeAmp.PageSpeed.AspNetCore`}</code></pre>
           <tr>
             <td>A server-side optimization module to fix Core Web Vitals</td>
             <td>
-              <a href="/">mod_pagespeed 2</a>
+              <a href="/">mod_pagespeed</a>
             </td>
           </tr>
           <tr>
@@ -387,13 +388,13 @@ dotnet add package WeAmp.PageSpeed.AspNetCore`}</code></pre>
         same module, not a different category of tool.
       </p>
       <p>
-        That continuation is mod_pagespeed 2, developed by We-Amp B.V. (the team that helped build
-        ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache incubation). It is
-        the same optimization core, the same directive surface, and the same classic filter names,
-        with ongoing CVE patches, a current toolchain, and support for current Apache 2.4+ and nginx
-        releases. An existing configuration carries over: swap the packages, keep your config. The
-        native module installs from the signed apt/yum repository for Apache and nginx. The IIS
-        package ships as a signed installer on the mod_pagespeed GitHub release.
+        That continuation is the current mod_pagespeed, developed by We-Amp B.V. (the team that
+        helped build ngx_pagespeed, maintained mod_pagespeed, and drove the project's Apache
+        incubation). It is the same optimization core, the same directive surface, and the same
+        classic filter names, with ongoing CVE patches, a current toolchain, and support for current
+        Apache 2.4+ and nginx releases. An existing configuration carries over: swap the packages,
+        keep your config. The native module installs from the signed apt/yum repository for Apache
+        and nginx. The IIS package ships as a signed installer on the mod_pagespeed GitHub release.
       </p>
       <p>
         If you're standing up a new deployment rather than rescuing an old one, the same product has

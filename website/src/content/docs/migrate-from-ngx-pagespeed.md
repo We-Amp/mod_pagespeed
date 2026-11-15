@@ -1,9 +1,9 @@
 ---
 title: 'Migrate from ngx_pagespeed'
-description: 'Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed 2 nginx module: what carries over.'
+description: 'Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed nginx module: what carries over.'
 order: 13
 group: 'Upgrade and migrate'
-lastUpdated: 2026-11-14
+lastUpdated: 2026-11-15
 datePublished: 2026-10-08
 faq:
   - q: 'Do my pagespeed directives carry over from ngx_pagespeed?'
@@ -12,7 +12,7 @@ faq:
     a: 'Each module build is pinned to the exact nginx version your distribution ships. An nginx from another repository, including the one a third-party ngx_pagespeed package was built against, has a different version string and nginx refuses the module. Run the stock nginx, or contact us for a matching build.'
 ---
 
-mod_pagespeed 2 continues the nginx port. If you run the open-source
+The current mod_pagespeed continues the nginx port. If you run the open-source
 [`ngx_pagespeed`](https://ngxpagespeed.com/install/) today, whether you compiled it into nginx yourself or
 installed a third-party package build of it such as the GetPageSpeed packages,
 the move is a package swap: remove the old module, install the signed
@@ -73,7 +73,7 @@ repository and set two directives; see
 
 ## Configuration compatibility
 
-| Directives and filters                                                                                                                                                                                                                             | Status in mod_pagespeed 2                                                                                                   |
+| Directives and filters                                                                                                                                                                                                                             | Status in the current mod_pagespeed                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `pagespeed on/off`, `RewriteLevel`, `EnableFilters`, `DisableFilters`, `ForbidFilters`, `Domain`, `MapOriginDomain`, `MapRewriteDomain`, `MapProxyDomain`, `LoadFromFile`, the admin and statistics paths, `FetchHttps`, `UseNativeFetcher` and the rest of the [configuration reference](/docs/configuration/) | Carry over unchanged                                                                                                          |
 | `DistributeFetches`, `DistributedRewriteKey`, `DistributedRewriteServers`, `DistributedRewriteTimeoutMs`, `FileCacheCleanIntervalMs`, `FileCacheInodeLimit` and `MaxPrefetchJsElements` | Removed. Unlike Apache, which warns and carries on, nginx does not recognize these names: `nginx -t` fails with `directive "FileCacheInodeLimit" not recognized` and nginx will not start. Delete the lines; none has a replacement. The disk cache stays within `FileCacheSizeKb` |

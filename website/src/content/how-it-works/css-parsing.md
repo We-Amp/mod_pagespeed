@@ -3,7 +3,7 @@ title: 'How CSS minification and URL rewriting work'
 description: "How mod_pagespeed parses CSS into a syntax tree to minify, rewrite url(), and flatten @import safely — and why regex rewriters corrupt stylesheets."
 order: 30
 datePublished: 2026-06-13
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-15
 ---
 Most "CSS minifiers" are a pile of regular expressions. Strip whitespace, delete comments, collapse `0px` to `0`. That works until it doesn't, and when it fails it fails silently: the page still loads, the stylesheet still parses in the browser, but one background image now points at the wrong path. mod_pagespeed treats CSS the way a browser does. It parses the stylesheet into a syntax tree before touching a byte. This page explains why that matters, and what a real parser makes possible that string-munging cannot.
 
@@ -51,6 +51,6 @@ Both parts fully parse CSS for structural rewrites and fall back to URL-only rew
 
 A structure-aware server optimizer is categorically safer than the string substitution most build-time hacks rely on. It edits CSS without corrupting the stylesheet on the input you didn't think to test.
 
-The CSS parser at the center of this design comes from the original mod_pagespeed project: Joshua Marantz wrote the 2010 design note that argued for a real parser over search-and-replace, and that lineage carries straight into mod_pagespeed 2 today, in both of its parts. mod_pagespeed is an open-source project now maintained by We-Amp B.V.
+The CSS parser at the center of this design comes from the original mod_pagespeed project: Joshua Marantz wrote the 2010 design note that argued for a real parser over search-and-replace, and that lineage carries straight into the current mod_pagespeed, in both of its parts. mod_pagespeed is an open-source project now maintained by We-Amp B.V.
 
 You can run the full optimizer — licensed under Apache-2.0, free to run — and watch it rewrite a stylesheet on your own pages; see [what mod_pagespeed optimizes](/features/) to start.

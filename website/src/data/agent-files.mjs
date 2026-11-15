@@ -17,13 +17,13 @@
 
 /** The blockquote under the H1: the one-paragraph summary of the llms.txt convention. */
 export const SUMMARY =
-  'Self-hosted web performance optimization for Apache and nginx. {{LICENSE_CLAUSE_CAP}}. {{PRODUCT_NAME}} 2 converges the mod_pagespeed lineage and the engine from the 2.0 re-architecture into one product: a native web-server module with a separate optimizer worker.';
+  'Self-hosted web performance optimization for Apache and nginx. {{LICENSE_CLAUSE_CAP}}. The current {{PRODUCT_NAME}} converges the mod_pagespeed lineage and the engine from the 2.0 re-architecture into one product: a native web-server module with a separate optimizer worker.';
 
 /**
  * The paragraphs between the summary and the first link section. Plain
  * Markdown, no headings (the llms.txt convention reserves H2 for link lists).
  */
-export const ABOUT = `We-Amp B.V. develops {{PRODUCT_NAME}} 2, the converged continuation of the open-source mod_pagespeed project, originally developed at Google. It automatically optimizes web content (images, CSS, JavaScript, HTML): a native in-process module for Apache and nginx handles serving, and a separate optimizer worker does the heavy optimization work outside the web server. Drop-in compatible with the classic module: the same configuration directives and filters carry over, and no application code changes are required. {{PRODUCT_NAME}} 2 converges the {{V1_LINE}} module line (renumbered from {{V1_RENUMBERED_FROM}}, the forward-semver successor to the last upstream release, {{LAST_UPSTREAM_VERSION}}) with the ModPageSpeed {{V2_LINE}} engine, which continues as the optimizer worker; both predecessor lines upgrade to it in place.
+export const ABOUT = `We-Amp B.V. develops {{PRODUCT_NAME}}, the converged continuation of the open-source mod_pagespeed project, originally developed at Google. It automatically optimizes web content (images, CSS, JavaScript, HTML): a native in-process module for Apache and nginx handles serving, and a separate optimizer worker does the heavy optimization work outside the web server. Drop-in compatible with the classic module: the same configuration directives and filters carry over, and no application code changes are required. The current {{PRODUCT_NAME}} converges the {{V1_LINE}} module line (renumbered from {{V1_RENUMBERED_FROM}}, the forward-semver successor to the last upstream release, {{LAST_UPSTREAM_VERSION}}) with the ModPageSpeed {{V2_LINE}} engine, which continues as the optimizer worker; both predecessor lines upgrade to it in place.
 
 Heritage: mod_pagespeed, the open-source optimization core this product continues, powers {{BUILTWITH_SITES}} live sites (per BuiltWith, {{BUILTWITH_AS_OF}}; {{BUILTWITH_HISTORICAL}} across its history). These are not We-Amp customers; they are the proof the optimization core works at scale.
 

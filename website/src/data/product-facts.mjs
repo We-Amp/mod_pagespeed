@@ -496,7 +496,7 @@ export const MODULE_PACKAGE_VERSION = '2.8.2';
 
 // --- NuGet packages ---------------------------------------------------------
 export const PKG_ASPNETCORE = 'WeAmp.PageSpeed.AspNetCore'; // the ASP.NET Core middleware
-export const PKG_SIDECAR = 'WeAmp.PageSpeed.Sidecar'; // mod_pagespeed 1.15 sidecar
+export const PKG_SIDECAR = 'WeAmp.PageSpeed.Sidecar'; // the current module, run behind Kestrel
 export const PKG_SIDECAR_NATIVE = 'WeAmp.PageSpeed.Sidecar.NativeAssets.Linux';
 // From 2.6.0 on the sidecar packages carry the product version and ship with
 // every full release (release-notes-2-6.mdx, release-notes-2-8.mdx), so the

@@ -1,8 +1,8 @@
 # mod_pagespeed
 
-> Self-hosted web performance optimization for Apache and nginx. Open source under the Apache License 2.0. mod_pagespeed 2 converges the mod_pagespeed lineage and the engine from the 2.0 re-architecture into one product: a native web-server module with a separate optimizer worker.
+> Self-hosted web performance optimization for Apache and nginx. Open source under the Apache License 2.0. The current mod_pagespeed converges the mod_pagespeed lineage and the engine from the 2.0 re-architecture into one product: a native web-server module with a separate optimizer worker.
 
-We-Amp B.V. develops mod_pagespeed 2, the converged continuation of the open-source mod_pagespeed project, originally developed at Google. It automatically optimizes web content (images, CSS, JavaScript, HTML): a native in-process module for Apache and nginx handles serving, and a separate optimizer worker does the heavy optimization work outside the web server. Drop-in compatible with the classic module: the same configuration directives and filters carry over, and no application code changes are required. mod_pagespeed 2 converges the 1.15 module line (renumbered from 1.1, the forward-semver successor to the last upstream release, 1.14.36.1) with the ModPageSpeed 2.0 engine, which continues as the optimizer worker; both predecessor lines upgrade to it in place.
+We-Amp B.V. develops mod_pagespeed, the converged continuation of the open-source mod_pagespeed project, originally developed at Google. It automatically optimizes web content (images, CSS, JavaScript, HTML): a native in-process module for Apache and nginx handles serving, and a separate optimizer worker does the heavy optimization work outside the web server. Drop-in compatible with the classic module: the same configuration directives and filters carry over, and no application code changes are required. The current mod_pagespeed converges the 1.15 module line (renumbered from 1.1, the forward-semver successor to the last upstream release, 1.14.36.1) with the ModPageSpeed 2.0 engine, which continues as the optimizer worker; both predecessor lines upgrade to it in place.
 
 Heritage: mod_pagespeed, the open-source optimization core this product continues, powers 231,341 live sites (per BuiltWith, May 2026; 1.9 million+ across its history). These are not We-Amp customers; they are the proof the optimization core works at scale.
 
@@ -48,11 +48,11 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 
 - [Upgrade and migrate](https://modpagespeed.com/docs/upgrade/): Upgrade mod_pagespeed per shape: apt or dnf, Docker tag, Helm, the Windows installer and NuGet; what to read first, security updates, rollback.
 - [Migrate from ModPageSpeed 2.0](https://modpagespeed.com/docs/migrating-to-2-1/): Move a ModPageSpeed 2.0 Docker Compose or Helm deployment to mod_pagespeed: unprivileged worker, loopback-bound API, configuration carries over.
-- [Migrate from mod_pagespeed 1.15](https://modpagespeed.com/docs/migrate-from-1-15/): Move a 1.15 install to mod_pagespeed 2 in place: one package upgrade brings the optimizer worker, configuration carries over, the old cache stays.
-- [Migrate from ngx_pagespeed](https://modpagespeed.com/docs/migrate-from-ngx-pagespeed/): Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed 2 nginx module: what carries over.
+- [Migrate from mod_pagespeed 1.15](https://modpagespeed.com/docs/migrate-from-1-15/): Move a 1.15 install to the current mod_pagespeed in place: one package upgrade adds the optimizer worker, configuration carries over, the old cache stays.
+- [Migrate from ngx_pagespeed](https://modpagespeed.com/docs/migrate-from-ngx-pagespeed/): Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed nginx module: what carries over.
 - [nginx: unknown directive pagespeed after Plesk 18.0.79](https://modpagespeed.com/docs/nginx-unknown-directive-pagespeed/): Plesk Obsidian 18.0.79 removed ngx_pagespeed from its nginx. How to get nginx starting again, and the options for PageSpeed afterwards.
 - [Migrate from IISpeed](https://modpagespeed.com/docs/migrate-from-iispeed/): Move an IISpeed install to the mod_pagespeed IIS module: save the configuration, uninstall IISpeed, run the MSI, keep the cache, verify, roll back.
-- [Migrate from the archived Google module](https://modpagespeed.com/docs/migrate-from-google-mod-pagespeed/): Move from the archived mod_pagespeed or ngx_pagespeed binaries to mod_pagespeed 2: package swap, what maps to what, cache, rollback.
+- [Migrate from the archived Google module](https://modpagespeed.com/docs/migrate-from-google-mod-pagespeed/): Move from the archived mod_pagespeed or ngx_pagespeed binaries to the current mod_pagespeed: package swap, what maps to what, cache, rollback.
 - [Long-standing upstream issues resolved](https://modpagespeed.com/docs/upstream-issues-resolved/): Open issues in the archived mod_pagespeed and ngx_pagespeed trackers that current mod_pagespeed resolves, with each fix and the release that shipped it.
 
 ## Configure
@@ -2037,7 +2037,7 @@ sudo rm -f /etc/yum.repos.d/modpagespeed-ea4.repo
 
 Any third-party EA4 module — `ea-apache24-mod_pagespeed` included — blocks `cpanel/elevate` OS-major upgrades (for example EL8 → EL9 or EL9 → EL10), the same way `mod_passenger` does. cPanel's elevate preflight stops on the installed package; the upgrade does not start.
 
-Because mod_pagespeed is built for **both EL8 and EL9**, an EL8 → EL9 upgrade has a target-OS package waiting — you reinstall the EL9 build after elevate finishes (an EL8-only module would leave you with nothing to reinstall). The remove-before / reinstall-after flow below is still required, because elevate's preflight halts on any third-party module regardless of whether a target-OS build exists.
+Because mod_pagespeed is built for **EL8, EL9 and EL10**, an EL8 → EL9 or EL9 → EL10 upgrade has a target-OS package waiting — you reinstall the build for the new release after elevate finishes (a module built for one release only would leave you with nothing to reinstall). The remove-before / reinstall-after flow below is still required, because elevate's preflight halts on any third-party module regardless of whether a target-OS build exists.
 
 Remove the module before the upgrade window and reinstall after:
 
@@ -2621,11 +2621,11 @@ Check, in order:
 Then re-run the [content-negotiation check](https://modpagespeed.com/docs/aspnet-getting-started/#3-content-negotiation-serves-smaller-images) — a `webp` request should return materially fewer
 bytes with `Content-Type: image/webp`.
 
-## The 1.15 sidecar: WeAmp.PageSpeed.Sidecar
+## The sidecar: WeAmp.PageSpeed.Sidecar
 
-`WeAmp.PageSpeed.Sidecar` adds **mod_pagespeed 1.15** to your ASP.NET Core app with two lines of
-middleware. Your Kestrel app stays the public front door; a bundled, matched (nginx + ngx_pagespeed)
-optimizer runs on loopback behind it, recompressing images (jpeg/png/webp), minifying CSS and JS,
+`WeAmp.PageSpeed.Sidecar` adds **the current mod_pagespeed module, run behind Kestrel**, to your
+ASP.NET Core app with two lines of middleware. Your Kestrel app stays the public front door; a
+bundled, matched (nginx + ngx_pagespeed) optimizer runs on loopback behind it, recompressing images (jpeg/png/webp), minifying CSS and JS,
 inlining and extracting critical CSS, and rewriting HTML for Core Web Vitals on the way out.
 Requests that can't be optimized — and any request while the optimizer isn't running — pass straight
 through your app un-optimized.
@@ -2642,7 +2642,7 @@ That's the whole setup. No domain list, no separate front-proxy to configure. Th
 **Inverse** topology; a classic front-proxy mode (bundled nginx as the public front door) is also
 available — see [Sidecar configuration options](https://modpagespeed.com/docs/aspnet-getting-started/#sidecar-configuration-options).
 
-This is the **1.15 (1.x engine) ASP.NET Core option** and is **Linux-only** (`linux-x64`,
+This is the **bundled-nginx ASP.NET Core option** and is **Linux-only** (`linux-x64`,
 `linux-arm64`). The middleware documented above on this page — `WeAmp.PageSpeed.AspNetCore` — is
 cross-platform, in-process, and carries the newest image pipeline (SVG auto-vectorization, Jpegli,
 and ML-predicted quality); use it if you don't specifically need the sidecar's bundled nginx engine.
@@ -3101,7 +3101,7 @@ Move a ModPageSpeed 2.0 Docker Compose or Helm deployment to mod_pagespeed: unpr
 
 Canonical URL: https://modpagespeed.com/docs/migrating-to-2-1/
 
-mod_pagespeed 2 converges the mod_pagespeed lineage and the ModPageSpeed 2.0
+The current mod_pagespeed converges the mod_pagespeed lineage and the ModPageSpeed 2.0
 engine into one product. If you run 2.0 today, the engine you rely on continues
 as the **optimizer worker** of mod_pagespeed. The migration upgrades the deployment around
 it rather than rebuilding it: your nginx directives and worker flags carry
@@ -3297,11 +3297,11 @@ No — migrate on your own schedule. Migrating earlier moves you onto the curren
 
 # Migrate from mod_pagespeed 1.15
 
-Move a 1.15 install to mod_pagespeed 2 in place: one package upgrade brings the optimizer worker, configuration carries over, the old cache stays.
+Move a 1.15 install to the current mod_pagespeed in place: one package upgrade adds the optimizer worker, configuration carries over, the old cache stays.
 
 Canonical URL: https://modpagespeed.com/docs/migrate-from-1-15/
 
-The move from a 1.15 install is a package upgrade in place. mod_pagespeed 2
+The move from a 1.15 install is a package upgrade in place. The current mod_pagespeed
 continues the 1.15 module lineage on top of a separate optimizer worker, keeps
 the same directives and the same filter names, and installs from the same
 signed repository your 1.15 packages came from. Your configuration carries
@@ -3309,7 +3309,7 @@ over; what you gain is the worker.
 
 ## What changes
 
-| In 1.15                                           | In mod_pagespeed 2                                                                                                                                                         |
+| In 1.15                                           | In the current mod_pagespeed                                                                                                                                                         |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | The module optimizes in process                   | The module still serves and rewrites in process; the `pagespeed-optimizer` worker builds optimized variants beside it and the module serves them from the shared cache |
 | One package per web server                        | The Apache module package depends on `pagespeed-optimizer` at the same version; one upgrade command moves both                                                   |
@@ -3362,7 +3362,7 @@ remove it before upgrading, or install with
 ## The cache
 
 Nothing is purged. A 1.15 install stores its cache in a Cyclone volume under
-the module's file-cache path; the mod_pagespeed 2 optimizer worker opens its own volume under
+the module's file-cache path; the optimizer worker opens its own volume under
 `/var/cache/pagespeed-optimizer/v3` and never touches the old file. The first
 requests after the upgrade are misses and the cache refills as traffic
 arrives, so pick a quiet hour if your origin is sensitive to that. Both files
@@ -3378,7 +3378,7 @@ confident you will not roll back.
   the duration; plan a maintenance window. See
   [Install on IIS](https://modpagespeed.com/docs/install-iis/#install-the-module).
 - **Debian 11 (bullseye).** The repository's bullseye suite carries the 1.15.0
-  module packages; the mod_pagespeed 2 packages need Debian 12 or newer.
+  module packages; the current packages need Debian 12 or newer.
 - **cPanel EasyApache 4 (EL8).** The module runs without the optimizer worker.
 
 ## Verify
@@ -3403,21 +3403,21 @@ has the commands.
 
 **Does my 1.15 configuration carry over?**
 
-Yes. mod_pagespeed 2 keeps the same directives and the same filter names; 1.14 and 1.15 configurations load unchanged. The Apache packages add one file, `pagespeed_daemon.conf`, which points the module at the optimizer worker.
+Yes. The current mod_pagespeed keeps the same directives and the same filter names; 1.14 and 1.15 configurations load unchanged. The Apache packages add one file, `pagespeed_daemon.conf`, which points the module at the optimizer worker.
 
 **Is the cache purged?**
 
-No. The mod_pagespeed 2 optimizer worker opens its own volume under `/var/cache/pagespeed-optimizer/v3` and never touches the Cyclone volume a 1.15 install kept under its file-cache path. The first requests are cold; the old file stays where it is and makes a rollback warm.
+No. The optimizer worker opens its own volume under `/var/cache/pagespeed-optimizer/v3` and never touches the Cyclone volume a 1.15 install kept under its file-cache path. The first requests are cold; the old file stays where it is and makes a rollback warm.
 
 ---
 
 # Migrate from ngx_pagespeed
 
-Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed 2 nginx module: what carries over.
+Replace an open-source ngx_pagespeed build, compiled in or from a third-party package, with the signed mod_pagespeed nginx module: what carries over.
 
 Canonical URL: https://modpagespeed.com/docs/migrate-from-ngx-pagespeed/
 
-mod_pagespeed 2 continues the nginx port. If you run the open-source
+The current mod_pagespeed continues the nginx port. If you run the open-source
 [`ngx_pagespeed`](https://ngxpagespeed.com/install/) today, whether you compiled it into nginx yourself or
 installed a third-party package build of it such as the GetPageSpeed packages,
 the move is a package swap: remove the old module, install the signed
@@ -3478,7 +3478,7 @@ repository and set two directives; see
 
 ## Configuration compatibility
 
-| Directives and filters                                                                                                                                                                                                                             | Status in mod_pagespeed 2                                                                                                   |
+| Directives and filters                                                                                                                                                                                                                             | Status in the current mod_pagespeed                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `pagespeed on/off`, `RewriteLevel`, `EnableFilters`, `DisableFilters`, `ForbidFilters`, `Domain`, `MapOriginDomain`, `MapRewriteDomain`, `MapProxyDomain`, `LoadFromFile`, the admin and statistics paths, `FetchHttps`, `UseNativeFetcher` and the rest of the [configuration reference](https://modpagespeed.com/docs/configuration/) | Carry over unchanged                                                                                                          |
 | `DistributeFetches`, `DistributedRewriteKey`, `DistributedRewriteServers`, `DistributedRewriteTimeoutMs`, `FileCacheCleanIntervalMs`, `FileCacheInodeLimit` and `MaxPrefetchJsElements` | Removed. Unlike Apache, which warns and carries on, nginx does not recognize these names: `nginx -t` fails with `directive "FileCacheInodeLimit" not recognized` and nginx will not start. Delete the lines; none has a replacement. The disk cache stays within `FileCacheSizeKb` |
@@ -3744,14 +3744,14 @@ No. The module reads your `iiswebspeed.config` files where no `pagespeed.config`
 
 # Migrate from the archived Google module
 
-Move from the archived mod_pagespeed or ngx_pagespeed binaries to mod_pagespeed 2: package swap, what maps to what, cache, rollback.
+Move from the archived mod_pagespeed or ngx_pagespeed binaries to the current mod_pagespeed: package swap, what maps to what, cache, rollback.
 
 Canonical URL: https://modpagespeed.com/docs/migrate-from-google-mod-pagespeed/
 
 mod_pagespeed is an open-source project originally developed at Google. It was
 donated to the Apache Software Foundation in 2017, the Incubator podling
 retired in 2023, and the repositories became read-only in 2025; the 1.13.35.2
-binaries still install but have had no security fixes since. mod_pagespeed 2,
+binaries still install but have had no security fixes since. The current mod_pagespeed,
 developed by We-Amp B.V. and not affiliated with or endorsed by Google,
 continues that codebase: same
 directives, same filter names, built against current Apache and nginx, with
@@ -4060,7 +4060,7 @@ what changed and what did not.
 
 ## Frequently asked questions
 
-**Is mod_pagespeed 2 a drop-in replacement for the archived module?**
+**Is the current mod_pagespeed a drop-in replacement for the archived module?**
 
 Yes. It continues the same codebase, keeps the `pagespeed` and `ModPagespeed` directive surface and the classic filter names, and loads in process on Apache and nginx. Your configuration, `.htaccess` directives included, carries over, with seven removed option names to delete on nginx (see the next answer).
 
@@ -10966,7 +10966,7 @@ pagespeed CycloneRamCacheKb 8192
 
 ### Zero-copy serving
 
-Two related options reduce or skip the per-request copy of cached response bodies. Zero-copy serving is **opt-in on all three platforms** while it accrues production soak; on-by-default is planned for a future revision.
+Two related options reduce or skip the per-request copy of cached response bodies. Zero-copy serving is **opt-in on all three platforms**.
 
 **`CycloneZeroCopy`** reads cached hits directly from the memory-mapped cache file without copying the payload. It is off by default on every platform and is the switch that opts a server in.
 
@@ -11407,6 +11407,11 @@ capability classes that mod_pagespeed actually uses.
 - **CSS/JS** is unaffected — it uses only `Vary: Accept-Encoding`, which CDNs
   handle well.
 
+The [safe cache mode](https://modpagespeed.com/docs/cache-modes/) limits the cost of low CDN hit rates:
+its short TTLs and ETag-based 304 revalidation keep the bandwidth overhead
+small. See [cache-control headers](https://modpagespeed.com/docs/cache-control/) for the TTL and
+revalidation directives behind this behavior.
+
 ## Image format and the Accept header
 
 An image keeps its URL; the format of the body is chosen per request from the
@@ -11599,24 +11604,6 @@ Have the proxy overwrite the header rather than append to it, and do not expose 
 **3. Send `.pagespeed.` requests to the server that runs the module.** When you serve resources from a CDN hostname with [`MapRewriteDomain`](https://modpagespeed.com/docs/domain-configuration/#maprewritedomain), that hostname's origin must be the server that runs the module, because only the module can answer a `.pagespeed.` request. A CDN that pulls from a separate storage bucket gets a 404 for them (see [Why does a `.pagespeed.` URL return 404?](https://modpagespeed.com/docs/troubleshooting/#optimized-resources-return-404)). Authorize the CDN hostname with [`Domain`](https://modpagespeed.com/docs/configuration/#domain) so that the module may fetch and rewrite the resources named under it.
 
 **Caching the HTML in front of the module.** The module sends HTML so that shared caches do not keep it. If a CDN or cache in front is meant to store rewritten HTML, read [Downstream caching with nginx proxy_cache and Varnish](https://modpagespeed.com/docs/downstream-caching/) first: it explains how to key the cache and how the module purges stale pages. For images behind a CDN, key on the normalized `Accept` header as described [above](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation).
-
-## Future directions
-
-We are evaluating these approaches to improve CDN compatibility:
-
-- **Configurable Vary strategy** — A directive to remove User-Agent from Vary
-  for operators behind CDNs that handle device classification themselves.
-- **Client Hints** — Using `Sec-CH-Mobile`, `Sec-CH-Viewport-Width`, and
-  `Sec-CH-DPR` instead of User-Agent parsing. Modern standard but not
-  universally supported yet.
-- **Custom capability header** — Emitting an `X-PS-Cap` header with the
-  normalized capability class, enabling CDN cache key customization.
-
-For now, the [safe cache mode](https://modpagespeed.com/docs/cache-modes/) mitigates the worst impact of
-CDN cache misses — even with low CDN hit rates, the short TTLs and ETag-based
-304 revalidation keep bandwidth overhead minimal. See
-[cache-control headers](https://modpagespeed.com/docs/cache-control/) for the TTL and revalidation
-directives behind this behavior.
 
 ---
 
@@ -12847,9 +12834,9 @@ routes keep their own rules.
 #### Check an existing deployment
 
 Every release since 2.0.13 serves the console and all six `/v1/*` paths this
-way, with no fix release yet; 2.0.4 through 2.0.12 served the console and a
-smaller set of proxied paths, also without authentication. From outside your
-network:
+way. The middleware does not authenticate these paths, so gate them as shown
+above. 2.0.4 through 2.0.12 served the console and a smaller set of proxied
+paths, also without authentication. From outside your network:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://<your-domain>/v1/config
@@ -17509,11 +17496,11 @@ server.
 The console runs on the same machine as your worker and is accessible only
 from your network. It loads no third-party scripts and makes no outbound network requests.
 
-![mod_pagespeed web console dashboard showing total bandwidth saved, cache hit counters, and live throughput and health charts](https://modpagespeed.com/images/console-savings.png)
+![The worker web console Dashboard after a few minutes of sample traffic: total bandwidth saved (109.5 MB, a 67% reduction), counters for notifications, variants written, compression, errors, connections, thread pool, cache and cache hits, and Activity charts for throughput, cache entries and size, and errors and thread pool](https://modpagespeed.com/images/worker-console-dashboard.png)
 
 > **See it live**
 >
-> The [read-only web console](https://we-amp.com/console/) runs on our own production deployment — the dashboard above shows real optimization stats from the traffic that deployment serves. It runs in [public demo mode](https://modpagespeed.com/docs/workbench/#public-demo-mode), so you can browse every view without a login.
+> [Our console](https://we-amp.com/pagespeed_global_admin/) runs on our own production deployment and is open to read. The dashboard above is this web console on a test worker with sample traffic.
 
 ## Accessing the console
 

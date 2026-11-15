@@ -658,7 +658,7 @@ describe('ai-plugin.json manifest drift guard', () => {
 
   it('description_for_model carries the single-sourced identity + support facts', () => {
     const m: string = manifest.description_for_model;
-    expect(m).toContain(`The current product, ${PRODUCT_NAME} 2,`);
+    expect(m).toContain(`The current product, ${PRODUCT_NAME},`);
     expect(m).not.toMatch(/mod[_ ]pagespeed 2\.1(?![.\d])/i);
     expect(m).toContain(`mod_pagespeed ${V1_LINE}`);
     expect(m).toContain(`renumbered from ${V1_RENUMBERED_FROM}`);
@@ -741,6 +741,9 @@ describe('product-facts consumers reflect the single source', () => {
     expect(data.related_products[0]).not.toHaveProperty('support_until');
     expect(data.related_products[0].nuget_sidecar.bundled_nginx).toBe(SIDECAR_NGINX_VERSION);
     expect(data.related_products[0].nuget_sidecar.package).toBe(PKG_SIDECAR);
+    expect(data.related_products[0].nuget_sidecar.description).toBe(
+      'The current mod_pagespeed module, run behind Kestrel.',
+    );
     expect(data.related_products[1].product).toBe(`ModPageSpeed ${V2_LINE}`);
     expect(data.related_products[1]).not.toHaveProperty('status');
     expect(data.related_products[1]).not.toHaveProperty('support_until');

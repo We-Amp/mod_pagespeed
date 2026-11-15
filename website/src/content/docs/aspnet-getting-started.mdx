@@ -3,7 +3,7 @@ title: 'Install ASP.NET Core middleware'
 description: 'Install the mod_pagespeed ASP.NET Core middleware via NuGet — the same optimization pipeline (image transcoding, critical CSS) inside your .NET app.'
 order: 9
 group: 'Install'
-lastUpdated: 2026-10-30
+lastUpdated: 2026-11-15
 ---
 
 import NugetCmd from '../../components/release/NugetCmd.astro';
@@ -258,11 +258,13 @@ Check, in order:
 Then re-run the [content-negotiation check](#3-content-negotiation-serves-smaller-images) — a `webp` request should return materially fewer
 bytes with `Content-Type: image/webp`.
 
-## The 1.15 sidecar: WeAmp.PageSpeed.Sidecar
+<a id="the-115-sidecar-weamppagespeedsidecar"></a>
 
-`WeAmp.PageSpeed.Sidecar` adds **mod_pagespeed 1.15** to your ASP.NET Core app with two lines of
-middleware. Your Kestrel app stays the public front door; a bundled, matched (nginx + ngx_pagespeed)
-optimizer runs on loopback behind it, recompressing images (jpeg/png/webp), minifying CSS and JS,
+## The sidecar: WeAmp.PageSpeed.Sidecar
+
+`WeAmp.PageSpeed.Sidecar` adds **the current mod_pagespeed module, run behind Kestrel**, to your
+ASP.NET Core app with two lines of middleware. Your Kestrel app stays the public front door; a
+bundled, matched (nginx + ngx_pagespeed) optimizer runs on loopback behind it, recompressing images (jpeg/png/webp), minifying CSS and JS,
 inlining and extracting critical CSS, and rewriting HTML for Core Web Vitals on the way out.
 Requests that can't be optimized — and any request while the optimizer isn't running — pass straight
 through your app un-optimized.
@@ -279,7 +281,7 @@ That's the whole setup. No domain list, no separate front-proxy to configure. Th
 **Inverse** topology; a classic front-proxy mode (bundled nginx as the public front door) is also
 available — see [Sidecar configuration options](#sidecar-configuration-options).
 
-This is the **1.15 (1.x engine) ASP.NET Core option** and is **Linux-only** (`linux-x64`,
+This is the **bundled-nginx ASP.NET Core option** and is **Linux-only** (`linux-x64`,
 `linux-arm64`). The middleware documented above on this page — `WeAmp.PageSpeed.AspNetCore` — is
 cross-platform, in-process, and carries the newest image pipeline (SVG auto-vectorization, Jpegli,
 and ML-predicted quality); use it if you don't specifically need the sidecar's bundled nginx engine.
