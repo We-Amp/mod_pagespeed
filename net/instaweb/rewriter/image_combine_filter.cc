@@ -872,19 +872,52 @@ class ImageCombineFilter::Context : public RewriteContext {
                         OutputResourcePtr output) {
     ImageCombineFilter::Combiner combiner(filter_, &library_);
 
+    // An image that could not be fetched ends the sprite there (see
+    // FetchCombinesAvailableInputs()): the images above it keep the offsets
+    // the page's CSS uses, and nothing is drawn for the rest.
     ResourceVector resources;
+    ResourceVector available;
     bool ok = true;
+    bool truncated = false;
     for (int i = 0, n = num_slots(); (i < n) && ok; ++i) {
       ResourcePtr resource(slot(i)->resource());
+      if (!(resource->loaded() && resource->HttpStatusOk())) {
+        truncated = true;
+      } else {
+        available.push_back(resource);
+      }
+      if (truncated) {
+        continue;
+      }
       resources.push_back(resource);
       RegisterResource(resource.get());
       ok = EnsureLoaded(resource->url());
     }
-    if (!ok || !combiner.Write(resources, output)) {
-      RewriteDone(kRewriteFailed, partition_index);
-      return;
+    if (ok && resources.empty() && !available.empty()) {
+      // The first image is the one that is missing, and the size of what
+      // follows it in the strip is not known, so nothing can keep its place.
+      ok = WriteBlankSprite(available, output);
+    } else if (!ok || resources.empty() || !combiner.Write(resources, output)) {
+      ok = false;
     }
-    RewriteDone(kRewriteOk, partition_index);
+    RewriteDone(ok ? kRewriteOk : kRewriteFailed, partition_index);
+  }
+
+  // A fully transparent 1x1 PNG.
+  bool WriteBlankSprite(const ResourceVector& inputs,
+                        const OutputResourcePtr& output) {
+    static const unsigned char kBlankPng[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+        0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x00, 0x02, 0x00,
+        0x00, 0x05, 0x00, 0x01, 0xe9, 0xfa, 0xdc, 0xd8, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+    return Driver()->Write(
+        inputs,
+        StringPiece(reinterpret_cast<const char*>(kBlankPng),
+                    sizeof(kBlankPng)),
+        &kContentTypePng, StringPiece(), output.get());
   }
 
   void WriteCombinationCancel(
@@ -895,6 +928,10 @@ class ImageCombineFilter::Context : public RewriteContext {
       OutputResourcePtr output) {
     RewriteDone(kTooBusy, partition_index);
   }
+
+  // A sprite whose images cannot all be fetched now is rebuilt from the ones
+  // above the first that cannot, rather than answering 404.
+  bool FetchCombinesAvailableInputs() const override { return true; }
 
   bool PolicyPermitsRendering() const override {
     return AreOutputsAllowedByCsp(CspDirective::kImgSrc);
