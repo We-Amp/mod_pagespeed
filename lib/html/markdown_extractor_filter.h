@@ -148,7 +148,18 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   int content_root_depth_ =
       0;                   // depth inside a <main>/<article>/role=main root
   int article_depth_ = 0;  // depth inside an <article>/role=article subtree
-  int anchor_depth_ = 0;   // open <a> nesting (Issue F (5))
+  // Per open <a>: the output offset of its '[' and whether any visible text or
+  // image was emitted inside it, so a link with none can be dropped at </a>
+  // instead of emitting '[](href)'.
+  struct OpenAnchor {
+    std::size_t pos;
+    bool has_text;
+  };
+  std::vector<OpenAnchor> anchor_open_pos_;
+  void MarkAnchorText() {
+    for (OpenAnchor& a : anchor_open_pos_) a.has_text = true;
+  }
+  int anchor_depth_ = 0;  // open <a> nesting (Issue F (5))
   bool item_open_ = false;
   bool in_table_ = false;
   bool in_cell_ = false;

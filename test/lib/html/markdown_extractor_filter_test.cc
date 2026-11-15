@@ -47,6 +47,56 @@ TEST_F(MarkdownExtractorFilterTest, Links) {
   EXPECT_EQ(Md("<p><a>bare</a></p>"), "[bare]()");
 }
 
+TEST_F(MarkdownExtractorFilterTest, EmptyLinkInHeadingIsOmitted) {
+  EXPECT_EQ(Md("<h2 id=\"roll-back\">Roll back<a class=\"heading-anchor\" "
+               "href=\"#roll-back\" aria-label=\"Link to Roll back\">"
+               "</a></h2>"),
+            "## Roll back");
+}
+
+TEST_F(MarkdownExtractorFilterTest, IconOnlyLinkIsOmitted) {
+  EXPECT_EQ(Md("<p>Docs <a href=\"/d\"><svg viewBox=\"0 0 1 1\">"
+               "<path d=\"M0\"/></svg></a>here</p>"),
+            "Docs here");
+  EXPECT_EQ(Md("<p>Go<a href=\"/g\" aria-label=\"Go there\">"
+               "<span aria-hidden=\"true\">&rarr;</span></a></p>"),
+            "Go");
+  EXPECT_EQ(Md("<p>Go<a href=\"/g\"><i class=\"icon\"></i></a></p>"), "Go");
+}
+
+TEST_F(MarkdownExtractorFilterTest, AsteriskTextLinksAreKept) {
+  EXPECT_EQ(Md("<p>Note<a href=\"#fn\">*</a></p>"), "Note[*](#fn)");
+  EXPECT_EQ(Md("<p>Note<a href=\"#fn\">**</a></p>"), "Note[**](#fn)");
+  EXPECT_EQ(Md("<p>Note<a href=\"#fn\">* *</a></p>"), "Note[* *](#fn)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, TextInNestedSpansKeepsLink) {
+  EXPECT_EQ(Md("<p><a href=\"/n\"><span><span>deep</span></span></a></p>"),
+            "[deep](/n)");
+  EXPECT_EQ(Md("<p><a href=\"/n\"><span aria-hidden=\"true\">x</span>"
+               "<span>shown</span></a></p>"),
+            "[shown](/n)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, EntityOnlyLinkIsKept) {
+  EXPECT_EQ(Md("<p>a<a href=\"/e\">&amp;</a></p>"), "a[&](/e)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, ImageLinkWithAltIsKept) {
+  EXPECT_EQ(Md("<p><a href=\"/h\"><img src=\"/l.png\" alt=\"Logo\"></a></p>"),
+            "[![Logo](/l.png)](/h)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, NormalLinkIsKept) {
+  EXPECT_EQ(Md("<h2>Title <a href=\"/x\">more</a></h2>"),
+            "## Title [more](/x)");
+}
+
+TEST_F(MarkdownExtractorFilterTest, WhitespaceOnlyLinkIsOmitted) {
+  EXPECT_EQ(Md("<p>a<a href=\"/w\">  \n </a>b</p>"), "ab");
+  EXPECT_EQ(Md("<p>a <a href=\"/w\"> </a>b</p>"), "a b");
+}
+
 TEST_F(MarkdownExtractorFilterTest, Images) {
   EXPECT_EQ(Md("<p><img src=\"/a.png\" alt=\"cat\"></p>"), "![cat](/a.png)");
   EXPECT_EQ(Md("<p><img src=\"/a.png\"></p>"), "![](/a.png)");

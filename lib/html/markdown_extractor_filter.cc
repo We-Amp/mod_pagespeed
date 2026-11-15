@@ -186,6 +186,22 @@ bool IsInlineHidden(HtmlElement* el) {
   return false;
 }
 
+// True when t holds a character a reader can see (not ASCII whitespace or the
+// UTF-8 form of NBSP).
+bool HasVisibleText(std::string_view t) {
+  for (std::size_t i = 0; i < t.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(t[i]);
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f') continue;
+    if (c == 0xC2 && i + 1 < t.size() &&
+        static_cast<unsigned char>(t[i + 1]) == 0xA0) {
+      ++i;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 std::string EscapeCell(std::string_view s) {
   std::string out;
   out.reserve(s.size());
@@ -390,6 +406,7 @@ void MarkdownExtractorFilter::StartDocument() {
   content_root_depth_ = 0;
   article_depth_ = 0;
   anchor_depth_ = 0;
+  anchor_open_pos_.clear();
   item_open_ = false;
   in_table_ = false;
   in_cell_ = false;
@@ -426,6 +443,7 @@ void MarkdownExtractorFilter::AppendText(std::string_view raw_text) {
   // decode-then-escape order keeps the markdown-structure security contract.
   const std::string decoded = SafeDecodeHtmlEntities(raw_text);
   std::string_view text(decoded);
+  if (HasVisibleText(text)) MarkAnchorText();
   std::string* o = Out();
   // Pre-cap bound on the intermediate buffer itself: a single never-flushed
   // block (or one giant text node) must not grow cur_/cell_ past the output cap
@@ -754,6 +772,7 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
     case HtmlName::kA:
       if (pre_depth_ == 0) {
         std::string* o = Out();
+        anchor_open_pos_.push_back({o->size(), false});
         o->append("[");
         // Issue F (5): record where the link text begins so a block element
         // wrapped in this anchor can be flattened into one '[text](href)'. Only
@@ -768,6 +787,7 @@ void MarkdownExtractorFilter::StartElement(HtmlElement* element) {
       if (src != nullptr && *src != '\0') {
         const char* alt = element->AttributeValue(HtmlName::kAlt);
         std::string* o = Out();
+        MarkAnchorText();
         o->append("![");
         if (alt != nullptr) o->append(EscapeLinkText(alt));
         o->append("](");
@@ -803,6 +823,7 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
       bool pad = !code_buf_.empty() &&
                  (code_buf_.front() == '`' || code_buf_.back() == '`');
       std::string* o = Out();
+      if (HasVisibleText(code_buf_)) MarkAnchorText();
       o->append(fence);
       if (pad) o->push_back(' ');
       o->append(code_buf_);
@@ -967,6 +988,20 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
         if (anchor_depth_ > 0) --anchor_depth_;  // Issue F (5)
         const char* href = element->AttributeValue(HtmlName::kHref);
         std::string* o = Out();
+        // A link with no visible text (an empty heading permalink, an icon-only
+        // link whose svg / aria-hidden child was stripped) is dropped rather
+        // than emitted as '[](href)'; empty emphasis markers from an icon-font
+        // <i> do not count as text. aria-label is deliberately not used as text.
+        // An
+        // image inside the link counts as content, so image links are kept.
+        if (!anchor_open_pos_.empty()) {
+          const OpenAnchor open = anchor_open_pos_.back();
+          anchor_open_pos_.pop_back();
+          if (!open.has_text && open.pos < o->size() && (*o)[open.pos] == '[') {
+            o->resize(open.pos);
+            break;
+          }
+        }
         o->append("](");
         if (href != nullptr) o->append(SanitizeUrl(href));
         o->append(")");
