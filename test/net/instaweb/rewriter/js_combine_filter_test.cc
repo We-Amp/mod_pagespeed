@@ -1250,14 +1250,12 @@ TEST_F(JsCombineFilterTest, HostileInputUrlsYieldOnlyNamesAndLiterals) {
       "var h = \"</script><script>\\\"\";\n");
   GoogleString out;
   ResponseHeaders headers;
-  if (FetchResourceUrl(url, &out, &headers)) {
-    EXPECT_EQ(HttpStatus::kOK, headers.status_code());
-    EXPECT_EQ(3, std::count(out.begin(), out.end(), '\n')) << out;
-    ExpectOnlyNamesAndLiterals(out);
-  } else {
-    // Refusing the request is also acceptable; nothing is served then.
-    EXPECT_NE(HttpStatus::kOK, headers.status_code());
-  }
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  // One line per input, the served one with its code in it.
+  EXPECT_EQ(3, std::count(out.begin(), out.end(), '\n')) << out;
+  EXPECT_NE(GoogleString::npos, out.find("var h =")) << out;
+  ExpectOnlyNamesAndLiterals(out);
 }
 
 // A combination served without some of its inputs is always private.
