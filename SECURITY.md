@@ -72,6 +72,37 @@ The Windows installer and binaries are also Authenticode signed by
 We-Amp B.V. From v2.5.0 on, the source tags `v2.*` are signed with the same
 key. The apt and yum repositories are signed by a separate repository key.
 
+### Sigstore signature and build provenance
+
+A release that carries `SHA256SUMS.sigstore.json` also has a keyless Sigstore
+signature of `SHA256SUMS`, a build provenance attestation (SLSA v1) for every
+module file, `SHA256SUMS` and `manifest.json`, and an SBOM attestation for
+every module package. They are in addition to the PGP signature above, which
+stays the primary check. The signer is the release workflow on `master`, and
+the source ref is the release tag. With
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/):
+
+```
+cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity 'https://github.com/We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-github-workflow-ref refs/tags/module-v<version>
+```
+
+With the [GitHub CLI](https://cli.github.com/), for any module file:
+
+```
+gh attestation verify <file> --repo We-Amp/mod_pagespeed \
+  --cert-identity 'https://github.com/We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master' \
+  --source-ref refs/tags/module-v<version>
+```
+
+Add `--predicate-type https://spdx.dev/Document/v2.3` to check the SBOM
+attestation of a package. The `pagespeed-optimizer` packages in the release
+are attested in the
+[pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer)
+repository; verify them with the commands of its `RELEASING.md`.
+
 ## Disclosure policy
 
 We follow a 90-day coordinated disclosure timeline. Once a vulnerability is
