@@ -661,6 +661,32 @@ TEST_F(RewriteQueryTest, OptionsNotArbitrary) {
   EXPECT_TRUE(options == nullptr);
 }
 
+// The wait of a fetch with a negative rewrite deadline is the operator's to
+// set: a request must not lengthen it, by a query parameter, a request header
+// or the options segment of a resource URL.
+TEST_F(RewriteQueryTest, NegativeDeadlineFetchWaitIsNotSetPerRequest) {
+  const GoogleString name = RewriteOptions::kNegativeDeadlineFetchWaitMs;
+  const RewriteOptions* options =
+      ParseAndScan(kHtmlUrl, StrCat("PageSpeed", name, "=60000"), "");
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  options = ParseAndScan(kHtmlUrl, "", StrCat("PageSpeed", name, ":60000"));
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  RewriteOptions scoped(factory()->thread_system());
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            scoped.SetOptionFromQuery(name, "60000"));
+
+  // The options segment of a resource URL refuses the whole segment.
+  allow_related_options_ = true;
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(
+                               Encode(kTestDomain, "cf", "0", "a.css", "css"),
+                               "ndfw=60000"),
+                           "", "") == nullptr);
+}
+
 TEST_F(RewriteQueryTest, FlattenLimitIsNotSetPerRequest) {
   GoogleString output_query, output_headers;
   const RewriteOptions* options = ParseAndScan(

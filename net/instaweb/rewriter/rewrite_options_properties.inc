@@ -679,6 +679,11 @@
     "it is disabled.", false) \
   X(kDefaultOptionCookiesDurationMs, option_cookies_duration_ms_, "ocd", \
     kOptionCookiesDurationMs, kDirectoryScope, \
-    "The max-age in ms of cookies that set PageSpeed options.", true)
+    "The max-age in ms of cookies that set PageSpeed options.", true) \
+  X(kDefaultNegativeDeadlineFetchWaitMs, negative_deadline_fetch_wait_ms_, \
+    "ndfw", kNegativeDeadlineFetchWaitMs, kServerScope, \
+    "How long a request for a rewritten resource waits for its optimization " \
+    "when the rewrite deadline is negative, before the original is served. " \
+    "At most FetcherTimeOutMs.", false)
 
 // clang-format on

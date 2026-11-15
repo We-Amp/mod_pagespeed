@@ -166,10 +166,10 @@ class RewriteContext {
   static const char kNumDeadlineAlarmInvocations[];
 
   // With a negative rewrite deadline a fetch does not wait for ever for a
-  // rewrite: it waits at most this long (the default rewrite deadline) and
-  // then serves the original, with a short private lifetime. See
+  // rewrite: it waits at most this long (the NegativeDeadlineFetchWaitMs
+  // option) and then serves the original, with a short private lifetime. See
   // FetchContext::SetupDeadlineAlarm().
-  static int64 NegativeDeadlineFetchWaitMs();
+  int64 NegativeDeadlineFetchWaitMs() const;
   static const char kHashMismatchMessage[];
 
   // Used to pass the result of the metadata cache lookups. Recipient must

@@ -114,7 +114,12 @@ void ApacheFetch::SendOutHeaders() {
   // will DECLINE the request and another handler will deal with it.
   status_ok_ = (status_code != 0) && (status_code < 400);
 
-  if (handle_error_ || status_ok_) {
+  const bool retryable_unavailable =
+      send_retryable_unavailable_ &&
+      status_code == HttpStatus::kUnavailable &&
+      response_headers()->Has("Retry-After");
+
+  if (handle_error_ || status_ok_ || retryable_unavailable) {
     StringPiece error_message = "";  // No error by default.
     // 304 and 204 responses shouldn't have content lengths and aren't expected
     // to have Content-Types.  All other responses should.

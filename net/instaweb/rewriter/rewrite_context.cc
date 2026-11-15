@@ -823,7 +823,7 @@ class RewriteContext::FetchContext {
     if (deadline_ms < 0 && !test_force_alarm) {
       // A negative deadline asks to wait for the optimization, but not for
       // ever: the wait is bounded, then the original is served.
-      deadline_ms = RewriteContext::NegativeDeadlineFetchWaitMs();
+      deadline_ms = rewrite_context_->NegativeDeadlineFetchWaitMs();
     }
     if (deadline_ms >= 0 || test_force_alarm) {
       if (test_force_alarm) {
@@ -3736,8 +3736,8 @@ int64 RewriteContext::GetRewriteDeadlineAlarmMs() const {
   return Driver()->rewrite_deadline_ms();
 }
 
-int64 RewriteContext::NegativeDeadlineFetchWaitMs() {
-  return RewriteOptions::kDefaultRewriteDeadlineMs;
+int64 RewriteContext::NegativeDeadlineFetchWaitMs() const {
+  return Driver()->options()->negative_deadline_fetch_wait_ms();
 }
 
 int64 RewriteContext::CombinedFetchCapMs() const {

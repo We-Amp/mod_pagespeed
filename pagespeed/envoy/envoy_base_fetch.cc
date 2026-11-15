@@ -86,7 +86,16 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
       }
     });
   } else {
-    bool ipro = !(status_code < 0 || status_code >= 400);
+    // A resource the rewriter gave up waiting for (a combined script) answers
+    // 503 with Retry-After. It is sent to the client as it is, not handed on
+    // to the upstream, which does not have the resource.
+    const bool retryable_unavailable =
+        status_code == HttpStatus::kUnavailable &&
+        response_headers()->Has("Retry-After");
+    retryable_unavailable_.store(retryable_unavailable,
+                                 std::memory_order_release);
+    bool ipro = !(status_code < 0 || status_code >= 400) ||
+                retryable_unavailable;
     have_ipro_response_.store(ipro, std::memory_order_release);
     continue_decoding = !ipro;
 
@@ -152,7 +161,7 @@ void EnvoyBaseFetch::HandleDone(bool success) {
     IncrementRefCount();
     std::shared_ptr<EnvoyBaseFetch> self(
         this, [](EnvoyBaseFetch* f) { f->DecrementRefCount(); });
-    if (!success) {
+    if (!success && !retryable_unavailable_.load(std::memory_order_acquire)) {
       decoder->decoderCallbacks()->dispatcher().post([this, self]() {
         auto* dec = decoder_.load(std::memory_order_acquire);
         if (dec != nullptr) {

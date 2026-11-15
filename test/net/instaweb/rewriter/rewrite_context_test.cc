@@ -3787,12 +3787,15 @@ const char RewriteContextFetchQueueTest::kMinifiedCss[] = "*{display:none}";
 // original is served with a short private lifetime. The rewrite is queued
 // behind the busy worker.
 TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitIsBounded) {
+  // Real hashes, so that the original and the optimized content have names of
+  // their own, other than the requested one.
+  UseMd5Hasher();
   options()->set_rewrite_deadline_ms(-1);
   WedgeLowPriorityWorker();
   Variable* alarms =
       statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
   const int64 alarms_before = alarms->Get();
-  const int64 bound_ms = RewriteContext::NegativeDeadlineFetchWaitMs();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
   const GoogleString url = Encode(kTestDomain, "cf", "0", "x.css", "css");
 
   StartFetch(url);
@@ -3804,11 +3807,27 @@ TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitIsBounded) {
   bool done_while_busy = AdvanceUntilDone(bound_ms, &advanced_ms);
   EXPECT_LE(bound_ms, advanced_ms);
 
-  // Nothing of the fallback has been stored while the worker is still busy.
+  // Nothing of the fallback has been stored while the worker is still busy:
+  // not under the requested name, and not under the name of the original's
+  // own hash either.
   HTTPValue value;
   ResponseHeaders cached_headers;
   const HTTPCache::FindResult in_cache =
       HttpBlockingFind(url, http_cache(), &value, &cached_headers);
+  const GoogleString original_url =
+      Encode(kTestDomain, "cf", server_context()->hasher()->Hash(kCss),
+             "x.css", "css");
+  const GoogleString optimized_url =
+      Encode(kTestDomain, "cf", server_context()->hasher()->Hash(kMinifiedCss),
+             "x.css", "css");
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(original_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(optimized_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
 
   const bool success = done_while_busy && fetch_->success();
   const GoogleString fallback_out = out_;
@@ -3838,6 +3857,15 @@ TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitIsBounded) {
   ResponseHeaders headers;
   EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
   EXPECT_EQ(kMinifiedCss, again);
+  // The optimized result is stored under its own name, the original never.
+  EXPECT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(optimized_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(original_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
 }
 
 // A combined CSS resource is rebuilt from its optimized inputs. With a
@@ -3845,6 +3873,7 @@ TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitIsBounded) {
 // the combination is made of the original input. That combination is private
 // and is not stored.
 TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
+  UseMd5Hasher();
   options()->set_rewrite_deadline_ms(-1);
   // Use the regular CSS filters for the combined resource and its inputs.
   options()->EnableFilter(RewriteOptions::kCombineCss);
@@ -3853,7 +3882,7 @@ TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
   Variable* alarms =
       statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
   const int64 alarms_before = alarms->Get();
-  const int64 bound_ms = RewriteContext::NegativeDeadlineFetchWaitMs();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
 
   GoogleString url = Encode(kTestDomain, "cc", "0",
                             MultiUrl(Encode("", "cf", "0", "x.css", "css"),
@@ -3885,14 +3914,24 @@ TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
       fallback_headers.HasValue(HttpAttributes::kCacheControl, "private"));
   EXPECT_NE(HTTPCache::kFound, in_cache.status);
   EXPECT_LT(alarms_before, alarms->Get());
+  // The combination of the originals is not stored under the name of its own
+  // hash.
+  const GoogleString fallback_url =
+      Encode(kTestDomain, "cc", server_context()->hasher()->Hash(fallback_out),
+             MultiUrl(Encode("", "cf", "0", "x.css", "css"),
+                      Encode("", "cf", "0", "y.css", "css")),
+             "css");
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(fallback_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
 
   // Never stored: a later request gets the combination of the optimized
-  // inputs, publicly cacheable.
+  // inputs.
   GoogleString again;
   ResponseHeaders headers;
   EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
   EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), again);
-  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
 }
 
 // A combined JavaScript resource has no usable fallback: the original of an
@@ -3938,6 +3977,7 @@ TEST_F(RewriteContextFetchQueueTest, CombinedJsFetchWaitIsCapped) {
   EXPECT_FALSE(success);
   EXPECT_EQ(HttpStatus::kUnavailable, error_headers.status_code());
   EXPECT_TRUE(error_headers.Has("Retry-After"));
+  EXPECT_TRUE(error_headers.HasValue(HttpAttributes::kCacheControl, "no-store"));
   EXPECT_FALSE(error_headers.HasValue(HttpAttributes::kCacheControl, "public"));
   EXPECT_EQ(GoogleString::npos, error_out.find("var x"));
   EXPECT_LE(alarms_before + 1, alarms->Get());
