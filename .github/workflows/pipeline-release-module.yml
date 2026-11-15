@@ -2432,7 +2432,7 @@ jobs:
             echo "UNIT_REDIS=${R}"
             echo "UNIT_MEMCACHED=${M}"
           } >> "$GITHUB_ENV"
-          docker network create "$NET" 2>/dev/null || true
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" create "$NET"
           docker rm -f "$R" "$M" 2>/dev/null || true
           for img in redis:7-alpine memcached:1.6-alpine; do
             for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
