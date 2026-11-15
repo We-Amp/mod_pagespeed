@@ -547,6 +547,21 @@ pagespeed_cc_test(
     ],
 )
 
+# The RequestOptionOverride token never reaches the client: the removal
+# helper, its header names against the engine's, and its call at the top of
+# OnSendResponse (reads the port source as data). Runs on every platform.
+pagespeed_cc_test(
+    name = "iis_option_token_test",
+    srcs = ["iis_option_token_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/iis:iis_option_token",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The stage the module takes up a request at: after IIS authentication and
 # authorization, so nothing is served before IIS has admitted the request.
 # Reads the port source as data, so it builds and runs on every platform.

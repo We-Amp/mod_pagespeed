@@ -68,6 +68,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Removing the RequestOptionOverride token from responses.  Header-only and
+# free of IIS/Windows headers so it is unit-testable on every platform.
+cc_library(
+    name = "iis_option_token",
+    hdrs = ["iis_option_token.h"],
+    visibility = ["//visibility:public"],
+)
+
 # Decision core for the zero-copy aliased serve (CycloneZeroCopyServe):
 # chunking, copy-out and abort policy.  Header-only and free of
 # IIS/Windows headers (same pattern as iis_proxy_fetch_completion) so the
@@ -173,6 +181,7 @@ cc_library(
         ":iis_inplace_url_agreement",
         ":iis_ip_string",
         ":iis_local_request",
+        ":iis_option_token",
         ":iis_proxy_fetch_completion",
         ":iis_self_fetch",
         ":iis_unclaimed_ref",
