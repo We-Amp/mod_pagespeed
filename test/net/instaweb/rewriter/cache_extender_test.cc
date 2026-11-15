@@ -856,6 +856,63 @@ TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLossWithFileLoad) {
   EXPECT_EQ(kImageData, content);
 }
 
+// A LoadFromFile rule written for the proxied (external) origin applies when a
+// proxied resource is rebuilt, as it does while the HTML is rewritten. The
+// docroot mirror under the proxy path is not read: the proxied origin wins.
+TEST_F(CacheExtenderTest, ProxiedResourceRebuildHonorsOriginLoadFromFile) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/docroot/");
+  options()->file_load_policy()->Associate(kOrigin, "/origin-files/");
+  InitTest(kShortTtlSec);
+  // Deliberately no InitResource: the origin cannot be fetched.
+  WriteFile("/origin-files/256/photo.jpg", kImageData);
+  WriteFile("/docroot/shared_img/256/photo.jpg", "docroot mirror");
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
+// Control for the test above: in the same setup, a URL that is not proxied is
+// still loaded from file.
+TEST_F(CacheExtenderTest, UnproxiedResourceStillLoadsFromFileWithProxyMapping) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/docroot/");
+  options()->file_load_policy()->Associate(kOrigin, "/origin-files/");
+  InitTest(kShortTtlSec);
+  WriteFile("/docroot/local.jpg", kImageData);
+  const GoogleString local_url = StrCat(kTestDomain, "local.jpg");
+
+  const GoogleString rewritten =
+      Encode(kTestDomain, kFilterId, "0", "local.jpg", "jpg");
+  ValidateExpected("local_image", StrCat("<img src='", local_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
 void CacheExtenderTest::TestCanonicalOnFallback(
     bool fallback_to_pagespeed_resource) {
   // Make sure canonical header is correct if we have to go through fallback
