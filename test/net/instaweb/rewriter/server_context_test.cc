@@ -1479,6 +1479,12 @@ class BeaconTest : public ServerContextTest {
             rewrite_driver());
     ASSERT_EQ(kBeaconWithNonce, last_beacon_metadata_.status);
     ASSERT_FALSE(last_beacon_metadata_.nonce.empty());
+    // Register the page's images, as CriticalImagesBeaconFilter does at the end
+    // of an instrumented document.
+    server_context()
+        ->critical_images_finder()
+        ->UpdateCandidateImagesForBeaconing(
+            candidate_image_hashes_, rewrite_driver(), true /* beaconing */);
     rewrite_driver()->property_page()->WriteCohort(
         server_context()->beacon_cohort());
   }
@@ -1543,6 +1549,8 @@ class BeaconTest : public ServerContextTest {
   std::unique_ptr<RenderedImages> rendered_images_;
   // This field holds candidate critical css selectors.
   StringSet candidates_;
+  // This field holds the hashes of the images on the page.
+  StringSet candidate_image_hashes_;
   BeaconMetadata last_beacon_metadata_;
 };
 
@@ -1571,6 +1579,7 @@ TEST_F(BeaconTest, HandleBeaconRenderedDimensionsofImages) {
   images->set_rendered_height(50);
   GoogleString json_map_rendered_dimensions = StrCat(
       "{\"", hash1, "\":{\"rw\":40,", "\"rh\":50,\"ow\":160,\"oh\":200}}");
+  candidate_image_hashes_.insert(hash1);
   InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
   TestBeacon(nullptr, nullptr, &json_map_rendered_dimensions,
              UserAgentMatcherTestBase::kChromeUserAgent);
@@ -1589,6 +1598,8 @@ TEST_F(BeaconTest, HandleBeaconCritImages) {
   GoogleString hash2 = IntegerToString(
       HashString<CasePreserve, unsigned>(img2.c_str(), img2.size()));
 
+  candidate_image_hashes_.insert(hash1);
+  candidate_image_hashes_.insert(hash2);
   StringSet critical_image_hashes;
   critical_image_hashes.insert(hash1);
   InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
@@ -1627,6 +1638,28 @@ TEST_F(BeaconTest, HandleBeaconCritImages) {
   TestBeacon(&critical_image_hashes, nullptr, nullptr,
              UserAgentMatcherTestBase::kChromeUserAgent);
   EXPECT_STREQ(hash1, JoinCollection(critical_html_images_, ","));
+}
+
+// A beacon only counts for the images the page was instrumented with.
+TEST_F(BeaconTest, HandleBeaconKeepsOnlyPageImages) {
+  GoogleString img1 = "http://www.example.com/img1.png";
+  GoogleString hash1 = IntegerToString(
+      HashString<CasePreserve, unsigned>(img1.c_str(), img1.size()));
+  options()->EnableFilter(RewriteOptions::kResizeToRenderedImageDimensions);
+  candidate_image_hashes_.insert(hash1);
+  StringSet critical_image_hashes;
+  critical_image_hashes.insert(hash1);
+  critical_image_hashes.insert("12345");
+  GoogleString json_map_rendered_dimensions =
+      StrCat("{\"", hash1, "\":{\"rw\":40,\"rh\":50,\"ow\":160,\"oh\":200},",
+             "\"12345\":{\"rw\":40,\"rh\":50,\"ow\":160,\"oh\":200}}");
+  InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
+  TestBeacon(&critical_image_hashes, nullptr, &json_map_rendered_dimensions,
+             UserAgentMatcherTestBase::kChromeUserAgent);
+  EXPECT_STREQ(hash1, JoinCollection(critical_html_images_, ","));
+  ASSERT_FALSE(rendered_images_.get() == nullptr);
+  ASSERT_EQ(1, rendered_images_->image_size());
+  EXPECT_STREQ(hash1, rendered_images_->image(0).src());
 }
 
 TEST_F(BeaconTest, HandleBeaconCriticalCss) {

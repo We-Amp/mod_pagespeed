@@ -309,15 +309,16 @@ bool CriticalImagesFinder::UpdateCriticalImagesCacheEntry(
   PopulateCriticalImagesFromPropertyValue(property_value, &critical_images);
   return UpdateAndWriteBackCriticalImagesCacheEntry(
       html_critical_images_set, css_critical_images_set, rendered_images_set,
-      support_interval, cohort, page, &critical_images);
+      support_interval, false /* require_prior_support */, cohort, page,
+      &critical_images);
 }
 
 bool CriticalImagesFinder::UpdateAndWriteBackCriticalImagesCacheEntry(
     const StringSet* html_critical_images_set,
     const StringSet* css_critical_images_set,
     const RenderedImages* rendered_images_set, int support_interval,
-    const PropertyCache::Cohort* cohort, AbstractPropertyPage* page,
-    CriticalImages* critical_images) {
+    bool require_prior_support, const PropertyCache::Cohort* cohort,
+    AbstractPropertyPage* page, CriticalImages* critical_images) {
   // Update RenderedImages proto in property Cache.
   if (rendered_images_set != nullptr) {
     UpdateInPropertyCache(*rendered_images_set, cohort,
@@ -325,7 +326,8 @@ bool CriticalImagesFinder::UpdateAndWriteBackCriticalImagesCacheEntry(
                           false /* don't write cohort */, page);
   }
   if (!UpdateCriticalImages(html_critical_images_set, css_critical_images_set,
-                            support_interval, critical_images)) {
+                            support_interval, require_prior_support,
+                            critical_images)) {
     return false;
   }
 
@@ -348,10 +350,11 @@ bool CriticalImagesFinder::UpdateAndWriteBackCriticalImagesCacheEntry(
 
 bool CriticalImagesFinder::UpdateCriticalImages(
     const StringSet* html_critical_images, const StringSet* css_critical_images,
-    int support_interval, CriticalImages* critical_images) {
+    int support_interval, bool require_prior_support,
+    CriticalImages* critical_images) {
   DCHECK(critical_images != nullptr);
   if (html_critical_images != nullptr) {
-    UpdateCriticalKeys(false /* require_prior_support */, *html_critical_images,
+    UpdateCriticalKeys(require_prior_support, *html_critical_images,
                        support_interval,
                        critical_images->mutable_html_critical_image_support());
   }

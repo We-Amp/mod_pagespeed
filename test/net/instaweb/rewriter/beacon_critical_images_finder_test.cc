@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "net/instaweb/rewriter/critical_images.pb.h"
 #include "net/instaweb/rewriter/critical_keys.pb.h"
@@ -27,6 +29,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "test/net/instaweb/rewriter/critical_images_finder_test_base.h"
@@ -63,6 +66,7 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
     html_images_.insert("x.jpg");
     html_images_.insert("y.png");
     html_images_.insert("z.gif");
+    candidate_images_ = html_images_;
     css_images_.insert("a.jpg");
     css_images_.insert("b.png");
     css_images_.insert("c.gif");
@@ -97,6 +101,7 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
     factory()->mock_timer()->AdvanceMs(
         options()->beacon_reinstrument_time_sec() * Timer::kSecondMs);
     VerifyBeaconStatus(kBeaconWithNonce);
+    UpdateCandidateImages();
   }
 
   // Same as Beacon(), but advances time by the low frequency beacon interval.
@@ -108,6 +113,14 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
         options()->beacon_reinstrument_time_sec() * Timer::kSecondMs *
         kLowFreqBeaconMult);
     VerifyBeaconStatus(kBeaconWithNonce);
+    UpdateCandidateImages();
+  }
+
+  // Register the images on the page, as CriticalImagesBeaconFilter does at the
+  // end of an instrumented document.
+  void UpdateCandidateImages() {
+    finder_->UpdateCandidateImagesForBeaconing(
+        candidate_images_, rewrite_driver(), true /* beaconing */);
   }
 
   // Verify that no beacon injection occurs.
@@ -188,6 +201,8 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
   BeaconMetadata last_beacon_metadata_;
   StringSet html_images_;
   StringSet css_images_;
+  // The images on the page; beacon results for other html images are ignored.
+  StringSet candidate_images_;
 };
 
 TEST_F(BeaconCriticalImagesFinderTest, StoreRestore) {
@@ -248,6 +263,42 @@ TEST_F(BeaconCriticalImagesFinderTest, StoreMultiple) {
     EXPECT_TRUE(UpdateCriticalImagesCacheEntry(&html_images_, &css_images_));
   }
   EXPECT_STREQ("x.jpg;", CriticalImagesString());
+}
+
+// A beacon result only counts for the images the page was instrumented with;
+// it cannot add keys of its own to the page's stored state.
+TEST_F(BeaconCriticalImagesFinderTest, BeaconKeepsOnlyPageImages) {
+  Beacon();
+  html_images_.clear();
+  html_images_.insert("x.jpg");
+  html_images_.insert("other.jpg");
+  RenderedImages rendered_images;
+  RenderedImages::Image* image = rendered_images.add_image();
+  image->set_src("other.jpg");
+  image->set_rendered_width(1);
+  image->set_rendered_height(2);
+  image = rendered_images.add_image();
+  image->set_src("x.jpg");
+  image->set_rendered_width(3);
+  image->set_rendered_height(4);
+  EXPECT_TRUE(BeaconCriticalImagesFinder::UpdateCriticalImagesCacheEntry(
+      &html_images_, nullptr, &rendered_images, last_beacon_metadata_.nonce,
+      server_context()->beacon_cohort(), rewrite_driver()->property_page(),
+      server_context()->timer()));
+  EXPECT_STREQ("x.jpg;", CriticalImagesString());
+  const CriticalKeys& html_keys =
+      GetCriticalImages()->html_critical_image_support();
+  ASSERT_EQ(3, html_keys.key_evidence_size());
+  EXPECT_EQ("x.jpg", html_keys.key_evidence(0).key());
+  EXPECT_EQ("y.png", html_keys.key_evidence(1).key());
+  EXPECT_EQ("z.gif", html_keys.key_evidence(2).key());
+  std::unique_ptr<RenderedImages> stored_rendered_images(
+      finder_->ExtractRenderedImageDimensionsFromCache(rewrite_driver()));
+  ASSERT_TRUE(stored_rendered_images != nullptr);
+  ASSERT_EQ(1, stored_rendered_images->image_size());
+  EXPECT_EQ("x.jpg", stored_rendered_images->image(0).src());
+  EXPECT_EQ(3, stored_rendered_images->image(0).rendered_width());
+  EXPECT_EQ(4, stored_rendered_images->image(0).rendered_height());
 }
 
 // Make sure beacon results can arrive out of order (so long as the nonce
