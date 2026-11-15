@@ -650,9 +650,128 @@ bool InApacheCommandTable(const ApacheConfig& config,
          GoogleString::npos;
 }
 
+// Where in the httpd configuration a directive is written.
+enum class ApacheWhere { kServerConfig, kVirtualHost, kDirectory };
+
+// What httpd and mod_instaweb do with a command by scope, read from the
+// module: the command table's override class (OR_ALL allows <Directory>,
+// RSRC_CONF does not) and the vhost handling of process-scope options
+// (CheckGlobalOption).
+struct ApacheCommandScope {
+  bool in_directory = true;
+  bool errors_in_vhost = false;  // "used inside a <VirtualHost> ..."
+};
+
+// The hand-written entries of mod_pagespeed_filter_cmds:
+// APACHE_CONFIG_[DIR_]OPTION[2|3|23](name, ...).  The DIR_ forms register
+// OR_ALL, the others RSRC_CONF.  The name is a kModPagespeedFoo constant
+// (the directive is "ModPagespeedFoo"), RewriteQuery::kModPagespeed (the
+// plain "ModPagespeed" directive) or a string literal.  Returns the option
+// names (lower case, without "ModPagespeed") mapped to "allowed in
+// <Directory>".
+std::map<GoogleString, bool> ReadHandWrittenCommands(
+    const GoogleString& source) {
+  std::map<GoogleString, bool> out;
+  const size_t table = source.find("mod_pagespeed_filter_cmds[] = {");
+  if (table == GoogleString::npos) {
+    return out;
+  }
+  const GoogleString kMacro = "APACHE_CONFIG_";
+  size_t pos = table;
+  while ((pos = source.find(kMacro, pos)) != GoogleString::npos) {
+    pos += kMacro.size();
+    const bool dir = source.compare(pos, 4, "DIR_") == 0;
+    if (dir) {
+      pos += 4;
+    }
+    if (source.compare(pos, 6, "OPTION") != 0) {
+      continue;
+    }
+    pos += 6;
+    while (pos < source.size() &&
+           isdigit(static_cast<unsigned char>(source[pos]))) {
+      ++pos;
+    }
+    if (pos >= source.size() || source[pos] != '(') {
+      continue;
+    }
+    ++pos;
+    while (pos < source.size() &&
+           isspace(static_cast<unsigned char>(source[pos]))) {
+      ++pos;
+    }
+    size_t end = pos;
+    GoogleString name;
+    if (source[pos] == '"') {
+      end = source.find('"', pos + 1);
+      name = source.substr(pos + 1, end - pos - 1);
+    } else {
+      while (end < source.size() &&
+             (isalnum(static_cast<unsigned char>(source[end])) ||
+              source[end] == '_' || source[end] == ':')) {
+        ++end;
+      }
+      name = source.substr(pos, end - pos);
+      const size_t colons = name.rfind("::");
+      if (colons != GoogleString::npos) {
+        name = name.substr(colons + 2);
+      }
+      if (name.compare(0, 1, "k") == 0) {
+        name = name.substr(1);
+      }
+    }
+    if (name.compare(0, 12, "ModPagespeed") != 0) {
+      continue;
+    }
+    out[Lower(name.substr(12))] = dir;
+  }
+  return out;
+}
+
+ApacheCommandScope ScopeOf(RewriteOptions::OptionScope scope) {
+  // FillInApacheCommand in mod_instaweb.cc.
+  ApacheCommandScope s;
+  s.in_directory = scope == RewriteOptions::kDirectoryScope ||
+                   scope == RewriteOptions::kQueryScope;
+  s.errors_in_vhost = scope == RewriteOptions::kProcessScopeStrict;
+  return s;
+}
+
+// The command httpd would find for ModPagespeed<option>: the hand-written
+// table comes first, then one entry per registered option with help text,
+// then one per deprecated name (InstallCommands).  Only the generated entries
+// are in vhost_command_handling_map_, so only they can refuse in a vhost with
+// CheckGlobalOption; the hand-written names that are global are refused by
+// the factory instead (is_process_scope).
+ApacheCommandScope CommandScope(
+    const ApacheConfig& config,
+    const std::map<GoogleString, bool>& hand_written, StringPiece option) {
+  ApacheCommandScope s;
+  const auto hw = hand_written.find(Lower(option));
+  if (hw != hand_written.end()) {
+    s.in_directory = hw->second;
+    return s;
+  }
+  for (const RewriteOptions::OptionBase* o : config.all_options()) {
+    if (o != nullptr && o->help_text() != nullptr &&
+        StringCaseEqual(o->option_name(), option)) {
+      return ScopeOf(o->scope());
+    }
+  }
+  const RewriteOptions::Properties* deprecated =
+      RewriteOptions::deprecated_properties();
+  for (int i = 0, n = deprecated->size(); i < n; ++i) {
+    if (StringCaseEqual(deprecated->property(i)->option_name(), option)) {
+      return ScopeOf(deprecated->property(i)->scope());
+    }
+  }
+  return s;
+}
+
 Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
                    ApacheConfig* config, OptionParsingFactory* factory,
-                   RecordingHandler* handler) {
+                   RecordingHandler* handler,
+                   ApacheWhere where = ApacheWhere::kServerConfig) {
   handler->Clear();
   RewriteOptions::ResetDeprecatedFilterWarnings();
   Result refused;
@@ -666,6 +785,23 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
     refused.message = "Invalid command (not in the module's command table)";
     return refused;
   }
+  if (where != ApacheWhere::kServerConfig) {
+    const ApacheCommandScope scope = CommandScope(
+        *config, ReadHandWrittenCommands(mod_instaweb_source), option);
+    if (where == ApacheWhere::kDirectory && !scope.in_directory) {
+      refused.message =
+          StrCat(d.args[0], " not allowed in <Directory> context");
+      return refused;
+    }
+    if (where == ApacheWhere::kVirtualHost && scope.errors_in_vhost) {
+      refused.message = StrCat("Directive ", d.args[0],
+                               " used inside a <VirtualHost> but applies "
+                               "globally.");
+      return refused;
+    }
+  }
+  // ParseDirective passes !cmd->server->is_virtual as is_process_scope.
+  const bool process_scope = where != ApacheWhere::kVirtualHost;
   const int n_values = static_cast<int>(d.args.size()) - 1;
   GoogleString msg;
   RewriteOptions::OptionSettingResult r = RewriteOptions::kOptionNameUnknown;
@@ -692,8 +828,8 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
     }
     r = config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
     if (r == RewriteOptions::kOptionNameUnknown) {
-      r = factory->ParseAndSetOption1(option, arg, true /* process scope */,
-                                      &msg, handler);
+      r = factory->ParseAndSetOption1(option, arg, process_scope, &msg,
+                                      handler);
     }
     if (r == RewriteOptions::kOptionNameUnknown &&
         RewriteOptions::IsDeprecatedOptionName(option)) {
@@ -706,7 +842,7 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
                                            handler);
     if (r == RewriteOptions::kOptionNameUnknown) {
       r = factory->ParseAndSetOption2(option, d.args[1], d.args[2],
-                                      true /* process scope */, &msg, handler);
+                                      process_scope, &msg, handler);
     }
   } else if (n_values == 3) {
     r = config->ParseAndSetOptionFromName3(option, d.args[1], d.args[2],
@@ -849,6 +985,78 @@ class LegacyConfigCompatTest : public testing::Test {
     GTEST_LOG_(INFO) << summary << "\n" << report;
   }
 
+#ifdef LEGACY_CONFIG_APACHE
+  // The same corpus written inside <VirtualHost> and inside <Directory>, as
+  // httpd applies it.  The expectation is not a list: each option's scope comes
+  // from the module (the hand-written command table's APACHE_CONFIG_* macros,
+  // each registered option's scope as FillInApacheCommand maps it, the deprecated
+  // names' scope, and the factory's own refusal of the global names in a vhost).
+  // The counts are what `apachectl configtest` reported on released 2.8.2 for the
+  // same 370 lines: 327 accepted and 43 refused in a vhost (the 31 never-loaded
+  // names plus 12 process-scope names), 239 and 131 in a directory (the 31 plus
+  // 100 names that are not allowed in <Directory> context).
+  //
+  // Run from ApacheDirectivesKeepLoading, not as a test of its own: parsing
+  // StaticAssetCDN a second time in a process that has done
+  // ApacheConfig::Terminate() and Initialize() again crashes in protobuf's
+  // descriptor lookup, so everything that applies the whole corpus shares one
+  // SetUp.
+  void CheckApacheScopes() {
+    const std::vector<Directive> corpus = ReadCorpus("apache.conf", false);
+    ASSERT_GE(corpus.size(), 300u);
+    const GoogleString mod_instaweb = ReadSource(kModInstawebCc);
+    ASSERT_FALSE(mod_instaweb.empty());
+    ASSERT_GE(ReadHandWrittenCommands(mod_instaweb).size(), 30u);
+    std::unique_ptr<OptionParsingFactory> factory = NewFactory();
+    RecordingHandler handler;
+    struct Case {
+      const char* name;
+      ApacheWhere where;
+      int accepted;
+      int refused;
+      int refused_by_scope;
+    };
+    for (const Case& c :
+         {Case{"server config", ApacheWhere::kServerConfig, 339, 31, 0},
+          Case{"<VirtualHost>", ApacheWhere::kVirtualHost, 327, 43, 12},
+          Case{"<Directory>", ApacheWhere::kDirectory, 239, 131, 100}}) {
+      int accepted = 0;
+      int refused = 0;
+      int by_scope = 0;
+      GoogleString report;
+      for (const Directive& d : corpus) {
+        ApacheConfig config("legacy-apache", &thread_system_);
+        const Result r = ApplyApache(d, mod_instaweb, &config, factory.get(),
+                                     &handler, c.where);
+        if (r.outcome != Outcome::kRefused) {
+          ++accepted;
+          EXPECT_NE(Expect::kNeverLoaded, d.expect) << c.name << ": " << d.text;
+          continue;
+        }
+        ++refused;
+        if (d.expect != Expect::kNeverLoaded) {
+          ++by_scope;
+          StrAppend(&report, "  line ", IntegerToString(d.line), "  ", d.text,
+                    "  [", r.message, "]\n");
+          // Only a scope rule may refuse a line the server scope accepts.
+          EXPECT_TRUE(r.message.find("not allowed in <Directory>") !=
+                          GoogleString::npos ||
+                      r.message.find("<VirtualHost>") != GoogleString::npos ||
+                      r.message.find("is global") != GoogleString::npos)
+              << c.name << ": `" << d.text << "` refused: " << r.message;
+        }
+      }
+      GTEST_LOG_(INFO) << c.name << ": " << accepted << " accepted, " << refused
+                       << " refused\n"
+                       << report;
+      EXPECT_EQ(c.accepted, accepted) << c.name;
+      EXPECT_EQ(c.refused, refused) << c.name;
+      EXPECT_EQ(c.refused_by_scope, by_scope) << c.name;
+    }
+  }
+
+#endif
+
   std::unique_ptr<ProcessContext> process_context_;
   NullThreadSystem thread_system_;
 };
@@ -886,6 +1094,7 @@ TEST_F(LegacyConfigCompatTest, ApacheDirectivesKeepLoading) {
     ApacheConfig config("legacy-apache", &thread_system_);
     return ApplyApache(d, mod_instaweb, &config, factory.get(), &handler);
   });
+  CheckApacheScopes();
 }
 
 // The harness refuses what httpd refuses: a name that was never a command and
@@ -1049,6 +1258,14 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   EXPECT_NE(GoogleString::npos, all.find("if(option->help_text()!=nullptr)"));
   EXPECT_NE(GoogleString::npos,
             all.find("RewriteOptions::deprecated_properties()"));
+  // The scope rules ApacheScopesMatchHttpd models.
+  EXPECT_NE(GoogleString::npos,
+            all.find("caseRewriteOptions::kProcessScopeStrict:"
+                     "vhost_command_handling_map_[cmd]=kErrorInVHost;"
+                     "cmd->req_override=RSRC_CONF;"));
+  EXPECT_NE(GoogleString::npos, all.find("!cmd->server->is_virtual"));
+  EXPECT_NE(GoogleString::npos, all.find("NULL,RSRC_CONF,help)"));
+  EXPECT_NE(GoogleString::npos, all.find("NULL,OR_ALL,help)"));
 }
 
 #endif  // LEGACY_CONFIG_APACHE
