@@ -3185,18 +3185,17 @@ jobs:
       # its sibling leg has started on another runner (so the sibling cannot
       # be given the same runner), then ends green; with no other runner in
       # the hold limit (10 minutes; vars.IIS_RETRY_HOLD_MINUTES, 1 to 45) it
-      # fails with a plain message. The limit is short on purpose: a second
-      # IIS runner that is online and idle takes the sibling within seconds,
-      # while with only one runner online the hold can never end and a long
-      # limit only stalls the merge group. The runners API needs an organization admin
+      # fails with a plain message. The limit is short on purpose: a second IIS
+      # runner that is online and idle takes the sibling within seconds, while
+      # with only one runner online the hold can never end and a long limit only
+      # stalls the merge group. The runners API needs an organization admin
       # scope that this job's token (actions: read, repository only) lacks, so
       # the online count cannot be asked up front, and a job cannot change its
       # runner after it has landed (the IIS tests are not run on hosted
-      # windows-2022 for merge groups). It reads this run's job list
-      # (actions: read). A leg re-run on its own lands in a new run attempt
-      # without its sibling: it tests when it lands on another runner, and
-      # fails at once when it lands on the failed one (re-run all jobs
-      # instead).
+      # windows-2022 for merge groups). It reads this run's job list (actions:
+      # read). A leg re-run on its own lands in a new run attempt without its
+      # sibling: it tests when it lands on another runner, and fails at once
+      # when it lands on the failed one (re-run all jobs instead).
       - name: Pick this job's role
         id: role
         env:
