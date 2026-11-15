@@ -45,6 +45,9 @@ const char kModPagespeedInPlaceFixHeadersName[] =
 // to our cache.
 const char kModPagespeedInPlaceCheckHeadersName[] =
     "MOD_PAGESPEED_IN_PLACE_CHECK_HEADERS_FILTER";
+// Removes the RequestOptionOverride token from every response.
+const char kModPagespeedStripOptionTokenName[] =
+    "MOD_PAGESPEED_STRIP_OPTION_TOKEN_FILTER";
 
 }  // namespace net_instaweb
 

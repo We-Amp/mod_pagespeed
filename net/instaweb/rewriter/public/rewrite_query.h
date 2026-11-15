@@ -122,6 +122,18 @@ class RewriteQuery {
   // custom header or query param.
   static bool MightBeCustomOption(StringPiece name);
 
+  // True for the header names that carry the RequestOptionOverride token
+  // (ModPagespeedRequestOptionOverride, PageSpeedRequestOptionOverride),
+  // compared without regard to case.
+  static bool IsRequestOptionOverrideName(StringPiece name);
+
+  // Removes the RequestOptionOverride token from response headers.  An
+  // origin may send it to have its own option headers honoured; it is a
+  // credential and is never passed on to the client.  Scan() and
+  // ScanHeader() call this on every response they are given, whether or not
+  // the token matched and whether or not the scan completed.
+  static void RemoveRequestOptionOverride(ResponseHeaders* headers);
+
   const QueryParams& query_params() const { return query_params_; }
   const QueryParams& pagespeed_query_params() const {
     return pagespeed_query_params_;

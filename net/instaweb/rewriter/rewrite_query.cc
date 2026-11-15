@@ -22,6 +22,7 @@
 #include <algorithm>  // for std::binary_search
 #include <map>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -71,6 +72,20 @@ StringPiece SanitizeValueAsQP(StringPiece untrusted_value, GoogleUrl* storage) {
                      sanitized_value.size() - STATIC_STRLEN(kUrlBase));
 }
 
+// Removes the RequestOptionOverride token from the response headers when
+// RewriteQuery::Scan() returns, on every return path.
+class ScopedRemoveRequestOptionOverride {
+ public:
+  explicit ScopedRemoveRequestOptionOverride(ResponseHeaders* headers)
+      : headers_(headers) {}
+  ~ScopedRemoveRequestOptionOverride() {
+    RewriteQuery::RemoveRequestOptionOverride(headers_);
+  }
+
+ private:
+  ResponseHeaders* headers_;
+};
+
 }  // namespace
 
 const char RewriteQuery::kModPagespeed[] = "ModPagespeed";
@@ -107,6 +122,11 @@ RewriteQuery::Status RewriteQuery::ScanHeader(
         break;
       }
     }
+  }
+  // The token is not an option, so the loop below would leave it in place.
+  // In a response it must not reach the client.
+  if constexpr (std::is_same_v<HeaderT, ResponseHeaders>) {
+    RemoveRequestOptionOverride(headers);
   }
 
   // Tracks the headers that need to be removed.
@@ -160,6 +180,8 @@ RewriteQuery::Status RewriteQuery::Scan(
     ServerContext* server_context, GoogleUrl* request_url,
     RequestHeaders* request_headers, ResponseHeaders* response_headers,
     MessageHandler* handler) {
+  // Several paths below return before the response headers are scanned.
+  ScopedRemoveRequestOptionOverride remove_token(response_headers);
   Status status = kNoneFound;
   query_params_.Clear();
   pagespeed_query_params_.Clear();
@@ -426,6 +448,23 @@ bool RewriteQuery::MightBeCustomOption(StringPiece name) {
   // TODO(jmarantz): switch to case-insenstive comparisons for these prefixes.
   return name.starts_with(kModPagespeed) || name.starts_with(kPageSpeed) ||
          StringCaseEqual(name, HttpAttributes::kXPsaClientOptions);
+}
+
+bool RewriteQuery::IsRequestOptionOverrideName(StringPiece name) {
+  return StringCaseEqual(
+             name,
+             StrCat(kModPagespeed, RewriteOptions::kRequestOptionOverride)) ||
+         StringCaseEqual(
+             name, StrCat(kPageSpeed, RewriteOptions::kRequestOptionOverride));
+}
+
+void RewriteQuery::RemoveRequestOptionOverride(ResponseHeaders* headers) {
+  if (headers != nullptr) {
+    headers->RemoveAll(
+        StrCat(kModPagespeed, RewriteOptions::kRequestOptionOverride));
+    headers->RemoveAll(
+        StrCat(kPageSpeed, RewriteOptions::kRequestOptionOverride));
+  }
 }
 
 template <class HeaderT>

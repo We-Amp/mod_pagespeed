@@ -1056,6 +1056,37 @@ apr_status_t instaweb_in_place_origin_caching_filter(ap_filter_t* filter,
   return ap_pass_brigade(filter->next, bb);
 }
 
+// An origin may send the RequestOptionOverride token in its response to have
+// its own option headers honoured.  The token is a credential.  The option
+// scan in the HTML output filter drops it from the responses it reads; this
+// filter drops it from every response, including the ones that filter never
+// sees (other content types and statuses, proxied and in-place resources).
+// It runs after that filter and before in-place recording.
+apr_status_t instaweb_strip_option_token_filter(ap_filter_t* filter,
+                                                apr_bucket_brigade* bb) {
+  request_rec* request = filter->r;
+  const GoogleString names[] = {
+      StrCat(RewriteQuery::kModPagespeed,
+             RewriteOptions::kRequestOptionOverride),
+      StrCat(RewriteQuery::kPageSpeed, RewriteOptions::kRequestOptionOverride),
+  };
+  for (const GoogleString& name : names) {
+    apr_table_unset(request->headers_out, name.c_str());
+    if (request->err_headers_out != nullptr) {
+      apr_table_unset(request->err_headers_out, name.c_str());
+    }
+  }
+  ap_remove_output_filter(filter);
+  return ap_pass_brigade(filter->next, bb);
+}
+
+void instaweb_insert_strip_option_token_filter(request_rec* request) {
+  if (request->main == nullptr) {
+    ap_add_output_filter(kModPagespeedStripOptionTokenName, nullptr, request,
+                         request->connection);
+  }
+}
+
 // Runs immediately after mod_headers and other filters which muck with the
 // headers, but before headers are finalized.
 //
@@ -1521,6 +1552,17 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
       kModPagespeedInPlaceOriginCachingName,
       instaweb_in_place_origin_caching_filter, nullptr,
       static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 3));
+
+  // After the HTML output filter (AP_FTYPE_RESOURCE + 1), which reads the
+  // token, and ahead of every in-place recording filter.  Added to every
+  // response, error responses included.
+  ap_register_output_filter(
+      kModPagespeedStripOptionTokenName, instaweb_strip_option_token_filter,
+      nullptr, static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 4));
+  ap_hook_insert_filter(instaweb_insert_strip_option_token_filter, nullptr,
+                        nullptr, APR_HOOK_MIDDLE);
+  ap_hook_insert_error_filter(instaweb_insert_strip_option_token_filter,
+                              nullptr, nullptr, APR_HOOK_MIDDLE);
 
   // DaemonHtmlCache report-only reads the late headers here: mod_expires,
   // mod_headers and mod_deflate have run, instaweb_fix_headers_filter has not.

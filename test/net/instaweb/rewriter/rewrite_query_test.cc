@@ -950,6 +950,91 @@ TEST_F(RewriteQueryTest, RequestOptionOverrideNotProvidedWhenRequired) {
   EXPECT_TRUE(options == nullptr);
 }
 
+TEST_F(RewriteQueryTest, ResponseOverrideTokenHonouredAndRemoved) {
+  // The origin's token unlocks its option headers.  The option headers and
+  // the token are all removed from the response.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  request_option_override_ = "abc";
+  response_headers.Add("PageSpeedFilters", "remove_quotes");
+  response_headers.Add("PageSpeedRequestOptionOverride", "abc");
+  const RewriteOptions* options = ParseAndScan(
+      kHtmlUrl, "", StringPiece(), &request_headers, &response_headers,
+      &out_query, &out_req_string, &out_resp_string);
+  ASSERT_TRUE(options != nullptr);
+  EXPECT_TRUE(options->Enabled(RewriteOptions::kRemoveQuotes));
+  EXPECT_EQ(0, response_headers.NumAttributes());
+}
+
+TEST_F(RewriteQueryTest, ResponseOverrideTokenRemovedWhenWrong) {
+  // A token that does not match unlocks nothing and is removed all the same.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  request_option_override_ = "abc";
+  response_headers.Add("PageSpeedFilters", "remove_quotes");
+  response_headers.Add("ModPagespeedRequestOptionOverride", "def");
+  const RewriteOptions* options = ParseAndScan(
+      kHtmlUrl, "", StringPiece(), &request_headers, &response_headers,
+      &out_query, &out_req_string, &out_resp_string);
+  EXPECT_TRUE(options == nullptr);
+  ASSERT_EQ(1, response_headers.NumAttributes());
+  EXPECT_STREQ("PageSpeedFilters", response_headers.Name(0));
+}
+
+TEST_F(RewriteQueryTest, ResponseOverrideTokenRemovedWhenNotConfigured) {
+  // Without the directive the token means nothing; it is still removed.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  response_headers.Add("PageSpeedRequestOptionOverride", "abc");
+  response_headers.Add("Content-Type", "text/html");
+  ParseAndScan(kHtmlUrl, "", StringPiece(), &request_headers, &response_headers,
+               &out_query, &out_req_string, &out_resp_string);
+  ASSERT_EQ(1, response_headers.NumAttributes());
+  EXPECT_STREQ("Content-Type", response_headers.Name(0));
+}
+
+TEST_F(RewriteQueryTest, ResponseOverrideTokenRemovedOnInvalidQuery) {
+  // An invalid query value ends the scan before the response headers are
+  // read; the token is removed anyway.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  request_option_override_ = "abc";
+  response_headers.Add("PageSpeedRequestOptionOverride", "abc");
+  EXPECT_EQ(
+      RewriteQuery::kInvalid,
+      Parse(kHtmlUrl, "PageSpeed=junk", StringPiece(), &request_headers,
+            &response_headers, &out_query, &out_req_string, &out_resp_string));
+  EXPECT_EQ(0, response_headers.NumAttributes());
+}
+
+TEST_F(RewriteQueryTest, ResponseOverrideTokenRemovedOnInvalidRequestHeader) {
+  // Same when the invalid value is in a request header.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  request_option_override_ = "abc";
+  request_headers.Add("PageSpeed", "junk");
+  response_headers.Add("PageSpeedRequestOptionOverride", "abc");
+  EXPECT_EQ(
+      RewriteQuery::kInvalid,
+      Parse(kHtmlUrl, "", StringPiece(), &request_headers, &response_headers,
+            &out_query, &out_req_string, &out_resp_string));
+  EXPECT_EQ(0, response_headers.NumAttributes());
+}
+
+TEST_F(RewriteQueryTest, OverrideTokenNameIgnoresCase) {
+  EXPECT_TRUE(RewriteQuery::IsRequestOptionOverrideName(
+      "PageSpeedRequestOptionOverride"));
+  EXPECT_TRUE(RewriteQuery::IsRequestOptionOverrideName(
+      "modpagespeedrequestoptionoverride"));
+  EXPECT_FALSE(RewriteQuery::IsRequestOptionOverrideName("PageSpeedFilters"));
+  EXPECT_FALSE(RewriteQuery::IsRequestOptionOverrideName("PageSpeed"));
+}
+
 TEST_F(RewriteQueryTest, GenerateEmptyResourceOption) {
   EXPECT_EQ("", RewriteQuery::GenerateResourceOption("ic", rewrite_driver()));
 }
