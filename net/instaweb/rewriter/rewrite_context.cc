@@ -945,7 +945,8 @@ class RewriteContext::FetchContext {
         StringPiece contents = output_resource_->ExtractUncompressedContents();
         ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
                                                 async_fetch_, handler_);
-      } else if (rewrite_context_->FailOnHashMismatch()) {
+      } else if (rewrite_context_->FailOnHashMismatch() &&
+                 !rewrite_context_->fetch_left_out_inputs_) {
         FailForHashMismatch();
         return;
       } else {
