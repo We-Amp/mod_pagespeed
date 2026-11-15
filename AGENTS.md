@@ -18,8 +18,9 @@ module), C#/.NET middleware (`samples/aspnetcore/`), and a pnpm workbench
 - **Stage files explicitly.** Use `git add <file>...`; never `git add .` or
   `git commit -a`. Pre-commit hooks will modify files — expect a two-pass commit.
 - **Touched `src/` or `lib/`? Write the release note in the same PR.** CI blocks
-  a pull request that changes product code without a `CHANGELOG.md` entry
-  (`tools/ci/check_release_note.sh`). If nothing a user can observe changed, put
+  a pull request that changes product code without a changelog fragment
+  (`changelog.d/<branch-slug>.<category>.md`, see `changelog.d/README.md`;
+  never edit `CHANGELOG.md` directly) (`tools/ci/check_release_note.sh`). If nothing a user can observe changed, put
   `Release-Note: none — <reason>` in a commit message. A reason is required.
   See RELEASING.md → "Every user-facing change carries its note".
 - **Security fixes are not opened as public pull requests or issues;** follow `SECURITY.md`.

@@ -13,5 +13,5 @@
 ## Checklist
 
 - [ ] Tests added or updated for behaviour changes
-- [ ] `CHANGELOG.md` entry under the unreleased heading, or `Release-Note: none — <why>` (required when `src/` or `lib/` changes)
+- [ ] `changelog.d/<branch-slug>.<category>.md` fragment (see `changelog.d/README.md`), or `Release-Note: none — <why>` (required when `src/` or `lib/` changes)
 - [ ] Formatting hooks pass (`pre-commit run --all-files` or the commit/push hooks)

@@ -65,9 +65,11 @@ Website changes (`website/`) are ordinary pull requests too; see
 - Add or update tests for behaviour changes; `bazel test --config=libc++ //...`
   should pass locally.
 - **Release notes are required.** A pull request that touches `src/` or `lib/`
-  (outside tests and build files) must add an entry under the unreleased
-  heading of [CHANGELOG.md](CHANGELOG.md), written for a user deciding whether
-  to upgrade. If the change is invisible to users, put
+  (outside tests and build files) must add a changelog fragment,
+  `changelog.d/<branch-slug>.<category>.md` (see
+  [changelog.d/README.md](changelog.d/README.md)), instead of editing
+  [CHANGELOG.md](CHANGELOG.md); write it for a user deciding whether to
+  upgrade. If the change is invisible to users, put
   `Release-Note: none — <why>` in a commit message or the pull request
   description (editing the description does not re-run the check; re-run
   the job). Check it locally with

@@ -17,9 +17,13 @@ request at a time, and CI enforces that.
 
 `tools/ci/check_release_note.sh` runs on every pull request. If the diff
 touches `src/` or `lib/` — excluding tests and build files — it requires
-that the same pull request also touches `CHANGELOG.md`. Add the entry under
-the unreleased heading at the top, written for someone deciding whether to
-upgrade: what they observed before, what they observe now.
+that the same pull request also adds a note: a fragment file
+`changelog.d/<slug>.<category>.md` (see `changelog.d/README.md`; the release
+cut folds fragments into `CHANGELOG.md`), or, during the transition, an edit
+of `CHANGELOG.md`. Only a fragment the pull request adds or modifies counts;
+deleting one does not. Fragment text is also scanned for security entries
+(see "Security entries" in `changelog.d/README.md`). Write it for someone deciding whether to upgrade: what they
+observed before, what they observe now.
 
 If the change genuinely cannot be observed by a user, say so in one line:
 
@@ -55,6 +59,48 @@ numbered on the module's 1.x line (built from `VERSION.txt` 2.1.0 to 2.4.0);
 those tags still verify, with a notice. The cut order is: bump `VERSION.txt` on
 `main`, tag `optimizer-v<X>` on that commit, record the pin in the module
 repository, then tag `module-v<X>` there; `docs/ci/release.md` has the details.
+
+The notes join the cut commit: in the pull request that bumps `VERSION.txt`,
+run `python3 -I tools/changelog/assemble.py` (it folds `changelog.d/` into
+`## Unreleased` and removes the fragments), then rename `## Unreleased` to
+`## <X.Y.Z> - <date>` and add a fresh empty `## Unreleased` above it. Security
+paragraphs arrive in `CHANGELOG.md` with that fold, so the cut pull request
+comes from a `landing/<X.Y.Z>` branch with `Release-Note: landing -- <why>`,
+as the release-note gate already requires for any Security entry.
+
+The optimizer tag lane (`pipeline-release-optimizer.yml`, step "Verify the
+release commit holds no unfolded changelog fragments") fails a tag whose
+commit still has anything in `changelog.d/` besides `README.md`; for a
+prerelease tag, and for a dry run of a tag that does not exist yet, it only
+warns. A tag from before `changelog.d/` existed has no directory and passes.
+Nothing else in the tag lanes reads the changelog. The module's own lanes
+live in its repository and are not covered here.
+
+### Converting a pull request that already edits CHANGELOG.md
+
+`to_fragment.py` restores `CHANGELOG.md` to the merge-base, so run it on the
+branch BEFORE rebasing onto the main that carries the fragments, never after
+resolving a `CHANGELOG.md` conflict:
+
+1. Commit your work. The tool finds the repository from its own location,
+   so a branch without it gets it in place, untracked:
+   `mkdir -p tools/changelog && for f in assemble to_fragment; do git show
+   origin/main:tools/changelog/$f.py > tools/changelog/$f.py; done`.
+2. `python3 -I tools/changelog/to_fragment.py` (base defaults to
+   `origin/main`). It moves the
+   lines you added under `## Unreleased` into fragments named after your
+   branch and puts `CHANGELOG.md` back. It exits 2 when the edit removes
+   lines or touches text outside `## Unreleased`; convert such an edit by
+   hand.
+3. `rm -r tools/changelog` if you added it in step 1 (a leftover untracked
+   copy blocks the rebase), `git add changelog.d && git commit`, then
+   `git rebase origin/main`. No
+   `CHANGELOG.md` conflict is left to resolve.
+4. `python3 -I tools/changelog/assemble.py --lint`, then push once.
+
+If you already rebased and hit the conflict, abort the rebase, run step 2 on
+the pre-rebase branch, then rebase. A pull request that only carries a
+`Release-Note: none` waiver needs nothing.
 
 ## Cutting a release
 

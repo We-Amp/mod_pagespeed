@@ -15,3 +15,6 @@
 /lib/html/HTML_KERNEL_PIN @oschaaf
 /lib/js/JS_KERNEL_PIN @oschaaf
 /tools/ci/nupkg_checks.sh @oschaaf
+/tools/ci/check_release_note.sh @oschaaf
+/tools/changelog/ @oschaaf
+/.github/workflows/pipeline-pr.yml @oschaaf

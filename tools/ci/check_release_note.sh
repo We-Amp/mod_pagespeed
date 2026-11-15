@@ -23,8 +23,12 @@
 # In CI the inputs come from the GitHub API instead of git, so the check works
 # on the shallow checkout the rest of the job already uses:
 #   bash tools/ci/check_release_note.sh --files-from FILE --haystack-from FILE \
-#        [--changelog-added-from FILE] [--head-ref BRANCH]
-# where --changelog-added-from lists the lines the change adds to CHANGELOG.md.
+#        [--changelog-added-from FILE] [--fragments-from FILE] [--head-ref BRANCH]
+# where --changelog-added-from lists the lines the change adds to CHANGELOG.md
+# and to changelog.d/ fragments (so a security entry hidden in a *.fixed.md is
+# seen too), and --fragments-from lists the changelog.d/ files the change ADDS
+# OR MODIFIES (a deleted fragment is not a note). Without --fragments-from no
+# fragment counts.
 
 set -euo pipefail
 
@@ -72,15 +76,22 @@ SECPUB_RE='^[[:space:]]*Release-Note:[[:space:]]*security-public[[:space:]]*[-:�
 # $2 — waiver haystack (commit messages and/or PR body)
 # $3 — lines the change adds to CHANGELOG.md (optional)
 # $4 — the pull request's head branch (optional)
+# $5 — changelog.d/ files the change adds or modifies (optional)
 #
 # 0 = pass, 1 = block.
 evaluate_release_note() {
   local changed="$1"
   local haystack="$2"
-  local sec_added="${3:-}" head_ref="${4:-}"
-  local triggering note_touched waiver_line reason sec_lines sec_ok="" why
+  local sec_added="${3:-}" head_ref="${4:-}" frags_in="${5:-}" frags
+  local triggering note_touched waiver_line reason sec_lines sec_frag sec_ok="" why
 
   sec_lines="$(printf '%s\n' "$sec_added" | grep -iE "$SECURITY_LINE_RE" || true)"
+  # Only fragments the change adds or modifies count: deleting one (as the
+  # release cut does) is neither a note nor a security entry.
+  frags="$(printf '%s\n' "$frags_in" | grep -E '^changelog\.d/[^/]+\.md$' | grep -vFx 'changelog.d/README.md' || true)"
+  # A *.security.md fragment is a security entry by its name.
+  sec_frag="$(printf '%s\n' "$frags" | grep -E '^changelog\.d/[^/]+\.security\.md$' || true)"
+  [ -n "$sec_frag" ] && sec_lines="$(printf '%s\n%s\n' "$sec_lines" "$sec_frag" | grep -v '^$')"
   if [ -n "$sec_lines" ]; then
     if printf '%s\n' "$head_ref" | grep -qE "$LANDING_BRANCH_RE"; then
       why="$(printf '%s\n' "$haystack" | grep -iE "$LANDING_RE" | head -n 1 \
@@ -112,7 +123,11 @@ evaluate_release_note() {
     return 0
   fi
 
+  # A changelog.d/ fragment (README.md excluded) counts as the note, like an
+  # edit of CHANGELOG.md. The fragment name and content are checked by
+  # `python3 -I tools/changelog/assemble.py --lint`, a separate CI step.
   note_touched="$(printf '%s\n' "$changed" | grep -Fx "$RELEASE_NOTE_FILE" || true)"
+  [ -z "$note_touched" ] && note_touched="$frags"
   if [ -n "$note_touched" ]; then
     echo "OK: user-facing change carries a $RELEASE_NOTE_FILE entry."
     return 0
@@ -242,6 +257,35 @@ self_test() {
   check "note alone, no product code         -> pass" 0 \
     "$(printf 'CHANGELOG.md\n')" ""
 
+  # changelog.d/ fragments (see changelog.d/README.md). Fifth argument: the
+  # fragments the change adds or modifies.
+  fchk() {
+    local name="$1" want="$2" changed="$3" frags="$4" haystack="${5:-}" secadd="${6:-}" ref="${7:-fix/topic}"
+    local got=0
+    n=$((n + 1))
+    evaluate_release_note "$changed" "$haystack" "$secadd" "$ref" "$frags" >/dev/null 2>&1 || got=$?
+    if [ "$got" -ne "$want" ]; then
+      echo "  FAIL  $name (wanted exit $want, got $got)" >&2
+      failures=$((failures + 1))
+    else
+      echo "  ok    $name"
+    fi
+  }
+  local SRC=$'src/worker/rewrite.cc\n' F1='changelog.d/fix-rewrite.fixed.md'
+  fchk "product code + added fragment        -> pass" 0 "${SRC}${F1}" "$F1"
+  fchk "product code + deleted fragment only -> BLOCK" 1 "${SRC}${F1}" ""
+  fchk "product code + README only           -> BLOCK" 1 "${SRC}changelog.d/README.md" "changelog.d/README.md"
+  fchk "product code + nested fragment path  -> BLOCK" 1 "${SRC}changelog.d/sub/x.fixed.md" "changelog.d/sub/x.fixed.md"
+  fchk "security fragment, normal branch     -> BLOCK" 1 "${SRC}changelog.d/s.security.md" "changelog.d/s.security.md"
+  fchk "security fragment + public marker    -> pass" 0 "${SRC}changelog.d/s.security.md" "changelog.d/s.security.md" \
+    "Release-Note: security-public -- advisory already published upstream"
+  fchk "security fragment removed (the cut)  -> pass" 0 "changelog.d/s.security.md" ""
+  fchk "security line inside a fixed fragment-> BLOCK" 1 "${SRC}${F1}" "$F1" "" \
+    "Security: a client could read a response meant for another client."
+  fchk "same, landing branch + marker        -> pass" 0 "${SRC}${F1}" "$F1" \
+    "Release-Note: landing -- the 2.9.0 release landing" \
+    "Security: a client could read a response meant for another client." landing/2.9.0
+
   # The separator is a RUN, not one character. The gate's own help text
   # suggests `Release-Note: none -- <why>`, so the double hyphen has to work;
   # before it did, the second `-` survived into the reason and counted toward
@@ -345,6 +389,13 @@ self_test() {
   e2e "security + landing/ branch + marker-> pass " 0 \
     --files-from "$tmp/files-sec.txt" --changelog-added-from "$tmp/secadd.txt" \
     --haystack-from "$tmp/landing.txt" --head-ref landing/2.9.0
+  printf 'src/worker/rewrite.cc\nchangelog.d/x-y-z.fixed.md\n' > "$tmp/files-frag.txt"
+  printf 'changelog.d/x-y-z.fixed.md\n' > "$tmp/frags.txt"
+  e2e "fragment listed in --fragments-from-> pass " 0 \
+    --files-from "$tmp/files-frag.txt" --fragments-from "$tmp/frags.txt"
+  e2e "fragment without --fragments-from  -> BLOCK" 1 --files-from "$tmp/files-frag.txt"
+  e2e "--fragments-from missing           -> BLOCK" 1 \
+    --files-from "$tmp/files-frag.txt" --fragments-from "$tmp/nope.txt"
   e2e "no arguments at all                -> BLOCK" 1
   e2e "unresolvable base                  -> BLOCK" 1 --base 0000000000000000000000000000000000000000
 
@@ -366,6 +417,7 @@ HEAD="HEAD"
 FILES_FROM=""
 HAYSTACK_FROM=""
 CHANGELOG_ADDED_FROM=""
+FRAGMENTS_FROM=""
 HEAD_REF="${GITHUB_HEAD_REF:-}"
 
 while [ $# -gt 0 ]; do
@@ -376,6 +428,7 @@ while [ $# -gt 0 ]; do
     --files-from) FILES_FROM="${2:-}"; shift 2 ;;
     --haystack-from) HAYSTACK_FROM="${2:-}"; shift 2 ;;
     --changelog-added-from) CHANGELOG_ADDED_FROM="${2:-}"; shift 2 ;;
+    --fragments-from) FRAGMENTS_FROM="${2:-}"; shift 2 ;;
     --head-ref) HEAD_REF="${2:-}"; shift 2 ;;
     -h|--help)
       sed -n '6,28p' "${BASH_SOURCE[0]}"
@@ -410,7 +463,15 @@ if [ -n "$FILES_FROM" ]; then
     fi
     SECADD="$(cat "$CHANGELOG_ADDED_FROM")"
   fi
-  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$SECADD" "$HEAD_REF"
+  FRAGS=""
+  if [ -n "$FRAGMENTS_FROM" ]; then
+    if [ ! -f "$FRAGMENTS_FROM" ]; then
+      echo "FAILED: --fragments-from '$FRAGMENTS_FROM' does not exist." >&2
+      exit 1
+    fi
+    FRAGS="$(cat "$FRAGMENTS_FROM")"
+  fi
+  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$SECADD" "$HEAD_REF" "$FRAGS"
   exit $?
 fi
 
@@ -434,6 +495,8 @@ CHANGED="$(git diff --name-only "$MERGE_BASE" "$HEAD")"
 COMMIT_MESSAGES="$(git log --format='%B' "$MERGE_BASE..$HEAD")"
 HAYSTACK="$(printf '%s\n%s\n' "$COMMIT_MESSAGES" "${PR_BODY:-}")"
 
-SECADD="$(git diff -U0 "$MERGE_BASE" "$HEAD" -- CHANGELOG.md | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)"
+# Added or modified fragments only (a deletion is not a note).
+FRAGS="$(git diff --name-only --diff-filter=AM "$MERGE_BASE" "$HEAD" -- changelog.d || true)"
+SECADD="$(git diff -U0 "$MERGE_BASE" "$HEAD" -- CHANGELOG.md ':(glob)changelog.d/*.md' ':!changelog.d/README.md' | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)"
 
-evaluate_release_note "$CHANGED" "$HAYSTACK" "$SECADD" "$HEAD_REF"
+evaluate_release_note "$CHANGED" "$HAYSTACK" "$SECADD" "$HEAD_REF" "$FRAGS"

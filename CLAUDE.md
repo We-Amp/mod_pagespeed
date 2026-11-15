@@ -614,7 +614,9 @@ Docker release images via `docker/build-release.sh`.
 
 ## Git Workflow Rules
 
-- **A change to `src/` or `lib/` needs a `CHANGELOG.md` entry in the same PR.**
+- **A change to `src/` or `lib/` needs a changelog fragment in the same PR:**
+  `changelog.d/<branch-slug>.<category>.md` (see `changelog.d/README.md`).
+  Do not edit `CHANGELOG.md` directly; the release cut folds the fragments in.
   Enforced by `tools/ci/check_release_note.sh` in CI. Where the change is
   genuinely invisible to users, record that instead — `Release-Note: none —
   <reason>` in a commit message — rather than leaving the question unanswered.

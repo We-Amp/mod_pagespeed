@@ -303,6 +303,37 @@ jobs:
           fi
           bash tools/ci/check_optimizer_tag_version.sh "$TAG" "$RUNNER_TEMP/VERSION.txt" "$@"
 
+      # The cut folds changelog.d/ into CHANGELOG.md (RELEASING.md). A
+      # release commit that still holds fragments would ship notes nobody
+      # folded in. A tag from before changelog.d/ existed has no directory
+      # (404) and passes; a prerelease, and a dry run of an unfinished
+      # release, only warn.
+      - name: Verify the release commit holds no unfolded changelog fragments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_SHA: ${{ steps.derive.outputs.tag_sha }}
+          PRERELEASE: ${{ steps.derive.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if ! names="$(gh api "repos/${GITHUB_REPOSITORY}/contents/changelog.d?ref=${TAG_SHA:-$GITHUB_SHA}" --jq '.[].name' 2>"$RUNNER_TEMP/frag.err")"; then
+            if grep -q 'HTTP 404' "$RUNNER_TEMP/frag.err"; then
+              echo "::notice::no changelog.d/ at this commit; nothing to check"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/frag.err" >&2
+            exit 1
+          fi
+          left="$(printf '%s\n' "$names" | grep -vFx 'README.md' || true)"
+          if [ -n "$left" ]; then
+            msg="changelog.d/ still holds fragments the cut did not fold into CHANGELOG.md: $(printf '%s' "$left" | tr '\n' ' ')(run python3 -I tools/changelog/assemble.py in the cut PR)"
+            if [ -z "$TAG_SHA" ] || [ "$PRERELEASE" = true ]; then
+              echo "::warning::$msg"
+            else
+              echo "::error::$msg"
+              exit 1
+            fi
+          fi
+
   # ---------------------------------------------------------------------
   # Linux packages. One step list (YAML anchor) for three jobs: amd64 on the
   # fleet, its hosted twin while the fleet is off, and arm64 hosted. The job

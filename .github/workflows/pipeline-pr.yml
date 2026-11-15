@@ -235,6 +235,25 @@ jobs:
       - name: Release-note gate - self-test
         run: bash tools/ci/check_release_note.sh --self-test
 
+      # Changelog fragment tools (changelog.d/README.md). A branch that
+      # predates them has nothing to self-test; the lint below takes main's
+      # copy for such a branch.
+      - name: Changelog fragment tools - self-tests
+        if: ${{ hashFiles('tools/changelog/assemble.py') != '' }}
+        run: |
+          python3 -I tools/changelog/assemble.py --self-test
+          python3 -I tools/changelog/to_fragment.py --self-test
+
+      - name: Changelog fragments are well formed
+        run: |
+          tool=tools/changelog/assemble.py
+          if [ ! -f "$tool" ]; then
+            git fetch --quiet --depth=1 origin main
+            tool="${RUNNER_TEMP}/assemble.py"
+            git show FETCH_HEAD:tools/changelog/assemble.py > "$tool"
+          fi
+          python3 -I "$tool" --lint --repo-root "$PWD"
+
       # Inputs come from the API rather than git, so the gate works on the
       # depth-1 checkout above. The pull request body is read live, not from
       # the event payload: the payload is frozen at event time, so after a
@@ -254,8 +273,12 @@ jobs:
           gh api --paginate "${api}/commits" \
             --jq '.[].commit.message' > "${RUNNER_TEMP}/release-note-haystack.txt"
           gh api "${api}" --jq '.body // ""' >> "${RUNNER_TEMP}/release-note-haystack.txt"
-          # Lines the change adds to CHANGELOG.md (a missing patch fails closed).
-          gh api --paginate "${api}/files" --jq '.[] | select(.filename=="CHANGELOG.md") | (.patch // error("no patch for CHANGELOG.md"))' \
+          # Fragments the change adds or modifies (a deleted one is not a note).
+          gh api --paginate "${api}/files" --jq '.[] | select((.status=="added" or .status=="modified") and (.filename|test("^changelog\\.d/[^/]+\\.md$")) and .filename!="changelog.d/README.md") | .filename' \
+            > "${RUNNER_TEMP}/release-note-fragments.txt"
+          # Lines the change adds to CHANGELOG.md and to those fragments, so a
+          # security entry hidden in any of them is seen (a missing patch fails closed).
+          gh api --paginate "${api}/files" --jq '.[] | select(.filename=="CHANGELOG.md" or ((.status=="added" or .status=="modified") and (.filename|test("^changelog\\.d/[^/]+\\.md$")) and .filename!="changelog.d/README.md")) | (.patch // error("no patch for " + .filename))' \
             | { grep -E '^\+' || true; } | { grep -vE '^\+\+\+' || true; } | sed 's/^+//' \
             > "${RUNNER_TEMP}/release-note-changelog-added.txt"
           echo "collected $(wc -l < "${RUNNER_TEMP}/release-note-files.txt" | tr -d ' ') changed file name(s)"
@@ -265,7 +288,15 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          bash tools/ci/check_release_note.sh \
+          # A branch that predates --fragments-from takes the gate from main.
+          gate=tools/ci/check_release_note.sh
+          if ! grep -q -e '--fragments-from' "$gate"; then
+            git fetch --quiet --depth=1 origin main
+            gate="${RUNNER_TEMP}/check_release_note.sh"
+            git show FETCH_HEAD:tools/ci/check_release_note.sh > "$gate"
+          fi
+          bash "$gate" \
+            --fragments-from "${RUNNER_TEMP}/release-note-fragments.txt" \
             --files-from "${RUNNER_TEMP}/release-note-files.txt" \
             --haystack-from "${RUNNER_TEMP}/release-note-haystack.txt" \
             --changelog-added-from "${RUNNER_TEMP}/release-note-changelog-added.txt" \
