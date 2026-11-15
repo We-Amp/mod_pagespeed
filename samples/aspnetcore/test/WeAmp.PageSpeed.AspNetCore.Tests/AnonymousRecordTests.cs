@@ -14,10 +14,12 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Matching;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 using Xunit;
 
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
@@ -78,47 +80,42 @@ public class AnonymousRecordTests : IDisposable
         p.RequireAssertion(c =>
             c.Resource is HttpContext h && h.Request.Headers.ContainsKey(PassHeader));
 
-    private async Task<WebApplication?> StartAsync(
-        Action<WebApplication> map, bool asyncCss = false)
+    // A missing native library fails the test: the theories are skipped up
+    // front when it is absent locally (NativeLibTheory), and required on CI.
+    private async Task<WebApplication> StartAsync(
+        Action<WebApplication> map, bool asyncCss = false,
+        Action<WebApplication>? afterPageSpeed = null,
+        Action<PageSpeedOptions>? options = null,
+        bool explicitRouting = true,
+        Action<IServiceCollection>? services = null)
     {
-        WebApplication app;
-        try
+        var builder = WebApplication.CreateBuilder(Array.Empty<string>());
+        builder.WebHost.UseTestServer();
+        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        builder.Services.AddPageSpeed(opts =>
         {
-            var builder = WebApplication.CreateBuilder(Array.Empty<string>());
-            builder.WebHost.UseTestServer();
-            builder.Logging.SetMinimumLevel(LogLevel.Warning);
-            builder.Services.AddPageSpeed(opts =>
-            {
-                opts.Cache.VolumePath = Path.Combine(_dir, "volume.dat");
-                opts.Cache.VolumeSizeBytes = 16 * 1024 * 1024;
-                opts.Worker.AutoStart = false;  // standalone: no worker
-                opts.Html.EnableAsyncCss = asyncCss;
-            });
-            builder.Services.AddAuthentication(SchemeName)
-                .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>(SchemeName, null);
-            builder.Services.AddAuthorization();
-            app = builder.Build();
-        }
-        catch (DllNotFoundException)
-        {
-            return null;  // native library not available
-        }
+            opts.Cache.VolumePath = Path.Combine(_dir, "volume.dat");
+            opts.Cache.VolumeSizeBytes = 16 * 1024 * 1024;
+            opts.Worker.AutoStart = false;  // standalone: no worker
+            opts.Html.EnableAsyncCss = asyncCss;
+            options?.Invoke(opts);
+        });
+        builder.Services.AddAuthentication(SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>(SchemeName, null);
+        builder.Services.AddAuthorization();
+        services?.Invoke(builder.Services);
+        var app = builder.Build();
 
         app.UsePageSpeed();
-        app.UseRouting();
+        afterPageSpeed?.Invoke(app);
+        // Without an explicit call, the host inserts routing at the start of
+        // the pipeline, ahead of UsePageSpeed().
+        if (explicitRouting) app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();
         map(app);
 
-        try
-        {
-            await app.StartAsync();
-        }
-        catch (DllNotFoundException)
-        {
-            await app.DisposeAsync();
-            return null;  // native library not available
-        }
+        await app.StartAsync();
         return app;
     }
 
@@ -129,7 +126,7 @@ public class AnonymousRecordTests : IDisposable
         WebApplication app, string path, Func<HttpContext, string> body) =>
         app.MapGet(path, (HttpContext ctx) =>
         {
-            _served.AddOrUpdate(path, 1, (_, n) => n + 1);
+            Count(ctx, path);
             ctx.Response.Headers.CacheControl = "public, max-age=3600";
             return Results.Text(body(ctx), "text/css");
         });
@@ -137,12 +134,25 @@ public class AnonymousRecordTests : IDisposable
     private RouteHandlerBuilder Page(WebApplication app, string path, string html) =>
         app.MapGet(path, (HttpContext ctx) =>
         {
-            _served.AddOrUpdate(path, 1, (_, n) => n + 1);
+            Count(ctx, path);
             ctx.Response.Headers.CacheControl = "public, max-age=60";
             return Results.Text(html, "text/html");
         });
 
     private int Served(string path) => _served.TryGetValue(path, out var n) ? n : 0;
+
+    // Requests from 224.0.0.0 are the middleware's own anonymous check before
+    // a response is stored (AnonymousFetchCheck); Served counts the others.
+    private readonly ConcurrentDictionary<string, int> _checks = new();
+
+    private void Count(HttpContext ctx, string path)
+    {
+        var counter = AgentSelfFetch.Label.Equals(ctx.Connection.RemoteIpAddress)
+            ? _checks : _served;
+        counter.AddOrUpdate(path, 1, (_, n) => n + 1);
+    }
+
+    private int Checks(string path) => _checks.TryGetValue(path, out var n) ? n : 0;
 
     private static HttpClient Client(WebApplication app)
     {
@@ -202,7 +212,7 @@ public class AnonymousRecordTests : IDisposable
         _ => throw new ArgumentException(kind),
     };
 
-    [Theory]
+    [NativeLibTheory]
     [MemberData(nameof(Admitted))]
     public async Task ResponseToNonAnonymousRequest_IsNotCached(string kind, bool html)
     {
@@ -215,7 +225,6 @@ public class AnonymousRecordTests : IDisposable
                 : Css(a, path, HeldCss);
             if (kind == "authorize-endpoint") target.RequireAuthorization(PassPolicy);
         });
-        if (app == null) return;
         try
         {
             var client = Client(app);
@@ -262,7 +271,7 @@ public class AnonymousRecordTests : IDisposable
     // Positive control for the theory above: the same responses to anonymous
     // requests are stored and served from the cache, also on an endpoint
     // with an authorization requirement that allows anonymous access.
-    [Theory]
+    [NativeLibTheory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -276,7 +285,6 @@ public class AnonymousRecordTests : IDisposable
             var target = html ? Page(a, path, PageHtml) : Css(a, path, HeldCss);
             if (allowAnonymous) target.RequireAuthorization(PassPolicy).AllowAnonymous();
         });
-        if (app == null) return;
         try
         {
             var client = Client(app);
@@ -286,6 +294,8 @@ public class AnonymousRecordTests : IDisposable
             second.EnsureSuccessStatusCode();
             Assert.Equal("HIT", XPageSpeed(second));
             Assert.Equal(1, Served(path));
+            // Asked once more as an anonymous client before it was stored.
+            Assert.Equal(1, Checks(path));
         }
         finally
         {
@@ -296,7 +306,7 @@ public class AnonymousRecordTests : IDisposable
 
     // ── A stylesheet held back from anonymous clients ───────────────
 
-    [Theory]
+    [NativeLibTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CriticalCss_NeverFromAStylesheetFirstFetchedBySignedInClient(bool asyncCss)
@@ -313,7 +323,6 @@ public class AnonymousRecordTests : IDisposable
             Css(a, "/held.css", HeldCss).RequireAuthorization();
             Page(a, "/", page);
         }, asyncCss);
-        if (app == null) return;
         try
         {
             var client = Client(app);
@@ -356,8 +365,9 @@ public class AnonymousRecordTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task CriticalCss_NeverCarriesAnotherUsersStylesheet()
+    [NativeLibTheory]
+    [InlineData("alice")]
+    public async Task CriticalCss_NeverCarriesAnotherUsersStylesheet(string user1)
     {
         // One URL, a body per signed-in user.
         const string page =
@@ -368,18 +378,17 @@ public class AnonymousRecordTests : IDisposable
         var app = await StartAsync(a =>
         {
             Css(a, "/theme.css", ctx =>
-                ctx.Request.Headers[UserHeader].ToString() == "alice"
+                ctx.Request.Headers[UserHeader].ToString() == user1
                     ? "header{background:#aa0001}"
                     : "header{background:#bb0002}");
             Page(a, "/", page);
         });
-        if (app == null) return;
         try
         {
             var client = Client(app);
             for (var i = 0; i < 3; i++)
             {
-                (await client.SendAsync(Get("/theme.css", false, (UserHeader, "alice"))))
+                (await client.SendAsync(Get("/theme.css", false, (UserHeader, user1))))
                     .EnsureSuccessStatusCode();
             }
             foreach (var user in new[] { "bob", "" })
@@ -399,16 +408,644 @@ public class AnonymousRecordTests : IDisposable
         }
     }
 
+    // ── Responses the application gives only to some clients ────────
+
+    private static readonly IPAddress OfficePeer = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress OtherPeer = IPAddress.Parse("198.51.100.7");
+    private const string KeyHeader = "X-Test-Key";
+
+    // Anonymous requests the address rule below refused, by path.
+    private readonly ConcurrentDictionary<string, int> _ruleChecks = new();
+
+    private int RuleChecks(string path) =>
+        _ruleChecks.TryGetValue(path, out var n) ? n : 0;
+
+    // Middleware after UsePageSpeed() that admits /office/* only from
+    // OfficePeer.
+    private void OfficeAddressRule(WebApplication app) =>
+        app.Use(async (ctx, next) =>
+        {
+            if (AgentSelfFetch.Label.Equals(ctx.Connection.RemoteIpAddress))
+                _ruleChecks.AddOrUpdate(ctx.Request.Path.Value!, 1, (_, n) => n + 1);
+            if (ctx.Request.Path.StartsWithSegments("/office") &&
+                !OfficePeer.Equals(ctx.Connection.RemoteIpAddress))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+            await next();
+        });
+
+    private sealed record Answer(HttpStatusCode Status, string Body, string XPageSpeed);
+
+    private static Task<Answer> SendFrom(
+        WebApplication app, IPAddress peer, string path, bool html,
+        params (string Name, string Value)[] headers) =>
+        SendFrom(app, peer, path, html, null, 0, headers);
+
+    private static async Task<Answer> SendFrom(
+        WebApplication app, IPAddress peer, string path, bool html,
+        int? hostPort, int localPort,
+        params (string Name, string Value)[] headers)
+    {
+        var ctx = await app.GetTestServer().SendAsync(c =>
+        {
+            c.Request.Method = "GET";
+            c.Request.Scheme = "https";
+            c.Request.Host = hostPort is { } port
+                ? new HostString("localhost", port)
+                : new HostString("localhost");
+            if (localPort != 0) c.Connection.LocalPort = localPort;
+            c.Request.Path = path;
+            if (html) c.Request.Headers.Accept = "text/html";
+            foreach (var (name, value) in headers) c.Request.Headers[name] = value;
+            c.Connection.RemoteIpAddress = peer;
+        });
+        using var reader = new StreamReader(ctx.Response.Body);
+        return new Answer(
+            (HttpStatusCode)ctx.Response.StatusCode,
+            await reader.ReadToEndAsync(),
+            ctx.Response.Headers["X-PageSpeed"].ToString());
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResponseAdmittedByClientAddress_IsNotServedToOtherClients(bool html)
+    {
+        var path = html ? "/office/target.html" : "/office/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, afterPageSpeed: OfficeAddressRule);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 2; i++)
+            {
+                var admitted = await SendFrom(app, OfficePeer, path, html);
+                Assert.Equal(HttpStatusCode.OK, admitted.Status);
+                Assert.Contains(html ? "<header>" : HeldMarker, admitted.Body);
+            }
+
+            var other = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.Forbidden, other.Status);
+            Assert.NotEqual("HIT", other.XPageSpeed);
+            Assert.DoesNotContain(HeldMarker, other.Body);
+            Assert.DoesNotContain("<header>", other.Body);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CriticalCss_NeverFromAStylesheetAdmittedByClientAddress(bool asyncCss)
+    {
+        const string page =
+            "<!doctype html><html><head>" +
+            "<link rel=\"stylesheet\" href=\"/open.css\">" +
+            "<link rel=\"stylesheet\" href=\"/office/held.css\">" +
+            "</head><body><header>Top</header><main><p>Hello</p></main>" +
+            "</body></html>";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            Css(a, "/office/held.css", HeldCss);
+            Page(a, "/", page);
+        }, asyncCss, afterPageSpeed: OfficeAddressRule);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 3; i++)
+            {
+                var primed = await SendFrom(app, OfficePeer, "/office/held.css", false);
+                Assert.Equal(HttpStatusCode.OK, primed.Status);
+                Assert.Contains(HeldMarker, primed.Body);
+            }
+
+            // The page for another client, built and then from the cache.
+            for (var i = 0; i < 2; i++)
+            {
+                var response = await SendFrom(app, OtherPeer, "/", true);
+                Assert.Equal(HttpStatusCode.OK, response.Status);
+                Assert.Contains("0a0a0a", CriticalBlock(response.Body));
+                Assert.DoesNotContain(HeldMarker, response.Body);
+            }
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResponseAdmittedByAppHeaderCheck_IsNotServedToOtherClients(bool html)
+    {
+        var path = html ? "/target.html" : "/target.css";
+        var app = await StartAsync(a =>
+        {
+            // The handler admits by a header the application reads itself.
+            a.MapGet(path, (HttpContext ctx) =>
+            {
+                Count(ctx, path);
+                if (!ctx.Request.Headers.ContainsKey(KeyHeader))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                ctx.Response.Headers.CacheControl = "public, max-age=3600";
+                return html
+                    ? Results.Text(PageHtml.Replace("Hello", HeldMarker), "text/html")
+                    : Results.Text(HeldCss, "text/css");
+            });
+            Css(a, "/open.css", OpenCss);
+        });
+        try
+        {
+            var client = Client(app);
+            (await client.GetAsync("/open.css")).EnsureSuccessStatusCode();
+            for (var i = 0; i < 2; i++)
+            {
+                var keyed = await client.SendAsync(Get(path, html, (KeyHeader, "k")));
+                Assert.Equal(HttpStatusCode.OK, keyed.StatusCode);
+                Assert.Contains(HeldMarker, await keyed.Content.ReadAsStringAsync());
+            }
+
+            var other = await client.SendAsync(Get(path, html));
+            Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+            Assert.NotEqual("HIT", XPageSpeed(other));
+            Assert.DoesNotContain(HeldMarker, await other.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // Positive control: a response the address rule does not restrict is
+    // stored when the first client to ask came from the admitted address.
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenResponseFirstFetchedFromAdmittedAddress_IsCached(bool html)
+    {
+        var path = html ? "/target.html" : "/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, afterPageSpeed: OfficeAddressRule);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OfficePeer, path, html)).Status);
+            var other = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.OK, other.Status);
+            Assert.Equal("HIT", other.XPageSpeed);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // ── What is stored: the anonymous request's response ────────────
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StoredResponse_IsTheAnonymousRequestsResponse(bool html)
+    {
+        var path = html ? "/target.html" : "/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            // 200 for every client; a client with the key header gets more.
+            a.MapGet(path, (HttpContext ctx) =>
+            {
+                Count(ctx, path);
+                ctx.Response.Headers.CacheControl = "public, max-age=3600";
+                var keyed = ctx.Request.Headers.ContainsKey(KeyHeader);
+                return html
+                    ? Results.Text(keyed ? PageHtml.Replace("Hello", HeldMarker) : PageHtml,
+                                   "text/html")
+                    : Results.Text(keyed ? HeldCss : OpenCss, "text/css");
+            });
+        });
+        try
+        {
+            var client = Client(app);
+            (await client.GetAsync("/open.css")).EnsureSuccessStatusCode();
+            var keyed = await client.SendAsync(Get(path, html, (KeyHeader, "k")));
+            Assert.Equal(HttpStatusCode.OK, keyed.StatusCode);
+            // The visitor gets its own response.
+            Assert.Contains(HeldMarker, await keyed.Content.ReadAsStringAsync());
+
+            var other = await client.SendAsync(Get(path, html));
+            var body = await other.Content.ReadAsStringAsync();
+            Assert.Equal("HIT", XPageSpeed(other));
+            Assert.DoesNotContain(HeldMarker, body);
+            Assert.Contains(html ? "<p>Hello</p>" : "0a0a0a", body);
+            Assert.Equal(1, Served(path));
+            Assert.Equal(1, Checks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData("set-cookie")]
+    [InlineData("private")]
+    [InlineData("no-store")]
+    public async Task AnonymousResponseThatMayNotBeStored_IsNotStored(string kind)
+    {
+        const string path = "/target.css";
+        var app = await StartAsync(a =>
+            a.MapGet(path, (HttpContext ctx) =>
+            {
+                Count(ctx, path);
+                // A visitor with the key header gets a shareable response;
+                // a request without it does not.
+                var keyed = ctx.Request.Headers.ContainsKey(KeyHeader);
+                ctx.Response.Headers.CacheControl = keyed || kind == "set-cookie"
+                    ? "public, max-age=3600"
+                    : kind + ", max-age=3600";
+                if (!keyed && kind == "set-cookie")
+                    ctx.Response.Headers.SetCookie = "s=new; Path=/";
+                return Results.Text(OpenCss, "text/css");
+            }));
+        try
+        {
+            var client = Client(app);
+            for (var i = 0; i < 2; i++)
+            {
+                var keyed = await client.SendAsync(Get(path, false, (KeyHeader, "k")));
+                Assert.Equal(HttpStatusCode.OK, keyed.StatusCode);
+                Assert.NotEqual("HIT", XPageSpeed(keyed));
+            }
+            Assert.Equal(2, Served(path));
+            // Refused once, then remembered.
+            Assert.Equal(1, Checks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefusedUrl_IsNotAskedAgainOnEveryRequest(bool html)
+    {
+        var path = html ? "/office/target.html" : "/office/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, afterPageSpeed: OfficeAddressRule);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 4; i++)
+            {
+                var admitted = await SendFrom(app, OfficePeer, path, html);
+                Assert.Equal(HttpStatusCode.OK, admitted.Status);
+            }
+            Assert.Equal(4, Served(path));
+            // Refused once, then remembered for a while.
+            Assert.Equal(1, RuleChecks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordResponsesOff_StoresNothingAndMakesNoSecondRequest(bool html)
+    {
+        var path = html ? "/target.html" : "/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, options: o => o.RecordResponses = false);
+        try
+        {
+            var client = Client(app);
+            for (var i = 0; i < 2; i++)
+            {
+                var response = await client.SendAsync(Get(path, html));
+                response.EnsureSuccessStatusCode();
+                Assert.NotEqual("HIT", XPageSpeed(response));
+            }
+            Assert.Equal(2, Served(path));
+            Assert.Equal(0, Checks(path));
+            Assert.Equal(0, Checks("/open.css"));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // An endpoint the pipeline selects after UsePageSpeed() is selected again
+    // for the anonymous request, from the URL that reached the middleware.
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EndpointSelectedAfterPageSpeed_IsSelectedAgainForTheAnonymousRequest(
+        bool html)
+    {
+        var path = html ? "/theme.html" : "/theme.css";
+        var officePath = "/office" + path;
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html)
+            {
+                Page(a, path, PageHtml);
+                Page(a, officePath, PageHtml.Replace("Hello", HeldMarker));
+            }
+            else
+            {
+                Css(a, path, OpenCss);
+                Css(a, officePath, HeldCss);
+            }
+        }, afterPageSpeed: a => a.Use(async (ctx, next) =>
+        {
+            // Clients from the office address get the office variant.
+            if (OfficePeer.Equals(ctx.Connection.RemoteIpAddress) &&
+                ctx.Request.Path == path)
+                ctx.Request.Path = officePath;
+            await next();
+        }));
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            var admitted = await SendFrom(app, OfficePeer, path, html);
+            Assert.Equal(HttpStatusCode.OK, admitted.Status);
+            Assert.Contains(HeldMarker, admitted.Body);
+
+            var other = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.OK, other.Status);
+            Assert.Equal("HIT", other.XPageSpeed);
+            Assert.DoesNotContain(HeldMarker, other.Body);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // The cache key has no port: a response one listener gives is not served
+    // to clients of another.
+    [NativeLibTheory]
+    [InlineData("local-port", false)]
+    [InlineData("local-port", true)]
+    [InlineData("host-port", false)]
+    [InlineData("host-port", true)]
+    public async Task ResponseAdmittedByListenerPort_IsNotServedOnOtherPorts(
+        string by, bool html)
+    {
+        var path = html ? "/office/target.html" : "/office/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, afterPageSpeed: a => a.Use(async (ctx, next) =>
+        {
+            var port = by == "local-port" ? ctx.Connection.LocalPort : ctx.Request.Host.Port;
+            if (ctx.Request.Path.StartsWithSegments("/office") && port != 8443)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+            await next();
+        }));
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 2; i++)
+            {
+                var admitted = by == "local-port"
+                    ? await SendFrom(app, OtherPeer, path, html, null, 8443)
+                    : await SendFrom(app, OtherPeer, path, html, 8443, 0);
+                Assert.Equal(HttpStatusCode.OK, admitted.Status);
+                Assert.Contains(html ? "<header>" : HeldMarker, admitted.Body);
+            }
+
+            var other = by == "local-port"
+                ? await SendFrom(app, OtherPeer, path, html, null, 443)
+                : await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.Forbidden, other.Status);
+            Assert.NotEqual("HIT", other.XPageSpeed);
+            Assert.DoesNotContain(HeldMarker, other.Body);
+            Assert.DoesNotContain("<header>", other.Body);
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // ── Endpoints selected before UsePageSpeed() ────────────────────
+
+    // Positive control: with routing ahead of UsePageSpeed() (no explicit
+    // UseRouting()), a plain endpoint is still cached.
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PlainEndpointSelectedBeforePageSpeed_IsCached(bool html)
+    {
+        var path = html ? "/target.html" : "/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, explicitRouting: false);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            Assert.Equal(HttpStatusCode.OK, (await SendFrom(app, OtherPeer, path, html)).Status);
+            var second = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal("HIT", second.XPageSpeed);
+            Assert.Equal(1, Checks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EndpointMatchedByHostPortBeforePageSpeed_IsNotStored(bool html)
+    {
+        var path = html ? "/office/target.html" : "/office/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            var target = html ? Page(a, path, PageHtml) : Css(a, path, HeldCss);
+            target.RequireHost("*:8443");
+        }, explicitRouting: false);
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 2; i++)
+            {
+                var admitted = await SendFrom(app, OtherPeer, path, html, 8443, 0);
+                Assert.Equal(HttpStatusCode.OK, admitted.Status);
+                Assert.Contains(html ? "<header>" : HeldMarker, admitted.Body);
+            }
+
+            var other = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.NotFound, other.Status);
+            Assert.NotEqual("HIT", other.XPageSpeed);
+            Assert.DoesNotContain(HeldMarker, other.Body);
+            Assert.DoesNotContain("<header>", other.Body);
+            // Refused without a second request.
+            Assert.Equal(0, Checks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // A matcher policy the middleware does not know, admitting /office/*
+    // endpoints only for OfficePeer.
+    private sealed class OfficeAddressMatcherPolicy : MatcherPolicy, IEndpointSelectorPolicy
+    {
+        public override int Order => 0;
+
+        public bool AppliesToEndpoints(IReadOnlyList<Endpoint> endpoints) =>
+            endpoints.Any(e => e is RouteEndpoint r &&
+                               (r.RoutePattern.RawText ?? "").StartsWith("/office"));
+
+        public Task ApplyAsync(HttpContext httpContext, CandidateSet candidates)
+        {
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (!OfficePeer.Equals(httpContext.Connection.RemoteIpAddress))
+                    candidates.SetValidity(i, false);
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    [NativeLibTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EndpointSelectedByUnknownMatcherPolicyBeforePageSpeed_IsNotStored(bool html)
+    {
+        var path = html ? "/office/target.html" : "/office/target.css";
+        var app = await StartAsync(a =>
+        {
+            Css(a, "/open.css", OpenCss);
+            if (html) Page(a, path, PageHtml); else Css(a, path, HeldCss);
+        }, explicitRouting: false,
+           services: s => s.AddSingleton<MatcherPolicy, OfficeAddressMatcherPolicy>());
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await SendFrom(app, OtherPeer, "/open.css", false)).Status);
+            for (var i = 0; i < 2; i++)
+            {
+                var admitted = await SendFrom(app, OfficePeer, path, html);
+                Assert.Equal(HttpStatusCode.OK, admitted.Status);
+                Assert.Contains(html ? "<header>" : HeldMarker, admitted.Body);
+            }
+
+            var other = await SendFrom(app, OtherPeer, path, html);
+            Assert.Equal(HttpStatusCode.NotFound, other.Status);
+            Assert.NotEqual("HIT", other.XPageSpeed);
+            Assert.DoesNotContain(HeldMarker, other.Body);
+            Assert.DoesNotContain("<header>", other.Body);
+            Assert.Equal(0, Checks(path));
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    // A HEAD miss says nothing about the GET that would be stored: its
+    // refusal is not remembered.
+    [NativeLibTheory]
+    [InlineData("/target.css")]
+    public async Task RefusedHeadMiss_DoesNotHoldBackTheGet(string path)
+    {
+        var app = await StartAsync(a =>
+            a.MapMethods(path, new[] { "GET", "HEAD" }, async (HttpContext ctx) =>
+            {
+                Count(ctx, path);
+                ctx.Response.Headers.CacheControl = "public, max-age=3600";
+                ctx.Response.ContentType = "text/css";
+                // This app writes no body for a HEAD to the anonymous request.
+                if (HttpMethods.IsHead(ctx.Request.Method) &&
+                    AgentSelfFetch.Label.Equals(ctx.Connection.RemoteIpAddress))
+                    return;
+                await ctx.Response.WriteAsync(OpenCss);
+            }));
+        try
+        {
+            var client = Client(app);
+            var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path));
+            Assert.Equal(HttpStatusCode.OK, head.StatusCode);
+            (await client.GetAsync(path)).EnsureSuccessStatusCode();
+            var hit = await client.GetAsync(path);
+            Assert.Equal("HIT", XPageSpeed(hit));
+            Assert.Contains("0a0a0a", await hit.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
     // ── Entries recorded without the stamp ──────────────────────────
 
-    [Theory]
+    [NativeLibTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CacheEntryWithoutAnonymousRecordStamp_IsAMiss(bool stamped)
     {
         const string path = "/planted.css";
         var app = await StartAsync(a => Css(a, path, OpenCss));
-        if (app == null) return;
         try
         {
             byte flags = CacheFlags.HeadersClassified;

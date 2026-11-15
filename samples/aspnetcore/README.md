@@ -131,12 +131,17 @@ an authorization requirement such as `[Authorize]` or `RequireAuthorization()`
 (unless the endpoint also allows anonymous access). A page served to a
 signed-in client is still optimized for that response, and it is not stored.
 Responses that set a cookie or carry `Cache-Control: private` or `no-store`
-are not stored either. List paths that your app restricts by client address,
-such as IIS `ipSecurity` rules or your own middleware, in `ExcludePaths`.
-List paths whose access your app checks without setting `HttpContext.User`,
-such as its own session or login cookie, an API key in a custom header, or a
-client certificate checked by app code or required at the TLS listener, in
-`ExcludePaths` too.
+are not stored either. On a cache miss whose response would be stored, the
+middleware requests the same URL once more as an anonymous request (no
+signed-in user, cookies or credentials, from the client address `224.0.0.0`)
+and stores that response; the visitor still gets its own. Your app therefore
+handles each response that gets cached twice. Put middleware and endpoints
+that admit clients by address or identity after `UsePageSpeed()`, or list
+their paths in `ExcludePaths`, and call `UseRouting()` after `UsePageSpeed()`:
+an endpoint selected ahead of it is cached only when nothing about its
+selection can depend on the client. If your app's GET handlers have side effects,
+set `RecordResponses` to `false`: pages are still optimized, and nothing new
+is cached.
 
 ## Platform Support
 

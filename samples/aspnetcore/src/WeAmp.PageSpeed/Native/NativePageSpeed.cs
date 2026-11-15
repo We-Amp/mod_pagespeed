@@ -270,6 +270,12 @@ internal static partial class NativePageSpeed
         IntPtr names, IntPtr values, nuint count,
         out int verdict, out int stored);
 
+    // Classifies a complete response header set without a cache (PS_API 1.4).
+    // Returns ps_sidecar_verdict_t as int, or -1 on a NULL table or element.
+    [LibraryImport(Lib, EntryPoint = "ps_headers_sidecar_classify")]
+    internal static partial int HeadersSidecarClassify(
+        IntPtr names, IntPtr values, nuint count);
+
     // ---------- cache management ----------
 
     [LibraryImport(Lib, EntryPoint = "ps_cache_alternate_exists",

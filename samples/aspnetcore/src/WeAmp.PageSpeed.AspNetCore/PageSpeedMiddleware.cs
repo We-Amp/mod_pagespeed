@@ -91,6 +91,7 @@ public sealed class PageSpeedMiddleware
     private readonly WorkerNotificationService _notifier;
     private readonly ILogger<PageSpeedMiddleware> _logger;
     private readonly IOptionsMonitor<HostFilteringOptions>? _hostFiltering;
+    private readonly RefusalMemo _refusals = new();
 
     /// <summary>
     /// Creates a new PageSpeed middleware instance.
@@ -292,6 +293,9 @@ public sealed class PageSpeedMiddleware
             capture);
 
         // ── CACHE MISS — proxy to origin ─────────────────────────
+        // Endpoint and route values set ahead of this middleware, for the
+        // anonymous request a stored response comes from.
+        var seed = AnonymousFetchCheck.Seed.Capture(context);
         var originalBody = context.Response.Body;
         using var buffer = MsPool.GetStream("PageSpeed.Buffer");
         context.Response.Body = buffer;
@@ -330,10 +334,12 @@ public sealed class PageSpeedMiddleware
             return;
         }
 
-        // Only the response to an anonymous request is stored. Evaluated now,
-        // after the application ran, so authentication and endpoint selection
-        // placed after this middleware are visible.
-        var record = IsAnonymousRequest(context);
+        // Only the response to an anonymous request leads to a store. Evaluated
+        // now, after the application ran, so authentication and endpoint
+        // selection placed after this middleware are visible. What is stored is
+        // the answer to a second, anonymous request (StoreAnonymousAnswerAsync).
+        var record = opts.RecordResponses && IsAnonymousRequest(context) &&
+                     !_refusals.IsRefused(RefusalMemo.Key(scheme, hostname, url));
 
         // Classify response content type (managed, no P/Invoke needed).
         var responseContentType = context.Response.ContentType;
@@ -352,8 +358,7 @@ public sealed class PageSpeedMiddleware
             case PageSpeedContentType.Html:
                 await HandleHtmlMiss(
                     context, originalBody, buffer, opts,
-                    url, hostname, scheme, mask, cacheability,
-                    cacheControl, capture, record);
+                    url, hostname, scheme, mask, capture, record, seed);
                 break;
 
             case PageSpeedContentType.Image:
@@ -370,8 +375,7 @@ public sealed class PageSpeedMiddleware
                 await HandleAssetMiss(
                     context, originalBody, buffer, opts,
                     url, hostname, scheme, mask,
-                    psContentType, responseContentType,
-                    cacheability, cacheControl, capture);
+                    psContentType, capture, seed);
                 break;
 
             default:
@@ -1068,19 +1072,19 @@ public sealed class PageSpeedMiddleware
     }
 
     /// <summary>
-    /// Handles an HTML cache MISS: transforms the HTML and, when
-    /// <paramref name="record"/> is set, caches it, writes early hints, and
-    /// notifies the worker. Otherwise the transformed page is served to this
-    /// client only.
+    /// Handles an HTML cache MISS: transforms the HTML for this client and,
+    /// when <paramref name="record"/> is set, caches the anonymous request's
+    /// page (<see cref="FetchAnonymousAnswerAsync"/>), transformed, writes its
+    /// early hints, and notifies the worker. Otherwise the transformed page is
+    /// served to this client only.
     /// </summary>
     private async Task HandleHtmlMiss(
         HttpContext context, Stream originalBody,
         RecyclableMemoryStream buffer, PageSpeedOptions opts,
         string url, string hostname, string scheme, uint mask,
-        ResponseCacheability cacheability,
-        string? cacheControl,
         MissCapture capture,
-        bool record)
+        bool record,
+        AnonymousFetchCheck.Seed seed)
     {
         // Size gate for HTML processing.
         if (buffer.Length > opts.MaxResponseBufferBytes ||
@@ -1118,20 +1122,34 @@ public sealed class PageSpeedMiddleware
 
                 if (!record) return;
 
+                // Stores the anonymous request's page, optimized, instead.
+                using var answer = await FetchAnonymousAnswerAsync(
+                    context, seed, url, hostname, scheme, capture);
+                if (answer == null) return;
+                if (answer.Body.Length > opts.MaxResponseBufferBytes ||
+                    !RequestClassifier.IsHtmlResponse(answer.Response))
+                {
+                    RememberRefusal(context, scheme, hostname, url);
+                    return;
+                }
+                using var stored = _htmlProcessor.Process(
+                    answer.Span, url, hostname, scheme);
+                if (!stored.Modified) return;
+
                 var cacheable = TryWriteToCache(
-                    url, hostname, scheme, output,
+                    url, hostname, scheme, stored.OutputMemory,
                     PageSpeedContentType.Html,
-                    context.Response.ContentType,
-                    result.NeedsRevalidation,
-                    capture,
-                    cacheControl);
+                    answer.Response.ContentType,
+                    stored.NeedsRevalidation,
+                    answer.Capture,
+                    answer.CacheControl);
 
                 if (cacheable)
                     TryWriteEarlyHints(
-                        url, hostname, scheme, result.EarlyHintsMemory);
+                        url, hostname, scheme, stored.EarlyHintsMemory);
 
                 // [Critical #2] Skip worker notification if no-transform.
-                if (cacheable && cacheability != ResponseCacheability.NoTransform &&
+                if (cacheable && answer.Cacheability != ResponseCacheability.NoTransform &&
                     !WithholdHtmlNotify(PageSpeedContentType.Html, hostname))
                 {
                     if (!_notifier.TryNotify(
@@ -1196,19 +1214,18 @@ public sealed class PageSpeedMiddleware
     }
 
     /// <summary>
-    /// Handles a cache MISS for images, CSS, and JS: caches the
-    /// original response and notifies the worker for optimization
-    /// (image transcoding, CSS/JS minification, compression).
+    /// Handles a cache MISS for images, CSS, and JS: serves this client's
+    /// response, caches the anonymous request's response for the same URL
+    /// (<see cref="FetchAnonymousAnswerAsync"/>), and notifies the worker for
+    /// optimization (image transcoding, CSS/JS minification, compression).
     /// </summary>
     private async Task HandleAssetMiss(
         HttpContext context, Stream originalBody,
         RecyclableMemoryStream buffer, PageSpeedOptions opts,
         string url, string hostname, string scheme, uint mask,
         PageSpeedContentType psContentType,
-        string? responseContentType,
-        ResponseCacheability cacheability,
-        string? cacheControl,
-        MissCapture capture)
+        MissCapture capture,
+        AnonymousFetchCheck.Seed seed)
     {
         // Pass through the original response to the client.
         buffer.Seek(0, SeekOrigin.Begin);
@@ -1226,24 +1243,150 @@ public sealed class PageSpeedMiddleware
             return;
         }
 
-        // Cache the original (identity) content.
-        var underlying = buffer.GetBuffer();
-        var data = new ReadOnlyMemory<byte>(
-            underlying, 0, (int)buffer.Length);
+        // Cache the anonymous request's original (identity) content.
+        using var answer = await FetchAnonymousAnswerAsync(
+            context, seed, url, hostname, scheme, capture);
+        if (answer == null) return;
+        if (answer.Body.Length == 0 || answer.Body.Length > opts.MaxAssetCacheBytes)
+        {
+            RememberRefusal(context, scheme, hostname, url);
+            return;
+        }
 
         var cacheable = TryWriteToCache(
-            url, hostname, scheme, data,
-            psContentType, responseContentType,
+            url, hostname, scheme, answer.Memory,
+            psContentType, answer.Response.ContentType,
             needsRevalidation: false,
-            capture: capture,
-            cacheControl: context.Response.Headers.CacheControl.ToString());
+            capture: answer.Capture,
+            cacheControl: answer.CacheControl);
 
         // [Critical #2] Skip worker notification if no-transform.
-        if (cacheable && cacheability != ResponseCacheability.NoTransform)
+        if (cacheable && answer.Cacheability != ResponseCacheability.NoTransform)
         {
             if (!_notifier.TryNotify(url, hostname, scheme, psContentType, mask,
                                      hostVouched: HostVouched(hostname)))
                 _logger.LogDebug("TryNotify failed for {Type}: {Url}", psContentType, url);
+        }
+    }
+
+    /// <summary>
+    /// The answer to the anonymous request for this URL, whose response is
+    /// what gets stored (see <see cref="AnonymousFetchCheck"/>).
+    /// </summary>
+    private sealed class AnonymousAnswer : IDisposable
+    {
+        public AnonymousAnswer(DefaultHttpContext check, RecyclableMemoryStream body)
+        {
+            Check = check;
+            Body = body;
+            Capture = new MissCapture(check.Response);
+        }
+
+        public DefaultHttpContext Check { get; }
+        public HttpResponse Response => Check.Response;
+        public RecyclableMemoryStream Body { get; }
+        public MissCapture Capture { get; }
+        public string CacheControl => Response.Headers.CacheControl.ToString();
+        public ResponseCacheability Cacheability => ClassifyCacheability(Response);
+        public ReadOnlyMemory<byte> Memory => new(Body.GetBuffer(), 0, (int)Body.Length);
+        public ReadOnlySpan<byte> Span => Memory.Span;
+
+        public void Dispose() => Body.Dispose();
+    }
+
+    /// <summary>
+    /// On a miss whose response would be stored, asks the rest of the
+    /// pipeline for the same URL as an anonymous client and returns that
+    /// answer when it has the visitor's status and media type and may itself
+    /// be stored (no cookie, not private or no-store, headers a hit can
+    /// replay). Returns null otherwise, and remembers the URL as refused for
+    /// a short time unless the request was cancelled. The anonymous request
+    /// is not made when the visitor's own response could not be stored.
+    /// </summary>
+    private async Task<AnonymousAnswer?> FetchAnonymousAnswerAsync(
+        HttpContext context, AnonymousFetchCheck.Seed seed,
+        string url, string hostname, string scheme, MissCapture visitorCapture)
+    {
+        if (!HttpMethods.IsGet(context.Request.Method) &&
+            !HttpMethods.IsHead(context.Request.Method))
+            return null;
+        // Nothing would be stored for the visitor's response either.
+        if (visitorCapture.Uncacheable || visitorCapture.UncacheableNow ||
+            !HeadersMayBeStored(visitorCapture.Headers))
+            return null;
+
+        // An endpoint selected ahead of this middleware in a way that may
+        // depend on the client would answer the anonymous request as it
+        // answered the visitor.
+        if (AnonymousFetchCheck.EndpointDependsOnClient(seed.Endpoint, context.RequestServices))
+        {
+            RememberRefusal(context, scheme, hostname, url);
+            _logger.LogDebug(
+                "Endpoint for {Url} was selected before UsePageSpeed() in a way that may depend on the client; not caching",
+                url);
+            return null;
+        }
+
+        var body = MsPool.GetStream("PageSpeed.Anonymous");
+        var answer = new AnonymousAnswer(
+            AnonymousFetchCheck.Create(context, seed, body), body);
+        bool keep = false;
+        try
+        {
+            if (!await AnonymousFetchCheck.RunAsync(context, answer.Check, _next, _logger))
+            {
+                RememberRefusal(context, scheme, hostname, url);
+                _logger.LogDebug(
+                    "Anonymous request for {Url} was answered differently; not caching", url);
+                return null;
+            }
+            if (answer.Cacheability == ResponseCacheability.Uncacheable ||
+                answer.Capture.Uncacheable)
+            {
+                RememberRefusal(context, scheme, hostname, url);
+                _logger.LogDebug(
+                    "Anonymous response for {Url} is not cacheable; not caching", url);
+                return null;
+            }
+            keep = true;
+            return answer;
+        }
+        finally
+        {
+            if (!keep) answer.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Remembers the URL as refused (<see cref="RefusalMemo"/>), except for a
+    /// cancelled request or a HEAD request, whose answer says nothing about
+    /// the GET that would be stored.
+    /// </summary>
+    private void RememberRefusal(
+        HttpContext context, string scheme, string hostname, string url)
+    {
+        if (context.RequestAborted.IsCancellationRequested ||
+            HttpMethods.IsHead(context.Request.Method))
+            return;
+        _refusals.Refuse(RefusalMemo.Key(scheme, hostname, url));
+    }
+
+    /// <summary>
+    /// The response-header gate's verdict on the visitor's headers, asked
+    /// before the anonymous request so that a response a hit cannot replay
+    /// costs no second run. Without the native library (unit tests with a
+    /// substitute cache) the answer is left to the store itself.
+    /// </summary>
+    private static bool HeadersMayBeStored(IReadOnlyList<KeyValuePair<string, string>> headers)
+    {
+        try
+        {
+            return PageSpeedCache.ClassifyHeadersSidecar(headers) ==
+                   HeadersSidecarVerdict.SwapEligible;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return true;
         }
     }
 

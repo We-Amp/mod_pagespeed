@@ -323,6 +323,51 @@ public sealed class PageSpeedCache : IPageSpeedCache
         IReadOnlyList<KeyValuePair<string, string>> headers)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        bool added = false;
+        _handle.DangerousAddRef(ref added);
+        try
+        {
+            return WithHeaderTables(headers,
+                new HeadersSidecarWriteResult(HeadersSidecarVerdict.FallThrough, false),
+                (names, values, count) =>
+                {
+                    int err = NativePageSpeed.CacheWriteHeadersSidecar(
+                        _handle, url, hostname, scheme, names, values, count,
+                        out int verdict, out int stored);
+                    NativeCheck.ThrowOnError(err);
+                    return new HeadersSidecarWriteResult(
+                        (HeadersSidecarVerdict)verdict, stored != 0);
+                });
+        }
+        finally
+        {
+            if (added) _handle.DangerousRelease();
+        }
+    }
+
+    /// <summary>
+    /// The response-header gate's verdict on <paramref name="headers"/>, the
+    /// same decision <see cref="WriteHeadersSidecar"/> makes, without a cache
+    /// and without storing anything.
+    /// </summary>
+    internal static HeadersSidecarVerdict ClassifyHeadersSidecar(
+        IReadOnlyList<KeyValuePair<string, string>> headers) =>
+        WithHeaderTables(headers, HeadersSidecarVerdict.FallThrough,
+            (names, values, count) =>
+            {
+                int verdict = NativePageSpeed.HeadersSidecarClassify(names, values, count);
+                return verdict is >= 0 and <= (int)HeadersSidecarVerdict.NeverOptimized
+                    ? (HeadersSidecarVerdict)verdict
+                    : HeadersSidecarVerdict.FallThrough;
+            });
+
+    // Lays the header lines out as two pinned tables of NUL-terminated
+    // Latin-1 strings (const char* const*) and calls `call` with them.
+    // A line that is not Latin-1 text returns `notLatin1` without a call.
+    private static T WithHeaderTables<T>(
+        IReadOnlyList<KeyValuePair<string, string>> headers, T notLatin1,
+        Func<IntPtr, IntPtr, nuint, T> call)
+    {
         int count = headers.Count;
 
         // One NUL-terminated Latin-1 string per name and per value, laid out
@@ -331,7 +376,7 @@ public sealed class PageSpeedCache : IPageSpeedCache
         foreach (var h in headers)
         {
             if (!IsLatin1(h.Key) || !IsLatin1(h.Value))
-                return new(HeadersSidecarVerdict.FallThrough, false);
+                return notLatin1;
             total += h.Key.Length + h.Value.Length + 2;
         }
         var blob = new byte[Math.Max(total, 1)];
@@ -352,8 +397,6 @@ public sealed class PageSpeedCache : IPageSpeedCache
         var values = new IntPtr[Math.Max(count, 1)];
         var blobHandle = GCHandle.Alloc(blob, GCHandleType.Pinned);
         GCHandle namesHandle = default, valuesHandle = default;
-        bool added = false;
-        _handle.DangerousAddRef(ref added);
         try
         {
             var baseAddr = blobHandle.AddrOfPinnedObject();
@@ -364,16 +407,11 @@ public sealed class PageSpeedCache : IPageSpeedCache
             }
             namesHandle = GCHandle.Alloc(names, GCHandleType.Pinned);
             valuesHandle = GCHandle.Alloc(values, GCHandleType.Pinned);
-            int err = NativePageSpeed.CacheWriteHeadersSidecar(
-                _handle, url, hostname, scheme,
-                namesHandle.AddrOfPinnedObject(), valuesHandle.AddrOfPinnedObject(),
-                (nuint)count, out int verdict, out int stored);
-            NativeCheck.ThrowOnError(err);
-            return new((HeadersSidecarVerdict)verdict, stored != 0);
+            return call(namesHandle.AddrOfPinnedObject(),
+                        valuesHandle.AddrOfPinnedObject(), (nuint)count);
         }
         finally
         {
-            if (added) _handle.DangerousRelease();
             if (valuesHandle.IsAllocated) valuesHandle.Free();
             if (namesHandle.IsAllocated) namesHandle.Free();
             blobHandle.Free();

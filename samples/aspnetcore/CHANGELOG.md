@@ -4,6 +4,10 @@ Entries for 2.0.x predate the relicensing of the product under the Apache Licens
 
 ## Unreleased
 
+### Cached responses come from an anonymous request
+
+On a cache miss, a response that would be cached is fetched once more as an anonymous request (no signed-in user, cookies or credentials, from the client address `224.0.0.0`); only that response is stored, and the visitor still gets its own. The app therefore handles each response that gets cached twice. Put rules that admit clients by address or identity after `UsePageSpeed()`, or list their paths in `ExcludePaths`. Call `UseRouting()` after `UsePageSpeed()`: an endpoint selected ahead of it is cached only when nothing about its selection can depend on the client. For an app whose GET handlers have side effects, set the new `RecordResponses` option to `false`: pages are still optimized, and nothing new is cached.
+
 ### Disabled at startup, enabled later
 
 While the top-level `Enabled` switch (`PageSpeed:Enabled`) is `false`,

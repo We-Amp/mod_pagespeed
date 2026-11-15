@@ -42,6 +42,17 @@ public sealed class PageSpeedOptions
         ["/api/", "/signalr/", "/_blazor/", "/_framework/"];
 
     /// <summary>
+    /// Whether the middleware stores responses in its cache. Supports
+    /// hot-reload. On a cache miss whose response would be stored, the
+    /// middleware requests the same URL once more as an anonymous request and
+    /// stores that response, so the app handles each stored response twice.
+    /// Set to false for an app whose GET handlers have side effects: pages
+    /// are still optimized for each response, and nothing new is stored.
+    /// Default: true.
+    /// </summary>
+    public bool RecordResponses { get; set; } = true;
+
+    /// <summary>
     /// Max response body size to buffer (bytes). Responses larger than this
     /// pass through unmodified. Default: 5 MB.
     /// </summary>

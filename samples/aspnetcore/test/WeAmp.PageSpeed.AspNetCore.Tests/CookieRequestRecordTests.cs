@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 using Xunit;
 
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
@@ -76,7 +77,7 @@ public class CookieRequestRecordTests : IDisposable
     {
         app.MapGet(path, (HttpContext ctx) =>
         {
-            _served.AddOrUpdate(path, 1, (_, n) => n + 1);
+            if (FromClient(ctx)) _served.AddOrUpdate(path, 1, (_, n) => n + 1);
             if (cacheControl != null) ctx.Response.Headers.CacheControl = cacheControl;
             if (expires != null) ctx.Response.Headers.Expires = expires;
             return Results.Bytes(body, contentType);
@@ -89,6 +90,12 @@ public class CookieRequestRecordTests : IDisposable
             System.Text.Encoding.UTF8.GetBytes(PageHtml));
 
     private int Served(string path) => _served.TryGetValue(path, out var n) ? n : 0;
+
+    // The application's answers to clients. Before a response is stored the
+    // middleware asks the application once more as an anonymous client from
+    // 224.0.0.0 (AnonymousFetchCheck); that request is not counted here.
+    private static bool FromClient(HttpContext ctx) =>
+        !AgentSelfFetch.Label.Equals(ctx.Connection.RemoteIpAddress);
 
     // One request, with the given raw request headers (an empty value is
     // sent as an empty header). Returns the X-PageSpeed value.

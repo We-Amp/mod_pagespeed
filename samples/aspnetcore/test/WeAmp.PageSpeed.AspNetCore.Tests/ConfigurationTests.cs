@@ -17,6 +17,7 @@ public class ConfigurationTests
         var options = new PageSpeedOptions();
 
         Assert.True(options.Enabled);
+        Assert.True(options.RecordResponses);
         Assert.Equal(5 * 1024 * 1024, options.MaxResponseBufferBytes);
         Assert.NotNull(options.Cache);
         Assert.NotNull(options.Html);
