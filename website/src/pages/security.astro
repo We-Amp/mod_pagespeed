@@ -183,6 +183,23 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             </p>
           </div>
           <div>
+            <h3 class="font-semibold text-text-body">Continuous fuzzing</h3>
+            <p class="mt-2 text-text-muted">
+              mod_pagespeed has been enrolled in{' '}
+              <a
+                href="https://github.com/google/oss-fuzz/tree/master/projects/mod_pagespeed"
+                rel="noopener noreferrer"
+                class="text-interactive hover:text-interactive-hover underline"
+              >
+                OSS-Fuzz
+              </a>
+              , Google&rsquo;s fuzzing service for open-source projects, since November 2026. Its
+              HTML parser, JavaScript minifier, CSS parser and rule-pack code are fuzzed
+              continuously; findings are disclosed under OSS-Fuzz&rsquo;s standard policy, and
+              reports reach security@modpagespeed.com.
+            </p>
+          </div>
+          <div>
             <h3 class="font-semibold text-text-body">SBOM</h3>
             <p class="mt-2 text-text-muted">
               An SPDX 2.3 SBOM, with a VEX document, is published in the{' '}
