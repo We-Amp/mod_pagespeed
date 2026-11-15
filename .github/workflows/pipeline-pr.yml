@@ -1593,6 +1593,14 @@ jobs:
       - name: Stage CI artifacts
         run: tools/ci/stage-artifacts.sh "${RUNNER_TEMP}/bundle"
 
+      # Leaked ci-net-* networks from killed jobs exhaust the host's docker
+      # address pools; reap only the stale, empty ones before compose
+      # creates this job's network, and prove the filters on scratch networks.
+      - name: Reap stale CI networks
+        run: |
+          bash tools/ci/docker-net.sh reap-stale
+          bash tools/ci/docker-net.sh selftest
+
       - name: Build Docker images (prebuilt)
         run: |
           docker compose -f tools/production-tests/docker-compose.yml \
