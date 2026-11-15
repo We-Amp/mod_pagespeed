@@ -7,7 +7,6 @@ author: 'Otto van der Schaaf'
 tags: ['architecture', 'caching', 'performance', 'deep-dive', 'nginx']
 draft: false
 product: '2.0'
-pinned: 1
 faq:
   - q: 'How does mod_pagespeed serve a cache hit without copying the data?'
     a: 'nginx and the optimizing worker share one memory-mapped cache file. For a large hit, nginx streams the bytes straight from that file to the socket with sendfile, so the payload never enters the serving process. For a small hit, it copies the bytes once from the mapped region, because the sendfile syscall would cost more than the copy.'
