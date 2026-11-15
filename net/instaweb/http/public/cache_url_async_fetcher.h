@@ -33,6 +33,8 @@ class Histogram;
 class HTTPCache;
 class MessageHandler;
 class NamedLockManager;
+class RequestHeaders;
+class ResponseHeaders;
 class Sequence;
 class Variable;
 
@@ -89,6 +91,19 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
   // HTTP status code used to indicate that we failed the Fetch because
   // result was not found in cache. (Only happens if fetcher_ == NULL).
   static const int kNotInCacheStatus;
+
+  // CORS and shared copies.  A response whose Access-Control-Allow-Origin
+  // names one origin, or that varies on Origin, was made for the request
+  // that got it.
+  static bool IsCorsSpecificResponse(const ResponseHeaders& response);
+  // Whether a stored copy with these headers may answer this request: true
+  // for a request without Origin, and for one whose origin the copy's
+  // Access-Control-Allow-Origin allows (it is "*" or that origin).  A
+  // request with credentials (Cookie or Authorization) needs that exact
+  // origin and Access-Control-Allow-Credentials: true, as browsers do.
+  // `request` may be null, which counts as a request without Origin.
+  static bool CorsAllowsSharedCopy(const RequestHeaders* request,
+                                   const ResponseHeaders& response);
 
   HTTPCache* http_cache() const { return http_cache_; }
   UrlAsyncFetcher* fetcher() const { return fetcher_; }
@@ -174,6 +189,11 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
 
   void set_own_fetcher(bool x) { own_fetcher_ = x; }
 
+  // When set, a response to a request carrying Origin is not stored when it
+  // is specific to that request (see IsCorsSpecificResponse).
+  void set_cors_guard(bool x) { cors_guard_ = x; }
+  bool cors_guard() const { return cors_guard_; }
+
   // By default, the CacheUrlAsyncFetcher will call its fetcher callbacks
   // on whatever thread the cache or the fetcher happen to be on (e.g. the
   // memcached thread).  Setting the response_sequence ensures that cached
@@ -212,6 +232,7 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
   bool default_cache_html_;
   bool proactively_freshen_user_facing_request_;
   bool own_fetcher_;  // set true to transfer ownership of fetcher to this.
+  bool cors_guard_;
   int64 serve_stale_while_revalidate_threshold_sec_;
   Sequence* response_sequence_;
 

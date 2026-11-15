@@ -395,6 +395,7 @@ class RewriteOptions {
   static const char kInPlacePreemptiveRewriteImages[];
   static const char kInPlacePreemptiveRewriteJavascript[];
   static const char kInPlaceResourceOptimization[];
+  static const char kInPlaceCorsGuard[];
   static const char kInPlaceRewriteDeadlineMs[];
   static const char kInPlaceSMaxAgeSec[];
   static const char kInPlaceWaitForOptimized[];
@@ -1974,6 +1975,9 @@ class RewriteOptions {
     return (in_place_wait_for_optimized_.value() ||
             (in_place_rewrite_deadline_ms() < 0));
   }
+
+  void set_in_place_cors_guard(bool x) { set_option(x, &in_place_cors_guard_); }
+  bool in_place_cors_guard() const { return in_place_cors_guard_.value(); }
 
   void set_in_place_rewrite_deadline_ms(int x) {
     set_option(x, &in_place_rewrite_deadline_ms_);
@@ -4019,6 +4023,9 @@ class RewriteOptions {
   Option<bool> in_place_rewriting_enabled_;
   // Optimize before responding in in-place flow?
   Option<bool> in_place_wait_for_optimized_;
+  // Serve in-place copies to cross-origin CORS requests only when the copy's
+  // own Access-Control-Allow-Origin allows the request's origin?
+  Option<bool> in_place_cors_guard_;
   // Interval to delay serving on the IPRO path while waiting for optimizations.
   // After this interval, the unoptimized resource will be served.
   Option<int> in_place_rewrite_deadline_ms_;

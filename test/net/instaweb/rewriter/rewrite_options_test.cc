@@ -1622,6 +1622,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kIncreaseSpeedTracking,
       RewriteOptions::kInlineOnlyCriticalImages,
       RewriteOptions::kInlineResourcesWithoutExplicitAuthorization,
+      RewriteOptions::kInPlaceCorsGuard,
       RewriteOptions::kInPlacePreemptiveRewriteCss,
       RewriteOptions::kInPlacePreemptiveRewriteCssImages,
       RewriteOptions::kInPlacePreemptiveRewriteImages,
@@ -2719,8 +2720,7 @@ TEST_F(RewriteOptionsTest, ExperimentLinesStartALineAfterEverySection) {
     }
   }
   EXPECT_EQ(options_.num_experiments(), experiments);
-  EXPECT_NE(GoogleString::npos,
-            options_string.find("\n*.example.com/*A,\n"));
+  EXPECT_NE(GoogleString::npos, options_string.find("\n*.example.com/*A,\n"));
   EXPECT_NE(GoogleString::npos,
             options_string.find("\nProxy Suffix: .proxy.example\n"));
 }

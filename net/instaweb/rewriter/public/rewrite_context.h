@@ -658,6 +658,13 @@ class RewriteContext {
   virtual void FetchTryFallback(const GoogleString& url,
                                 const StringPiece& hash);
 
+  // Callback for HTTP lookup on fetch path where the metadata cache suggests
+  // we should try either serving a different path or the original.  Takes
+  // ownership of `data`.  A subclass that makes the lookup itself in
+  // FetchTryFallback continues here, on a rewrite task.
+  void FetchFallbackCacheDone(HTTPCache::FindResult result,
+                              HTTPCache::Callback* data);
+
   // Whether a fetch that falls back to its original input may serve it from
   // the HTTP cache only when the module fetched it itself.
   virtual bool FallbackToInputNeedsFetchedEntry() const { return true; }
@@ -1003,11 +1010,6 @@ class RewriteContext {
 
   // Called on the metadata lookup for FetchNotModified.
   void FetchNotModifiedCacheDone(CacheLookupResult* cache_result);
-
-  // Callback for HTTP lookup on fetch path where the metadata cache suggests
-  // we should try either serving a different path or the original.
-  void FetchFallbackCacheDone(HTTPCache::FindResult result,
-                              HTTPCache::Callback* data);
 
   // Returns true if we can attempt to serve the original file for a fetch
   // request in case something goes wrong with rewriting (circumstance ==

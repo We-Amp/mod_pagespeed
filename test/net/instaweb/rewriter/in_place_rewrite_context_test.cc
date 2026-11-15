@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_value.h"
@@ -241,8 +242,7 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
                                     redirect_body_);
 
     img_filter_ = new FakeImageFilter(rewrite_driver());
-    js_filter_ = new FakeFilter(RewriteOptions::kJavascriptMinId,
-                                rewrite_driver(), semantic_type::kScript);
+    js_filter_ = MakeJsFilter();
     css_filter_ = new FakeFilter(RewriteOptions::kCssFilterId, rewrite_driver(),
                                  semantic_type::kStylesheet);
 
@@ -268,6 +268,11 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
         InPlaceRewriteContext::kInPlaceOversizedOptStream);
     in_place_uncacheable_rewrites_ = statistics()->GetVariable(
         InPlaceRewriteContext::kInPlaceUncacheableRewrites);
+  }
+
+  virtual FakeFilter* MakeJsFilter() {
+    return new FakeFilter(RewriteOptions::kJavascriptMinId, rewrite_driver(),
+                          semantic_type::kScript);
   }
 
   void AddResponseStrContentType(const GoogleString& url,
@@ -925,7 +930,8 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeResourceTooBig) {
   EXPECT_EQ(1, oversized_stream_->Get());
 }
 
-TEST_F(InPlaceRewriteContextTest, WaitForOptimizeOversizedNoShortContentLength) {
+TEST_F(InPlaceRewriteContextTest,
+       WaitForOptimizeOversizedNoShortContentLength) {
   // When a buffered response crosses the cache size limit mid-stream, the
   // fetch falls back to passing the original body through.  It must not
   // declare a Content-Length shorter than the body it actually delivers.
@@ -938,8 +944,8 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeOversizedNoShortContentLength) 
   http_cache()->set_max_cacheable_response_content_length(1);
 
   WorkerTestBase::SyncPoint sync(server_context()->thread_system());
-  RequestContextPtr request_context(RequestContext::NewTestRequestContext(
-      server_context()->thread_system()));
+  RequestContextPtr request_context(
+      RequestContext::NewTestRequestContext(server_context()->thread_system()));
   NotifyingFetch notifying_fetch(request_context, options(), cache_jpg_url_,
                                  &sync, &response_headers_);
   rewrite_driver()->FetchResource(cache_jpg_url_, &notifying_fetch);
@@ -1123,8 +1129,9 @@ TEST_F(InPlaceRewriteContextTest, OptimizedOriginalUrlServeNotPublicImmutable) {
                         start_time_ms() + ttl_ms_ / 2);
   // The origin authored no Cache-Control beyond its TTL, so the in-place
   // serve must carry exactly the remaining max-age -- nothing else.
-  EXPECT_EQ(StrCat("max-age=", Integer64ToString(ttl_ms_ / 2 / Timer::kSecondMs)),
-            response_headers_.LookupJoined(HttpAttributes::kCacheControl));
+  EXPECT_EQ(
+      StrCat("max-age=", Integer64ToString(ttl_ms_ / 2 / Timer::kSecondMs)),
+      response_headers_.LookupJoined(HttpAttributes::kCacheControl));
   EXPECT_FALSE(
       response_headers_.HasValue(HttpAttributes::kCacheControl, "public"));
   EXPECT_FALSE(
@@ -1826,8 +1833,8 @@ TEST_F(InPlaceRewriteContextTest, NonCacheableUrlRewriting) {
   // An uncacheable response has no cache lifetime; the cacheability itself
   // is checked below.
   FetchAndCheckResponse(nocache_js_url_, StrCat(cache_body_, ":", "jm"),
-                        true /* success */, 0 /* ttl (ms) */,
-                        etag_ /* etag */, timer()->NowMs());
+                        true /* success */, 0 /* ttl (ms) */, etag_ /* etag */,
+                        timer()->NowMs());
 
   // Shouldn't be cacheable at all.
   EXPECT_FALSE(response_headers_.IsBrowserCacheable());
@@ -2200,8 +2207,8 @@ TEST_F(InPlaceRewriteContextTest, LoadFromFile) {
   AdvanceTimeMs(1 * Timer::kSecondMs);
   WriteFile("/test/cacheable.js", "new_content");
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_url_, "new_content", true,
-                        kInjectedSMaxAgeMs, nullptr, timer()->NowMs());
+  FetchAndCheckResponse(cache_js_url_, "new_content", true, kInjectedSMaxAgeMs,
+                        nullptr, timer()->NowMs());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, http_cache()->cache_hits()->Get());
   EXPECT_EQ(0, http_cache()->cache_misses()->Get());
@@ -2236,6 +2243,417 @@ TEST_F(InPlaceRewriteContextTest, JsonWithJsonContentTypeSynonymSucceeds) {
   Init();
   CheckCachingAndContentType(json_json_type_synonym_url_, "application/x-json",
                              cache_body_, RewriteOptions::kJavascriptMinId);
+}
+
+// In-place serving and cross-origin CORS requests (Origin set).  A copy is
+// served to such a request only when the copy's own
+// Access-Control-Allow-Origin allows the request's origin; otherwise the
+// request goes past the stored copies: at the origin the server answers it
+// itself, and a proxy fetches it for this client.
+// Like the JavaScript minifier, keeps the input's headers that are not about
+// caching, such as Access-Control-Allow-Origin, on the optimized version.
+class HeaderKeepingJsFilter : public FakeFilter {
+ public:
+  class Context : public FakeFilter::Context {
+   public:
+    using FakeFilter::Context::Context;
+
+    void DoRewriteSingle(const ResourcePtr input,
+                         OutputResourcePtr output) override {
+      FindServerContext()->MergeNonCachingResponseHeaders(input, output);
+      FakeFilter::Context::DoRewriteSingle(input, output);
+    }
+  };
+
+  explicit HeaderKeepingJsFilter(RewriteDriver* rewrite_driver)
+      : FakeFilter(RewriteOptions::kJavascriptMinId, rewrite_driver,
+                   semantic_type::kScript) {}
+
+  RewriteContext* MakeFakeContext(RewriteDriver* driver, RewriteContext* parent,
+                                  ResourceContext* resource_context) override {
+    return new Context(this, driver, parent, resource_context);
+  }
+};
+
+class InPlaceCorsGuardTest : public InPlaceRewriteContextTest {
+ protected:
+  // Notes what the response looked like each time its headers were
+  // committed, which is when a server sends them on.
+  class CommitNotingFetch : public NotifyingFetch {
+   public:
+    CommitNotingFetch(const RequestContextPtr& request_context,
+                      RewriteOptions* options, const GoogleString& url,
+                      WorkerTestBase::SyncPoint* sync,
+                      ResponseHeaders* response_headers)
+        : NotifyingFetch(request_context, options, url, sync,
+                         response_headers) {}
+
+    int commits = 0;
+    int status_at_commit = 0;
+    bool content_type_at_commit = false;
+    int64 bytes_at_commit = -1;
+
+   protected:
+    void HandleHeadersComplete() override {
+      ++commits;
+      status_at_commit = response_headers()->status_code();
+      content_type_at_commit =
+          response_headers()->Has(HttpAttributes::kContentType);
+      bytes_at_commit = content().size();
+      NotifyingFetch::HandleHeadersComplete();
+    }
+  };
+
+  FakeFilter* MakeJsFilter() override {
+    return new HeaderKeepingJsFilter(rewrite_driver());
+  }
+
+  static constexpr char kOriginA[] = "https://a.example";
+  static constexpr char kOriginB[] = "https://b.example";
+
+  // What one in-place request got.
+  struct Served {
+    bool success = false;
+    int status = 0;
+    GoogleString body;
+    GoogleString acao;   // Access-Control-Allow-Origin, "" when absent.
+    int64 declined = 0;  // in_place_cors_declined after the request.
+    int commits = 0;     // Times the response headers were committed.
+    int status_at_commit = 0;
+    bool content_type_at_commit = false;
+    int64 bytes_at_commit = -1;  // Body bytes written before the commit.
+  };
+
+  // Answers the module's own fetch of cache_js_url_ (which carries no
+  // Origin) with the given CORS headers, and stores the same response as
+  // the in-place recording of it.  A null header is left out.
+  void StoreJs(const char* acao, const char* vary) {
+    Store(cache_js_url_, kContentTypeJavascript.mime_type(), acao, vary,
+          nullptr);
+  }
+
+  // The same for any `url` and Content-Type, optionally with
+  // Access-Control-Allow-Credentials.
+  void Store(const GoogleString& url, const GoogleString& content_type,
+             const char* acao, const char* vary, const char* credentials) {
+    Init();
+    ResponseHeaders headers;
+    SetDefaultHeaders(content_type, &headers);
+    headers.SetDateAndCaching(start_time_ms(), ttl_ms_);
+    if (acao != nullptr) {
+      headers.Add(HttpAttributes::kAccessControlAllowOrigin, acao);
+    }
+    if (vary != nullptr) {
+      headers.Add(HttpAttributes::kVary, vary);
+    }
+    if (credentials != nullptr) {
+      headers.Add(HttpAttributes::kAccessControlAllowCredentials, credentials);
+    }
+    mock_url_fetcher()->SetResponse(url, headers, cache_body_);
+    headers.ComputeCaching();
+    http_cache()->Put(url, rewrite_driver()->CacheFragment(),
+                      RequestHeaders::Properties(),
+                      ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                      &headers, cache_body_, message_handler());
+    ResetHeadersAndStats();
+  }
+
+  // Requests `url` in place, with `origin` as the Origin request header
+  // (none if null), at the origin (as the server modules do) or as a proxy.
+  // A non-null `cookie` is sent as the Cookie request header, as a
+  // credentialed cross-origin request sends it.
+  Served Serve(const GoogleString& url, const char* origin, bool proxy_mode,
+               const char* cookie = nullptr) {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    CommitNotingFetch fetch(request_context, options(), url, &sync,
+                            &response_headers_);
+    if (origin != nullptr) {
+      fetch.request_headers()->Add(HttpAttributes::kOrigin, origin);
+    }
+    if (cookie != nullptr) {
+      fetch.request_headers()->Add(HttpAttributes::kCookie, cookie);
+    }
+    rewrite_driver()->SetRequestHeaders(*fetch.request_headers());
+    GoogleUrl gurl(url);
+    rewrite_driver()->FetchInPlaceResource(gurl, proxy_mode, &fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_TRUE(fetch.done());
+    Served served;
+    served.success = fetch.success();
+    served.status = response_headers_.status_code();
+    served.body = fetch.content().as_string();
+    const char* acao =
+        response_headers_.Lookup1(HttpAttributes::kAccessControlAllowOrigin);
+    served.acao = (acao == nullptr) ? "" : acao;
+    served.commits = fetch.commits;
+    served.status_at_commit = fetch.status_at_commit;
+    served.content_type_at_commit = fetch.content_type_at_commit;
+    served.bytes_at_commit = fetch.bytes_at_commit;
+    served.declined =
+        statistics()
+            ->GetVariable(InPlaceRewriteContext::kInPlaceCorsDeclined)
+            ->Get();
+    return served;
+  }
+
+  // Serves cache_js_url_ at the origin twice without Origin, so the
+  // optimized version exists and is what such a request gets.
+  void OptimizeJs() {
+    EXPECT_EQ(cache_body_, Serve(cache_js_url_, nullptr, false).body);
+    ResetHeadersAndStats();
+    SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+    EXPECT_EQ("good:jm", Serve(cache_js_url_, nullptr, false).body);
+    ResetHeadersAndStats();
+  }
+
+  // The answer that sends the request to the server's own handler.
+  static void ExpectDeclined(const Served& served) {
+    EXPECT_FALSE(served.success);
+    EXPECT_EQ(CacheUrlAsyncFetcher::kNotInCacheStatus, served.status);
+    EXPECT_EQ("", served.body);
+    EXPECT_EQ(1, served.declined);
+  }
+};
+
+// The origin adds Access-Control-Allow-Origin only to requests that carry
+// Origin, so the optimized version (built from the module's own fetch) has
+// none.  A CORS request is not given it: the server answers it.
+TEST_F(InPlaceCorsGuardTest, ConditionalOriginOptimizedCopyDeclined) {
+  StoreJs(nullptr, nullptr);
+  OptimizeJs();
+  ExpectDeclined(Serve(cache_js_url_, kOriginA, false));
+  // A request without Origin still gets the optimized version.
+  ResetHeadersAndStats();
+  Served plain = Serve(cache_js_url_, nullptr, false);
+  EXPECT_EQ("good:jm", plain.body);
+  EXPECT_EQ(0, plain.declined);
+}
+
+// The same request through a proxy is fetched for this client, with its
+// Origin, instead of being answered from the stored copies.
+TEST_F(InPlaceCorsGuardTest, ConditionalOriginProxyFetchesForTheClient) {
+  StoreJs(nullptr, nullptr);
+  OptimizeJs();
+  Served served = Serve(cache_js_url_, kOriginA, true);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ(1, served.declined);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+// The recorded response was what a request without Origin got; it is not
+// replayed to a CORS request either.
+TEST_F(InPlaceCorsGuardTest, RecordedCopyWithoutAcaoDeclined) {
+  StoreJs(nullptr, nullptr);
+  ExpectDeclined(Serve(cache_js_url_, kOriginA, false));
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+// An origin that allows every origin keeps full optimization: the CORS
+// request gets the optimized version, with the header it needs.
+TEST_F(InPlaceCorsGuardTest, WildcardOriginServedOptimized) {
+  StoreJs("*", nullptr);
+  OptimizeJs();
+  Served served = Serve(cache_js_url_, kOriginA, false);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ("good:jm", served.body);
+  EXPECT_EQ("*", served.acao);
+  EXPECT_EQ(0, served.declined);
+}
+
+// A response whose Access-Control-Allow-Origin names one origin was made
+// for one request: it is never optimized, and a proxy serves the stored copy
+// only to that origin.
+TEST_F(InPlaceCorsGuardTest, SpecificOriginNotOptimized) {
+  StoreJs(kOriginA, nullptr);
+  Served first = Serve(cache_js_url_, kOriginA, true);
+  EXPECT_TRUE(first.success);
+  EXPECT_EQ(cache_body_, first.body);
+  EXPECT_EQ(kOriginA, first.acao);
+  EXPECT_EQ(0, first.declined);
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  EXPECT_EQ(cache_body_, Serve(cache_js_url_, nullptr, true).body);
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+  ResetHeadersAndStats();
+  Served other = Serve(cache_js_url_, kOriginB, true);
+  EXPECT_EQ(1, other.declined);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+}
+
+// At the origin, such a response is left to the server to answer.
+TEST_F(InPlaceCorsGuardTest, SpecificOriginLeftToTheServer) {
+  StoreJs(kOriginA, nullptr);
+  Served served = Serve(cache_js_url_, kOriginA, false);
+  EXPECT_FALSE(served.success);
+  EXPECT_EQ(CacheUrlAsyncFetcher::kNotInCacheStatus, served.status);
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+// Vary: Origin says the response differs per origin, and the optimized
+// version would lose that header: such a response is not optimized.
+TEST_F(InPlaceCorsGuardTest, VaryOriginNotOptimized) {
+  StoreJs("*", "Origin");
+  EXPECT_EQ(cache_body_, Serve(cache_js_url_, nullptr, true).body);
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  Served served = Serve(cache_js_url_, nullptr, true);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary, "Origin"));
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+// A proxy does not store a response made for one origin, and does not
+// serve a stored one to another origin.
+TEST_F(InPlaceCorsGuardTest, ProxyKeepsPerOriginResponsesApart) {
+  StoreJs(kOriginA, "Origin");
+  ResponseHeaders for_b;
+  SetDefaultHeaders(kContentTypeJavascript.mime_type(), &for_b);
+  for_b.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  for_b.Add(HttpAttributes::kAccessControlAllowOrigin, kOriginB);
+  for_b.Add(HttpAttributes::kVary, "Origin");
+  mock_url_fetcher()->SetResponse(cache_js_url_, for_b, cache_body_);
+  Served served = Serve(cache_js_url_, kOriginB, true);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ(kOriginB, served.acao);
+  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+}
+
+// While the response is held back for the optimized version, a CORS
+// request is not given an optimized version built from a fetch whose
+// headers do not allow its origin; it gets the response it was answered.
+TEST_F(InPlaceCorsGuardTest, WaitForOptimizedKeepsAllowedResponse) {
+  options()->set_in_place_wait_for_optimized(true);
+  StoreJs("*", nullptr);
+  ResponseHeaders without_acao;
+  SetDefaultHeaders(kContentTypeJavascript.mime_type(), &without_acao);
+  without_acao.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  mock_url_fetcher()->SetResponse(cache_js_url_, without_acao, cache_body_);
+  Served served = Serve(cache_js_url_, kOriginA, false);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ("*", served.acao);
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+// A file the module loads itself carries no CORS headers.
+TEST_F(InPlaceCorsGuardTest, LoadFromFileDeclined) {
+  options()->file_load_policy()->Associate("http://www.example.com", "/test/");
+  WriteFile("/test/cacheable.js", cache_body_);
+  Init();
+  ResetHeadersAndStats();
+  ExpectDeclined(Serve(cache_js_url_, kOriginA, false));
+}
+
+// The decline is decided before any response header goes out: the only
+// headers committed are the not-in-cache answer, with no body, so no part
+// of the optimized version's response reaches the server.
+TEST_F(InPlaceCorsGuardTest, DeclineCommitsNoHeadersOfTheCopy) {
+  StoreJs(nullptr, nullptr);
+  OptimizeJs();
+  Served served = Serve(cache_js_url_, kOriginA, false);
+  ExpectDeclined(served);
+  EXPECT_EQ(1, served.commits);
+  EXPECT_EQ(CacheUrlAsyncFetcher::kNotInCacheStatus, served.status_at_commit);
+  EXPECT_FALSE(served.content_type_at_commit);
+  EXPECT_EQ(0, served.bytes_at_commit);
+}
+
+// Web fonts are always requested in CORS mode. A proxy serves a stored font
+// to another origin when it allows every origin...
+TEST_F(InPlaceCorsGuardTest, FontAllowingAnyOriginServedFromProxyCache) {
+  const GoogleString font_url = "http://www.example.com/font.woff2";
+  Store(font_url, "font/woff2", "*", nullptr, nullptr);
+  Served served = Serve(font_url, kOriginA, true);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ("*", served.acao);
+  EXPECT_EQ(0, served.declined);
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
+// ...and fetches it for the visitor when the stored font names another
+// origin, without storing the answer made for this one.  The stored font
+// names origin A without a Vary, so the CORS check is what refuses it.
+TEST_F(InPlaceCorsGuardTest, FontForAnotherOriginFetchedForTheVisitor) {
+  const GoogleString font_url = "http://www.example.com/font.woff2";
+  Store(font_url, "font/woff2", kOriginA, nullptr, nullptr);
+  ResponseHeaders for_b;
+  SetDefaultHeaders("font/woff2", &for_b);
+  for_b.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  for_b.Add(HttpAttributes::kAccessControlAllowOrigin, kOriginB);
+  for_b.Add(HttpAttributes::kVary, "Origin");
+  mock_url_fetcher()->SetResponse(font_url, for_b, cache_body_);
+  Served served = Serve(font_url, kOriginB, true);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ(kOriginB, served.acao);
+  EXPECT_EQ(1, served.declined);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+}
+
+// A stored font that also says Vary: Origin is a miss for every visitor's
+// request already (a stored answer to a visitor that varies beyond
+// Accept-Encoding is never served), before the CORS check sees it: the font
+// is fetched for the visitor all the same and the answer is not stored, but
+// it is not counted as a CORS decline.
+TEST_F(InPlaceCorsGuardTest, FontVaryingOnOriginFetchedForTheVisitor) {
+  const GoogleString font_url = "http://www.example.com/font.woff2";
+  Store(font_url, "font/woff2", kOriginA, "Origin", nullptr);
+  ResponseHeaders for_b;
+  SetDefaultHeaders("font/woff2", &for_b);
+  for_b.SetDateAndCaching(start_time_ms(), ttl_ms_);
+  for_b.Add(HttpAttributes::kAccessControlAllowOrigin, kOriginB);
+  for_b.Add(HttpAttributes::kVary, "Origin");
+  mock_url_fetcher()->SetResponse(font_url, for_b, cache_body_);
+  Served served = Serve(font_url, kOriginB, true);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ(kOriginB, served.acao);
+  EXPECT_EQ(0, served.declined);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+}
+
+// A credentialed request (it sends cookies) is refused "*" by the browser,
+// so a copy allowing every origin is not served to it...
+TEST_F(InPlaceCorsGuardTest, CredentialedRequestNotGivenWildcardCopy) {
+  Store(cache_js_url_, kContentTypeJavascript.mime_type(), "*", nullptr,
+        nullptr);
+  Served served = Serve(cache_js_url_, kOriginA, true, "session=1");
+  EXPECT_EQ(1, served.declined);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+}
+
+// ...but one naming its origin and allowing credentials is.
+TEST_F(InPlaceCorsGuardTest, CredentialedRequestGivenCopyAllowingIt) {
+  Store(cache_js_url_, kContentTypeJavascript.mime_type(), kOriginA, nullptr,
+        "true");
+  Served served = Serve(cache_js_url_, kOriginA, true, "session=1");
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ(cache_body_, served.body);
+  EXPECT_EQ(kOriginA, served.acao);
+  EXPECT_EQ(0, served.declined);
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
+// With InPlaceCorsGuard off, in-place serving ignores Origin, as before.
+TEST_F(InPlaceCorsGuardTest, GuardOffServesOptimizedCopy) {
+  options()->set_in_place_cors_guard(false);
+  StoreJs(nullptr, nullptr);
+  OptimizeJs();
+  Served served = Serve(cache_js_url_, kOriginA, false);
+  EXPECT_TRUE(served.success);
+  EXPECT_EQ("good:jm", served.body);
+  EXPECT_EQ(0, served.declined);
 }
 
 }  // namespace

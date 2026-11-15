@@ -24,23 +24,31 @@
 #include <memory>
 #include <vector>
 
+#include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
+#include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "test/net/instaweb/rewriter/notifying_fetch.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
+#include "test/pagespeed/kernel/thread/mock_scheduler.h"
+#include "test/pagespeed/kernel/thread/worker_test_base.h"
 
 namespace net_instaweb {
 
@@ -198,7 +206,8 @@ class InPlaceResourceRecorderTest : public RewriteTestBase {
                      IproVar("ipro_recorder_dropped_content_type") +
                      IproVar("ipro_recorder_error_status") +
                      IproVar("ipro_recorder_skipped_transient") +
-                     IproVar("ipro_recorder_empty");
+                     IproVar("ipro_recorder_empty") +
+                     IproVar("ipro_recorder_dropped_cors_specific");
     EXPECT_EQ(IproVar("ipro_recorder_resources"), terminal);
   }
 
@@ -714,6 +723,158 @@ TEST_F(InPlaceResourceRecorderTest, WriteInflateFailureCountsFailed) {
 // The seam hands the recorder the caching headers as the origin sent them;
 // the final headers carry the server's.  Storing needs both to allow it, for
 // the shorter of the two lifetimes.
+class InPlaceResourceRecorderCorsTest : public InPlaceResourceRecorderTest {
+ protected:
+  // Records kHello at kTestUrl with final headers carrying the given CORS
+  // headers (none for a null one), with `guard` as InPlaceCorsGuard, and
+  // returns what the cache then holds for the URL.
+  HTTPCache::FindResult Record(const char* acao, const char* vary,
+                               bool guard = true) {
+    ResponseHeaders final_headers;
+    SetDefaultLongCacheHeaders(&kContentTypeCss, &final_headers);
+    if (acao != nullptr) {
+      final_headers.Add(HttpAttributes::kAccessControlAllowOrigin, acao);
+    }
+    if (vary != nullptr) {
+      final_headers.Add(HttpAttributes::kVary, vary);
+    }
+    final_headers.ComputeCaching();
+    HttpOptions http_options = options()->ComputeHttpOptions();
+    http_options.ipro_cors_guard = guard;
+    RequestContextPtr request_context(new RequestContext(
+        http_options, server_context()->thread_system()->NewMutex(), timer()));
+    RequestHeaders headers;
+    std::unique_ptr<InPlaceResourceRecorder> recorder(
+        new InPlaceResourceRecorder(
+            request_context, kTestUrl, rewrite_driver_->CacheFragment(),
+            headers.GetProperties(), kMaxResponseBytes, 4, http_cache(),
+            statistics(), message_handler()));
+    recorder->ConsiderResponseHeaders(InPlaceResourceRecorder::kFullHeaders,
+                                      &final_headers);
+    recorder->Write(kHello, message_handler());
+    recorder.release()->DoneAndSetHeaders(&final_headers,
+                                          true /* complete response */);
+    HTTPValue value_out;
+    ResponseHeaders headers_out;
+    return HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out);
+  }
+};
+
+// A response whose Access-Control-Allow-Origin names one origin is not
+// recorded, and nothing is remembered against the URL.
+TEST_F(InPlaceResourceRecorderCorsTest, OriginSpecificResponseNotRecorded) {
+  EXPECT_EQ(kNotFoundResult, Record("https://a.example", nullptr));
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_cors_specific"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  ExpectTerminalInvariant();
+}
+
+TEST_F(InPlaceResourceRecorderCorsTest, VaryOriginResponseNotRecorded) {
+  EXPECT_EQ(kNotFoundResult, Record("*", "Accept-Encoding, Origin"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_cors_specific"));
+  ExpectTerminalInvariant();
+}
+
+// A response every origin may use is recorded as before.
+TEST_F(InPlaceResourceRecorderCorsTest, WildcardResponseRecorded) {
+  EXPECT_EQ(kFoundResult, Record("*", nullptr));
+  EXPECT_EQ(0, IproVar("ipro_recorder_dropped_cors_specific"));
+  ExpectTerminalInvariant();
+}
+
+// With InPlaceCorsGuard off it is recorded, as before.
+TEST_F(InPlaceResourceRecorderCorsTest, GuardOffRecordsOriginSpecific) {
+  EXPECT_EQ(kFoundResult, Record("https://a.example", nullptr, false));
+  EXPECT_EQ(0, IproVar("ipro_recorder_dropped_cors_specific"));
+}
+
+// The whole sequence at the origin: a script is optimized; a request with
+// Origin is declined, and the server's answer to it (made for that origin)
+// reaches the recorder, as it does in every server module.  The entry the
+// other requests are served from is unchanged, and a request without Origin
+// still gets the optimized version.
+TEST_F(InPlaceResourceRecorderCorsTest,
+       DeclinedOriginRequestKeepsCleanEntryAndOptimizedCopy) {
+  const char kJsUrl[] = "http://www.example.com/script.js";
+  const char kJs[] = "var  answer = 42 ;\n";
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  options()->set_in_place_rewriting_enabled(true);
+  rewrite_driver()->AddFilters();
+  ResponseHeaders clean;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &clean);
+  clean.ComputeCaching();
+  SetFetchResponse(kJsUrl, clean, kJs);
+  http_cache()->Put(kJsUrl, rewrite_driver_->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                    &clean, kJs, message_handler());
+
+  // Serves kJsUrl in place at the origin; returns the body ("" if the
+  // request was left to the server) and sets *status.
+  auto serve = [this, kJsUrl](const char* origin, int* status) {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    ResponseHeaders response;
+    NotifyingFetch fetch(RequestContext::NewTestRequestContext(
+                             server_context()->thread_system()),
+                         options(), kJsUrl, &sync, &response);
+    if (origin != nullptr) {
+      fetch.request_headers()->Add(HttpAttributes::kOrigin, origin);
+    }
+    rewrite_driver()->SetRequestHeaders(*fetch.request_headers());
+    rewrite_driver()->FetchInPlaceResource(GoogleUrl(kJsUrl), false, &fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    *status = response.status_code();
+    GoogleString body = fetch.content().as_string();
+    ClearRewriteDriver();
+    return body;
+  };
+
+  int status = 0;
+  EXPECT_EQ(kJs, serve(nullptr, &status));  // Optimization starts.
+  const GoogleString optimized = serve(nullptr, &status);
+  ASSERT_NE(kJs, optimized);
+
+  HTTPValue before_value;
+  ResponseHeaders before;
+  ASSERT_EQ(kFoundResult,
+            HttpBlockingFind(kJsUrl, http_cache(), &before_value, &before));
+  StringPiece before_body;
+  before_value.ExtractContents(&before_body);
+  const GoogleString before_text = StrCat(before.ToString(), before_body);
+
+  EXPECT_EQ("", serve("https://a.example", &status));
+  EXPECT_EQ(CacheUrlAsyncFetcher::kNotInCacheStatus, status);
+  // The server answers it, adding the header for that origin, and records.
+  ResponseHeaders for_a;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &for_a);
+  for_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  for_a.Add(HttpAttributes::kVary, "Origin");
+  for_a.ComputeCaching();
+  std::unique_ptr<InPlaceResourceRecorder> recorder(new InPlaceResourceRecorder(
+      RequestContext::NewTestRequestContext(server_context()->thread_system()),
+      kJsUrl, rewrite_driver_->CacheFragment(),
+      RequestHeaders().GetProperties(), kMaxResponseBytes, 4, http_cache(),
+      statistics(), message_handler()));
+  recorder->ConsiderResponseHeaders(InPlaceResourceRecorder::kFullHeaders,
+                                    &for_a);
+  recorder->Write(kJs, message_handler());
+  recorder.release()->DoneAndSetHeaders(&for_a, true /* complete response */);
+
+  HTTPValue after_value;
+  ResponseHeaders after;
+  ASSERT_EQ(kFoundResult,
+            HttpBlockingFind(kJsUrl, http_cache(), &after_value, &after));
+  StringPiece after_body;
+  after_value.ExtractContents(&after_body);
+  EXPECT_EQ(before_text, StrCat(after.ToString(), after_body));
+  EXPECT_FALSE(after.Has(HttpAttributes::kAccessControlAllowOrigin));
+
+  EXPECT_EQ(optimized, serve(nullptr, &status));
+  EXPECT_EQ(HttpStatus::kOK, status);
+}
+
 class InPlaceResourceRecorderOriginCachingTest
     : public InPlaceResourceRecorderTest {
  protected:
@@ -850,9 +1011,11 @@ class InPlaceResourceRecorderVaryTest : public InPlaceResourceRecorderTest {
   // full headers up front, as nginx does.  When `origin_vary` is not null the
   // seam also hands over the origin's caching headers, with that Vary (none
   // when empty).  Returns what the cache holds.
+  // `cors_guard` is InPlaceCorsGuard.
   HTTPCache::FindResult RecordWithVary(StringPiece vary,
                                        bool full_headers_first,
-                                       const char* origin_vary = nullptr) {
+                                       const char* origin_vary = nullptr,
+                                       bool cors_guard = true) {
     ResponseHeaders headers;
     SetDefaultLongCacheHeaders(&kContentTypeJpeg, &headers);
     if (!vary.empty()) {
@@ -863,10 +1026,13 @@ class InPlaceResourceRecorderVaryTest : public InPlaceResourceRecorderTest {
     RequestHeaders client;
     client.Add(HttpAttributes::kAccept, "image/webp,*/*");
     client.Add(HttpAttributes::kOrigin, "http://one.example.com");
+    HttpOptions http_options = kDefaultHttpOptionsForTests;
+    http_options.ipro_cors_guard = cors_guard;
     std::unique_ptr<InPlaceResourceRecorder> recorder(
         new InPlaceResourceRecorder(
-            RequestContext::NewTestRequestContext(
-                server_context()->thread_system()),
+            RequestContextPtr(new RequestContext(
+                http_options, server_context()->thread_system()->NewMutex(),
+                timer())),
             kTestUrl, rewrite_driver_->CacheFragment(), client.GetProperties(),
             kMaxResponseBytes, 4 /* max_concurrent_recordings */, http_cache(),
             statistics(), message_handler()));
@@ -905,11 +1071,38 @@ TEST_F(InPlaceResourceRecorderVaryTest, AnswerVaryingOnTheRequestIsNotStored) {
       SCOPED_TRACE(StrCat(vary, full_headers_first ? " full" : " prelim"));
       lru_cache()->Clear();
       ClearStats();
-      EXPECT_NE(kFoundResult, RecordWithVary(vary, full_headers_first));
+      const HTTPCache::FindResult found =
+          RecordWithVary(vary, full_headers_first);
+      EXPECT_NE(kFoundResult, found);
       EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
-      EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+      if (StringCaseEqual(vary, "Origin")) {
+        // Made for one origin (InPlaceCorsGuard): skipped without remembering
+        // anything against the URL, so it cannot displace the entry other
+        // requests are served from.
+        EXPECT_EQ(kNotFoundResult, found);
+        EXPECT_EQ(1, IproVar("ipro_recorder_dropped_cors_specific"));
+        EXPECT_EQ(0, IproVar("ipro_recorder_not_cacheable"));
+      } else {
+        EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+      }
       ExpectTerminalInvariant();
     }
+  }
+}
+
+// With InPlaceCorsGuard off, an answer varying on Origin is refused like any
+// other answer varying on the request: not stored, remembered as such.
+TEST_F(InPlaceResourceRecorderVaryTest, AnswerVaryingOnOriginWithGuardOff) {
+  for (bool full_headers_first : {false, true}) {
+    SCOPED_TRACE(full_headers_first ? "full" : "prelim");
+    lru_cache()->Clear();
+    ClearStats();
+    EXPECT_NE(kFoundResult,
+              RecordWithVary("Origin", full_headers_first, nullptr, false));
+    EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+    EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+    EXPECT_EQ(0, IproVar("ipro_recorder_dropped_cors_specific"));
+    ExpectTerminalInvariant();
   }
 }
 
@@ -927,9 +1120,19 @@ TEST_F(InPlaceResourceRecorderVaryTest,
     SCOPED_TRACE(StrCat("server=", c.server_vary, " origin=", c.origin_vary));
     lru_cache()->Clear();
     ClearStats();
-    EXPECT_NE(kFoundResult, RecordWithVary(c.server_vary, true, c.origin_vary));
+    const HTTPCache::FindResult found =
+        RecordWithVary(c.server_vary, true, c.origin_vary);
+    EXPECT_NE(kFoundResult, found);
     EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
-    EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+    if (StringCaseEqual(c.origin_vary, "Origin")) {
+      // The origin's Vary: Origin is carried onto the final headers, which
+      // then were made for one origin: skipped, nothing remembered.
+      EXPECT_EQ(kNotFoundResult, found);
+      EXPECT_EQ(1, IproVar("ipro_recorder_dropped_cors_specific"));
+      EXPECT_EQ(0, IproVar("ipro_recorder_not_cacheable"));
+    } else {
+      EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+    }
   }
   // Control: neither side varies on the request.
   lru_cache()->Clear();
