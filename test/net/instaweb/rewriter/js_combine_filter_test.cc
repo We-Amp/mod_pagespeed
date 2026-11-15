@@ -1122,6 +1122,85 @@ TEST_F(JsFilterAndCombineFilterTest,
   EXPECT_FALSE(headers.IsProxyCacheable());
 }
 
+// A page rewritten by an older version names a minified script inside the
+// combination (jm inside jc) and evaluates it under a name derived from that
+// URL. When the rebuild of the minified script falls back to the unoptimized
+// original (here because the background rewrite is shed), the original has
+// another content hash; the combination must still declare the script under
+// the name the page evaluates, or the page's eval() throws a ReferenceError.
+TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithFallbackInput) {
+  const GoogleString jm_url =
+      Encode(kTestDomain, "jm", "FUEwDOA7jh", kJsUrl1, "js");
+  const GoogleString url =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js", kJsUrl2), "js");
+  // The names an older page evaluates (see ReconstructNoTimeout).
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  EXPECT_EQ(kLegacyVar1, JsCombineFilter::VarName(rewrite_driver(), jm_url));
+  const GoogleString var2 =
+      JsCombineFilter::VarName(rewrite_driver(), StrCat(kTestDomain, kJsUrl2));
+
+  // Make the minification of a.js fall back: its background rewrite is
+  // dropped, so the rebuilt input is the unoptimized original.
+  server_context()->low_priority_rewrite_workers()->ShutDown();
+
+  GoogleString out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  // The combiner minifies what it gets, so only the names show the fallback.
+  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = ", kMinifiedEscapedJs1, ";\n",
+                   "var ", var2, " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+  // Not what the URL names, so not publicly cacheable.
+  EXPECT_FALSE(headers.IsProxyCacheable());
+}
+
+// The same when the script's content changed since the page was rewritten:
+// the rebuilt input has a new hash, and the page still evaluates the name
+// from the URL it has.
+TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithChangedInput) {
+  const GoogleString url = Encode(kTestDomain, "jc", "0",
+                                  MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js",
+                                           "b.js.pagespeed.jm.Y1kknPfzVs.js"),
+                                  "js");
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  const char kLegacyVar2[] = "mod_pagespeed_ose8Vzgyj9";
+  SimulateJsResource(kJsUrl1, "// changed\nvar a=1;");
+
+  GoogleString out;
+  ASSERT_TRUE(FetchResourceUrl(url, &out));
+  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = \"var a=1;\";\n", "var ",
+                   kLegacyVar2, " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+}
+
+// A page rewritten by this version (and the versions since jm-inside-jc
+// stopped being emitted) still evaluates the names the fetched combination
+// declares, before and after a cache loss, and when the combined inputs fall
+// back to their originals.
+TEST_F(JsFilterAndCombineFilterTest, PageNamesMatchFetchedCombination) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain, TestHtml());
+  ASSERT_EQ(3, scripts.size());
+  const GoogleString url =
+      GoogleUrl(GoogleUrl(kTestDomain), scripts[0].url).Spec().as_string();
+  const GoogleString eval1 = scripts[1].text_content;
+  const GoogleString eval2 = scripts[2].text_content;
+  ASSERT_TRUE(StringPiece(eval1).starts_with("eval("));
+  ASSERT_TRUE(StringPiece(eval2).starts_with("eval("));
+  const GoogleString var1 = eval1.substr(5, eval1.size() - 7);
+  const GoogleString var2 = eval2.substr(5, eval2.size() - 7);
+
+  lru_cache()->Clear();
+  GoogleString out;
+  ASSERT_TRUE(FetchResourceUrl(url, &out));
+  EXPECT_EQ(StrCat("var ", var1, " = ", kMinifiedEscapedJs1, ";\n", "var ",
+                   var2, " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+}
+
 // A combination served without some of its inputs is always private.
 TEST_F(JsCombineFilterTest, PartialAnswerIsPrivateUnderItsOwnHash) {
   SetResponseWithDefaultHeaders("pa.js", kContentTypeJavascript, "var pa;",
