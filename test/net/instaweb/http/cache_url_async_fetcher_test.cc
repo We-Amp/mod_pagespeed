@@ -1478,10 +1478,10 @@ TEST_F(CacheUrlAsyncFetcherTest, ProxyHitOnModuleFetchedEntryKeepsMaxAge) {
   GoogleString content;
   bool done = false, success = false, cacheable = false;
   ResponseHeaders served(http_options_);
-  MockFetch* fetch = new MockFetch(
-      RequestContextPtr(
-          new RequestContext(http_options_, thread_system_->NewMutex(), nullptr)),
-      &content, &done, &success, &cacheable);
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
   fetch->set_response_headers(&served);
   cache_fetcher_->Fetch(kUrl, &handler_, fetch);
   ASSERT_TRUE(done);
@@ -2645,6 +2645,89 @@ TEST_F(CacheUrlAsyncFetcherTest, CycloneZeroCopyHitTornFailsClosed) {
   EXPECT_EQ("", content);
   // The borrow was returned despite the failed serve.
   EXPECT_EQ(mapped_backend.mapped_hits(), mapped_backend.release_count());
+}
+
+// Which stored copies may answer a request that carries Origin.
+TEST(CacheUrlAsyncFetcherCorsTest, CorsAllowsSharedCopy) {
+  RequestHeaders plain;
+  RequestHeaders from_a;
+  from_a.Add(HttpAttributes::kOrigin, "https://a.example");
+  ResponseHeaders none;
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  ResponseHeaders only_b;
+  only_b.Add(HttpAttributes::kAccessControlAllowOrigin, "https://b.example");
+  ResponseHeaders two;
+  two.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  two.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+
+  for (const ResponseHeaders* r : {&none, &any, &only_a, &only_b, &two}) {
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(nullptr, *r));
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&plain, *r));
+  }
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, none));
+  EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, any));
+  EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, only_a));
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, only_b));
+  // Browsers refuse more than one Access-Control-Allow-Origin.
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, two));
+}
+
+// A credentialed cross-origin request (it carries cookies or credentials)
+// is answered only by a copy that names its origin and allows credentials.
+TEST(CacheUrlAsyncFetcherCorsTest, CredentialedRequest) {
+  RequestHeaders with_cookie;
+  with_cookie.Add(HttpAttributes::kOrigin, "https://a.example");
+  with_cookie.Add(HttpAttributes::kCookie, "session=1");
+  RequestHeaders with_auth;
+  with_auth.Add(HttpAttributes::kOrigin, "https://a.example");
+  with_auth.Add(HttpAttributes::kAuthorization, "Basic dTpw");
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  ResponseHeaders any_with_credentials;
+  any_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  any_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                           "true");
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  ResponseHeaders only_a_with_credentials;
+  only_a_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin,
+                              "https://a.example");
+  only_a_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                              "true");
+  ResponseHeaders only_b_with_credentials;
+  only_b_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin,
+                              "https://b.example");
+  only_b_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                              "true");
+  for (const RequestHeaders* request : {&with_cookie, &with_auth}) {
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(request, any));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, any_with_credentials));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(request, only_a));
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, only_a_with_credentials));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, only_b_with_credentials));
+  }
+}
+
+// Which responses were made for the one request that got them.
+TEST(CacheUrlAsyncFetcherCorsTest, IsCorsSpecificResponse) {
+  ResponseHeaders none;
+  EXPECT_FALSE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(none));
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  EXPECT_FALSE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(any));
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  EXPECT_TRUE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(only_a));
+  ResponseHeaders vary;
+  vary.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  vary.Add(HttpAttributes::kVary, "Accept-Encoding, origin");
+  EXPECT_TRUE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(vary));
 }
 
 }  // namespace

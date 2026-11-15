@@ -158,6 +158,11 @@
   X(false, in_place_wait_for_optimized_, "ipwo", \
     kInPlaceWaitForOptimized, kDirectoryScope, \
     "Wait for optimizations to complete", true) \
+  X(true, in_place_cors_guard_, "ipcg", \
+    kInPlaceCorsGuard, kDirectoryScope, \
+    "Serve an in-place resource to a cross-origin CORS request only when " \
+    "its Access-Control-Allow-Origin header allows that request's origin; " \
+    "otherwise let the server answer the request itself.", true) \
   X(10, in_place_s_maxage_sec_, "ipsm", \
     kInPlaceSMaxAgeSec, kServerScope, \
     "What to set s-maxage to on not-yet-optimized ipro resources", true) \

@@ -24,6 +24,7 @@
 #include <cstdint>
 
 #include "base/logging.h"
+#include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
@@ -50,6 +51,7 @@ const char kNumDroppedContentType[] = "ipro_recorder_dropped_content_type";
 const char kNumErrorStatus[] = "ipro_recorder_error_status";
 const char kNumSkippedTransient[] = "ipro_recorder_skipped_transient";
 const char kNumEmpty[] = "ipro_recorder_empty";
+const char kNumDroppedCorsSpecific[] = "ipro_recorder_dropped_cors_specific";
 
 // Process-wide count of recorders ever CONSTRUCTED.  Deliberately not a
 // Statistics variable: it exists so a test can distinguish "the recorder was
@@ -114,6 +116,7 @@ InPlaceResourceRecorder::InPlaceResourceRecorder(
       num_error_status_(stats->GetVariable(kNumErrorStatus)),
       num_skipped_transient_(stats->GetVariable(kNumSkippedTransient)),
       num_empty_(stats->GetVariable(kNumEmpty)),
+      num_dropped_cors_specific_(stats->GetVariable(kNumDroppedCorsSpecific)),
       status_code_(-1),
       failure_(false),
       specific_outcome_recorded_(false),
@@ -162,6 +165,7 @@ void InPlaceResourceRecorder::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumErrorStatus);
   statistics->AddVariable(kNumSkippedTransient);
   statistics->AddVariable(kNumEmpty);
+  statistics->AddVariable(kNumDroppedCorsSpecific);
 }
 
 bool InPlaceResourceRecorder::RecordSpecificOutcome(Variable* counter) {
@@ -350,6 +354,23 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
                         "IPRO: not recording %s: transient status %d "
                         "(not a 200)",
                         url_.c_str(), status_code_);
+    }
+    failure_ = true;
+    return;
+  }
+
+  // A response made for one origin, such as the server's answer to a CORS
+  // request the in-place path declined, is not what other requests get:
+  // storing it would replace the entry they are served (and optimized)
+  // from.  Nothing is remembered against the URL either, so the next
+  // response that suits every request is recorded as usual.
+  if (http_options_.ipro_cors_guard &&
+      CacheUrlAsyncFetcher::IsCorsSpecificResponse(*response_headers)) {
+    if (RecordSpecificOutcome(num_dropped_cors_specific_)) {
+      handler_->Message(kInfo,
+                        "IPRO: not recording %s: response is specific to one "
+                        "origin",
+                        url_.c_str());
     }
     failure_ = true;
     return;

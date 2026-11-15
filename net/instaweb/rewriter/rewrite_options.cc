@@ -205,6 +205,7 @@ const char RewriteOptions::kInPlacePreemptiveRewriteImages[] =
     "InPlacePreemptiveRewriteImages";
 const char RewriteOptions::kInPlacePreemptiveRewriteJavascript[] =
     "InPlacePreemptiveRewriteJavascript";
+const char RewriteOptions::kInPlaceCorsGuard[] = "InPlaceCorsGuard";
 const char RewriteOptions::kInPlaceRewriteDeadlineMs[] =
     "InPlaceRewriteDeadlineMs";
 const char RewriteOptions::kIncreaseSpeedTracking[] = "IncreaseSpeedTracking";
@@ -4912,6 +4913,7 @@ HttpOptions RewriteOptions::ComputeHttpOptions() const {
   HttpOptions options;
   options.respect_vary = respect_vary();
   options.implicit_cache_ttl_ms = implicit_cache_ttl_ms();
+  options.ipro_cors_guard = in_place_cors_guard();
   return options;
 }
 
