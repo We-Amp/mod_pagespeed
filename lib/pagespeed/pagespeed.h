@@ -1497,12 +1497,11 @@ PS_EXPORT PS_NODISCARD ps_error_t ps_build_cache_control(
 /* Store-side `Vary` refusal predicate: 1 if a response carrying this `Vary`
  * must NOT be stored, 0 if it may be.
  *
- * A response is refused when its `Vary` names `*` or any field the capability
- * mask does not key on. The allowed set is exactly `Accept-Encoding`,
- * `User-Agent`, `Accept` and `Save-Data` — the four request fields the mask is
- * derived from. Anything else would put a single representation behind a key
- * that cannot tell the variants apart, and the next client on a different axis
- * value gets the wrong bytes.
+ * A response may be stored only when its `Vary` names nothing but
+ * `Accept-Encoding`: one stored response per URL serves every client, and the
+ * coding is chosen per request. `*` or any other field (`Accept`,
+ * `User-Agent`, `Save-Data`, ...) refuses it. Earlier versions also admitted
+ * `User-Agent`, `Accept` and `Save-Data`.
  *
  * `vary` is the field VALUE, NUL-terminated, or NULL for a response with no
  * `Vary` (which is storable). A response carrying several `Vary` lines must
@@ -1534,6 +1533,9 @@ PS_EXPORT int ps_vary_uncacheable(const char* vary);
  * but never optimize it", and a response that may not be stored at all has
  * nothing to mark — so a caller that refuses the response first never needs
  * this, and a caller that asks both gets a consistent pair.
+ *
+ * Since ps_vary_uncacheable refuses `Vary: Accept`, this returns 0 for every
+ * value. It stays exported for callers built against it.
  *
  * Available from PS_API 1.7. */
 PS_EXPORT int ps_vary_varies_accept(const char* vary);

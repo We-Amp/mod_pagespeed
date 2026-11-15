@@ -137,7 +137,7 @@ TEST(HeadersSidecarReplayTest, RepeatedLinesStaySeparateAndOrdered) {
       {"Cache-Control", "max-age=60"},
       {"Content-Security-Policy", "img-src https:"},
       {"Vary", "Accept-Encoding"},
-      {"vary", "Accept"},
+      {"vary", "accept-encoding"},
   };
   const std::string payload = PayloadOf(origin);
   auto plan = PlanSidecarServe(kBoth, false, payload);

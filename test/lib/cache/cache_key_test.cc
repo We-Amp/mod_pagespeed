@@ -47,12 +47,12 @@ TEST(SiteCacheKeyTest, EmptySiteGivesTheExistingKey) {
 }
 
 TEST(SiteCacheKeyTest, SitedKeyWrapsTheUnsitedStringUnderItsPrefix) {
-  EXPECT_EQ(cyclone::CacheKey("ks3:st1:" + kSiteA + "@https://example.com" +
+  EXPECT_EQ(cyclone::CacheKey("ks4:st1:" + kSiteA + "@https://example.com" +
                               std::string(kUrl)),
             PageSpeedCache::ComposeSiteKeyPreNormalized(kUrl, kHost, kScheme,
                                                         "", kSiteA));
   const std::string ctx = ContextSignature();
-  EXPECT_EQ(cyclone::CacheKey("ks3:st1:" + kSiteA + "@oc1:" + ctx +
+  EXPECT_EQ(cyclone::CacheKey("ks4:st1:" + kSiteA + "@oc1:" + ctx +
                               "@https://example.com" + std::string(kUrl)),
             PageSpeedCache::ComposeSiteKeyPreNormalized(kUrl, kHost, kScheme,
                                                         ctx, kSiteA));

@@ -141,10 +141,9 @@ copy and `/llms.txt`, which follow the page they were made from.
 **Never stored.** A response is not stored when it sets a cookie
 (`Set-Cookie`), or when it carries `Cache-Control: private` or
 `Cache-Control: no-store`. A response is stored only when its `Vary` names
-nothing beyond `Accept-Encoding`, `User-Agent`, `Accept` and `Save-Data`. Any
-other field, including `Vary: Cookie`, and `Vary: *`, means it is not stored. For
-a response that varies on `Accept`, `User-Agent` or `Save-Data`, those request
-headers take part in choosing which stored copy answers.
+nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
+`Vary: User-Agent`, `Vary: Save-Data`, `Vary: Cookie` and `Vary: *`, means it is
+not stored, and each request is answered by your origin.
 
 **Requests with a cookie.** A request that carries a `Cookie` header is treated
 by the kind of response:

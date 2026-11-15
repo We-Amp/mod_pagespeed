@@ -100,10 +100,10 @@ bazel test //test/lib/cache/...
   or `Expires` is stored only if it has a validator, and is then always
   revalidated), a stale entry is NEVER served (`stale-while-revalidate`,
   `stale-if-error`, `max-stale` and `must-revalidate` are not consulted), and
-  `Accept-Encoding` is the ONLY admitted `Vary` token (not the four axes
-  `VaryUncacheable` admits). Do not call `EvaluateFreshness` or
-  `VaryUncacheable` from it: their per-class defaults and wider Vary gate are
-  exactly what the policy forbids. In report-only mode the serve verdict is the
+  `Accept-Encoding` is the ONLY admitted `Vary` token (`VaryUncacheable` now
+  admits only that token too, but keeps its own decision). Do not call
+  `EvaluateFreshness` or `VaryUncacheable` from it: their per-class defaults
+  and separate Vary gate are not the policy's. In report-only mode the serve verdict is the
   one `kServeCachedHtml` would give, with `enforce` false, so a counter of what
   the strongest mode would do is honest. Fuzz it with
   `bazel run -c opt --config=asan //lib/cache:html_cache_policy_fuzz`; the seeds

@@ -373,6 +373,64 @@ public class ResponseHeaderReplayTests
         Assert.Contains("Accept-Encoding", vary);
     }
 
+    [Theory]
+    [InlineData("User-Agent")]
+    [InlineData("Accept")]
+    [InlineData("Save-Data")]
+    [InlineData("Origin")]
+    [InlineData("Accept-Encoding, User-Agent")]
+    public async Task Miss_ApplicationVaryOnARequestHeader_IsNotCached(string vary)
+    {
+        var cache = new FakeCache();
+        var ctx = await Run(cache, NewContext(), c =>
+        {
+            c.Response.StatusCode = 200;
+            c.Response.ContentType = "text/css";
+            c.Response.Headers.Vary = vary;
+            return c.Response.WriteAsync("body{}");
+        });
+        Assert.Equal(0, cache.BeginWriteCalls);
+        Assert.Equal("MISS", ctx.Response.Headers["X-PageSpeed"].ToString());
+    }
+
+    [Theory]
+    [InlineData("User-Agent")]
+    [InlineData("Accept")]
+    [InlineData("Origin")]
+    public async Task Miss_VarySetBeforeTheMiddlewareRan_IsNotCached(string vary)
+    {
+        // A token already on the response when the middleware is entered
+        // (set by middleware ahead of it) is not stored with the entry, but
+        // the response still varies on it, so it may not be shared.
+        var cache = new FakeCache();
+        var ctx = NewContext();
+        ctx.Response.Headers.Vary = vary;
+        await Run(cache, ctx, c =>
+        {
+            c.Response.StatusCode = 200;
+            c.Response.ContentType = "text/css";
+            return c.Response.WriteAsync("body{}");
+        });
+        Assert.Equal(0, cache.BeginWriteCalls);
+        Assert.Contains(vary, ctx.Response.Headers.Vary.ToString());
+    }
+
+    [Fact]
+    public async Task Miss_VaryOnAcceptEncodingOnly_IsStillCached()
+    {
+        var cache = new FakeCache();
+        var ctx = NewContext();
+        ctx.Response.Headers.Vary = "Accept-Encoding";
+        await Run(cache, ctx, c =>
+        {
+            c.Response.StatusCode = 200;
+            c.Response.ContentType = "text/css";
+            c.Response.Headers.Append("Vary", "accept-encoding");
+            return c.Response.WriteAsync("body{}");
+        });
+        Assert.Equal(1, cache.BeginWriteCalls);
+    }
+
     [Fact]
     public async Task Miss_HeadersThatCannotBeReplayed_AreNotCached()
     {
@@ -494,7 +552,9 @@ public class ResponseHeaderReplayNativeTests : IDisposable
             c.Response.Headers["Content-Security-Policy"] = "default-src 'self'";
             c.Response.Headers["X-Content-Type-Options"] = "nosniff";
             c.Response.Headers["Access-Control-Allow-Origin"] = "https://app.example";
-            c.Response.Headers.Vary = "User-Agent";
+            // The one request header a stored response may vary on, spelled
+            // as the application spelled it so the replayed line is its own.
+            c.Response.Headers.Vary = "accept-encoding";
             return c.Response.WriteAsync("body { color: red }");
         }, "/a.css");
         Assert.Equal(1, runs);
@@ -504,8 +564,7 @@ public class ResponseHeaderReplayNativeTests : IDisposable
         Assert.Equal("nosniff", Values(hit, "X-Content-Type-Options").Single());
         Assert.Equal("https://app.example", Values(hit, "Access-Control-Allow-Origin").Single());
         var vary = string.Join(",", Values(hit, "Vary"));
-        Assert.Contains("User-Agent", vary);
-        Assert.Contains("Accept-Encoding", vary);
+        Assert.Contains("accept-encoding", vary, StringComparison.Ordinal);
         Assert.Equal("body { color: red }", res[1].Body);
         Assert.Equal(res[1].Body.Length, hit.Content.Headers.ContentLength);
 
@@ -514,6 +573,66 @@ public class ResponseHeaderReplayNativeTests : IDisposable
         Assert.Equal(304, cond[0].Status);
         Assert.Equal("default-src 'self'", Values(cond[0].Response, "Content-Security-Policy").Single());
         Assert.Equal("nosniff", Values(cond[0].Response, "X-Content-Type-Options").Single());
+    }
+
+    [Theory]
+    [InlineData("User-Agent", "User-Agent")]
+    [InlineData("Accept", "Accept")]
+    [InlineData("Save-Data", "Save-Data")]
+    [InlineData("Origin", "Origin")]
+    public async Task AppVaryOnARequestHeader_EachRequestGetsItsOwnAnswer(string vary, string header)
+    {
+        int runs = 0;
+        var res = await Get(null, c =>
+        {
+            runs++;
+            c.Response.ContentType = "text/css";
+            c.Response.Headers.Vary = vary;
+            return c.Response.WriteAsync($"/* {c.Request.Headers[header]} {runs} */");
+        }, "/v-" + vary + ".css", 3);
+        Assert.Equal(3, runs);
+        Assert.All(res, r => Assert.NotEqual("HIT", Values(r.Response, "X-PageSpeed").SingleOrDefault()));
+    }
+
+    [Fact]
+    public async Task OuterMiddlewareVary_KeepsTheResponseOutOfTheCache()
+    {
+        int runs = 0;
+        var res = await Get(
+            (c, next) => { c.Response.Headers.Vary = "Origin"; return next(); },
+            c => { runs++; c.Response.ContentType = "text/css"; return c.Response.WriteAsync("o{}"); },
+            "/outer-vary.css", 3);
+        Assert.Equal(3, runs);
+        Assert.All(res, r => Assert.NotEqual("HIT", Values(r.Response, "X-PageSpeed").SingleOrDefault()));
+    }
+
+    [Fact]
+    public async Task OuterMiddlewareVaryOnAcceptEncoding_IsStillCached()
+    {
+        int runs = 0;
+        var res = await Get(
+            (c, next) => { c.Response.Headers.Vary = "Accept-Encoding"; return next(); },
+            c => { runs++; c.Response.ContentType = "text/css"; return c.Response.WriteAsync("ae{}"); },
+            "/outer-ae.css");
+        Assert.Equal(1, runs);
+        Assert.Equal("HIT", Values(res[1].Response, "X-PageSpeed").Single());
+    }
+
+    [Fact]
+    public void VaryStoreRule_GivesTheNativeStorePredicatesAnswers()
+    {
+        string?[] values =
+        {
+            null, "", " ", ",", "Accept-Encoding", "accept-encoding", " Accept-Encoding ,\taccept-encoding",
+            "*", "Accept-Encoding, *", "Accept", "User-Agent", "Save-Data", "Origin", "Cookie",
+            "Accept-Encoding, User-Agent", "Accept-Encodings", "Accept-", "Sec-CH-DPR",
+        };
+        foreach (var v in values)
+        {
+            bool native = WeAmp.PageSpeed.Native.NativePageSpeed.VaryUncacheable(v) != 0;
+            bool managed = WeAmp.PageSpeed.AspNetCore.Internal.VaryStoreRule.Refuses(new[] { v });
+            Assert.True(native == managed, $"Vary [{v}]: native {native}, managed {managed}");
+        }
     }
 
     [Fact]

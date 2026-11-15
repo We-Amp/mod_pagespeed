@@ -253,6 +253,13 @@ internal static partial class NativePageSpeed
     internal static partial int ParseCacheControl(
         string headerValue, ref NativeCacheControl parsed);
 
+    // ---------- Vary store predicate ----------
+    // 1 if a response carrying this combined Vary value may not be stored,
+    // 0 if it may; a null value is a response with no Vary.
+    [LibraryImport(Lib, EntryPoint = "ps_vary_uncacheable",
+        StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int VaryUncacheable(string? vary);
+
     // ---------- response-header block ----------
     // names/values: arrays of `count` NUL-terminated strings (const char* const*).
     // out verdict: ps_sidecar_verdict_t as int; out stored: 0 or 1.

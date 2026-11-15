@@ -3013,6 +3013,78 @@ static void ngx_http_pagespeed_classify_origin_headers(
   }
 }
 
+// The URL's stored entries were just removed because its origin's answer may
+// no longer be shared (a `Vary` the cache does not key on).  Tell the worker,
+// with the same origin-refreshed sentinel a freshness re-fetch sends: it
+// purges whatever it still holds for the URL and clears its record of having
+// processed it, so once the origin stops varying the re-recorded original is
+// optimized again rather than skipped as already done.  Fire-and-forget.
+static void ngx_http_pagespeed_notify_url_dropped(ngx_http_request_t* r,
+                                                  std::string_view url,
+                                                  std::string_view hostname,
+                                                  std::string_view scheme,
+                                                  ContentType ct) {
+  if (g_shared_config.socket_path.empty()) {
+    return;
+  }
+  CacheNotification refresh;
+  refresh.url = std::string(url);
+  refresh.hostname = std::string(hostname);
+  refresh.scheme = std::string(scheme);
+  refresh.content_type = ct;
+  refresh.capability_mask = pagespeed::kOriginRefreshedSentinel;
+  refresh.host_vouched = ngx_http_pagespeed_host_vouched(r, hostname);
+  auto send_result = SendNotificationPersistent(
+      std::string_view(g_shared_config.socket_path), refresh);
+  if (!send_result.success) {
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                  "pagespeed: dropped-entry notify failed: %s",
+                  send_result.error_message.c_str());
+  }
+}
+
+// A 2xx origin response whose `Vary` the cache may not store
+// (lib/cache/vary_storability.h).  Not recording it is not enough when the
+// URL already has entries — stored before its origin started varying, or by
+// an earlier version — because they would keep answering other clients.
+// Drop them, as the headers-sidecar refusal does.
+static void ngx_http_pagespeed_drop_on_vary_refusal(ngx_http_request_t* r) {
+  ngx_http_pagespeed_loc_conf_t* conf =
+      static_cast<ngx_http_pagespeed_loc_conf_t*>(
+          ngx_http_get_module_loc_conf(r, ngx_http_pagespeed_module));
+  if (conf->cache_path.len == 0) {
+    return;
+  }
+  std::string_view cache_path_sv(
+      reinterpret_cast<const char*>(conf->cache_path.data),
+      conf->cache_path.len);
+  std::shared_ptr<PageSpeedCache> cache =
+      CheckGenerationAndGetCache(cache_path_sv, r->connection->log);
+  if (!cache) {
+    cache = GetCache(cache_path_sv, r->connection->log);
+  }
+  if (!cache) {
+    return;
+  }
+  std::string url_str = ngx_http_pagespeed_cache_url(r);
+  std::string hostname = ngx_http_pagespeed_cache_hostname(r);
+  std::string_view scheme = ngx_http_pagespeed_scheme(r, conf);
+  CapabilityMask default_mask;
+  const AlternateId identity_id =
+      MaskToAlternateId(static_cast<uint8_t>(default_mask.Encode() & 0xFF));
+  if (pagespeed::EvictOnSidecarRefusal(*cache, url_str, hostname, scheme,
+                                       identity_id)) {
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                  "pagespeed: origin response for %V varies on a request "
+                  "header the cache does not key on; removed the stored "
+                  "entries",
+                  &r->uri);
+    ngx_http_pagespeed_notify_url_dropped(
+        r, url_str, hostname, scheme,
+        ngx_http_pagespeed_detect_content_type(r));
+  }
+}
+
 // =====================================================================
 // Response-header sidecar, serve side (issue #208).  The
 // decisions live in src/nginx/headers_sidecar_replay.h; this is the nginx
@@ -3493,12 +3565,8 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
 
   // Send notification to worker (fire-and-forget).
   // Skip for no-transform: original is cached but must not be optimized.
-  // Skip when the origin negotiates on Accept itself: the original is cached
-  // (marked, above) but must not be optimized, for the same reason
-  // no-transform must not — the origin has already decided which
-  // representation this request gets, and deriving a variant set from the one
-  // copy we captured would layer a second negotiation on top of the origin's,
-  // keyed on whichever Accept the FIRST requester happened to send.
+  // `origin_varies_accept` is never set now (a `Vary: Accept` response is not
+  // stored at all); it stays in the condition for the marker's readers.
   // Skip HTML notifications when disable_html is set in shared config.
   // Skip for non-2xx responses: error pages (4xx/5xx) should not trigger
   // worker optimization.  Without this, bots hitting non-existent URLs
@@ -4211,6 +4279,8 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
         if (!sidecar_removed) {
           (void)cache->Remove(url, hostname, scheme);
         }
+        ngx_http_pagespeed_notify_url_dropped(r, url, hostname, scheme,
+                                              updated_meta.content_type);
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                       "pagespeed: 304 for %V is no longer storable (Vary) - "
                       "served the held bytes once and dropped the entry",
@@ -4622,19 +4692,17 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
     if (ngx_http_pagespeed_get_response_header(r, "Set-Cookie").len > 0) {
       ctx->uncacheable = 1;
     }
-    // Everything the origin's Vary decides on the store side, from one parse
-    // (lib/cache/vary_storability.h).  Storability and the Accept-negotiation
-    // marker used to be derived independently — the store path admitted
-    // Vary: Accept and the notify path had no Vary term at all — so the two
-    // halves disagreed and such responses were both stored AND optimized.
+    // The origin's Vary (lib/cache/vary_storability.h): a response that
+    // varies on any request header other than Accept-Encoding is not stored,
+    // and whatever the URL already has stored is dropped, so each client gets
+    // the origin's answer to its own request.  `varies_accept` is now always
+    // false; the branch stays so the marker keeps one writer.
     const pagespeed::VaryStoreVerdict vary_verdict =
         pagespeed::ClassifyVaryForStore(ngx_http_pagespeed_combined_vary(r));
     if (!vary_verdict.storable) {
       ctx->uncacheable = 1;
+      ngx_http_pagespeed_drop_on_vary_refusal(r);
     }
-    // The origin negotiates on Accept itself: store what it sent, stamp the
-    // entry so a later serve can tell "deliberately left alone" from "not
-    // optimized yet", and never hand it to the optimizer.
     if (vary_verdict.varies_accept) {
       ctx->origin_varies_accept = 1;
     }

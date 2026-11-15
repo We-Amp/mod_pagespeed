@@ -928,7 +928,13 @@ TEST(AbiVary, MirrorsTheSharedPredicate) {
   EXPECT_EQ(ps_vary_uncacheable(nullptr), 0);
   EXPECT_EQ(ps_vary_uncacheable(""), 0);
   EXPECT_EQ(ps_vary_uncacheable("Accept-Encoding"), 0);
-  EXPECT_EQ(ps_vary_uncacheable("Accept, User-Agent, Save-Data"), 0);
+  EXPECT_EQ(ps_vary_uncacheable("accept-encoding"), 0);
+  // The request fields an origin negotiates on are refused: one original is
+  // kept per URL, so it would reach clients that asked for something else.
+  EXPECT_EQ(ps_vary_uncacheable("Accept"), 1);
+  EXPECT_EQ(ps_vary_uncacheable("User-Agent"), 1);
+  EXPECT_EQ(ps_vary_uncacheable("Save-Data"), 1);
+  EXPECT_EQ(ps_vary_uncacheable("Accept, User-Agent, Save-Data"), 1);
   EXPECT_EQ(ps_vary_uncacheable("*"), 1);
   EXPECT_EQ(ps_vary_uncacheable("Cookie"), 1);
   EXPECT_EQ(ps_vary_uncacheable("Accept-Encoding, Accept-Language"), 1);

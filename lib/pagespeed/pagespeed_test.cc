@@ -4689,16 +4689,16 @@ TEST(VaryStoreVerdictApiTest, VariesAcceptAnswersTheStampingQuestion) {
       // No Vary at all: storable, negotiates on nothing.
       {nullptr, 0, 0},
       {"", 0, 0},
-      // The axis the mask keys on but the origin does not negotiate.
+      // The one field a stored response is keyed on.
       {"Accept-Encoding", 0, 0},
-      {"User-Agent", 0, 0},
-      {"Save-Data", 0, 0},
-      // The origin negotiates on Accept: storable AND must be marked.
-      {"Accept", 0, 1},
-      {"accept", 0, 1},
-      {"  Accept  ", 0, 1},
-      {"Accept-Encoding, Accept", 0, 1},
-      {"Accept,Accept-Encoding", 0, 1},
+      // Fields the origin picks its answer from: refused, so never marked.
+      {"User-Agent", 1, 0},
+      {"Save-Data", 1, 0},
+      {"Accept", 1, 0},
+      {"accept", 1, 0},
+      {"  Accept  ", 1, 0},
+      {"Accept-Encoding, Accept", 1, 0},
+      {"Accept,Accept-Encoding", 1, 0},
       // Refused outright: nothing to store, so nothing to mark.
       {"*", 1, 0},
       {"Cookie", 1, 0},
@@ -5389,7 +5389,7 @@ TEST_F(PageSpeedCacheApiTest, WriteHeadersSidecarStoresAndReadsBackByExactId) {
   const char* names[] = {"Cache-Control", "Content-Security-Policy",
                          "Referrer-Policy", "Vary"};
   const char* values[] = {"max-age=600", "default-src 'self'", "no-referrer",
-                          "Accept-Encoding,  ACCEPT "};
+                          "Accept-Encoding,  ACCEPT-ENCODING "};
   int verdict = -1;
   int stored = -1;
   ASSERT_EQ(ps_cache_write_headers_sidecar(cache_, "/style.css", "example.com",
@@ -5414,7 +5414,7 @@ TEST_F(PageSpeedCacheApiTest, WriteHeadersSidecarStoresAndReadsBackByExactId) {
   EXPECT_EQ(data[0], 1);
   // The origin's actual Vary string is in there, byte for byte.
   const std::string blob(reinterpret_cast<const char*>(data), len);
-  EXPECT_NE(blob.find("Accept-Encoding,  ACCEPT "), std::string::npos);
+  EXPECT_NE(blob.find("Accept-Encoding,  ACCEPT-ENCODING "), std::string::npos);
   ps_read_free(result);
 
   // And it is not something ordinary selection can produce.

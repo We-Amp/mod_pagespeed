@@ -953,7 +953,8 @@ public sealed class PageSpeedMiddleware
         /// middleware ahead of this one, has run.
         /// </summary>
         public bool UncacheableNow =>
-            ClassifyCacheability(_response) == ResponseCacheability.Uncacheable;
+            ClassifyCacheability(_response) == ResponseCacheability.Uncacheable ||
+            VaryStoreRule.Refuses(_response, OwnVaryTokens);
 
         public void Capture()
         {
@@ -997,22 +998,15 @@ public sealed class PageSpeedMiddleware
             }
             if (varyTokens.Count > 0)
                 captured.Add(new("Vary", string.Join(", ", varyTokens)));
-            _uncacheable = ClassifyCacheability(_response) == ResponseCacheability.Uncacheable;
+            // Every Vary token counts for whether the response may be stored,
+            // the ones present at entry included; only this middleware's own
+            // are left out. (Entry tokens are not stored with the entry, but a
+            // response that varies on them still may not be shared.)
+            _uncacheable =
+                ClassifyCacheability(_response) == ResponseCacheability.Uncacheable ||
+                VaryStoreRule.Refuses(_response, OwnVaryTokens);
             _captured = captured;
         }
-    }
-
-    /// <summary>True when the response's own Vary names Accept.</summary>
-    private static bool VariesOnAccept(IReadOnlyList<KeyValuePair<string, string>> headers)
-    {
-        foreach (var h in headers)
-        {
-            if (!h.Key.Equals("Vary", StringComparison.OrdinalIgnoreCase)) continue;
-            foreach (var token in h.Value.Split(','))
-                if (token.Trim().Equals("Accept", StringComparison.OrdinalIgnoreCase))
-                    return true;
-        }
-        return false;
     }
 
     /// <summary>Lines in <paramref name="after"/> that are not in <paramref name="before"/> (multiset difference).</summary>
@@ -1290,7 +1284,6 @@ public sealed class PageSpeedMiddleware
             // Callers record only responses to anonymous requests.
             flags |= CacheFlags.HeadersClassified | CacheFlags.AnonymousRecorded;
             if (sidecar.Stored) flags |= CacheFlags.HeadersSidecarRequired;
-            if (VariesOnAccept(originHeaders)) flags |= CacheFlags.OriginVariesAccept;
         }
         catch (CacheNotOpenException)
         {

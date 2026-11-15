@@ -10,6 +10,8 @@ RFC 9110 Section 12: Content negotiation semantics.
 RFC 9110 Section 12.5.3: Vary header.
 """
 
+import pytest
+
 
 class TestImageFormatNegotiation:
     """Accept header → image format selection."""
@@ -210,23 +212,10 @@ class TestOriginNegotiatesByAccept:
 
     `/vary/accept` is a `text/css` response carrying `Vary: Accept`
     (compliance_origin.py). The origin has declared that IT picks the
-    representation from the request's `Accept`, so two things have to hold
-    for every response we serve from that entry:
-
-      1. `Vary` must still name `Accept`. On a HIT the origin's headers are
-         long gone and the module builds the response itself, so the marker
-         has to be carried by the stored entry — otherwise a shared cache
-         downstream of us keys the response WITHOUT `Accept` and hands one
-         client's representation to a differently-negotiating one.
-
-      2. The bytes must be the origin's. Manufacturing variants from one
-         captured representation layers a second negotiation on top of the
-         origin's own, and later clients get a representation family they
-         never asked for.
-
-    Both are asserted on the HIT path, which is where the information is
-    genuinely at risk: on a MISS the origin's own `Vary` passes through
-    untouched, so a MISS-only assertion proves nothing about the cache.
+    representation from the request's `Accept`. The cache keeps one copy per
+    URL, so it cannot hold one answer per `Accept` value: the response is
+    passed through on every request, with the origin's own `Vary` and bytes,
+    and never served from the cache.
     """
 
     PATH = "/vary/accept"
@@ -252,85 +241,106 @@ class TestOriginNegotiatesByAccept:
             f"(Vary: {r.headers.get('Vary', '<absent>')!r})"
         )
 
-    def test_hit_preserves_origin_vary_accept(self, client):
-        """HIT still names `Accept` in `Vary` (issue #1293).
+    def test_never_served_from_cache(self, client, origin_client):
+        """Every request reaches the origin and gets the origin's bytes.
 
-        The HIT response is built from the stored entry, so this passes only
-        when the origin's Accept negotiation was persisted with the entry.
-        """
-        client.get(self.PATH)
-        r = client.poll_for_hit(self.PATH)
-        client.assert_hit(r)
-        tokens = self._vary_tokens(r)
-        assert "accept" in tokens, (
-            f"HIT dropped the origin's Vary: Accept "
-            f"(Vary: {r.headers.get('Vary', '<absent>')!r})"
-        )
-
-    def test_hit_vary_accept_not_duplicated(self, client):
-        """`Accept` appears once in the HIT `Vary`, not twice."""
-        client.get(self.PATH)
-        r = client.poll_for_hit(self.PATH)
-        client.assert_hit(r)
-        tokens = self._vary_tokens(r)
-        assert tokens.count("accept") == 1, (
-            f"Vary names Accept {tokens.count('accept')} times: "
-            f"{r.headers.get('Vary', '<absent>')!r}"
-        )
-
-    def test_hit_serves_the_origin_bytes(self, client, origin_client):
-        """The entry is served as the origin sent it, never re-negotiated.
-
-        Re-checked after a settle window: the optimizer runs asynchronously,
-        so a body that matches on the first HIT but diverges a second later
-        would still be a second negotiation layered on the origin's.
+        Re-checked over a settle window: recording and optimization run
+        asynchronously, so a response that is a MISS once but a HIT a second
+        later would still be one client's answer served to another.
         """
         import time
 
         origin_body = origin_client.get(self.PATH).content
         assert origin_body, "origin served an empty body — fixture broken"
 
-        client.get(self.PATH)
-        r = client.poll_for_hit(self.PATH)
-        client.assert_hit(r)
-        assert r.content == origin_body, (
-            f"HIT body differs from the origin's: {r.content!r} != {origin_body!r}"
-        )
-
         deadline = time.time() + 3.0
         while time.time() < deadline:
-            time.sleep(0.5)
-            later = client.get(self.PATH)
-            assert later.content == origin_body, (
-                f"body diverged from the origin's after "
-                f"{later.headers.get('X-PageSpeed', '<absent>')}: "
-                f"{later.content!r} != {origin_body!r}"
+            r = client.get(self.PATH)
+            assert r.headers.get("X-PageSpeed") != "HIT", (
+                "a Vary: Accept response was served from the cache"
             )
+            assert r.content == origin_body, (
+                f"body differs from the origin's: {r.content!r} != {origin_body!r}"
+            )
+            assert self._vary_tokens(r).count("accept") == 1, (
+                f"Vary must name Accept once: {r.headers.get('Vary', '<absent>')!r}"
+            )
+            time.sleep(0.5)
 
-    def test_hit_content_type_preserved(self, client):
-        """The entry keeps the origin's `text/css` Content-Type."""
-        client.get(self.PATH)
-        r = client.poll_for_hit(self.PATH)
+
+class TestRequestFieldVaryIsPerClient:
+    """A response whose `Vary` names a request field answers each client.
+
+    `/vary/negotiated/<field>/...` sends `Vary: <field>` and echoes the
+    request's value for that field in its body. Two clients that differ only
+    in that field must each get the answer to their own request, however long
+    the first answer has had to settle into the cache. `Accept-Encoding` is
+    the control: the cache stores the identity form and codes it per request,
+    so that response is still cached and shared.
+    """
+
+    @staticmethod
+    def _path(field: str) -> str:
+        import uuid
+
+        return "/vary/negotiated/%s/%s.css" % (field, uuid.uuid4().hex)
+
+    @staticmethod
+    def _settle(client, path, headers) -> None:
+        """Give the first answer every chance to be recorded."""
+        import time
+
+        client.get(path, headers=headers)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if client.get(path, headers=headers).headers.get("X-PageSpeed") == "HIT":
+                return
+            time.sleep(0.25)
+
+    @pytest.mark.parametrize(
+        "field,first,second",
+        [
+            ("Accept", "image/webp,*/*", "text/css,*/*"),
+            ("User-Agent", "client-one/1.0", "client-two/1.0"),
+            ("Save-Data", "on", None),
+            ("Origin", "https://a.example", "https://b.example"),
+        ],
+    )
+    def test_second_client_gets_its_own_answer(self, client, field, first, second):
+        path = self._path(field.lower())
+        first_headers = {field: first}
+        self._settle(client, path, first_headers)
+
+        second_headers = {field: second} if second is not None else {}
+        r = client.get(path, headers=second_headers)
+        assert r.status_code == 200
+        expected = ("/* %s=%s */\n" % (field, second or "")).encode()
+        assert r.content == expected, (
+            "a client sending %s: %r was given %r (X-PageSpeed %s)"
+            % (field, second, r.content, r.headers.get("X-PageSpeed"))
+        )
+        assert r.headers.get("X-PageSpeed") != "HIT"
+
+    def test_accept_encoding_vary_is_still_cached(self, client):
+        path = self._path("accept-encoding")
+        client.get(path)
+        r = client.poll_for_hit(path, headers={"User-Agent": "client-two/1.0"})
         client.assert_hit(r)
-        ct = r.headers.get("Content-Type", "")
-        assert ct.startswith("text/css"), f"Expected text/css, got: {ct}"
 
 
 class TestOriginBeginsNegotiatingByAccept:
-    """The upgrade population: a URL already cached AND OPTIMIZED before its
-    origin started declaring `Vary: Accept`.
+    """A URL already cached AND OPTIMIZED before its origin started
+    declaring `Vary: Accept`.
 
     `/vary/accept` cannot reach this case — it has declared `Vary: Accept`
     from its very first response, so it never has a variant set to begin
-    with. That is precisely the population where the marker composes with
-    variants that were built while the resource was still an ordinary one,
-    and where those variants outscore the plain original for any client
-    whose encoding they match. `/vary/flip.css` starts as an ordinary
-    stylesheet and is switched over mid-test via `/vary/control`.
+    with. `/vary/flip.css` starts as an ordinary stylesheet and is switched
+    over mid-test via `/vary/control`. Once the origin negotiates, its
+    response is not stored, so every client must get the origin's own bytes
+    and `Vary` rather than the variants built earlier.
 
-    Recovery is not instant by construction: the stale variant set is
-    dropped by the origin-refresh event, which is rate limited per URL, so
-    these poll rather than assert on the next request.
+    Recovery waits for the stored entry to go stale, so these poll rather
+    than assert on the next request.
     """
 
     PATH = "/vary/flip.css"
@@ -375,18 +385,18 @@ class TestOriginBeginsNegotiatingByAccept:
             "precondition not reached: %s was never optimized, so this test "
             "would not be exercising a pre-existing variant set at all "
             "(last body %r, X-PageSpeed %s)"
-            % (self.PATH, r.content if r else None,
-               r.headers.get("X-PageSpeed") if r else None)
+            % (
+                self.PATH,
+                r.content if r else None,
+                r.headers.get("X-PageSpeed") if r else None,
+            )
         )
 
         # --- the origin starts negotiating on Accept ----------------------
         self._set_origin_vary(origin_client, True)
 
         def recovered(x):
-            return (
-                x.content == self.ORIGIN_BYTES
-                and "accept" in self._vary_tokens(x)
-            )
+            return x.content == self.ORIGIN_BYTES and "accept" in self._vary_tokens(x)
 
         ok, last = self._poll(client, recovered, timeout=45.0)
         assert ok, (
@@ -410,8 +420,7 @@ class TestOriginBeginsNegotiatingByAccept:
             later = client.get(self.PATH)
             assert later.content == self.ORIGIN_BYTES, (
                 "regressed to an optimized representation after recovery: %r "
-                "(X-PageSpeed %s)"
-                % (later.content, later.headers.get("X-PageSpeed"))
+                "(X-PageSpeed %s)" % (later.content, later.headers.get("X-PageSpeed"))
             )
             assert "accept" in self._vary_tokens(later), (
                 "regressed to dropping Accept from Vary after recovery: %r"
@@ -423,11 +432,9 @@ class TestOriginVaryChangesOnRevalidation:
     """The same transition, but over the conditional-revalidation path.
 
     `/vary/flip-etag.css` carries an ETag, so an expired entry is revalidated
-    and answered `304` rather than re-fetched in full. A `304` legitimately
-    omits most headers, so the stored marker may only be re-decided from a
-    `Vary` the `304` actually carries (RFC 9111 Section 4.3.4) -- and it must
-    be re-decided, or an entry frozen on that path can never learn that its
-    origin's negotiation changed. Both directions are asserted.
+    and answered `304` rather than re-fetched in full. A `304` that carries
+    `Vary: Accept` makes the entry one the cache may not hold: it must be
+    dropped, and from then on the URL is passed through to the origin.
     """
 
     PATH = "/vary/flip-etag.css"
@@ -441,9 +448,7 @@ class TestOriginVaryChangesOnRevalidation:
 
     @staticmethod
     def _set_origin_vary(origin_client, on: bool):
-        r = origin_client.get(
-            "/vary/control?flip-etag=%s" % ("on" if on else "off")
-        )
+        r = origin_client.get("/vary/control?flip-etag=%s" % ("on" if on else "off"))
         assert r.status_code == 200
 
     @staticmethod
@@ -465,7 +470,7 @@ class TestOriginVaryChangesOnRevalidation:
             time.sleep(0.5)
         return False, last
 
-    def test_marker_is_learned_held_and_released_across_revalidation(
+    def test_entry_is_dropped_when_origin_starts_negotiating(
         self, client, origin_client
     ):
         # --- ordinary resource, optimized ---------------------------------
@@ -482,7 +487,7 @@ class TestOriginVaryChangesOnRevalidation:
             % (self.PATH, r.content if r else None)
         )
 
-        # --- origin STARTS negotiating: entry must learn it ---------------
+        # --- origin STARTS negotiating: the entry must go ------------------
         self._set_origin_vary(origin_client, True)
         ok, last = self._poll(
             client,
@@ -491,7 +496,7 @@ class TestOriginVaryChangesOnRevalidation:
             timeout=45.0,
         )
         assert ok, (
-            "the entry never learned its origin had started negotiating on "
+            "the entry was kept after its origin started negotiating on "
             "Accept across revalidation. last body=%r Vary=%r X-PageSpeed=%s"
             % (
                 last.content if last else None,
@@ -500,41 +505,32 @@ class TestOriginVaryChangesOnRevalidation:
             )
         )
 
-        # --- origin stops SENDING Vary: the marker must SURVIVE ------------
-        # A 304 that omits a header means "unchanged", not "cleared"
-        # (RFC 9111 Section 4.3.4). Dropping the marker because a 304 said
-        # nothing about Vary would silently put an Accept-negotiating
-        # resource back into optimization on the strength of a header nobody
-        # sent. The route keeps answering 304 here (same validator), so the
-        # marker has to hold.
+        # --- and, while it negotiates, it is never served from the cache --
         import time
 
-        self._set_origin_vary(origin_client, False)
         deadline = time.time() + 6.0
         while time.time() < deadline:
             time.sleep(0.5)
             held = client.get(self.PATH)
-            assert "accept" in self._vary_tokens(held), (
-                "the marker was dropped because a 304 merely omitted Vary; "
-                "absent is not cleared (RFC 9111 Section 4.3.4). Vary=%r"
-                % held.headers.get("Vary")
+            assert held.headers.get("X-PageSpeed") != "HIT", (
+                "a Vary: Accept response was served from the cache"
+            )
+            assert held.content == self.ORIGIN_BYTES, (
+                "served %r instead of the origin's bytes" % held.content
             )
 
 
 class TestOriginStopsNegotiatingByAccept:
     """The release direction: an origin that stops declaring `Vary: Accept`.
 
-    The entry must lose the marker, or the resource is frozen out of
-    optimization forever by a header its origin no longer sends -- while
-    still over-keying every downstream cache with an `Accept` nobody asked
-    for.
+    The URL must become an ordinary cached, optimized resource again, without
+    `Accept` in `Vary` -- or it is frozen out of the cache forever by a header
+    its origin no longer sends, while still over-keying every downstream
+    cache with an `Accept` nobody asked for.
 
-    This failed until the serve path stopped emitting our own `Vary` before
-    the freshness verdict was known. On a stale entry that header was pushed
-    onto the response header list and the request then left for the origin,
-    so the store-side classifier read our own `Accept` back as if the origin
-    had sent it and re-marked the entry on every single re-fetch. Nothing
-    downstream could ever clear it.
+    This once failed because the serve path emitted our own `Vary` before the
+    freshness verdict was known, so the store-side check read our own
+    `Accept` back as if the origin had sent it.
     """
 
     PATH = "/vary/flip-etag.css"
@@ -545,7 +541,7 @@ class TestOriginStopsNegotiatingByAccept:
         vary = response.headers.get("Vary", "")
         return [t.strip().lower() for t in vary.split(",") if t.strip()]
 
-    def test_marker_is_released_when_origin_stops_declaring_vary(
+    def test_url_is_cached_again_when_origin_stops_negotiating(
         self, client, origin_client
     ):
         import time
@@ -573,7 +569,7 @@ class TestOriginStopsNegotiatingByAccept:
                 return
             time.sleep(0.5)
         raise AssertionError(
-            "marker never released: Vary=%r body=%r X-PageSpeed=%s"
+            "never cached and optimized again: Vary=%r body=%r X-PageSpeed=%s"
             % (
                 last.headers.get("Vary") if last else None,
                 last.content if last else None,
@@ -715,6 +711,5 @@ class TestServeNoCacheArmStillDeclaresVary:
         assert "user-agent" in tokens, (
             "a cache HIT on the serve-with-no-cache arm declared no "
             "User-Agent in Vary, so a shared cache downstream keys it without "
-            "the viewport dimension. Vary=%r"
-            % r.headers.get("Vary", "<absent>")
+            "the viewport dimension. Vary=%r" % r.headers.get("Vary", "<absent>")
         )

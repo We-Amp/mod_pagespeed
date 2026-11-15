@@ -130,7 +130,7 @@ TEST_F(HeadersSidecarStoreTest, StoredBlockRoundTripsThroughTheVolume) {
       {"X-Content-Type-Options", "nosniff"},
       {"Access-Control-Allow-Origin", "*"},
       {"Referrer-Policy", ""},
-      {"Vary", "Accept-Encoding,  ACCEPT "},
+      {"Vary", "Accept-Encoding,  ACCEPT-ENCODING "},
   };
   auto write = cache_->WriteHeadersSidecar(kUrl, kHost, kScheme, headers);
   ASSERT_TRUE(write.has_value());
@@ -148,7 +148,7 @@ TEST_F(HeadersSidecarStoreTest, StoredBlockRoundTripsThroughTheVolume) {
   EXPECT_EQ(block[3].second, "");
   // F4's point: the origin's ACTUAL Vary string, spacing and case included.
   EXPECT_EQ(block[4].first, "Vary");
-  EXPECT_EQ(block[4].second, "Accept-Encoding,  ACCEPT ");
+  EXPECT_EQ(block[4].second, "Accept-Encoding,  ACCEPT-ENCODING ");
 }
 
 TEST_F(HeadersSidecarStoreTest, OneEntryPerUrlAndAReStoreReplaces) {

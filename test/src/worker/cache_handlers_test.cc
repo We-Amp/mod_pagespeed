@@ -374,7 +374,7 @@ TEST_F(CacheHandlersTest, ListAlternatesWithData) {
   EXPECT_FALSE(j["alternates"][0]["is_sentinel"].get<bool>());
   // Single entry: chain_length equals count (no stale duplicates).
   EXPECT_EQ(j["chain_length"], 1);
-  EXPECT_EQ(j["cache_key"], "ks3:https://example.comhttp://example.com/page");
+  EXPECT_EQ(j["cache_key"], "ks4:https://example.comhttp://example.com/page");
 }
 
 TEST_F(CacheHandlersTest, ListUrlsEndpoint) {
@@ -393,7 +393,7 @@ TEST_F(CacheHandlersTest, ListUrlsEndpoint) {
   EXPECT_EQ(j["urls"][0]["alternate_count"], 0);
   // The reported key is the string the cache composes, namespace included.
   EXPECT_EQ(j["urls"][0]["cache_key"],
-            "ks3:https://example.comhttp://example.com/b");
+            "ks4:https://example.comhttp://example.com/b");
 }
 
 TEST_F(CacheHandlersTest, ListUrlsAlternateCount) {
@@ -2823,7 +2823,7 @@ TEST_F(SiteCacheHandlersTest, AlternatesTakeTheSite) {
   json j = ParseJsonBody(resp);
   EXPECT_EQ(j["count"], 1);
   EXPECT_EQ(j["site"], kSiteA);
-  EXPECT_EQ(j["cache_key"], "ks3:st1:" + kSiteA + "@https://example.com/s.css");
+  EXPECT_EQ(j["cache_key"], "ks4:st1:" + kSiteA + "@https://example.com/s.css");
   EXPECT_EQ(j["alternates"][0]["content_type"], "css");
 
   resp = SendRequest(
@@ -2861,7 +2861,7 @@ TEST_F(SiteCacheHandlersTest, ListingAndContentTakeTheSite) {
   // The reported key is the one the cache composes: the namespace first,
   // then the site.
   EXPECT_EQ(j["urls"][0]["cache_key"],
-            "ks3:st1:" + kSiteA + "@https://example.com/s.css");
+            "ks4:st1:" + kSiteA + "@https://example.com/s.css");
 
   const int id = MaskToAlternateId(CapabilityMask().Encode() & 0xFF);
   resp = SendRequest(

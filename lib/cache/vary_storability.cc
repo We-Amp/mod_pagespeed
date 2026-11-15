@@ -33,12 +33,10 @@ VaryStoreVerdict ClassifyVaryForStore(std::string_view combined_vary) {
   }
   std::string_view val(combined_vary);
 
-  // Field-names the capability mask handles — case-insensitive match.
+  // The one field a stored response may vary on (vary_storability.h):
+  // case-insensitive match.
   static constexpr std::string_view kAllowed[] = {
       "Accept-Encoding",
-      "User-Agent",
-      "Accept",
-      "Save-Data",
   };
 
   // Split on ',' and check each list member.
@@ -72,14 +70,12 @@ VaryStoreVerdict ClassifyVaryForStore(std::string_view combined_vary) {
       }
     }
     if (!allowed) {
-      // A field outside the allowed set refuses the whole response, so the
-      // `Accept` term (if any) is moot: there is no entry to mark.
+      // A field outside the allowed set refuses the whole response.  `Accept`
+      // is outside it, so `varies_accept` stays false: there is no entry to
+      // mark.
       verdict.storable = false;
       verdict.varies_accept = false;
       return verdict;
-    }
-    if (AsciiEqualsIgnoreCase(token, "Accept")) {
-      verdict.varies_accept = true;
     }
   }
   return verdict;

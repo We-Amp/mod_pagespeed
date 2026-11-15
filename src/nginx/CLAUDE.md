@@ -21,8 +21,8 @@ Headers inspected before recording to cache:
 | Request carries `Authorization` + response CC lacks `public`/`must-revalidate`/`s-maxage` | NOT cached, no worker notification (RFC 9111 §3.5) |
 | `Cache-Control: no-transform` | Cached but NO worker notification |
 | `Set-Cookie` | NOT cached (implicitly private) |
-| `Vary: *` or unsupported Vary | NOT cached |
-| `Vary: Accept-Encoding, User-Agent, Accept, Save-Data` | Allowed (handled via capability mask) |
+| `Vary: *` or any Vary token other than `Accept-Encoding` (incl. `User-Agent`, `Accept`, `Save-Data`, `Origin`) | NOT cached: one original per URL, so it would reach clients that sent another value |
+| `Vary: Accept-Encoding` | Allowed (identity stored, coding chosen per request) |
 | HEAD requests | NOT cached |
 | Any origin header a cache hit cannot reproduce (`ClassifyForHeadersSidecar` fall-through, e.g. `X-Request-Id`) | NOT cached, stored entry for the URL removed, `headers_sidecar_fall_through` counted, one NOTICE per (host, header) |
 | `Content-Security-Policy` carrying a nonce | NOT cached, stored entry removed, `headers_sidecar_never_optimized` counted |
@@ -105,7 +105,8 @@ closed); `/llms.txt` is never served to a cookie-bearing request. The 304
 restamp declines to extend an entry once the rule is no longer met.
 Independent of the Authorization gate below; a request carrying both passes
 both. Entries stored before this rule are unreachable: the key namespace
-moved to `ks3:` (`PageSpeedCache::kKeyNamespace`).
+moved to `ks3:`, and to `ks4:` with the Vary store rule
+(`PageSpeedCache::kKeyNamespace`).
 
 **Authorization (RFC 9111 §3.5)**: Authorization-bearing requests are served
 from cache only when the stored entry's origin Cache-Control carries a §3.5

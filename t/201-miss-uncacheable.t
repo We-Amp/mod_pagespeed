@@ -141,7 +141,7 @@ location /t {
 [crit]
 
 
-=== TEST 6: Vary: User-Agent, Accept response is cached (allowed tokens)
+=== TEST 6: Vary: User-Agent, Accept response is not cached (always MISS)
 --- config
 pagespeed on;
 pagespeed_cache_path /tmp/test-ps-201-6.vol;
@@ -161,7 +161,7 @@ location /t {
 --- response_body chomp eval
 ["ua-accept-varied content", "ua-accept-varied content"]
 --- response_headers_like eval
-["X-PageSpeed: MISS", "X-PageSpeed: HIT"]
+["X-PageSpeed: MISS", "X-PageSpeed: MISS"]
 --- no_error_log
 [crit]
 
@@ -225,7 +225,7 @@ pagespeed_cache_path /tmp/test-ps-201-9.vol;
 location /origin {
     pagespeed off;
     default_type text/css;
-    add_header Vary "accept-encoding, user-agent" always;
+    add_header Vary "accept-encoding, ACCEPT-ENCODING" always;
     return 200 "lowercase-vary content";
 }
 location /t {

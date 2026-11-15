@@ -23,27 +23,36 @@
 namespace pagespeed {
 namespace {
 
-// --- the allowed set: the four axes the capability mask is derived from ----
+// --- the allowed set: the one field a stored response is keyed on --------
 
 TEST(VaryStorability, NoVaryIsStorable) { EXPECT_FALSE(VaryUncacheable("")); }
 
-TEST(VaryStorability, EachMaskAxisIsAllowed) {
+TEST(VaryStorability, ContentCodingIsAllowed) {
   EXPECT_FALSE(VaryUncacheable("Accept-Encoding"));
-  EXPECT_FALSE(VaryUncacheable("User-Agent"));
-  EXPECT_FALSE(VaryUncacheable("Accept"));
-  EXPECT_FALSE(VaryUncacheable("Save-Data"));
 }
 
-TEST(VaryStorability, AllFourTogetherAreAllowed) {
-  EXPECT_FALSE(
+// One original is kept per URL and served to every client, so a response the
+// origin picked from one of these request fields would reach clients that sent
+// something else.  The capability mask reading a field does not make the
+// stored original keyed on it.
+TEST(VaryStorability, ClientNegotiatedFieldsAreRefused) {
+  EXPECT_TRUE(VaryUncacheable("User-Agent"));
+  EXPECT_TRUE(VaryUncacheable("Accept"));
+  EXPECT_TRUE(VaryUncacheable("Save-Data"));
+  EXPECT_TRUE(VaryUncacheable("Accept-Encoding, User-Agent"));
+  EXPECT_TRUE(VaryUncacheable("Accept-Encoding, Accept"));
+  EXPECT_TRUE(VaryUncacheable("Save-Data, Accept-Encoding"));
+  EXPECT_TRUE(
       VaryUncacheable("Accept-Encoding, User-Agent, Accept, Save-Data"));
 }
 
 TEST(VaryStorability, FieldNameMatchingIsCaseInsensitive) {
   EXPECT_FALSE(VaryUncacheable("accept-encoding"));
-  EXPECT_FALSE(VaryUncacheable("ACCEPT"));
-  EXPECT_FALSE(VaryUncacheable("uSeR-aGeNt"));
-  EXPECT_FALSE(VaryUncacheable("save-DATA"));
+  EXPECT_FALSE(VaryUncacheable("ACCEPT-ENCODING"));
+  EXPECT_FALSE(VaryUncacheable("aCcEpT-eNcOdInG"));
+  EXPECT_TRUE(VaryUncacheable("ACCEPT"));
+  EXPECT_TRUE(VaryUncacheable("uSeR-aGeNt"));
+  EXPECT_TRUE(VaryUncacheable("save-DATA"));
 }
 
 // --- the wildcard --------------------------------------------------------
@@ -85,17 +94,17 @@ TEST(VaryStorability, PrefixOfAnAllowedFieldIsNotAllowed) {
 
 TEST(VaryStorability, SurroundingWhitespaceIsTrimmed) {
   // OWS per RFC 9110 §5.6.1: SP and HTAB, on either side of a member.
-  EXPECT_FALSE(VaryUncacheable("  Accept  "));
+  EXPECT_FALSE(VaryUncacheable("  Accept-Encoding  "));
   EXPECT_FALSE(VaryUncacheable("\tAccept-Encoding\t"));
-  EXPECT_FALSE(VaryUncacheable(" Accept ,\tUser-Agent "));
+  EXPECT_FALSE(VaryUncacheable(" Accept-Encoding ,\taccept-encoding "));
 }
 
 TEST(VaryStorability, EmptyListMembersAreSkipped) {
   // An empty member is a syntax artefact, not a field-name; treating it as
   // one would refuse a list that is otherwise entirely allowed.
-  EXPECT_FALSE(VaryUncacheable("Accept,,Accept-Encoding"));
-  EXPECT_FALSE(VaryUncacheable(",Accept"));
-  EXPECT_FALSE(VaryUncacheable("Accept,"));
+  EXPECT_FALSE(VaryUncacheable("Accept-Encoding,,Accept-Encoding"));
+  EXPECT_FALSE(VaryUncacheable(",Accept-Encoding"));
+  EXPECT_FALSE(VaryUncacheable("Accept-Encoding,"));
   EXPECT_FALSE(VaryUncacheable(",,,"));
   EXPECT_FALSE(VaryUncacheable("   "));
 }
@@ -104,8 +113,9 @@ TEST(VaryStorability, MultipleHeaderLinesAreOneListWhenJoined) {
   // A response may carry several Vary lines; they combine as one comma list
   // (RFC 9110 §5.3). Joined, an unhandled field in the second line must still
   // refuse the response -- which is exactly what a per-line call would miss.
-  EXPECT_FALSE(VaryUncacheable("Accept,User-Agent"));
-  EXPECT_TRUE(VaryUncacheable("Accept,Cookie"));
+  EXPECT_FALSE(VaryUncacheable("Accept-Encoding,accept-encoding"));
+  EXPECT_TRUE(VaryUncacheable("Accept-Encoding,Cookie"));
+  EXPECT_TRUE(VaryUncacheable("Accept-Encoding,User-Agent"));
 }
 
 // ===========================================================================
@@ -123,9 +133,9 @@ TEST(VaryStorability, MultipleHeaderLinesAreOneListWhenJoined) {
 // hand-written lists match.
 //
 // The other direction is deliberately NOT asserted: the mask also consumes
-// `Sec-CH-DPR`, which this predicate refuses. Refusing costs a cache entry;
-// admitting a field the gate has never admitted is a behaviour change. See
-// the header.
+// `User-Agent`, `Accept`, `Save-Data` and `Sec-CH-DPR`, which this predicate
+// refuses, because the mask keys only the optimizer's own variants and not
+// the stored original. See the header.
 TEST(VaryStorabilityAxes, EveryAllowedFieldIsOneTheMaskDistinguishesOn) {
   struct Axis {
     const char* field;
@@ -135,14 +145,9 @@ TEST(VaryStorabilityAxes, EveryAllowedFieldIsOneTheMaskDistinguishesOn) {
     const char* accept_encoding;
   };
   // For each allowed field, two header sets differing ONLY in that field.
-  const char* kUaMobile =
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)";
   const char* kUaDesktop = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
   const Axis base = {"", "image/png", kUaDesktop, "", "identity"};
   const Axis variants[] = {
-      {"Accept", "image/webp", kUaDesktop, "", "identity"},
-      {"User-Agent", "image/png", kUaMobile, "", "identity"},
-      {"Save-Data", "image/png", kUaDesktop, "on", "identity"},
       {"Accept-Encoding", "image/png", kUaDesktop, "", "br"},
   };
 
@@ -208,7 +213,10 @@ int NgxStrncasecmp(const unsigned char* s1, const unsigned char* s2, size_t n) {
 }
 
 // The pre-extraction body, unchanged except for taking the already-combined
-// Vary value the caller used to build inline.
+// Vary value the caller used to build inline, and for its allowed set, which
+// is the current one.  The set moved on purpose when `User-Agent`, `Accept`
+// and `Save-Data` stopped being stored; what this oracle pins is that the
+// PARSING did not move.
 bool VaryUncacheableInline(const std::string& combined) {
   if (combined.empty()) {
     return false;
@@ -217,9 +225,6 @@ bool VaryUncacheableInline(const std::string& combined) {
 
   static constexpr std::string_view kAllowed[] = {
       "Accept-Encoding",
-      "User-Agent",
-      "Accept",
-      "Save-Data",
   };
 
   while (!val.empty()) {
@@ -366,16 +371,11 @@ TEST(VaryStoreVerdictTest, NoVaryStoresAndOptimizes) {
   EXPECT_FALSE(v.varies_accept);
 }
 
-TEST(VaryStoreVerdictTest, AcceptIsStoredAndMarked) {
-  // The ruling this pins: by DEFAULT an origin resource carrying
-  // `Vary: Accept` IS stored -- as an original, marked. It is not refused.
-  const VaryStoreVerdict v = ClassifyVaryForStore("Accept");
-  EXPECT_TRUE(v.storable);
-  EXPECT_TRUE(v.varies_accept);
-}
-
-TEST(VaryStoreVerdictTest, AcceptIsRecognisedAnywhereInTheList) {
+TEST(VaryStoreVerdictTest, AcceptIsRefusedAndNeverMarked) {
+  // An origin that picks its answer from `Accept` is no longer stored: the one
+  // stored copy would be the first requester's answer, served to everyone.
   for (const char* input : {
+           "Accept",
            "Accept, Accept-Encoding",
            "Accept-Encoding, Accept",
            "User-Agent, Accept, Save-Data",
@@ -387,33 +387,35 @@ TEST(VaryStoreVerdictTest, AcceptIsRecognisedAnywhereInTheList) {
        }) {
     SCOPED_TRACE(input);
     const VaryStoreVerdict v = ClassifyVaryForStore(input);
-    EXPECT_TRUE(v.storable);
-    EXPECT_TRUE(v.varies_accept);
+    EXPECT_FALSE(v.storable);
+    EXPECT_FALSE(v.varies_accept);
   }
 }
 
-TEST(VaryStoreVerdictTest, AcceptEncodingIsNotAccept) {
+TEST(VaryStoreVerdictTest, AcceptEncodingIsStoredAndNotMarked) {
   // The near-miss that matters most: `Accept-Encoding` is on the allowed list
-  // and shares a prefix with `Accept`. Marking every gzip-varying response as
-  // origin-negotiated would take the whole compressible population out of
-  // optimization.
+  // and shares a prefix with `Accept`.
   for (const char* input : {
            "Accept-Encoding",
-           "accept-encoding, User-Agent",
-           "Accept-Encodin",  // refused, but must not read as Accept either
-           "Accept-",
+           "accept-encoding, ACCEPT-ENCODING",
        }) {
+    SCOPED_TRACE(input);
+    const VaryStoreVerdict v = ClassifyVaryForStore(input);
+    EXPECT_TRUE(v.storable);
+    EXPECT_FALSE(v.varies_accept);
+  }
+  for (const char* input : {"Accept-Encodin", "Accept-"}) {
     SCOPED_TRACE(input);
     EXPECT_FALSE(ClassifyVaryForStore(input).varies_accept);
   }
 }
 
-TEST(VaryStoreVerdictTest, OtherAllowedFieldsDoNotMark) {
+TEST(VaryStoreVerdictTest, UserAgentAndSaveDataAreRefused) {
   for (const char* input :
        {"User-Agent", "Save-Data", "Accept-Encoding, User-Agent, Save-Data"}) {
     SCOPED_TRACE(input);
     const VaryStoreVerdict v = ClassifyVaryForStore(input);
-    EXPECT_TRUE(v.storable);
+    EXPECT_FALSE(v.storable);
     EXPECT_FALSE(v.varies_accept);
   }
 }

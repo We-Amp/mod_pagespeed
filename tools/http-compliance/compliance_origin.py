@@ -545,9 +545,7 @@ class ComplianceHandler(http.server.BaseHTTPRequestHandler):
         # always declared it cannot reach.
         if path == "/vary/control":
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            params = dict(
-                p.split("=", 1) for p in query.split("&") if "=" in p
-            )
+            params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
             for key in ("flip", "flip-etag"):
                 if key in params:
                     VARY_FLIP[key] = params[key] in ("1", "on", "true")
@@ -654,6 +652,36 @@ class ComplianceHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(content)))
+            self.send_header("Date", formatdate(usegmt=True))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(content)
+            return True
+
+        # Request-field negotiation: /vary/negotiated/<field>/<anything>.css
+        # answers with `Vary: <field>` and echoes that request field's value
+        # in the body, so a test can tell whose answer a client was given.
+        # Cacheable for ten minutes, so only the Vary keeps it out of a
+        # shared cache.  <field> is one of the names below.
+        if path.startswith("/vary/negotiated/"):
+            fields = {
+                "accept": "Accept",
+                "user-agent": "User-Agent",
+                "save-data": "Save-Data",
+                "origin": "Origin",
+                "accept-encoding": "Accept-Encoding",
+            }
+            parts = path.split("/")
+            field = fields.get(parts[3] if len(parts) > 4 else "")
+            if field is None:
+                return False
+            value = self.headers.get(field, "")
+            content = ("/* %s=%s */\n" % (field, value)).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/css")
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "max-age=600")
+            self.send_header("Vary", field)
             self.send_header("Date", formatdate(usegmt=True))
             self.end_headers()
             if send_body:
@@ -917,9 +945,7 @@ class ComplianceHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "public, max-age=600")
                 self.send_header("ETag", etag_for(content))
             if path == "/sidecar/nonce.html":
-                self.send_header(
-                    "Content-Security-Policy", "script-src 'nonce-abc123'"
-                )
+                self.send_header("Content-Security-Policy", "script-src 'nonce-abc123'")
             else:
                 for name, value in SIDECAR_SECURITY_HEADERS:
                     self.send_header(name, value)

@@ -232,7 +232,7 @@ cyclone::CacheKey PageSpeedCache::ComposeKey(std::string_view url,
 cyclone::CacheKey PageSpeedCache::ComposeKeyPreNormalized(
     std::string_view url, std::string_view normalized_hostname,
     std::string_view scheme) {
-  // Key format: "ks3:scheme://hostname/url" (url already starts with /).
+  // Key format: "ks4:scheme://hostname/url" (url already starts with /).
   // This produces distinct keys for http vs https.
   std::string combined;
   combined.reserve(scheme.size() + 3 + normalized_hostname.size() + url.size());

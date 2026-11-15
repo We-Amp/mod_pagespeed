@@ -3,10 +3,11 @@
 
 // Every entry this version stores lives under keys that an earlier version
 // never computes, and the reverse: neither the versions that composed keys
-// without a namespace nor those that used the previous "ks2:" namespace.  One case
-// per class of stored entry, in both directions: what this version writes
-// cannot be found under the key an earlier version computes for the same URL,
-// and what was stored under such a key cannot be read by this version.
+// without a namespace nor those that used the earlier "ks2:" and "ks3:"
+// namespaces.  One case per class of stored entry, in both directions: what
+// this version writes cannot be found under the key an earlier version
+// computes for the same URL, and what was stored under such a key cannot be
+// read by this version.
 
 #include <cstddef>
 #include <cstdint>
@@ -39,7 +40,7 @@ const std::string kSignature(64, 'a');
 
 // The namespaces earlier versions composed keys in: none at all, and the
 // previous "ks2:".  An entry stored under either is never served.
-constexpr std::string_view kEarlierNamespaces[] = {"", "ks2:"};
+constexpr std::string_view kEarlierNamespaces[] = {"", "ks2:", "ks3:"};
 
 // The key an earlier version computes: the composed string in its namespace.
 cyclone::CacheKey EarlierKey(std::string_view url, std::string_view ns) {
@@ -135,13 +136,13 @@ AlternateMetadata ContentMetadata() {
 
 TEST(KeyNamespaceKeyTest, KeysCarryTheNamespace) {
   EXPECT_EQ(PageSpeedCache::ComposeKeyPreNormalized("/a", kHost, kScheme),
-            cyclone::CacheKey("ks3:https://example.com/a"));
+            cyclone::CacheKey("ks4:https://example.com/a"));
   EXPECT_EQ(
       PageSpeedCache::ComposeKeyPreNormalized("/a", kHost, kScheme, kSignature),
-      cyclone::CacheKey("ks3:oc1:" + kSignature + "@https://example.com/a"));
+      cyclone::CacheKey("ks4:oc1:" + kSignature + "@https://example.com/a"));
   EXPECT_EQ(PageSpeedCache::ComposeSiteKeyPreNormalized("/a", kHost, kScheme,
                                                         "", kSite),
-            cyclone::CacheKey("ks3:st1:" + kSite + "@https://example.com/a"));
+            cyclone::CacheKey("ks4:st1:" + kSite + "@https://example.com/a"));
   for (std::string_view ns : kEarlierNamespaces) {
     SCOPED_TRACE(std::string(ns));
     EXPECT_NE(PageSpeedCache::ComposeKeyPreNormalized("/a", kHost, kScheme),
@@ -297,7 +298,8 @@ INSTANTIATE_TEST_SUITE_P(
     EarlierNamespaces, KeyNamespaceTest,
     ::testing::ValuesIn(kEarlierNamespaces),
     [](const ::testing::TestParamInfo<std::string_view>& info) {
-      return info.param.empty() ? std::string("none") : std::string("ks2");
+      if (info.param.empty()) return std::string("none");
+      return std::string(info.param.substr(0, info.param.size() - 1));
     });
 
 }  // namespace
