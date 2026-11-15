@@ -1,5 +1,9 @@
+# No PGP key is published for reports. For an encrypted channel, use the
+# GitHub private vulnerability reporting form below.
 Contact: mailto:security@modpagespeed.com
+Contact: https://github.com/We-Amp/mod_pagespeed/security/advisories/new
 Expires: 2027-03-15T00:00:00.000Z
 Preferred-Languages: en
 Canonical: https://modpagespeed.com/.well-known/security.txt
+Canonical: https://ngxpagespeed.com/.well-known/security.txt
 Policy: https://modpagespeed.com/security/

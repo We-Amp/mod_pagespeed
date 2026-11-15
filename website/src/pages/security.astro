@@ -25,7 +25,28 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           >
             security@modpagespeed.com
           </a>
-          with details. Do not open a public GitHub issue for security vulnerabilities.
+          with details, or use GitHub private vulnerability reporting on the
+          <a
+            href="https://github.com/We-Amp/mod_pagespeed/security/advisories/new"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            module
+          </a>{' '}
+          or the
+          <a
+            href="https://github.com/We-Amp/pagespeed-optimizer/security/advisories/new"
+            rel="noopener noreferrer"
+            class="text-interactive hover:text-interactive-hover underline"
+          >
+            optimizer worker
+          </a>{' '}
+          repository. Do not open a public GitHub issue for security vulnerabilities.
+        </p>
+        <p class="mt-4 text-text-muted">
+          We do not publish a PGP key for reports. GitHub private vulnerability reporting is the
+          encrypted channel; if you need another one, ask by email and we will arrange it before
+          you send details.
         </p>
       </div>
 
@@ -60,9 +81,25 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div>
         <h2 class="h2-section text-text-body">Our commitment</h2>
         <p class="mt-4 text-text-muted">
-          We acknowledge reports within 72 hours and follow a 90-day coordinated disclosure window:
-          we aim to release a fix within 90 days of the initial report, after which the reporter may
-          publish details. Critical vulnerabilities affecting production deployments jump the queue.
+          We acknowledge reports and follow a coordinated disclosure process: we work on a fix with
+          the reporter, and after the fix is released the reporter may publish details. Critical
+          vulnerabilities affecting production deployments jump the queue.
+        </p>
+        <p class="mt-4 text-text-muted">
+          We keep reporters informed as we work on a fix. If a vulnerability is being exploited, we
+          do not wait for a scheduled release: the fix is released as soon as it is ready.
+        </p>
+      </div>
+
+      <div class="rule-ticked-scale" role="presentation" aria-hidden="true"></div>
+
+      <!-- Supported versions -->
+      <div>
+        <h2 class="h2-section text-text-body">Supported versions</h2>
+        <p class="mt-4 text-text-muted">
+          Security fixes are made in the latest release. Upgrading to it is the supported path
+          from any earlier release. Security fixes reach every user at the same time, through the same public
+          channels: nobody receives a fixed build before the public release.
         </p>
       </div>
 
@@ -109,7 +146,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           >
             release notes
           </a>
-          , with the release that carried it.
+          , with the release that carried it: the impact, the affected and fixed versions, and
+          and whether to update, plus the CVE id when one has been assigned. The announcements describe
+          the impact; they do not describe how to trigger an issue.
         </p>
       </div>
 
@@ -129,7 +168,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
               >
                 security@modpagespeed.com
               </a>
-              . Reports go by email; the repositories' SECURITY.md files state the same policy. See
+              . Reports go by email or through GitHub private vulnerability reporting; the repositories'
+              SECURITY.md files state the same policy. See
               <a
                 href="/.well-known/security.txt"
                 class="text-interactive hover:text-interactive-hover underline"
