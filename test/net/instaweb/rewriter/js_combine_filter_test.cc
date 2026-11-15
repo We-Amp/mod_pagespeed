@@ -330,6 +330,11 @@ class JsCombineFilterTest : public RewriteTestBase {
   }
 
  protected:
+  // The variable name the page evaluates for the script at url.
+  GoogleString VarNameFor(const GoogleString& url) {
+    return JsCombineFilter::VarName(rewrite_driver(), url);
+  }
+
   ResponseHeaders default_js_header_;
   GoogleString other_domain_;
 };
@@ -1136,9 +1141,8 @@ TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithFallbackInput) {
              MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js", kJsUrl2), "js");
   // The names an older page evaluates (see ReconstructNoTimeout).
   const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
-  EXPECT_EQ(kLegacyVar1, JsCombineFilter::VarName(rewrite_driver(), jm_url));
-  const GoogleString var2 =
-      JsCombineFilter::VarName(rewrite_driver(), StrCat(kTestDomain, kJsUrl2));
+  EXPECT_EQ(kLegacyVar1, VarNameFor(jm_url));
+  const GoogleString var2 = VarNameFor(StrCat(kTestDomain, kJsUrl2));
 
   // Make the minification of a.js fall back: its background rewrite is
   // dropped, so the rebuilt input is the unoptimized original.
