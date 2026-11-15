@@ -443,6 +443,11 @@ class JsCombineFilter::Context : public RewriteContext {
   // page's scripts still run.
   bool FetchCombinesAvailableInputs() const override { return true; }
 
+  // The page evaluates each script under a variable named after the script's
+  // rewritten URL, which contains its content hash. The unoptimized original
+  // has another hash, so a combination made from it would not run.
+  bool FetchInputsMayFallBack() const override { return false; }
+
   // Which scripts may be combined depends on the page's charset and on each
   // <script> element's charset attribute, not only on the scripts, so pages
   // that differ in any of them must not share a metadata cache entry. These

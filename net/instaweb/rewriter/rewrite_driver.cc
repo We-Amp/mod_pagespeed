@@ -466,6 +466,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   flush_early_info_.reset(nullptr);
   can_rewrite_resources_ = true;
   is_nested_ = false;
+  nested_fetch_may_fall_back_ = false;
   num_initiated_rewrites_ = 0;
   num_detached_rewrites_ = 0;
   if (request_context_.get() != nullptr) {
