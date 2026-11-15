@@ -89,6 +89,9 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-github-workflow-ref refs/tags/module-v<version>
 ```
 
+Replace `<version>` with the release version. The Sigstore bundle is in the
+current bundle format: use cosign v2.4 or newer.
+
 With the [GitHub CLI](https://cli.github.com/), for any module file:
 
 ```

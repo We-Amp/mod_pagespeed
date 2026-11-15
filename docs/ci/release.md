@@ -522,7 +522,7 @@ It does everything a dry run does, and then, in this order:
    user would. Its first step refuses a run whose ref (`github.ref`, which
    the certificate records) is not `refs/tags/<the tag>`, before anything is
    signed: a dispatched real run must be started with `--ref <tag>`, so the
-   documented verify commands always name the tag. The pinned optimizer packages are not attested here: their
+   documented verify commands always name the tag. The subjects are chosen earlier, in `validate` (which every run executes, so a rehearsal exercises the selection and a path or name mismatch fails before a real tag) and handed over as the `attestation-subjects` artifact; this job re-checks them against its own download. The pinned optimizer packages are not attested here: their
    attestations are in the pagespeed-optimizer repository. In an adopting
    run the attestation names the releasing run; `manifest.json`, an attested
    subject, names the candidate run that built the files (`build_run_id`).

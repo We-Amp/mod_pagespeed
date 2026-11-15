@@ -4369,6 +4369,48 @@ jobs:
           python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_signature_check.py" pe "$@"
           python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_signature_check.py" msi "release-assets/pagespeed-iis-${VERSION}-win-x64.msi"
 
+      # The attestation subjects are chosen here, in the unprivileged job that
+      # every run (rehearsal and dry run included) executes, so a path or name
+      # mismatch fails before a real tag. They are the files this lane built,
+      # by manifest.json: every file except the pinned optimizer packages,
+      # which the optimizer's own release lane attests in its repository, plus
+      # SHA256SUMS and manifest.json. In an adopting run the files were built
+      # by the candidate run, which manifest.json (itself a subject) records
+      # as build_run_id; the attestation names the run that released them
+      # from the tag. `sign-checksums` re-checks the lists against its own
+      # download before it attests anything.
+      - name: Choose the attestation subjects
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/release-assets"
+          out="${RUNNER_TEMP}/attest"
+          mkdir -p "$out"
+          jq -r '.files[] | select(.component != "optimizer") | .asset' manifest.json > "$out/all.txt"
+          jq -r '.files[] | select(.component == "module") | .asset' manifest.json > "$out/packages.txt"
+          printf '%s\n' SHA256SUMS manifest.json >> "$out/all.txt"
+          [ -s "$out/packages.txt" ] || { echo "::error::manifest.json lists no module file"; exit 1; }
+          sbom="$(jq -r '[.files[] | select(.component == "sbom" and (.asset | endswith(".spdx.json"))) | .asset] | if length == 1 then .[0] else "" end' manifest.json)"
+          [ -n "$sbom" ] || { echo "::error::manifest.json must list exactly one SPDX SBOM"; exit 1; }
+          echo "$sbom" > "$out/sbom.txt"
+          for list in all packages; do
+            : > "$out/${list}.sha256"
+            while IFS= read -r f; do
+              printf '%s' "$f" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*$' || { echo "::error::unexpected subject name '$f'"; exit 1; }
+              [ -s "$f" ] || { echo "::error::subject $f is missing or empty"; exit 1; }
+              sha256sum "$f" >> "$out/${list}.sha256"
+            done < "$out/${list}.txt"
+          done
+          echo "Attestation subjects: $(wc -l < "$out/all.sha256") files, $(wc -l < "$out/packages.sha256") with the SBOM" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the attestation subjects
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: attestation-subjects
+          path: ${{ runner.temp }}/attest/*
+          retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 30 }}
+          overwrite: true
+          if-no-files-found: error
+
       # Signing the checksums (SHA256SUMS.asc), creating the draft release and
       # publishing it are the jobs `sign-checksums` and `create-release`, in
       # the protected `release` environment after this job and only when
@@ -4500,6 +4542,12 @@ jobs:
           name: release-assets
           path: assets
 
+      - name: Download the attestation subjects chosen by validate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: attestation-subjects
+          path: ${{ runner.temp }}/attest
+
       # The published public key, from master (never from the tree being
       # released), is what the signature is verified against below.
       - name: Checkout master (published release key)
@@ -4517,6 +4565,10 @@ jobs:
           set -euo pipefail
           cd assets
           sha256sum -c SHA256SUMS
+          # The subject lists validate chose must still match these bytes.
+          sha256sum -c "${RUNNER_TEMP}/attest/all.sha256"
+          sha256sum -c "${RUNNER_TEMP}/attest/packages.sha256"
+          echo "SBOM_PATH=assets/$(cat "${RUNNER_TEMP}/attest/sbom.txt")" >> "$GITHUB_ENV"
 
       - name: Sign SHA256SUMS (detached, armored)
         env:
@@ -4610,35 +4662,6 @@ jobs:
             GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
             rm -rf "$h"
           done
-
-      # The subjects are the files this lane built, by manifest.json: every
-      # file except the pinned optimizer packages, which the optimizer's own
-      # release lane attests in its repository, plus SHA256SUMS and
-      # manifest.json. In an adopting run the files were built by the
-      # candidate run, which manifest.json (itself a subject) records as
-      # build_run_id; the attestation names this run, the one that released
-      # them from the tag.
-      - name: Choose the attestation subjects
-        run: |
-          set -euo pipefail
-          cd assets
-          mkdir -p "${RUNNER_TEMP}/attest"
-          jq -r '.files[] | select(.component != "optimizer") | .asset' manifest.json > "${RUNNER_TEMP}/attest/all.txt"
-          jq -r '.files[] | select(.component == "module") | .asset' manifest.json > "${RUNNER_TEMP}/attest/packages.txt"
-          printf '%s\n' SHA256SUMS manifest.json >> "${RUNNER_TEMP}/attest/all.txt"
-          [ -s "${RUNNER_TEMP}/attest/packages.txt" ] || { echo "::error::manifest.json lists no module file"; exit 1; }
-          sbom="$(jq -r '[.files[] | select(.component == "sbom" and (.asset | endswith(".spdx.json"))) | .asset] | if length == 1 then .[0] else "" end' manifest.json)"
-          [ -n "$sbom" ] || { echo "::error::manifest.json must list exactly one SPDX SBOM"; exit 1; }
-          for list in all packages; do
-            : > "${RUNNER_TEMP}/attest/${list}.sha256"
-            while IFS= read -r f; do
-              printf '%s' "$f" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*$' || { echo "::error::unexpected subject name '$f'"; exit 1; }
-              [ -s "$f" ] || { echo "::error::subject $f is missing or empty"; exit 1; }
-              sha256sum "$f" >> "${RUNNER_TEMP}/attest/${list}.sha256"
-            done < "${RUNNER_TEMP}/attest/${list}.txt"
-          done
-          echo "SBOM_PATH=assets/${sbom}" >> "$GITHUB_ENV"
-          echo "Attestation subjects: $(wc -l < "${RUNNER_TEMP}/attest/all.sha256") files, $(wc -l < "${RUNNER_TEMP}/attest/packages.sha256") with the SBOM" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # They prove which workflow run released these digests from which tag.
       # Most build jobs run on the project's own runners, so they do not
