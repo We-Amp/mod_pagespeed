@@ -805,7 +805,8 @@ void AdminSite::PrintCaches(
             "{\"success\":false,\"error\":\"Invalid URL: ", escaped_url, "\"}");
         WriteJsonResponse(fetch, json, timer_, message_handler_);
       } else {
-        PurgeHandler(resolved.Spec(), cache_path, fetch);
+        Purge(resolved.Spec(), cache_path, fetch,
+              is_global /* allow_eviction */);
       }
     }
   } else {
@@ -1397,8 +1398,8 @@ void AdminSite::StatisticsPage(
   }
 }
 
-void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
-                             AsyncFetch* fetch) {
+void AdminSite::Purge(StringPiece url, SystemCachePath* cache_path,
+                      AsyncFetch* fetch, bool allow_eviction) {
   PurgeContext* purge_context = cache_path->purge_context();
   int64 now_ms = timer_->NowMs();
   PurgeFetchCallbackGasket* gasket =
@@ -1407,8 +1408,10 @@ void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
       NewCallback(gasket, &PurgeFetchCallbackGasket::Done);
   if (strings::EndsWith(url, "*")) {
     purge_context->SetCachePurgeGlobalTimestampMs(now_ms, callback);
-  } else {
+  } else if (allow_eviction) {
     purge_context->AddPurgeUrl(url, now_ms, callback);
+  } else {
+    purge_context->AddPurgeUrlWithoutEviction(url, now_ms, callback);
   }
 }
 

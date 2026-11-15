@@ -4400,6 +4400,67 @@ TEST_F(AdminSiteDaemonTest, VhostPurgeSetListsOwnHostOnly) {
   EXPECT_THAT(global_body, ::testing::HasSubstr("theirs.css"));
 }
 
+// Records how the console asked for a purge instead of making it.
+class PurgeRecordingAdminSite : public AdminSite {
+ public:
+  PurgeRecordingAdminSite(Timer* timer, MessageHandler* handler)
+      : AdminSite(timer, handler, nullptr /* daemon_reader */) {}
+
+  void Purge(StringPiece url, SystemCachePath* cache_path, AsyncFetch* fetch,
+             bool allow_eviction) override {
+    ++num_purges_;
+    url.CopyToString(&last_url_);
+    last_allow_eviction_ = allow_eviction;
+    fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
+    fetch->Write("{}", nullptr);
+    fetch->Done(true);
+  }
+
+  int num_purges_ = 0;
+  GoogleString last_url_;
+  bool last_allow_eviction_ = true;
+};
+
+TEST_F(AdminSiteDaemonTest, VhostConsolePurgeMayNotEvict) {
+  // A single-URL purge from a per-vhost console must not evict another
+  // site's purge record; the whole-server console may.
+  std::unique_ptr<RewriteOptions> options(rewrite_driver()->options()->Clone());
+  options->set_enable_cache_purge(true);
+  PurgeRecordingAdminSite site(timer(), message_handler());
+  auto purge = [&](bool is_global) {
+    GoogleString body;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+    fetch.request_headers()->set_method(RequestHeaders::kPost);
+    fetch.request_headers()->Add("X-Requested-With", "XMLHttpRequest");
+    GoogleUrl gurl(
+        StrCat("http://example.com/",
+               is_global ? "pagespeed_global_admin" : "pagespeed_admin",
+               "/cache?purge=http://example.com/x.css"));
+    QueryParams query_params;
+    query_params.ParseFromUrl(gurl);
+    SystemServerContext* system_server_context =
+        static_cast<SystemServerContext*>(server_context_.get());
+    site.AdminPage(
+        is_global, gurl, query_params, options.get(), nullptr /* cache_path */,
+        &fetch, nullptr /* system_caches */,
+        nullptr /* filesystem_metadata_cache */, nullptr /* http_cache */,
+        nullptr /* metadata_cache */, nullptr /* page_property_cache */,
+        system_server_context, factory()->statistics(), factory()->statistics(),
+        system_server_context->global_system_rewrite_options(),
+        "" /* request_body */, StringPiece());
+    ASSERT_TRUE(fetch.done());
+  };
+
+  purge(false /* vhost */);
+  ASSERT_EQ(1, site.num_purges_);
+  EXPECT_EQ("http://example.com/x.css", site.last_url_);
+  EXPECT_FALSE(site.last_allow_eviction_);
+
+  purge(true /* global */);
+  ASSERT_EQ(2, site.num_purges_);
+  EXPECT_TRUE(site.last_allow_eviction_);
+}
+
 TEST_F(AdminSiteDaemonTest, VhostLookupRejectsForeignHost) {
   GoogleString body;
   auto fetch = FetchAdminPage(daemon_site_.get(),
