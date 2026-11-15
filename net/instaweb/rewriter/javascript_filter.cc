@@ -63,6 +63,35 @@ const char kInlineCspMessage[] =
 const char kModuleCrossHostMessage[] =
     "Not rewriting module script: rewritten URL would be on another host";
 
+int CountIgnoreCase(StringPiece text, StringPiece needle) {
+  int count = 0;
+  for (size_t pos = FindIgnoreCase(text, needle); pos != StringPiece::npos;
+       pos = FindIgnoreCase(text, needle)) {
+    ++count;
+    text.remove_prefix(pos + needle.size());
+  }
+  return count;
+}
+
+// Whether rewritten has more end tags than original of an element whose
+// content a browser reads as text: a script inside one would end it there.
+bool AddsTextElementEndTag(StringPiece original, StringPiece rewritten) {
+  static const char* const kEndTags[] = {
+      "</script", "</noscript", "</noembed", "</noframes", "</textarea",
+      "</title",  "</style",    "</iframe",  "</xmp",
+  };
+  if (rewritten.find("</") == StringPiece::npos) {
+    return false;
+  }
+  for (const char* end_tag : kEndTags) {
+    if (CountIgnoreCase(rewritten, end_tag) >
+        CountIgnoreCase(original, end_tag)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CleanupWhitespaceScriptBody(RewriteDriver* driver,
                                  HtmlCharactersNode* node) {
   // Note that an external script tag might contain body data.  We erase this
@@ -554,11 +583,13 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
                        library_url.as_string().c_str());
   }
   // Minification must not change where an HTML parser ends the element (see
-  // JsInlineFilter::RenderInline); keep the original script if it could.
+  // JsInlineFilter::RenderInline), or the element the script is in; keep the
+  // original script if it could.
   const bool moves_element_end =
       code_block.successfully_rewritten() &&
       (FindIgnoreCase(code_block.rewritten_code(), "</script") !=
            StringPiece::npos ||
+       AddsTextElementEndTag(*script, code_block.rewritten_code()) ||
        (code_block.rewritten_code().find("<!--") != StringPiece::npos &&
         FindIgnoreCase(code_block.rewritten_code(), "<script") !=
             StringPiece::npos));

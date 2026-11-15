@@ -1112,6 +1112,32 @@ TEST_F(JsMinifyTest, DoNotCreateSgmlLineComment2) {
   CheckMinification("if (x < !--y) { x = 0; }\n", "if(x< !--y){x=0;}");
 }
 
+TEST_F(JsMinifyTest, DoNotCreateHtmlEndTag) {
+  // "<" followed by a regular expression: joining the two would put an HTML
+  // end tag such as "</textarea" in the output, which the input does not
+  // have; the space (or the linebreak) between them is kept instead.
+  static const char* const kNames[] = {
+      "script", "noscript", "noembed", "noframes", "textarea",
+      "title",  "style",    "iframe",  "xmp",      "TEXTAREA",
+      "NoScript", "Style",  "XMP",
+  };
+  for (const char* name : kNames) {
+    SCOPED_TRACE(name);
+    CheckNewMinification(StrCat("var ok = 1 < /* note */ /", name, "/ > 0;"),
+                         StrCat("var ok=1< /", name, "/>0;"));
+    CheckNewMinification(StrCat("var ok = 1 < /", name, "/.test(s);"),
+                         StrCat("var ok=1< /", name, "/.test(s);"));
+    CheckNewMinification(StrCat("var ok = 1 <\n/", name, "/ > 0;"),
+                         StrCat("var ok=1<\n/", name, "/>0;"));
+    CheckNewMinification(StrCat("x = y << /* c */ /", name, "/g.lastIndex;"),
+                         StrCat("x=y<< /", name, "/g.lastIndex;"));
+  }
+  // Text that already has the pair keeps it as it is.
+  CheckNewMinification("var ok = 1</textarea/ > 0;", "var ok=1</textarea/>0;");
+  // Other tokens after "<" still join.
+  CheckNewMinification("if (a < b) { c = a <= b; }", "if(a<b){c=a<=b;}");
+}
+
 TEST_F(JsMinifyTest, DoNotJoinDecimalIntegerAndDot) {
   // 34 .toString() is legal code, but 34.toString() isn't, because the . in
   // the second example gets parsed as part of the literal (decimal point).  So

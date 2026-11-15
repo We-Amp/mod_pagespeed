@@ -432,7 +432,10 @@ bool JsMinifyingTokenizer::WhitespaceNeededBefore(JsKeywords::Type type,
   } else if (strings::EndsWith(prev_token_, "+")) {
     return strings::StartsWith(token, "+");
   } else if (strings::EndsWith(prev_token_, "<")) {
-    return strings::StartsWith(token, "!");
+    // "<"+"!" would start an HTML comment, and "<"+"/" (a regular expression
+    // after "<") an HTML end tag such as "</textarea": output that is written
+    // into an HTML page must not gain either.
+    return strings::StartsWith(token, "!") || strings::StartsWith(token, "/");
   } else if (strings::EndsWith(prev_token_, "!") ||
              strings::EndsWith(prev_token_, "-")) {
     return strings::StartsWith(token, "-");

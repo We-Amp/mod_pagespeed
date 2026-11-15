@@ -38,9 +38,59 @@
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
-#include "pagespeed/kernel/util/re2.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// Elements whose content a browser reads as text that runs up to the
+// element's end tag. An inlined script can sit inside any of them (for
+// <script> itself, always), so its text must not contain such an end tag.
+const char* const kTextElementNames[] = {
+    "script", "noscript", "noembed", "noframes", "textarea",
+    "title",  "style",    "iframe",  "xmp",
+};
+
+// Copies contents to *out, writing the first letter of each "</name" (for
+// the names above, in any case) and of each "<script" as a \uNNNN escape;
+// see RenderInline for why that keeps the script's meaning. Returns whether
+// anything was escaped.
+bool EscapeTextElementTags(StringPiece contents, GoogleString* out) {
+  static const char kHex[] = "0123456789abcdef";
+  bool escaped = false;
+  out->clear();
+  out->reserve(contents.size());
+  for (size_t i = 0; i < contents.size(); ++i) {
+    out->push_back(contents[i]);
+    if (contents[i] != '<') {
+      continue;
+    }
+    size_t letter = i + 1;
+    const bool end_tag = letter < contents.size() && contents[letter] == '/';
+    if (end_tag) {
+      ++letter;
+    }
+    const StringPiece rest = contents.substr(letter);
+    for (const char* name : kTextElementNames) {
+      if ((end_tag || StringPiece(name) == "script") &&
+          StringCaseStartsWith(rest, name)) {
+        if (end_tag) {
+          out->push_back('/');
+        }
+        const unsigned char ch = static_cast<unsigned char>(contents[letter]);
+        out->append("\\u00");
+        out->push_back(kHex[ch >> 4]);
+        out->push_back(kHex[ch & 0xf]);
+        i = letter;
+        escaped = true;
+        break;
+      }
+    }
+  }
+  return escaped;
+}
+
+}  // namespace
 
 const char JsInlineFilter::kNumJsInlined[] = "num_js_inlined";
 
@@ -204,6 +254,16 @@ bool JsInlineFilter::ShouldInline(const ResourcePtr& resource,
     return false;
   }
 
+  // Escaping changes the raw text of a template literal (see RenderInline).
+  GoogleString escaped;
+  if (contents.find('`') != StringPiece::npos &&
+      EscapeTextElementTags(contents, &escaped)) {
+    *reason =
+        "JS not inlined since it has a template literal and text that would "
+        "need escaping";
+    return false;
+  }
+
   // The bytes are copied into the page as they are, so a script in a different
   // charset than the page is only safe to inline when every byte means the
   // same in both (plain ASCII; NUL bytes betray UTF-16/32).
@@ -271,23 +331,24 @@ void JsInlineFilter::RenderInline(const ResourcePtr& resource,
   // instead.  I don't know why they decided \uNNNN would be good for both
   // strings and identifiers but \xNN would be good only for strings, but that's
   // the way it is.  For clarity (and gzip?) we'll just use \uNNNN everywhere.
+  //
+  // The same holds for the end tag of any element whose content a browser
+  // reads as text, such as </textarea or </noscript: the script may sit inside
+  // one, and its text must not end it. In valid JavaScript such a "</name"
+  // can only be inside a string, a regular expression, a comment or a
+  // template literal: outside them, "</" is "<" followed by a regular
+  // expression, whose first letter is inside it, or the end of a regular
+  // expression followed by its flags, and none of these names is made of
+  // flag letters only. The \uNNNN escape reads as the letter in strings,
+  // regular expressions and the cooked text of template literals, and a
+  // comment's text is unused.
+  // A tag function also sees a template literal's raw text, which the escape
+  // does change, so ShouldInline() leaves a script with a template literal
+  // external when it needs any escape.
   GoogleString contents_for_escaping;
-  StringPiece escaped_contents;
-  // First quickly scan to see if there's anything we need to fix.
-  if (FindIgnoreCase(contents, "<script") != StringPiece::npos ||
-      FindIgnoreCase(contents, "</script") != StringPiece::npos) {
-    contents.CopyToString(&contents_for_escaping);
-
-    // To keep the case of the original 'script' text we need to run twice, once
-    // for 's' and once for 'S'.
-    RE2::GlobalReplace(&contents_for_escaping, "<(/?)s([cC][rR][iI][pP][tT])",
-                       "<\\1\\\\u0073\\2");
-    RE2::GlobalReplace(&contents_for_escaping, "<(/?)S([cC][rR][iI][pP][tT])",
-                       "<\\1\\\\u0053\\2");
-
+  StringPiece escaped_contents = contents;
+  if (EscapeTextElementTags(contents, &contents_for_escaping)) {
     escaped_contents = contents_for_escaping;
-  } else {
-    escaped_contents = contents;
   }
 
   // If we're in XHTML, we should wrap the script in a <!CDATA[...]]>

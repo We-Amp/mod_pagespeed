@@ -663,6 +663,119 @@ TEST_F(JsInlineFilterTest, ScriptWithScriptTags) {
                       "<body>Hello, world!</body>\n");
 }
 
+// The elements whose content a browser reads as text up to the element's end
+// tag, in the case forms the table test below uses.
+const char* const kTextElementNames[] = {
+    "script",   "noscript", "noembed",  "noframes", "textarea", "title",
+    "style",    "iframe",   "xmp",      "SCRIPT",   "NOSCRIPT", "TextArea",
+    "TiTlE",    "STYLE",    "iFrame",   "Xmp",      "NoEmbed",  "NOFRAMES",
+};
+
+// name with its first letter written as a JavaScript \uNNNN escape.
+GoogleString EscapeFirstLetter(StringPiece name) {
+  return StrCat(absl::StrFormat("\\u%04x", static_cast<unsigned char>(name[0])),
+                name.substr(1));
+}
+
+// A script whose text has the end tag of an element that a browser reads as
+// text, in each place valid JavaScript can have one, is inlined with the
+// first letter of each such name escaped: the escape means the same letter in
+// strings and regular expressions (in and out of a character class), and a
+// comment's text is unused. The inlined text has no such end tag.
+TEST_F(JsInlineFilterTest, TextElementEndTagsAreEscaped) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  int i = 0;
+  for (const char* name : kTextElementNames) {
+    SCOPED_TRACE(name);
+    const GoogleString js_url = StrCat("t", IntegerToString(i++), ".js");
+    // "%s" is the name, once as it is and once escaped.
+    static constexpr char kFormat[] =
+        "var a = \"</%1$s>\";\n"
+        "var b = '</%1$s';\n"
+        "var c = /[</%1$s]/.test(a);\n"
+        "var d = 1 </%1$s/ > 0;\n"
+        "/* </%1$s> */\n"
+        "// </%1$s>\n";
+    const GoogleString js = absl::StrFormat(kFormat, name);
+    const GoogleString escaped =
+        absl::StrFormat(kFormat, EscapeFirstLetter(name));
+    SetResponseWithDefaultHeaders(js_url, kContentTypeJavascript, js, 3000);
+    EXPECT_EQ(StringPiece::npos, FindIgnoreCase(escaped, StrCat("</", name)));
+    ValidateExpected(js_url, StrCat("<script src=\"", js_url, "\"></script>"),
+                     StrCat("<script>", escaped, "</script>"));
+  }
+}
+
+// The regular expression flags after "</" are left alone.
+TEST_F(JsInlineFilterTest, RegexFlagsAfterLessThanAreKept) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  static const char kJs[] = "var r = /x</gi, s = /y</ims;\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+  ValidateExpected("flags", "<script src=\"script.js\"></script>",
+                   StrCat("<script>", kJs, "</script>"));
+}
+
+// A tag function sees a template literal's raw text, which an escape would
+// change: a script with a template literal is only inlined when it needs no
+// escape.
+TEST_F(JsInlineFilterTest, TemplateLiteralIsInlinedOnlyWithoutEscape) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  static const char kPlain[] = "var t = `<b>${x}</b>`;\n";
+  SetResponseWithDefaultHeaders("plain.js", kContentTypeJavascript, kPlain,
+                                3000);
+  ValidateExpected("plain", "<script src=\"plain.js\"></script>",
+                   StrCat("<script>", kPlain, "</script>"));
+
+  static const char kEndTag[] = "var t = String.raw`</textarea>`;\n";
+  SetResponseWithDefaultHeaders("end.js", kContentTypeJavascript, kEndTag,
+                                3000);
+  ValidateNoChanges("end", "<script src=\"end.js\"></script>");
+  static const char kScriptTag[] = "var t = `<script>`;\n";
+  SetResponseWithDefaultHeaders("open.js", kContentTypeJavascript, kScriptTag,
+                                3000);
+  ValidateNoChanges("open", "<script src=\"open.js\"></script>");
+  EXPECT_EQ(1, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+// The escape is applied on XHTML pages too, inside the CDATA wrapper.
+TEST_F(JsInlineFilterTest, TextElementEndTagsAreEscapedOnXhtmlPage) {
+  SetXhtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  static const char kJs[] = "var s = \"</title>\";\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+  ValidateExpected("xhtml", "<script src=\"script.js\"></script>",
+                   "<script>//<![CDATA[\nvar s = \"</\\u0074itle>\";\n"
+                   "\n//]]></script>");
+}
+
+// The report's shapes: a script inlined inside a brief-closed <textarea/>,
+// which browsers keep open, and inside a <noscript>.
+TEST_F(JsInlineFilterTest, InlinedScriptDoesNotEndEnclosingElement) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  static const char kJs[] =
+      "var s = \"</textarea/><span id=promoted>m</span>\";\n";
+  SetResponseWithDefaultHeaders("ta.js", kContentTypeJavascript, kJs, 3000);
+  Parse("textarea",
+        "<textarea/><script src=\"ta.js\"></script></textarea>");
+  EXPECT_NE(GoogleString::npos,
+            output_buffer_.find("var s = \"</\\u0074extarea/><span"))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("\"</textarea"))
+      << output_buffer_;
+
+  static const char kNoscriptJs[] =
+      "var s = \"</noscript><span id=promoted>m</span>\";\n";
+  SetResponseWithDefaultHeaders("ns.js", kContentTypeJavascript, kNoscriptJs,
+                                3000);
+  Parse("noscript", "<noscript><script src=\"ns.js\"></script></noscript>");
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("\"</noscript"))
+      << output_buffer_;
+}
+
 TEST_F(JsInlineFilterTest, FlushSplittingScriptTag) {
   SetHtmlMimetype();
   options()->SoftEnableFilterForTesting(RewriteOptions::kInlineJavascript);

@@ -788,9 +788,11 @@ TEST_F(JavascriptFilterTest, InlineScriptKeepsElementEnd) {
                       "var a = \"b\";\n"
                       "//-->");
   ValidateExpected("wrapped", wrapped, wrapped);
-  const GoogleString joined =
-      absl::StrFormat(kInlineJs, "var n = 1 < /script>/.test(a);");
-  ValidateExpected("joined", joined, joined);
+  // "<" and the regular expression after it stay apart, so there is no
+  // "</script" in the minified script.
+  ValidateExpected("joined",
+                   absl::StrFormat(kInlineJs, "var n = 1 < /script>/.test(a);"),
+                   absl::StrFormat(kInlineJs, "var n=1< /script>/.test(a);"));
   const GoogleString commented = absl::StrFormat(kInlineJs,
                                                  "<!--\n"
                                                  "var a = \"<!--<script>\";\n"
@@ -1025,6 +1027,91 @@ TEST_F(JavascriptFilterTest, InlineScriptInsideNoscriptLikeElementIsKept) {
       "elsewhere", StrCat("<div>", script, "</div>"),
       StrCat("<div>", absl::StrFormat(kInlineScriptFormat, kJsMinData),
              "</div>"));
+}
+
+// The end tags of elements whose content a browser reads as text, in the
+// case forms the table tests below use.
+const char* const kTextElementNames[] = {
+    "script",   "noscript", "noembed",  "noframes", "textarea", "title",
+    "style",    "iframe",   "xmp",      "SCRIPT",   "NOSCRIPT", "TextArea",
+    "TiTlE",    "STYLE",    "iFrame",   "Xmp",      "NoEmbed",  "NOFRAMES",
+};
+
+// Minification never joins "<" and a following regular expression into an
+// end tag the script did not have, which would end an enclosing element
+// (such as a <textarea/> that browsers keep open) inside the script.
+TEST_F(JavascriptFilterTest, InlineMinifyDoesNotCreateTextElementEndTag) {
+  SetHtmlMimetype();
+  InitFilters();
+  for (const char* name : kTextElementNames) {
+    SCOPED_TRACE(name);
+    const GoogleString script =
+        StrCat("var ok = 1 < /* note */ /", name, "/ > 0;");
+    const GoogleString minified = StrCat("var ok=1< /", name, "/>0;");
+    EXPECT_EQ(StringPiece::npos,
+              FindIgnoreCase(minified, StrCat("</", name)));
+    ValidateExpected(StrCat("div_", name),
+                     StrCat("<div>", absl::StrFormat(kInlineJs, script),
+                            "</div>"),
+                     StrCat("<div>", absl::StrFormat(kInlineJs, minified),
+                            "</div>"));
+    Parse(StrCat("textarea_", name),
+          StrCat("<textarea/>", absl::StrFormat(kInlineJs, script),
+                 "</textarea>"));
+    EXPECT_NE(GoogleString::npos,
+              output_buffer_.find(absl::StrFormat(kInlineJs, minified)))
+        << output_buffer_;
+  }
+  // An end tag that is already in the script stays, and the script is still
+  // minified.
+  ValidateExpected(
+      "existing", absl::StrFormat(kInlineJs, "var s = \"</textarea>\";  "),
+      absl::StrFormat(kInlineJs, "var s=\"</textarea>\";"));
+}
+
+// The report's regression test, under the core filters and a nonce policy.
+class ContainerEndTagTest : public RewriteTestBase {
+ protected:
+  void SetUp() override {
+    RewriteTestBase::SetUp();
+    SetHtmlMimetype();
+    options()->SetRewriteLevel(RewriteOptions::kCoreFilters);
+    rewrite_driver()->AddFilters();
+  }
+};
+
+TEST_F(ContainerEndTagTest, MinifyDoesNotSynthesizeContainerEndTag) {
+  ParseUrl(StrCat(kTestDomain, "textarea.html"),
+           "<html><head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src 'nonce-test'\"></head><body><textarea/>"
+           "<script nonce=\"test\">"
+           "var ok = 1 < /* note */ /textarea/>0;"
+           "var t = \"<span id=promoted>m</span>\";"
+           "</script></textarea></body></html>");
+  EXPECT_EQ(GoogleString::npos, FindIgnoreCase(output_buffer_, "1</textarea"))
+      << output_buffer_;
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("var ok=1< /textarea/>0;"))
+      << output_buffer_;
+
+  ParseUrl(StrCat(kTestDomain, "noscript.html"),
+           "<html><head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src 'nonce-test'\"></head><body><noscript>"
+           "<script nonce=\"test\">"
+           "var ok = 1 < /* note */ /noscript/ > 0;"
+           "</script></noscript></body></html>");
+  EXPECT_EQ(GoogleString::npos, FindIgnoreCase(output_buffer_, "1</noscript"))
+      << output_buffer_;
+
+  // A regular expression after "<" is still minified, keeping one space.
+  ParseUrl(StrCat(kTestDomain, "benign.html"),
+           "<html><head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src 'nonce-test'\"></head><body>"
+           "<script nonce=\"test\">"
+           "var ok = 1 < /* note */ /style_token/.test(\"x\");"
+           "</script></body></html>");
+  EXPECT_NE(GoogleString::npos,
+            output_buffer_.find("var ok=1< /style_token/.test(\"x\");"))
+      << output_buffer_;
 }
 
 // http://github.com/apache/incubator-pagespeed-mod/issues/324
