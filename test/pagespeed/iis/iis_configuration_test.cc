@@ -1265,4 +1265,28 @@ TEST_F(IisConfigurationTest, Utf16FileIsRefusedWithWarning) {
   EXPECT_EQ("", rwo.daemon_socket_path());
 }
 
+// A deprecated option name is accepted with the deprecation warning; a name
+// that was never an option keeps the generic warning.
+TEST_F(IisConfigurationTest, DeprecatedOptionNameWarnsAsDeprecated) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed FileCacheInodeLimit 500000\n"
+      "pagespeed NoSuchOptionAtAll 1\n"
+      "pagespeed DistributedRewriteServers a b c d e\n",
+      &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "pagespeed FileCacheInodeLimit is deprecated and has no "
+                   "effect; please remove it from your configuration"));
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "pagespeed DistributedRewriteServers is deprecated"));
+  EXPECT_EQ(0, recorder.CountContaining("NoSuchOptionAtAll is deprecated"));
+  EXPECT_GE(recorder.CountContaining("NoSuchOptionAtAll"), 1);
+}
+
 }  // namespace

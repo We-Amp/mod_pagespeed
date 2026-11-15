@@ -21,10 +21,37 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
 #include "pagespeed/envoy/envoy_rewrite_options.h"
+#include "pagespeed/kernel/base/message_handler.h"
 
 namespace net_instaweb {
+
+bool ApplyVHostCustomOption(EnvoyRewriteOptions* options,
+                            const std::string& host_pattern,
+                            const std::string& key, const std::string& value,
+                            MessageHandler* handler) {
+  GoogleString msg;
+  RewriteOptions::OptionSettingResult result =
+      options->ParseAndSetOptionFromName1(key, value, &msg, handler);
+  if (result == RewriteOptions::kOptionOk) {
+    handler->Message(kInfo, "VHost %s: Set option %s = %s",
+                     host_pattern.c_str(), key.c_str(), value.c_str());
+    return true;
+  }
+  if (result == RewriteOptions::kOptionNameUnknown &&
+      RewriteOptions::IsDeprecatedOptionName(key)) {
+    handler->Message(kWarning,
+                     "VHost %s: pagespeed %s is deprecated and has no "
+                     "effect; please remove it from your configuration",
+                     host_pattern.c_str(), key.c_str());
+    return false;
+  }
+  handler->Message(kWarning, "VHost %s: Failed to set option %s: %s",
+                   host_pattern.c_str(), key.c_str(), msg.c_str());
+  return false;
+}
 
 EnvoyVHostConfigManager::EnvoyVHostConfigManager() : sorted_(false) {}
 

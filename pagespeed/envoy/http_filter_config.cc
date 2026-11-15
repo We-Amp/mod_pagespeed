@@ -295,18 +295,8 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
 
   // Apply custom options as key-value pairs.
   for (const auto& [key, value] : vhost_options.custom_options()) {
-    GoogleString msg;
-    RewriteOptions::OptionSettingResult result =
-        options->ParseAndSetOptionFromName1(key, value, &msg, message_handler);
-    if (result == RewriteOptions::kOptionOk) {
-      message_handler->Message(kInfo, "VHost %s: Set option %s = %s",
-                               vhost_config.host_pattern().c_str(), key.c_str(),
-                               value.c_str());
-    } else {
-      message_handler->Message(
-          kWarning, "VHost %s: Failed to set option %s: %s",
-          vhost_config.host_pattern().c_str(), key.c_str(), msg.c_str());
-    }
+    ApplyVHostCustomOption(options.get(), vhost_config.host_pattern(), key,
+                           value, message_handler);
   }
 
   // Apply domain configuration if present.

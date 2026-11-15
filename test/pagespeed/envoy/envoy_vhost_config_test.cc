@@ -21,10 +21,12 @@
 
 #include <chrono>
 #include <string>
+#include <vector>
 #include <memory>
 
 #include "gtest/gtest.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
@@ -51,6 +53,62 @@ class EnvoyVHostConfigTest : public ::testing::Test {
 };
 
 // Test exact host matching.
+namespace {
+class RecordingHandler : public MessageHandler {
+ public:
+  int Count(const std::string& needle) const {
+    int n = 0;
+    for (const auto& m : messages_) {
+      if (m.find(needle) != std::string::npos) ++n;
+    }
+    return n;
+  }
+
+ protected:
+  void MessageSImpl(MessageType, const GoogleString& m) override {
+    messages_.push_back(m);
+  }
+  void FileMessageSImpl(MessageType, const char*, int,
+                        const GoogleString& m) override {
+    messages_.push_back(m);
+  }
+
+ private:
+  std::vector<std::string> messages_;
+};
+}  // namespace
+
+// A deprecated option name is accepted as a no-op and logged as deprecated.
+TEST_F(EnvoyVHostConfigTest, DeprecatedCustomOptionWarnsAsDeprecated) {
+  RecordingHandler rec;
+  EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_FALSE(ApplyVHostCustomOption(&options, "example.com",
+                                      "FileCacheInodeLimit", "500000", &rec));
+  EXPECT_EQ(1, rec.Count("VHost example.com: pagespeed FileCacheInodeLimit is "
+                         "deprecated and has no effect; please remove it from "
+                         "your configuration"));
+  EXPECT_EQ(0, rec.Count("Failed to set option"));
+}
+
+// A name that was never an option keeps the generic failure warning.
+TEST_F(EnvoyVHostConfigTest, UnknownCustomOptionKeepsGenericWarning) {
+  RecordingHandler rec;
+  EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_FALSE(ApplyVHostCustomOption(&options, "example.com",
+                                      "NoSuchOptionAtAll", "1", &rec));
+  EXPECT_EQ(1, rec.Count("Failed to set option NoSuchOptionAtAll"));
+  EXPECT_EQ(0, rec.Count("is deprecated"));
+}
+
+// A known option is set.
+TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
+  RecordingHandler rec;
+  EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "AdminPath",
+                                     "/adm", &rec));
+  EXPECT_EQ(0, rec.Count("Failed"));
+}
+
 TEST_F(EnvoyVHostConfigTest, ExactMatch) {
   EXPECT_TRUE(
       EnvoyVHostConfigManager::HostPatternMatches("example.com", "example.com"));
