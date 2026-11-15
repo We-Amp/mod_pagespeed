@@ -1798,14 +1798,26 @@ ResourcePtr RewriteDriver::CreateInputResourceUnchecked(
     const ContentType* type = NameExtensionToContentType(url.LeafSansQuery());
     GoogleString filename;
     // A URL under a MapProxyDomain path lives on the proxied origin, not on
-    // local disk, so a LoadFromFile prefix that also covers it must not apply.
+    // local disk, so a LoadFromFile prefix covering the proxy path itself must
+    // not apply. A LoadFromFile rule written for the proxied origin does apply,
+    // matching what happens when the origin URL is the input during HTML
+    // rewriting.
     GoogleString mapped_url;
     GoogleString host_header;
     bool is_proxy = false;
     options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
                                              &is_proxy);
-    if (!is_proxy &&
-        options()->file_load_policy()->ShouldLoadFromFile(url, &filename)) {
+    bool load_from_file = false;
+    if (is_proxy) {
+      GoogleUrl mapped_origin_gurl(mapped_url);
+      load_from_file = mapped_origin_gurl.IsWebValid() &&
+                       options()->file_load_policy()->ShouldLoadFromFile(
+                           mapped_origin_gurl, &filename);
+    } else {
+      load_from_file =
+          options()->file_load_policy()->ShouldLoadFromFile(url, &filename);
+    }
+    if (load_from_file) {
       resource.reset(new FileInputResource(this, type, url_string, filename));
     } else {
       // If the scheme is https and the fetcher doesn't support https, check
