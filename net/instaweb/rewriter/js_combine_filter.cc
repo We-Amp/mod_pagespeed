@@ -213,6 +213,10 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
                   OutputResource* combination, Writer* writer,
                   MessageHandler* handler) override;
 
+  bool WriteUnavailablePiece(int index, int num_pieces, const Resource* input,
+                             OutputResource* combination, Writer* writer,
+                             MessageHandler* handler) override;
+
   JavascriptCodeBlock* BlockForResource(const Resource* input);
 
   JsCombineFilter* filter_;
@@ -420,6 +424,11 @@ class JsCombineFilter::Context : public RewriteContext {
   // rewrites of the same inputs read.
   bool FetchWritesPartition() const override { return false; }
 
+  // A script that cannot be fetched is declared empty in the fetched
+  // combination (see JsCombiner::WriteUnavailablePiece), so the rest of the
+  // page's scripts still run.
+  bool FetchCombinesAvailableInputs() const override { return true; }
+
   // Which scripts may be combined depends on the page's charset and on each
   // <script> element's charset attribute, not only on the scripts, so pages
   // that differ in any of them must not share a metadata cache entry. These
@@ -532,6 +541,18 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
   writer->Write(escaped, handler);
   writer->Write(";\n", handler);
   return true;
+}
+
+// The page evaluates one variable per script, so a script left out of the
+// combination is declared as empty code: evaluating it does nothing, as when
+// the browser cannot load that script.
+bool JsCombineFilter::JsCombiner::WriteUnavailablePiece(
+    int /*index*/, int /*num_pieces*/, const Resource* input,
+    OutputResource* /*combination*/, Writer* writer, MessageHandler* handler) {
+  return writer->Write(
+      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, input->url()),
+             " = \"\";\n"),
+      handler);
 }
 
 JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(

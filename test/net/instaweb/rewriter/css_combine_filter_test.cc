@@ -322,18 +322,16 @@ class CssCombineFilterTest : public RewriteTestBase {
     // (bbb.css) in addition to the two that do exist, a.css and c.css.  Using
     // an entirely non-existent resource appears to test a strict superset of
     // filter code paths when compared with returning a 404 for the resource.
+    // The combination is served without the missing stylesheet (issue #791).
     SetFetchFailOnUnexpected(false);
-    ExpectStringAsyncFetch fail_callback(
-        false, RequestContext::NewTestRequestContext(
-                   server_context()->thread_system()));
-    EXPECT_TRUE(rewrite_driver()->FetchResource(kABCUrl, &fail_callback));
+    ExpectStringAsyncFetch partial_callback(
+        true, RequestContext::NewTestRequestContext(
+                  server_context()->thread_system()));
+    EXPECT_TRUE(rewrite_driver()->FetchResource(kABCUrl, &partial_callback));
     rewrite_driver()->WaitForCompletion();
-
-    // What status we get here depends a lot on details of when exactly
-    // we detect the failure. If done early enough, nothing will be set.
-    // This test may change, but see also
-    // ResourceCombinerTest.TestContinuingFetchWhenFastFailed
-    EXPECT_EQ("", fail_callback.buffer());
+    EXPECT_EQ(HttpStatus::kOK,
+              partial_callback.response_headers()->status_code());
+    EXPECT_EQ(expected_combination, partial_callback.buffer());
   }
 
   // Common framework for testing barriers.  A null-terminated set of css
@@ -585,6 +583,49 @@ TEST_F(CssCombineFilterTest, Fetch) { TestFetch(); }
 TEST_F(CssCombineFilterTest, FetchUnhealthy) {
   lru_cache()->set_is_healthy(false);
   TestFetch();
+}
+
+// Issue #791: once the cache no longer holds a combined stylesheet, an input
+// the server cannot fetch at that moment must not turn the whole combined URL
+// into a 404. The stylesheets that can be fetched are served, in order, with
+// a short private lifetime, and the full combination comes back once the
+// input can be fetched again.
+TEST_F(CssCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
+  // A real hasher, so the partial result's hash differs from the one asked
+  // for, as it does outside tests.
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  const GoogleString combined_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  content.clear();
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+
+  lru_cache()->Clear();
+  SetupCssResources(kCssA, kCssB);
+  content.clear();
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+}
+
+// When none of the inputs can be fetched there is nothing usable to serve.
+TEST_F(CssCombineFilterTest, FetchAfterCacheLossWithNoInputAvailable) {
+  SetupCssResources(kCssA, kCssB);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssA));
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  EXPECT_FALSE(TryFetchResource(Encode(kDomain, RewriteOptions::kCssCombinerId,
+                                       "0", MultiUrl(kCssA, kCssB), "css")));
 }
 
 TEST_F(CssCombineFilterTest, CombineCssMD5) {

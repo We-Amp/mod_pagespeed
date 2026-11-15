@@ -627,6 +627,15 @@ class RewriteContext {
   // and its output still goes to the HTTP cache.
   virtual bool FetchWritesPartition() const;
 
+  // Whether a fetch of an output combining several inputs may be answered
+  // when some, but not all, of those inputs cannot be fetched.  Rewrite() then
+  // sees those inputs not loaded or with an error status, and must leave
+  // their content out.  The result differs from what the requested URL names,
+  // so it is served with a short, private lifetime; FetchWritesPartition()
+  // must be false so it never decides how pages are rewritten.  Without this
+  // such a fetch fails, as the original of a combination cannot be served.
+  virtual bool FetchCombinesAvailableInputs() const { return false; }
+
   // Adjust headers sent out for a stale or in-place result. We may send out
   // stale results in the fallback fetch pathway, but these results should not
   // be cached much.  By default we strip Set-Cookie* headers and Etags, and

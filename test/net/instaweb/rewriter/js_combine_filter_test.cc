@@ -46,6 +46,7 @@
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
@@ -1025,14 +1026,14 @@ TEST_F(JsCombineFilterTest, TestCombineShard) {
 
 TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
   // Regression test where a combination involving a 404 gets fetched,
-  // and then the page is rewritten.  The fetch fails and leaves nothing
-  // behind for the HTML path, which then rewrites the page exactly as it
-  // would have without the fetch: the two scripts that exist are combined
-  // and the missing one is left alone.
+  // and then the page is rewritten.  The fetch is answered without the
+  // missing script and leaves nothing behind for the HTML path, which then
+  // rewrites the page exactly as it would have without the fetch: the two
+  // scripts that exist are combined and the missing one is left alone.
   SetFetchResponse404("404.js");
   SetResponseWithDefaultHeaders(kJsUrl1, kContentTypeJavascript, "var a;", 100);
   SetResponseWithDefaultHeaders(kJsUrl2, kContentTypeJavascript, "var b;", 100);
-  EXPECT_FALSE(TryFetchResource(Encode(
+  EXPECT_TRUE(TryFetchResource(Encode(
       kTestDomain, "jc", "0", MultiUrl(kJsUrl1, kJsUrl2, "404.js"), "js")));
 
   ScriptInfoVector scripts;
@@ -1045,6 +1046,49 @@ TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
   VerifyUse(scripts[1], kJsUrl1);
   VerifyUse(scripts[2], kJsUrl2);
   EXPECT_EQ("404.js", scripts[3].url);
+}
+
+// Issue #791: once the cache no longer holds a combined script, an input the
+// server cannot fetch at that moment must not turn the whole combined URL into
+// a 404. The scripts that can be fetched are served; the missing one is
+// declared empty, so the page's eval() of it does nothing instead of throwing.
+// The response has a short private lifetime, and the full combination comes
+// back once the input can be fetched again.
+TEST_F(JsCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
+  const char kJsX[] = "x.js";
+  const char kJsY[] = "y.js";
+  const char kJsZ[] = "z.js";
+  SetResponseWithDefaultHeaders(kJsX, kContentTypeJavascript, "var x;", 300);
+  SetResponseWithDefaultHeaders(kJsY, kContentTypeJavascript, "var y;", 300);
+  SetResponseWithDefaultHeaders(kJsZ, kContentTypeJavascript, "var z;", 300);
+  const GoogleString js_url =
+      Encode(kTestDomain, "jc", "0", MultiUrl(kJsX, kJsY, kJsZ), "js");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(js_url, &full));
+  // Three "var <name> = <code>;" lines, y's in the middle.
+  const GoogleString y_code = " = \"var y;\";\n";
+  const size_t y_pos = full.find(y_code);
+  ASSERT_NE(GoogleString::npos, y_pos);
+  ASSERT_NE(GoogleString::npos, full.find("\"var x;\""));
+  ASSERT_NE(GoogleString::npos, full.find("\"var z;\""));
+  GoogleString expected_partial = full;
+  expected_partial.replace(y_pos, y_code.size(), " = \"\";\n");
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kJsY));
+  GoogleString js_out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(js_url, &js_out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(expected_partial, js_out);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+
+  lru_cache()->Clear();
+  SetResponseWithDefaultHeaders(kJsY, kContentTypeJavascript, "var y;", 300);
+  js_out.clear();
+  ASSERT_TRUE(FetchResourceUrl(js_url, &js_out));
+  EXPECT_EQ(full, js_out);
 }
 
 TEST_F(JsCombineFilterTest, FetchWithNoInputsIsRefused) {
