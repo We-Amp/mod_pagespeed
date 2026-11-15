@@ -1973,7 +1973,7 @@ jobs:
                 \( -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) \
                 -not -path "pagespeed/iis/*" \
                 -not -path "net/instaweb/rewriter/generated/*" \
-                | xargs -r grep -L "DO NOT EDIT BY HAND" \
+                | xargs -r sh -c "grep -L \"DO NOT EDIT BY HAND\" \"\$@\" || [ \$? -eq 1 ]" sh \
                 | xargs -r clang-format-20 --dry-run --Werror
             '
 
