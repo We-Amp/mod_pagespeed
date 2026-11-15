@@ -10,7 +10,7 @@ draft: false
 
 [PageSpeed for Envoy](/docs/install-envoy/) is an experimental HTTP filter. No package, container image or download is published for it. You build it from the [public source repository](https://github.com/We-Amp/mod_pagespeed). Its standalone target, `envoy_pagespeed`, links the filter into an Envoy binary. If you run that build, you already build Envoy yourself.
 
-That makes a recent measurement relevant to you. We rebuilt unmodified Envoy with clang profile-guided optimization (PGO) and ThinLTO and compared it with a standard optimized build of the same commit. On HTTP/1 and HTTP/2 proxy benchmarks, CPU per request fell by 20% to 40%. The full write-up, with the method, the tables, the costs and the recipe, is on we-amp.com: [Building Envoy with PGO and ThinLTO](https://we-amp.com/writing/envoy-pgo-thinlto/).
+That makes a recent measurement relevant to you. We rebuilt unmodified Envoy with clang profile-guided optimization (PGO) and ThinLTO and compared it with a standard optimized build of the same commit. On HTTP/1 and HTTP/2 proxy benchmarks, CPU per request fell by 20% to 40%. The full write-up, with the method, the tables, the costs and the recipe, is on we-amp.com: [Building Envoy with PGO and ThinLTO](https://we-amp.com/writing/envoy-pgo-thinlto/). The method behind these measurements, and the earlier results we dropped along the way, is in [our account of the whole Envoy CPU effort](https://we-amp.com/writing/envoy-cpu-performance/).
 
 This post covers what carries over to the PageSpeed filter, and what does not.
 
