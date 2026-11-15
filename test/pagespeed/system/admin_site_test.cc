@@ -37,6 +37,7 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -46,12 +47,14 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/packs/signature_format.h"
+#include "pagespeed/kernel/util/copy_on_write.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/admin_daemon_handler.h"
@@ -4343,6 +4346,58 @@ TEST_F(AdminSiteDaemonTest, VhostPurgeRejectsForeignHost) {
                               "XMLHttpRequest");
   EXPECT_EQ(403, fetch->response_headers()->status_code());
   EXPECT_THAT(body, ::testing::HasSubstr("another host"));
+}
+
+TEST_F(AdminSiteDaemonTest, VhostPurgeSetListsOwnHostOnly) {
+  // The purge set of a cache path holds every site's records.  A per-vhost
+  // console lists its own host's records and the whole-cache line; the
+  // global console lists them all.
+  std::unique_ptr<RewriteOptions> options(rewrite_driver()->options()->Clone());
+  options->UpdateCacheInvalidationTimestampMs(1000);
+  CopyOnWrite<PurgeSet> purges(options->purge_set());
+  purges.MakeWriteable()->Put("http://example.com/own.css", 2000);
+  purges.MakeWriteable()->Put("http://EXAMPLE.com/upper.css", 2000);
+  purges.MakeWriteable()->Put("http://example.com:8081/other-port.css", 2000);
+  purges.MakeWriteable()->Put("http://other.example.org/theirs.css?k=v", 2000);
+  ASSERT_TRUE(options->UpdateCachePurgeSet(purges));
+
+  auto fetch_purge_set = [&](bool is_global, GoogleString* body) {
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), body);
+    fetch.request_headers()->set_method(RequestHeaders::kGet);
+    GoogleUrl gurl(
+        StrCat("http://example.com/",
+               is_global ? "pagespeed_global_admin" : "pagespeed_admin",
+               "/cache?new_set="));
+    QueryParams query_params;
+    query_params.ParseFromUrl(gurl);
+    SystemServerContext* system_server_context =
+        static_cast<SystemServerContext*>(server_context_.get());
+    daemon_site_->AdminPage(
+        is_global, gurl, query_params, options.get(), nullptr /* cache_path */,
+        &fetch, nullptr /* system_caches */,
+        nullptr /* filesystem_metadata_cache */, nullptr /* http_cache */,
+        nullptr /* metadata_cache */, nullptr /* page_property_cache */,
+        system_server_context, factory()->statistics(), factory()->statistics(),
+        system_server_context->global_system_rewrite_options(),
+        "" /* request_body */, StringPiece());
+    ASSERT_TRUE(fetch.done());
+    EXPECT_EQ(200, fetch.response_headers()->status_code());
+  };
+
+  GoogleString vhost_body;
+  fetch_purge_set(false /* vhost */, &vhost_body);
+  EXPECT_THAT(vhost_body, ::testing::HasSubstr("Global@"));
+  EXPECT_THAT(vhost_body, ::testing::HasSubstr("http://example.com/own.css@"));
+  EXPECT_THAT(vhost_body, ::testing::HasSubstr("upper.css@"));
+  EXPECT_THAT(vhost_body, ::testing::Not(::testing::HasSubstr("other-port")));
+  EXPECT_THAT(vhost_body, ::testing::Not(::testing::HasSubstr("theirs.css")));
+
+  GoogleString global_body;
+  fetch_purge_set(true /* global */, &global_body);
+  EXPECT_THAT(global_body, ::testing::HasSubstr("Global@"));
+  EXPECT_THAT(global_body, ::testing::HasSubstr("own.css@"));
+  EXPECT_THAT(global_body, ::testing::HasSubstr("other-port.css@"));
+  EXPECT_THAT(global_body, ::testing::HasSubstr("theirs.css"));
 }
 
 TEST_F(AdminSiteDaemonTest, VhostLookupRejectsForeignHost) {
