@@ -241,6 +241,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
                              OutputResource* combination, Writer* writer,
                              MessageHandler* handler) override;
 
+  // The URL that names input number index of the combination: during a
+  // fetch, the one the fetched URL names (see set_requested_urls()),
+  // otherwise the input's own URL.
+  GoogleString NameUrl(int index, const Resource* input) const;
+
   JavascriptCodeBlock* BlockForResource(const Resource* input);
 
   JsCombineFilter* filter_;
@@ -563,9 +568,11 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
     }
   }
 
-  // We write out code of each script into a variable.
+  // We write out code of each script into a variable, named after the URL the
+  // page evaluates (see NameUrl()).
   writer->Write(
-      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, input->url()),
+      StrCat("var ",
+             JsCombineFilter::VarName(rewrite_driver_, NameUrl(index, input)),
              " = "),
       handler);
 
@@ -580,22 +587,29 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
 // The page evaluates one variable per script, so a script left out of the
 // combination is declared as empty code: evaluating it does nothing, as when
 // the browser cannot load that script.
-//
-// The name comes from the input URL as the combined URL names it, the one the
-// page evaluates: an input that is itself a .pagespeed. resource is rebuilt
-// into a resource whose URL carries the hash of what was rebuilt, which for a
-// failed rebuild is not the hash the page uses.
 bool JsCombineFilter::JsCombiner::WriteUnavailablePiece(
     int index, int /*num_pieces*/, const Resource* input,
     OutputResource* /*combination*/, Writer* writer, MessageHandler* handler) {
-  const GoogleString& url = (requested_urls_ != nullptr &&
-                             index < static_cast<int>(requested_urls_->size()))
-                                ? (*requested_urls_)[index]
-                                : input->url();
   return writer->Write(
-      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, url),
+      StrCat("var ",
+             JsCombineFilter::VarName(rewrite_driver_, NameUrl(index, input)),
              " = \"\";\n"),
       handler);
+}
+
+// The name comes from the input URL as the combined URL names it, the one the
+// page evaluates. An input that is itself a .pagespeed. resource is rebuilt
+// into a resource whose URL carries the hash of what was rebuilt; when the
+// rebuild falls back to the unoptimized original, or the input changed since
+// the page was rewritten, that is not the hash the page uses. When rewriting
+// HTML, the page evaluates the name of the slot's resource, which is the input.
+GoogleString JsCombineFilter::JsCombiner::NameUrl(int index,
+                                                  const Resource* input) const {
+  if (requested_urls_ != nullptr && index >= 0 &&
+      index < static_cast<int>(requested_urls_->size())) {
+    return (*requested_urls_)[index];
+  }
+  return input->url();
 }
 
 JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(
