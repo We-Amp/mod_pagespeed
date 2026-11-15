@@ -1561,7 +1561,9 @@ class RewriteOptions {
   bool OptionValue(StringPiece option_name, const char** id, bool* was_set,
                    GoogleString* value) const;
 
-  // Set all of the options to their values specified in the option set.
+  // Set all of the options to their values specified in the option set, the
+  // options= component of an ExperimentSpec.  As ExperimentSpec is a
+  // directory-scope directive, options of a wider scope are refused.
   // Returns true if all options in the set were successful, false if not.
   bool SetOptionsFromName(const OptionSet& option_set, MessageHandler* handler);
 

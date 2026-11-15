@@ -3296,6 +3296,51 @@ TEST_F(RewriteOptionsTest, SetOptionsFromName) {
   EXPECT_FALSE(handler.messages().empty());
 }
 
+// ExperimentSpec is a directory-scope directive, so the options= component of
+// a spec may set only options a directory-scope directive may set.
+TEST_F(RewriteOptionsTest, ExperimentSpecOptionsStayWithinDirectoryScope) {
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=10;default;options=CssInlineMaxBytes=66", &msg,
+                &handler));
+  // A server-scope option makes the spec invalid when it is parsed.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=2;percent=10;default;options=UrlSigningKey=abc,"
+                "RulePackRequireSigned=off,CssInlineMaxBytes=77",
+                &msg, &handler));
+  // So does a process-scope one.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=3;percent=10;default;options=ImageMaxRewritesAtOnce=0",
+                &msg, &handler));
+  bool scope_named = false;
+  for (const GoogleString& message : handler.messages()) {
+    if (message.find("Maximum allowed scope") != GoogleString::npos) {
+      scope_named = true;
+    }
+  }
+  EXPECT_TRUE(scope_named);
+
+  // An invalid spec stays in the list (a remote configuration file goes on
+  // after a bad line), so the wider-scope options must not be applied when
+  // the experiment is set up either; the directory-scope one still is.
+  options_.set_rule_pack_require_signed(true);
+  const int image_max_rewrites = options_.image_max_rewrites_at_once();
+  ASSERT_TRUE(options_.GetExperimentSpec(2) != nullptr);
+  options_.SetExperimentState(2);
+  EXPECT_EQ("", options_.url_signing_key());
+  EXPECT_TRUE(options_.rule_pack_require_signed());
+  EXPECT_EQ(77, options_.css_inline_max_bytes());
+  ASSERT_TRUE(options_.GetExperimentSpec(3) != nullptr);
+  options_.SetExperimentState(3);
+  EXPECT_EQ(image_max_rewrites, options_.image_max_rewrites_at_once());
+}
 // TODO(sriharis):  Add thorough ComputeSignature tests
 
 TEST_F(RewriteOptionsTest, ComputeSignatureWildcardGroup) {
