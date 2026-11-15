@@ -4392,10 +4392,11 @@ jobs:
           sbom="$(jq -r '[.files[] | select(.component == "sbom" and (.asset | endswith(".spdx.json"))) | .asset] | if length == 1 then .[0] else "" end' manifest.json)"
           [ -n "$sbom" ] || { echo "::error::manifest.json must list exactly one SPDX SBOM"; exit 1; }
           echo "$sbom" > "$out/sbom.txt"
+          bash "${GITHUB_WORKSPACE}/tools/ci/check_attest_subjects.sh" sbom "$out/sbom.txt" "$out/all.txt" || exit 1
           for list in all packages; do
             : > "$out/${list}.sha256"
             while IFS= read -r f; do
-              printf '%s' "$f" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*$' || { echo "::error::unexpected subject name '$f'"; exit 1; }
+              bash "${GITHUB_WORKSPACE}/tools/ci/check_attest_subjects.sh" name "$f" || exit 1
               [ -s "$f" ] || { echo "::error::subject $f is missing or empty"; exit 1; }
               sha256sum "$f" >> "$out/${list}.sha256"
             done < "$out/${list}.txt"
@@ -4555,7 +4556,9 @@ jobs:
         with:
           ref: master
           path: trust
-          sparse-checkout: RELEASE-SIGNING-KEY.asc
+          sparse-checkout: |
+            RELEASE-SIGNING-KEY.asc
+            tools/ci/check_attest_subjects.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -4568,6 +4571,9 @@ jobs:
           # The subject lists validate chose must still match these bytes.
           sha256sum -c "${RUNNER_TEMP}/attest/all.sha256"
           sha256sum -c "${RUNNER_TEMP}/attest/packages.sha256"
+          # The SBOM name is read from an artifact, so check it again here, with
+          # the checker from master, before it reaches the environment.
+          bash "${GITHUB_WORKSPACE}/trust/tools/ci/check_attest_subjects.sh" sbom "${RUNNER_TEMP}/attest/sbom.txt" "${RUNNER_TEMP}/attest/all.txt"
           echo "SBOM_PATH=assets/$(cat "${RUNNER_TEMP}/attest/sbom.txt")" >> "$GITHUB_ENV"
 
       - name: Sign SHA256SUMS (detached, armored)
