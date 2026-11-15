@@ -3188,7 +3188,7 @@ bool RewriteDriver::Write(const ResourceVector& inputs,
 
     HTTPCache* http_cache = server_context_->http_cache();
     if (output->kind() != kOnTheFlyResource &&
-        output->kind() != kInlineResource &&
+        output->kind() != kInlineResource && output->store_in_http_cache() &&
         (http_cache->force_caching() || meta_data->IsProxyCacheable())) {
       // This URL should already be mapped to the canonical rewrite domain,
       // But we should store its unsharded form in the cache.

@@ -627,6 +627,19 @@ class RewriteContext {
   // and its output still goes to the HTTP cache.
   virtual bool FetchWritesPartition() const;
 
+  // Whether a fetch of an output combining several inputs may be answered
+  // when some, but not all, of those inputs cannot be fetched.  Rewrite() then
+  // sees those inputs not loaded or with an error status, and must leave
+  // their content out.  The result differs from what the requested URL names,
+  // so it is served with a short, private lifetime; FetchWritesPartition()
+  // must be false so it never decides how pages are rewritten.  Without this
+  // such a fetch fails, as the original of a combination cannot be served.
+  virtual bool FetchCombinesAvailableInputs() const { return false; }
+
+  // Returns true if this rewrite context was created to fetch a resource (e.g.,
+  // IPRO or .pagespeed. URLs) and false otherwise.
+  bool IsFetchRewrite() const { return fetch_.get() != nullptr; }
+
   // Adjust headers sent out for a stale or in-place result. We may send out
   // stale results in the fallback fetch pathway, but these results should not
   // be cached much.  By default we strip Set-Cookie* headers and Etags, and
@@ -863,10 +876,6 @@ class RewriteContext {
                                        const ResponseHeaders& response_headers,
                                        StringPiece content,
                                        OutputResourcePtr* output_resource);
-
-  // Returns true if this rewrite context was created to fetch a resource (e.g.,
-  // IPRO or .pagespeed. URLs) and false otherwise.
-  bool IsFetchRewrite() const { return fetch_.get() != nullptr; }
 
   // Called on the parent from a nested Rewrite when it is complete.
   // Note that we don't track rewrite success/failure here.  We only
@@ -1163,6 +1172,11 @@ class RewriteContext {
   // in the failure case we also set was_too_busy_, which does get copied to the
   // parent.
   bool ok_to_write_output_partitions_;
+
+  // True when a fetch is answered with a combination that leaves out inputs
+  // it could not fetch (FetchCombinesAvailableInputs()).  Such a result is
+  // never stored in the HTTP cache and is always served private and short.
+  bool fetch_left_out_inputs_ = false;
 
   // True if the rewrite was incomplete due to heavy load; if this is true
   // ok_to_write_output_partitions_ must be false.  This is copied from nested

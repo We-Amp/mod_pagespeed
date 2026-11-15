@@ -273,9 +273,21 @@ bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
     // those of the first input.
     return false;
   }
+  // Only a fetch that may leave out inputs it could not fetch passes inputs
+  // that are not loaded or not a 200 (see WriteUnavailablePiece()); the
+  // output is made from the others.
+  ResourceVector available;
+  for (const ResourcePtr& input : combine_resources) {
+    if (input->loaded() && input->HttpStatusOk()) {
+      available.push_back(input);
+    }
+  }
+  if (available.empty()) {
+    return false;
+  }
   bool written = true;
   // Check the inputs' content types here too.
-  for (const ResourcePtr& input : combine_resources) {
+  for (const ResourcePtr& input : available) {
     GoogleString failure_reason;
     if (!HasCombinationContentType(input.get(), &failure_reason)) {
       handler->Message(kInfo, "Cannot combine %s: %s",
@@ -289,8 +301,13 @@ bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
   StringWriter writer(&combined_contents);
   for (int i = 0, n = combine_resources.size(); written && (i < n); ++i) {
     const ResourcePtr& input(combine_resources[i]);
-    written =
-        WritePiece(i, n, input.get(), combination.get(), &writer, handler);
+    if (input->loaded() && input->HttpStatusOk()) {
+      written =
+          WritePiece(i, n, input.get(), combination.get(), &writer, handler);
+    } else {
+      written = WriteUnavailablePiece(i, n, input.get(), combination.get(),
+                                      &writer, handler);
+    }
   }
   if (written) {
     // Intersect the response headers from each input.
@@ -302,14 +319,14 @@ bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
     // RewriteDriver::Write when it calls
     // RewriteDriver::SetDefaultLongCacheHeaders.
     server_context_->MergeNonCachingResponseHeaders(
-        *combine_resources[0]->response_headers(), output_headers);
-    for (int i = 1, n = combine_resources.size(); i < n; ++i) {
-      output_headers->RemoveIfNotIn(*combine_resources[i]->response_headers());
+        *available[0]->response_headers(), output_headers);
+    for (int i = 1, n = available.size(); i < n; ++i) {
+      output_headers->RemoveIfNotIn(*available[i]->response_headers());
     }
 
     // TODO(morlovich): Fix combiners to deal with charsets.
     written = rewrite_driver_->Write(
-        combine_resources, combined_contents, CombinationContentType(),
+        available, combined_contents, CombinationContentType(),
         StringPiece() /* not computing charset for now */, combination.get());
   }
   return written;
@@ -320,6 +337,14 @@ bool ResourceCombiner::WritePiece(int index, int num_pieces,
                                   OutputResource* /*combination*/,
                                   Writer* writer, MessageHandler* handler) {
   return writer->Write(input->ExtractUncompressedContents(), handler);
+}
+
+bool ResourceCombiner::WriteUnavailablePiece(int /*index*/, int /*num_pieces*/,
+                                             const Resource* /*input*/,
+                                             OutputResource* /*combination*/,
+                                             Writer* /*writer*/,
+                                             MessageHandler* /*handler*/) {
+  return true;
 }
 
 void ResourceCombiner::Clear() {

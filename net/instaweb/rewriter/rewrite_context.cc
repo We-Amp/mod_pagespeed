@@ -864,7 +864,11 @@ class RewriteContext::FetchContext {
     bool ok = false;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
-      if (output_resource_->hash() == requested_hash_) {
+      // A combination served without some of its inputs is not the one the
+      // URL names, whatever its hash: it is never served as the immutable
+      // public resource.
+      if (output_resource_->hash() == requested_hash_ &&
+          !rewrite_context_->fetch_left_out_inputs_) {
         // The body below is the uncompressed one, so the headers must
         // describe that one as well.
         response_headers->CopyFrom(*(output_resource_->UncompressedHeaders()));
@@ -1007,7 +1011,9 @@ class RewriteContext::FetchContext {
     // compute the cache-control for a hidden .pagespeed. resource in a
     // nested RewriteContext, and we need to propogate that to the ipro
     // resource response headers.
-    if (headers->HasValue(HttpAttributes::kCacheControl, "public")) {
+    // A combination served without some of its inputs stays private.
+    if (!rewrite_context_->fetch_left_out_inputs_ &&
+        headers->HasValue(HttpAttributes::kCacheControl, "public")) {
       async_fetch_->response_headers()->SetCacheControlPublic();
     }
 
@@ -2816,6 +2822,13 @@ void RewriteContext::StartRewriteForFetch() {
         fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     ok_to_rewrite = false;
   }
+  // A combination whose filter allows it is still served when some of its
+  // inputs cannot be fetched right now, leaving those out, rather than
+  // failing the whole URL (the original of a combination cannot be served).
+  const bool may_skip_unavailable = (num_slots() > 1) &&
+                                    FetchCombinesAvailableInputs() &&
+                                    !FetchWritesPartition();
+  int num_available = 0;
   for (int i = 0, n = slots_.size(); ok_to_rewrite && (i < n); ++i) {
     ResourcePtr resource(slot(i)->resource());
     if (resource->loaded() && resource->HttpStatusOk() &&
@@ -2826,12 +2839,26 @@ void RewriteContext::StartRewriteForFetch() {
       Resource::HashHint hash_hint =
           on_the_fly ? Resource::kOmitInputHash : Resource::kIncludeInputHash;
       resource->AddInputInfoToPartition(hash_hint, i, partition);
+      ++num_available;
+    } else if (may_skip_unavailable &&
+               !(resource->loaded() && resource->HttpStatusOk())) {
+      fetch_left_out_inputs_ = true;
+      fetch_->handler()->Message(
+          kWarning, "Input %s unavailable; serving %s without it",
+          resource->UrlForDebug().c_str(),
+          fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     } else {
       ok_to_rewrite = false;
       break;
     }
   }
+  if (may_skip_unavailable && (num_available == 0)) {
+    ok_to_rewrite = false;
+  }
   OutputResourcePtr output(fetch_->output_resource());
+  if (fetch_left_out_inputs_) {
+    output->set_store_in_http_cache(false);
+  }
 
   // During normal rewrite path, Partition() is responsible for syncing up
   // the output resource's CachedResult and the partition tables. As it does
@@ -3524,7 +3551,8 @@ void RewriteContext::FixFetchFallbackHeaders(const CachedResult& cached_result,
     }
   }
   int64 ttl_ms = min_cache_expiry_time_ms - date_ms;
-  if (!Options()->publicly_cache_mismatched_hashes_experimental()) {
+  if (!Options()->publicly_cache_mismatched_hashes_experimental() ||
+      fetch_left_out_inputs_) {
     // Shorten cache length, and prevent proxies caching this, as it's under
     // the "wrong" URL.
     cache_control_suffix = ",private";

@@ -122,6 +122,17 @@ class ResourceCombiner {
                           OutputResource* combination, Writer* writer,
                           MessageHandler* handler);
 
+  // Called by WriteCombination() in place of WritePiece() for an input that
+  // could not be fetched (not loaded, or not a 200).  Only the fetch of a
+  // combination whose context returns true from
+  // RewriteContext::FetchCombinesAvailableInputs() passes such inputs.  The
+  // default writes nothing, leaving the input out.  Returns whether
+  // successful.
+  virtual bool WriteUnavailablePiece(int index, int num_pieces,
+                                     const Resource* input,
+                                     OutputResource* combination,
+                                     Writer* writer, MessageHandler* handler);
+
   // Returns whether the origin labelled resource as CombinationContentType(),
   // setting *failure_reason if not. The combination is labelled with
   // CombinationContentType(), so only inputs of that type are accepted.
