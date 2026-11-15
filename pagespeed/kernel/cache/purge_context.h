@@ -256,14 +256,14 @@ class PurgeContext {
 
   Statistics* statistics_;
   std::unique_ptr<AbstractMutex> mutex_;
-  CopyOnWrite<PurgeSet> purge_set_;        // protected by mutex_
-  PurgeSet pending_purges_;                // protected by mutex_
-  PurgeCallbackVector pending_callbacks_;  // protected by mutex_
+  CopyOnWrite<PurgeSet> purge_set_;                     // protected by mutex_
+  PurgeSet pending_purges_;                             // protected by mutex_
+  PurgeCallbackVector pending_callbacks_;               // protected by mutex_
   NonEvictingPurgeVector pending_non_evicting_purges_;  // protected by mutex_
-  int64 local_purge_index_;                // protected by mutex_
-  int num_consecutive_failures_;           // protected_by mutex_
-  bool waiting_for_interprocess_lock_;     // protected_by mutex_
-  bool reading_;                           // protected_by mutex_
+  int64 local_purge_index_;                             // protected by mutex_
+  int num_consecutive_failures_;                        // protected_by mutex_
+  bool waiting_for_interprocess_lock_;                  // protected_by mutex_
+  bool reading_;                                        // protected_by mutex_
 
   bool enable_purge_;  // When false, can only flush entire cache.
   int max_bytes_in_cache_;
