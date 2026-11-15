@@ -383,6 +383,14 @@ TEST_F(JsInlineFilterTest, DoInlineJavascriptSimpleXhtml) {
                             "function id(x) { return x; }\n", true);
 }
 
+// CE-HTML is XHTML: an inlined script is written as XML, in CDATA.
+TEST_F(JsInlineFilterTest, InlinedScriptOnCeHtmlPageIsInCdata) {
+  SetMimetype("application/ce-html+xml");
+  TestInlineJavascriptXhtml("http://www.example.com/index.html",
+                            "http://www.example.com/script.js",
+                            "var label = \"<b/>\";\n", true);
+}
+
 TEST_F(JsInlineFilterTest, DoInlineJavascriptWhitespace) {
   SetHtmlMimetype();
 
