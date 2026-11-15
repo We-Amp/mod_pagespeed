@@ -1038,8 +1038,8 @@ const char* const kTextElementNames[] = {
 };
 
 // Minification never joins "<" and a following regular expression into an
-// end tag the script did not have, which would end an enclosing element
-// (such as a <textarea/> that browsers keep open) inside the script.
+// end tag the script did not have, in a div or after a self-closed textarea
+// tag.
 TEST_F(JavascriptFilterTest, InlineMinifyDoesNotCreateTextElementEndTag) {
   SetHtmlMimetype();
   InitFilters();
@@ -1062,14 +1062,44 @@ TEST_F(JavascriptFilterTest, InlineMinifyDoesNotCreateTextElementEndTag) {
               output_buffer_.find(absl::StrFormat(kInlineJs, minified)))
         << output_buffer_;
   }
-  // An end tag that is already in the script stays, and the script is still
-  // minified.
-  ValidateExpected(
-      "existing", absl::StrFormat(kInlineJs, "var s = \"</textarea>\";  "),
-      absl::StrFormat(kInlineJs, "var s=\"</textarea>\";"));
+  // A script that has such an end tag is left as it is.
+  ValidateNoChanges("existing",
+                    absl::StrFormat(kInlineJs, "var s = \"</textarea>\";  "));
 }
 
-// The report's regression test, under the core filters and a nonce policy.
+// Minification keeps the original script whenever the minified form has an
+// end tag of an element whose content is read as text, wherever it is: here
+// the minified form gains a "</textarea" and loses the one in a comment.
+TEST_F(JavascriptFilterTest, MinifiedScriptWithTextElementEndTagIsNotUsed) {
+  EXPECT_TRUE(JavascriptFilter::MinifiedScriptMayEndElement(
+      "/* </textarea> */ var ok = 1 < /textarea/ > 0;",
+      "var ok=1</textarea/>0;"));
+  EXPECT_TRUE(JavascriptFilter::MinifiedScriptMayEndElement(
+      "var s = \"</TITLE>\";  ", "var s=\"</TITLE>\";"));
+  EXPECT_TRUE(JavascriptFilter::MinifiedScriptMayEndElement(
+      "/* x */ var s = '</sCrIpT';", "var s='</sCrIpT';"));
+  EXPECT_FALSE(JavascriptFilter::MinifiedScriptMayEndElement(
+      "var ok = 1 < /textarea/ > 0;", "var ok=1< /textarea/>0;"));
+  EXPECT_FALSE(JavascriptFilter::MinifiedScriptMayEndElement(
+      "var s = \"</div>\";  ", "var s=\"</div>\";"));
+}
+
+// "<" and "</" at the very end of a script never form an end tag.
+TEST_F(JavascriptFilterTest, InlineMinifyLessThanAtEndOfScript) {
+  SetHtmlMimetype();
+  InitFilters();
+  for (const char* script :
+       {"var ok = 1 <", "var ok = 1 <   ", "var ok = 1 </", "var ok = 1 < /",
+        "var ok = 1 < /textarea"}) {
+    SCOPED_TRACE(script);
+    Parse("end", absl::StrFormat(kInlineJs, script));
+    EXPECT_EQ(GoogleString::npos, FindIgnoreCase(output_buffer_, "1</t"))
+        << output_buffer_;
+  }
+}
+
+// Minification with the core filters and a nonce policy, after a self-closed
+// textarea tag and inside a noscript.
 class ContainerEndTagTest : public RewriteTestBase {
  protected:
   void SetUp() override {

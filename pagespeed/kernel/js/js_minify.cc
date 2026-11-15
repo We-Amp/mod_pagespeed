@@ -484,8 +484,11 @@ bool MinifyUtf8JsWithSourceMap(
         // only exists on the decline path), so accepted-input output is
         // byte-identical; on valid-but-unmodelable input (the n4 class)
         // it is a correctness fix for the seam, not a behavior regression.
+        // Likewise for "<" and a "/" after it, which would form an HTML end
+        // tag such as "</textarea" that the input does not have.
         if (!output->empty() && !token.empty() &&
-            CanFuseAtSeam(output->back(), token[0])) {
+            (CanFuseAtSeam(output->back(), token[0]) ||
+             (output->back() == '<' && token[0] == '/'))) {
           output->push_back(' ');
         }
         output->append(token.data(), token.size());

@@ -1134,6 +1134,17 @@ TEST_F(JsMinifyTest, DoNotCreateHtmlEndTag) {
   }
   // Text that already has the pair keeps it as it is.
   CheckNewMinification("var ok = 1</textarea/ > 0;", "var ok=1</textarea/>0;");
+  // Nor at the very end of the input, where minification may stop and keep
+  // the rest of the input as it is.
+  for (const char* input :
+       {"x = 1 <", "x = 1 <  ", "x = 1 < /", "x = 1 < /textarea",
+        "x = 1 < /* c */ /textarea", "x = 1 <\n/TITLE"}) {
+    SCOPED_TRACE(input);
+    GoogleString output;
+    pagespeed::js::MinifyUtf8Js(&patterns_, input, &output);
+    EXPECT_EQ(GoogleString::npos, output.find("</")) << output;
+  }
+  CheckNewMinification("x = 1 <", "x=1<");
   // Other tokens after "<" still join.
   CheckNewMinification("if (a < b) { c = a <= b; }", "if(a<b){c=a<=b;}");
 }

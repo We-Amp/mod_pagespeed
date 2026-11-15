@@ -689,21 +689,39 @@ TEST_F(JsInlineFilterTest, TextElementEndTagsAreEscaped) {
   for (const char* name : kTextElementNames) {
     SCOPED_TRACE(name);
     const GoogleString js_url = StrCat("t", IntegerToString(i++), ".js");
-    // "%s" is the name, once as it is and once escaped.
+    // %1$s is the name, once as it is and once escaped; %2$s is the name.
     static constexpr char kFormat[] =
         "var a = \"</%1$s>\";\n"
         "var b = '</%1$s';\n"
         "var c = /[</%1$s]/.test(a);\n"
         "var d = 1 </%1$s/ > 0;\n"
+        "var e = /[</%1$s]/u.test(a) || 1 </%1$s/u > 0;\n"
+        // With the v flag, "/" in a class must be escaped, so there is no
+        // "</" to escape.
+        "var f = /[<\\/]%2$s/v.test(a);\n"
         "/* </%1$s> */\n"
         "// </%1$s>\n";
-    const GoogleString js = absl::StrFormat(kFormat, name);
+    const GoogleString js = absl::StrFormat(kFormat, name, name);
     const GoogleString escaped =
-        absl::StrFormat(kFormat, EscapeFirstLetter(name));
+        absl::StrFormat(kFormat, EscapeFirstLetter(name), name);
     SetResponseWithDefaultHeaders(js_url, kContentTypeJavascript, js, 3000);
     EXPECT_EQ(StringPiece::npos, FindIgnoreCase(escaped, StrCat("</", name)));
     ValidateExpected(js_url, StrCat("<script src=\"", js_url, "\"></script>"),
                      StrCat("<script>", escaped, "</script>"));
+  }
+}
+
+// "<" and "</" at the very end of a script are left as they are.
+TEST_F(JsInlineFilterTest, LessThanAtEndOfScriptIsKept) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  int i = 0;
+  for (const char* js : {"var ok = 1 <", "var ok = 1 </", "<", "</"}) {
+    SCOPED_TRACE(js);
+    const GoogleString js_url = StrCat("e", IntegerToString(i++), ".js");
+    SetResponseWithDefaultHeaders(js_url, kContentTypeJavascript, js, 3000);
+    ValidateExpected(js_url, StrCat("<script src=\"", js_url, "\"></script>"),
+                     StrCat("<script>", js, "</script>"));
   }
 }
 
@@ -751,8 +769,8 @@ TEST_F(JsInlineFilterTest, TextElementEndTagsAreEscapedOnXhtmlPage) {
                    "\n//]]></script>");
 }
 
-// The report's shapes: a script inlined inside a brief-closed <textarea/>,
-// which browsers keep open, and inside a <noscript>.
+// A script inlined after a self-closed textarea tag, and one inside a
+// noscript, has no end tag of either element in its text.
 TEST_F(JsInlineFilterTest, InlinedScriptDoesNotEndEnclosingElement) {
   SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineJavascript);
