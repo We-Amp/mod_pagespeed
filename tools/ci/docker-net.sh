@@ -29,7 +29,9 @@ reap_stale() {
     case "$name" in "${PREFIX}"*) ;; *) continue ;; esac
     n=$(docker network inspect -f '{{len .Containers}}' "$id" 2>/dev/null) || continue
     [ "$n" = 0 ] || continue
-    created=$(docker network inspect -f '{{.Created}}' "$id" 2>/dev/null) || continue
+    # json gives RFC3339 (the plain value prints Go's "+0000 UTC" form).
+    created=$(docker network inspect -f '{{json .Created}}' "$id" 2>/dev/null) || continue
+    created=${created//\"/}
     # Unparsable timestamp: leave the network alone.
     ts=$(date -d "$created" +%s 2>/dev/null) || continue
     age=$((now - ts))
@@ -58,21 +60,23 @@ create() {
 }
 
 selftest() {
-  local p="ci-net-selftest-$$-" fail=0 img=${SELFTEST_IMAGE:-} cid=""
+  local p="ci-net-selftest-$$-" fail=0 img=${SELFTEST_IMAGE:-}
+  SELFTEST_CID=""
   local old="${p}old" busy="${p}busy" fresh="${p}fresh" other="keep-selftest-$$-old"
   PREFIX="$p"
   MAX_AGE=5
   cleanup() {
-    [ -n "$cid" ] && docker rm -f "$cid" >/dev/null 2>&1
-    docker network rm "$old" "$busy" "$fresh" "$other" >/dev/null 2>&1
+    [ -n "${SELFTEST_CID:-}" ] && docker rm -f "$SELFTEST_CID" >/dev/null 2>&1
+    docker network rm "${SELFTEST_NETS[@]}" >/dev/null 2>&1
     return 0
   }
+  SELFTEST_NETS=("$old" "$busy" "$fresh" "$other")
   trap cleanup EXIT
   for nw in "$old" "$busy" "$other"; do
     docker network create --label ci-net-selftest=1 "$nw" >/dev/null || return 1
   done
   if [ -n "$img" ]; then
-    cid=$(docker run -d --network "$busy" "$img" sleep 120) || return 1
+    SELFTEST_CID=$(docker run -d --network "$busy" "$img" sleep 120) || return 1
   fi
   sleep 7
   docker network create --label ci-net-selftest=1 "$fresh" >/dev/null || return 1
