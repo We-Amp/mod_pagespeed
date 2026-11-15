@@ -223,16 +223,8 @@ TEST(HeadersSidecarReplayTest, ForeignBlockWithServePathNameIsAMiss) {
 }
 
 // --- Vary precedence -----------------------------------------------------
-
-TEST(HeadersSidecarReplayTest, ComputedVaryDropsAcceptWhenOriginVaryReplayed) {
-  // No replayed Vary: the entry's own marker decides, as before.
-  EXPECT_TRUE(ComputedVaryListsAccept(true, false));
-  EXPECT_FALSE(ComputedVaryListsAccept(false, false));
-  // The origin's Vary line went out first: the computed line follows it
-  // without Accept (the MISS shape), whatever the marker says.
-  EXPECT_FALSE(ComputedVaryListsAccept(true, true));
-  EXPECT_FALSE(ComputedVaryListsAccept(false, true));
-}
+// The rule for naming Accept after a replayed origin Vary line is
+// pagespeed::EmittedVaryNamesAccept (test/lib/cache/vary_emission_test.cc).
 
 // --- Legacy-entry migration --------------------------------------------------
 

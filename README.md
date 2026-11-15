@@ -171,7 +171,7 @@ curl -s -o /dev/null -D - http://localhost/style.css | grep -i x-pagespeed
 | `pagespeed_cache_path PATH` | (required) | Path to Cyclone cache file |
 | `pagespeed_disallow PATTERN` | (none) | Exclude URL patterns from optimization |
 
-These three are the minimum. The module also takes `pagespeed_cache_mode`, the max-age family (`pagespeed_max_age`, `pagespeed_html_max_age`, `pagespeed_css_max_age`, `pagespeed_image_max_age`, `pagespeed_immutable_max_age`, `pagespeed_stale_if_error_max_age`), `pagespeed_synthesize_swr`, `pagespeed_conditional_revalidation`, `pagespeed_hot_threshold`, `pagespeed_force_refresh`, `pagespeed_force_refresh_html` and `pagespeed_trust_x_forwarded_proto`; see [cache modes](https://modpagespeed.com/docs/cache-modes/) and [cache control](https://modpagespeed.com/docs/cache-control/).
+These three are the minimum. The module also takes `pagespeed_cache_mode`, the max-age family (`pagespeed_max_age`, `pagespeed_html_max_age`, `pagespeed_css_max_age`, `pagespeed_image_max_age`, `pagespeed_immutable_max_age`, `pagespeed_stale_if_error_max_age`), `pagespeed_synthesize_swr`, `pagespeed_conditional_revalidation`, `pagespeed_hot_threshold`, `pagespeed_force_refresh`, `pagespeed_force_refresh_html`, `pagespeed_trust_x_forwarded_proto` and `pagespeed_agent_content_signal`; see [cache modes](https://modpagespeed.com/docs/cache-modes/) and [cache control](https://modpagespeed.com/docs/cache-control/).
 
 The worker socket path and HTML processing toggle are configured on
 the worker side and shared with nginx automatically via `pagespeed-shared.conf`

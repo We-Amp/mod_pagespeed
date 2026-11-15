@@ -94,11 +94,9 @@ SidecarServePlan PlanSidecarServe(uint8_t entry_flags, bool agent_markdown,
 // name; a block that carries one did not come from it.
 bool SidecarFieldCollidesWithServePath(std::string_view name);
 
-// The Accept-negotiation marker to pass to the computed Vary: the entry's
-// stored marker, unless the replayed block already carried the origin's own
-// Vary line (which lists Accept when the origin negotiated on it).
-bool ComputedVaryListsAccept(bool entry_varies_accept,
-                             bool sidecar_carried_vary);
+// (Whether the computed Vary then names Accept — the entry's marker unless
+// the replayed block carried the origin's own Vary line — is
+// pagespeed::EmittedVaryNamesAccept in lib/cache/vary_emission.h.)
 
 // Migration rule for entries recorded before the gate.  Such an entry
 // carries no classification, and a 304 carries only part of the header set,

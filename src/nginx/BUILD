@@ -86,6 +86,16 @@ cc_library(
     deps = ["//src/worker:shared_config"],
 )
 
+# Values of the headers sent with a Markdown response for agents
+# (x-markdown-tokens, content-signal) - pure C++, testable without nginx
+# headers.
+cc_library(
+    name = "agent_markdown_headers",
+    srcs = ["agent_markdown_headers.cc"],
+    hdrs = ["agent_markdown_headers.h"],
+    visibility = ["//visibility:public"],
+)
+
 # Which request hostnames a server block stands behind (exact and wildcard
 # server names, the operator host alias table) - pure C++, testable without
 # nginx headers.
@@ -216,6 +226,7 @@ cc_library(
     tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = [
+        ":agent_markdown_headers",
         ":agent_self_fetch",
         ":authz_cache_gate",
         ":cache_generation_check",

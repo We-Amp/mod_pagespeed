@@ -95,11 +95,6 @@ SidecarServePlan PlanSidecarServe(uint8_t entry_flags, bool agent_markdown,
   return plan;
 }
 
-bool ComputedVaryListsAccept(bool entry_varies_accept,
-                             bool sidecar_carried_vary) {
-  return entry_varies_accept && !sidecar_carried_vary;
-}
-
 bool ConditionalRevalidationAllowed(uint8_t entry_flags, bool expired_by_age) {
   const bool classified =
       (entry_flags & AlternateMetadata::kFlagHeadersClassified) != 0;

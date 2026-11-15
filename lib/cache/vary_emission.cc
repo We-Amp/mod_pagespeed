@@ -37,4 +37,43 @@ std::string_view VaryForServedResponse(ContentType ct,
   return entry_varies_accept ? "Accept" : std::string_view();
 }
 
+bool EmittedVaryNamesAccept(ContentType ct, bool origin_varies_accept,
+                            bool origin_line_lists_accept,
+                            bool agent_optimize) {
+  // An origin line on this response already lists Accept: never a second
+  // member.
+  if (origin_line_lists_accept) return false;
+  return origin_varies_accept || (agent_optimize && ct == ContentType::kHtml);
+}
+
+bool VaryListsAccept(std::string_view combined_vary) {
+  while (!combined_vary.empty()) {
+    const size_t comma = combined_vary.find(',');
+    std::string_view member = combined_vary.substr(0, comma);
+    combined_vary = comma == std::string_view::npos
+                        ? std::string_view()
+                        : combined_vary.substr(comma + 1);
+    while (!member.empty() &&
+           (member.front() == ' ' || member.front() == '\t')) {
+      member.remove_prefix(1);
+    }
+    while (!member.empty() && (member.back() == ' ' || member.back() == '\t')) {
+      member.remove_suffix(1);
+    }
+    constexpr std::string_view kAccept = "accept";
+    if (member.size() != kAccept.size()) continue;
+    bool same = true;
+    for (size_t i = 0; i < member.size(); ++i) {
+      char ch = member[i];
+      if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch | 0x20);
+      if (ch != kAccept[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) return true;
+  }
+  return false;
+}
+
 }  // namespace pagespeed

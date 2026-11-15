@@ -56,6 +56,33 @@ namespace pagespeed {
 std::string_view VaryForServedResponse(ContentType ct,
                                        bool entry_varies_accept);
 
+// Whether the Vary line WE emit must name `Accept`: the second input of
+// VaryForServedResponse, decided from three facts.
+//
+//   `origin_varies_accept`     — the served entry's stored
+//       kFlagOriginVariesAccept (entries recorded by builds that stored
+//       `Vary: Accept` responses; false on the MISS path).
+//   `origin_line_lists_accept` — an origin Vary line that goes out on this
+//       response already lists Accept: the origin's own lines on the MISS
+//       path, the 304's own lines on a revalidation, a replayed stored line
+//       on a cache serve.  Naming it again would be a duplicate list member.
+//   `agent_optimize`           — agent optimization is on.  The module may then
+//       answer an `Accept: text/markdown` request for a page with the page's
+//       Markdown copy at the same URL, so EVERY HTML response must name
+//       Accept: a shared cache that keyed the HTML without it could hand the
+//       HTML to an agent, or keep the Markdown copy for a browser.  Only HTML
+//       has a Markdown copy; other types are unaffected.
+//
+// With `agent_optimize` false the answer is the rule the serve paths used
+// before: the origin's marker, unless the origin's own line already lists it.
+bool EmittedVaryNamesAccept(ContentType ct, bool origin_varies_accept,
+                            bool origin_line_lists_accept, bool agent_optimize);
+
+// True when the Vary value `combined_vary` (several lines joined with `,`)
+// lists the field `Accept`: an ASCII case-insensitive list member, OWS
+// trimmed.  `Accept-Encoding` and the like are other fields.
+bool VaryListsAccept(std::string_view combined_vary);
+
 }  // namespace pagespeed
 
 #endif  // PAGESPEED_LIB_CACHE_VARY_EMISSION_H_

@@ -215,6 +215,19 @@
       "field": "cache_mode",
       "default": "safe",
       "defaultNote": "unless the worker shared configuration sets aggressive"
+    },
+    {
+      "name": "pagespeed_agent_content_signal",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "type": "string",
+      "values": null,
+      "field": "agent_content_signal",
+      "default": "",
+      "defaultNote": null
     }
   ]
 }

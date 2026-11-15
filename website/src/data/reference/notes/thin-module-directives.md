@@ -166,3 +166,18 @@ synthesis is allowed. HTML always gets `no-cache` in both modes. The per-type
 defaults of [`pagespeed_css_max_age`](#pagespeed_css_max_age) and
 [`pagespeed_image_max_age`](#pagespeed_image_max_age) follow the mode. See
 [Cache modes](/docs/cache-modes/) for the full reference.
+
+## pagespeed_agent_content_signal
+
+The `content-signal` header sent with a Markdown response for agents (the
+page's Markdown copy and `/llms.txt`), in the
+[Content Signals](https://contentsignals.org/) format. Unset, no header is
+sent; `off` stops an inherited value.
+
+```nginx
+pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
+```
+
+The value must be printable ASCII on one line, up to 512 bytes; nginx refuses
+to start with any other value. See
+[Serve Markdown to AI agents](/docs/agent-optimize/).

@@ -58,6 +58,7 @@ extern "C" {
 #include "src/crypto/webbotauth/rsl_cap_token.h"
 #include "src/crypto/webbotauth/rsl_cap_validator.h"
 #include "src/crypto/webbotauth/verifier.h"
+#include "src/nginx/agent_markdown_headers.h"
 #include "src/nginx/agent_self_fetch.h"
 #include "src/nginx/authz_cache_gate.h"
 #include "src/nginx/cache_generation_check.h"
@@ -1108,6 +1109,9 @@ typedef struct {
   // its freshness lifetime.  0 disables.  Default: 86400 (matches the
   // stale-if-error directive synthesized downstream in aggressive mode).
   ngx_int_t stale_if_error_max_age;
+  // content-signal value sent with a Markdown response for agents (the
+  // Markdown copy and /llms.txt).  Empty (the default, or `off`): no header.
+  ngx_str_t agent_content_signal;
 } ngx_http_pagespeed_loc_conf_t;
 
 // Per server block: a copy of the block's server names.  nginx keeps its own
@@ -1487,6 +1491,12 @@ static ngx_command_t ngx_http_pagespeed_commands[] = {
      offsetof(ngx_http_pagespeed_loc_conf_t, cache_mode),
      ngx_http_pagespeed_cache_mode_enum},
 
+    {ngx_string("pagespeed_agent_content_signal"),
+     NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF |
+         NGX_CONF_TAKE1,
+     ngx_conf_set_str_slot, NGX_HTTP_LOC_CONF_OFFSET,
+     offsetof(ngx_http_pagespeed_loc_conf_t, agent_content_signal), nullptr},
+
     ngx_null_command};
 
 // Module context
@@ -1676,6 +1686,27 @@ static char* ngx_http_pagespeed_merge_loc_conf(ngx_conf_t* cf, void* parent,
   ngx_conf_merge_value(conf->stale_if_error_max_age,
                        prev->stale_if_error_max_age, 86400);
   ngx_conf_merge_value(conf->html_max_age, prev->html_max_age, 0);
+  // content-signal for agent Markdown responses: inherited like any other
+  // string directive; `off` stops an inherited value.  A value that is not a
+  // plain one-line ASCII header value is refused here, at configuration time.
+  ngx_conf_merge_str_value(conf->agent_content_signal,
+                           prev->agent_content_signal, "");
+  {
+    std::string_view signal(
+        reinterpret_cast<const char*>(conf->agent_content_signal.data),
+        conf->agent_content_signal.len);
+    if (signal == "off") {
+      conf->agent_content_signal.len = 0;
+    } else if (!signal.empty() &&
+               !pagespeed::IsValidContentSignalValue(signal)) {
+      ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                         "pagespeed_agent_content_signal: the value must be "
+                         "1 to %uz bytes of printable ASCII on one line, or "
+                         "\"off\"",
+                         pagespeed::kMaxContentSignalBytes);
+      return static_cast<char*>(NGX_CONF_ERROR);
+    }
+  }
   // Merge cache_mode before css/image max-age so we can select defaults
   // based on the resolved mode.  Default is NGX_CONF_UNSET_UINT so that
   // the shared config (workbench) can provide the value at runtime when
@@ -3879,6 +3910,26 @@ static ngx_table_elt_t* add_response_header_cstr(ngx_http_request_t* r,
                              strlen(val));
 }
 
+// The headers every Markdown response for agents carries on top of its own
+// fixed set (lib: src/nginx/agent_markdown_headers.h): the estimated token
+// count of `body_bytes` of Markdown, and the operator's content-signal when
+// one is configured.  The value is copied into the request pool, which
+// outlives the header send.
+static void ngx_http_pagespeed_add_agent_markdown_headers(
+    ngx_http_request_t* r, const ngx_http_pagespeed_loc_conf_t* conf,
+    size_t body_bytes) {
+  const std::string tokens = pagespeed::MarkdownTokensHeaderValue(body_bytes);
+  auto* tokens_buf = static_cast<u_char*>(ngx_pnalloc(r->pool, tokens.size()));
+  if (tokens_buf != nullptr) {
+    ngx_memcpy(tokens_buf, tokens.data(), tokens.size());
+    add_response_header(r, "x-markdown-tokens", tokens_buf, tokens.size());
+  }
+  if (conf != nullptr && conf->agent_content_signal.len > 0) {
+    add_response_header(r, "content-signal", conf->agent_content_signal.data,
+                        conf->agent_content_signal.len);
+  }
+}
+
 // Emit Vary header so downstream caches and CDNs serve the correct variant
 // per client capabilities.
 //
@@ -3897,10 +3948,19 @@ static ngx_table_elt_t* add_response_header_cstr(ngx_http_request_t* r,
 // On MISS the origin's response may already include Vary; HTTP allows
 // multiple Vary headers which combine as a comma-list (RFC 9110), so adding
 // ours is safe even if duplicating tokens like Accept-Encoding.
+//
+// Whether our line names Accept is pagespeed::EmittedVaryNamesAccept: the
+// entry's marker, and, while agent optimization is on, every HTML response,
+// because the same URL may answer an `Accept: text/markdown` request with the
+// page's Markdown copy — unless `origin_line_lists_accept` says an origin
+// Vary line on this response already lists it.
 static void ngx_http_pagespeed_emit_vary(ngx_http_request_t* r, ContentType ct,
-                                         bool entry_varies_accept) {
-  std::string_view vary_val =
-      pagespeed::VaryForServedResponse(ct, entry_varies_accept);
+                                         bool origin_varies_accept,
+                                         bool origin_line_lists_accept) {
+  std::string_view vary_val = pagespeed::VaryForServedResponse(
+      ct, pagespeed::EmittedVaryNamesAccept(
+              ct, origin_varies_accept, origin_line_lists_accept,
+              g_shared_config.agent_optimize_entitled));
   if (vary_val.empty()) return;
   add_response_header(r, "Vary",
                       reinterpret_cast<const u_char*>(vary_val.data()),
@@ -4085,11 +4145,12 @@ static ngx_int_t ngx_http_pagespeed_serve_stale_on_error(
   // Built from the stashed entry, so its stored Accept-negotiation marker is
   // the only thing that can put Accept back into Vary here (unless the
   // replayed origin Vary line already lists it).
-  ngx_http_pagespeed_emit_vary(
-      r, smeta.content_type,
-      pagespeed::ComputedVaryListsAccept(
-          (smeta.flags & AlternateMetadata::kFlagOriginVariesAccept) != 0,
-          ctx->sidecar_carried_vary != 0));
+  {
+    const bool marked =
+        (smeta.flags & AlternateMetadata::kFlagOriginVariesAccept) != 0;
+    ngx_http_pagespeed_emit_vary(r, smeta.content_type, marked,
+                                 marked && ctx->sidecar_carried_vary != 0);
+  }
   add_response_header_cstr(r, "X-PageSpeed", "STALE");
   add_response_header_cstr(r, "X-PageSpeed-Stale", "if-error");
 
@@ -4709,13 +4770,17 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
     // rewritten as a 200 carrying the cached bytes, so it is a served-from-
     // entry response: updated_meta is a copy of the stored metadata (flags
     // included), which is what carries the origin's Accept negotiation.
-    // When the origin's own Vary line was just added from the stored block,
-    // it already lists Accept, so the computed line does not repeat it (the
-    // MISS shape).
-    ngx_http_pagespeed_emit_vary(
-        r, updated_meta.content_type,
-        !replayed_vary && (updated_meta.flags &
-                           AlternateMetadata::kFlagOriginVariesAccept) != 0);
+    // When an origin Vary line goes out on this response — the 304's own
+    // (it stays in headers_out) or one just added from the stored block — it
+    // already lists Accept when the origin negotiates on it, so the computed
+    // line does not repeat it (the MISS shape).
+    {
+      const bool marked = (updated_meta.flags &
+                           AlternateMetadata::kFlagOriginVariesAccept) != 0;
+      ngx_http_pagespeed_emit_vary(
+          r, updated_meta.content_type, marked,
+          pagespeed::VaryListsAccept(vary_304) || (marked && replayed_vary));
+    }
 
     // Add X-PageSpeed: REVALIDATED header.
     {
@@ -4885,8 +4950,12 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
     // and whatever the URL already has stored is dropped, so each client gets
     // the origin's answer to its own request.  `varies_accept` is now always
     // false; the branch stays so the marker keeps one writer.
+    // Read once, before this filter adds a Vary line of its own: the store
+    // decision and the Accept check of our line below both see only the
+    // origin's lines.
+    const std::string origin_vary = ngx_http_pagespeed_combined_vary(r);
     const pagespeed::VaryStoreVerdict vary_verdict =
-        pagespeed::ClassifyVaryForStore(ngx_http_pagespeed_combined_vary(r));
+        pagespeed::ClassifyVaryForStore(origin_vary);
     if (!vary_verdict.storable) {
       ctx->uncacheable = 1;
       ngx_http_pagespeed_drop_on_vary_refusal(r);
@@ -4898,11 +4967,13 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
     // Emit Vary on MISS so CDNs key on the right dimensions.
     // Must be after the Vary uncacheable check above.
     //
-    // false: on MISS the origin's response — including its own Vary — passes
-    // through to the client untouched, so the marker would only duplicate a
-    // list member the client is already receiving.
+    // On MISS the origin's response — including its own Vary — passes
+    // through to the client untouched, so an Accept the origin lists is never
+    // repeated; with agent optimization on, an HTML response whose origin
+    // lines do not list Accept still gets it.
     ngx_http_pagespeed_emit_vary(r, ngx_http_pagespeed_detect_content_type(r),
-                                 /*entry_varies_accept=*/false);
+                                 vary_verdict.varies_accept,
+                                 pagespeed::VaryListsAccept(origin_vary));
     if (r->method == NGX_HTTP_HEAD) {
       ctx->head_request = 1;
     }
@@ -5889,6 +5960,7 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
     r->headers_out.content_type = md_ct;
     r->headers_out.content_type_len = md_ct.len;
     add_response_header_cstr(r, "X-Robots-Tag", "noindex");
+    ngx_http_pagespeed_add_agent_markdown_headers(r, conf, body.size());
     ngx_table_elt_t* cc =
         static_cast<ngx_table_elt_t*>(ngx_list_push(&r->headers_out.headers));
     if (cc != nullptr) {
@@ -6231,6 +6303,8 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
       if (ctx->served_agent_markdown) {
         add_response_header_cstr(r, "Vary", "Accept");
         add_response_header_cstr(r, "X-Robots-Tag", "noindex");
+        ngx_http_pagespeed_add_agent_markdown_headers(r, conf,
+                                                      cached_data.size());
         ngx_table_elt_t* md_cc = static_cast<ngx_table_elt_t*>(
             ngx_list_push(&r->headers_out.headers));
         if (md_cc) {
@@ -6323,13 +6397,12 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
         // the shape a MISS sends.
         auto emit_served_vary = [&] {
           ngx_http_pagespeed_replay_sidecar(r, ctx);
-          ngx_http_pagespeed_emit_vary(
-              r, meta.content_type,
+          const bool marked =
               !ctx->served_agent_markdown &&
-                  pagespeed::ComputedVaryListsAccept(
-                      (meta.flags &
-                       AlternateMetadata::kFlagOriginVariesAccept) != 0,
-                      ctx->sidecar_carried_vary != 0));
+              (meta.flags & AlternateMetadata::kFlagOriginVariesAccept) != 0;
+          ngx_http_pagespeed_emit_vary(
+              r, meta.content_type, marked,
+              marked && ctx->sidecar_carried_vary != 0);
         };
 
         switch (freshness.verdict) {

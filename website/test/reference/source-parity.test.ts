@@ -64,8 +64,8 @@ describe('thin-module-directives.json equals a fresh parse of src/nginx/ngx_page
     expect(committed.source.path).toBe('src/nginx/ngx_pagespeed_module.cc');
   });
 
-  it('lists the 16 thin-module directives', () => {
-    expect(parsed.length).toBe(16);
+  it('lists the 17 thin-module directives', () => {
+    expect(parsed.length).toBe(17);
   });
 
   it('matches directive for directive', () => {

@@ -7,6 +7,7 @@ cc_binary(
     name = "seed_test_cache",
     srcs = ["seed-test-cache.cc"],
     deps = [
+        "//lib/cache:headers_sidecar",
         "//lib/cache:origin_cache_control",
         "//lib/cache:pagespeed_cache",
         "//lib/classify:alternate_id",

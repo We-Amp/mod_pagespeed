@@ -269,6 +269,7 @@ const THIN_PLACEHOLDERS = {
   pagespeed_cache_path: 'path',
   pagespeed_disallow: 'pattern',
   pagespeed_hot_threshold: 'count',
+  pagespeed_agent_content_signal: 'value | off',
 };
 
 export function renderThinModuleDirectives() {

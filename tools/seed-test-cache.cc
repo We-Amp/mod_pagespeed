@@ -42,6 +42,7 @@
 #include "absl/flags/parse.h"
 #include "absl/strings/str_split.h"
 #include "lib/cache/cache.h"
+#include "lib/cache/headers_sidecar.h"
 #include "lib/cache/origin_cache_control.h"
 #include "lib/classify/alternate_id.h"
 #include "lib/classify/alternate_metadata.h"
@@ -92,6 +93,12 @@ ABSL_FLAG(bool, create_only, false,
           "Create the volume and exit without writing an entry. Used to "
           "pre-create empty volumes for the resolve-only nginx module "
           "(volume_size = 0 cannot cold-create a volume).");
+
+ABSL_FLAG(bool, dump, false,
+          "Print what the cache holds for --url instead of writing: the "
+          "flags byte of the --mask entry and the stored response-header "
+          "lines (one 'header <name>: <value>' per line), for Test::Nginx "
+          "files that check what the module recorded.");
 
 namespace {
 
@@ -192,6 +199,51 @@ int main(int argc, char* argv[]) {
     }
   } else {
     content = absl::GetFlag(FLAGS_content);
+  }
+
+  if (absl::GetFlag(FLAGS_dump)) {
+    pagespeed::PageSpeedCacheConfig existing;
+    existing.volume_path = cache_path;
+    existing.enable_checksum = true;
+    existing.volume_size = 0;  // resolve-only: never re-stripe a live volume
+    auto opened = pagespeed::PageSpeedCache::Create(existing);
+    if (!opened.has_value()) {
+      std::cerr << "Error: failed to open cache at " << cache_path
+                << " err=" << static_cast<int>(opened.error()) << "\n";
+      return 1;
+    }
+    const std::string scheme = absl::GetFlag(FLAGS_scheme);
+    const pagespeed::AlternateId id =
+        pagespeed::MaskToAlternateId(static_cast<uint8_t>(mask_val & 0xFF));
+    auto entry = (*opened)->ReadAlternate(url, host, scheme, id, site);
+    if (entry.has_value() && entry->is_valid()) {
+      const uint8_t flags = entry->metadata.flags;
+      std::cout << "entry present flags=0x" << std::hex
+                << static_cast<int>(flags) << std::dec << " varies_accept="
+                << ((flags &
+                     pagespeed::AlternateMetadata::kFlagOriginVariesAccept) != 0
+                        ? 1
+                        : 0)
+                << "\n";
+    } else {
+      std::cout << "entry absent\n";
+    }
+    auto block = (*opened)->ReadHeadersSidecar(url, host, scheme, site);
+    if (!block.has_value() || !block->is_valid()) {
+      std::cout << "sidecar absent\n";
+      return 0;
+    }
+    auto fields = pagespeed::ParseHeadersSidecar(
+        pagespeed::PageSpeedCache::HeadersSidecarPayload(*block));
+    if (!fields.has_value()) {
+      std::cout << "sidecar unreadable\n";
+      return 0;
+    }
+    std::cout << "sidecar present\n";
+    for (const auto& field : *fields) {
+      std::cout << "header " << field.name << ": " << field.value << "\n";
+    }
+    return 0;
   }
 
   if (!create_only && absl::GetFlag(FLAGS_remove_alternate).empty() &&

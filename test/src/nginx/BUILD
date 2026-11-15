@@ -46,6 +46,11 @@ gtest_test(
 )
 
 gtest_test(
+    name = "agent_markdown_headers_test",
+    deps = ["//src/nginx:agent_markdown_headers"],
+)
+
+gtest_test(
     name = "host_vouch_test",
     deps = ["//src/nginx:host_vouch"],
 )
