@@ -911,11 +911,10 @@ class ImageCombineFilter::Context : public RewriteContext {
         0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x00, 0x02, 0x00,
         0x00, 0x05, 0x00, 0x01, 0xe9, 0xfa, 0xdc, 0xd8, 0x00, 0x00, 0x00, 0x00,
         0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
-    return Driver()->Write(
-        inputs,
-        StringPiece(reinterpret_cast<const char*>(kBlankPng),
-                    sizeof(kBlankPng)),
-        &kContentTypePng, StringPiece(), output.get());
+    return Driver()->Write(inputs,
+                           StringPiece(reinterpret_cast<const char*>(kBlankPng),
+                                       sizeof(kBlankPng)),
+                           &kContentTypePng, StringPiece(), output.get());
   }
 
   void WriteCombinationCancel(
