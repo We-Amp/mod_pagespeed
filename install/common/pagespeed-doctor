@@ -383,18 +383,38 @@ CORPUS="$TMP/corpus"
 # feed(line, number) per line and flush() at the end of each file.
 # shellcheck disable=SC2016 # awk program, not shell
 JOIN_AWK='
-function feed(line, ln,    pos, c, buf) {
-  if (line ~ /^[ \t]*#/) return
+function feed(line, ln,    pos, c, i, n, prev) {
+  if (line ~ /^[ \t]*#/) {
+    # A comment line ends a pending Apache continuation; inside an nginx
+    # statement it is just skipped.
+    if (syntax != "nginx") flush()
+    return
+  }
   if (syntax == "nginx") {
-    sub(/[ \t]#.*$/, "", line)
+    # Walk the line: ; { } end a statement, # starts a comment where a word
+    # could start, and quotes (open across lines) hide all of them.
     if (pend == "") pendln = ln
-    buf = (pend == "" ? "" : pend " ") line
-    while ((pos = match(buf, /[;{}]/)) > 0) {
-      c = substr(buf, pos, 1)
-      if (c == ";") stmt_out(substr(buf, 1, pos - 1), pendln)
-      buf = substr(buf, pos + 1); pendln = ln
+    else pend = pend " "
+    n = length(line); prev = " "
+    for (i = 1; i <= n; i++) {
+      c = substr(line, i, 1)
+      if (q != "") {
+        pend = pend c
+        if (c == "\\" && i < n) { i++; pend = pend substr(line, i, 1) }
+        else if (c == q) q = ""
+      } else if (c == "\"" || c == "\047") {
+        q = c; pend = pend c
+      } else if (c == "#" && prev ~ /[ \t]/) {
+        break
+      } else if (c == ";" || c == "{" || c == "}") {
+        if (c == ";") stmt_out(pend, pendln)
+        pend = ""; pendln = ln
+      } else {
+        pend = pend c
+      }
+      prev = c
     }
-    pend = (buf ~ /^[ \t]*$/) ? "" : buf
+    if (pend ~ /^[ \t]*$/) pend = ""
   } else {
     if (line ~ /\\[ \t]*$/) {
       sub(/\\[ \t]*$/, " ", line)
@@ -406,7 +426,7 @@ function feed(line, ln,    pos, c, buf) {
     else stmt_out(line, ln)
   }
 }
-function flush() { if (pend != "") { stmt_out(pend, pendln); pend = "" } }
+function flush() { if (pend != "") { stmt_out(pend, pendln); pend = "" }; q = "" }
 '
 
 # shellcheck disable=SC2016 # awk program, not shell

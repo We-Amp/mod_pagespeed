@@ -91,5 +91,19 @@ run apache "$W/c4a.conf"
 check "apache continuation: the cache path is found" \
   "field D03 '.reason' | grep -q '$W/c4/apache-cache'"
 
+# 5. A ' #' inside quotes is not a comment: the statement keeps its ';' and
+# the next directive is not glued onto it.
+printf 'load_module modules/ngx_pagespeed_module.so;\npagespeed on;\nreturn 200 "a #b";\npagespeed FileCachePath %s/c5/cacheC;\n' "$W" > "$W/c5.conf"
+run nginx "$W/c5.conf"
+check "nginx quoted ' #': the cache path after it is found" \
+  "field D03 '.reason' | grep -q '$W/c5/cacheC'"
+
+# 6. A comment line ends an Apache continuation: the directive after it is
+# its own.
+printf 'LoadModule pagespeed_module /x/mod_pagespeed.so\nModPagespeedEnableFilters \\\n# a comment\nModPagespeedFileCachePath %s/c6/cache\n' "$W" > "$W/c6.conf"
+run apache "$W/c6.conf"
+check "apache continuation then comment line: the cache path is found" \
+  "field D03 '.reason' | grep -q '$W/c6/cache'"
+
 [ "$fail" = 0 ] && echo "ALL PASS (defects)" || echo "SOME FAILED (defects)"
 exit "$fail"
