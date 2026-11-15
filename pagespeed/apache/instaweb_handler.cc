@@ -1166,7 +1166,7 @@ bool InstawebHandler::HandleAsProxy() {
     fetch_->set_strip_cookies(true);
     DisownDriver();
     server_context_->proxy_fetch_factory()->StartNewProxyFetch(
-        mapped_url, fetch_, driver, nullptr, nullptr);
+        mapped_url, fetch_, driver, nullptr, nullptr, is_proxy);
     WaitForFetch();
     return true;  // handled
   }

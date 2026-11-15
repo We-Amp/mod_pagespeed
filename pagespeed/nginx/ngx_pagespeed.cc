@@ -3607,7 +3607,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       driver->set_pagespeed_option_cookies(pagespeed_option_cookies);
       cfg_s->proxy_fetch_factory->StartNewProxyFetch(
           mapped_url, ctx->base_fetch, driver, nullptr /*property_callback*/,
-          nullptr /*original_content_fetch*/);
+          nullptr /*original_content_fetch*/, is_proxy);
 
       return ps_async_wait_response(r);
     }
