@@ -57,6 +57,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -1320,6 +1321,30 @@ TEST_F(ServerContextTest, TestHandleBeaconInvalidUrl) {
   EXPECT_FALSE(server_context()->HandleBeacon(
       "url=%2f%2finvalidurl&ets=load:34",
       UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconRejectedValueEscapedInLog) {
+  // A rejected beacon is quoted in a warning.  Control characters from the
+  // client are escaped, so each warning stays one message line.
+  EXPECT_FALSE(server_context()->HandleBeacon(
+      "url=not-a-url%0Asecond&ets=load:34",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_FALSE(server_context()->HandleBeacon(
+      "ets=load:34\nsecond", UserAgentMatcherTestBase::kChromeUserAgent,
+      CreateRequestContext()));
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(
+      GoogleString::npos,
+      messages.find("Invalid URL parameter in beacon: not-a-url\\nsecond"))
+      << messages;
+  EXPECT_NE(
+      GoogleString::npos,
+      messages.find("Missing URL parameter in beacon: ets=load:34\\nsecond"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nWsecond")) << messages;
 }
 
 TEST_F(ServerContextTest, TestHandleBeaconMissingValue) {

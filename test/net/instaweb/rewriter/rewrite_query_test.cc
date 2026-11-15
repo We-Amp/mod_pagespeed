@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -1033,6 +1034,32 @@ TEST_F(RewriteQueryTest, OverrideTokenNameIgnoresCase) {
       "modpagespeedrequestoptionoverride"));
   EXPECT_FALSE(RewriteQuery::IsRequestOptionOverrideName("PageSpeedFilters"));
   EXPECT_FALSE(RewriteQuery::IsRequestOptionOverrideName("PageSpeed"));
+}
+
+TEST_F(RewriteQueryTest, LoggedQueryValuesAreEscaped) {
+  // A rejected value from the query is quoted in a warning.  Control
+  // characters in it are escaped, so the warning stays one message line.
+  RequestContextPtr null_request_context;
+  GoogleUrl bad_mode(StrCat(kHtmlUrl, "?PageSpeed=x%0Asecond"));
+  EXPECT_EQ(RewriteQuery::kInvalid,
+            rewrite_query_.Scan(false, false, "", null_request_context,
+                                factory(), server_context(), &bad_mode, nullptr,
+                                nullptr, message_handler()));
+  GoogleUrl bad_filter(StrCat(kHtmlUrl, "?PageSpeedFilters=x%0Asecond"));
+  rewrite_query_.Scan(false, false, "", null_request_context, factory(),
+                      server_context(), &bad_filter, nullptr, nullptr,
+                      message_handler());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos,
+            messages.find("Invalid value for PageSpeed: x\\nsecond"))
+      << messages;
+  EXPECT_NE(GoogleString::npos,
+            messages.find("Invalid filter name: x\\nsecond"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nWsecond")) << messages;
 }
 
 TEST_F(RewriteQueryTest, GenerateEmptyResourceOption) {

@@ -552,8 +552,7 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
       handler->Message(kWarning,
                        "Invalid value for %s: %s "
                        "(should be on, off, unplugged, or noscript)",
-                       name.as_string().c_str(),
-                       trimmed_value.as_string().c_str());
+                       CEscape(name).c_str(), CEscape(trimmed_value).c_str());
       status = kInvalid;
     }
   } else if (!allow_options) {

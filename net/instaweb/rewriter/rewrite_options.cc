@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_rw_lock.h"
 #include "pagespeed/kernel/base/stl_util.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/purge_set.h"
@@ -2208,8 +2209,10 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
       }
     } else {
       if (handler != nullptr) {
+        // The name may come from a request: escape it so that it stays
+        // within this one log message.
         handler->Message(kWarning, "Invalid filter name: %s",
-                         option.as_string().c_str());
+                         CEscape(option).c_str());
       }
       ret = false;
     }
