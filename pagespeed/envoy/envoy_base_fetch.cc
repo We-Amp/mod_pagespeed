@@ -86,7 +86,10 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
       }
     });
   } else {
-    bool ipro = !(status_code < 0 || status_code >= 400);
+    // A 403 from PageSpeed (e.g. a .pagespeed. URL whose signature does not
+    // verify) is answered here; it is not passed on upstream.
+    bool ipro = !(status_code < 0 || status_code >= 400) ||
+                status_code == HttpStatus::kForbidden;
     have_ipro_response_.store(ipro, std::memory_order_release);
     continue_decoding = !ipro;
 

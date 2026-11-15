@@ -1232,6 +1232,14 @@ bool RewriteDriver::DecodeUrlGivenOptions(const GoogleUrl& url,
 
 OutputResourcePtr RewriteDriver::DecodeOutputResource(
     const GoogleUrl& gurl, RewriteFilter** filter) const {
+  bool invalid_signature = false;
+  return DecodeOutputResource(gurl, filter, &invalid_signature);
+}
+
+OutputResourcePtr RewriteDriver::DecodeOutputResource(
+    const GoogleUrl& gurl, RewriteFilter** filter,
+    bool* invalid_signature) const {
+  *invalid_signature = false;
   ResourceNamer namer;
   OutputResourceKind kind;
   if (!DecodeOutputResourceName(gurl, options(), server_context()->url_namer(),
@@ -1244,6 +1252,7 @@ OutputResourcePtr RewriteDriver::DecodeOutputResource(
       new OutputResource(this, base, base, base, namer, kind));
   if (!output_resource.get()->CheckSignature()) {
     output_resource.clear();
+    *invalid_signature = true;
   }
   return output_resource;
 }
@@ -1540,7 +1549,9 @@ bool RewriteDriver::FetchResource(const StringPiece& url,
   // actually fetch any data until we specifically ask it to.
   RewriteFilter* filter = nullptr;
   GoogleUrl gurl(url);
-  OutputResourcePtr output_resource(DecodeOutputResource(gurl, &filter));
+  bool invalid_signature = false;
+  OutputResourcePtr output_resource(
+      DecodeOutputResource(gurl, &filter, &invalid_signature));
 
   if (output_resource.get() != nullptr) {
     handled = true;
@@ -1550,9 +1561,23 @@ bool RewriteDriver::FetchResource(const StringPiece& url,
       filter->LogFilterModifiedContent();
     }
     FetchOutputResource(output_resource, filter, async_fetch);
+  } else if (invalid_signature) {
+    // A .pagespeed. URL whose signature does not verify is refused here
+    // with 403 Forbidden and is not passed on to any other handling.
+    handled = true;
+    ref_counts_.AddRef(kRefFetchUserFacing);
+    ResponseHeaders* response_headers = async_fetch->response_headers();
+    response_headers->Clear();
+    response_headers->SetStatusAndReason(HttpStatus::kForbidden);
+    response_headers->Add(HttpAttributes::kContentType,
+                          kContentTypeText.mime_type());
+    response_headers->Add(HttpAttributes::kCacheControl,
+                          HttpAttributes::kNoCacheMaxAge0);
+    response_headers->ComputeCaching();
+    async_fetch->Write("Forbidden", message_handler());
+    async_fetch->Done(true);
+    FetchComplete();
   } else if (options()->in_place_rewriting_enabled()) {
-    // TODO(jcrowell): Make URLs with signatures take this path so they will 403
-    // instead of 404.
     // This is an ajax resource.
     handled = true;
     // TODO(sligocki): Get rid of this fallback and make all callers call
