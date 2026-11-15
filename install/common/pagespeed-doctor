@@ -89,6 +89,11 @@ export LC_ALL
 PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin"
 export PATH
 
+# No pathname expansion anywhere: paths from the configuration are data, and
+# an unquoted loop over them must not turn "/x/cache*" into its siblings.
+# (expand_include turns it back on, for its one pattern.)
+set -f
+
 US=$(printf '\037')
 NL='
 '
@@ -371,8 +376,41 @@ ARCH=$(uname -m 2>/dev/null || echo unknown)
 CORPUS="$TMP/corpus"
 : > "$CORPUS"
 
+# Joins a directive that spans lines before it is parsed: nginx statements
+# end at ; { or } (so "pagespeed FileCachePath" and its path may sit on
+# different lines), Apache lines end with a backslash to continue. The
+# program using it defines stmt_out(statement, first_line) and calls
+# feed(line, number) per line and flush() at the end of each file.
 # shellcheck disable=SC2016 # awk program, not shell
-CORPUS_AWK='
+JOIN_AWK='
+function feed(line, ln,    pos, c, buf) {
+  if (line ~ /^[ \t]*#/) return
+  if (syntax == "nginx") {
+    sub(/[ \t]#.*$/, "", line)
+    if (pend == "") pendln = ln
+    buf = (pend == "" ? "" : pend " ") line
+    while ((pos = match(buf, /[;{}]/)) > 0) {
+      c = substr(buf, pos, 1)
+      if (c == ";") stmt_out(substr(buf, 1, pos - 1), pendln)
+      buf = substr(buf, pos + 1); pendln = ln
+    }
+    pend = (buf ~ /^[ \t]*$/) ? "" : buf
+  } else {
+    if (line ~ /\\[ \t]*$/) {
+      sub(/\\[ \t]*$/, " ", line)
+      if (pend == "") pendln = ln
+      pend = pend line
+      return
+    }
+    if (pend != "") { stmt_out(pend line, pendln); pend = "" }
+    else stmt_out(line, ln)
+  }
+}
+function flush() { if (pend != "") { stmt_out(pend, pendln); pend = "" } }
+'
+
+# shellcheck disable=SC2016 # awk program, not shell
+CORPUS_AWK="$JOIN_AWK"'
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function emit(file, line, name, args,    lname) {
   lname = tolower(name)
@@ -412,6 +450,7 @@ function handle(stmt, file, line,    n, t, name, args, i) {
     }
   }
 }
+function stmt_out(stmt, ln) { handle(stmt, file, ln) }
 BEGIN {
   n = split(allowlist, a, / /); for (i = 1; i <= n; i++) allow[tolower(a[i])] = 1
   file = ""; ln = 0
@@ -419,26 +458,16 @@ BEGIN {
 {
   if (dump) {
     if ($0 ~ /^# configuration file .*:$/) {
+      flush()
       file = substr($0, 22); sub(/:$/, "", file); ln = 0; next
     }
     ln++
   } else {
     file = FILENAME; ln = FNR
   }
-  line = $0
-  if (line ~ /^[ \t]*#/) next
-  if (syntax == "nginx") {
-    sub(/[ \t]#.*$/, "", line)
-    m = split(line, parts, /;/)
-    for (j = 1; j <= m; j++) {
-      p = parts[j]
-      while (match(p, /[{}]/)) p = substr(p, RSTART + 1)
-      handle(p, file, ln)
-    }
-  } else {
-    handle(line, file, ln)
-  }
-}'
+  feed($0, ln)
+}
+END { flush() }'
 
 build_corpus_static() {
   # $1 = syntax; the remaining arguments are files (missing ones skipped).
@@ -453,24 +482,18 @@ build_corpus_static() {
 # The arguments of the include directives of one file, comments removed.
 # shellcheck disable=SC2016 # awk program
 include_patterns() { # FILE
-  awk -v syntax="$SERVER" '
+  awk -v syntax="$SERVER" "$JOIN_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function arg(v) { gsub(/^["\047]|["\047]$/, "", v); print v }
-    /^[ \t]*#/ { next }
-    {
-      line = $0; sub(/[ \t]#.*$/, "", line)
+    function stmt_out(stmt, ln,    n, w) {
+      if (syntax != "nginx") sub(/[ \t]#.*$/, "", stmt)
+      n = split(trim(stmt), w, /[ \t]+/)
       if (syntax == "nginx") {
-        m = split(line, parts, /;/)
-        for (j = 1; j <= m; j++) {
-          p = parts[j]; while (match(p, /[{}]/)) p = substr(p, RSTART + 1)
-          n = split(trim(p), w, /[ \t]+/)
-          if (n >= 2 && w[1] == "include") arg(w[2])
-        }
-      } else {
-        n = split(trim(line), w, /[ \t]+/)
-        if (n >= 2 && (tolower(w[1]) == "include" || tolower(w[1]) == "includeoptional")) arg(w[2])
-      }
-    }' "$1" 2>/dev/null
+        if (n >= 2 && w[1] == "include") arg(w[2])
+      } else if (n >= 2 && (tolower(w[1]) == "include" || tolower(w[1]) == "includeoptional")) arg(w[2])
+    }
+    { feed($0, FNR) }
+    END { flush() }' "$1" 2>/dev/null
 }
 
 # Apache reads a directory named by Include, and every directory below it;
@@ -478,6 +501,7 @@ include_patterns() { # FILE
 expand_include() { # PATTERN -> existing files, in the order the server reads them
   _oifs=$IFS; IFS=$NL
   # Pathname expansion only (IFS is a newline): the pattern is never run.
+  set +f
   # shellcheck disable=SC2086
   for _g in $1; do
     if [ -f "$_g" ]; then
@@ -486,6 +510,7 @@ expand_include() { # PATTERN -> existing files, in the order the server reads th
       find -L "$_g" -type f 2>/dev/null | sort
     fi
   done
+  set -f
   IFS=$_oifs
 }
 
@@ -651,6 +676,9 @@ shielded() {
 }
 
 root_files_in() { # dir -> root-owned non-directories, bounded
+  # Only an absolute path: a relative one such as "-delete" would be read by
+  # find as an expression and run against the current directory.
+  case "$1" in /*) ;; *) return 0 ;; esac
   find "$1" -xdev -user 0 ! -type d 2>/dev/null | head -n 1000
 }
 
@@ -724,18 +752,22 @@ run_configtest() {
   existing_cache_dirs() {
     { cache_dirs; for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
         /var/cache/pagespeed-optimizer; do printf '%s\n' "$_d"; done; } | \
-      while IFS= read -r _d; do [ -d "$_d" ] && printf '%s\n' "$_d"; done | sort -u
+      while IFS= read -r _d; do
+        case "$_d" in /*) [ -d "$_d" ] && printf '%s\n' "$_d" ;; esac
+      done | sort -u
   }
+  if [ -s "$CFG_UNRESOLVED" ]; then
+    _why="an include path in $(sort -u "$CFG_UNRESOLVED" | tr '\n' ' ' | sed 's/ $//') uses a \${VARIABLE} the doctor cannot resolve, so it cannot tell which cache directories the configuration names"
+    # An include the doctor cannot follow may hold the LoadModule line or a
+    # cache path, so "not loaded" cannot be concluded from what it read.
+    if [ "$OPT_ALLOW_WRITES" != 1 ]; then not_isolated "$_why"; return; fi
+  fi
   if ! module_referenced; then
     # The module is not loaded at all: nothing of ours can write.
     CT_MODE=module_not_loaded
     existing_cache_dirs > "$TMP/shield.cand.real"
     run_configtest_direct "$@"
     return
-  fi
-  if [ -s "$CFG_UNRESOLVED" ]; then
-    _why="an include path in $(sort -u "$CFG_UNRESOLVED" | tr '\n' ' ' | sed 's/ $//') uses a \${VARIABLE} the doctor cannot resolve, so it cannot tell which cache directories the configuration names"
-    if [ "$OPT_ALLOW_WRITES" != 1 ]; then not_isolated "$_why"; return; fi
   fi
   if ! shield_plan; then
     if [ "$OPT_ALLOW_WRITES" = 1 ]; then
@@ -1430,7 +1462,7 @@ check_d11() {
   # config test did not cover (the static read missed them).
   if [ "$CT_MODE" = namespace ]; then
     printf '%s\n' "$_dirs" | while IFS= read -r _d; do
-      [ -n "$_d" ] && ! shielded "$_d" && printf '%s\n' "$_d"
+      case "$_d" in /*) ! shielded "$_d" && printf '%s\n' "$_d" ;; esac
     done > "$CT_UNSHIELDED"
   fi
   if [ -z "$_dirs" ]; then
@@ -1443,6 +1475,16 @@ check_d11() {
     IFS=$_old_ifs
     [ "$_ev" = "[" ] || _ev="$_ev,"
     _ev="$_ev{\"path\":$(json_str "$_d")}"
+    case "$_d" in
+      /*) ;;
+      *)
+        # Never handed to find, test or a printed command: it would be read
+        # against the doctor's own working directory.
+        [ "$_status" = fail ] || { _status=warn; _code=cache_path_relative; }
+        _msgs="$_msgs; $_d is not an absolute path, so it was not checked"
+        _hint="Use an absolute path for the cache directory."
+        continue ;;
+    esac
     if [ ! -d "$_d" ]; then
       [ "$_status" = fail ] || { _status=warn; _code=cache_dir_missing; }
       _msgs="$_msgs; $_d does not exist yet"

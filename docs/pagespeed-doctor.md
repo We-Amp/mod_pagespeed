@@ -105,7 +105,7 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
 `cache_control_not_rewritable`, `domain_not_authorized`,
 `resource_fetch_failures` (D05); `cache_dir_missing`,
 `cache_dir_not_writable`, `root_owned_cache_files`, `cache_disk_full`,
-`configtest_unshielded` (D11);
+`configtest_unshielded`, `cache_path_relative` (D11);
 `worker_not_running`, `worker_unreachable`, `user_not_in_group`,
 `worker_socket_denied`, `worker_health_missing`, `worker_degraded`,
 `worker_unhealthy`, `worker_health_unknown` (D12).
@@ -162,6 +162,10 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
   directories to the shield. `${VARIABLE}` in an Apache include path is
   resolved from the environment the doctor runs in; anything else makes the
   config test fail closed.
+- A directive that spans lines is joined before it is read: an nginx
+  statement runs to its `;`, an Apache line ends with `\` to continue. A
+  relative cache path (one not starting with `/`) is reported by D11 as
+  `cache_path_relative` and never examined or shielded.
 - Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
   the main file, else from the server's compiled-in root.
 - A cache directory that does not exist yet is never shielded by covering
