@@ -864,7 +864,11 @@ class RewriteContext::FetchContext {
     bool ok = false;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
-      if (output_resource_->hash() == requested_hash_) {
+      // A combination served without some of its inputs is not the one the
+      // URL names, whatever its hash: it is never served as the immutable
+      // public resource.
+      if (output_resource_->hash() == requested_hash_ &&
+          !rewrite_context_->fetch_left_out_inputs_) {
         // The body below is the uncompressed one, so the headers must
         // describe that one as well.
         response_headers->CopyFrom(*(output_resource_->UncompressedHeaders()));
@@ -1007,7 +1011,9 @@ class RewriteContext::FetchContext {
     // compute the cache-control for a hidden .pagespeed. resource in a
     // nested RewriteContext, and we need to propogate that to the ipro
     // resource response headers.
-    if (headers->HasValue(HttpAttributes::kCacheControl, "public")) {
+    // A combination served without some of its inputs stays private.
+    if (!rewrite_context_->fetch_left_out_inputs_ &&
+        headers->HasValue(HttpAttributes::kCacheControl, "public")) {
       async_fetch_->response_headers()->SetCacheControlPublic();
     }
 

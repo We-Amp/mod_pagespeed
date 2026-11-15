@@ -22,7 +22,6 @@
 
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
-#include <cstdio>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -1123,6 +1122,50 @@ TEST_F(JsFilterAndCombineFilterTest,
   EXPECT_FALSE(headers.IsProxyCacheable());
 }
 
+// A combination served without some of its inputs is always private.
+TEST_F(JsCombineFilterTest, PartialAnswerIsPrivateUnderItsOwnHash) {
+  SetResponseWithDefaultHeaders("pa.js", kContentTypeJavascript, "var pa;",
+                                300);
+  SetResponseWithDefaultHeaders("pb.js", kContentTypeJavascript, "var pb;",
+                                300);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, "pb.js"));
+  GoogleString partial;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl("pa.js", "pb.js"), "js"),
+      &partial));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jc", hasher()->Hash(partial),
+                              MultiUrl("pa.js", "pb.js"), "js"),
+                       &content, &headers));
+  EXPECT_EQ(partial, content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+TEST_F(JsCombineFilterTest, PartialAnswerIsPrivateWithPublicInputs) {
+  ResponseHeaders public_js;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &public_js);
+  public_js.SetCacheControlPublic();
+  public_js.ComputeCaching();
+  SetFetchResponse(StrCat(kTestDomain, "qa.js"), public_js, "var qa;");
+  SetFetchResponse(StrCat(kTestDomain, "qb.js"), public_js, "var qb;");
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, "qb.js"));
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl("qa.js", "qb.js"), "js"),
+      &content, &headers));
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
 // A script that is gone for good stops being combined once what the server
 // knows about it expires: pages rewritten after that no longer reference the
 // old combined URL. Until then (the input's cache lifetime, counted from when
@@ -1154,10 +1197,6 @@ TEST_F(JsCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
       break;
     }
   }
-  fprintf(stderr,
-          "issue-791 js: old combined URL emitted until %d s "
-          "(input TTL %d s)\n",
-          static_cast<int>(gone_after_sec), static_cast<int>(kTtlSec));
   ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
   EXPECT_LE(gone_after_sec, kTtlSec + 10);
   ASSERT_EQ(2, scripts.size());

@@ -21,7 +21,6 @@
 
 #include "net/instaweb/rewriter/public/css_combine_filter.h"
 
-#include <cstdio>
 #include <vector>
 
 #include "base/logging.h"
@@ -660,6 +659,54 @@ TEST_F(CssCombineFilterTest,
   EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
 }
 
+// A combination served without some of its inputs is always private.
+TEST_F(CssCombineFilterTest, PartialAnswerIsPrivateUnderItsOwnHash) {
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  GoogleString partial;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB, "c.css"), "css"),
+                       &partial));
+  ASSERT_EQ(StrCat(kACssBody, kCCssBody), partial);
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(partial),
+             MultiUrl(kCssA, kCssB, "c.css"), "css"),
+      &content, &headers));
+  EXPECT_EQ(partial, content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+TEST_F(CssCombineFilterTest, PartialAnswerIsPrivateWithPublicInputs) {
+  UseMd5Hasher();
+  ResponseHeaders public_css;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &public_css);
+  public_css.SetCacheControlPublic();
+  public_css.ComputeCaching();
+  SetFetchResponse(StrCat(kDomain, kCssA), public_css, kACssBody);
+  SetFetchResponse(StrCat(kDomain, kCssB), public_css, kBCssBody);
+  SetFetchResponse(StrCat(kDomain, "c.css"), public_css, kCCssBody);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB, "c.css"), "css"),
+                       &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
 // A stylesheet that is gone for good stops being combined once what the
 // server knows about it expires: pages rewritten after that no longer
 // reference the old combined URL. Until then (the input's cache lifetime,
@@ -689,10 +736,6 @@ TEST_F(CssCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
       break;
     }
   }
-  fprintf(stderr,
-          "issue-791 css: old combined URL emitted until %d s "
-          "(input TTL %d s)\n",
-          static_cast<int>(gone_after_sec), static_cast<int>(kTtlSec));
   ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
   EXPECT_LE(gone_after_sec, kTtlSec + 10);
   css_urls.clear();
