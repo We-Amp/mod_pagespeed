@@ -1,0 +1,1960 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# pagespeed-doctor: tell whether mod_pagespeed (Apache or nginx) is loaded,
+# answering and optimizing, and if not, why. Phase 1 runs five checks:
+#
+#   D02  module loaded (not missing, not loaded twice, built for this nginx)
+#   D03  config test, with each pagespeed error triaged: removed or
+#        deprecated option, scope error, or typo (with the closest name)
+#   D04  module answering: X-Page-Speed / X-Mod-Pagespeed on the test page
+#   D05  optimizing: compare with ?PageSpeed=off and read the statistics
+#   D11  cache directory: writable by the web server user, no root-owned files
+#   D12  optimizer worker: socket, health socket, `pagespeed` group membership
+#
+# Usage: pagespeed-doctor [--json] [--server nginx|apache] [--host NAME]
+#        [--path /p] [--port N] [--url URL] [--no-configtest] [--verbose]
+#
+# Exit codes: 0 all pass, 1 warnings only, 2 at least one failure,
+# 3 the doctor itself could not run (bad flag, no supported server found).
+#
+# Guarantees
+#
+# * Read-only. It never edits configuration, restarts or reloads a service,
+#   purges a cache or changes ownership. Every fix is printed for the operator
+#   to run. The only files it writes are in its own temporary directory, which
+#   it removes on exit.
+# * No secrets in the output. Configuration is parsed in memory; the doctor
+#   prints file:line and the option *name*, and an option *value* only for a
+#   short list of non-secret options (paths, on/off, filter names). Raw
+#   `nginx -t` / `apachectl` output is never printed, because an error message
+#   can quote a value; messages are rebuilt from the parsed error, and
+#   anything that looks like a key, token or password is masked.
+# * No outbound network. It talks to 127.0.0.1 (or the URL given with --url),
+#   local Unix sockets and local files. curl is always run with
+#   --noproxy '*', so a proxy in the environment never sees a request.
+#
+# The config test and root-owned cache files (We-Amp/mod_pagespeed#780)
+#
+# `nginx -t`, `nginx -T` and `apachectl configtest` all load the module, and
+# the module's configuration handlers can create cache files. Run as root,
+# that leaves root-owned files in a cache directory the web server's worker
+# user must write. So the doctor never runs the config test against the real
+# cache unless asked to:
+#
+#   1. It first reads the configuration files itself (the main file and
+#      every file it includes, followed recursively) without running the
+#      server, and collects every FileCachePath and DaemonVolumePath plus the
+#      packaged cache defaults (also when no cache path is configured but
+#      the module is loaded). Nested directories are covered by their
+#      outermost one. Relative includes resolve against nginx's
+#      configuration directory or Apache's ServerRoot; Apache directory
+#      includes are followed into subdirectories; --config names a
+#      non-default main file.
+#   2. It runs the test (`nginx -T`: one run gives the verdict and the
+#      effective configuration, read in memory and never printed; Apache:
+#      `-t -D DUMP_MODULES`) in a private mount namespace (`unshare`) with
+#      an empty scratch directory bind-mounted over each of them. Whatever
+#      the module creates lands in scratch, which is deleted afterwards.
+#      Every directory to shield must already exist: a cache directory that
+#      does not exist yet could only be shielded by covering its parent,
+#      which would also catch logs, certificates and mounts there, so that
+#      case fails closed (create the directory first).
+#   3. Fail closed: when a private mount namespace or a bind mount is not
+#      available (most containers), a cache directory (or, with no cache
+#      path configured, the packaged default) does not exist yet, an
+#      include path uses a ${VARIABLE} the doctor cannot resolve, or
+#      pagespeed is configured without any FileCachePath, the test is NOT
+#      run and D03 is skipped with code configtest_not_isolated. Only when
+#      the module is not loaded at all does the test run unshielded.
+#      --allow-cache-writes runs it anyway; the doctor then lists root-owned
+#      cache files before and after and D11 reports what the test created.
+#   4. After a shielded test, the cache directories of the effective
+#      configuration (`nginx -T`; Apache's DUMP_INCLUDES file list) are
+#      compared with the shielded ones; any the static read missed is
+#      reported by D11 (configtest_unshielded). When the server gives no
+#      such list, D11 says the shield could not be checked.
+#   5. --no-configtest skips the test (D03 is then skipped).
+#
+# Without root the config test is skipped: as another user it would fail on
+# files only root can read (TLS keys, logs) and say nothing useful.
+
+DOCTOR_VERSION="dev"
+SCHEMA="pagespeed-doctor/1"
+DOCS="https://modpagespeed.com/docs"
+
+LC_ALL=C
+export LC_ALL
+PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin"
+export PATH
+
+# No pathname expansion anywhere: paths from the configuration are data, and
+# an unquoted loop over them must not turn "/x/cache*" into its siblings.
+# (expand_include turns it back on, for its one pattern.)
+set -f
+
+US=$(printf '\037')
+NL='
+'
+
+# ---------------------------------------------------------------------------
+# Tables. The blocks between BEGIN/END are generated from the module source
+# by test/doctor/doctor_tables.py; CI fails when they drift.
+
+OPTION_NAMES=$(sed -n '/^# BEGIN doctor-option-names$/,/^# END doctor-option-names$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || OPTION_NAMES=""
+REMOVED_OPTIONS=$(sed -n '/^# BEGIN doctor-removed-options$/,/^# END doctor-removed-options$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || REMOVED_OPTIONS=""
+DEPRECATED_OPTIONS=$(sed -n '/^# BEGIN doctor-deprecated-options$/,/^# END doctor-deprecated-options$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || DEPRECATED_OPTIONS=""
+DEPRECATED_FILTERS=$(sed -n '/^# BEGIN doctor-deprecated-filters$/,/^# END doctor-deprecated-filters$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || DEPRECATED_FILTERS=""
+
+# Where nginx accepts an option: http {} only, or http {} / server {} (not
+# location {}). Generated from the option properties, like the tables above.
+PROCESS_SCOPE_OPTIONS=$(sed -n '/^# BEGIN doctor-process-scope-options$/,/^# END doctor-process-scope-options$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || PROCESS_SCOPE_OPTIONS=""
+SERVER_SCOPE_OPTIONS=$(sed -n '/^# BEGIN doctor-server-scope-options$/,/^# END doctor-server-scope-options$/p' "$0" 2>/dev/null | sed -n 's/^#: //p') || SERVER_SCOPE_OPTIONS=""
+
+# Options whose value may be printed. Everything else shows as ***.
+VALUE_ALLOWLIST="on off standby unplugged FileCachePath FileCacheSizeKb DaemonSocketPath DaemonVolumePath DaemonApiSocketPath LogDir AdminPath GlobalAdminPath StatisticsPath GlobalStatisticsPath MessagesPath ConsolePath EnableFilters DisableFilters ForbidFilters RewriteLevel Statistics StatisticsLogging InPlaceResourceOptimization FetchHttps SslCertDirectory SslCertFile EnableRewriting"
+
+# ---------------------------------------------------------------------------
+# Arguments.
+
+OPT_JSON=0
+OPT_SERVER=""
+OPT_HOST=""
+OPT_PATH="/"
+OPT_PORT=""
+OPT_URL=""
+OPT_CONFIGTEST=1
+OPT_ALLOW_WRITES=0
+OPT_CONFIG=""
+OPT_VERBOSE=0
+
+# --json is honoured even for errors found while parsing the other options.
+for _a in "$@"; do [ "$_a" = --json ] && OPT_JSON=1; done
+
+json_str() {
+  printf '"%s"' "$(printf '%s' "$1" | tr '\t\n\r' '   ' | tr -d '\000-\037\177' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
+# Every exit 3 goes through here: one JSON document with --json.
+doctor_error() { # MESSAGE
+  if [ "$OPT_JSON" = 1 ]; then
+    printf '{"schema":%s,"doctor_version":%s,"verdict":"doctor_error","exit_code":3,"error":%s}\n' \
+      "$(json_str "$SCHEMA")" "$(json_str "$DOCTOR_VERSION")" "$(json_str "$1")"
+  else
+    printf 'pagespeed-doctor: %s\n' "$1" >&2
+  fi
+  exit 3
+}
+
+usage() {
+  cat <<'USAGE'
+usage: pagespeed-doctor [options]
+
+  --json              print one JSON document (schema pagespeed-doctor/1)
+  --server KIND       nginx or apache (default: detect)
+  --host NAME         Host header for the test request (the vhost to test)
+  --path PATH         page to test (default /)
+  --port N            local port (default 80)
+  --url URL           test this URL instead of http://127.0.0.1/ (the only
+                      host contacted; statistics are read only on localhost)
+  --no-configtest     do not run the server's config test (D03 is skipped)
+  --config FILE       the server's main configuration file, when it is not
+                      the default (nginx -c FILE, httpd -f FILE)
+  --allow-cache-writes
+                      run the config test even where it cannot be isolated
+                      from the cache directories (it may then leave
+                      root-owned cache files; D11 reports them)
+  --verbose           print redacted evidence for passing checks too
+  -h, --help          this help
+
+Exit codes: 0 all pass, 1 warnings, 2 failures, 3 the doctor could not run.
+The doctor is read-only: it prints fixes, it never applies them.
+USAGE
+}
+
+die_usage() {
+  [ "$OPT_JSON" = 1 ] || usage >&2
+  doctor_error "$1"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) OPT_JSON=1 ;;
+    --server) [ $# -ge 2 ] || die_usage "--server needs a value"; OPT_SERVER="$2"; shift ;;
+    --server=*) OPT_SERVER="${1#*=}" ;;
+    --host) [ $# -ge 2 ] || die_usage "--host needs a value"; OPT_HOST="$2"; shift ;;
+    --host=*) OPT_HOST="${1#*=}" ;;
+    --path) [ $# -ge 2 ] || die_usage "--path needs a value"; OPT_PATH="$2"; shift ;;
+    --path=*) OPT_PATH="${1#*=}" ;;
+    --port) [ $# -ge 2 ] || die_usage "--port needs a value"; OPT_PORT="$2"; shift ;;
+    --port=*) OPT_PORT="${1#*=}" ;;
+    --url) [ $# -ge 2 ] || die_usage "--url needs a value"; OPT_URL="$2"; shift ;;
+    --url=*) OPT_URL="${1#*=}" ;;
+    --no-configtest) OPT_CONFIGTEST=0 ;;
+    --allow-cache-writes) OPT_ALLOW_WRITES=1 ;;
+    --config) [ $# -ge 2 ] || die_usage "--config needs a value"; OPT_CONFIG="$2"; shift ;;
+    --config=*) OPT_CONFIG="${1#*=}" ;;
+    --verbose|-v) OPT_VERBOSE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die_usage "unknown option: $1" ;;
+  esac
+  shift
+done
+
+case "$OPT_SERVER" in ""|nginx|apache) ;; *) die_usage "--server must be nginx or apache" ;; esac
+case "$OPT_PORT" in ""|*[!0-9]*) [ -z "$OPT_PORT" ] || die_usage "--port must be a number" ;; esac
+case "$OPT_PATH" in /*) ;; *) die_usage "--path must start with /" ;; esac
+case "$OPT_HOST" in *[!A-Za-z0-9.:_-]*) die_usage "--host must be a host name" ;; esac
+case "$OPT_URL" in ""|http://*|https://*) ;; *) die_usage "--url must start with http:// or https://" ;; esac
+if [ -n "$OPT_CONFIG" ]; then
+  case "$OPT_CONFIG" in /*) ;; *) OPT_CONFIG="$(pwd)/$OPT_CONFIG" ;; esac
+  [ -f "$OPT_CONFIG" ] && [ -r "$OPT_CONFIG" ] || die_usage "--config: cannot read $OPT_CONFIG"
+fi
+
+progress() {
+  # Progress goes to stderr so --json keeps stdout to one document.
+  [ "$OPT_JSON" = 1 ] && return 0
+  [ -t 2 ] && printf '  ... %s\r' "$1" >&2
+  return 0
+}
+
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/pagespeed-doctor.XXXXXX") || doctor_error "cannot create a temporary directory"
+NS_SCRATCH=""
+# shellcheck disable=SC2329 # invoked by the EXIT trap
+cleanup() {
+  [ -n "$NS_SCRATCH" ] && rm -rf "$NS_SCRATCH"
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+trap 'doctor_error interrupted' INT TERM HUP
+chmod 700 "$TMP"
+CHECKS="$TMP/checks"
+: > "$CHECKS"
+
+IS_ROOT=0
+[ "$(id -u 2>/dev/null)" = 0 ] && IS_ROOT=1
+
+now_ms() {
+  _t=$(date +%s%3N 2>/dev/null)
+  case "$_t" in *N*|"") _t=$(( $(date +%s) * 1000 )) ;; esac
+  echo "$_t"
+}
+
+# ---------------------------------------------------------------------------
+# Redaction and JSON helpers.
+
+# One line, no control bytes (ESC included), secrets masked.
+sanitize() {
+  printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\000-\037\177' | sed -E \
+    -e 's/(Cannot set option [A-Za-z]+ to ).*/\1***/' \
+    -e 's/"([A-Za-z]+) [^"]*"/"\1 ***"/g' \
+    -e "s/'([A-Za-z]+) [^']*'/'\\1 ***'/g" \
+    -e 's/((key|token|password|passwd|secret|auth)[A-Za-z]*[=: ]+)[^ ;,]+/\1***/Ig' \
+    -e 's/[A-Za-z0-9+\/_=-]{32,}/***/g'
+}
+
+# Quote a value for a printed shell command, so a path from the config can
+# never run as code when the operator copies the command.
+shquote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+in_list() { # word list (case-insensitive)
+  # shellcheck disable=SC2086 # one word per line
+  printf '%s\n' $2 | awk -v w="$1" 'tolower($0) == tolower(w) { f = 1 } END { exit !f }'
+}
+
+# add_check ID TITLE STATUS CODE SIGNATURE MESSAGE HINT COMMAND MUTATES DOC DEPENDS EVIDENCE_JSON EVIDENCE_TEXT DURATION
+add_check() {
+  _rec=""
+  for _f in "$@"; do
+    _rec="$_rec$(printf '%s' "$_f" | tr '\t\n\r' '   ' | tr -d '\000-\037\177')$US"
+  done
+  printf '%s\n' "$_rec" >> "$CHECKS"
+}
+
+status_of() {
+  awk -F "$US" -v id="$1" '$1 == id { s = $3 } END { print s }' "$CHECKS"
+}
+
+# ---------------------------------------------------------------------------
+# Server detection.
+
+SERVER="$OPT_SERVER"
+NGINX_BIN=$(command -v nginx 2>/dev/null || true)
+APACHE_CTL=""
+APACHE_FLAVOR=""
+if command -v apache2ctl >/dev/null 2>&1 && [ -d /etc/apache2 ]; then
+  APACHE_CTL=$(command -v apache2ctl); APACHE_FLAVOR=debian
+elif command -v httpd >/dev/null 2>&1 && [ -d /etc/httpd ]; then
+  APACHE_CTL=$(command -v httpd); APACHE_FLAVOR=el
+fi
+
+pkg_version() {
+  if command -v dpkg-query >/dev/null 2>&1; then
+    dpkg-query -W -f='${Status} ${Version}\n' "$1" 2>/dev/null | awk '/install ok installed/ { print $NF }'
+  elif command -v rpm >/dev/null 2>&1; then
+    rpm -q --qf '%{VERSION}-%{RELEASE}\n' "$1" 2>/dev/null | grep -v 'not installed' || true
+  fi
+}
+
+PKG_NGINX=$(pkg_version nginx-module-pagespeed)
+[ -n "$PKG_NGINX" ] || PKG_NGINX=$(pkg_version nginx-module-pagespeed-nginxorg)
+PKG_APACHE=$(pkg_version mod-pagespeed)
+[ -n "$PKG_APACHE" ] || PKG_APACHE=$(pkg_version mod-pagespeed-stable)
+PKG_OPTIMIZER=$(pkg_version pagespeed-optimizer)
+
+if [ -z "$SERVER" ]; then
+  if [ -n "$NGINX_BIN" ] && [ -n "$APACHE_CTL" ]; then
+    if [ -n "$PKG_NGINX" ] && [ -z "$PKG_APACHE" ]; then SERVER=nginx
+    elif [ -n "$PKG_APACHE" ] && [ -z "$PKG_NGINX" ]; then SERVER=apache
+    else
+      doctor_error "both nginx and Apache are installed; pick one with --server nginx|apache"
+    fi
+  elif [ -n "$NGINX_BIN" ]; then SERVER=nginx
+  elif [ -n "$APACHE_CTL" ]; then SERVER=apache
+  else
+    doctor_error "no nginx or Apache found on this host (use --server)"
+  fi
+fi
+if [ "$SERVER" = nginx ] && [ -z "$NGINX_BIN" ]; then
+  doctor_error "nginx not found in PATH"
+fi
+if [ "$SERVER" = apache ] && [ -z "$APACHE_CTL" ]; then
+  doctor_error "apache2ctl or httpd not found"
+fi
+
+SERVER_VERSION=""
+if [ "$SERVER" = nginx ]; then
+  SERVER_VERSION=$("$NGINX_BIN" -v 2>&1 | sed -n 's|.*nginx/\([0-9.]*\).*|\1|p' | head -n 1)
+  NGINX_V=$("$NGINX_BIN" -V 2>&1 || true)
+  NGINX_PREFIX=$(printf '%s' "$NGINX_V" | sed -n 's/.*--prefix=\([^ ]*\).*/\1/p' | head -n 1)
+  NGINX_MODPATH=$(printf '%s' "$NGINX_V" | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' | head -n 1)
+  NGINX_CONF=$(printf '%s' "$NGINX_V" | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p' | head -n 1)
+  [ -n "$NGINX_CONF" ] || NGINX_CONF=/etc/nginx/nginx.conf
+  # nginx -c FILE reads relative includes from FILE's directory.
+  [ -n "$OPT_CONFIG" ] && NGINX_CONF="$OPT_CONFIG"
+  NGINX_CONFDIR=$(dirname -- "$NGINX_CONF")
+  HEADER_NAME="X-Page-Speed"
+  PKG_MODULE="$PKG_NGINX"
+  SERVICE_NAME=nginx
+else
+  SERVER_VERSION=$("$APACHE_CTL" -v 2>/dev/null | sed -n 's|.*Apache/\([0-9.]*\).*|\1|p' | head -n 1)
+  # Compiled-in server root and main file (-V prints build settings and
+  # reads no configuration).
+  APACHE_V=$("$APACHE_CTL" -V 2>/dev/null || true)
+  APACHE_ROOT=$(printf '%s' "$APACHE_V" | sed -n 's/.*-D HTTPD_ROOT="\([^"]*\)".*/\1/p' | head -n 1)
+  APACHE_CONF=$(printf '%s' "$APACHE_V" | sed -n 's/.*-D SERVER_CONFIG_FILE="\([^"]*\)".*/\1/p' | head -n 1)
+  if [ "$APACHE_FLAVOR" = debian ]; then
+    : "${APACHE_ROOT:=/etc/apache2}"; : "${APACHE_CONF:=apache2.conf}"
+  else
+    : "${APACHE_ROOT:=/etc/httpd}"; : "${APACHE_CONF:=conf/httpd.conf}"
+  fi
+  case "$APACHE_CONF" in /*) ;; *) APACHE_CONF="$APACHE_ROOT/$APACHE_CONF" ;; esac
+  [ -n "$OPT_CONFIG" ] && APACHE_CONF="$OPT_CONFIG"
+  HEADER_NAME="X-Mod-Pagespeed"
+  PKG_MODULE="$PKG_APACHE"
+  SERVICE_NAME=apache2
+  [ "$APACHE_FLAVOR" = el ] && SERVICE_NAME=httpd
+fi
+
+OS_ID="unknown"
+if [ -r /etc/os-release ]; then
+  # shellcheck source=/dev/null
+  OS_ID=$(. /etc/os-release 2>/dev/null; echo "${ID:-unknown}-${VERSION_ID:-}")
+fi
+ARCH=$(uname -m 2>/dev/null || echo unknown)
+
+# ---------------------------------------------------------------------------
+# Configuration corpus: one record per relevant directive,
+#   file US line US NAME US ARGS
+# NAME is the pagespeed option name (ModPagespeed prefix removed), or
+# @load_module, @user, @outputfilter. ARGS is *** unless the option is on the
+# value allowlist. Secrets never reach the corpus file.
+
+CORPUS="$TMP/corpus"
+: > "$CORPUS"
+
+# Joins a directive that spans lines before it is parsed: nginx statements
+# end at ; { or } (so "pagespeed FileCachePath" and its path may sit on
+# different lines), Apache lines end with a backslash to continue. The
+# program using it defines stmt_out(statement, first_line) and calls
+# feed(line, number) per line and flush() at the end of each file.
+# shellcheck disable=SC2016 # awk program, not shell
+JOIN_AWK='
+function feed(line, ln,    pos, c, i, n, prev) {
+  if (line ~ /^[ \t]*#/) {
+    # A comment line ends a pending Apache continuation; inside an nginx
+    # statement it is just skipped.
+    if (syntax != "nginx") flush()
+    return
+  }
+  if (syntax == "nginx") {
+    # Walk the line: ; { } end a statement; # and quotes start only at the
+    # start of a word (after whitespace or ; { }), as in nginx; an open quote
+    # (which may span lines) hides everything.
+    if (pend == "") pendln = ln
+    else pend = pend " "
+    n = length(line); prev = " "
+    for (i = 1; i <= n; i++) {
+      c = substr(line, i, 1)
+      if (q != "") {
+        pend = pend c
+        if (c == "\\" && i < n) { i++; pend = pend substr(line, i, 1) }
+        else if (c == q) q = ""
+      } else if ((c == "\"" || c == "\047") && prev ~ /[ \t;{}]/) {
+        q = c; pend = pend c
+      } else if (c == "#" && prev ~ /[ \t;{}]/) {
+        break
+      } else if (c == ";" || c == "{" || c == "}") {
+        if (c == ";") stmt_out(pend, pendln)
+        pend = ""; pendln = ln
+      } else {
+        pend = pend c
+      }
+      prev = c
+    }
+    if (pend ~ /^[ \t]*$/) pend = ""
+  } else {
+    if (line ~ /\\[ \t]*$/) {
+      sub(/\\[ \t]*$/, " ", line)
+      if (pend == "") pendln = ln
+      pend = pend line
+      return
+    }
+    if (pend != "") { stmt_out(pend line, pendln); pend = "" }
+    else stmt_out(line, ln)
+  }
+}
+function flush() { if (pend != "") { stmt_out(pend, pendln); pend = "" }; q = "" }
+'
+
+# shellcheck disable=SC2016 # awk program, not shell
+CORPUS_AWK="$JOIN_AWK"'
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function emit(file, line, name, args,    lname) {
+  lname = tolower(name)
+  if (args != "" && !(lname in allow) && substr(name, 1, 1) != "@") args = "***"
+  gsub(/[\037\t]/, " ", args)
+  printf "%s%s%d%s%s%s%s\n", file, US, line, US, name, US, args
+}
+function handle(stmt, file, line,    n, t, name, args, i) {
+  stmt = trim(stmt)
+  if (stmt == "") return
+  n = split(stmt, t, /[ \t]+/)
+  for (i = 1; i <= n; i++) gsub(/^["\047]|["\047]$/, "", t[i])
+  if (syntax == "nginx") {
+    if (t[1] == "pagespeed" && n >= 2) {
+      name = t[2]; args = ""
+      if (tolower(name) ~ /^modpagespeed./) name = substr(name, 13)
+      for (i = 3; i <= n; i++) args = args (i > 3 ? " " : "") t[i]
+      emit(file, line, name, args)
+    } else if (t[1] == "load_module" && n >= 2) {
+      emit(file, line, "@load_module", t[2])
+    } else if (t[1] == "user" && n >= 2) {
+      emit(file, line, "@user", t[2])
+    }
+  } else {
+    if (tolower(t[1]) == "modpagespeed" && n >= 2) {
+      emit(file, line, tolower(t[2]), "")
+    } else if (tolower(t[1]) ~ /^modpagespeed./ && tolower(t[1]) != "modpagespeedif") {
+      name = substr(t[1], 13); args = ""
+      for (i = 2; i <= n; i++) args = args (i > 2 ? " " : "") t[i]
+      emit(file, line, name, args)
+    } else if (tolower(t[1]) == "loadmodule" && t[2] == "pagespeed_module") {
+      emit(file, line, "@load_module", t[3])
+    } else if (tolower(t[1]) == "addoutputfilterbytype" && stmt ~ /MOD_PAGESPEED_OUTPUT_FILTER/) {
+      emit(file, line, "@outputfilter", "MOD_PAGESPEED_OUTPUT_FILTER")
+    } else if (tolower(t[1]) == "user" && n >= 2) {
+      emit(file, line, "@user", t[2])
+    }
+  }
+}
+function stmt_out(stmt, ln) { handle(stmt, file, ln) }
+BEGIN {
+  n = split(allowlist, a, / /); for (i = 1; i <= n; i++) allow[tolower(a[i])] = 1
+  file = ""; ln = 0
+}
+{
+  if (dump) {
+    if ($0 ~ /^# configuration file .*:$/) {
+      flush()
+      file = substr($0, 22); sub(/:$/, "", file); ln = 0; next
+    }
+    ln++
+  } else {
+    file = FILENAME; ln = FNR
+  }
+  feed($0, ln)
+}
+END { flush() }'
+
+build_corpus_static() {
+  # $1 = syntax; the remaining arguments are files (missing ones skipped).
+  _syn="$1"; shift
+  for _f in "$@"; do
+    [ -f "$_f" ] && [ -r "$_f" ] || continue
+    awk -v US="$US" -v syntax="$_syn" -v dump=0 -v allowlist="$VALUE_ALLOWLIST" \
+      "$CORPUS_AWK" "$_f" >> "$CORPUS" 2>/dev/null
+  done
+}
+
+# The arguments of the include directives of one file, comments removed.
+# shellcheck disable=SC2016 # awk program
+include_patterns() { # FILE
+  awk -v syntax="$SERVER" "$JOIN_AWK"'
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function arg(v) { gsub(/^["\047]|["\047]$/, "", v); print v }
+    function stmt_out(stmt, ln,    n, w) {
+      if (syntax != "nginx") sub(/[ \t]#.*$/, "", stmt)
+      n = split(trim(stmt), w, /[ \t]+/)
+      if (syntax == "nginx") {
+        if (n >= 2 && w[1] == "include") arg(w[2])
+      } else if (n >= 2 && (tolower(w[1]) == "include" || tolower(w[1]) == "includeoptional")) arg(w[2])
+    }
+    { feed($0, FNR) }
+    END { flush() }' "$1" 2>/dev/null
+}
+
+# Apache reads a directory named by Include, and every directory below it;
+# nginx's include takes files (globs) only.
+expand_include() { # PATTERN -> existing files, in the order the server reads them
+  _oifs=$IFS; IFS=$NL
+  # Pathname expansion only (IFS is a newline): the pattern is never run.
+  set +f
+  # shellcheck disable=SC2086
+  for _g in $1; do
+    if [ -f "$_g" ]; then
+      printf '%s\n' "$_g"
+    elif [ -d "$_g" ] && [ "$SERVER" = apache ]; then
+      find -L "$_g" -type f 2>/dev/null | sort
+    fi
+  done
+  set -f
+  IFS=$_oifs
+}
+
+# Apache's ${NAME} in an include path, from the environment (Define is not
+# followed). Prints the resolved pattern, or returns 1.
+# shellcheck disable=SC2016 # literal ${ and }, not expansions
+resolve_vars() { # PATTERN
+  _rest="$1"; _out=""
+  while :; do
+    case "$_rest" in
+      *'${'*'}'*) ;;
+      *) printf '%s%s\n' "$_out" "$_rest"; return 0 ;;
+    esac
+    _pre=${_rest%%'${'*}; _rest=${_rest#*'${'}
+    _name=${_rest%%'}'*}; _rest=${_rest#*'}'}
+    case "$_name" in ""|*[!A-Za-z0-9_]*|[0-9]*) return 1 ;; esac
+    _val=$(printenv -- "$_name" 2>/dev/null) || return 1
+    _out="$_out$_pre$_val"
+  done
+}
+
+# The server's configuration files: the main file and everything it
+# includes (globs, and for Apache directories and their subdirectories),
+# followed recursively, read without running the server. Relative include
+# paths are resolved against nginx's configuration directory, or Apache's
+# ServerRoot (the directive in the main file, else the compiled-in root).
+# Include paths that cannot be resolved go to $TMP/cfg_unresolved.
+CFG_UNRESOLVED="$TMP/cfg_unresolved"
+: > "$CFG_UNRESOLVED"
+config_files() {
+  if [ "$SERVER" = nginx ]; then
+    _root="$NGINX_CONF"; _base="$NGINX_CONFDIR"
+  else
+    _root="$APACHE_CONF"; _base="$APACHE_ROOT"
+    _sr=$(awk '/^[ \t]*#/ { next } tolower($1) == "serverroot" && NF >= 2 { v = $2; gsub(/^"|"$/, "", v); print v; exit }' "$_root" 2>/dev/null)
+    [ -n "$_sr" ] && _base="$_sr"
+  fi
+  : > "$TMP/cfiles"
+  printf '%s\n' "$_root" > "$TMP/ctodo"
+  _n=0
+  while [ "$_n" -lt 2000 ] && [ -s "$TMP/ctodo" ]; do
+    _n=$((_n + 1))
+    _f=$(sed -n '1p' "$TMP/ctodo")
+    sed '1d' "$TMP/ctodo" > "$TMP/ctodo.next"; mv "$TMP/ctodo.next" "$TMP/ctodo"
+    grep -qxF -- "$_f" "$TMP/cfiles" && continue
+    [ -f "$_f" ] && [ -r "$_f" ] || continue
+    printf '%s\n' "$_f" >> "$TMP/cfiles"
+    include_patterns "$_f" | while IFS= read -r _p; do
+      if [ "$SERVER" = apache ]; then
+        _q=$(resolve_vars "$_p") || { printf '%s\n' "$_f" >> "$CFG_UNRESOLVED"; continue; }
+        _p="$_q"
+      fi
+      case "$_p" in /*) ;; *) _p="$_base/$_p" ;; esac
+      expand_include "$_p"
+    done >> "$TMP/ctodo"
+  done
+  cat "$TMP/cfiles"
+}
+
+load_static_corpus() {
+  : > "$CORPUS"
+  _list=$(config_files)
+  _old_ifs=$IFS; IFS=$NL
+  # shellcheck disable=SC2086
+  set -- $_list
+  IFS=$_old_ifs
+  build_corpus_static "$SERVER" "$@"
+}
+
+corpus_names() { awk -F "$US" '{ print $3 }' "$CORPUS"; }
+corpus_values() { # NAME (case-insensitive) -> args, one per line
+  awk -F "$US" -v n="$1" 'tolower($3) == tolower(n) && $4 != "" { print $4 }' "$CORPUS"
+}
+corpus_has() { awk -F "$US" -v n="$1" 'tolower($3) == tolower(n) { f = 1 } END { exit !f }' "$CORPUS"; }
+corpus_where() { # NAME -> "file:line" lines
+  awk -F "$US" -v n="$1" 'tolower($3) == tolower(n) { print $1 ":" $2 }' "$CORPUS"
+}
+
+# ---------------------------------------------------------------------------
+# Cache directories and the web server user.
+
+web_user() {
+  _u=$(corpus_values @user | head -n 1)
+  if [ -z "$_u" ] && [ "$SERVER" = apache ] && [ -r /etc/apache2/envvars ]; then
+    _u=$(sed -n 's/^export APACHE_RUN_USER=\(.*\)/\1/p' /etc/apache2/envvars | tr -d '"' | head -n 1)
+  fi
+  case "$_u" in \$*) _u="" ;; esac
+  if [ -z "$_u" ]; then
+    for _c in www-data nginx apache; do
+      id "$_c" >/dev/null 2>&1 && { _u=$_c; break; }
+    done
+  fi
+  echo "$_u"
+}
+
+cache_dirs() { # configured cache directories (paths may hold any character but newline)
+  {
+    corpus_values FileCachePath
+    corpus_values DaemonVolumePath | while IFS= read -r _v; do
+      if [ -d "$_v" ]; then printf '%s\n' "$_v"; else dirname -- "$_v"; fi
+    done
+  } | sed 's|/*$||; s|^$|/|' | sort -u
+}
+
+# Is the module loaded, going by the configuration files?
+module_referenced() {
+  if [ "$SERVER" = nginx ]; then
+    awk -F "$US" '$3 == "@load_module" && $4 ~ /ngx_pagespeed_module/ { f = 1 } END { exit !f }' "$CORPUS" && return 0
+    printf '%s' "$NGINX_V" | grep -q pagespeed
+  else
+    corpus_has @load_module
+  fi
+}
+pagespeed_configured() { awk -F "$US" 'substr($3, 1, 1) != "@" { f = 1 } END { exit !f }' "$CORPUS"; }
+
+# The shield for the config test, in $TMP/shield: existing cache
+# directories, one per line, outermost only; an empty scratch directory is
+# bind-mounted over each. $TMP/shield.paths is the same list.
+# Returns 1 with SHIELD_ERROR (and SHIELD_HINT) set when one cannot be
+# shielded -- in particular when a cache directory does not exist yet.
+SHIELD_ERROR=""
+SHIELD_HINT=""
+NO_CACHE_PATH=0
+shield_plan() {
+  : > "$TMP/shield.all"
+  cache_dirs > "$TMP/shield.cand"
+  if [ ! -s "$TMP/shield.cand" ]; then
+    # No cache path in the configuration, but the module is loaded: the
+    # packaged default is where it would write.
+    NO_CACHE_PATH=1
+    if [ "$SERVER" = nginx ]; then echo /var/cache/ngx_pagespeed; else echo /var/cache/mod_pagespeed; fi > "$TMP/shield.cand"
+  fi
+  for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
+            /var/cache/pagespeed-optimizer; do
+    [ -d "$_d" ] && printf '%s\n' "$_d" >> "$TMP/shield.cand"
+  done
+  while IFS= read -r _c; do
+    [ -n "$_c" ] || continue
+    case "$_c" in /*) ;; *) SHIELD_ERROR="cache path is not absolute: $_c"; return 1 ;; esac
+    if [ ! -d "$_c" ]; then
+      SHIELD_ERROR="the cache directory $_c does not exist yet"
+      SHIELD_HINT="Create $_c first, owned by the web server user, then run the doctor again; or rerun with --allow-cache-writes."
+      return 1
+    fi
+    _r=$(readlink -f -- "$_c" 2>/dev/null) || _r=""
+    if [ -z "$_r" ] || [ ! -d "$_r" ] || [ "$_r" = / ]; then
+      SHIELD_ERROR="cannot resolve the cache directory $_c"; return 1
+    fi
+    printf '%s\n' "$_r" >> "$TMP/shield.all"
+  done < "$TMP/shield.cand"
+  sort -u "$TMP/shield.all" | \
+    awk '{ for (k in kept) if (index($0, k "/") == 1) next; kept[$0] = 1; print }' > "$TMP/shield"
+  cp "$TMP/shield" "$TMP/shield.paths"
+  return 0
+}
+
+# Is PATH (or its nearest existing parent) inside a shielded directory?
+shielded() {
+  _p="$1"
+  while [ ! -e "$_p" ]; do _p=$(dirname -- "$_p"); done
+  _r=$(readlink -f -- "$_p" 2>/dev/null) || return 1
+  awk -v p="$_r" '$0 == p || index(p, $0 "/") == 1 { f = 1 } END { exit !f }' "$TMP/shield.paths"
+}
+
+root_files_in() { # dir -> root-owned non-directories, bounded
+  # Only an absolute path: a relative one such as "-delete" would be read by
+  # find as an expression and run against the current directory.
+  case "$1" in /*) ;; *) return 0 ;; esac
+  find "$1" -xdev -user 0 ! -type d 2>/dev/null | head -n 1000
+}
+
+# ---------------------------------------------------------------------------
+# Config test (see the header comment for why it runs this way).
+
+CT_RAN=0          # 1 when the test ran
+CT_OK=0           # 1 when it passed
+CT_MODE="skipped" # namespace | module_not_loaded | direct | skipped
+CT_VERIFIED=false # the shield was checked against the effective configuration
+CT_SKIP_REASON=""
+CT_SKIP_CODE=""
+CT_OUT="$TMP/configtest.err"
+CT_DUMP="$TMP/configtest.dump"
+CT_CREATED="$TMP/configtest.created"
+CT_UNSHIELDED="$TMP/configtest.unshielded"
+: > "$CT_OUT"; : > "$CT_DUMP"; : > "$CT_CREATED"; : > "$CT_UNSHIELDED"; : > "$TMP/shield"; : > "$TMP/shield.paths"
+
+configtest_cmd() { # sets the positional parameters of the caller via CT_ARGS
+  if [ "$SERVER" = nginx ]; then
+    if [ -n "$OPT_CONFIG" ]; then set -- "$NGINX_BIN" -c "$OPT_CONFIG" -T; else set -- "$NGINX_BIN" -T; fi
+  else
+    # DUMP_INCLUDES lists the files Apache read, to check the shield against.
+    if [ -n "$OPT_CONFIG" ]; then
+      set -- "$APACHE_CTL" -f "$OPT_CONFIG" -t -D DUMP_MODULES -D DUMP_INCLUDES
+    else
+      set -- "$APACHE_CTL" -t -D DUMP_MODULES -D DUMP_INCLUDES
+    fi
+  fi
+  printf '%s\n' "$@" > "$TMP/ct_args"
+}
+
+CT_SKIP_HINT=""
+not_isolated() { # REASON [HINT]
+  CT_SKIP_CODE=configtest_not_isolated
+  CT_SKIP_HINT="${2:-}"
+  CT_SKIP_REASON="cannot isolate the config test from the cache ($1); rerun with --allow-cache-writes to run it anyway"
+}
+
+# Run the test against the real cache (only with --allow-cache-writes, or
+# when there is no cache directory at all), listing root-owned files before
+# and after.
+run_configtest_direct() {
+  _i=0
+  while IFS= read -r _d; do
+    _i=$((_i + 1)); root_files_in "$_d" | sort > "$TMP/before.$_i"
+  done < "$TMP/shield.cand.real"
+  # shellcheck disable=SC2086
+  $_to "$@" > "$CT_DUMP" 2> "$CT_OUT" < /dev/null
+  _rc=$?
+  CT_RAN=1
+  [ "$_rc" = 0 ] && CT_OK=1
+  _i=0
+  while IFS= read -r _d; do
+    _i=$((_i + 1)); root_files_in "$_d" | sort > "$TMP/after.$_i"
+    comm -13 "$TMP/before.$_i" "$TMP/after.$_i" >> "$CT_CREATED"
+  done < "$TMP/shield.cand.real"
+}
+
+run_configtest() {
+  if [ "$OPT_CONFIGTEST" = 0 ]; then CT_SKIP_REASON="--no-configtest given"; return; fi
+  if [ "$IS_ROOT" != 1 ]; then CT_SKIP_REASON="needs root"; return; fi
+  _to=""
+  command -v timeout >/dev/null 2>&1 && _to="timeout 30"
+  configtest_cmd
+  _oifs=$IFS; IFS=$NL
+  # shellcheck disable=SC2046 # one argument per line
+  set -- $(cat "$TMP/ct_args")
+  IFS=$_oifs
+  # Existing cache directories, for the before/after listing of a direct run.
+  existing_cache_dirs() {
+    { cache_dirs; for _d in /var/cache/ngx_pagespeed /var/cache/pagespeed /var/cache/mod_pagespeed \
+        /var/cache/pagespeed-optimizer; do printf '%s\n' "$_d"; done; } | \
+      while IFS= read -r _d; do
+        case "$_d" in /*) [ -d "$_d" ] && printf '%s\n' "$_d" ;; esac
+      done | sort -u
+  }
+  if [ -s "$CFG_UNRESOLVED" ]; then
+    _why="an include path in $(sort -u "$CFG_UNRESOLVED" | tr '\n' ' ' | sed 's/ $//') uses a \${VARIABLE} the doctor cannot resolve, so it cannot tell which cache directories the configuration names"
+    # An include the doctor cannot follow may hold the LoadModule line or a
+    # cache path, so "not loaded" cannot be concluded from what it read.
+    if [ "$OPT_ALLOW_WRITES" != 1 ]; then not_isolated "$_why"; return; fi
+  fi
+  if ! module_referenced; then
+    # The module is not loaded at all: nothing of ours can write.
+    CT_MODE=module_not_loaded
+    existing_cache_dirs > "$TMP/shield.cand.real"
+    run_configtest_direct "$@"
+    return
+  fi
+  if ! shield_plan; then
+    if [ "$OPT_ALLOW_WRITES" = 1 ]; then
+      CT_MODE=direct
+      : > "$TMP/shield"; : > "$TMP/shield.paths"
+      existing_cache_dirs > "$TMP/shield.cand.real"
+      run_configtest_direct "$@"
+    else
+      if [ "$NO_CACHE_PATH" = 1 ] && pagespeed_configured; then
+        not_isolated "pagespeed is configured but no FileCachePath was found, so where the module writes is not known"
+      else
+        not_isolated "$SHIELD_ERROR" "$SHIELD_HINT"
+      fi
+    fi
+    return
+  fi
+  if [ "$NO_CACHE_PATH" = 1 ] && pagespeed_configured && [ "$OPT_ALLOW_WRITES" != 1 ]; then
+    not_isolated "pagespeed is configured but no FileCachePath was found, so where the module writes is not known"
+    return
+  fi
+  # PAGESPEED_DOCTOR_NO_NAMESPACE=1 behaves as if namespaces were unavailable
+  # (used by the container test).
+  if [ -z "${PAGESPEED_DOCTOR_NO_NAMESPACE:-}" ] && command -v unshare >/dev/null 2>&1 && \
+     unshare --mount --propagation private true >/dev/null 2>&1; then
+    NS_SCRATCH=$(mktemp -d "${DOCTOR_SCRATCH_DIR:-/var/tmp}/pagespeed-doctor-ns.XXXXXX" 2>/dev/null) || NS_SCRATCH=""
+  fi
+  if [ -n "$NS_SCRATCH" ]; then
+    # The inner shell reads the shield from a file, one entry per line, and
+    # passes every path as a single argument: no path is ever parsed as
+    # shell code.
+    # shellcheck disable=SC2016 # expanded by the inner shell
+    DOCTOR_NS_LIST="$TMP/shield" DOCTOR_NS_SCRATCH="$NS_SCRATCH" \
+      $_to unshare --mount --propagation private sh -c '
+        i=0
+        while IFS= read -r d; do
+          i=$((i + 1)); s="$DOCTOR_NS_SCRATCH/$i"
+          mkdir -p "$s" || exit 97
+          mount --bind "$s" "$d" || exit 97
+        done < "$DOCTOR_NS_LIST"
+        exec "$@" < /dev/null' doctor "$@" > "$CT_DUMP" 2> "$CT_OUT"
+    _rc=$?
+    rm -rf "$NS_SCRATCH"; NS_SCRATCH=""
+    if [ "$_rc" != 97 ]; then
+      CT_MODE=namespace; CT_RAN=1
+      [ "$_rc" = 0 ] && CT_OK=1
+      return
+    fi
+    : > "$CT_DUMP"; : > "$CT_OUT"
+    _why="a mount over a cache directory failed"
+  else
+    _why="no private mount namespace is available here"
+  fi
+  if [ "$OPT_ALLOW_WRITES" = 1 ]; then
+    CT_MODE=direct
+    : > "$TMP/shield"; : > "$TMP/shield.paths"
+    existing_cache_dirs > "$TMP/shield.cand.real"
+    run_configtest_direct "$@"
+  else
+    not_isolated "$_why"
+  fi
+}
+
+# Apache: the files the config test actually read (DUMP_INCLUDES). Files the
+# static read missed are added to the corpus, so D11 checks their cache
+# directories against the shield. Sets CT_VERIFIED.
+apache_verify_includes() {
+  grep -q 'Included configuration files' "$CT_DUMP" 2>/dev/null || return 0
+  sed -n 's/^ *([0-9*]*) \(\/.*\)$/\1/p' "$CT_DUMP" | while IFS= read -r _f; do
+    grep -qxF -- "$_f" "$TMP/cfiles" || printf '%s\n' "$_f"
+  done > "$TMP/cfiles.missed"
+  while IFS= read -r _f; do build_corpus_static apache "$_f"; done < "$TMP/cfiles.missed"
+  CT_VERIFIED=true
+}
+
+# The first error line of the config test, and its file and line.
+ct_error_line() {
+  if [ "$SERVER" = nginx ]; then
+    grep -m 1 '\[emerg\]' "$CT_OUT" || grep -m 1 -i 'error\|failed' "$CT_OUT" || true
+  else
+    # Apache: "AH00526: Syntax error on line N of FILE:" + message line, or a
+    # one-line error.
+    awk '/Syntax error on line/ { getline m; print $0 " " m; exit }
+         /Invalid command|Cannot load|error/ { print; exit }' "$CT_OUT"
+  fi
+}
+
+ct_error_location() { # -> "file:line" or empty
+  _e=$(ct_error_line)
+  if [ "$SERVER" = nginx ]; then
+    printf '%s' "$_e" | sed -n 's/.* in \(\/[^ ]*:[0-9][0-9]*\)$/\1/p'
+  else
+    printf '%s' "$_e" | sed -n 's/.*Syntax error on line \([0-9]*\) of \([^:]*\):.*/\2:\1/p'
+  fi
+}
+
+evidence_json_loc() { # "file:line" [directive] [error_class]
+  _loc="$1"; _dir="${2:-}"; _cls="${3:-}"
+  [ -n "$_loc$_cls" ] || { echo "[]"; return; }
+  _file=${_loc%:*}; _line=${_loc##*:}
+  case "$_line" in ""|*[!0-9]*) _line=0 ;; esac
+  printf '[{"file":%s,"line":%s' "$([ -n "$_loc" ] && json_str "$_file" || echo null)" "$_line"
+  [ -n "$_dir" ] && printf ',"directive":%s' "$(json_str "$_dir")"
+  [ -n "$_cls" ] && printf ',"error_class":%s' "$(json_str "$_cls")"
+  printf '}]'
+}
+
+# A directive name the doctor may print: a plain word, not secret-shaped.
+plain_word() {
+  case "$1" in ""|*[!A-Za-z0-9_]*) return 1 ;; esac
+  [ "${#1}" -le 40 ]
+}
+
+# Classify a config-test error the doctor has no specific triage for.
+# Prints "CLASS DIRECTIVE"; DIRECTIVE is empty unless the server itself
+# named a directive it knows (an unknown directive's text is never echoed).
+ct_error_class() { # ERROR_LINE
+  _e="$1"; _cls=other; _d=""
+  case "$_e" in
+    *'unknown directive'*|*'Invalid command'*) _cls=unknown_directive ;;
+    *'directive is not allowed here'*)
+      _cls=directive_not_allowed_here
+      _d=$(printf '%s' "$_e" | sed -n 's/.*"\([A-Za-z0-9_]*\)" directive is not allowed here.*/\1/p') ;;
+    *'invalid number of arguments in "'*)
+      _cls=wrong_arguments
+      _d=$(printf '%s' "$_e" | sed -n 's/.*invalid number of arguments in "\([A-Za-z0-9_]*\)" directive.*/\1/p') ;;
+    *'directive is duplicate'*)
+      _cls=duplicate_directive
+      _d=$(printf '%s' "$_e" | sed -n 's/.*"\([A-Za-z0-9_]*\)" directive is duplicate.*/\1/p') ;;
+    *' takes one argument'*|*' takes two arguments'*|*' takes three arguments'*|*' takes '*' argument'*)
+      _cls=wrong_arguments
+      _d=$(printf '%s' "$_e" | sed -n 's/.*[: ]\([A-Za-z0-9_]*\) takes .*/\1/p') ;;
+    *'unexpected'*|*'unbalanced'*|*'without closing'*) _cls=syntax_error ;;
+    *'No such file'*|*'open()'*) _cls=file_not_found ;;
+    *'Permission denied'*) _cls=permission_denied ;;
+    *'host not found'*) _cls=host_not_found ;;
+    *'invalid'*|*'Invalid'*) _cls=invalid_value ;;
+  esac
+  plain_word "$_d" || _d=""
+  printf '%s %s\n' "$_cls" "$_d"
+}
+
+# Closest valid option name (case-insensitive edit distance), or empty.
+closest_name() {
+  # shellcheck disable=SC2086 # one name per word
+  printf '%s\n' $OPTION_NAMES | awk -v want="$1" '
+    function min(a, b) { return a < b ? a : b }
+    function dist(s, t,    i, j, m, n, d, c) {
+      m = length(s); n = length(t)
+      for (i = 0; i <= m; i++) d[i, 0] = i
+      for (j = 0; j <= n; j++) d[0, j] = j
+      for (i = 1; i <= m; i++)
+        for (j = 1; j <= n; j++) {
+          c = (substr(s, i, 1) == substr(t, j, 1)) ? 0 : 1
+          d[i, j] = min(min(d[i-1, j] + 1, d[i, j-1] + 1), d[i-1, j-1] + c)
+        }
+      return d[m, n]
+    }
+    BEGIN { w = tolower(want); best = ""; bd = 99 }
+    NF { x = dist(w, tolower($1)); if (x < bd) { bd = x; best = $1 } }
+    END {
+      lim = int(length(want) / 4); if (lim < 2) lim = 2; if (lim > 4) lim = 4
+      if (bd <= lim) print best
+    }'
+}
+
+# ---------------------------------------------------------------------------
+# D02: module loaded.
+
+check_d02() {
+  _t0=$(now_ms)
+  _err=$(ct_error_line)
+  _loc=$(ct_error_location)
+  _title="Module loaded"
+  _doc="$DOCS/troubleshooting/#no-x-mod-pagespeed-or-x-page-speed-header"
+  if [ "$SERVER" = nginx ]; then
+    _fixpkg="apt install nginx-module-pagespeed   # or: dnf install nginx-module-pagespeed"
+    case "$_err" in
+      *'module "ngx_pagespeed_module" is already loaded'*|*'already loaded'*pagespeed*)
+        add_check D02 "$_title" fail module_loaded_twice S2 \
+          "ngx_pagespeed_module is loaded twice" \
+          "Keep one load_module line for ngx_pagespeed_module.so (the package's modules-enabled/50-mod-pagespeed.conf) and delete the other." \
+          "grep -rn ngx_pagespeed_module $(shquote "$NGINX_CONFDIR")" false "$DOCS/migrate-from-ngx-pagespeed/" "" \
+          "$(evidence_json_loc "$_loc" load_module)" "$_loc" $(( $(now_ms) - _t0 ))
+        return ;;
+      *'unknown directive "pagespeed"'*)
+        add_check D02 "$_title" fail module_not_loaded S2 \
+          "nginx does not know the pagespeed directive: the module is not loaded" \
+          "Install the module package for this nginx, or add load_module modules/ngx_pagespeed_module.so; at the top of nginx.conf." \
+          "$_fixpkg" true "$_doc" "" "$(evidence_json_loc "$_loc" pagespeed)" "$_loc" $(( $(now_ms) - _t0 ))
+        return ;;
+      *ngx_pagespeed_module*'version'*'instead of'*)
+        add_check D02 "$_title" fail module_version_mismatch S2 \
+          "the module was built for a different nginx version than $SERVER_VERSION" \
+          "Install the module package built for this nginx (the package pins the exact nginx version)." \
+          "$_fixpkg" true "$DOCS/installation-module/" "" "$(evidence_json_loc "$_loc" load_module)" "$_loc" $(( $(now_ms) - _t0 ))
+        return ;;
+      *'dlopen()'*pagespeed*'failed'*)
+        add_check D02 "$_title" fail module_file_missing S2 \
+          "nginx cannot open ngx_pagespeed_module.so" \
+          "Reinstall the module package, or correct the load_module path." \
+          "$_fixpkg" true "$DOCS/installation-module/" "" "$(evidence_json_loc "$_loc" load_module)" "$_loc" $(( $(now_ms) - _t0 ))
+        return ;;
+    esac
+    _n=$(awk -F "$US" '$3 == "@load_module" && $4 ~ /ngx_pagespeed_module/' "$CORPUS" | wc -l | tr -d ' ')
+    _where=$(awk -F "$US" '$3 == "@load_module" && $4 ~ /ngx_pagespeed_module/ { print $1 ":" $2; exit }' "$CORPUS")
+    if [ "$_n" = 0 ]; then
+      if printf '%s' "$NGINX_V" | grep -q 'pagespeed'; then
+        add_check D02 "$_title" pass "" S2 "ngx_pagespeed is compiled into nginx" "" "" false "" "" "[]" "" $(( $(now_ms) - _t0 ))
+      else
+        add_check D02 "$_title" fail module_not_loaded S2 \
+          "no load_module line for ngx_pagespeed_module.so in the nginx configuration" \
+          "Install the module package (it adds the load_module line), or add load_module modules/ngx_pagespeed_module.so; at the top of nginx.conf." \
+          "$_fixpkg" true "$_doc" "" "[]" "" $(( $(now_ms) - _t0 ))
+      fi
+      return
+    fi
+    if [ "$_n" -gt 1 ]; then
+      add_check D02 "$_title" fail module_loaded_twice S2 \
+        "ngx_pagespeed_module.so is loaded by $_n load_module lines" \
+        "Keep one load_module line (the package's modules-enabled/50-mod-pagespeed.conf) and delete the others." \
+        "grep -rn ngx_pagespeed_module $(shquote "$NGINX_CONFDIR")" false "$DOCS/migrate-from-ngx-pagespeed/" "" \
+        "$(evidence_json_loc "$_where" load_module)" "$_where" $(( $(now_ms) - _t0 ))
+      return
+    fi
+    _so=$(awk -F "$US" '$3 == "@load_module" && $4 ~ /ngx_pagespeed_module/ { print $4; exit }' "$CORPUS")
+    case "$_so" in
+      /*) _sofile="$_so" ;;
+      *) _sofile="${NGINX_PREFIX:-/usr/share/nginx}/$_so" ;;
+    esac
+    if [ ! -e "$_sofile" ] && [ -n "$NGINX_MODPATH" ] && [ -e "$NGINX_MODPATH/$(basename "$_so")" ]; then
+      _sofile="$NGINX_MODPATH/$(basename "$_so")"
+    fi
+    if [ ! -e "$_sofile" ] && [ "$CT_OK" != 1 ]; then
+      add_check D02 "$_title" fail module_file_missing S2 \
+        "load_module points at $_so, which does not exist" \
+        "Reinstall the module package, or correct the load_module path." \
+        "$_fixpkg" true "$DOCS/installation-module/" "" "$(evidence_json_loc "$_where" load_module)" "$_where" $(( $(now_ms) - _t0 ))
+      return
+    fi
+    _ver=""
+    [ -n "$PKG_MODULE" ] && _ver=" (package $PKG_MODULE)"
+    add_check D02 "$_title" pass "" S2 "ngx_pagespeed_module.so loaded once via $_where$_ver" "" "" false "" "" \
+      "$(evidence_json_loc "$_where" load_module)" "$_where" $(( $(now_ms) - _t0 ))
+    return
+  fi
+
+  # Apache.
+  _fixpkg="apt install mod-pagespeed   # or: dnf install mod-pagespeed"
+  _load_lines=$(awk -F "$US" '$3 == "@load_module"' "$CORPUS" | wc -l | tr -d ' ')
+  _where=$(awk -F "$US" '$3 == "@load_module" { print $1 ":" $2; exit }' "$CORPUS")
+  case "$_err" in
+    *"Invalid command 'ModPagespeed"*|*"Invalid command 'modpagespeed"*)
+      if [ "$_load_lines" = 0 ]; then
+        add_check D02 "$_title" fail module_not_loaded S2 \
+          "Apache does not know the ModPagespeed directives: the module is not loaded" \
+          "Enable the module (Debian/Ubuntu: a2enmod pagespeed) or install the package." \
+          "a2enmod pagespeed" true "$_doc" "" "$(evidence_json_loc "$_loc")" "$_loc" $(( $(now_ms) - _t0 ))
+        return
+      fi ;;
+    *'Cannot load'*pagespeed*)
+      add_check D02 "$_title" fail module_file_missing S2 \
+        "Apache cannot load mod_pagespeed.so" \
+        "Reinstall the package for this Apache, or correct the LoadModule path." \
+        "$_fixpkg" true "$DOCS/installation-module/" "" "$(evidence_json_loc "$_loc")" "$_loc" $(( $(now_ms) - _t0 ))
+      return ;;
+  esac
+  if grep -q 'pagespeed_module is already loaded' "$CT_OUT" 2>/dev/null || [ "$_load_lines" -gt 1 ]; then
+    add_check D02 "$_title" fail module_loaded_twice S2 \
+      "pagespeed_module is loaded more than once" \
+      "Keep one LoadModule pagespeed_module line and delete the others." \
+      "grep -rn 'LoadModule pagespeed_module' /etc/apache2 /etc/httpd" false "$DOCS/migrate-from-google-mod-pagespeed/" "" \
+      "$(evidence_json_loc "$_where" LoadModule)" "$_where" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if [ "$CT_OK" = 1 ]; then
+    if grep -q 'pagespeed_module' "$CT_DUMP"; then
+      add_check D02 "$_title" pass "" S2 "pagespeed_module is loaded${_where:+ via $_where}" "" "" false "" "" \
+        "$(evidence_json_loc "$_where" LoadModule)" "$_where" $(( $(now_ms) - _t0 ))
+    else
+      add_check D02 "$_title" fail module_not_loaded S2 \
+        "Apache runs without pagespeed_module" \
+        "Enable the module (Debian/Ubuntu: a2enmod pagespeed), then reload Apache." \
+        "a2enmod pagespeed" true "$_doc" "" "[]" "" $(( $(now_ms) - _t0 ))
+    fi
+    return
+  fi
+  if [ "$_load_lines" = 0 ]; then
+    add_check D02 "$_title" fail module_not_loaded S2 \
+      "no LoadModule pagespeed_module line in the enabled Apache configuration" \
+      "Enable the module (Debian/Ubuntu: a2enmod pagespeed) or install the package." \
+      "a2enmod pagespeed" true "$_doc" "" "[]" "" $(( $(now_ms) - _t0 ))
+  else
+    add_check D02 "$_title" pass "" S2 "LoadModule pagespeed_module found at $_where" "" "" false "" "" \
+      "$(evidence_json_loc "$_where" LoadModule)" "$_where" $(( $(now_ms) - _t0 ))
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# D03: config test and directive triage.
+
+classify_unknown() { # NAME LOC -> adds the D03 failure
+  _name="$1"; _loc="$2"; _t0="$3"
+  _ev=$(evidence_json_loc "$_loc" "$_name")
+  _show="${_loc:-the configuration}"
+  _sed="sed -n '${_loc##*:}p' $(shquote "${_loc%:*}")"
+  [ -n "$_loc" ] || _sed=""
+  if in_list "$_name" "$REMOVED_OPTIONS"; then
+    add_check D03 "Config test" fail directive_removed S1 \
+      "config test fails: pagespeed option $_name is not recognized ($_show)" \
+      "This option was removed and has no effect. Delete the line, then run the config test again." \
+      "$_sed" false "$DOCS/migrate-from-ngx-pagespeed/" D02 "$_ev" "$_show" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if in_list "$_name" "$OPTION_NAMES"; then
+    add_check D03 "Config test" fail directive_arguments S1 \
+      "config test fails: pagespeed option $_name has the wrong number of arguments ($_show)" \
+      "Check the option's syntax in the configuration reference (quote values that contain spaces)." \
+      "$_sed" false "$DOCS/configuration/" D02 "$_ev" "$_show" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  _near=$(closest_name "$_name")
+  if [ -n "$_near" ]; then
+    add_check D03 "Config test" fail directive_typo S1 \
+      "config test fails: unknown pagespeed option $_name; did you mean $_near? ($_show)" \
+      "Correct the option name to $_near, then run the config test again." \
+      "$_sed" false "$DOCS/configuration/" D02 "$_ev" "$_show" $(( $(now_ms) - _t0 ))
+  else
+    add_check D03 "Config test" fail directive_unknown S1 \
+      "config test fails: unknown pagespeed option $_name ($_show)" \
+      "Check the spelling against the configuration reference, or delete the line." \
+      "$_sed" false "$DOCS/configuration/" D02 "$_ev" "$_show" $(( $(now_ms) - _t0 ))
+  fi
+}
+
+check_d03() {
+  _t0=$(now_ms)
+  if [ "$CT_RAN" != 1 ]; then
+    _hint="Run as root for the config test: sudo pagespeed-doctor"
+    [ "$CT_SKIP_CODE" = configtest_not_isolated ] && _hint="Run the config test yourself and then give the cache back to the web server user, or rerun with --allow-cache-writes."
+    [ -n "$CT_SKIP_HINT" ] && _hint="$CT_SKIP_HINT"
+    [ "$OPT_CONFIGTEST" = 0 ] && _hint=""
+    add_check D03 "Config test" skip "$CT_SKIP_CODE" S1 "skipped: $CT_SKIP_REASON" "$_hint" "" false "" D02 "[]" "" 0
+    return
+  fi
+  if [ "$(status_of D02)" = fail ]; then
+    add_check D03 "Config test" skip "" S1 "skipped: depends on D02" "" "" false "" D02 "[]" "" 0
+    return
+  fi
+  _ctname="nginx -t"; [ "$SERVER" = apache ] && _ctname="apachectl configtest"
+  if [ "$CT_OK" != 1 ]; then
+    _err=$(ct_error_line)
+    _loc=$(ct_error_location)
+    if [ "$SERVER" = nginx ]; then
+      # nginx: "pagespeed" directive "Name" not recognized or too many arguments
+      _name=$(printf '%s' "$_err" | sed -n 's/.*"\([A-Za-z]*\)" not recognized.*/\1/p')
+      if [ -n "$_name" ]; then
+        case "$_name" in ModPagespeed?*) _name=${_name#ModPagespeed} ;; esac
+        classify_unknown "$_name" "$_loc" "$_t0"; return
+      fi
+      _name=$(printf '%s' "$_err" | sed -n -e 's/.*"\([A-Za-z]*\)" cannot be set at this scope.*/\1/p' \
+        -e "s/.*'\\([A-Za-z]*\\)' is global and can't be set at this scope.*/\\1/p" \
+        -e 's/.* \([A-Za-z]*\) is only allowed at the top level.*/\1/p' | head -n 1)
+      if [ -n "$_name" ]; then
+        if in_list "$_name" "$PROCESS_SCOPE_OPTIONS"; then
+          _hint="$_name is a global option: set it in the http {} block only, then run nginx -t."
+        elif in_list "$_name" "$SERVER_SCOPE_OPTIONS"; then
+          _hint="Set $_name in the http {} block or a server {} block, not inside a location {}, then run nginx -t."
+        else
+          _hint="Move $_name to an enclosing block (http {} or server {}), then run nginx -t."
+        fi
+        add_check D03 "Config test" fail directive_scope S1 \
+          "nginx -t fails: pagespeed option $_name is set in a block where it is not allowed (${_loc:-?})" \
+          "$_hint" "" false "$DOCS/configuration/" D02 "$(evidence_json_loc "$_loc" "$_name")" "$_loc" $(( $(now_ms) - _t0 ))
+        return
+      fi
+      _name=$(printf '%s' "$_err" | sed -n 's/.*Cannot set option \([A-Za-z]*\) to.*/\1/p')
+      if [ -n "$_name" ]; then
+        add_check D03 "Config test" fail directive_value_invalid S1 \
+          "nginx -t fails: invalid value for pagespeed option $_name (${_loc:-?})" \
+          "Correct the value; see the option in the configuration reference." \
+          "" false "$DOCS/configuration/" D02 "$(evidence_json_loc "$_loc" "$_name")" "$_loc" $(( $(now_ms) - _t0 ))
+        return
+      fi
+    else
+      _name=$(printf '%s' "$_err" | sed -n "s/.*Invalid command '\\(ModPagespeed[A-Za-z]*\\)'.*/\\1/Ip")
+      if [ -n "$_name" ]; then
+        _name=$(printf '%s' "$_name" | cut -c13-)
+        classify_unknown "$_name" "$_loc" "$_t0"; return
+      fi
+      _name=$(printf '%s' "$_err" | sed -n "s/.*'\\([A-Za-z]*\\)' is global and can't be set at this scope.*/\\1/p")
+      if [ -n "$_name" ]; then
+        add_check D03 "Config test" fail directive_scope S1 \
+          "apachectl configtest fails: ModPagespeed$_name is global and set inside a VirtualHost (${_loc:-?})" \
+          "Move ModPagespeed$_name to the server-wide configuration, then run apachectl configtest." \
+          "" false "$DOCS/configuration/" D02 "$(evidence_json_loc "$_loc" "ModPagespeed$_name")" "$_loc" $(( $(now_ms) - _t0 ))
+        return
+      fi
+    fi
+    # No specific triage: report the error class, the directive the server
+    # named (when it is one it knows) and file:line -- never the error text,
+    # which can quote a value.
+    # shellcheck disable=SC2046 # two words: class and directive
+    set -- $(ct_error_class "$_err")
+    _cls="$1"; _dir="${2:-}"
+    _what=$(printf '%s' "$_cls" | tr '_' ' ')
+    _see=""
+    [ -n "$_loc" ] && _see="sed -n '${_loc##*:}p' $(shquote "${_loc%:*}")"
+    add_check D03 "Config test" fail config_test_failed S1 \
+      "$_ctname fails: $_what${_dir:+ (directive $_dir)}${_loc:+ at $_loc}" \
+      "Fix the line named above, then run $_ctname again." \
+      "$_see" false "$DOCS/configuration/" D02 \
+      "$(evidence_json_loc "$_loc" "$_dir" "$_cls")" "$_loc" $(( $(now_ms) - _t0 ))
+    return
+  fi
+
+  # Passed: list deprecated options and filters still in the configuration,
+  # each once (the servers print some warnings twice).
+  _dep=""; _ev="["; _evt=""
+  for _n in $(corpus_names | sort -u); do
+    case "$_n" in @*) continue ;; esac
+    if in_list "$_n" "$REMOVED_OPTIONS $DEPRECATED_OPTIONS"; then
+      _dep="$_dep $_n"
+      for _w in $(corpus_where "$_n"); do
+        [ "$_ev" = "[" ] || _ev="$_ev,"
+        _ev="$_ev$(evidence_json_loc "$_w" "$_n" | sed 's/^\[//; s/\]$//')"
+        _evt="$_evt $_w"
+      done
+    fi
+  done
+  _filt=""
+  for _v in $(corpus_values EnableFilters | tr ',' ' '); do
+    if in_list "$_v" "$DEPRECATED_FILTERS"; then
+      case " $_filt " in *" $_v "*) ;; *) _filt="$_filt $_v" ;; esac
+    fi
+  done
+  _ev="$_ev]"
+  if [ -n "$_dep$_filt" ]; then
+    _msg="$_ctname passes, but the configuration uses deprecated names:"
+    [ -n "$_dep" ] && _msg="$_msg options$_dep;"
+    [ -n "$_filt" ] && _msg="$_msg filters$_filt;"
+    add_check D03 "Config test" warn directive_deprecated S1 "${_msg%;}" \
+      "These have no effect. Delete them to keep the config test clean." \
+      "" false "$DOCS/upgrade/" D02 "$_ev" "${_evt# }" $(( $(now_ms) - _t0 ))
+  else
+    add_check D03 "Config test" pass "" S1 "$_ctname passes; no deprecated pagespeed names" "" "" false "" D02 "[]" "" $(( $(now_ms) - _t0 ))
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# HTTP helpers (loopback, or the --url target only).
+
+TARGET_URL=""
+TARGET_LOCAL=1
+if [ -n "$OPT_URL" ]; then
+  TARGET_URL="$OPT_URL"
+  case "$OPT_URL" in
+    http://127.0.0.1[:/]*|http://localhost[:/]*|http://\[::1\][:/]*|https://127.0.0.1[:/]*|https://localhost[:/]*) TARGET_LOCAL=1 ;;
+    *) TARGET_LOCAL=0 ;;
+  esac
+else
+  TARGET_URL="http://127.0.0.1${OPT_PORT:+:$OPT_PORT}$OPT_PATH"
+fi
+LOCAL_BASE=$(printf '%s' "$TARGET_URL" | sed -n 's|^\(https*://[^/]*\).*|\1|p')
+
+http_get() { # URL HEADERS_OUT BODY_OUT -> curl exit code; prints the status
+  if [ -n "$OPT_HOST" ]; then
+    curl -q -sS --noproxy '*' --max-time 3 --connect-timeout 2 -H "Host: $OPT_HOST" \
+      -A "pagespeed-doctor/$DOCTOR_VERSION" -D "$2" -o "$3" -w '%{http_code}' "$1" 2>/dev/null
+  else
+    curl -q -sS --noproxy '*' --max-time 3 --connect-timeout 2 \
+      -A "pagespeed-doctor/$DOCTOR_VERSION" -D "$2" -o "$3" -w '%{http_code}' "$1" 2>/dev/null
+  fi
+}
+
+header_value() { # HEADERS_FILE NAME
+  awk -v n="$2" 'BEGIN { n = tolower(n) }
+    { line = $0; sub(/\r$/, "", line); i = index(line, ":")
+      if (i > 0 && tolower(substr(line, 1, i - 1)) == n) { v = substr(line, i + 1); sub(/^ +/, "", v) } }
+    END { print v }' "$1"
+}
+
+add_query() { # URL PARAM
+  case "$1" in *\?*) echo "$1&$2" ;; *) echo "$1?$2" ;; esac
+}
+
+# ---------------------------------------------------------------------------
+# D04: module answering.
+
+check_d04() {
+  _t0=$(now_ms)
+  _title="Module answering"
+  if [ "$(status_of D02)" = fail ] || [ "$(status_of D03)" = fail ]; then
+    _dep=D03; [ "$(status_of D02)" = fail ] && _dep=D02
+    add_check D04 "$_title" skip "" S3 "skipped: depends on $_dep" "" "" false "" "D02,D03" "[]" "" 0
+    return
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    add_check D04 "$_title" skip curl_missing S3 "skipped: curl is not installed" "Install curl and run the doctor again." "" false "" "D02,D03" "[]" "" 0
+    return
+  fi
+  progress "requesting $TARGET_URL"
+  _code=$(http_get "$TARGET_URL" "$TMP/h1" "$TMP/b1")
+  _rc=$?
+  _show_url=$(printf '%s' "$TARGET_URL" | sed 's/?.*//')
+  if [ "$_rc" != 0 ] || [ -z "$_code" ] || [ "$_code" = 000 ]; then
+    add_check D04 "$_title" fail server_not_reachable S3 \
+      "no HTTP response from $_show_url" \
+      "Start or reload the web server, or point the doctor at the right port with --port or --url." \
+      "systemctl status $SERVICE_NAME" \
+      false "$DOCS/is-it-working/" "D02,D03" "[]" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  _hv=$(header_value "$TMP/h1" X-Page-Speed)
+  _hn="X-Page-Speed"
+  if [ -z "$_hv" ]; then _hv=$(header_value "$TMP/h1" X-Mod-Pagespeed); _hn="X-Mod-Pagespeed"; fi
+  if [ -z "$_hv" ]; then _hv=$(header_value "$TMP/h1" X-PageSpeed); _hn="X-PageSpeed"; fi
+  _ct=$(header_value "$TMP/h1" Content-Type)
+  if [ -n "$_hv" ]; then
+    add_check D04 "$_title" pass "" S3 "$_hn: $(sanitize "$_hv") ($_show_url, HTTP $_code)" "" "" false "" "D02,D03" "[]" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  _hint="Make sure the request reaches a vhost with pagespeed on; test another vhost with --host."
+  _codeid=header_missing
+  _why="$HEADER_NAME missing on $_show_url (HTTP $_code)"
+  if corpus_has off || corpus_has unplugged; then
+    _codeid=module_off; _w=$(corpus_where off; corpus_where unplugged)
+    _why="$_why: pagespeed is switched off at $(printf '%s' "$_w" | tr '\n' ' ')"
+    _hint="Set pagespeed on (nginx) or ModPagespeed on (Apache) for this site, then reload."
+  elif corpus_has standby; then
+    _codeid=module_standby; _w=$(corpus_where standby)
+    _why="$_why: pagespeed is in standby at $(printf '%s' "$_w" | tr '\n' ' ')"
+    _hint="Standby rewrites nothing. Set pagespeed on (nginx) or ModPagespeed on (Apache), then reload."
+  elif [ "$SERVER" = nginx ] && ! corpus_has on; then
+    _codeid=module_not_enabled
+    _why="$_why: there is no 'pagespeed on;' in the nginx configuration"
+    _hint="Add 'pagespeed on;' (and a FileCachePath) in the http {} or server {} block, then reload nginx."
+  elif [ -n "$_ct" ] && ! printf '%s' "$_ct" | grep -qi 'text/html\|xhtml'; then
+    _codeid=not_html
+    _why="$_why: the page is $(sanitize "${_ct%%;*}"), not HTML"
+    _hint="Test an HTML page with --path."
+  elif [ "$SERVER" = apache ] && ! corpus_has @outputfilter; then
+    _codeid=output_filter_missing
+    _why="$_why: no AddOutputFilterByType MOD_PAGESPEED_OUTPUT_FILTER text/html in the enabled configuration"
+    _hint="Restore AddOutputFilterByType MOD_PAGESPEED_OUTPUT_FILTER text/html from the package's pagespeed.conf."
+  fi
+  add_check D04 "$_title" fail "$_codeid" S3 "$_why" "$_hint" "" false "$DOCS/troubleshooting/#no-x-mod-pagespeed-or-x-page-speed-header" "D02,D03" "[]" "" $(( $(now_ms) - _t0 ))
+}
+
+# ---------------------------------------------------------------------------
+# D05: optimizing, and why not.
+
+STATS0="$TMP/stats0.json"
+STATS="$TMP/stats.json"
+: > "$STATS0"; : > "$STATS"
+
+fetch_stats() { # OUTFILE -> prints the path that answered
+  [ "$TARGET_LOCAL" = 1 ] || return 1
+  {
+    corpus_values StatisticsPath
+    corpus_values GlobalStatisticsPath
+    corpus_values AdminPath | sed 's|/*$|/statistics|'
+    corpus_values GlobalAdminPath | sed 's|/*$|/statistics|'
+    if [ "$SERVER" = nginx ]; then echo /ngx_pagespeed_statistics; else echo /mod_pagespeed_statistics; fi
+    echo /pagespeed_admin/statistics
+  } | awk '!seen[$1]++ { print $1 }' | while read -r _p; do
+    case "$_p" in /*) ;; *) continue ;; esac
+    # The statistics handler answers JSON as is; ?json means something else
+    # there (the console log) and is refused unless that is enabled.
+    _c=$(http_get "$LOCAL_BASE$_p" "$TMP/hs" "$TMP/bs")
+    if [ "$_c" = 200 ] && grep -q '"variables"' "$TMP/bs" 2>/dev/null; then
+      cp "$TMP/bs" "$1"; echo "$_p"; break
+    fi
+  done
+}
+
+stat_value() { # FILE NAME
+  _v=$(sed -n "s/.*\"$2\": *\\([0-9][0-9]*\\).*/\\1/p" "$1" 2>/dev/null | head -n 1)
+  echo "${_v:-0}"
+}
+
+# A blocking counter: rising while the doctor requested the page is a
+# failure; non-zero only since the server started (maybe other pages) is a
+# warning.
+d05_cause() { # NAME CODE SIGNATURE WHAT HINT DOC -> 0 when it reported
+  _tot=$(stat_value "$STATS" "$1")
+  _d=$(( _tot - $(stat_value "$STATS0" "$1") ))
+  if [ "$_d" -gt 0 ]; then
+    add_check D05 "$_title" fail "$2" "$3" "nothing rewritten: $_d $4 while the doctor requested the page$_statnote" \
+      "$5" "" false "$6" D04 "[]" "" $(( $(now_ms) - _t0 ))
+    return 0
+  elif [ "$_tot" -gt 0 ]; then
+    add_check D05 "$_title" warn "$2" "$3" "no optimized URLs yet; since the server started: $_tot $4 (perhaps on other pages)$_statnote" \
+      "$5" "" false "$6" D04 "[]" "" $(( $(now_ms) - _t0 ))
+    return 0
+  fi
+  return 1
+}
+
+check_d05() {
+  _t0=$(now_ms)
+  _title="Optimizing"
+  if [ "$(status_of D04)" != pass ]; then
+    add_check D05 "$_title" skip "" S4 "skipped: depends on D04" "" "" false "" D04 "[]" "" 0
+    return
+  fi
+  progress "comparing with ?PageSpeed=off"
+  _sp=$(fetch_stats "$STATS0")
+  sleep 1
+  http_get "$TARGET_URL" "$TMP/h2" "$TMP/b2" >/dev/null
+  http_get "$(add_query "$TARGET_URL" PageSpeed=off)" "$TMP/h3" "$TMP/b3" >/dev/null
+  _on=$(grep -o '\.pagespeed\.' "$TMP/b2" 2>/dev/null | wc -l | tr -d ' ')
+  _off=$(grep -o '\.pagespeed\.' "$TMP/b3" 2>/dev/null | wc -l | tr -d ' ')
+  _refs=$(grep -o -i -e '<link[^>]*stylesheet' -e '<script[^>]*src=' -e '<img[^>]*src=' -e '<style' "$TMP/b2" 2>/dev/null | wc -l | tr -d ' ')
+  _differs=0
+  cmp -s "$TMP/b2" "$TMP/b3" || _differs=1
+  if [ -n "$_sp" ]; then
+    sleep 1   # resource rewrites finish in the background
+    _sp=$(fetch_stats "$STATS")
+  fi
+  _rew=$(stat_value "$STATS" num_rewrites_executed)
+  _statnote=""
+  [ -n "$_sp" ] && _statnote="; statistics at $_sp: $_rew rewrites executed since start"
+  [ -s "$STATS" ] || _statnote="; statistics not reachable from localhost (set StatisticsPath and its localhost-only location to see why when nothing is optimized)"
+  if [ "${_on:-0}" -gt "${_off:-0}" ]; then
+    add_check D05 "$_title" pass "" S4 "$_on optimized (.pagespeed.) URL(s) on the page$_statnote" "" "" false "" D04 "[]" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if [ "$_differs" = 1 ] && [ "$_rew" -gt 0 ]; then
+    add_check D05 "$_title" pass "" S4 "the page differs from its ?PageSpeed=off copy$_statnote" "" "" false "" D04 "[]" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if [ "${_refs:-0}" = 0 ] && [ "$_differs" = 0 ]; then
+    add_check D05 "$_title" warn nothing_to_optimize S4 \
+      "the module answers, but this page has no stylesheets, scripts or images to optimize$_statnote" \
+      "Test a typical page of the site with --path." "" false "$DOCS/is-it-working/" D04 "[]" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if [ -s "$STATS" ]; then
+    d05_cause num_cache_control_not_rewritable_resources cache_control_not_rewritable S5 \
+      "resource(s) skipped for Cache-Control private, no-cache or no-store" \
+      "Serve CSS, JavaScript and images with a public Cache-Control (or an Expires header)." \
+      "$DOCS/cache-control/" && return
+    d05_cause resource_url_domain_rejections domain_not_authorized S7 \
+      "resource URL(s) rejected because their domain is not authorized" \
+      "Authorize the resource hosts with pagespeed Domain (nginx) or ModPagespeedDomain (Apache)." \
+      "$DOCS/domain-configuration/#domain-authorization" && return
+    d05_cause num_resource_fetch_failures resource_fetch_failures S8 \
+      "resource fetch failure(s)" \
+      "The server could not fetch its own resources. Check that it resolves and reaches its host name, or use LoadFromFile." \
+      "$DOCS/domain-configuration/#mapproxydomain" && return
+  fi
+  add_check D05 "$_title" warn not_optimized_yet S4 \
+    "the module answers, but no optimized URLs yet$_statnote" \
+    "Optimization is progressive: request the page again in a few seconds and re-run the doctor." \
+    "" false "$DOCS/troubleshooting/" D04 "[]" "" $(( $(now_ms) - _t0 ))
+}
+
+# ---------------------------------------------------------------------------
+# D11: cache directory.
+
+# Run `test FLAG PATH` as USER. Every value is passed as its own argument
+# (no shell string), so nothing from the configuration is ever parsed as
+# code. Returns 0/1, or 2 when it cannot tell (no root, no helper).
+as_user_test() { # USER FLAG PATH
+  id -- "$1" >/dev/null 2>&1 || return 2
+  if [ "$(id -un 2>/dev/null)" = "$1" ]; then
+    test "$2" "$3"; return $?
+  fi
+  [ "$IS_ROOT" = 1 ] || return 2
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u "$1" -- test "$2" "$3" 2>/dev/null; _r=$?
+  elif command -v setpriv >/dev/null 2>&1; then
+    setpriv --reuid="$(id -u -- "$1")" --regid="$(id -g -- "$1")" --init-groups -- test "$2" "$3" 2>/dev/null; _r=$?
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -n -u "$1" -- test "$2" "$3" 2>/dev/null; _r=$?
+  else
+    return 2
+  fi
+  [ "$_r" -le 1 ] && return "$_r"
+  return 2
+}
+
+check_d11() {
+  _t0=$(now_ms)
+  _title="Cache directory"
+  _u=$(web_user)
+  _dirs=$(cache_dirs)
+  if [ -z "$_dirs" ]; then
+    if [ "$SERVER" = apache ] && [ -d /var/cache/mod_pagespeed ]; then _dirs=/var/cache/mod_pagespeed; fi
+  fi
+  # Cache directories of the effective configuration that the shielded
+  # config test did not cover (the static read missed them).
+  if [ "$CT_MODE" = namespace ]; then
+    printf '%s\n' "$_dirs" | while IFS= read -r _d; do
+      case "$_d" in /*) ! shielded "$_d" && printf '%s\n' "$_d" ;; esac
+    done > "$CT_UNSHIELDED"
+  fi
+  if [ -z "$_dirs" ]; then
+    add_check D11 "$_title" skip "" S11 "skipped: no FileCachePath or DaemonVolumePath in the configuration" "" "" false "" "" "[]" "" 0
+    return
+  fi
+  _status=pass; _code=""; _msgs=""; _hint=""; _cmd=""; _mut=false; _ev="["; _full_mnts=""
+  _old_ifs=$IFS; IFS=$NL
+  for _d in $_dirs; do
+    IFS=$_old_ifs
+    [ "$_ev" = "[" ] || _ev="$_ev,"
+    _ev="$_ev{\"path\":$(json_str "$_d")}"
+    case "$_d" in
+      /*) ;;
+      *)
+        # Never handed to find, test or a printed command: it would be read
+        # against the doctor's own working directory.
+        [ "$_status" = fail ] || { _status=warn; _code=cache_path_relative; }
+        _msgs="$_msgs; $_d is not an absolute path, so it was not checked"
+        _hint="Use an absolute path for the cache directory."
+        continue ;;
+    esac
+    if [ ! -d "$_d" ]; then
+      [ "$_status" = fail ] || { _status=warn; _code=cache_dir_missing; }
+      _msgs="$_msgs; $_d does not exist yet"
+      _hint="The module creates it at startup; check the startup log if it stays missing."
+      continue
+    fi
+    if [ -n "$_u" ]; then
+      as_user_test "$_u" -w "$_d"; _w=$?
+      if [ "$_w" = 1 ]; then
+        _status=fail; _code=cache_dir_not_writable
+        _msgs="$_msgs; $_d is not writable by $_u"
+        _hint="Give the directory to the web server user."
+        _cmd="chown -R $(shquote "$_u"): $(shquote "$_d")"; _mut=true
+        continue
+      elif [ "$_w" = 2 ] && [ "$_status" = pass ]; then
+        _msgs="$_msgs; $_d (writability not checked: needs root)"
+      fi
+    fi
+    _roots=$(root_files_in "$_d" | wc -l | tr -d ' ')
+    _created=$(awk -v p="$_d/" 'index($0, p) == 1 { n++ } END { print n + 0 }' "$CT_CREATED")
+    if [ "${_u:-root}" != root ] && [ "${_roots:-0}" -gt 0 ]; then
+      if [ "$_status" != fail ]; then _status=warn; _code=root_owned_cache_files; fi
+      _msgs="$_msgs; $_roots root-owned file(s) in $_d"
+      [ "${_created:-0}" -gt 0 ] && _msgs="$_msgs ($_created created by this config test)"
+      if [ "$_status" != fail ]; then
+        _hint="The web server user cannot replace root-owned cache files; a config test run as root creates them (mod_pagespeed#780)."
+        _cmd="chown -R $(shquote "$_u"): $(shquote "$_d")"; _mut=true
+      fi
+    fi
+    if command -v df >/dev/null 2>&1; then
+      _pct=$(df -P "$_d" 2>/dev/null | awk 'NR == 2 { sub(/%/, "", $5); print $5 }')
+      _mnt=$(df -P "$_d" 2>/dev/null | awk 'NR == 2 { print $6 }')
+      if [ -n "$_pct" ] && [ "$_pct" -gt 90 ] 2>/dev/null; then
+        [ "$_status" = pass ] && { _status=warn; _code=cache_disk_full; }
+        # One line per file system, however many cache directories it holds.
+        case "$NL$_full_mnts$NL" in
+          *"$NL$_mnt$NL"*) ;;
+          *) _full_mnts="$_full_mnts$NL$_mnt"
+             _msgs="$_msgs; the file system of $_d is ${_pct}% full" ;;
+        esac
+      fi
+    fi
+    IFS=$NL
+  done
+  IFS=$_old_ifs
+  _ev="$_ev]"
+  _msgs=${_msgs#; }
+  if [ "$_status" = pass ]; then
+    _msgs="$(echo "$_dirs" | tr '\n' ' ' | sed 's/ $//') writable by ${_u:-the web server user}, no root-owned files${_msgs:+; $_msgs}"
+  fi
+  if [ -s "$CT_UNSHIELDED" ]; then
+    [ "$_status" = fail ] || { _status=warn; _code=configtest_unshielded; }
+    _msgs="$_msgs; the config test ran without shielding $(tr '\n' ' ' < "$CT_UNSHIELDED" | sed 's/ $//') (found only in the effective configuration)"
+    [ -n "$_hint" ] || _hint="Check those directories for root-owned files after a config test run as root."
+  elif [ "$CT_MODE" = namespace ] && [ "$CT_VERIFIED" = true ]; then
+    _msgs="$_msgs (config test ran with the cache shielded; shield checked against the effective configuration)"
+  elif [ "$CT_MODE" = namespace ]; then
+    _msgs="$_msgs (config test ran with the cache shielded; the shield could not be checked against the effective configuration because the server gave no list of what it read)"
+  fi
+  add_check D11 "$_title" "$_status" "$_code" S11 "$_msgs" "$_hint" "$_cmd" "$_mut" \
+    "$DOCS/troubleshooting/#failed-to-open-cache-at" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+}
+
+# ---------------------------------------------------------------------------
+# D12: optimizer worker.
+
+health_query() { # SOCKET -> first line of the health answer
+  if command -v socat >/dev/null 2>&1; then
+    echo '' | socat -t 2 -T 2 - "UNIX-CONNECT:$1" 2>/dev/null | head -n 1
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -I -c 'import socket,sys
+s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect(sys.argv[1])
+print(s.recv(4096).decode("utf-8","replace").splitlines()[0])' "$1" 2>/dev/null
+  elif command -v curl >/dev/null 2>&1; then
+    curl -q -s --http0.9 --max-time 2 --unix-socket "$1" http://health/ 2>/dev/null | head -n 1
+  fi
+}
+
+check_d12() {
+  _t0=$(now_ms)
+  _title="Optimizer worker"
+  _sock=$(corpus_values DaemonSocketPath | head -n 1)
+  if [ -z "$_sock" ]; then
+    add_check D12 "$_title" skip "" S12 "skipped: no DaemonSocketPath configured (the module optimizes in-process)" "" "" false "" "" "[]" "" 0
+    return
+  fi
+  _u=$(web_user)
+  _ev="[{\"path\":$(json_str "$_sock")}]"
+  _doc="$DOCS/worker-configuration/"
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 && [ -n "$PKG_OPTIMIZER" ]; then
+    if ! systemctl is-active --quiet pagespeed-optimizer 2>/dev/null; then
+      add_check D12 "$_title" fail worker_not_running S12 "the pagespeed-optimizer service is not running" \
+        "Start the optimizer worker." "systemctl start pagespeed-optimizer" true "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+      return
+    fi
+  fi
+  if [ ! -S "$_sock" ]; then
+    _hint="Start the optimizer worker, or correct DaemonSocketPath."
+    [ -z "$PKG_OPTIMIZER" ] && _hint="Install and start pagespeed-optimizer, or remove DaemonSocketPath."
+    add_check D12 "$_title" fail worker_unreachable S12 "no worker socket at $_sock" "$_hint" \
+      "" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  if getent group pagespeed >/dev/null 2>&1 && [ -n "$_u" ] && [ "$_u" != root ]; then
+    if ! id -nG "$_u" 2>/dev/null | tr ' ' '\n' | grep -qx pagespeed; then
+      add_check D12 "$_title" fail user_not_in_group S12 "the web server user $_u is not in the pagespeed group, so it cannot reach the worker" \
+        "Add the user to the group, then restart the web server." "usermod -a -G pagespeed $(shquote "$_u")" true "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+      return
+    fi
+  fi
+  if [ -n "$_u" ]; then
+    as_user_test "$_u" -w "$_sock"
+    if [ $? = 1 ]; then
+      add_check D12 "$_title" fail worker_socket_denied S12 "$_u cannot write to the worker socket $_sock" \
+        "Check the socket's group (pagespeed) and mode, and that $_u is in that group." "ls -l $(shquote "$_sock")" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+      return
+    fi
+  fi
+  if [ ! -S "$_sock.health" ]; then
+    add_check D12 "$_title" warn worker_health_missing S12 "worker socket present, but no health socket at $_sock.health" \
+      "Restart the worker; an older worker has no health socket." "" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 ))
+    return
+  fi
+  _h=""
+  [ "$IS_ROOT" = 1 ] || [ -w "$_sock.health" ] && _h=$(health_query "$_sock.health")
+  case "$_h" in
+    OK*) add_check D12 "$_title" pass "" S12 "worker healthy: $(sanitize "$(printf '%s' "$_h" | cut -c1-80)")" "" "" false "" "" "$_ev" "" $(( $(now_ms) - _t0 )) ;;
+    DEGRADED*) add_check D12 "$_title" warn worker_degraded S12 "worker running without its cache: $(sanitize "$(printf '%s' "$_h" | cut -c1-80)")" \
+      "Check the worker's volume path and its log." "journalctl -u pagespeed-optimizer -n 50" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 )) ;;
+    "") add_check D12 "$_title" warn worker_health_unknown S12 "could not read the health socket (needs root, or socat/python3/curl)" \
+      "Run as root, or install socat." "" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 )) ;;
+    *) add_check D12 "$_title" fail worker_unhealthy S12 "worker health answer: $(sanitize "$(printf '%s' "$_h" | cut -c1-80)")" \
+      "Check the worker's log." "journalctl -u pagespeed-optimizer -n 50" false "$_doc" "" "$_ev" "" $(( $(now_ms) - _t0 )) ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Run.
+
+# Read the configuration files first (nothing is run): the config test is
+# shielded from the cache directories found here.
+progress "reading the configuration"
+load_static_corpus
+CORPUS_SOURCE="configuration files"
+progress "config test"
+run_configtest
+if [ "$SERVER" = nginx ] && [ "$CT_OK" = 1 ] && [ -s "$CT_DUMP" ]; then
+  awk -v US="$US" -v syntax=nginx -v dump=1 -v allowlist="$VALUE_ALLOWLIST" \
+    "$CORPUS_AWK" "$CT_DUMP" > "$CORPUS" 2>/dev/null
+  CORPUS_SOURCE="effective configuration (nginx -T)"
+  CT_VERIFIED=true
+elif [ "$SERVER" = apache ] && [ "$CT_RAN" = 1 ]; then
+  apache_verify_includes
+fi
+# The nginx dump held every config file; it is not needed any more. (For
+# Apache it holds the DUMP_MODULES list, which D02 reads.)
+[ "$SERVER" = nginx ] && : > "$CT_DUMP"
+
+check_d02
+check_d03
+check_d04
+check_d05
+check_d11
+check_d12
+
+# ---------------------------------------------------------------------------
+# Report.
+
+N_PASS=$(awk -F "$US" '$3 == "pass"' "$CHECKS" | wc -l | tr -d ' ')
+N_WARN=$(awk -F "$US" '$3 == "warn"' "$CHECKS" | wc -l | tr -d ' ')
+N_FAIL=$(awk -F "$US" '$3 == "fail"' "$CHECKS" | wc -l | tr -d ' ')
+N_SKIP=$(awk -F "$US" '$3 == "skip"' "$CHECKS" | wc -l | tr -d ' ')
+if [ "$N_FAIL" -gt 0 ]; then VERDICT=not_working; EXIT=2
+elif [ "$N_WARN" -gt 0 ]; then VERDICT=working_with_warnings; EXIT=1
+else VERDICT=working; EXIT=0; fi
+# A config test that did not run means the doctor cannot vouch for the
+# configuration: a skipped D03 raises the verdict to at least a warning,
+# unlike checks that simply do not apply (D12 without a worker). D03 skipped
+# because D02 failed is already a failure.
+SKIP_NOTE=""
+if [ "$(status_of D03)" = skip ] && [ "$(status_of D02)" != fail ]; then
+  SKIP_NOTE="config test skipped: $(awk -F "$US" '$1 == "D03" { m = $6 } END { sub(/^skipped: /, "", m); print m }' "$CHECKS")"
+  if [ "$EXIT" = 0 ]; then VERDICT=working_with_warnings; EXIT=1; fi
+fi
+FIRST_FAIL=$(awk -F "$US" '$3 == "fail" { print $1; exit }' "$CHECKS")
+
+if [ "$OPT_JSON" = 1 ]; then
+  {
+    printf '{"schema":%s,"doctor_version":%s,"generated_at":%s,' \
+      "$(json_str "$SCHEMA")" "$(json_str "$DOCTOR_VERSION")" "$(json_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+    printf '"host":{"os":%s,"arch":%s,"server":%s,"server_version":%s,"root":%s},' \
+      "$(json_str "$OS_ID")" "$(json_str "$ARCH")" "$(json_str "$SERVER")" "$(json_str "$SERVER_VERSION")" \
+      "$([ "$IS_ROOT" = 1 ] && echo true || echo false)"
+    printf '"packages":{'
+    _sep=""
+    for _p in nginx-module-pagespeed:"$PKG_NGINX" mod-pagespeed:"$PKG_APACHE" pagespeed-optimizer:"$PKG_OPTIMIZER"; do
+      _k=${_p%%:*}; _v=${_p#*:}
+      [ -n "$_v" ] || continue
+      printf '%s%s:%s' "$_sep" "$(json_str "$_k")" "$(json_str "$_v")"; _sep=","
+    done
+    printf '},'
+    printf '"target":{"url":%s,"host_header":%s},' "$(json_str "$(printf '%s' "$TARGET_URL" | sed 's/?.*//')")" \
+      "$([ -n "$OPT_HOST" ] && json_str "$OPT_HOST" || echo null)"
+    printf '"config":{"source":%s,"config_test":%s,"shield_verified":%s},' "$(json_str "$CORPUS_SOURCE")" "$(json_str "$CT_MODE")" \
+      "$([ "$CT_MODE" = namespace ] && echo "$CT_VERIFIED" || echo false)"
+    printf '"verdict":"%s","exit_code":%s,' "$VERDICT" "$EXIT"
+    printf '"summary":{"pass":%s,"warn":%s,"fail":%s,"skip":%s,"notes":[%s]},' "$N_PASS" "$N_WARN" "$N_FAIL" "$N_SKIP" \
+      "$([ -n "$SKIP_NOTE" ] && json_str "$SKIP_NOTE")"
+    printf '"checks":['
+    _first=1
+    while IFS="$US" read -r c_id c_title c_status c_code c_sig c_msg c_hint c_cmd c_mut c_doc c_dep c_evj c_evt c_dur _rest; do
+      [ "$_first" = 1 ] || printf ','
+      _first=0
+      printf '{"id":%s,"title":%s,"status":%s,"signature":%s,' "$(json_str "$c_id")" "$(json_str "$c_title")" \
+        "$(json_str "$c_status")" "$(json_str "$c_sig")"
+      printf '"code":%s,' "$([ -n "$c_code" ] && json_str "$c_code" || echo null)"
+      printf '"message":%s,' "$(json_str "$c_msg")"
+      printf '"evidence":%s,' "${c_evj:-[]}"
+      if [ -n "$c_hint$c_cmd$c_doc" ]; then
+        printf '"fix":{"hint":%s,"commands":[' "$(json_str "$c_hint")"
+        [ -n "$c_cmd" ] && printf '{"command":%s,"mutates":%s}' "$(json_str "$c_cmd")" "${c_mut:-false}"
+        printf '],"doc":%s},' "$([ -n "$c_doc" ] && json_str "$c_doc" || echo null)"
+      else
+        printf '"fix":null,'
+      fi
+      printf '"depends_on":['
+      _s=""
+      for _d in $(echo "$c_dep" | tr ',' ' '); do printf '%s%s' "$_s" "$(json_str "$_d")"; _s=","; done
+      printf '],'
+      if [ "$c_status" = skip ]; then
+        printf '"reason":%s,' "$(json_str "$(printf '%s' "$c_msg" | sed 's/^skipped: //')")"
+      fi
+      printf '"duration_ms":%s}' "${c_dur:-0}"
+      : "$c_evt" "$_rest"
+    done < "$CHECKS"
+    printf ']}\n'
+  }
+  exit "$EXIT"
+fi
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_PASS=$(printf '\033[32m'); C_WARN=$(printf '\033[33m'); C_FAIL=$(printf '\033[31m')
+  C_SKIP=$(printf '\033[2m'); C_OFF=$(printf '\033[0m')
+else
+  C_PASS=""; C_WARN=""; C_FAIL=""; C_SKIP=""; C_OFF=""
+fi
+[ -t 2 ] && printf '\r\033[K' >&2
+
+_pk=""
+[ -n "$PKG_MODULE" ] && _pk=", $([ "$SERVER" = nginx ] && echo nginx-module-pagespeed || echo mod-pagespeed) $PKG_MODULE"
+[ -n "$PKG_OPTIMIZER" ] && _pk="$_pk, pagespeed-optimizer $PKG_OPTIMIZER"
+printf 'pagespeed-doctor %s -- %s %s (%s)%s\n\n' "$DOCTOR_VERSION" "$SERVER" "${SERVER_VERSION:-?}" "$OS_ID" "$_pk"
+while IFS="$US" read -r c_id c_title c_status c_code c_sig c_msg c_hint c_cmd c_mut c_doc c_dep c_evj c_evt c_dur _rest; do
+  case "$c_status" in
+    pass) _c=$C_PASS; _s="PASS" ;; warn) _c=$C_WARN; _s="WARN" ;;
+    fail) _c=$C_FAIL; _s="FAIL" ;; *) _c=$C_SKIP; _s="SKIP" ;;
+  esac
+  printf '  %s%s%s  %s %-17s %s\n' "$_c" "$_s" "$C_OFF" "$c_id" "$c_title" "$c_msg"
+  if [ "$c_status" = warn ] || [ "$c_status" = fail ]; then
+    [ -n "$c_hint" ] && printf '        fix: %s\n' "$c_hint"
+    if [ -n "$c_cmd" ]; then
+      if [ "$c_mut" = true ]; then printf '        run: %s   (changes the system)\n' "$c_cmd"
+      else printf '        see: %s\n' "$c_cmd"; fi
+    fi
+    [ -n "$c_doc" ] && printf '        docs: %s\n' "$c_doc"
+    [ "$OPT_VERBOSE" = 1 ] && [ -n "$c_evt" ] && printf '        evidence: %s\n' "$c_evt"
+  elif [ "$OPT_VERBOSE" = 1 ] && [ -n "$c_evt" ]; then
+    printf '        evidence: %s\n' "$c_evt"
+  fi
+  : "$c_code" "$c_sig" "$c_dep" "$c_evj" "$c_dur" "$_rest"
+done < "$CHECKS"
+
+printf '\n'
+case "$VERDICT" in
+  working) printf 'Verdict: WORKING -- %s checks passed.\n' "$N_PASS" ;;
+  working_with_warnings)
+    if [ "$N_WARN" -gt 0 ]; then printf 'Verdict: WORKING WITH WARNINGS -- %s warning(s).\n' "$N_WARN"
+    else printf 'Verdict: WORKING WITH WARNINGS -- the configuration was not tested.\n'; fi ;;
+  not_working) printf 'Verdict: NOT WORKING -- %s failure(s), %s warning(s). Fix %s first.\n' "$N_FAIL" "$N_WARN" "$FIRST_FAIL" ;;
+esac
+[ -n "$SKIP_NOTE" ] && printf '%s\n' "$SKIP_NOTE"
+[ "$IS_ROOT" = 1 ] || printf 'Some checks need root: run sudo pagespeed-doctor for the full result.\n'
+exit "$EXIT"
+
+# The tables below are data read by the script itself (see "Tables" above).
+# BEGIN doctor-option-names
+#: AcceptInvalidSignatures AccessControlAllowOrigins AddOptionsToUrls
+#: AddResourceHeader AdminDomains AdminPath AgentOptimize Allow
+#: AllowLoggingUrlsInLogRecord AllowOptionsToBeSetByCookies AllowVaryOn
+#: AlwaysRewriteCss AmpLinkPattern AnalyticsID AsyncMetadataL2Writes
+#: AvifAnimatedRecompressionQuality AvifQualityForSaveData
+#: AvifRecompressionQuality AvifRecompressionQualityForSmallScreens
+#: AvifTimeoutMs AvoidRenamingIntrospectiveJavascript AwaitPcacheLookup
+#: BeaconReinstrumentTimeSec BeaconUrl BlockingRewriteKey
+#: BlockingRewriteRefererUrls CacheFlushFilename CacheFlushPollIntervalSec
+#: CacheFragment CacheSmallImagesUnrewritten ClientDomainRewrite
+#: CombineAcrossPaths CompressMetadataCache ConsoleDomains ConsolePath
+#: ContentExperimentID ContentExperimentVariantID
+#: CreateSharedMemoryMetadataCache CriticalCssAboveTheFoldOnly
+#: CriticalImagesBeaconEnabled CssFlattenMaxBytes CssImageInlineMaxBytes
+#: CssInlineMaxBytes CssOutlineMinBytes CssParseMaxBytes CssPreserveURLs
+#: CustomFetchHeader CycloneRamCacheKb CycloneZeroCopy CycloneZeroCopyServe
+#: DaemonApiSocketPath DaemonHtmlCache DaemonHtmlMaxBytes
+#: DaemonServeHonorRequestFreshness DaemonServeStoredEncodings DaemonSocketPath
+#: DaemonVolumePath DebugOutputMaxBytes DefaultCacheHtml DetectHydratedPages
+#: DisableBackgroundFetchesForBots DisableFilters DisableRewriteOnNoTransform
+#: Disallow DocumentImageInlineMaxBytes Domain DomainRewriteCookies
+#: DomainRewriteHyperlinks DomainShardCount DownstreamCachePurgeLocationPrefix
+#: DownstreamCachePurgeMethod DownstreamCacheRebeaconingKey
+#: DownstreamCacheRewrittenPercentageThreshold
+#: EnableAggressiveRewritersForMobile EnableCachePurge
+#: EnableDeferJsExperimental EnableExtendedInstrumentation EnableFilters
+#: EnableLazyLoadHighResImages EnablePrioritizingScripts EnableRewriting
+#: EnrollExperiment ExperimentalCentralControllerPort
+#: ExperimentalMeasurementProxy ExperimentalPopularityContestMaxInFlight
+#: ExperimentalPopularityContestMaxQueueSize ExperimentalProxyAllRequests
+#: ExperimentCookieDurationMs ExperimentSlot ExperimentSpec ExperimentVariable
+#: ExposeVersionInHeaders FetcherTimeOutMs FetchHttps FetchProxy FileCachePath
+#: FileCacheSizeKb FileCacheSmallTierPercent
+#: FinderPropertiesCacheExpirationTimeMs FinderPropertiesCacheRefreshTimeMs
+#: FlushBufferLimitBytes FlushHtml FollowFlushes ForbidAllDisabledFilters
+#: ForbidFilters ForceBuffering ForceCaching GlobalAdminDomains GlobalAdminPath
+#: GlobalStatisticsDomains GlobalStatisticsPath GoogleFontCssInlineMaxBytes
+#: HideRefererUsingMeta HonorCsp HttpCacheCompressionLevel IdleFlushTimeMs
+#: ImageInlineMaxBytes ImageJpegNumProgressiveScans
+#: ImageJpegNumProgressiveScansForSmallScreens ImageLimitOptimizedPercent
+#: ImageLimitRenderedAreaPercent ImageLimitResizeAreaPercent
+#: ImageMaxAnimatedFrames ImageMaxRewritesAtOnce ImagePreserveURLs
+#: ImageProvenanceCarry ImageRecompressionQuality ImageResolutionLimitBytes
+#: ImageWebpRecompressionQuality ImageWebpRecompressionQualityForSmallScreens
+#: ImgInlineMaxBytes ImgMaxRewritesAtOnce ImplicitCacheTtlMs
+#: IncreaseSpeedTracking InlineOnlyCriticalImages
+#: InlineResourcesWithoutExplicitAuthorization InPlacePreemptiveRewriteCss
+#: InPlacePreemptiveRewriteCssImages InPlacePreemptiveRewriteImages
+#: InPlacePreemptiveRewriteJavascript InPlaceResourceOptimization
+#: InPlaceRewriteDeadlineMs InPlaceSMaxAgeSec InPlaceWaitForOptimized
+#: InstallCrashHandler JpegQualityForSaveData JpegRecompressionQuality
+#: JpegRecompressionQualityForSmallScreens JsInlineMaxBytes JsOutlineMinBytes
+#: JsPreserveURLs LazyloadImagesAfterOnload LazyloadImagesBlankUrl
+#: LazyloadImagesMode LazyloadImagesSkipFirst Library
+#: ListOutstandingUrlsOnError LoadFromFile LoadFromFileCacheTtlMs
+#: LoadFromFileMatch LoadFromFileRule LoadFromFileRuleMatch
+#: LogBackgroundRewrite LogDir LogMobilizationSamples LogRewriteTiming
+#: LogUrlIndices LowercaseHtmlNames LRUCacheByteLimit LRUCacheKbPerProcess
+#: MapOriginDomain MapProxyDomain MapRewriteDomain MaxCacheableContentLength
+#: MaxCombinedCssBytes MaxCombinedJsBytes MaxHtmlCacheTimeMs MaxHtmlParseBytes
+#: MaxImageSizeLowResolutionBytes MaxInlinedPreviewImagesIndex
+#: MaxLowResImageSizeBytes MaxLowResToHighResImageSizePercentage
+#: MaxRewriteInfoLogSize MaxSegmentLength MaxUrlSize MemcachedServers
+#: MemcachedThreads MemcachedTimeoutUs MessageBufferSize MessagesDomains
+#: MessagesPath MetadataCacheStalenessThresholdMs
+#: MinImageSizeLowResolutionBytes MinResourceCacheTimeToRewriteMs
+#: ModifyCachingHeaders NativeFetcherMaxKeepaliveRequests
+#: NonCacheablesForCachePartialHtml NoTransformOptimizedImages
+#: NumExpensiveRewriteThreads NumRewriteThreads ObliviousPagespeedUrls off on
+#: OptionCookiesDurationMs OverrideCachingTtlMs PermitIdsForCssCombining
+#: PreserveImageProvenance PreserveSubresourceHints PreserveUrlRelativity
+#: PrivateNotVaryForIE ProactivelyFreshenUserFacingRequest
+#: ProactiveResourceFreshening ProcessScriptVariables ProgressiveJpegMinBytes
+#: ProxyAuth ProxySuffix PubliclyCacheMismatchedHashesExperimental
+#: RateLimitBackgroundFetches RedisDatabaseIndex RedisPassword
+#: RedisReconnectionDelayMs RedisServer RedisTimeoutUs RedisTTLSec RedisUser
+#: RejectBlacklisted RejectBlacklistedStatusCode RejectedUrl
+#: RemoteConfigurationTimeoutMs RemoteConfigurationUrl ReportUnloadTime
+#: RequestOptionOverride RespectVary RespectXForwardedProto
+#: ResponsiveImageDensities RetainComment RewriteDeadlinePerFlushMs
+#: RewriteLevel RewriteRandomDropPercentage RewriteUncacheableResources
+#: RslCapDirectoryHost RslCapEnforcement RslCapIssuer
+#: RslCapKeyDirectoryAllowlist RslCapKeyDirectoryFile
+#: RslCapKeyDirectoryRefreshSec RslCapKeyDirectoryUrl RslCapRequestedLicense
+#: RslCapRequestedScope RulePackFile RulePackMode RulePackRequireSigned
+#: RulePackTrustKey RunExperiment ServeRewrittenAvifUrlsToAnyAgent
+#: ServeRewrittenWebpUrlsToAnyAgent ServeStaleIfFetchError
+#: ServeStaleWhileRevalidateThresholdSec ServeXhrAccessControlHeaders
+#: ShardDomain SharedMemoryLocks SlurpDirectory SlurpFlushLimit SlurpReadOnly
+#: SslCertDirectory SslCertFile standby StaticAssetCDN StaticAssetPrefix
+#: Statistics StatisticsDomains StatisticsLogging StatisticsLoggingChartsCSS
+#: StatisticsLoggingChartsJS StatisticsLoggingIntervalMs
+#: StatisticsLoggingMaxFileSizeKb StatisticsPath StickyQueryParameters
+#: SupportNoScriptEnabled TestProxy TestProxySlurp TrackOriginalContentLength
+#: unplugged UrlSigningKey UrlValuedAttribute UseAnalyticsJs
+#: UseBlankImageForInlinePreview UseExperimentalJsMinifier
+#: UseFallbackPropertyCacheValues UseImageScanlineApi UseNativeFetcher
+#: UsePerVHostStatistics WebBotAuth WebBotAuthBotDetection
+#: WebBotAuthDirectoryHost WebBotAuthKeyDirectoryAllowlist
+#: WebBotAuthKeyDirectoryFile WebBotAuthKeyDirectoryRefreshSec
+#: WebBotAuthKeyDirectoryUrl WebBotAuthPublicCounter WebBotAuthTelemetry
+#: WebBotAuthVerifiedBots WebpAnimatedRecompressionQuality
+#: WebpQualityForSaveData WebpRecompressionQuality
+#: WebpRecompressionQualityForSmallScreens WebpTimeoutMs XHeaderValue
+# END doctor-option-names
+# BEGIN doctor-removed-options
+#: CollectRefererStatistics DisableForBots DistributedRewriteKey
+#: DistributedRewriteServers DistributedRewriteTimeoutMs DistributeFetches
+#: FetchFromModSpdy FileCacheCleanIntervalMs FileCacheInodeLimit
+#: GeneratedFilePrefix HashRefererStatistics InheritVHostConfig
+#: MaxPrefetchJsElements NumShards RefererStatisticsOutputLevel
+#: StatisticsLoggingFile UrlPrefix
+# END doctor-removed-options
+# BEGIN doctor-deprecated-options
+#: AllowVaryOn AnalyticsID ContentExperimentID ContentExperimentVariantID
+#: ExperimentVariable IncreaseSpeedTracking LogMobilizationSamples
+#: PrivateNotVaryForIE UseAnalyticsJs UseExperimentalJsMinifier
+# END doctor-deprecated-options
+# BEGIN doctor-process-scope-options
+#: AvifTimeoutMs CreateSharedMemoryMetadataCache DetectHydratedPages
+#: ExperimentalCentralControllerPort ExperimentalPopularityContestMaxInFlight
+#: ExperimentalPopularityContestMaxQueueSize ExposeVersionInHeaders
+#: GlobalAdminPath GlobalStatisticsPath ImageMaxRewritesAtOnce
+#: InstallCrashHandler NativeFetcherMaxKeepaliveRequests
+#: NumExpensiveRewriteThreads NumRewriteThreads ProcessScriptVariables
+#: StaticAssetCDN StaticAssetPrefix UseNativeFetcher UsePerVHostStatistics
+#: WebpTimeoutMs
+# END doctor-process-scope-options
+# BEGIN doctor-server-scope-options
+#: AcceptInvalidSignatures AdminPath AsyncMetadataL2Writes AwaitPcacheLookup
+#: BlockingRewriteKey BlockingRewriteRefererUrls CacheFlushFilename
+#: CacheFlushPollIntervalSec CompressMetadataCache ConsolePath
+#: CycloneRamCacheKb CycloneZeroCopy CycloneZeroCopyServe DaemonApiSocketPath
+#: DaemonHtmlCache DaemonHtmlMaxBytes DaemonServeHonorRequestFreshness
+#: DaemonServeStoredEncodings DaemonSocketPath DaemonVolumePath
+#: FetcherTimeoutMs FetchHttps FetchProxy FileCachePath FileCacheSizeKb
+#: FileCacheSmallTierPercent FlushHtml ForceCaching GeneratedFilePrefix
+#: HonorCsp HttpCacheCompressionLevel ImgMaxRewritesAtOnce InheritVHostConfig
+#: InPlaceSMaxAgeSec LoadFromFile LoadFromFileMatch LoadFromFileRule
+#: LoadFromFileRuleMatch LogBackgroundRewrite LogDir LRUCacheByteLimit
+#: LRUCacheKbPerProcess MaxCacheableContentLength MemcachedServers
+#: MemcachedThreads MemcachedTimeoutUs MessageBufferSize MessagesPath
+#: ProactiveResourceFreshening RateLimitBackgroundFetches RedisDatabaseIndex
+#: RedisPassword RedisReconnectionDelayMs RedisServer RedisTimeoutUs
+#: RedisTTLSec RedisUser RemoteConfigurationTimeoutMs
+#: RewriteUncacheableResources RslCapDirectoryHost RslCapEnforcement
+#: RslCapIssuer RslCapKeyDirectoryAllowlist RslCapKeyDirectoryFile
+#: RslCapKeyDirectoryRefreshSec RslCapKeyDirectoryUrl RslCapRequestedLicense
+#: RslCapRequestedScope RulePackFile RulePackMode RulePackRequireSigned
+#: RulePackTrustKey SharedMemoryLocks SlurpDirectory SlurpFlushLimit
+#: SlurpReadOnly SslCertDirectory SslCertFile Statistics StatisticsLogging
+#: StatisticsLoggingChartsCSS StatisticsLoggingChartsJS
+#: StatisticsLoggingIntervalMs StatisticsLoggingMaxFileSizeKb StatisticsPath
+#: TestProxy TestProxySlurp TrackOriginalContentLength UrlSigningKey
+#: UseFallbackPropertyCacheValues WebBotAuth WebBotAuthBotDetection
+#: WebBotAuthDirectoryHost WebBotAuthKeyDirectoryAllowlist
+#: WebBotAuthKeyDirectoryFile WebBotAuthKeyDirectoryRefreshSec
+#: WebBotAuthKeyDirectoryUrl WebBotAuthPublicCounter WebBotAuthTelemetry
+#: WebBotAuthVerifiedBots
+# END doctor-server-scope-options
+# BEGIN doctor-deprecated-filters
+#: defer_iframe div_structure explicit_close_tags flush_subresources
+#: in_place_optimize_for_browser insert_ga local_storage_cache
+#: make_google_analytics_async mobilize mobilize_precompute split_html
+#: split_html_helper
+# END doctor-deprecated-filters
