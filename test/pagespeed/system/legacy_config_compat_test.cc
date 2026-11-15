@@ -728,12 +728,48 @@ std::map<GoogleString, bool> ReadHandWrittenCommands(
   return out;
 }
 
-ApacheCommandScope ScopeOf(RewriteOptions::OptionScope scope) {
-  // FillInApacheCommand in mod_instaweb.cc.
+const char* ScopeLabel(RewriteOptions::OptionScope scope) {
+  switch (scope) {
+    case RewriteOptions::kDirectoryScope:
+      return "kDirectoryScope";
+    case RewriteOptions::kQueryScope:
+      return "kQueryScope";
+    case RewriteOptions::kServerScope:
+      return "kServerScope";
+    case RewriteOptions::kProcessScopeStrict:
+      return "kProcessScopeStrict";
+    case RewriteOptions::kLegacyProcessScope:
+      return "kLegacyProcessScope";
+  }
+  return "";
+}
+
+// What FillInApacheCommand does for an option scope, read from the switch in
+// mod_instaweb.cc rather than copied: the case's statements, up to its
+// break, say whether the command is OR_ALL (allowed in <Directory>) and
+// whether it is registered as kErrorInVHost.  A case label that is missing
+// from the switch fails the test.
+ApacheCommandScope ScopeOf(const GoogleString& mod_instaweb_source,
+                           RewriteOptions::OptionScope scope) {
   ApacheCommandScope s;
-  s.in_directory = scope == RewriteOptions::kDirectoryScope ||
-                   scope == RewriteOptions::kQueryScope;
-  s.errors_in_vhost = scope == RewriteOptions::kProcessScopeStrict;
+  const GoogleString body = FunctionBody(
+      mod_instaweb_source, "void ApacheProcessContext::FillInApacheCommand(");
+  const GoogleString label =
+      StrCat("case RewriteOptions::", ScopeLabel(scope), ":");
+  const size_t at = body.find(label);
+  if (at == GoogleString::npos) {
+    ADD_FAILURE() << "FillInApacheCommand has no `" << label << "`";
+    return s;
+  }
+  // Labels that fall through share the statements after the last one.
+  const size_t end = body.find("break;", at);
+  const GoogleString block = body.substr(
+      at, end == GoogleString::npos ? GoogleString::npos : end - at);
+  const bool or_all = block.find("OR_ALL") != GoogleString::npos;
+  const bool rsrc_conf = block.find("RSRC_CONF") != GoogleString::npos;
+  EXPECT_NE(or_all, rsrc_conf) << label << " must set one req_override";
+  s.in_directory = or_all;
+  s.errors_in_vhost = block.find("kErrorInVHost") != GoogleString::npos;
   return s;
 }
 
@@ -744,7 +780,7 @@ ApacheCommandScope ScopeOf(RewriteOptions::OptionScope scope) {
 // CheckGlobalOption; the hand-written names that are global are refused by
 // the factory instead (is_process_scope).
 ApacheCommandScope CommandScope(
-    const ApacheConfig& config,
+    const ApacheConfig& config, const GoogleString& mod_instaweb_source,
     const std::map<GoogleString, bool>& hand_written, StringPiece option) {
   ApacheCommandScope s;
   const auto hw = hand_written.find(Lower(option));
@@ -755,14 +791,14 @@ ApacheCommandScope CommandScope(
   for (const RewriteOptions::OptionBase* o : config.all_options()) {
     if (o != nullptr && o->help_text() != nullptr &&
         StringCaseEqual(o->option_name(), option)) {
-      return ScopeOf(o->scope());
+      return ScopeOf(mod_instaweb_source, o->scope());
     }
   }
   const RewriteOptions::Properties* deprecated =
       RewriteOptions::deprecated_properties();
   for (int i = 0, n = deprecated->size(); i < n; ++i) {
     if (StringCaseEqual(deprecated->property(i)->option_name(), option)) {
-      return ScopeOf(deprecated->property(i)->scope());
+      return ScopeOf(mod_instaweb_source, deprecated->property(i)->scope());
     }
   }
   return s;
@@ -787,7 +823,8 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
   }
   if (where != ApacheWhere::kServerConfig) {
     const ApacheCommandScope scope = CommandScope(
-        *config, ReadHandWrittenCommands(mod_instaweb_source), option);
+        *config, mod_instaweb_source,
+        ReadHandWrittenCommands(mod_instaweb_source), option);
     if (where == ApacheWhere::kDirectory && !scope.in_directory) {
       refused.message =
           StrCat(d.args[0], " not allowed in <Directory> context");
@@ -857,6 +894,27 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
 // The fixture and the report.
 // ---------------------------------------------------------------------------
 
+// One ProcessContext for the whole binary.  Its destructor shuts protobuf
+// down, so a second ProcessContext in the same process (one per test)
+// crashes on the first enum descriptor lookup of the next test.
+class ProcessContextEnvironment : public testing::Environment {
+ public:
+  void SetUp() override { context_ = std::make_unique<ProcessContext>(); }
+  void TearDown() override { context_.reset(); }
+  const ProcessContext& context() const { return *context_; }
+
+ private:
+  std::unique_ptr<ProcessContext> context_;
+};
+
+ProcessContextEnvironment* const kProcessContextEnvironment =
+    static_cast<ProcessContextEnvironment*>(
+        testing::AddGlobalTestEnvironment(new ProcessContextEnvironment));
+
+const ProcessContext& ProcessContextForBinary() {
+  return kProcessContextEnvironment->context();
+}
+
 class LegacyConfigCompatTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -865,11 +923,9 @@ class LegacyConfigCompatTest : public testing::Test {
 #else
     SystemRewriteOptions::Initialize();
 #endif
-    process_context_ = std::make_unique<ProcessContext>();
   }
 
   void TearDown() override {
-    process_context_.reset();
 #ifdef LEGACY_CONFIG_APACHE
     ApacheConfig::Terminate();
 #else
@@ -882,7 +938,7 @@ class LegacyConfigCompatTest : public testing::Test {
     // caches that CreateSharedMemoryMetadataCache registers with, as the
     // ports do before reading their configuration.
     auto factory = std::make_unique<OptionParsingFactory>(
-        *process_context_, new SystemThreadSystem);
+        ProcessContextForBinary(), new SystemThreadSystem);
     factory->Init();
     // The factory's ShutDown() reads the timer, which is otherwise created
     // only when something asks for it.
@@ -996,11 +1052,6 @@ class LegacyConfigCompatTest : public testing::Test {
   // names plus 12 process-scope names), 239 and 131 in a directory (the 31 plus
   // 100 names that are not allowed in <Directory> context).
   //
-  // Run from ApacheDirectivesKeepLoading, not as a test of its own: parsing
-  // StaticAssetCDN a second time in a process that has done
-  // ApacheConfig::Terminate() and Initialize() again crashes in protobuf's
-  // descriptor lookup, so everything that applies the whole corpus shares one
-  // SetUp.
   void CheckApacheScopes() {
     const std::vector<Directive> corpus = ReadCorpus("apache.conf", false);
     ASSERT_GE(corpus.size(), 300u);
@@ -1057,7 +1108,6 @@ class LegacyConfigCompatTest : public testing::Test {
 
 #endif
 
-  std::unique_ptr<ProcessContext> process_context_;
   NullThreadSystem thread_system_;
 };
 
@@ -1094,6 +1144,10 @@ TEST_F(LegacyConfigCompatTest, ApacheDirectivesKeepLoading) {
     ApacheConfig config("legacy-apache", &thread_system_);
     return ApplyApache(d, mod_instaweb, &config, factory.get(), &handler);
   });
+}
+
+// The corpus at vhost and directory scope (see CheckApacheScopes).
+TEST_F(LegacyConfigCompatTest, ApacheScopesHoldInVhostAndDirectory) {
   CheckApacheScopes();
 }
 
@@ -1258,7 +1312,7 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   EXPECT_NE(GoogleString::npos, all.find("if(option->help_text()!=nullptr)"));
   EXPECT_NE(GoogleString::npos,
             all.find("RewriteOptions::deprecated_properties()"));
-  // The scope rules ApacheScopesMatchHttpd models.
+  // The scope rules ScopeOf and CheckApacheScopes read.
   EXPECT_NE(GoogleString::npos,
             all.find("caseRewriteOptions::kProcessScopeStrict:"
                      "vhost_command_handling_map_[cmd]=kErrorInVHost;"
