@@ -528,6 +528,13 @@ void JavascriptFilter::InitializeConfigIfNecessary() {
 }
 
 void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
+  // A script inside a <noscript>, <noembed> or <noframes> never runs, and
+  // browsers may read it as the text of that element, so minification must
+  // not change it.
+  if (body_node->parent() != nullptr &&
+      IsInsideSometimesLiteralElement(body_node->parent())) {
+    return;
+  }
   if (!driver()->content_security_policy().CanModifyInlineScript()) {
     driver()->InsertDebugComment(kInlineCspMessage, body_node->parent());
     return;

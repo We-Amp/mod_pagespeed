@@ -1011,6 +1011,22 @@ TEST_F(JavascriptFilterTest, HtmlInlineScriptLosesXmlComment) {
                    absl::StrFormat(kInlineJs, "var s=\"<i>x</i>\";"));
 }
 
+// An inline script inside <noscript>, <noembed> or <noframes> never runs, and
+// browsers may read it as the text of that element: it is not minified.
+TEST_F(JavascriptFilterTest, InlineScriptInsideNoscriptLikeElementIsKept) {
+  SetHtmlMimetype();
+  InitFiltersAndTest(100);
+  const GoogleString script = absl::StrFormat(kInlineScriptFormat, kJsData);
+  ValidateNoChanges("noscript", StrCat("<noscript>", script, "</noscript>"));
+  ValidateNoChanges("noembed",
+                    StrCat("<noembed><p>", script, "</p></noembed>"));
+  ValidateNoChanges("noframes", StrCat("<noframes>", script, "</noframes>"));
+  ValidateExpected(
+      "elsewhere", StrCat("<div>", script, "</div>"),
+      StrCat("<div>", absl::StrFormat(kInlineScriptFormat, kJsMinData),
+             "</div>"));
+}
+
 // http://github.com/apache/incubator-pagespeed-mod/issues/324
 TEST_F(JavascriptFilterTest, RetainExtraHeaders) {
   InitFilters();
