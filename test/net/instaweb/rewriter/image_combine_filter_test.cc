@@ -569,6 +569,7 @@ TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableLastInput) {
   EXPECT_EQ(70, height);
   EXPECT_FALSE(headers.IsProxyCacheable());
   EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
 
   // The partial answer was not stored: with the input back, the full sprite.
   lru_cache()->Clear();
@@ -600,6 +601,7 @@ TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableFirstInput) {
   EXPECT_EQ(1, height);
   EXPECT_FALSE(headers.IsProxyCacheable());
   EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
 }
 
 // A sprite none of whose images can be fetched is still a 404.
