@@ -1349,6 +1349,72 @@ TEST_F(CacheExtenderTest, DefangHtml) {
   ValidateNoChanges("defang", css_before);
 }
 
+// A Content-Type we don't recognize is still the origin's statement of what
+// the resource is: no extension in the URL, in the path or after it, turns
+// it into a script or stylesheet that gets cache-extended.
+TEST_F(CacheExtenderTest, UnrecognizedContentTypeIsNotGuessedFromUrl) {
+  options()->EnableExtendCacheFilters();
+  rewrite_driver()->AddFilters();
+  ResponseHeaders response_headers;
+  DefaultResponseHeaders(kContentTypeJavascript, kMediumTtlSec,
+                         &response_headers);
+  response_headers.Replace(HttpAttributes::kContentType,
+                           "application/x-unlisted-type");
+  response_headers.ComputeCaching();
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.js"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.css"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("files/named.js"), response_headers, kJsData);
+
+  ValidateNoChanges("unrecognized_type",
+                    "<script src='data.bin?format=.js'></script>"
+                    "<link rel=stylesheet href='data.bin?format=.css'>"
+                    "<script src='files/named.js'></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get());
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.js", "js"),
+      &content));
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.css", "css"),
+      &content));
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(StrCat(kTestDomain, "files/"), kFilterId, "0", "named.js", "js"),
+      &content));
+  EXPECT_EQ(0, num_cache_extended_->Get());
+}
+
+// Without any Content-Type the type may be guessed from the extension of the
+// URL's path, never from text after the path.
+TEST_F(CacheExtenderTest, MissingContentTypeIsGuessedFromPathOnly) {
+  options()->EnableExtendCacheFilters();
+  rewrite_driver()->AddFilters();
+  ResponseHeaders response_headers;
+  DefaultResponseHeaders(kContentTypeJavascript, kMediumTtlSec,
+                         &response_headers);
+  response_headers.RemoveAll(HttpAttributes::kContentType);
+  response_headers.ComputeCaching();
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.js"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("named.js?format=.bin"), response_headers,
+                   kJsData);
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.js", "js"),
+      &content));
+  EXPECT_EQ(0, num_cache_extended_->Get());
+
+  ResponseHeaders fetched_headers;
+  EXPECT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "named.js?format=.bin", "js"),
+      &content, &fetched_headers));
+  EXPECT_EQ(GoogleString(kJsData), content);
+  EXPECT_EQ(&kContentTypeJavascript, fetched_headers.DetermineContentType());
+}
+
 // Negative test to ensure we do not cache-extend CSS that was already
 // minified (and thus has a long cache lifetime).
 TEST_F(CacheExtenderTest, DoNotExtendRewrittenCss) {

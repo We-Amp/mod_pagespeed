@@ -42,6 +42,7 @@
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"  // for HttpAttributes, etc
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -239,17 +240,23 @@ int64 Resource::CacheExpirationTimeMs() const {
 // Note: OutputResource overrides this to also set the file extension.
 void Resource::SetType(const ContentType* type) { type_ = type; }
 
-// Try to determine the content type from the URL extension, or
-// the response headers.
+// Determine the content type from the response headers, or, when they have
+// none, from the URL.
 void Resource::DetermineContentType() {
   // First try the HTTP headers, the definitive source of Content-Type.
   const ContentType* content_type;
   response_headers()->DetermineContentTypeAndCharset(&content_type, &charset_);
-  // If there is no content type in headers, then guess from extension.
-  if (content_type == nullptr && has_url()) {
+  // A Content-Type we do not recognize is still the origin's statement of
+  // what the resource is, so a type is guessed only when the response has
+  // none, from the extension of the URL's path.
+  if (content_type == nullptr && has_url() &&
+      !response_headers()->Has(HttpAttributes::kContentType)) {
     GoogleString trimmed_url;
     TrimWhitespace(url(), &trimmed_url);
-    content_type = NameExtensionToContentType(trimmed_url);
+    GoogleUrl gurl(trimmed_url);
+    if (gurl.IsAnyValid()) {
+      content_type = NameExtensionToContentType(gurl.LeafSansQuery());
+    }
   }
 
   SetType(content_type);

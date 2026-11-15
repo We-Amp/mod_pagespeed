@@ -1,1 +1,2 @@
 - Responses whose caching headers state a lifetime the module cannot read are now treated as already expired, so they are no longer stored and served to other visitors. Readable lifetimes, including the forms HTTP allows that were ignored before, are now honored as stated.
+- Assets served with an unrecognised Content-Type are no longer optimized.
