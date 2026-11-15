@@ -548,8 +548,13 @@ public sealed class PageSpeedMiddleware
                 lastModified.ToString("R");
         }
 
-        // Content-Encoding for compressed variants.
-        var encoding = cachedMask & EncodingMask;
+        // Content-Encoding for compressed variants. The Markdown copy's mask is
+        // a sentinel id, not a capability mask: its bits would read as gzip,
+        // but its bytes are stored and sent uncompressed. Mirrors nginx
+        // (ngx_http_pagespeed_set_variant_content_encoding).
+        var encoding = (cachedMask & 0xFF) == SentinelId.AgentMarkdown
+            ? EncodingIdentity
+            : cachedMask & EncodingMask;
         if (encoding == EncodingGzip)
             context.Response.Headers.ContentEncoding = "gzip";
         else if (encoding == EncodingBrotli)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
+using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -82,6 +83,43 @@ public sealed class MarkdownContentNegotiationTests
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal("private, no-cache", headers.CacheControl.ToString());
         Assert.Equal("noindex", headers["X-Robots-Tag"].ToString());
+    }
+
+    [Theory]
+    [InlineData("gzip")]
+    [InlineData("gzip, deflate, br")]
+    public async Task EntitledMarkdownHit_ContentEncodingMatchesTheBodySent(
+        string acceptEncoding)
+    {
+        if (!NativeMarkdownProbe.Available(_output)) return;
+
+        // The Markdown copy is stored uncompressed. Whatever the request
+        // accepts, a Content-Encoding on the response must describe the bytes
+        // actually sent: decoding the body by it yields the Markdown.
+        var cache = new MarkdownNegotiationCache(agentEntitled: 1);
+        var (status, ct, body, headers) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/markdown",
+            acceptEncoding: acceptEncoding);
+
+        Assert.Equal(200, status);
+        Assert.Equal("text/markdown; charset=utf-8", ct);
+        Assert.Equal("HIT", headers["X-PageSpeed"].ToString());
+        var encoding = headers.ContentEncoding.ToString();
+        byte[] decoded;
+        if (encoding.Length == 0)
+        {
+            decoded = body;
+        }
+        else
+        {
+            Assert.Equal("gzip", encoding);
+            using var gz = new GZipStream(
+                new MemoryStream(body), CompressionMode.Decompress);
+            using var plain = new MemoryStream();
+            gz.CopyTo(plain);
+            decoded = plain.ToArray();
+        }
+        Assert.Equal(MarkdownBody, decoded);
     }
 
     [Fact]
@@ -227,7 +265,8 @@ public sealed class MarkdownContentNegotiationTests
 
     private async Task<(int Status, string? ContentType, byte[] Body, IHeaderDictionary Headers)>
         Serve(IPageSpeedCache cache, bool enableAgentOptimize, string accept,
-              string allowedHost = "localhost", string? cookie = null)
+              string allowedHost = "localhost", string? cookie = null,
+              string? acceptEncoding = null)
     {
         var options = new PageSpeedOptions
         {
@@ -262,6 +301,8 @@ public sealed class MarkdownContentNegotiationTests
         context.Request.Host = new HostString("localhost");
         context.Request.Headers.Accept = accept;
         if (cookie != null) context.Request.Headers.Cookie = cookie;
+        if (acceptEncoding != null)
+            context.Request.Headers.AcceptEncoding = acceptEncoding;
         var responseBody = new MemoryStream();
         context.Response.Body = responseBody;
 
