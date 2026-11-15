@@ -202,6 +202,10 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   }
   StringPiece containing_charset() const { return containing_charset_; }
 
+  // For a fetch, the input URLs as the fetched URL names them, by position;
+  // nullptr otherwise.  Not owned.
+  void set_requested_urls(const StringVector* urls) { requested_urls_ = urls; }
+
  private:
   using CodeBlockMap = std::map<const Resource*, JavascriptCodeBlock*>;
 
@@ -232,6 +236,7 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   GoogleString containing_charset_;
   // The charset of the combination so far.
   StringPiece combined_charset_;
+  const StringVector* requested_urls_ = nullptr;
 
   std::unique_ptr<JavascriptRewriteConfig> config_;
   CodeBlockMap code_blocks_;
@@ -353,13 +358,22 @@ class JsCombineFilter::Context : public RewriteContext {
     RewriteResult result = kRewriteOk;
     if (!output->IsWritten()) {
       ResourceVector resources;
+      StringVector requested_urls;
       for (int i = 0, n = num_slots(); i < n; ++i) {
         ResourcePtr resource(slot(i)->resource());
         resources.push_back(resource);
+        if (IsFetchRewrite()) {
+          // A fetch's slots are all FetchResourceSlots (PrepareFetch).
+          requested_urls.push_back(
+              static_cast<FetchResourceSlot*>(slot(i).get())->requested_url());
+        }
       }
+      combiner_.set_requested_urls(IsFetchRewrite() ? &requested_urls
+                                                    : nullptr);
       if (!combiner_.Write(resources, output)) {
         result = kRewriteFailed;
       }
+      combiner_.set_requested_urls(nullptr);
     }
     RewriteDone(result, partition_index);
   }
@@ -546,11 +560,20 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
 // The page evaluates one variable per script, so a script left out of the
 // combination is declared as empty code: evaluating it does nothing, as when
 // the browser cannot load that script.
+//
+// The name comes from the input URL as the combined URL names it, the one the
+// page evaluates: an input that is itself a .pagespeed. resource is rebuilt
+// into a resource whose URL carries the hash of what was rebuilt, which for a
+// failed rebuild is not the hash the page uses.
 bool JsCombineFilter::JsCombiner::WriteUnavailablePiece(
-    int /*index*/, int /*num_pieces*/, const Resource* input,
+    int index, int /*num_pieces*/, const Resource* input,
     OutputResource* /*combination*/, Writer* writer, MessageHandler* handler) {
+  const GoogleString& url = (requested_urls_ != nullptr &&
+                             index < static_cast<int>(requested_urls_->size()))
+                                ? (*requested_urls_)[index]
+                                : input->url();
   return writer->Write(
-      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, input->url()),
+      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, url),
              " = \"\";\n"),
       handler);
 }

@@ -210,6 +210,11 @@ class OutputResource : public Resource {
     cache_control_suffix_ = x;
   }
 
+  // False for an output that RewriteDriver::Write must not store in the HTTP
+  // cache, such as a combination fetched without some of its inputs.
+  bool store_in_http_cache() const { return store_in_http_cache_; }
+  void set_store_in_http_cache(bool x) { store_in_http_cache_ = x; }
+
  protected:
   ~OutputResource() override;
   REFCOUNT_FRIEND_DECLARATION(OutputResource);
@@ -261,6 +266,7 @@ class OutputResource : public Resource {
   GoogleString original_base_;
 
   GoogleString cache_control_suffix_;
+  bool store_in_http_cache_ = true;
 
   ResourceNamer full_name_;
 

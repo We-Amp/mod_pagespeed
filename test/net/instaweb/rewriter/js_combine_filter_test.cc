@@ -22,6 +22,7 @@
 
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
+#include <cstdio>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -1089,6 +1090,79 @@ TEST_F(JsCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
   js_out.clear();
   ASSERT_TRUE(FetchResourceUrl(js_url, &js_out));
   EXPECT_EQ(full, js_out);
+}
+
+// The same with inputs that are themselves optimized resources, as in URLs
+// that older versions put in pages (see ReconstructNoTimeout): the script
+// that cannot be fetched is declared under the name the page evaluates,
+// which comes from the URL the combination names, not from the failed
+// rebuild of that input.
+TEST_F(JsFilterAndCombineFilterTest,
+       FetchChainedCombinationWithUnavailableInput) {
+  const GoogleString url = Encode(kTestDomain, "jc", "FA3Pqioukh",
+                                  MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js",
+                                           "b.js.pagespeed.jm.Y1kknPfzVs.js"),
+                                  "js");
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  const char kLegacyVar2[] = "mod_pagespeed_ose8Vzgyj9";
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(url, &full));
+  ASSERT_NE(GoogleString::npos, full.find(StrCat("var ", kLegacyVar1, " = ")));
+  ASSERT_NE(GoogleString::npos, full.find(StrCat("var ", kLegacyVar2, " = ")));
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kJsUrl2));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &partial, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_NE(GoogleString::npos,
+            partial.find(StrCat("var ", kLegacyVar1, " = ")));
+  EXPECT_NE(GoogleString::npos,
+            partial.find(StrCat("var ", kLegacyVar2, " = \"\";\n")));
+  EXPECT_FALSE(headers.IsProxyCacheable());
+}
+
+// A script that is gone for good stops being combined once what the server
+// knows about it expires: pages rewritten after that no longer reference the
+// old combined URL. Until then (the input's cache lifetime, counted from when
+// the server last fetched it) pages keep referencing it, and a fetch of it
+// after cache loss is answered by the partial fallback.
+TEST_F(JsCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
+  const int64 kTtlSec = 100;
+  SetResponseWithDefaultHeaders("ga.js", kContentTypeJavascript, "var ga;",
+                                kTtlSec);
+  SetResponseWithDefaultHeaders("gb.js", kContentTypeJavascript, "var gb;",
+                                kTtlSec);
+  const GoogleString html =
+      "<script src=ga.js></script><script src=gb.js></script>";
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain, html);
+  ASSERT_EQ(3, scripts.size());
+  const GoogleString old_combined = scripts[0].url;
+  ASSERT_NE(GoogleString::npos, old_combined.find(".pagespeed.jc."));
+
+  SetFetchResponse404("gb.js");
+  int64 gone_after_sec = -1;
+  for (int64 t = 10; t <= 3 * kTtlSec; t += 10) {
+    AdvanceTimeMs(10 * Timer::kSecondMs);
+    scripts.clear();
+    ParseUrl(kTestDomain, html);
+    if (output_buffer_.find(old_combined) == GoogleString::npos) {
+      gone_after_sec = t;
+      break;
+    }
+  }
+  fprintf(stderr,
+          "issue-791 js: old combined URL emitted until %d s "
+          "(input TTL %d s)\n",
+          static_cast<int>(gone_after_sec), static_cast<int>(kTtlSec));
+  ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
+  EXPECT_LE(gone_after_sec, kTtlSec + 10);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ("ga.js", scripts[0].url);
+  EXPECT_EQ("gb.js", scripts[1].url);
 }
 
 TEST_F(JsCombineFilterTest, FetchWithNoInputsIsRefused) {

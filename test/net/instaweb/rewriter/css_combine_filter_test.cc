@@ -21,6 +21,7 @@
 
 #include "net/instaweb/rewriter/public/css_combine_filter.h"
 
+#include <cstdio>
 #include <vector>
 
 #include "base/logging.h"
@@ -611,12 +612,94 @@ TEST_F(CssCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
   EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
   EXPECT_FALSE(headers.IsProxyCacheable());
   EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  // The partial result is not kept in the HTTP cache under its own hash.
+  const GoogleString partial_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(content),
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  EXPECT_EQ(kNotFoundResult, HttpBlockingFindStatus(partial_url, http_cache()));
 
   lru_cache()->Clear();
   SetupCssResources(kCssA, kCssB);
   content.clear();
   ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
   EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+  // Control: the complete combination is kept, so the lookup above is a
+  // meaningful one.
+  const GoogleString full_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(content),
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  EXPECT_EQ(kFoundResult, HttpBlockingFindStatus(full_url, http_cache()));
+}
+
+// A combination served without some of its inputs stays private even where
+// mismatched hashes are otherwise served publicly.
+TEST_F(CssCombineFilterTest,
+       FetchWithUnavailableInputIsPrivateWithPublicMismatchedHashes) {
+  options()->ClearSignatureForTesting();
+  options()->set_publicly_cache_mismatched_hashes_experimental(true);
+  server_context()->ComputeSignature(options());
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  const GoogleString combined_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  // Control: the complete combination under a mismatched hash is public.
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+  EXPECT_TRUE(headers.IsProxyCacheable());
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  content.clear();
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+}
+
+// A stylesheet that is gone for good stops being combined once what the
+// server knows about it expires: pages rewritten after that no longer
+// reference the old combined URL. Until then (the input's cache lifetime,
+// counted from when the server last fetched it) pages keep referencing it,
+// and a fetch of it after cache loss is answered by the partial fallback.
+TEST_F(CssCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
+  const int64 kTtlSec = 100;
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kACssBody, kTtlSec);
+  SetResponseWithDefaultHeaders(kCssB, kContentTypeCss, kBCssBody, kTtlSec);
+  const GoogleString html_url = StrCat(kTestDomain, "gone.html");
+  const GoogleString html =
+      StrCat("<head>\n  ", Link(kCssA), "\n  ", Link(kCssB), "\n</head>\n");
+  ParseUrl(html_url, html);
+  StringVector css_urls;
+  CollectCssLinks("gone_before", output_buffer_, &css_urls);
+  ASSERT_EQ(1, css_urls.size());
+  const GoogleString old_combined = css_urls[0];
+  ASSERT_NE(GoogleString::npos, old_combined.find(".pagespeed.cc."));
+
+  SetFetchResponse404(kCssB);
+  int64 gone_after_sec = -1;
+  for (int64 t = 10; t <= 3 * kTtlSec; t += 10) {
+    AdvanceTimeMs(10 * Timer::kSecondMs);
+    ParseUrl(html_url, html);
+    if (output_buffer_.find(old_combined) == GoogleString::npos) {
+      gone_after_sec = t;
+      break;
+    }
+  }
+  fprintf(stderr,
+          "issue-791 css: old combined URL emitted until %d s "
+          "(input TTL %d s)\n",
+          static_cast<int>(gone_after_sec), static_cast<int>(kTtlSec));
+  ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
+  EXPECT_LE(gone_after_sec, kTtlSec + 10);
+  css_urls.clear();
+  CollectCssLinks("gone_after", output_buffer_, &css_urls);
+  ASSERT_EQ(2, css_urls.size());
+  EXPECT_EQ(kCssA, css_urls[0]);
+  EXPECT_EQ(kCssB, css_urls[1]);
 }
 
 // When none of the inputs can be fetched there is nothing usable to serve.

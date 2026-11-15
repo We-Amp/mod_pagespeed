@@ -2836,6 +2836,7 @@ void RewriteContext::StartRewriteForFetch() {
       ++num_available;
     } else if (may_skip_unavailable &&
                !(resource->loaded() && resource->HttpStatusOk())) {
+      fetch_left_out_inputs_ = true;
       fetch_->handler()->Message(
           kWarning, "Input %s unavailable; serving %s without it",
           resource->UrlForDebug().c_str(),
@@ -2849,6 +2850,9 @@ void RewriteContext::StartRewriteForFetch() {
     ok_to_rewrite = false;
   }
   OutputResourcePtr output(fetch_->output_resource());
+  if (fetch_left_out_inputs_) {
+    output->set_store_in_http_cache(false);
+  }
 
   // During normal rewrite path, Partition() is responsible for syncing up
   // the output resource's CachedResult and the partition tables. As it does
@@ -3538,7 +3542,8 @@ void RewriteContext::FixFetchFallbackHeaders(const CachedResult& cached_result,
     }
   }
   int64 ttl_ms = min_cache_expiry_time_ms - date_ms;
-  if (!Options()->publicly_cache_mismatched_hashes_experimental()) {
+  if (!Options()->publicly_cache_mismatched_hashes_experimental() ||
+      fetch_left_out_inputs_) {
     // Shorten cache length, and prevent proxies caching this, as it's under
     // the "wrong" URL.
     cache_control_suffix = ",private";
