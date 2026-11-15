@@ -684,6 +684,6 @@
     "ndfw", kNegativeDeadlineFetchWaitMs, kServerScope, \
     "How long a request for a rewritten resource waits for its optimization " \
     "when the rewrite deadline is negative, before the original is served. " \
-    "At most FetcherTimeOutMs.", false)
+    "At most FetcherTimeOutMs.", true)
 
 // clang-format on
