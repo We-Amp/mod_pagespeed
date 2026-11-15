@@ -1859,22 +1859,22 @@ exit "$EXIT"
 #: MessagesPath MetadataCacheStalenessThresholdMs
 #: MinImageSizeLowResolutionBytes MinResourceCacheTimeToRewriteMs
 #: ModifyCachingHeaders NativeFetcherMaxKeepaliveRequests
-#: NonCacheablesForCachePartialHtml NoTransformOptimizedImages
-#: NumExpensiveRewriteThreads NumRewriteThreads ObliviousPagespeedUrls off on
-#: OptionCookiesDurationMs OverrideCachingTtlMs PermitIdsForCssCombining
-#: PreserveImageProvenance PreserveSubresourceHints PreserveUrlRelativity
-#: PrivateNotVaryForIE ProactivelyFreshenUserFacingRequest
-#: ProactiveResourceFreshening ProcessScriptVariables ProgressiveJpegMinBytes
-#: ProxyAuth ProxySuffix PubliclyCacheMismatchedHashesExperimental
-#: RateLimitBackgroundFetches RedisDatabaseIndex RedisPassword
-#: RedisReconnectionDelayMs RedisServer RedisTimeoutUs RedisTTLSec RedisUser
-#: RejectBlacklisted RejectBlacklistedStatusCode RejectedUrl
-#: RemoteConfigurationTimeoutMs RemoteConfigurationUrl ReportUnloadTime
-#: RequestOptionOverride RespectVary RespectXForwardedProto
-#: ResponsiveImageDensities RetainComment RewriteDeadlinePerFlushMs
-#: RewriteLevel RewriteRandomDropPercentage RewriteUncacheableResources
-#: RslCapDirectoryHost RslCapEnforcement RslCapIssuer
-#: RslCapKeyDirectoryAllowlist RslCapKeyDirectoryFile
+#: NegativeDeadlineFetchWaitMs NonCacheablesForCachePartialHtml
+#: NoTransformOptimizedImages NumExpensiveRewriteThreads NumRewriteThreads
+#: ObliviousPagespeedUrls off on OptionCookiesDurationMs OverrideCachingTtlMs
+#: PermitIdsForCssCombining PreserveImageProvenance PreserveSubresourceHints
+#: PreserveUrlRelativity PrivateNotVaryForIE
+#: ProactivelyFreshenUserFacingRequest ProactiveResourceFreshening
+#: ProcessScriptVariables ProgressiveJpegMinBytes ProxyAuth ProxySuffix
+#: PubliclyCacheMismatchedHashesExperimental RateLimitBackgroundFetches
+#: RedisDatabaseIndex RedisPassword RedisReconnectionDelayMs RedisServer
+#: RedisTimeoutUs RedisTTLSec RedisUser RejectBlacklisted
+#: RejectBlacklistedStatusCode RejectedUrl RemoteConfigurationTimeoutMs
+#: RemoteConfigurationUrl ReportUnloadTime RequestOptionOverride RespectVary
+#: RespectXForwardedProto ResponsiveImageDensities RetainComment
+#: RewriteDeadlinePerFlushMs RewriteLevel RewriteRandomDropPercentage
+#: RewriteUncacheableResources RslCapDirectoryHost RslCapEnforcement
+#: RslCapIssuer RslCapKeyDirectoryAllowlist RslCapKeyDirectoryFile
 #: RslCapKeyDirectoryRefreshSec RslCapKeyDirectoryUrl RslCapRequestedLicense
 #: RslCapRequestedScope RulePackFile RulePackMode RulePackRequireSigned
 #: RulePackTrustKey RunExperiment ServeRewrittenAvifUrlsToAnyAgent
@@ -1934,16 +1934,16 @@ exit "$EXIT"
 #: LoadFromFileRuleMatch LogBackgroundRewrite LogDir LRUCacheByteLimit
 #: LRUCacheKbPerProcess MaxCacheableContentLength MemcachedServers
 #: MemcachedThreads MemcachedTimeoutUs MessageBufferSize MessagesPath
-#: ProactiveResourceFreshening RateLimitBackgroundFetches RedisDatabaseIndex
-#: RedisPassword RedisReconnectionDelayMs RedisServer RedisTimeoutUs
-#: RedisTTLSec RedisUser RemoteConfigurationTimeoutMs
-#: RewriteUncacheableResources RslCapDirectoryHost RslCapEnforcement
-#: RslCapIssuer RslCapKeyDirectoryAllowlist RslCapKeyDirectoryFile
-#: RslCapKeyDirectoryRefreshSec RslCapKeyDirectoryUrl RslCapRequestedLicense
-#: RslCapRequestedScope RulePackFile RulePackMode RulePackRequireSigned
-#: RulePackTrustKey SharedMemoryLocks SlurpDirectory SlurpFlushLimit
-#: SlurpReadOnly SslCertDirectory SslCertFile Statistics StatisticsLogging
-#: StatisticsLoggingChartsCSS StatisticsLoggingChartsJS
+#: NegativeDeadlineFetchWaitMs ProactiveResourceFreshening
+#: RateLimitBackgroundFetches RedisDatabaseIndex RedisPassword
+#: RedisReconnectionDelayMs RedisServer RedisTimeoutUs RedisTTLSec RedisUser
+#: RemoteConfigurationTimeoutMs RewriteUncacheableResources RslCapDirectoryHost
+#: RslCapEnforcement RslCapIssuer RslCapKeyDirectoryAllowlist
+#: RslCapKeyDirectoryFile RslCapKeyDirectoryRefreshSec RslCapKeyDirectoryUrl
+#: RslCapRequestedLicense RslCapRequestedScope RulePackFile RulePackMode
+#: RulePackRequireSigned RulePackTrustKey SharedMemoryLocks SlurpDirectory
+#: SlurpFlushLimit SlurpReadOnly SslCertDirectory SslCertFile Statistics
+#: StatisticsLogging StatisticsLoggingChartsCSS StatisticsLoggingChartsJS
 #: StatisticsLoggingIntervalMs StatisticsLoggingMaxFileSizeKb StatisticsPath
 #: TestProxy TestProxySlurp TrackOriginalContentLength UrlSigningKey
 #: UseFallbackPropertyCacheValues WebBotAuth WebBotAuthBotDetection
