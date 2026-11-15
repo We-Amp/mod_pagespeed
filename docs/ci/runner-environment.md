@@ -150,7 +150,8 @@ owner does, in this order:
 
 While a runner is out, the class is smaller: with one `fleet-iis` runner
 left, IIS jobs queue behind each other, and a retry leg that lands on the
-failed runner waits up to 40 minutes for another one.
+failed runner waits up to 10 minutes (repository variable `IIS_RETRY_HOLD_MINUTES`, 1 to 45)
+for another one, then fails.
 
 ## Linux additions
 
