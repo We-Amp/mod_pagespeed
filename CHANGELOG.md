@@ -16,6 +16,10 @@ Changed: in the nginx module, a response fetched for a visitor whose request car
 
 Changed: the JPEG quality of a desktop (full-size) image variant no longer depends on the smaller mobile and tablet variants built before it. Desktop and other full-size JPEG variants can come out larger or smaller than before. A normal-client WebP or AVIF variant is now always compared against the full-size JPEG, so it is no longer refused because of an earlier viewport.
 
+Changed: in the nginx module, each server block keeps its own cache entries and optimized variants. Server blocks that share a cache path no longer share entries, also when they list the same host names, so each block fetches and optimizes its own copy of a URL. A block's entries belong to its server names and listen addresses: adding or removing either starts the block with an empty cache. The cache starts empty after the upgrade. See UPGRADING.md.
+
+Changed: `GET /v1/cache/select` takes the `site` listed by `GET /v1/cache/urls`, as `GET /v1/cache/alternates` does, so it finds entries stored per site.
+
 ## 2.8.1 - 2026-11-08
 
 Changed: the Helm chart 0.3.15 is published with this release; its default

@@ -292,6 +292,18 @@ middleware's `BuildLinkHeader`) in the same release, with consumers deployed
 no later than the emitting worker — and rollback across a sentinel-format
 change requires a cache purge.
 
+## Cache Key Site
+
+Every key is in the keyspace (site) of the server block that received the
+request: `ngx_http_pagespeed_site(r)`, derived at configuration time from the
+block's server names and listen addresses (`src/nginx/site_identity.h`). Every
+URL-based cache call, the precomposed serve key and every `CacheNotification`
+carry it; the record and revalidation helpers get it through
+`SiteScopedCache`. The Host header only selects an entry inside the block's
+own keyspace. Seeding a HIT test therefore names the block:
+`seed_test_cache --site_listen 0.0.0.0:<port> --site_names localhost`
+(t/seed-*.sh). Integration test: `t/112-cache-per-server-block.t`.
+
 ## Cache Key Scheme
 
 The key scheme comes from the connection's TLS state for every protocol

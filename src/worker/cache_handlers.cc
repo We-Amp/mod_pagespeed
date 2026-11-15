@@ -430,7 +430,7 @@ static HttpResponse HandleListUrls(CacheApiContext& ctx,
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/cache/select?url=...&hostname=...&mask=...
+// GET /v1/cache/select?url=...&hostname=...&mask=...[&site=...]
 // ---------------------------------------------------------------------------
 
 static HttpResponse HandleSelect(CacheApiContext& ctx,
@@ -462,7 +462,10 @@ static HttpResponse HandleSelect(CacheApiContext& ctx,
   }
   uint32_t client_mask = static_cast<uint32_t>(*mask_val);
 
-  auto result = ctx.cache->ListAlternates(url, hostname, scheme);
+  auto site = request.QueryParam("site");
+  if (auto err = CheckSiteParam(ctx, site)) return std::move(*err);
+
+  auto result = ctx.cache->ListAlternates(url, hostname, scheme, site);
   if (!result) {
     return HttpResponse::Error(ApiErrorCode::kNotFound,
                                "No alternates found for URL");
@@ -488,7 +491,7 @@ static HttpResponse HandleSelect(CacheApiContext& ctx,
     } else {
       // Read the alternate to extract metadata (stored as content prefix).
       auto read_result =
-          ctx.cache->ReadAlternate(url, hostname, scheme, alt_byte);
+          ctx.cache->ReadAlternate(url, hostname, scheme, alt_byte, site);
       if (read_result) {
         entry["size"] = read_result->content_length();
         uint32_t stored_mask = read_result->metadata.full_mask;

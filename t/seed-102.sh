@@ -23,6 +23,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 # The volumes live in the dedicated cache-parent dirs the .t prologue
 # populates with pagespeed-shared.conf; create the dirs here too so this
 # script also works standalone (tools/run-test-nginx.sh runs it before
@@ -40,5 +45,5 @@ for vol in \
   # sibling, and Cyclone's fingerprint-named siblings) so every run starts
   # from a genuinely empty volume.
   rm -f "${vol}"* "${vol%.vol}"-*.vol
-  "$SEED" --cache "$vol" --create_only
+  "$SEED" "${SITE[@]}" --cache "$vol" --create_only
 done

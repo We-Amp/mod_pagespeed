@@ -23,10 +23,15 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 for vol in /tmp/test-ps-101-1.vol /tmp/test-ps-101-2.vol /tmp/test-ps-101-3.vol; do
   # Drop leftovers from previous runs (the volume, its .gen stamp, .small
   # sibling, and Cyclone's fingerprint-named siblings) so every run starts
   # from a genuinely empty volume.
   rm -f "${vol}"* "${vol%.vol}"-*.vol
-  "$SEED" --cache "$vol" --create_only
+  "$SEED" "${SITE[@]}" --cache "$vol" --create_only
 done

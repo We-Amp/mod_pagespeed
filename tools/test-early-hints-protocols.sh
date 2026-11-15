@@ -60,12 +60,15 @@ URLS=""
 for tag in h1 h2 h3; do
   URLS="${URLS} /page-${tag}.html /about-${tag} /style-${tag}.css /noaccept-${tag}"
 done
+# Each server block reads only its own entries: seed each for its block.
 for u in ${URLS}; do
   "${SEED_TOOL}" --cache "${VOL}" --url "${u}" --host "localhost:${PORT}" \
     --scheme https --content "/hero.css" --content_type other \
+    --site_listen "127.0.0.1:${PORT}" --site_names localhost \
     --mask 0x1C >/dev/null || { echo "seeding ${u} failed"; exit 2; }
   "${SEED_TOOL}" --cache "${VOL}" --url "${u}" --host "localhost:${PLAIN_PORT}" \
     --scheme http --content "/hero.css" --content_type other \
+    --site_listen "127.0.0.1:${PLAIN_PORT}" --site_names localhost \
     --mask 0x1C >/dev/null || { echo "seeding ${u} failed"; exit 2; }
 done
 

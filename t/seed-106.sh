@@ -27,6 +27,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 for name in match older newer none recover; do
   dir="/tmp/psgen-106-${name}"
   vol="${dir}/cache.vol"
@@ -35,7 +40,7 @@ for name in match older newer none recover; do
   # sibling, and Cyclone's fingerprint-named siblings) so every run starts
   # from a volume holding only the seeded entry.
   rm -f "${vol}"* "${vol%.vol}"-*.vol
-  "$SEED" \
+  "$SEED" "${SITE[@]}" \
     --cache "$vol" \
     --url "/style.css" \
     --host "localhost" \

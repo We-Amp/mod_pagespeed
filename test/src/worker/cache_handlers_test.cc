@@ -2834,6 +2834,29 @@ TEST_F(SiteCacheHandlersTest, AlternatesTakeTheSite) {
   EXPECT_NE(resp.find("\"count\":1"), std::string::npos);
 }
 
+TEST_F(SiteCacheHandlersTest, SelectTakesTheSite) {
+  WriteSited(kSiteA, "a{}");
+  const std::string query =
+      "GET /v1/cache/select?url=/s.css&hostname=example.com&scheme=https"
+      "&mask=" +
+      std::to_string(CapabilityMask().Encode());
+  // Without a site the unsited keyspace is read: nothing is stored there.
+  std::string resp =
+      SendRequest(query + " HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(resp.find("404"), std::string::npos) << resp;
+
+  resp = SendRequest(query + "&site=" + kSiteA +
+                     " HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  ASSERT_NE(resp.find("200 OK"), std::string::npos) << resp;
+  json j = ParseJsonBody(resp);
+  EXPECT_GT(j["best_score"].get<int>(), 0);
+  EXPECT_GE(j["best_index"].get<int>(), 0);
+
+  resp = SendRequest(query + "&site=" + kSiteB +
+                     " HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(resp.find("403"), std::string::npos) << resp;
+}
+
 TEST_F(SiteCacheHandlersTest, AlternatesWithAMalformedSiteIsABadRequest) {
   std::string resp = SendRequest(
       "GET /v1/cache/alternates?url=/s.css&hostname=example.com&site=nope"

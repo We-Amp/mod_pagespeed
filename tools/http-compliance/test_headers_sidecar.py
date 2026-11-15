@@ -180,6 +180,12 @@ def remove_stored_headers(path: str):
             NGINX_HOST,
             "--scheme",
             "http",
+            # The safe-mode server block (nginx-compliance.conf): its
+            # listener, and no server_name of its own.
+            "--site_listen",
+            "0.0.0.0:8080",
+            "--site_names",
+            "",
             "--remove_alternate",
             "0x6c",
         ],

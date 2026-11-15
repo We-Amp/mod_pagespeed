@@ -461,7 +461,9 @@ auto ReadSourceOnce(PageSpeedCache* cache, const std::string& url,
                     std::string_view site, WorkerStats& stats,
                     MessageHandler* handler)
     -> decltype(cache->ReadBestAlternate(url, hostname, scheme,
-                                         CapabilityMask())) {
+                                         CapabilityMask(),
+                                         /*agent_request_entitled=*/false,
+                                         site)) {
   auto selected =
       cache->ReadBestAlternate(url, hostname, scheme, CapabilityMask(),
                                /*agent_request_entitled=*/false, site);
@@ -509,7 +511,9 @@ auto ReadOriginalWithRetry(PageSpeedCache* cache, const std::string& url,
                            std::string_view site, WorkerStats& stats,
                            MessageHandler* handler)
     -> decltype(cache->ReadBestAlternate(url, hostname, scheme,
-                                         CapabilityMask())) {
+                                         CapabilityMask(),
+                                         /*agent_request_entitled=*/false,
+                                         site)) {
   stats.selector_invocations.fetch_add(1, std::memory_order_relaxed);
   auto result =
       ReadSourceOnce(cache, url, hostname, scheme, site, stats, handler);

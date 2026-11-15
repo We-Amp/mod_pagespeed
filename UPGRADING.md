@@ -37,6 +37,12 @@ This document covers upgrading to mod_pagespeed:
   `Expires`) are no longer cached from a request that carries a cookie, so
   they are cached less until the origin sends an explicit `max-age`. Most real
   assets already have one.
+- **Server blocks keep their own entries (nginx module).** Server blocks
+  that share a cache path no longer share cached entries or optimized
+  variants, also when they list the same host names; each block stores its
+  own copy of a URL. A block's entries belong to its `server_name` list and
+  its `listen` addresses, so changing either starts that block with an empty
+  cache.
 - **Authorization** handling is unchanged.
 
 ## Upgrading from 2.4.0

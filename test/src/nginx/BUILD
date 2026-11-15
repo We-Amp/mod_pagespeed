@@ -51,6 +51,14 @@ gtest_test(
 )
 
 gtest_test(
+    name = "site_identity_test",
+    deps = [
+        "//src/nginx:site_identity",
+        "//src/proto:worker_ipc",
+    ],
+)
+
+gtest_test(
     name = "cache_generation_check_test",
     deps = [
         "//src/nginx:cache_generation_check",

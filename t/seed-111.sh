@@ -18,13 +18,18 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 dir=/tmp/pscookie-111
 vol="${dir}/cache.vol"
 mkdir -p "$dir"
 rm -f "${vol}"* "${vol%.vol}"-*.vol
 
 page() {  # page URL CACHE_CONTROL BODY
-  "$SEED" --cache "$vol" --url "$1" --host localhost --scheme http \
+  "$SEED" "${SITE[@]}" --cache "$vol" --url "$1" --host localhost --scheme http \
     --content_type html --mask 0x08 --origin_cc "$2" --content "$3"
 }
 
@@ -40,9 +45,9 @@ page /mustrev "max-age=600, must-revalidate" \
 hash=$(printf 'ab%.0s' $(seq 32))
 markdown() {  # markdown URL PARENT_CACHE_CONTROL
   page "$1" "$2" "<html><body>stored parent</body></html>"
-  "$SEED" --cache "$vol" --url "$1" --host localhost --scheme http \
+  "$SEED" "${SITE[@]}" --cache "$vol" --url "$1" --host localhost --scheme http \
     --mask 0x3C --content_hex "$hash"
-  "$SEED" --cache "$vol" --url "$1" --host localhost --scheme http \
+  "$SEED" "${SITE[@]}" --cache "$vol" --url "$1" --host localhost --scheme http \
     --mask 0x7C --content_type other --origin_ct text/markdown \
     --origin_html_hash "$hash" --content "# markdown $1"
 }
@@ -61,7 +66,7 @@ page /smaxage-dup "max-age=600, s-maxage=600, s-maxage=600" \
 # Early Hints sets: one for a URL with no stored page (every request is a
 # miss), one for a stored page without a sharing mark.
 hints() {  # hints URL
-  "$SEED" --cache "$vol" --url "$1" --host localhost --scheme http \
+  "$SEED" "${SITE[@]}" --cache "$vol" --url "$1" --host localhost --scheme http \
     --mask 0x1C --content "/hint.css"
 }
 hints /hints-nopage
@@ -69,5 +74,5 @@ page /hints-unmarked "max-age=600" "<html><body>stored hints</body></html>"
 hints /hints-unmarked
 
 # The /llms.txt index (0x8C).
-"$SEED" --cache "$vol" --url /llms.txt --host localhost --scheme http \
+"$SEED" "${SITE[@]}" --cache "$vol" --url /llms.txt --host localhost --scheme http \
   --content_type other --mask 0x8C --content "# stored index"

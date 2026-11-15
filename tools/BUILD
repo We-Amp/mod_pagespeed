@@ -13,7 +13,9 @@ cc_binary(
         "//lib/classify:alternate_metadata",
         "//lib/classify:capability_mask",
         "//lib/classify:content_type",
+        "//src/nginx:site_identity",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/strings",
     ],
 )

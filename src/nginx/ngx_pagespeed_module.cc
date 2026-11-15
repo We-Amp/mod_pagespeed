@@ -71,6 +71,7 @@ extern "C" {
 #include "src/nginx/host_vouch.h"
 #include "src/nginx/mime_util.h"
 #include "src/nginx/revalidation_storability.h"
+#include "src/nginx/site_identity.h"
 #include "src/nginx/zerocopy_barrier.h"
 #include "src/product_version/version.h"
 #include "src/proto/notification_sender.h"
@@ -1114,9 +1115,14 @@ typedef struct {
 // temporary pool, which is released once the configuration is read, so the
 // request path cannot use it.  The names and compiled regexes it points to
 // live in the configuration pool and stay valid.
+//
+// And the block's site (src/nginx/site_identity.h): the cache keyspace every
+// entry it reads or records, and every notification it sends, is scoped to,
+// so each block keeps its own cache entries.
 typedef struct {
   ngx_http_server_name_t* server_names;
   ngx_uint_t server_names_count;
+  ngx_str_t site;  // kSiteIdChars lowercase hex, in the configuration pool
 } ngx_http_pagespeed_srv_conf_t;
 
 // Maximum response body size to record to cache (10MB).  Responses
@@ -1526,8 +1532,48 @@ static void* ngx_http_pagespeed_create_srv_conf(ngx_conf_t* cf) {
   return ngx_pcalloc(cf->pool, sizeof(ngx_http_pagespeed_srv_conf_t));
 }
 
+// The addresses `cscf` listens on, in nginx's text form with the port.
+// CONFIGURATION TIME ONLY: the core module keeps no per-block list; each
+// configured address lists its blocks instead, in the configuration's
+// temporary data.
+static std::vector<std::string> ngx_http_pagespeed_listen_addresses(
+    ngx_conf_t* cf, const ngx_http_core_srv_conf_t* cscf) {
+  std::vector<std::string> addresses;
+  const auto* cmcf = static_cast<const ngx_http_core_main_conf_t*>(
+      ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module));
+  if (cmcf == nullptr || cmcf->ports == nullptr) {
+    return addresses;
+  }
+  const auto* ports =
+      static_cast<const ngx_http_conf_port_t*>(cmcf->ports->elts);
+  for (ngx_uint_t p = 0; p < cmcf->ports->nelts; ++p) {
+    const auto* addrs =
+        static_cast<const ngx_http_conf_addr_t*>(ports[p].addrs.elts);
+    for (ngx_uint_t a = 0; a < ports[p].addrs.nelts; ++a) {
+      auto* const* servers =
+          static_cast<ngx_http_core_srv_conf_t* const*>(addrs[a].servers.elts);
+      for (ngx_uint_t i = 0; i < addrs[a].servers.nelts; ++i) {
+        if (servers[i] != cscf) {
+          continue;
+        }
+        // From the address itself: the listen directive's own spelling
+        // would make one listener read as two.
+        u_char text[NGX_SOCKADDR_STRLEN];
+        const size_t len =
+            ngx_sock_ntop(addrs[a].opt.sockaddr, addrs[a].opt.socklen, text,
+                          sizeof(text), 1 /* port */);
+        addresses.emplace_back(reinterpret_cast<const char*>(text), len);
+        break;
+      }
+    }
+  }
+  return addresses;
+}
+
 // Runs after the core module's own merge, so the block's name list is
-// complete here (including the empty name nginx adds to a block without one).
+// complete here (including the empty name nginx adds to a block without one),
+// and so is its list of listeners (including the default one the core module
+// adds to a block without a listen directive).
 static char* ngx_http_pagespeed_merge_srv_conf(ngx_conf_t* cf, void* parent,
                                                void* child) {
   auto* conf = static_cast<ngx_http_pagespeed_srv_conf_t*>(child);
@@ -1535,7 +1581,35 @@ static char* ngx_http_pagespeed_merge_srv_conf(ngx_conf_t* cf, void* parent,
       ngx_http_conf_get_module_srv_conf(cf, ngx_http_core_module));
   conf->server_names = nullptr;
   conf->server_names_count = 0;
-  if (cscf == nullptr || cscf->server_names.nelts == 0) {
+  ngx_str_null(&conf->site);
+  if (cscf == nullptr) {
+    return NGX_CONF_OK;
+  }
+
+  std::vector<std::string> names;
+  const auto* cnames =
+      static_cast<const ngx_http_server_name_t*>(cscf->server_names.elts);
+  for (ngx_uint_t i = 0; i < cscf->server_names.nelts; ++i) {
+    std::string name(reinterpret_cast<const char*>(cnames[i].name.data),
+                     cnames[i].name.len);
+#if (NGX_PCRE)
+    // nginx stores a regular-expression name without its "~".
+    if (cnames[i].regex != nullptr) {
+      name.insert(0, "~");
+    }
+#endif
+    names.push_back(std::move(name));
+  }
+  const std::string site = pagespeed::DeriveServerBlockSite(
+      std::move(names), ngx_http_pagespeed_listen_addresses(cf, cscf));
+  conf->site.data = static_cast<u_char*>(ngx_pnalloc(cf->pool, site.size()));
+  if (conf->site.data == nullptr) {
+    return static_cast<char*>(NGX_CONF_ERROR);
+  }
+  ngx_memcpy(conf->site.data, site.data(), site.size());
+  conf->site.len = site.size();
+
+  if (cscf->server_names.nelts == 0) {
     return NGX_CONF_OK;
   }
   const size_t bytes =
@@ -2481,6 +2555,117 @@ static std::string ngx_http_pagespeed_cache_hostname(ngx_http_request_t* r) {
                                            g_url_norm_config);
 }
 
+// The site of the server block that received `r`: the keyspace of every
+// cache read and record for the request, and the site every notification
+// for it carries.  The hostname above selects an entry within that keyspace.
+static std::string_view ngx_http_pagespeed_site(ngx_http_request_t* r) {
+  const auto* sconf = static_cast<const ngx_http_pagespeed_srv_conf_t*>(
+      ngx_http_get_module_srv_conf(r, ngx_http_pagespeed_module));
+  if (sconf == nullptr || sconf->site.len == 0) {
+    return {};
+  }
+  return std::string_view(reinterpret_cast<const char*>(sconf->site.data),
+                          sconf->site.len);
+}
+
+// Every URL-based cache operation of this module, in one server block's
+// keyspace.  The module calls PageSpeedCache's URL-based methods only through
+// this view (and the templated record and revalidation helpers in
+// headers_sidecar_record.h and revalidation_storability.h get it too), so no
+// call can leave the site out.  An empty site is refused rather than mapped
+// to the unsited keyspace: reads miss, writes and removals fail, nothing is
+// cached.  (ngx_http_pagespeed_site() is never empty for a configured block;
+// this is the backstop.)
+class SiteScopedCache {
+ public:
+  template <typename T>
+  using Result = std::expected<T, cyclone::CacheError>;
+
+  SiteScopedCache(PageSpeedCache& cache, std::string_view site)
+      : cache_(cache), site_(site) {}
+
+  bool AlternateExists(std::string_view url, std::string_view hostname,
+                       std::string_view scheme, AlternateId id) {
+    return !site_.empty() &&
+           cache_.AlternateExists(url, hostname, scheme, id, site_);
+  }
+  Result<ReadResult> ReadAlternate(std::string_view url,
+                                   std::string_view hostname,
+                                   std::string_view scheme, AlternateId id) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::NotFound);
+    }
+    return cache_.ReadAlternate(url, hostname, scheme, id, site_);
+  }
+  Result<void> Remove(std::string_view url, std::string_view hostname,
+                      std::string_view scheme) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::InvalidKey);
+    }
+    return cache_.Remove(url, hostname, scheme, site_);
+  }
+  Result<void> RemoveAlternate(std::string_view url, std::string_view hostname,
+                               std::string_view scheme, AlternateId id) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::InvalidKey);
+    }
+    return cache_.RemoveAlternate(url, hostname, scheme, id, site_);
+  }
+  Result<pagespeed::WriteResult> WriteAlternate(
+      std::string_view url, std::string_view hostname, std::string_view scheme,
+      AlternateId id, uint64_t content_length,
+      const AlternateMetadata& metadata) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::InvalidKey);
+    }
+    return cache_.WriteAlternate(url, hostname, scheme, id, content_length,
+                                 metadata, site_);
+  }
+  void EvictAlternateFromRamCache(std::string_view url,
+                                  std::string_view hostname,
+                                  std::string_view scheme, AlternateId id) {
+    if (!site_.empty()) {
+      cache_.EvictAlternateFromRamCache(url, hostname, scheme, id, site_);
+    }
+  }
+  Result<ReadResult> ReadHeadersSidecar(std::string_view url,
+                                        std::string_view hostname,
+                                        std::string_view scheme) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::NotFound);
+    }
+    return cache_.ReadHeadersSidecar(url, hostname, scheme, site_);
+  }
+  Result<PageSpeedCache::HeadersSidecarWrite> WriteHeadersSidecar(
+      std::string_view url, std::string_view hostname, std::string_view scheme,
+      std::span<const pagespeed::HeaderField> headers) {
+    if (site_.empty()) {
+      return std::unexpected(cyclone::CacheError::InvalidKey);
+    }
+    return cache_.WriteHeadersSidecar(url, hostname, scheme, headers, site_);
+  }
+  static std::string_view HeadersSidecarPayload(const ReadResult& block) {
+    return PageSpeedCache::HeadersSidecarPayload(block);
+  }
+
+ private:
+  PageSpeedCache& cache_;
+  std::string_view site_;
+};
+
+// A notification to the worker for one URL of one server block's keyspace:
+// the site is a required argument, so no notification goes out without it.
+static CacheNotification ngx_http_pagespeed_notification(
+    std::string_view url, std::string_view hostname, std::string_view scheme,
+    std::string_view site) {
+  CacheNotification n;
+  n.url = std::string(url);
+  n.hostname = std::string(hostname);
+  n.scheme = std::string(scheme);
+  n.site = std::string(site);
+  return n;
+}
+
 // Whether the server block that received `r` stands behind `hostname` (the
 // normalized cache hostname, which is also where the worker fetches from for
 // the /llms.txt build and the agent render): one of the block's server names
@@ -3003,7 +3188,8 @@ static void ngx_http_pagespeed_classify_origin_headers(
   CapabilityMask default_mask;
   const AlternateId identity_id =
       MaskToAlternateId(static_cast<uint8_t>(default_mask.Encode() & 0xFF));
-  if (pagespeed::EvictOnSidecarRefusal(*cache, url_str, hostname,
+  SiteScopedCache site_cache(*cache, ngx_http_pagespeed_site(r));
+  if (pagespeed::EvictOnSidecarRefusal(site_cache, url_str, hostname,
                                        ngx_http_pagespeed_scheme(r, conf),
                                        identity_id)) {
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
@@ -3019,18 +3205,14 @@ static void ngx_http_pagespeed_classify_origin_headers(
 // purges whatever it still holds for the URL and clears its record of having
 // processed it, so once the origin stops varying the re-recorded original is
 // optimized again rather than skipped as already done.  Fire-and-forget.
-static void ngx_http_pagespeed_notify_url_dropped(ngx_http_request_t* r,
-                                                  std::string_view url,
-                                                  std::string_view hostname,
-                                                  std::string_view scheme,
-                                                  ContentType ct) {
+static void ngx_http_pagespeed_notify_url_dropped(
+    ngx_http_request_t* r, std::string_view url, std::string_view hostname,
+    std::string_view scheme, std::string_view site, ContentType ct) {
   if (g_shared_config.socket_path.empty()) {
     return;
   }
-  CacheNotification refresh;
-  refresh.url = std::string(url);
-  refresh.hostname = std::string(hostname);
-  refresh.scheme = std::string(scheme);
+  CacheNotification refresh =
+      ngx_http_pagespeed_notification(url, hostname, scheme, site);
   refresh.content_type = ct;
   refresh.capability_mask = pagespeed::kOriginRefreshedSentinel;
   refresh.host_vouched = ngx_http_pagespeed_host_vouched(r, hostname);
@@ -3072,7 +3254,9 @@ static void ngx_http_pagespeed_drop_on_vary_refusal(ngx_http_request_t* r) {
   CapabilityMask default_mask;
   const AlternateId identity_id =
       MaskToAlternateId(static_cast<uint8_t>(default_mask.Encode() & 0xFF));
-  if (pagespeed::EvictOnSidecarRefusal(*cache, url_str, hostname, scheme,
+  const std::string_view site = ngx_http_pagespeed_site(r);
+  SiteScopedCache site_cache(*cache, site);
+  if (pagespeed::EvictOnSidecarRefusal(site_cache, url_str, hostname, scheme,
                                        identity_id)) {
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                   "pagespeed: origin response for %V varies on a request "
@@ -3080,7 +3264,7 @@ static void ngx_http_pagespeed_drop_on_vary_refusal(ngx_http_request_t* r) {
                   "entries",
                   &r->uri);
     ngx_http_pagespeed_notify_url_dropped(
-        r, url_str, hostname, scheme,
+        r, url_str, hostname, scheme, site,
         ngx_http_pagespeed_detect_content_type(r));
   }
 }
@@ -3237,6 +3421,7 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
   std::string url_str = ngx_http_pagespeed_cache_url(r);
   std::string_view url(url_str);
   std::string hostname = ngx_http_pagespeed_cache_hostname(r);
+  const std::string_view site = ngx_http_pagespeed_site(r);
   CapabilityMask default_mask;
   AlternateId id =
       MaskToAlternateId(static_cast<uint8_t>(default_mask.Encode() & 0xFF));
@@ -3390,7 +3575,8 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
   bool stored_marker_disagrees = false;
   uint8_t stored_flags = 0;
   {
-    auto stored = cache->ReadAlternate(url, hostname, scheme, id);
+    auto stored =
+        SiteScopedCache(*cache, site).ReadAlternate(url, hostname, scheme, id);
     if (stored.has_value() && stored->is_valid()) {
       stored_exists = true;
       stored_flags = stored->metadata.flags;
@@ -3415,11 +3601,13 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
     stored_state.exists = stored_exists;
     stored_state.flags = stored_flags;
     const bool force_rewrite = ctx->origin_refreshed || stored_marker_disagrees;
-    const std::string slot_key =
-        std::string(url) + "|" + hostname + "|" + std::string(scheme);
+    const std::string slot_key = std::string(url) + "|" + hostname + "|" +
+                                 std::string(scheme) + "|" + std::string(site);
+    SiteScopedCache site_cache(*cache, site);
     const auto recorded = pagespeed::RecordEntryWithHeadersSidecar(
-        *cache, url, hostname, scheme, id, meta, std::as_bytes(std::span(body)),
-        origin_views, stored_state, force_rewrite, [&slot_key] {
+        site_cache, url, hostname, scheme, id, meta,
+        std::as_bytes(std::span(body)), origin_views, stored_state,
+        force_rewrite, [&slot_key] {
           // The same per-URL slot the age-expiry refresh coalesces on, with
           // the full window rather than that path's min(window, max-age):
           // while a rewrite holds it, a concurrent genuine expiry of the
@@ -3477,8 +3665,9 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
                    "pagespeed: alternate exists, skip write for %V", &r->uri);
     // Fall through to notification — worker may still need to process variants.
   } else {
+    SiteScopedCache site_cache(*cache, site);
     auto wh =
-        cache->WriteAlternate(url, hostname, scheme, id, body.size(), meta);
+        site_cache.WriteAlternate(url, hostname, scheme, id, body.size(), meta);
     if (!wh.has_value()) {
       ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "pagespeed: failed to write original to cache for %V",
@@ -3507,7 +3696,7 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
     // process's RAM tier, so a miss-record after such a purge can still
     // hold a pre-purge RAM entry that would otherwise shadow the fresh
     // write.  Only when neither happened is this a no-op.
-    cache->EvictAlternateFromRamCache(url, hostname, scheme, id);
+    site_cache.EvictAlternateFromRamCache(url, hostname, scheme, id);
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "pagespeed: recorded %uz bytes to cache", body.size());
@@ -3543,13 +3732,11 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
       // No notification for this hostname (see the helper).  Without it
       // nothing purges the URL's older variants, so drop the URL here; the
       // next request records the fresh body again.
-      (void)cache->Remove(url, hostname, scheme);
+      (void)SiteScopedCache(*cache, site).Remove(url, hostname, scheme);
       return;
     }
-    CacheNotification refresh;
-    refresh.url = std::string(url);
-    refresh.hostname = std::string(hostname);
-    refresh.scheme = std::string(scheme);
+    CacheNotification refresh =
+        ngx_http_pagespeed_notification(url, hostname, scheme, site);
     refresh.content_type = ct;
     refresh.capability_mask = pagespeed::kOriginRefreshedSentinel;
     refresh.host_vouched = host_vouched;
@@ -3578,10 +3765,8 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
       r->headers_out.status < 200 || r->headers_out.status >= 300 ||
       ngx_http_pagespeed_withhold_html_notify(ct, host_vouched);
   if (!g_shared_config.socket_path.empty() && !skip_notification) {
-    CacheNotification notification;
-    notification.url = std::string(url);
-    notification.hostname = std::string(hostname);
-    notification.scheme = std::string(scheme);
+    CacheNotification notification =
+        ngx_http_pagespeed_notification(url, hostname, scheme, site);
     notification.content_type = ct;
     notification.capability_mask = ctx->mask_valid ? ctx->mask.Encode() : 0;
     // Demand-gate the worker's per-URL forced agent render — only
@@ -4063,8 +4248,9 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
       }
       if (ev_cache) {
         std::string ev_url_str = ngx_http_pagespeed_cache_url(r);
-        (void)ev_cache->Remove(ev_url_str, ngx_http_pagespeed_cache_hostname(r),
-                               ngx_http_pagespeed_scheme(r, conf));
+        (void)SiteScopedCache(*ev_cache, ngx_http_pagespeed_site(r))
+            .Remove(ev_url_str, ngx_http_pagespeed_cache_hostname(r),
+                    ngx_http_pagespeed_scheme(r, conf));
       }
       ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                     "pagespeed: origin for %V now negotiates on Accept — "
@@ -4180,6 +4366,8 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
       std::string_view url(url_str);
       std::string hostname = ngx_http_pagespeed_cache_hostname(r);
       std::string_view scheme = ngx_http_pagespeed_scheme(r, conf);
+      const std::string_view site = ngx_http_pagespeed_site(r);
+      SiteScopedCache site_cache(*cache, site);
       AlternateId id = MaskToAlternateId(
           static_cast<uint8_t>(updated_meta.full_mask & 0xFF));
 
@@ -4189,7 +4377,7 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
         std::optional<std::string_view> stored_payload;
         if ((stash_flags & AlternateMetadata::kFlagHeadersSidecarRequired) !=
             0) {
-          auto block = cache->ReadHeadersSidecar(url, hostname, scheme);
+          auto block = site_cache.ReadHeadersSidecar(url, hostname, scheme);
           if (block.has_value() && block->is_valid()) {
             stored_block =
                 std::string(PageSpeedCache::HeadersSidecarPayload(*block));
@@ -4203,7 +4391,7 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
           case pagespeed::RestampSidecarAction::kRemove:
             // Whole key, like the Accept-transition eviction above.  The
             // restamp below is skipped: there is nothing left to restamp.
-            (void)cache->Remove(url, hostname, scheme);
+            (void)site_cache.Remove(url, hostname, scheme);
             sidecar_removed = true;
             ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                           "pagespeed: 304 for %V changed what a cache hit has "
@@ -4214,8 +4402,8 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
             break;
           case pagespeed::RestampSidecarAction::kRewriteThenRestamp:
             if (storability_verdict == pagespeed::RestampVerdict::kRestamp) {
-              auto written = cache->WriteHeadersSidecar(url, hostname, scheme,
-                                                        sidecar_plan.merged);
+              auto written = site_cache.WriteHeadersSidecar(
+                  url, hostname, scheme, sidecar_plan.merged);
               if (written.has_value() && written->stored) {
                 pagespeed::RecordHeadersSidecarStored(g_serve_stats);
               } else {
@@ -4277,9 +4465,9 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
         // path.  The borrow this request serves from stays valid: removal
         // clears a directory entry and reclaims nothing.
         if (!sidecar_removed) {
-          (void)cache->Remove(url, hostname, scheme);
+          (void)site_cache.Remove(url, hostname, scheme);
         }
-        ngx_http_pagespeed_notify_url_dropped(r, url, hostname, scheme,
+        ngx_http_pagespeed_notify_url_dropped(r, url, hostname, scheme, site,
                                               updated_meta.content_type);
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                       "pagespeed: 304 for %V is no longer storable (Vary) - "
@@ -4287,7 +4475,7 @@ static ngx_int_t ngx_http_pagespeed_header_filter(ngx_http_request_t* r) {
                       &r->uri);
       } else if (!sidecar_removed) {
         const auto action = pagespeed::ApplyRestampVerdict(
-            *cache, storability_verdict, url, hostname, scheme, id,
+            site_cache, storability_verdict, url, hostname, scheme, id,
             updated_meta, std::as_bytes(std::span(content_copy)));
 
         switch (action) {
@@ -5591,12 +5779,19 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
   std::string_view url(url_str);
   std::string hostname = ngx_http_pagespeed_cache_hostname(r);
   std::string_view scheme = ngx_http_pagespeed_scheme(r, conf);
+  const std::string_view site = ngx_http_pagespeed_site(r);
+  if (site.empty()) {
+    // No keyspace for this block: an empty site would compose the unsited
+    // key, so the request is neither served from nor recorded to the cache.
+    ctx->uncacheable = 1;
+    return NGX_DECLINED;
+  }
 
-  // Pre-compose the cache key once.  Hostname is already normalized by
-  // ngx_http_pagespeed_cache_hostname(), so use the pre-normalized path
-  // to avoid redundant NormalizeHostname() inside ComposeKey().
-  auto cache_key =
-      PageSpeedCache::ComposeKeyPreNormalized(url, hostname, scheme);
+  // Pre-compose the cache key once, in this server block's keyspace.
+  // Hostname is already normalized by ngx_http_pagespeed_cache_hostname(), so
+  // use the pre-normalized path to avoid redundant NormalizeHostname().
+  auto cache_key = PageSpeedCache::ComposeSiteKeyPreNormalized(
+      url, hostname, scheme, /*option_signature=*/{}, site);
 
   // Synthesized /llms.txt site-index. Self-contained — serves the
   // worker-produced kLlmsTxt sentinel by exact id and returns, never entering
@@ -5663,10 +5858,8 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
       }
     }
     if (notify_build && !g_shared_config.socket_path.empty()) {
-      CacheNotification n;
-      n.url = std::string(url);
-      n.hostname = std::string(hostname);
-      n.scheme = std::string(scheme);
+      CacheNotification n =
+          ngx_http_pagespeed_notification(url, hostname, scheme, site);
       n.capability_mask = pagespeed::kLlmsTxtSentinel;
       n.content_type =
           ContentType::kHtml;  // unused by the builder; must be valid
@@ -6181,12 +6374,14 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
                   std::min(kRefreshGraceWindowSecs, effective_max_age);
               std::string slot_key;
               slot_key.reserve(url_str.size() + hostname.size() +
-                               scheme.size() + 2);
+                               scheme.size() + site.size() + 3);
               slot_key.append(url_str)
                   .append("|")
                   .append(hostname)
                   .append("|")
-                  .append(scheme);
+                  .append(scheme)
+                  .append("|")
+                  .append(site);
               if (!ngx_http_pagespeed_acquire_refresh_slot(slot_key, ngx_time(),
                                                            grace)) {
                 // RFC 9111 §5.2.2.2 / §5.2.2.8: a stale entry whose origin
@@ -6755,10 +6950,8 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
       should_notify = should_notify && !ngx_http_pagespeed_withhold_html_notify(
                                            meta.content_type, host_vouched);
       if (should_notify && !g_shared_config.socket_path.empty()) {
-        CacheNotification notification;
-        notification.url = std::string(url);
-        notification.hostname = std::string(hostname);
-        notification.scheme = std::string(scheme);
+        CacheNotification notification =
+            ngx_http_pagespeed_notification(url, hostname, scheme, site);
         notification.capability_mask = ctx->mask.Encode();
         notification.content_type = meta.content_type;
         // Demand-gate the per-URL forced agent render (see the
@@ -6787,10 +6980,8 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
           if (stored == url_hash) {
             int c = entry.count.fetch_add(1, std::memory_order_relaxed) + 1;
             if (c == conf->hot_threshold) {
-              CacheNotification warmup;
-              warmup.url = std::string(url);
-              warmup.hostname = std::string(hostname);
-              warmup.scheme = std::string(scheme);
+              CacheNotification warmup =
+                  ngx_http_pagespeed_notification(url, hostname, scheme, site);
               warmup.capability_mask = pagespeed::kWarmupSentinel;
               warmup.content_type = notification.content_type;
               warmup.host_vouched = host_vouched;
@@ -6856,9 +7047,10 @@ cache_miss:
                 accept_hdr.data ? reinterpret_cast<const char*>(accept_hdr.data)
                                 : "",
                 accept_hdr.data ? accept_hdr.len : 0))) {
-      auto hints_read = cache->ReadAlternate(
-          url, hostname, scheme,
-          static_cast<AlternateId>(SentinelId::kEarlyHints));
+      auto hints_read =
+          SiteScopedCache(*cache, site)
+              .ReadAlternate(url, hostname, scheme,
+                             static_cast<AlternateId>(SentinelId::kEarlyHints));
       if (hints_read.has_value()) {
         auto hints_content = hints_read->content();
         if (!hints_content.empty()) {
@@ -6902,8 +7094,28 @@ cache_miss:
 // "already logged" state, so the line appears once per cycle, not once per
 // worker.
 static ngx_int_t ngx_http_pagespeed_init_module(ngx_cycle_t* cycle) {
-  std::lock_guard<std::mutex> lock(g_cache_mutex);
-  LogCacheDirGenerationIfPending(cycle->log);
+  {
+    std::lock_guard<std::mutex> lock(g_cache_mutex);
+    LogCacheDirGenerationIfPending(cycle->log);
+  }
+  // Each server block's cache site, once per start or reload.  Logged here
+  // rather than when the site is derived, because the error log is not open
+  // at configuration time.
+  const auto* cmcf = static_cast<const ngx_http_core_main_conf_t*>(
+      ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));
+  if (cmcf != nullptr) {
+    auto* const* servers =
+        static_cast<ngx_http_core_srv_conf_t* const*>(cmcf->servers.elts);
+    for (ngx_uint_t i = 0; i < cmcf->servers.nelts; ++i) {
+      const auto* sconf = static_cast<const ngx_http_pagespeed_srv_conf_t*>(
+          servers[i]->ctx->srv_conf[ngx_http_pagespeed_module.ctx_index]);
+      if (sconf != nullptr && sconf->site.len > 0) {
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                      "pagespeed: server \"%V\" uses cache site %V",
+                      &servers[i]->server_name, &sconf->site);
+      }
+    }
+  }
   return NGX_OK;
 }
 

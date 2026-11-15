@@ -19,6 +19,13 @@
 // alternate of an existing volume (opened resolve-only, at the size it was
 // created with, like the nginx module): the compliance suite uses it to take
 // a URL's stored header block away behind a running server's back.
+//
+// The nginx module reads and records in the keyspace of the server block
+// that received the request (src/nginx/site_identity.h).  --site_listen and
+// --site_names name that block, so the entry lands where it reads:
+//   seed_test_cache ... --site_listen 0.0.0.0:1984 --site_names localhost
+// Without --site_listen the entry goes to the unsited keyspace, which no
+// server block of the nginx module reads.
 
 #include <cerrno>
 #include <cstddef>
@@ -29,15 +36,18 @@
 #include <iostream>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/strings/str_split.h"
 #include "lib/cache/cache.h"
 #include "lib/cache/origin_cache_control.h"
 #include "lib/classify/alternate_id.h"
 #include "lib/classify/alternate_metadata.h"
 #include "lib/classify/capability_mask.h"
 #include "lib/classify/content_type.h"
+#include "src/nginx/site_identity.h"
 
 ABSL_FLAG(std::string, cache, "", "Path to cache volume file");
 ABSL_FLAG(std::string, url, "", "URL path (e.g. /style.css)");
@@ -70,6 +80,14 @@ ABSL_FLAG(std::string, remove_alternate, "",
           "Alternate id as hex (e.g. 0x6c): remove that one alternate of "
           "--url from an EXISTING volume and exit.  The volume is opened at "
           "the size it was created with; nothing is written.");
+ABSL_FLAG(std::string, site_listen, "",
+          "Comma-separated listening addresses of the nginx server block the "
+          "entry is for, as nginx prints them (e.g. 0.0.0.0:1984).  Empty = "
+          "the unsited keyspace.");
+ABSL_FLAG(std::string, site_names, "",
+          "Comma-separated server names of that block, regular expressions "
+          "with their leading ~ (e.g. localhost,site.test).  Empty = the one "
+          "empty name nginx gives a block without server_name.");
 ABSL_FLAG(bool, create_only, false,
           "Create the volume and exit without writing an entry. Used to "
           "pre-create empty volumes for the resolve-only nginx module "
@@ -128,6 +146,17 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   uint32_t mask_val = static_cast<uint32_t>(parsed);
+
+  // The server block's keyspace, when one is named.
+  std::string site;
+  const std::string site_listen = absl::GetFlag(FLAGS_site_listen);
+  if (!site_listen.empty()) {
+    std::vector<std::string> names =
+        absl::StrSplit(absl::GetFlag(FLAGS_site_names), ',');
+    std::vector<std::string> listen = absl::StrSplit(site_listen, ',');
+    site =
+        pagespeed::DeriveServerBlockSite(std::move(names), std::move(listen));
+  }
 
   // Read content from file or flag.
   std::string content;
@@ -193,9 +222,9 @@ int main(int argc, char* argv[]) {
                 << " err=" << static_cast<int>(opened.error()) << "\n";
       return 1;
     }
-    auto removed =
-        (*opened)->RemoveAlternate(url, host, absl::GetFlag(FLAGS_scheme),
-                                   static_cast<pagespeed::AlternateId>(rid));
+    auto removed = (*opened)->RemoveAlternate(
+        url, host, absl::GetFlag(FLAGS_scheme),
+        static_cast<pagespeed::AlternateId>(rid), site);
     if (!removed.has_value()) {
       std::cerr << "Error: RemoveAlternate failed err="
                 << static_cast<int>(removed.error()) << "\n";
@@ -286,13 +315,13 @@ int main(int argc, char* argv[]) {
                                         pagespeed::SentinelId::kAgentMarkdown);
   auto wh = agent_markdown ? cache->WriteAgentAlternate(
                                  url, host, absl::GetFlag(FLAGS_scheme),
-                                 content.size(), meta)
+                                 content.size(), meta, site)
             : pagespeed::IsSentinel(id)
                 ? cache->WriteSentinel(url, host, absl::GetFlag(FLAGS_scheme),
                                        static_cast<pagespeed::SentinelId>(id),
-                                       content.size())
+                                       content.size(), site)
                 : cache->WriteAlternate(url, host, absl::GetFlag(FLAGS_scheme),
-                                        id, content.size(), meta);
+                                        id, content.size(), meta, site);
   if (!wh.has_value()) {
     std::cerr << "Error: WriteAlternate failed err="
               << static_cast<int>(wh.error()) << "\n";

@@ -18,6 +18,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost,site.test,*.wild.test,~^r[0-9]+\.regex\.test$')
+
 dir=/tmp/psvouch-107
 vol="${dir}/cache.vol"
 mkdir -p "$dir"
@@ -31,7 +36,7 @@ other_port=65000
 # 0x8C is the /llms.txt index sentinel.
 for host in site.test a.wild.test r7.regex.test canon.test unlisted.test \
   10.0.0.9 "site.test:${port}" "site.test:${other_port}"; do
-  "$SEED" \
+  "$SEED" "${SITE[@]}" \
     --cache "$vol" \
     --url "/llms.txt" \
     --host "$host" \

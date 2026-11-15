@@ -22,6 +22,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 VOL=/tmp/test-ps-302-1.vol
 
 # Drop leftovers from previous runs (the volume, its .gen stamp, .small
@@ -38,7 +43,7 @@ rm -f "${VOL}"* "${VOL%.vol}"-*.vol
 
 # WebP-only variants (one URL per test so a MISS-side recording for one URL
 # can never become another test's fallback variant).
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache "$VOL" \
   --url "/m1.jpg" \
   --host "localhost" \
@@ -47,7 +52,7 @@ rm -f "${VOL}"* "${VOL%.vol}"-*.vol
   --content_type image \
   --mask 0x09
 
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache "$VOL" \
   --url "/m2.jpg" \
   --host "localhost" \
@@ -56,7 +61,7 @@ rm -f "${VOL}"* "${VOL%.vol}"-*.vol
   --content_type image \
   --mask 0x09
 
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache "$VOL" \
   --url "/m3.jpg" \
   --host "localhost" \
@@ -67,7 +72,7 @@ rm -f "${VOL}"* "${VOL%.vol}"-*.vol
 
 # Original-format image variant: the universal fallback — must serve even to
 # a client that negotiated WebP.
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache "$VOL" \
   --url "/m4.jpg" \
   --host "localhost" \
@@ -78,7 +83,7 @@ rm -f "${VOL}"* "${VOL%.vol}"-*.vol
 
 # SVG variant: universal like Original — must serve to a client that
 # negotiated no image format at all.
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache "$VOL" \
   --url "/m5.svg" \
   --host "localhost" \

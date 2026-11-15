@@ -23,6 +23,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 # Unlike the other seeded tests (volumes directly under /tmp), t/103 keeps
 # its volumes in a dedicated subdirectory that the test's perl prologue
 # populates with the shared config and warmed key store. BEGIN blocks run
@@ -37,5 +42,5 @@ for n in 1 2 3 4 5 6 7 8; do
   # from a genuinely empty volume and the assertions stay deterministic on
   # repeated prove invocations.
   rm -f "${vol}"* "${vol%.vol}"-*.vol
-  "$SEED" --cache "$vol" --create_only
+  "$SEED" "${SITE[@]}" --cache "$vol" --create_only
 done

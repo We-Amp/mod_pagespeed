@@ -20,6 +20,11 @@ if [ ! -x "$SEED" ]; then
   exit 1
 fi
 
+# Entries go to the keyspace of the Test::Nginx server block the test
+# requests reach: its listener and its server names.
+SITE=(--site_listen "0.0.0.0:${TEST_NGINX_SERVER_PORT:-${TEST_NGINX_PORT:-1984}}"
+  --site_names 'localhost')
+
 # Start every run from fresh volumes so the MISS/HIT assertions stay
 # deterministic on repeated prove invocations.
 for vol in /tmp/test-ps-108-1.vol /tmp/test-ps-108-6.vol; do
@@ -28,7 +33,7 @@ done
 
 # A stored CSS entry at the default mask (Desktop/Identity = 0x08), keyed for
 # the plain-http requests Test::Nginx sends.
-"$SEED" \
+"$SEED" "${SITE[@]}" \
   --cache /tmp/test-ps-108-1.vol \
   --url "/style.css" \
   --host "localhost" \
@@ -38,4 +43,4 @@ done
   --mask 0x08
 
 # An empty volume: the test stores its entry through the MISS path.
-"$SEED" --cache /tmp/test-ps-108-6.vol --create_only
+"$SEED" "${SITE[@]}" --cache /tmp/test-ps-108-6.vol --create_only

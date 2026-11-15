@@ -19,6 +19,7 @@ use File::Path qw(make_path);
 use IO::Socket::UNIX;
 use Fcntl qw(:flock);
 use Time::HiRes qw(sleep);
+use Digest::SHA qw(sha256_hex);
 
 open(my $sc, '<', 'src/worker/shared_config.h') or die "shared_config.h: $!";
 our $gen;
@@ -50,8 +51,19 @@ BEGIN {
     close($hf);
 }
 
+# The site of the test's server block (src/nginx/site_identity.cc): its
+# server names (Test::Nginx's own and the config's) and its listener.
+our $port = $ENV{TEST_NGINX_SERVER_PORT} || $ENV{TEST_NGINX_PORT} || 1984;
+our $site = do {
+    my $in = "nginx-server-block-site-v1\n";
+    $in .= 'n' . length($_) . ":$_\n" for sort ('localhost', 'site.test');
+    my $addr = "0.0.0.0:$port";
+    $in .= 'a' . length($addr) . ":$addr\n";
+    sha256_hex($in);
+};
+
 # The listener: one child per connection, each frame appended as
-# "url=<url> host=<host> mask=<hex> flags=<n>".
+# "url=<url> host=<host> mask=<hex> site=<site, or - for none> flags=<n>".
 our $frames = "$dir/frames.log";
 unlink $frames;
 unlink "$dir/worker.sock";
@@ -78,12 +90,17 @@ if ($listener_pid == 0) {
             my $hl = unpack('N', substr($p, $o, 4)); $o += 4;
             my $host = substr($p, $o, $hl); $o += $hl;
             $o += 1;  # content type
-            my $mask = unpack('N', substr($p, $o, 4));
+            my $mask = unpack('N', substr($p, $o, 4)); $o += 4;
+            $o += 2;  # scheme, agent request
+            my $ocl = unpack('N', substr($p, $o, 4)); $o += 4 + $ocl;
+            my $osl = ord(substr($p, $o, 1)); $o += 1 + $osl;
+            my $sl = ord(substr($p, $o, 1)); $o += 1;
+            my $site = $sl ? substr($p, $o, $sl) : '-';
             my $flags = ord(substr($p, -1, 1));
             open(my $out, '>>', $frames) or exit 1;
             flock($out, LOCK_EX);
-            printf $out "url=%s host=%s mask=%08x flags=%d\n",
-                $url, $host, $mask, $flags;
+            printf $out "url=%s host=%s mask=%08x site=%s flags=%d\n",
+                $url, $host, $mask, $site, $flags;
             close($out);
         }
         exit 0;
@@ -142,6 +159,8 @@ add_response_body_check(sub {
     my @lines = frames_for($url, $host, 5);
     is(scalar(@lines), 1, $block->name . " - one frame");
     like($lines[0] // '', qr/ flags=$flags$/, $block->name . " - flags");
+    # Every frame names the server block's keyspace.
+    like($lines[0] // '', qr/ site=$site /, $block->name . " - site");
 });
 
 our $config = <<'_EOC_';

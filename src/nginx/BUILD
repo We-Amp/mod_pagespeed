@@ -96,6 +96,17 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# The cache keyspace (site) of a server block, from its server names and
+# listening addresses - pure C++, testable without nginx headers.  Cyclone is
+# here only for its bundled SHA-256.
+cc_library(
+    name = "site_identity",
+    srcs = ["site_identity.cc"],
+    hdrs = ["site_identity.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@cyclone"],
+)
+
 # Recognition of the worker's agent fetches arriving from this server (its
 # User-Agent marker and a peer that is loopback or the arrival address), which
 # the module presents to access rules as 224.0.0.0 - pure C++ over raw address
@@ -218,6 +229,7 @@ cc_library(
         ":host_vouch",
         ":mime_util",
         ":revalidation_storability",
+        ":site_identity",
         ":zerocopy_barrier",
         "//lib/cache:cache_control_header",
         "//lib/cache:freshness",

@@ -64,20 +64,29 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
 # is recorded as it passes through, so every case uses its own URL.
 VOL="${WORK}/cache.vol"
 "${SEED_TOOL}" --cache "${VOL}" --create_only >/dev/null || exit 2
-seed() {  # volume url scheme
+# Each server block reads only its own entries, so every entry is seeded for
+# the block (listener) the case asks; a MISS below is then the scheme's doing.
+seed() {  # volume url scheme port
   "${SEED_TOOL}" --cache "$1" --url "$2" --host "${HOST_HDR}" --scheme "$3" \
+    --site_listen "127.0.0.1:$4" --site_names "localhost,${HOST_HDR}" \
     --content "h1{color:red}" --content_type css --mask 0x08 >/dev/null \
     || { echo "seeding $2 failed"; exit 2; }
 }
-for u in /https-only-a.css /https-only-b.css /https-only-c.css /https-only-d.css /https-only-e.css /https-only-f.css; do
-  seed "${VOL}" "${u}" https
+for u in /https-only-a.css /https-only-b.css /https-only-e.css; do
+  seed "${VOL}" "${u}" https "${TLS_PORT}"
 done
+for u in /https-only-c.css /https-only-d.css /https-only-f.css; do
+  seed "${VOL}" "${u}" https "${PLAIN_PORT}"
+done
+seed "${VOL}" /http-only-a.css http "${PLAIN_PORT}"
 for u in /http-only-a.css /http-only-b.css /http-only-c.css; do
-  seed "${VOL}" "${u}" http
+  seed "${VOL}" "${u}" http "${TLS_PORT}"
 done
 # Entries for the listeners that trust X-Forwarded-Proto.
-for u in /fwd-https-a.css /fwd-https-b.css; do seed "${VOL}" "${u}" https; done
-for u in /fwd-http-a.css /fwd-http-b.css; do seed "${VOL}" "${u}" http; done
+seed "${VOL}" /fwd-https-a.css https "${FWD_PLAIN_PORT}"
+seed "${VOL}" /fwd-https-b.css https "${FWD_TLS_PORT}"
+seed "${VOL}" /fwd-http-a.css http "${FWD_TLS_PORT}"
+seed "${VOL}" /fwd-http-b.css http "${FWD_PLAIN_PORT}"
 
 chmod -R a+rwX "${WORK}"
 
