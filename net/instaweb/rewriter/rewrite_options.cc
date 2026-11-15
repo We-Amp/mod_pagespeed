@@ -3180,6 +3180,28 @@ void RewriteOptions::LimitSizeThresholdsTo(const RewriteOptions& ceiling) {
         ceiling.document_image_inline_max_bytes_, false);
 }
 
+void RewriteOptions::LimitWorkBound(Option<int64>* mine, int64 bound,
+                                    bool zero_or_less_is_unlimited) {
+  const int64 value = mine->value();
+  if (zero_or_less_is_unlimited) {
+    if (bound > 0 && (value <= 0 || value > bound)) {
+      mine->set(bound);
+    }
+  } else if (value > bound) {
+    mine->set(bound);
+  }
+}
+
+void RewriteOptions::LimitWorkBoundsTo(const RewriteOptions& ceiling) {
+  LimitWorkBound(&css_parse_max_bytes_, ceiling.css_parse_max_bytes(), true);
+  LimitWorkBound(&debug_output_max_bytes_, ceiling.debug_output_max_bytes(),
+                 true);
+  LimitWorkBound(&max_html_parse_bytes_, ceiling.max_html_parse_bytes(), true);
+  // Zero or less admits no image at all, so it only tightens.
+  LimitWorkBound(&image_resolution_limit_bytes_,
+                 ceiling.image_resolution_limit_bytes(), false);
+}
+
 void RewriteOptions::GetEnabledFiltersRequiringScriptExecution(
     RewriteOptions::FilterVector* filters) const {
   for (RewriteOptions::Filter filter : kRequiresScriptExecutionFilterSet) {
@@ -4403,9 +4425,22 @@ bool RewriteOptions::SetupExperimentRewriters() {
   // filters cannot enable a filter the configuration forbade.
   // We need these for the experiment to work properly.
   SetRequiredExperimentFilters();
-  // Options were already checked during config parsing.
+  // Options were already checked during config parsing.  A spec can come
+  // from a directory-level source (an .htaccess file, a remote
+  // configuration line), so its arm may tighten the work bounds of the
+  // configuration it runs under but not loosen them.
+  const int64 css_parse_max_bytes = css_parse_max_bytes_.value();
+  const int64 debug_output_max_bytes = debug_output_max_bytes_.value();
+  const int64 max_html_parse_bytes = max_html_parse_bytes_.value();
+  const int64 image_resolution_limit_bytes =
+      image_resolution_limit_bytes_.value();
   NullMessageHandler null_message_handler;
   SetOptionsFromName(spec->filter_options(), &null_message_handler);
+  LimitWorkBound(&css_parse_max_bytes_, css_parse_max_bytes, true);
+  LimitWorkBound(&debug_output_max_bytes_, debug_output_max_bytes, true);
+  LimitWorkBound(&max_html_parse_bytes_, max_html_parse_bytes, true);
+  LimitWorkBound(&image_resolution_limit_bytes_, image_resolution_limit_bytes,
+                 false);
   spec->ApplyAlternateOriginsToDomainLawyer(WriteableDomainLawyer(),
                                             &null_message_handler);
   return true;

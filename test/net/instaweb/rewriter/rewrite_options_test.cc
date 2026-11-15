@@ -3372,6 +3372,59 @@ TEST_F(RewriteOptionsTest, ExperimentSpecAlternateOriginNotAtDirectoryScope) {
   EXPECT_TRUE(options_.GetExperimentSpec(3)->has_alternate_origin_domains());
 }
 
+TEST_F(RewriteOptionsTest, LimitWorkBoundsToKeepsLooserValuesOut) {
+  RewriteOptions ceiling(&thread_system_);
+  ceiling.set_css_parse_max_bytes(1000);
+  ceiling.set_debug_output_max_bytes(500);
+  ceiling.set_max_html_parse_bytes(2000);
+  ceiling.set_image_resolution_limit_bytes(4000);
+
+  options_.set_css_parse_max_bytes(5000);            // larger: capped
+  options_.set_debug_output_max_bytes(0);            // no limit: capped
+  options_.set_max_html_parse_bytes(100);            // smaller: kept
+  options_.set_image_resolution_limit_bytes(10000);  // larger: capped
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(1000, options_.css_parse_max_bytes());
+  EXPECT_EQ(500, options_.debug_output_max_bytes());
+  EXPECT_EQ(100, options_.max_html_parse_bytes());
+  EXPECT_EQ(4000, options_.image_resolution_limit_bytes());
+
+  // A negative bound means no limit for the first three, so it is capped
+  // too; zero admits no image, which only tightens.
+  options_.set_max_html_parse_bytes(-1);
+  options_.set_image_resolution_limit_bytes(0);
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(2000, options_.max_html_parse_bytes());
+  EXPECT_EQ(0, options_.image_resolution_limit_bytes());
+
+  // A ceiling without a limit caps nothing.
+  ceiling.set_css_parse_max_bytes(0);
+  options_.set_css_parse_max_bytes(-1);
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(-1, options_.css_parse_max_bytes());
+}
+
+// An ExperimentSpec can come from a directory-level source, so an arm may
+// tighten the work bounds of the configuration it runs under, not loosen
+// them.
+TEST_F(RewriteOptionsTest, ExperimentArmCannotLoosenWorkBounds) {
+  TestMessageHandler handler;
+  GoogleString msg;
+  options_.set_max_html_parse_bytes(1000);
+  options_.set_css_parse_max_bytes(1000);
+  options_.set_image_resolution_limit_bytes(4000);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=100;default;options=MaxHtmlParseBytes=0,"
+                "CssParseMaxBytes=10,ImageResolutionLimitBytes=99999",
+                &msg, &handler));
+  options_.SetExperimentState(1);
+  EXPECT_EQ(1000, options_.max_html_parse_bytes());
+  EXPECT_EQ(10, options_.css_parse_max_bytes());
+  EXPECT_EQ(4000, options_.image_resolution_limit_bytes());
+}
+
 // TODO(sriharis):  Add thorough ComputeSignature tests
 
 TEST_F(RewriteOptionsTest, ComputeSignatureWildcardGroup) {

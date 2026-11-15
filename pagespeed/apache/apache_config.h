@@ -124,6 +124,13 @@ class ApacheConfig : public SystemRewriteOptions {
 
   void Merge(const RewriteOptions& src) override;
 
+  // Whether any directive of these options, or of an options set merged into
+  // them, came from an .htaccess file.  The per-request work bounds of such
+  // options are capped at the virtual host's values (LimitWorkBoundsTo), as
+  // a tenant of a shared host may tighten them but not loosen them.
+  bool set_from_htaccess() const { return set_from_htaccess_; }
+  void mark_set_from_htaccess() { set_from_htaccess_ = true; }
+
   OptionSettingResult ParseAndSetOptionFromName2(
       StringPiece name, StringPiece arg1, StringPiece arg2, GoogleString* msg,
       MessageHandler* handler) override;
@@ -150,6 +157,7 @@ class ApacheConfig : public SystemRewriteOptions {
   void Init();
 
   Option<bool> force_buffering_;
+  bool set_from_htaccess_ = false;
   Option<bool> proxy_all_requests_mode_;
   Option<GoogleString> proxy_auth_;  // CookieName[=Value][:RedirectUrl]
   Option<GoogleString> measurement_proxy_root_;

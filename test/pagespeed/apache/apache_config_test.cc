@@ -111,6 +111,21 @@ TEST_F(ApacheConfigOptionContextTest, ThisBinarySeesTheFullPropertyTable) {
 // The two daemon directives, and the one that must NOT exist.
 // ---------------------------------------------------------------------------
 
+// The mark that a directive came from an .htaccess file survives the merges
+// Apache does from a directory's configuration up to a request's options.
+TEST_F(ApacheConfigTest, SetFromHtaccessSurvivesMergeAndClone) {
+  EXPECT_FALSE(config_.set_from_htaccess());
+  ApacheConfig htaccess("htaccess", &thread_system_);
+  htaccess.mark_set_from_htaccess();
+  ApacheConfig merged("merged", &thread_system_);
+  merged.Merge(config_);
+  EXPECT_FALSE(merged.set_from_htaccess());
+  merged.Merge(htaccess);
+  EXPECT_TRUE(merged.set_from_htaccess());
+  std::unique_ptr<ApacheConfig> clone(merged.Clone());
+  EXPECT_TRUE(clone->set_from_htaccess());
+}
+
 TEST_F(ApacheConfigTest, DaemonPathsDefaultToUnconfigured) {
   EXPECT_TRUE(config_.daemon_socket_path().empty());
   EXPECT_TRUE(config_.daemon_volume_path().empty());

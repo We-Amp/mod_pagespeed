@@ -1721,6 +1721,15 @@ class RewriteOptions {
   // may make the server inline or flatten less, never more than its
   // configuration allows.
   void LimitSizeThresholdsTo(const RewriteOptions& ceiling);
+  // For options set by a configuration source that the server configuration
+  // does not trust with resource use, such as an .htaccess file on a shared
+  // host: replaces each per-document or per-resource work bound
+  // (CssParseMaxBytes, DebugOutputMaxBytes, MaxHtmlParseBytes,
+  // ImageResolutionLimitBytes) that is looser than the value in `ceiling`
+  // with that value.  "No limit" (zero or less, where the option reads it
+  // so) counts as looser than any positive ceiling.  Such a source may
+  // tighten these bounds, never loosen them.
+  void LimitWorkBoundsTo(const RewriteOptions& ceiling);
   int64 css_inline_max_bytes() const { return css_inline_max_bytes_.value(); }
   void set_css_inline_max_bytes(int64 x) {
     set_option(x, &css_inline_max_bytes_);
@@ -3612,6 +3621,13 @@ class RewriteOptions {
   };
 
   struct OptionIdCompare;
+
+  // Replaces *mine with bound when it is looser.  With
+  // zero_or_less_is_unlimited, a value <= 0 means "no limit": looser than
+  // any positive bound, and a bound <= 0 caps nothing.  See
+  // LimitWorkBoundsTo().
+  static void LimitWorkBound(Option<int64>* mine, int64 bound,
+                             bool zero_or_less_is_unlimited);
 
   // Enum type used to record what action must be taken to resolve conflicts
   // between "preserve URLs" and "extend cache" directives at different levels

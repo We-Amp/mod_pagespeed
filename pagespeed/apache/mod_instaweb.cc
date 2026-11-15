@@ -1684,6 +1684,12 @@ static const char* CmdOptions(const cmd_parms* cmd, void* data,
              "context";
     }
   }
+  // Apache parses .htaccess files with cmd->pool == cmd->temp_pool, which
+  // ap_check_cmd_context(NOT_IN_HTACCESS) tests.
+  if (ap_check_cmd_context(const_cast<cmd_parms*>(cmd), NOT_IN_HTACCESS) !=
+      nullptr) {
+    config->mark_set_from_htaccess();
+  }
   *config_out = config;
   return nullptr;
 }
