@@ -330,11 +330,6 @@ class JsCombineFilterTest : public RewriteTestBase {
   }
 
  protected:
-  // The variable name the page evaluates for the script at url.
-  GoogleString VarNameFor(const GoogleString& url) {
-    return JsCombineFilter::VarName(rewrite_driver(), url);
-  }
-
   ResponseHeaders default_js_header_;
   GoogleString other_domain_;
 };
@@ -1130,31 +1125,28 @@ TEST_F(JsFilterAndCombineFilterTest,
 // A page rewritten by an older version names a minified script inside the
 // combination (jm inside jc) and evaluates it under a name derived from that
 // URL. When the rebuild of the minified script falls back to the unoptimized
-// original (here because the background rewrite is shed), the original has
-// another content hash; the combination must still declare the script under
-// the name the page evaluates, or the page's eval() throws a ReferenceError.
+// original (here because minifying it no longer saves anything, so the
+// rebuild serves the original), the original has another content hash; the
+// combination must still declare the script under the name the page
+// evaluates, or the page's eval() throws a ReferenceError.
 TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithFallbackInput) {
-  const GoogleString jm_url =
-      Encode(kTestDomain, "jm", "FUEwDOA7jh", kJsUrl1, "js");
   const GoogleString url =
       Encode(kTestDomain, "jc", "0",
              MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js", kJsUrl2), "js");
   // The names an older page evaluates (see ReconstructNoTimeout).
   const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
-  EXPECT_EQ(kLegacyVar1, VarNameFor(jm_url));
-  const GoogleString var2 = VarNameFor(StrCat(kTestDomain, kJsUrl2));
+  const char kVar2[] = "mod_pagespeed_dzsx6RqvJJ";
 
-  // Make the minification of a.js fall back: its background rewrite is
-  // dropped, so the rebuilt input is the unoptimized original.
-  server_context()->low_priority_rewrite_workers()->ShutDown();
+  // Already minimal: the rebuild of a.js.pagespeed.jm falls back to the
+  // unoptimized original.
+  SimulateJsResource(kJsUrl1, "var a=1;");
 
   GoogleString out;
   ResponseHeaders headers;
   ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
   EXPECT_EQ(HttpStatus::kOK, headers.status_code());
-  // The combiner minifies what it gets, so only the names show the fallback.
-  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = ", kMinifiedEscapedJs1, ";\n",
-                   "var ", var2, " = ", kMinifiedEscapedJs2, ";\n"),
+  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = \"var a=1;\";\n", "var ", kVar2,
+                   " = ", kMinifiedEscapedJs2, ";\n"),
             out);
   // Not what the URL names, so not publicly cacheable.
   EXPECT_FALSE(headers.IsProxyCacheable());
