@@ -51,3 +51,19 @@ test('a heading permalink is reachable by keyboard and moves to its section', as
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`${href}$`));
 });
+
+test.describe('without JavaScript', () => {
+  test.use({ javaScriptEnabled: false });
+
+  // The permalinks are in the HTML as served (rendered at build time), so they
+  // work with scripts off and after an optimizer has rewritten the page, and
+  // the heading's name and text are the same either way.
+  test('the permalinks are in the served HTML', async ({ page }) => {
+    await page.goto('/docs/migrate-from-ngx-pagespeed/');
+    const heading = page.locator('article h2#roll-back');
+    await expect(heading.locator('> a.heading-anchor')).toHaveAttribute('href', '#roll-back');
+    expect(await heading.evaluate((h) => h.textContent)).toBe('Roll back');
+    const names = (await axQuery(page, 'article', 'heading')).map((h) => h.name);
+    expect(names).toContain('Roll back');
+  });
+});

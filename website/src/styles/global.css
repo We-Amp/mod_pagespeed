@@ -171,6 +171,44 @@ h1,
   overflow-wrap: anywhere;
 }
 
+/* Heading permalinks, rendered at build time by
+   src/lib/rehype-heading-anchors.mjs as a text-less link at the end of each
+   docs and how-it-works heading. The "#" is generated content, so it never
+   becomes part of the heading's text: textContent, innerText, a copy, reader
+   mode and a Markdown copy of the page all read the heading alone. The
+   alternative text after the slash keeps it out of the link's name too (the
+   first declaration is the fallback where that syntax is unsupported).
+   Hidden until the heading is hovered or the link is focused; touch screens,
+   which cannot hover, keep it faint. Not scoped to .prose, so a permalink
+   anywhere stays hidden until hover. */
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor {
+  /* The "#" alone is narrower than the 24px minimum target size (WCAG
+     2.5.8). Padding widens the target; the negative margins take the same
+     amount back, so the heading text does not move or wrap differently. */
+  padding: 0.25rem 0.5rem;
+  margin: 0 -0.5rem 0 -0.1rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor::after {
+  content: '#';
+  content: '#' / '';
+}
+:is(h1, h2, h3, h4, h5, h6):hover > a.heading-anchor,
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor:focus-visible {
+  opacity: 1;
+}
+:is(h1, h2, h3, h4, h5, h6) > a.heading-anchor:hover {
+  color: var(--color-interactive);
+}
+@media (hover: none) {
+  :is(h1, h2, h3, h4, h5, h6) > a.heading-anchor {
+    opacity: 0.4;
+  }
+}
+
 .prose :not(pre) > code {
   /* A name such as a package or a directive moves to the next line whole and
      breaks inside the word only when it cannot fit a line of its own. */

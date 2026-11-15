@@ -12,9 +12,10 @@
  *   - `inline` — a collapsible <details> disclosure for narrower screens.
  *
  * A single client script (deduplicated by Astro even when the component is
- * used twice on a page) adds scroll-spy highlighting and a hover permalink
- * anchor to each heading. Both are progressive enhancements; the plain anchor
- * links work without them.
+ * used twice on a page) adds scroll-spy highlighting, a progressive
+ * enhancement; the plain anchor links work without it. The "#" permalink on
+ * each heading is rendered at build time (src/lib/rehype-heading-anchors.mjs)
+ * and styled in global.css.
  */
 import Icon from './Icon.astro';
 
@@ -104,36 +105,6 @@ const show = items.length >= minItems;
   }
 </style>
 
-<style is:global>
-  /* Permalink anchors injected into article headings by the script below.
-     Hidden until the heading is hovered/focused or the anchor itself is
-     focused, so they never clutter the reading experience. */
-  .prose :is(h2, h3, h4) > .heading-anchor {
-    /* The "#" alone is narrower than the 24px minimum target size (WCAG
-       2.5.8). Padding widens the target; the negative margins take the same
-       amount back, so the heading text does not move or wrap differently. */
-    padding: 0.25rem 0.5rem;
-    margin: 0 -0.5rem 0 -0.1rem;
-    color: var(--color-text-muted);
-    text-decoration: none;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-  }
-  .prose :is(h2, h3, h4):hover > .heading-anchor,
-  .prose :is(h2, h3, h4) > .heading-anchor:focus-visible {
-    opacity: 1;
-  }
-  .prose .heading-anchor:hover {
-    color: var(--color-interactive);
-  }
-  @media (hover: none) {
-    /* Touch devices have no hover: keep permalinks discoverable but faint. */
-    .prose :is(h2, h3, h4) > .heading-anchor {
-      opacity: 0.4;
-    }
-  }
-</style>
-
 <script>
   function initOnThisPage() {
     if (document.documentElement.dataset.tocInit === '1') return;
@@ -143,29 +114,6 @@ const show = items.length >= minItems;
     const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]'));
     if (!headingEls.length) return;
     document.documentElement.dataset.tocInit = '1';
-
-    // Permalink anchor on every article heading that has an id. The anchor
-    // sits inside the heading, so without help its label would join the
-    // heading's accessible name and every entry in a screen reader's headings
-    // list would read twice. The heading's own text moves into a span and the
-    // heading takes its name from that span alone.
-    for (const h of headingEls) {
-      if (h.querySelector('.heading-anchor')) continue;
-      const label = (h.textContent || '').trim();
-      if (label && !h.hasAttribute('aria-labelledby') && !h.hasAttribute('aria-label')) {
-        const text = document.createElement('span');
-        text.id = `${h.id}--text`;
-        text.append(...Array.from(h.childNodes));
-        h.append(text);
-        h.setAttribute('aria-labelledby', text.id);
-      }
-      const a = document.createElement('a');
-      a.className = 'heading-anchor';
-      a.href = '#' + h.id;
-      a.setAttribute('aria-label', label ? `Link to “${label}”` : 'Link to this section');
-      a.innerHTML = '<span aria-hidden="true">#</span>';
-      h.appendChild(a);
-    }
 
     if (!links.length) return;
 
