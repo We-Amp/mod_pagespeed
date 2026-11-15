@@ -1974,17 +1974,20 @@ TEST_F(CacheUrlAsyncFetcherTest, CookieRequestAnswerIsSharedOnlyWhenMarked) {
     const char* content_type;
     const char* cache_control;  // nullptr: none
     bool stored_for_cookie;
+    bool stored_without_cookie;
   };
   const Case kCases[] = {
-      {"application/json", "max-age=600", false},
-      {"application/json", "public, max-age=600", true},
-      {"text/html", "max-age=600, s-maxage=600", true},
-      {"text/html", "max-age=600, s-maxage=600, s-maxage=600", false},
-      {"text/html", "max-age=600, s-maxage=abc", false},
-      {"application/unknown", "max-age=600", false},
-      {"image/png", "max-age=600", true},
-      {"text/css; charset=utf-8", "max-age=600", true},
-      {"image/png", nullptr, false},  // the implicit lifetime only
+      {"application/json", "max-age=600", false, true},
+      {"application/json", "public, max-age=600", true, true},
+      {"text/html", "max-age=600, s-maxage=600", true, true},
+      {"text/html", "max-age=600, s-maxage=600, s-maxage=600", false, true},
+      // An unreadable lifetime makes the response stale, so it is stored
+      // for no request at all.
+      {"text/html", "max-age=600, s-maxage=abc", false, false},
+      {"application/unknown", "max-age=600", false, true},
+      {"image/png", "max-age=600", true, true},
+      {"text/css; charset=utf-8", "max-age=600", true, true},
+      {"image/png", nullptr, false, true},  // the implicit lifetime only
   };
   RequestHeaders cookie;
   cookie.Add(HttpAttributes::kCookie, "session=1");
@@ -2011,7 +2014,8 @@ TEST_F(CacheUrlAsyncFetcherTest, CookieRequestAnswerIsSharedOnlyWhenMarked) {
         headers.Add(HttpAttributes::kCacheControl, c.cache_control);
       }
       mock_fetcher_.SetResponse(kUrl, headers, "answer");
-      if (request == &no_cookie || c.stored_for_cookie) {
+      if (request == &no_cookie ? c.stored_without_cookie
+                                : c.stored_for_cookie) {
         ExpectCacheWithRequestHeaders(kUrl, "answer", *request);
       } else {
         ExpectNoCacheWithRequestHeaders(kUrl, "answer", *request);

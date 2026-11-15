@@ -1708,6 +1708,26 @@ TEST_F(RewriteContextTest, HonorNoTransform) {
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
 }
 
+// Cache-control: no-transform is honored however the origin spells it.
+TEST_F(RewriteContextTest, HonorNoTransformInAnySpelling) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  ResponseHeaders origin;
+  origin.SetStatusAndReason(HttpStatus::kOK);
+  origin.SetDateAndCaching(timer()->NowMs(), 12 * Timer::kMinuteMs,
+                           ",x-ext; No-Transform");
+  origin.Add(HttpAttributes::kContentType, "text/css");
+  origin.ComputeCaching();
+  SetFetchResponse(StrCat(kTestDomain, "a_joined_no_transform.css"), origin,
+                   " a ");
+  GoogleString content;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                            "a_joined_no_transform.css", "css", &content,
+                            &headers));
+  EXPECT_EQ(" a ", content);
+}
+
 // Verifies that we can rewrite uncacheable resources without caching them.
 TEST_F(RewriteContextTest, FetchUncacheableWithRewritesInLineOfServing) {
   InitTrimFiltersSync(kOnTheFlyResource);

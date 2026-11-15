@@ -36,6 +36,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -283,7 +284,12 @@ void RemoveDerivedMaxAge(ResponseHeaders* headers) {
     for (const GoogleString* value : values) {
       StringPiece directive(*value);
       TrimWhitespace(&directive);
-      if (!StringCaseStartsWith(directive, "max-age")) {
+      // Drop only an element that is a max-age by name and nothing else; an
+      // element that also carries other directives is kept whole.
+      CachingHeaders::LifetimeDirective lifetime =
+          CachingHeaders::ReadLifetimeDirective(directive);
+      if (lifetime.name != CachingHeaders::LifetimeDirective::kMaxAge ||
+          lifetime.embedded) {
         kept.push_back(directive.as_string());
       }
     }

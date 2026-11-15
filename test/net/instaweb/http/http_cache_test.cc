@@ -226,7 +226,7 @@ class HTTPCacheTest : public testing::Test {
   size_t CacheSizeAfterPut(int cache_compression_level,
                            bool compress_before_put) {
     ResponseHeaders response_headers;
-    PutGzippedEntry("max-age:300", &response_headers, compress_before_put,
+    PutGzippedEntry("max-age=300", &response_headers, compress_before_put,
                     cache_compression_level);
     HTTPValue value;
     response_headers.Clear();

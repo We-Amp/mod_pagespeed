@@ -1997,6 +1997,18 @@ TEST_F(ServerContextCacheControlTest, NoStoreMixedCase) {
   EXPECT_TRUE(HasCacheControl("max-age=0"));
 }
 
+TEST_F(ServerContextCacheControlTest, NoStoreJoinedToAnotherDirective) {
+  // A no-store an origin joined to another directive with a semicolon still
+  // propagates to the output.
+  ResourcePtr joined_no_store_200 =
+      CreateCustomCachingResource("nos_joined_200", 200, ",x-ext; no-store");
+  resources_.push_back(implicit_public_100_);
+  resources_.push_back(joined_no_store_200);
+  server_context()->ApplyInputCacheControl(resources_, &response_headers_);
+  EXPECT_FALSE(HasCacheControl("public"));
+  EXPECT_TRUE(HasCacheControl("no-store"));
+}
+
 TEST_F(ServerContextCacheControlTest, ExplicitPublicMixedCase) {
   // A mixed-case Public on every input still marks the output public.
   ResourcePtr mixed_public_200 =

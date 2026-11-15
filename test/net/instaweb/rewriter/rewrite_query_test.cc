@@ -1222,6 +1222,22 @@ TEST_F(RewriteQueryTest, CacheControlNoTransform) {
               nullptr);
 }
 
+TEST_F(RewriteQueryTest, CacheControlNoTransformInAnySpelling) {
+  // No-transform turns optimization off however the client spells it.
+  for (const char* cache_control :
+       {"No-Transform", "max-age=0, no-transform", "x-ext; no-transform"}) {
+    RequestHeaders request_headers;
+    request_headers.Replace(HttpAttributes::kCacheControl, cache_control);
+    ResponseHeaders response_headers;
+    GoogleString in_query, out_query, out_req_string, out_resp_string;
+    const RewriteOptions* options = ParseAndScan(
+        kHtmlUrl, in_query, StringPiece(), &request_headers, &response_headers,
+        &out_query, &out_req_string, &out_resp_string);
+    ASSERT_TRUE(options != nullptr) << cache_control;
+    EXPECT_FALSE(options->enabled()) << cache_control;
+  }
+}
+
 TEST_F(RewriteQueryTest, DisableFiltersWithXHR) {
   RequestHeaders request_headers;
   request_headers.Replace(HttpAttributes::kXRequestedWith,
