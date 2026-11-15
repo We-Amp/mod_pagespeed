@@ -166,6 +166,9 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
   statement runs to its `;`, an Apache line ends with `\` to continue. A
   relative cache path (one not starting with `/`) is reported by D11 as
   `cache_path_relative` and never examined or shielded.
+- Content of nginx `*_by_lua_block` blocks is not parsed as Lua: an
+  apostrophe or a `#` in a Lua `--` comment there can hide the directives
+  that follow it from the static read.
 - Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
   the main file, else from the server's compiled-in root.
 - A cache directory that does not exist yet is never shielded by covering

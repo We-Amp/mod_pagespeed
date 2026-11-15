@@ -102,6 +102,19 @@ run() {
   check "$name: no secret in JSON" "! echo \"\$OUT\" | grep -q -e '$SECRET1' -e '$SECRET2'"
   check "$name: no secret in text" "! echo \"\$HUM\" | grep -q -e '$SECRET1' -e '$SECRET2'"
 }
+# wait_header present|absent: after a reload, poll (about 10 s at most) until
+# the X-Page-Speed header is served / gone, instead of sleeping.
+wait_header() {
+  local want="$1" i n
+  for i in $(seq 1 20); do
+    n=$(curl -sI http://127.0.0.1/ | grep -ci '^x-page-speed:')
+    if [ "$want" = present ] && [ "$n" -gt 0 ]; then return 0; fi
+    if [ "$want" = absent ] && [ "$n" -eq 0 ]; then return 0; fi
+    sleep 0.5
+  done
+  echo "NOTE: X-Page-Speed did not become $want within 10 s"
+  return 1
+}
 code_of() { echo "$OUT" | jq -r --arg id "$1" '.checks[] | select(.id == $id) | "\(.status) \(.code)"'; }
 
 # --- working --------------------------------------------------------------
@@ -215,10 +228,10 @@ sed -i '1d' /etc/nginx/nginx.conf
 
 # --- switched off ---------------------------------------------------------
 sed -i 's/^pagespeed on;/pagespeed off;/' /etc/nginx/conf.d/pagespeed.conf
-nginx -s reload; sleep 1
+nginx -s reload; wait_header absent
 run switched_off 2
 check "off: D04 module_off" "[ \"\$(code_of D04)\" = 'fail module_off' ]"
-good_conf; nginx -s reload; sleep 1
+good_conf; nginx -s reload; wait_header present
 # Re-warm after the reload, so D05 sees optimized URLs again.
 for i in 1 2 3 4; do curl -s -o /dev/null http://127.0.0.1/; curl -s -o /dev/null http://127.0.0.1/style.css; sleep 1; done
 

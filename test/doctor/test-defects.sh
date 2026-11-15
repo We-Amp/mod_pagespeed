@@ -105,5 +105,16 @@ run apache "$W/c6.conf"
 check "apache continuation then comment line: the cache path is found" \
   "field D03 '.reason' | grep -q '$W/c6/cache'"
 
+# 7. nginx starts a comment at a word start, also right after ';' (no space),
+# and a quote only at a word start: an apostrophe inside a word is plain.
+printf 'load_module modules/ngx_pagespeed_module.so;\npagespeed on;\ngzip on;#note\npagespeed FileCachePath %s/c7/cacheA;\n' "$W" > "$W/c7a.conf"
+run nginx "$W/c7a.conf"
+check "nginx ';#note' without a space: the cache path after it is found" \
+  "field D03 '.reason' | grep -q '$W/c7/cacheA'"
+printf 'load_module modules/ngx_pagespeed_module.so;\npagespeed on;\nadd_header X-Note it'"'"'s;\npagespeed FileCachePath %s/c7/cacheB;\n' "$W" > "$W/c7b.conf"
+run nginx "$W/c7b.conf"
+check "nginx apostrophe inside a word: the cache path after it is found" \
+  "field D03 '.reason' | grep -q '$W/c7/cacheB'"
+
 [ "$fail" = 0 ] && echo "ALL PASS (defects)" || echo "SOME FAILED (defects)"
 exit "$fail"

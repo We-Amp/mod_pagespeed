@@ -391,8 +391,9 @@ function feed(line, ln,    pos, c, i, n, prev) {
     return
   }
   if (syntax == "nginx") {
-    # Walk the line: ; { } end a statement, # starts a comment where a word
-    # could start, and quotes (open across lines) hide all of them.
+    # Walk the line: ; { } end a statement; # and quotes start only at the
+    # start of a word (after whitespace or ; { }), as in nginx; an open quote
+    # (which may span lines) hides everything.
     if (pend == "") pendln = ln
     else pend = pend " "
     n = length(line); prev = " "
@@ -402,9 +403,9 @@ function feed(line, ln,    pos, c, i, n, prev) {
         pend = pend c
         if (c == "\\" && i < n) { i++; pend = pend substr(line, i, 1) }
         else if (c == q) q = ""
-      } else if (c == "\"" || c == "\047") {
+      } else if ((c == "\"" || c == "\047") && prev ~ /[ \t;{}]/) {
         q = c; pend = pend c
-      } else if (c == "#" && prev ~ /[ \t]/) {
+      } else if (c == "#" && prev ~ /[ \t;{}]/) {
         break
       } else if (c == ";" || c == "{" || c == "}") {
         if (c == ";") stmt_out(pend, pendln)
