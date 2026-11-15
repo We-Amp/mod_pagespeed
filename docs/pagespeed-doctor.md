@@ -169,6 +169,9 @@ Codes: `module_not_loaded`, `module_loaded_twice`, `module_file_missing`,
 - Content of nginx `*_by_lua_block` blocks is not parsed as Lua: an
   apostrophe or a `#` in a Lua `--` comment there can hide the directives
   that follow it from the static read.
+- In the static read, an unquoted `#` right after a `}`, as in `${b}#x;`,
+  starts a comment, so the rest of that line is skipped, including any
+  statement after it on the same line.
 - Apache's `ServerRoot` is taken from the first `ServerRoot` directive in
   the main file, else from the server's compiled-in root.
 - A cache directory that does not exist yet is never shielded by covering
