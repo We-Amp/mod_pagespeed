@@ -94,8 +94,8 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
         response_headers()->Has("Retry-After");
     retryable_unavailable_.store(retryable_unavailable,
                                  std::memory_order_release);
-    bool ipro = !(status_code < 0 || status_code >= 400) ||
-                retryable_unavailable;
+    bool ipro =
+        !(status_code < 0 || status_code >= 400) || retryable_unavailable;
     have_ipro_response_.store(ipro, std::memory_order_release);
     continue_decoding = !ipro;
 
