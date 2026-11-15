@@ -516,6 +516,7 @@ jobs:
       css: ${{ steps.diff.outputs.css }}
       js: ${{ steps.diff.outputs.js }}
       etag: ${{ steps.diff.outputs.etag }}
+      tnginx: ${{ steps.diff.outputs.tnginx }}
       website: ${{ steps.diff.outputs.website }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
@@ -636,6 +637,7 @@ jobs:
           css=false
           js=false
           etag=false
+          tnginx=false
           website=false
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             changed="${RUNNER_TEMP}/changed-files.txt"
@@ -652,6 +654,14 @@ jobs:
             if grep -qE '^(src/nginx/etag_util\.|src/nginx/ngx_pagespeed_module\.cc$|src/nginx/header_key_util\.|src/worker/worker\.cc$|src/worker/api_handlers\.|src/worker/http_server\.|src/worker/worker\.h$|src/nginx/headers_sidecar_replay\.h$|src/nginx/revalidation_storability\.h$|lib/cache/headers_sidecar\.|lib/classify/alternate_metadata\.|tools/e2e/Dockerfile\.prebuilt$|tools/common/|tools/production-tests/)' "${changed}"; then
               etag=true
             fi
+            # The Test::Nginx suite (t/): the nginx module and its direct
+            # dependencies (cache, classification, base, protos, the
+            # webbotauth code, the worker headers it shares), the seed tool,
+            # the suite, its runner script, the image it runs in and this
+            # workflow.
+            if grep -qE '^(src/nginx/|lib/cache/|lib/classify/|lib/base/|src/proto/|src/crypto/webbotauth/|src/worker/shared_config\.|src/worker/serve_stats\.|src/worker/async_css_loader\.|tools/seed-test-cache\.cc$|t/|tools/docker-test-nginx\.sh$|docker/Dockerfile$|docker/nginx-version\.txt$|\.github/workflows/pipeline-pr\.yml$)' "${changed}"; then
+              tnginx=true
+            fi
             # The website gate (website.yml, the `website` job below): the
             # site, the facts it shares with the product, its own workflow and
             # the product sources its generated references come from.
@@ -659,17 +669,20 @@ jobs:
               website=true
             fi
           elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # A dispatch runs the whole PR tier, so the ETag subset runs too
-            # (the CSS and JS smokes stay pull request only).
+            # A dispatch runs the whole PR tier, so the ETag subset and the
+            # Test::Nginx suite run too (the CSS and JS smokes stay pull
+            # request only).
             etag=true
+            tnginx=true
           fi
           {
             echo "css=${css}"
             echo "js=${js}"
             echo "etag=${etag}"
+            echo "tnginx=${tnginx}"
             echo "website=${website}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: css=${css} js=${js} etag=${etag} website=${website}"
+          echo "path filters: css=${css} js=${js} etag=${etag} tnginx=${tnginx} website=${website}"
 
   # The website gate (website.yml) for a pull request or merge group that
   # changes the site or the sources it is generated from: build, unit tests,
@@ -1281,6 +1294,7 @@ jobs:
               FW=$(find "$ROOT" -path "*/bin/src/worker/factory_worker" -not -path "*.runfiles*" -type f | head -1)
               NGX=$(find "$ROOT" -path "*/bin/src/nginx/ngx_pagespeed_module.so" -type f | head -1)
               STC=$(find "$ROOT" -path "*/bin/tools/seed_test_cache" -not -path "*.runfiles*" -type f | head -1)
+              WST=$(find "$ROOT" -path "*/bin/src/crypto/webbotauth/webbotauth_sign_tool" -not -path "*.runfiles*" -type f | head -1)
               OUT=/workspace/.ci-artifacts
               cp "$SO" "$OUT/libpagespeed.so"
               cp "$FW" "$OUT/factory_worker"
@@ -1288,6 +1302,9 @@ jobs:
               # Already built by //... above; the prebuilt test image carries
               # it (tools/ci/stage-artifacts.sh requires it).
               cp "$STC" "$OUT/seed_test_cache"
+              # Also built by //...; the Test::Nginx job mints signatures with
+              # it (t/103, t/104).
+              cp "$WST" "$OUT/webbotauth_sign_tool"
               # Record the nginx version this module was built against (the
               # build image sources nginx into /nginx-src) so
               # Dockerfile.prebuilt can pin its runtime nginx + brotli to
@@ -1592,6 +1609,101 @@ jobs:
           docker compose -f tools/production-tests/docker-compose.yml \
             -f tools/production-tests/docker-compose.prebuilt.yml \
             down --remove-orphans -v --rmi local 2>/dev/null || true
+
+  # The Test::Nginx integration suite (t/, tools/docker-test-nginx.sh): the
+  # nginx module's directive, cookie, Vary, ordering and cache-path
+  # guarantees asserted against a real nginx. It reuses the Linux Build
+  # bundle (module, seed tool, sign tool) and builds nothing: the script runs
+  # in its prebuilt mode inside the dev image, whose nginx is the one the
+  # module was built against. Skipped, not failed, when none of the paths of
+  # the `tnginx` output changed (src/nginx/ and its direct dependencies, the
+  # seed tool, t/, the script, the dev image and this file; see the `diff`
+  # step of `changes`), and skipped on a push to main,
+  # where the diff is not computed; a dispatch runs it. The nightly runs the
+  # same suite on every night's build.
+  test-nginx:
+    permissions:
+      contents: read
+    name: nginx integration (Test::Nginx t/)
+    needs: [changes, linux-build]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || needs.changes.outputs.route != 'fleet' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ needs.changes.outputs.tnginx == 'true' }}
+    timeout-minutes: 30
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Docker preflight
+        run: tools/ci/docker-preflight.sh
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # A per-job directory, never a shared runner path.
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/tnginx-bundle
+
+      - name: Verify the build bundle
+        run: |
+          cd "${RUNNER_TEMP}/tnginx-bundle"
+          sha256sum -c --quiet checksums.sha256
+          # The artifact transport drops the executable bits.
+          chmod +x ngx_pagespeed_module.so seed_test_cache webbotauth_sign_tool
+
+      # The script runs as root (it installs Test::Nginx with apt and cpanm),
+      # so the checkout is mounted read-only and copied into the container:
+      # nothing root-owned lands in the runner's workspace. The suite's
+      # ports and cache files stay inside the container's own network and
+      # /tmp, so runner slots on one host do not collide. prove runs without
+      # -v: one line per test file, diagnostics only for a failure.
+      - name: Run the Test::Nginx suite
+        # shell: bash runs the step with -eo pipefail, so the docker exit
+        # code survives the pipe into tee (the default shell has no pipefail).
+        shell: bash
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 8g || exit 1
+          LOG="${RUNNER_TEMP}/test-nginx.log"
+          docker run --rm --init \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user 0:0 \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e PREBUILT_DIR=/bundle \
+            -e PROVE_OPTS=-r \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            -v "${RUNNER_TEMP}/tnginx-bundle:/bundle:ro" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -eo pipefail
+              tar --exclude=./.git --exclude=./vendor --exclude=./website -C /src -cf - . | tar -C /workspace -xf -
+              rc=0
+              bash tools/docker-test-nginx.sh || rc=$?
+              if [ "$rc" -ne 0 ] && [ -f t/servroot/logs/error.log ]; then
+                echo "=== nginx error.log (last 100 lines) ==="
+                tail -n 100 t/servroot/logs/error.log
+              fi
+              exit "$rc"
+            ' 2>&1 | tee "${LOG}"
+          {
+            echo "## Test::Nginx suite"
+            echo ""
+            echo '```'
+            grep -E '^t/[^ ]+\.t \.+|^Files=|^Result:' "${LOG}" || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   lint:
     permissions:
