@@ -9,6 +9,7 @@ import { createMarkdownProcessor } from '@astrojs/markdown-remark';
 import { FREE_TO_RUN_LINE } from '../../data/product-facts.mjs';
 import { productRef } from '../../data/software-jsonld';
 import { brandedTitle } from '../../lib/page-title';
+import { tocHeadings as pageTocHeadings } from '../../lib/toc-headings';
 
 export async function getStaticPaths() {
   const pages = await getCollection('how-it-works');
@@ -16,7 +17,7 @@ export async function getStaticPaths() {
 }
 
 const { doc } = Astro.props;
-const { Content, headings } = await render(doc);
+const { Content, headings, remarkPluginFrontmatter } = await render(doc);
 
 // FAQ accordion + FAQPage JSON-LD from frontmatter `faq` (mirrors docs/[slug]).
 // Answers carry inline markdown, so render them through Astro's markdown engine.
@@ -35,7 +36,7 @@ const faqItems = faqProcessor
   : [];
 
 const tocHeadings = [
-  ...headings.filter((h) => h.depth >= 2 && h.depth <= 3),
+  ...pageTocHeadings(headings, remarkPluginFrontmatter),
   ...(faqItems.length > 0 ? [{ depth: 2, slug: 'faq', text: 'Frequently asked questions' }] : []),
 ];
 const showToc = tocHeadings.length >= 3;

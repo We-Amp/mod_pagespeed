@@ -103,6 +103,10 @@ version: the scan's lifecycle sentence (`website/src/lib/scan/lifecycle.ts`)
 compares a detected `X-Mod-Pagespeed` header against it, so until it moves an
 install of the previous release is never told that a newer release exists, and
 `module-package-version.test.ts` compares it with the live package index.
+The site update that moves the version also removes the website's
+`:::next-release` markers for the shipped behaviour
+(`website/test/next-release-markers.test.ts` fails on it until they are gone;
+`website/CLAUDE.md`, "Unreleased behaviour").
 
 ## The CI gate
 

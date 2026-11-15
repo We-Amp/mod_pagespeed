@@ -18,6 +18,7 @@ import { FREE_TO_RUN_LINE, PRODUCT_DISPLAY_NAME } from '../../data/product-facts
 import { productRef } from '../../data/software-jsonld';
 import { ORGANIZATION_PUBLISHER } from '../../data/organization';
 import { basename } from 'node:path';
+import { tocHeadings as pageTocHeadings } from '../../lib/toc-headings';
 
 //: the JSON-LD HowTo schema for aspnet-getting-started cites
 // the literal `dotnet add package …` command shown on the page. Source it
@@ -41,7 +42,7 @@ export async function getStaticPaths() {
 }
 
 const { doc } = Astro.props;
-const { Content, headings } = await render(doc);
+const { Content, headings, remarkPluginFrontmatter } = await render(doc);
 
 const hasPlatformContent = doc.body?.includes('data-platform=') ?? false;
 
@@ -67,9 +68,10 @@ const faqItems = faqProcessor
 
 // "On this page" navigation: h2/h3 from the rendered body, plus the
 // frontmatter-driven FAQ section, which is rendered by this layout and so is
-// not part of the markdown `headings` export.
+// not part of the markdown `headings` export. A heading inside a
+// `:::next-release` marker is left out (src/lib/toc-headings.ts).
 const tocHeadings = [
-  ...headings.filter((h) => h.depth >= 2 && h.depth <= 3),
+  ...pageTocHeadings(headings, remarkPluginFrontmatter),
   ...(faqItems.length > 0 ? [{ depth: 2, slug: 'faq', text: 'Frequently asked questions' }] : []),
 ];
 const showToc = tocHeadings.length >= 3;

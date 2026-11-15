@@ -10,6 +10,7 @@ import {
   docUrl,
   groupDocs,
   nugetCommand,
+  renderDocMarkdown,
   substituteRelease,
 } from '../../src/lib/docs-markdown.mjs';
 
@@ -229,5 +230,34 @@ describe('groupDocs', () => {
 
   it('returns no groups for an empty collection', () => {
     expect(groupDocs([])).toEqual([]);
+  });
+});
+
+describe('renderDocMarkdown callouts', () => {
+  const render = (body: string, ext: 'md' | 'mdx' = 'md') =>
+    renderDocMarkdown(
+      {
+        slug: 'page',
+        file: 'page.md',
+        ext,
+        body,
+        data: { title: 'Page', description: 'About.', order: 1 },
+      },
+      { '1.1': release(), '2.0': release(), '2.1': release() },
+    );
+
+  it('renders a next-release marker as a titled blockquote, without its after', () => {
+    for (const ext of ['md', 'mdx'] as const) {
+      const md = render(
+        ['Before.', '', ':::next-release{after="2.8.2"}', 'New.', ':::', '', 'After.'].join('\n'),
+        ext,
+      );
+      expect(md).toContain('Before.\n\n> **From the next release**\n>\n> New.\n\nAfter.');
+      expect(md).not.toContain('after=');
+    }
+  });
+
+  it('takes a [label] over the next-release title', () => {
+    expect(render(':::next-release[Coming]{after="2.8.2"}\nNew.\n:::')).toContain('> **Coming**');
   });
 });

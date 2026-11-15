@@ -189,6 +189,37 @@ workflow (`.github/workflows/website.yml`), which also fails when the manifest l
 the latest stable `v2.*` tag of the public mod_pagespeed repository by more than a
 few hours.
 
+**Unreleased behaviour.** Docs on `main` can describe behaviour that is merged but
+not released yet; a reader on the released version who copies it gets an error. Wrap
+that text in a next-release marker, with `after` set to the last released version
+when you write it:
+
+```md
+:::next-release{after="2.8.2"}
+The new paragraph, list or table, unchanged.
+:::
+```
+
+It renders as a callout titled "From the next release" (`[Label]` overrides the title,
+as on the other callouts) and as a `> **From the next release**` blockquote in the
+Markdown copies. Write the marker at the top level, starting at the first column with
+three colons: the Markdown copies convert only those (the check also finds nested ones).
+Wrap whole blocks only, headings included (a section that is new goes in the marker with its heading;
+it keeps its anchor but stays out of "On this page", see `src/lib/rehype-next-release-headings.mjs`): a new sentence inside an existing paragraph
+moves into its own marker block after it, a changed table row goes back to its
+released text with the new row in a one-row table inside the marker, and text that
+replaced released text keeps the released text outside the marker. Frontmatter (a
+FAQ answer) cannot hold a marker, so it keeps the released wording. For a generated
+reference entry, add it to `src/data/reference/next-release.json` (region, entry name,
+`after`) and run `node scripts/render-references.mjs`; the renderer wraps the entry's
+block, heading included, and leaves it out of the region's index links and counts.
+Module directives cannot be marked (the directive finder needs that region flat), so the
+renderer refuses them; describe an unreleased module directive in a docs-page marker. `test/next-release-markers.test.ts` fails on a marker without `after` and on
+every marker whose `after` is older than the released version, the newer of
+`release.semver` in the 2.1 manifest and `MODULE_PACKAGE_VERSION` in
+`src/data/product-facts.mjs`. So it fires on the release's own site update, which
+removes the markers (keep the content, drop the `:::` lines and the JSON entries).
+
 ## Gates in `test/`
 
 `npx vitest run` runs them all; the two build-output gates skip themselves when
@@ -225,6 +256,9 @@ few hours.
   wording (license keys, trials, per-site pricing) stays out.
 - `sync/terms-version-sync.test.ts` — the terms-of-service version stamp is identical
   on `/terms/` and the `/pricing/` quote form.
+- `next-release-markers.test.ts` — every `:::next-release` marker and
+  `reference/next-release.json` entry names the released version in `after`; it
+  fails once a newer version is released (see "Unreleased behaviour").
 
 ## Generated references
 
@@ -236,7 +270,8 @@ mod_pagespeed tree at the `v2.*` tag in `src/data/reference/source-pin.json`, an
 re-clones the pin and fails on any diff. At release time bump `source-pin.json` to the
 new tag, run `MOD_PAGESPEED_SRC=<clone> npm run gen:references` and commit the JSON and
 the two pages. Prose the source does not carry lives in `src/data/reference/notes/*.md`
-and the two `*-overlay.json` files; never hand-edit the JSON or a generated region.
+and the two `*-overlay.json` files; an entry that is not released yet is listed in
+`next-release.json` (see "Unreleased behaviour"); never hand-edit the JSON or a generated region.
 
 The Markdown of the directive reference stays flat (an `h3` per area, an `h4` per
 directive). `src/lib/rehype-directive-blocks.mjs` marks it when the page is rendered:

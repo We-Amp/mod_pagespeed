@@ -13,6 +13,7 @@ import remarkDirective from 'remark-directive';
 import remarkCallouts from './src/lib/remark-callouts.mjs';
 import rehypeDirectiveBlocks from './src/lib/rehype-directive-blocks.mjs';
 import rehypeHeadingAnchors from './src/lib/rehype-heading-anchors.mjs';
+import rehypeNextReleaseHeadings from './src/lib/rehype-next-release-headings.mjs';
 import remarkLiteralTextDirectives from './src/lib/remark-literal-text-directives.mjs';
 import { gitFileHistory, gitLastModified } from './src/lib/git-date';
 import { EXAMPLES } from './src/data/examples';
@@ -249,6 +250,8 @@ export default defineConfig({
     // attribute on every directive and area heading) and adds the directive
     // finder; it
     // leaves every page without that region untouched.
+    // rehypeNextReleaseHeadings records the ids of headings inside a
+    // `:::next-release` marker, which the docs page leaves out of "On this page".
     // rehypeHeadingAnchors renders the "#" permalink into docs and
     // how-it-works headings at build time; it needs the heading ids, so
     // rehypeHeadingIds runs first (Astro runs it again at the end, which keeps
@@ -260,7 +263,12 @@ export default defineConfig({
         remarkLiteralTextDirectives,
         remarkCallouts,
       ],
-      rehypePlugins: [rehypeDirectiveBlocks, rehypeHeadingIds, rehypeHeadingAnchors],
+      rehypePlugins: [
+        rehypeDirectiveBlocks,
+        rehypeHeadingIds,
+        rehypeNextReleaseHeadings,
+        rehypeHeadingAnchors,
+      ],
     }),
     // Dual-theme Shiki. `defaultColor: false` emits CSS variables instead of
     // baking one theme's colors into the HTML — the styles in global.css then

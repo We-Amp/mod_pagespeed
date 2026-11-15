@@ -16,6 +16,12 @@ const CALLOUT_TYPES = {
   warning: 'Warning',
   danger: 'Danger',
   important: 'Important',
+  // Behaviour that is merged but not in a release yet. Written
+  // `:::next-release{after="X.Y.Z"}`, where X.Y.Z is the last released version
+  // when the block was written; test/next-release-markers.test.ts fails once a
+  // newer version is released, so the marker is removed in that release's
+  // site update. See website/CLAUDE.md, "Unreleased behaviour".
+  'next-release': 'From the next release',
 };
 
 /**
@@ -65,6 +71,10 @@ export default function remarkCallouts() {
       node.data.hProperties = {
         className: ['callout', `callout-${node.name}`],
       };
+      const after = node.attributes?.after;
+      if (node.name === 'next-release' && after) {
+        node.data.hProperties['data-released-after'] = after;
+      }
     });
   };
 }

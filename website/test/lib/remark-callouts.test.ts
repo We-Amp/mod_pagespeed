@@ -7,12 +7,13 @@ import remarkCallouts from '../../src/lib/remark-callouts.mjs';
 interface NodeData {
   directiveLabel?: boolean;
   hName?: string;
-  hProperties?: { className: string[] };
+  hProperties?: { className: string[]; 'data-released-after'?: string };
 }
 
 interface TestNode {
   type: string;
   name?: string;
+  attributes?: Record<string, string>;
   depth?: number;
   value?: string;
   children?: TestNode[];
@@ -106,6 +107,24 @@ describe('remarkCallouts', () => {
       directive('tip', [labelParagraph(text('   ')), paragraph(text('Body.'))]),
     );
     expect(node.children).toEqual([titleParagraph('Tip'), paragraph(text('Body.'))]);
+  });
+
+  it('renders a next-release marker with its title, and keeps its after on the aside', () => {
+    const node = transform({
+      ...directive('next-release', [paragraph(text('Body.'))]),
+      attributes: { after: '2.8.2' },
+    });
+    expect(node.data).toEqual({
+      hName: 'aside',
+      hProperties: {
+        className: ['callout', 'callout-next-release'],
+        'data-released-after': '2.8.2',
+      },
+    });
+    expect(node.children).toEqual([
+      titleParagraph('From the next release'),
+      paragraph(text('Body.')),
+    ]);
   });
 
   it('leaves a directive whose name it does not know untouched', () => {

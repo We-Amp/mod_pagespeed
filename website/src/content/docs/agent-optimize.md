@@ -6,7 +6,7 @@ group: 'Agents'
 lastUpdated: 2026-11-14
 faq:
   - q: 'Does this change what browsers and search engines see?'
-    a: 'No. Browsers and crawlers receive your normal HTML at the same URL. Only a request that explicitly negotiates the agent representation (Accept: text/markdown), on a deployment where you have enabled agent optimization, receives the rendered-Markdown copy. Both the Markdown copy and, while agent optimization is on, every HTML page carry Vary: Accept, so shared caches never mix the two.'
+    a: 'No. Browsers and crawlers receive your normal HTML at the same URL. Only a request that explicitly negotiates the agent representation (Accept: text/markdown), on a deployment where you have enabled agent optimization, receives the rendered-Markdown copy. The response carries Vary: Accept so shared caches never mix the two.'
   - q: 'Is it on by default?'
     a: 'No. The capability ships in every build but stays off until you enable it with the `--agent-optimize` worker flag. There is no separate build.'
   - q: 'Does my content leave my server?'
@@ -42,21 +42,26 @@ same URL.
 The agent response is content-negotiated, with these guarantees:
 
 - `Vary: Accept` — shared caches never serve the Markdown copy to a browser, or
-  the HTML to an agent. In the nginx module, while agent optimization is on,
-  the HTML responses of your pages name `Accept` in their `Vary` too (for example
-  `Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
-  exists yet, so a CDN in front of nginx keys the two apart from the first
-  request. With agent optimization off, `Vary` is as before. Stylesheets,
-  scripts and images are not affected.
+  the HTML to an agent.
 - `X-Robots-Tag: noindex` and `Cache-Control: private` — the agent copy stays
   out of search indexes and shared caches.
+- The page **body and Content-Type for browsers are unchanged** — standard
+  content negotiation on `Accept`, not cloaking.
+
+:::next-release{after="2.8.2"}
+In the nginx module, while agent optimization is on,
+the HTML responses of your pages name `Accept` in their `Vary` too (for example
+`Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
+exists yet, so a CDN in front of nginx keys the two apart from the first
+request. With agent optimization off, `Vary` is as before. Stylesheets,
+scripts and images are not affected.
+
 - `x-markdown-tokens` (nginx module) — an estimate of the number of tokens in
   the Markdown body, so an agent can budget its context before reading it. The estimate is
   the body size in bytes divided by four, rounded down; no tokenizer is run, so
   a model's own count differs. Treat it as an order of magnitude.
 - `content-signal` (nginx module) — only when you configure one (see below).
-- The page **body and Content-Type for browsers are unchanged** — standard
-  content negotiation on `Accept`, not cloaking.
+:::
 
 The rendering runs in the optimizer worker process behind nginx, reusing
 the same headless-Chrome subsystem as [browser analysis](/docs/browser-analysis/).
@@ -73,6 +78,7 @@ While the flag is off, an agent request **transparently receives the normal
 HTML** of the same URL — never an error, never a half-rendered page. Turning the
 feature off is always safe.
 
+:::next-release{after="2.8.2"}
 ## State a content-use policy (`content-signal`)
 
 A Markdown response can tell agents how you allow your content to be used,
@@ -92,6 +98,7 @@ refuses to start with any other value. The module does not read a
 `content-signal` header from your origin's response: the directive is the only
 source. To state the same policy to crawlers that read `robots.txt`, add a
 `Content-Signal:` line there as well.
+:::
 
 ## Serve an `/llms.txt` site index
 
@@ -100,8 +107,12 @@ site — a compact Markdown index that points AI agents at your important pages,
 in the [llmstxt.org](https://llmstxt.org/) format. The worker builds it from your own
 `sitemap.xml` (intersected with the paths you allow), with a one-line title and
 summary per page, and nginx serves it at `/llms.txt` with `X-Robots-Tag: noindex`,
-`Cache-Control: private`, `Content-Type: text/markdown`, and the same
-`x-markdown-tokens` estimate and `content-signal` as the Markdown copy.
+`Cache-Control: private`, and `Content-Type: text/markdown`.
+
+:::next-release{after="2.8.2"}
+`/llms.txt` carries the same `x-markdown-tokens` estimate and `content-signal`
+as the Markdown copy.
+:::
 
 It is off by default and enabled with its own flag (`--agent-optimize-llms-txt`,
 which requires `--agent-optimize`). Per-page summaries come for free: from a page's
@@ -172,11 +183,19 @@ copy and `/llms.txt`, which follow the page they were made from.
 **Never stored.** A response is not stored when it sets a cookie
 (`Set-Cookie`), or when it carries `Cache-Control: private` or
 `Cache-Control: no-store`. A response is stored only when its `Vary` names
+nothing beyond `Accept-Encoding`, `User-Agent`, `Accept` and `Save-Data`. Any
+other field, including `Vary: Cookie`, and `Vary: *`, means it is not stored. For
+a response that varies on `Accept`, `User-Agent` or `Save-Data`, those request
+headers take part in choosing which stored copy answers.
+
+:::next-release{after="2.8.2"}
+A response is stored only when its `Vary` names
 nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
 `Vary: User-Agent`, `Vary: Save-Data`, `Vary: Cookie` and `Vary: *`, means it is
 not stored, and each request is answered by your origin. This is the `Vary`
 your origin sends; the `Vary` mod_pagespeed adds to its own responses (such as
 `Accept` with agent optimization on) does not count.
+:::
 
 **Requests with a cookie.** A request that carries a `Cookie` header is treated
 by the kind of response:

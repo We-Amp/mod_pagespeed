@@ -1303,6 +1303,19 @@ html[data-active-platform='iis'] .platform-table tr[data-platform-row='iis'] {
     color: var(--color-success);
   }
 
+  /* next-release — merged but not released yet. Quieter than the advisory
+     tones: the recessed band with a dashed rule (the dash, not the hue, sets it
+     apart) and a muted title with a clock glyph. */
+  .callout-next-release {
+    border-style: dashed;
+    border-color: var(--color-border-strong);
+    background-color: var(--color-bg-secondary);
+    --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E");
+  }
+  .callout-next-release .callout-title {
+    color: var(--color-text-muted);
+  }
+
   /* Release notes — collapsible entry chrome. Scoped entirely to .rn-* so
      no other page pays for it. Tokens only, no new colors. */
   .rn-alias {

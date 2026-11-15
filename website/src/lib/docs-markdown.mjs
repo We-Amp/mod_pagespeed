@@ -353,7 +353,9 @@ function summaryText(html) {
 // --- The render -------------------------------------------------------------
 
 const FENCE = /^(\s*)(`{3,}|~{3,})/;
-const CALLOUT_OPEN = /^:::([a-z]+)(?:\[([^\]]*)\])?\s*$/;
+// `:::name[Label]{attributes}`: the attributes (the `after` of a next-release
+// marker) are not part of the Markdown copy.
+const CALLOUT_OPEN = /^:::([a-z][a-z-]*)(?:\[([^\]]*)\])?(?:\{[^}]*\})?\s*$/;
 const CALLOUT_CLOSE = /^:::\s*$/;
 const CALLOUT_TITLES = {
   note: 'Note',
@@ -362,6 +364,7 @@ const CALLOUT_TITLES = {
   warning: 'Warning',
   danger: 'Danger',
   important: 'Important',
+  'next-release': 'From the next release',
 };
 
 /**

@@ -8040,7 +8040,7 @@ URL normalization, the cache mode when no directive sets it) from the
 
 <!-- generated:begin thin-module-directives -->
 
-[`pagespeed`](https://modpagespeed.com/docs/worker-configuration/#pagespeed), [`pagespeed_cache_path`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_cache_path), [`pagespeed_disallow`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_disallow), [`pagespeed_hot_threshold`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_hot_threshold), [`pagespeed_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_max_age), [`pagespeed_immutable_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_immutable_max_age), [`pagespeed_synthesize_swr`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_synthesize_swr), [`pagespeed_conditional_revalidation`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_conditional_revalidation), [`pagespeed_stale_if_error_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_stale_if_error_max_age), [`pagespeed_html_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_html_max_age), [`pagespeed_css_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_css_max_age), [`pagespeed_image_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_image_max_age), [`pagespeed_force_refresh_html`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_force_refresh_html), [`pagespeed_force_refresh`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_force_refresh), [`pagespeed_trust_x_forwarded_proto`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_trust_x_forwarded_proto), [`pagespeed_cache_mode`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_cache_mode), [`pagespeed_agent_content_signal`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_agent_content_signal)
+[`pagespeed`](https://modpagespeed.com/docs/worker-configuration/#pagespeed), [`pagespeed_cache_path`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_cache_path), [`pagespeed_disallow`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_disallow), [`pagespeed_hot_threshold`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_hot_threshold), [`pagespeed_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_max_age), [`pagespeed_immutable_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_immutable_max_age), [`pagespeed_synthesize_swr`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_synthesize_swr), [`pagespeed_conditional_revalidation`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_conditional_revalidation), [`pagespeed_stale_if_error_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_stale_if_error_max_age), [`pagespeed_html_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_html_max_age), [`pagespeed_css_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_css_max_age), [`pagespeed_image_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_image_max_age), [`pagespeed_force_refresh_html`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_force_refresh_html), [`pagespeed_force_refresh`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_force_refresh), [`pagespeed_trust_x_forwarded_proto`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_trust_x_forwarded_proto), [`pagespeed_cache_mode`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_cache_mode)
 
 #### pagespeed
 
@@ -8268,24 +8268,26 @@ defaults of [`pagespeed_css_max_age`](https://modpagespeed.com/docs/worker-confi
 [`pagespeed_image_max_age`](https://modpagespeed.com/docs/worker-configuration/#pagespeed_image_max_age) follow the mode. See
 [Cache modes](https://modpagespeed.com/docs/cache-modes/) for the full reference.
 
-#### pagespeed_agent_content_signal
-
-- **Syntax:** `pagespeed_agent_content_signal value | off;`
-- **Default:** `(empty)`
-- **Context:** http, server, location
-
-The `content-signal` header sent with a Markdown response for agents (the
-page's Markdown copy and `/llms.txt`), in the
-[Content Signals](https://contentsignals.org/) format. Unset, no header is
-sent; `off` stops an inherited value.
-
-```nginx
-pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
-```
-
-The value must be printable ASCII on one line, up to 512 bytes; nginx refuses
-to start with any other value. See
-[Serve Markdown to AI agents](https://modpagespeed.com/docs/agent-optimize/).
+> **From the next release**
+>
+> #### pagespeed_agent_content_signal
+>
+> - **Syntax:** `pagespeed_agent_content_signal value | off;`
+> - **Default:** `(empty)`
+> - **Context:** http, server, location
+>
+> The `content-signal` header sent with a Markdown response for agents (the
+> page's Markdown copy and `/llms.txt`), in the
+> [Content Signals](https://contentsignals.org/) format. Unset, no header is
+> sent; `off` stops an inherited value.
+>
+> ```nginx
+> pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
+> ```
+>
+> The value must be printable ASCII on one line, up to 512 bytes; nginx refuses
+> to start with any other value. See
+> [Serve Markdown to AI agents](https://modpagespeed.com/docs/agent-optimize/).
 
 <!-- generated:end thin-module-directives -->
 
@@ -19533,21 +19535,26 @@ same URL.
 The agent response is content-negotiated, with these guarantees:
 
 - `Vary: Accept` — shared caches never serve the Markdown copy to a browser, or
-  the HTML to an agent. In the nginx module, while agent optimization is on,
-  the HTML responses of your pages name `Accept` in their `Vary` too (for example
-  `Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
-  exists yet, so a CDN in front of nginx keys the two apart from the first
-  request. With agent optimization off, `Vary` is as before. Stylesheets,
-  scripts and images are not affected.
+  the HTML to an agent.
 - `X-Robots-Tag: noindex` and `Cache-Control: private` — the agent copy stays
   out of search indexes and shared caches.
-- `x-markdown-tokens` (nginx module) — an estimate of the number of tokens in
-  the Markdown body, so an agent can budget its context before reading it. The estimate is
-  the body size in bytes divided by four, rounded down; no tokenizer is run, so
-  a model's own count differs. Treat it as an order of magnitude.
-- `content-signal` (nginx module) — only when you configure one (see below).
 - The page **body and Content-Type for browsers are unchanged** — standard
   content negotiation on `Accept`, not cloaking.
+
+> **From the next release**
+>
+> In the nginx module, while agent optimization is on,
+> the HTML responses of your pages name `Accept` in their `Vary` too (for example
+> `Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
+> exists yet, so a CDN in front of nginx keys the two apart from the first
+> request. With agent optimization off, `Vary` is as before. Stylesheets,
+> scripts and images are not affected.
+>
+> - `x-markdown-tokens` (nginx module) — an estimate of the number of tokens in
+>   the Markdown body, so an agent can budget its context before reading it. The estimate is
+>   the body size in bytes divided by four, rounded down; no tokenizer is run, so
+>   a model's own count differs. Treat it as an order of magnitude.
+> - `content-signal` (nginx module) — only when you configure one (see below).
 
 The rendering runs in the optimizer worker process behind nginx, reusing
 the same headless-Chrome subsystem as [browser analysis](https://modpagespeed.com/docs/browser-analysis/).
@@ -19564,25 +19571,27 @@ While the flag is off, an agent request **transparently receives the normal
 HTML** of the same URL — never an error, never a half-rendered page. Turning the
 feature off is always safe.
 
-## State a content-use policy (`content-signal`)
-
-A Markdown response can tell agents how you allow your content to be used,
-with a `content-signal` header in the [Content Signals](https://contentsignals.org/)
-format. The nginx module sends it only when you set one; there is no default
-policy, and the module never states one for you:
-
-```nginx
-pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
-```
-
-The directive works in `http`, `server` and `location` blocks and is inherited
-like other directives; `pagespeed_agent_content_signal off;` stops an inherited
-value. The header goes out with the Markdown copy and with `/llms.txt`, not with
-HTML. The value must be printable ASCII on one line, up to 512 bytes; nginx
-refuses to start with any other value. The module does not read a
-`content-signal` header from your origin's response: the directive is the only
-source. To state the same policy to crawlers that read `robots.txt`, add a
-`Content-Signal:` line there as well.
+> **From the next release**
+>
+> ## State a content-use policy (`content-signal`)
+>
+> A Markdown response can tell agents how you allow your content to be used,
+> with a `content-signal` header in the [Content Signals](https://contentsignals.org/)
+> format. The nginx module sends it only when you set one; there is no default
+> policy, and the module never states one for you:
+>
+> ```nginx
+> pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
+> ```
+>
+> The directive works in `http`, `server` and `location` blocks and is inherited
+> like other directives; `pagespeed_agent_content_signal off;` stops an inherited
+> value. The header goes out with the Markdown copy and with `/llms.txt`, not with
+> HTML. The value must be printable ASCII on one line, up to 512 bytes; nginx
+> refuses to start with any other value. The module does not read a
+> `content-signal` header from your origin's response: the directive is the only
+> source. To state the same policy to crawlers that read `robots.txt`, add a
+> `Content-Signal:` line there as well.
 
 ## Serve an `/llms.txt` site index
 
@@ -19591,8 +19600,12 @@ site — a compact Markdown index that points AI agents at your important pages,
 in the [llmstxt.org](https://llmstxt.org/) format. The worker builds it from your own
 `sitemap.xml` (intersected with the paths you allow), with a one-line title and
 summary per page, and nginx serves it at `/llms.txt` with `X-Robots-Tag: noindex`,
-`Cache-Control: private`, `Content-Type: text/markdown`, and the same
-`x-markdown-tokens` estimate and `content-signal` as the Markdown copy.
+`Cache-Control: private`, and `Content-Type: text/markdown`.
+
+> **From the next release**
+>
+> `/llms.txt` carries the same `x-markdown-tokens` estimate and `content-signal`
+> as the Markdown copy.
 
 It is off by default and enabled with its own flag (`--agent-optimize-llms-txt`,
 which requires `--agent-optimize`). Per-page summaries come for free: from a page's
@@ -19663,11 +19676,19 @@ copy and `/llms.txt`, which follow the page they were made from.
 **Never stored.** A response is not stored when it sets a cookie
 (`Set-Cookie`), or when it carries `Cache-Control: private` or
 `Cache-Control: no-store`. A response is stored only when its `Vary` names
-nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
-`Vary: User-Agent`, `Vary: Save-Data`, `Vary: Cookie` and `Vary: *`, means it is
-not stored, and each request is answered by your origin. This is the `Vary`
-your origin sends; the `Vary` mod_pagespeed adds to its own responses (such as
-`Accept` with agent optimization on) does not count.
+nothing beyond `Accept-Encoding`, `User-Agent`, `Accept` and `Save-Data`. Any
+other field, including `Vary: Cookie`, and `Vary: *`, means it is not stored. For
+a response that varies on `Accept`, `User-Agent` or `Save-Data`, those request
+headers take part in choosing which stored copy answers.
+
+> **From the next release**
+>
+> A response is stored only when its `Vary` names
+> nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
+> `Vary: User-Agent`, `Vary: Save-Data`, `Vary: Cookie` and `Vary: *`, means it is
+> not stored, and each request is answered by your origin. This is the `Vary`
+> your origin sends; the `Vary` mod_pagespeed adds to its own responses (such as
+> `Accept` with agent optimization on) does not count.
 
 **Requests with a cookie.** A request that carries a `Cookie` header is treated
 by the kind of response:
@@ -19724,7 +19745,7 @@ deep-dive on
 
 **Does this change what browsers and search engines see?**
 
-No. Browsers and crawlers receive your normal HTML at the same URL. Only a request that explicitly negotiates the agent representation (Accept: text/markdown), on a deployment where you have enabled agent optimization, receives the rendered-Markdown copy. Both the Markdown copy and, while agent optimization is on, every HTML page carry Vary: Accept, so shared caches never mix the two.
+No. Browsers and crawlers receive your normal HTML at the same URL. Only a request that explicitly negotiates the agent representation (Accept: text/markdown), on a deployment where you have enabled agent optimization, receives the rendered-Markdown copy. The response carries Vary: Accept so shared caches never mix the two.
 
 **Is it on by default?**
 
@@ -20914,9 +20935,16 @@ nobody tests.
 | `ps_evaluate_freshness()`   | Fresh / serve-no-cache / revalidate, plus age and remaining TTL              |
 | `ps_freshness_config_init_sized()` | Default caps and per-content-type lifetimes (use `ps_freshness_config_init_auto`) |
 | `ps_build_cache_control()`  | Assemble the `Cache-Control` value to send with a hit                       |
-| `ps_vary_uncacheable()`     | Whether a response's `Vary` forbids storing it at all: anything but `Accept-Encoding` does |
-| `ps_vary_varies_accept()`   | Whether the origin negotiates on `Accept` itself, so the stored entry must carry `PS_FLAG_ORIGIN_VARIES_ACCEPT`; such a response is now refused, so this returns 0 |
+| `ps_vary_uncacheable()`     | Whether a response's `Vary` forbids storing it at all                       |
+| `ps_vary_varies_accept()`   | Whether the origin negotiates on `Accept` itself, so the stored entry must carry `PS_FLAG_ORIGIN_VARIES_ACCEPT` |
 | `ps_parse_cache_control()`  | Derive the `PS_CC_ORIGIN_*` flags from a `Cache-Control` header line         |
+
+> **From the next release**
+>
+> | Function                    | Description                                                                 |
+> | --------------------------- | --------------------------------------------------------------------------- |
+> | `ps_vary_uncacheable()`     | Whether a response's `Vary` forbids storing it at all: anything but `Accept-Encoding` does |
+> | `ps_vary_varies_accept()`   | Whether the origin negotiates on `Accept` itself, so the stored entry must carry `PS_FLAG_ORIGIN_VARIES_ACCEPT`; such a response is now refused, so this returns 0 |
 
 `ps_parse_cache_control()` accumulates: call it once per `Cache-Control` header
 line, in order, against the same output — a response may carry several, and
@@ -21910,7 +21938,12 @@ curl "http://localhost:9880/v1/cache/select?url=/images/hero.jpg&hostname=exampl
 | `url`      | string | Yes      | The URL path                     |
 | `hostname` | string | No       | Hostname for cache key           |
 | `mask`     | int    | Yes      | 32-bit capability mask (decimal) |
-| `site`     | string | No       | Site id as listed by `GET /v1/cache/urls`; required to find an entry stored per site |
+
+> **From the next release**
+>
+> | Parameter  | Type   | Required | Description                      |
+> | ---------- | ------ | -------- | -------------------------------- |
+> | `site`     | string | No       | Site id as listed by `GET /v1/cache/urls`; required to find an entry stored per site |
 
 The `mask` parameter is the decimal representation of the
 [capability bitmask](https://modpagespeed.com/docs/api-reference/#capability-mask-encoding). Common
@@ -22015,10 +22048,12 @@ curl -X POST http://localhost:9880/v1/cache/purge \
 When `deleted` is `0`, the response includes a note explaining the URL was not
 found in cache.
 
-A purge without a `site` reaches the URL's entries for every site (nginx
-server block) the optimizer has received a request notification from; an
-entry stored by a server block it has not heard from stays until it expires
-or a full purge removes it.
+> **From the next release**
+>
+> A purge without a `site` reaches the URL's entries for every site (nginx
+> server block) the optimizer has received a request notification from; an
+> entry stored by a server block it has not heard from stays until it expires
+> or a full purge removes it.
 
 **Full cache purge:**
 
