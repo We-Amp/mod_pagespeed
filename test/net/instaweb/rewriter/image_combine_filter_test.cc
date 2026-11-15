@@ -541,13 +541,24 @@ bool PngDimensions(const GoogleString& png, int* width, int* height) {
   return true;
 }
 
-// Issue #818: once the cache no longer holds a sprite, an input the server
-// cannot fetch at that moment must not turn the sprite URL into a 404. In a
-// vertical strip an image's offset depends only on the images above it, so the
-// sprite is rebuilt from the images before the first one that is missing: they
-// keep the positions the page's CSS uses, and the rest of the page's
-// declarations show nothing, never another image. The answer has a short
-// private lifetime and the full sprite comes back once the input does.
+// Issue #818: once the cache no longer holds a sprite, an image the server
+// cannot fetch at that moment must not turn the sprite URL into a 404. The
+// size of the missing image is not known, so no shorter strip can keep the
+// positions the page's CSS uses (and under the default background-repeat a
+// cut-off strip would tile and show the wrong image). A transparent image is
+// served instead: nothing is drawn, with a short private lifetime, and the
+// full sprite comes back once the image does.
+void ExpectBlankPrivate(const GoogleString& body, const ResponseHeaders& h) {
+  EXPECT_EQ(HttpStatus::kOK, h.status_code());
+  int width = 0, height = 0;
+  ASSERT_TRUE(PngDimensions(body, &width, &height));
+  EXPECT_EQ(1, width);
+  EXPECT_EQ(1, height);
+  EXPECT_FALSE(h.IsProxyCacheable());
+  EXPECT_TRUE(h.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(h.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
 TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableLastInput) {
   const GoogleString sprite_url = Encode(
       kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");
@@ -563,15 +574,9 @@ TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableLastInput) {
   GoogleString partial;
   ResponseHeaders headers;
   ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
-  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
-  ASSERT_TRUE(PngDimensions(partial, &width, &height));
-  EXPECT_EQ(65, width);   // Cuppa.png only; it keeps its offset 0.
-  EXPECT_EQ(70, height);
-  EXPECT_FALSE(headers.IsProxyCacheable());
-  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
-  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+  ExpectBlankPrivate(partial, headers);
 
-  // The partial answer was not stored: with the input back, the full sprite.
+  // The blank answer was not stored: with the input back, the full sprite.
   lru_cache()->Clear();
   AddFileToMockFetcher(StrCat(kTestDomain, kBikePngFile), kBikePngFile,
                        kContentTypePng, 100);
@@ -580,9 +585,6 @@ TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableLastInput) {
   EXPECT_EQ(full, again);
 }
 
-// When the missing image is above others, those cannot keep their positions
-// (its size is not known), so nothing is drawn where they were: a transparent
-// image rather than a different image under the page's offsets.
 TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableFirstInput) {
   const GoogleString sprite_url = Encode(
       kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");
@@ -594,17 +596,31 @@ TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableFirstInput) {
   GoogleString partial;
   ResponseHeaders headers;
   ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
-  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
-  int width = 0, height = 0;
-  ASSERT_TRUE(PngDimensions(partial, &width, &height));
-  EXPECT_EQ(1, width);
-  EXPECT_EQ(1, height);
-  EXPECT_FALSE(headers.IsProxyCacheable());
-  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
-  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+  ExpectBlankPrivate(partial, headers);
 }
 
-// A sprite none of whose images can be fetched is still a 404.
+TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableMiddleInput) {
+  AddFileToMockFetcher(StrCat(kTestDomain, "bike2.png"), kBikePngFile,
+                       kContentTypePng, 100);
+  const GoogleString sprite_url =
+      Encode(kTestDomain, "is", "0",
+             MultiUrl(kCuppaPngFile, kBikePngFile, "bike2.png"), "png");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &full));
+  int width = 0, height = 0;
+  ASSERT_TRUE(PngDimensions(full, &width, &height));
+  EXPECT_EQ(270, height);
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kBikePngFile));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
+  ExpectBlankPrivate(partial, headers);
+}
+
+// A sprite none of whose images can be fetched is still a 404: nothing
+// vouches for the URL, so it is not answered as a valid sprite.
 TEST_F(CssImageCombineTest, FetchWithNoAvailableInputFails) {
   const GoogleString sprite_url = Encode(
       kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");

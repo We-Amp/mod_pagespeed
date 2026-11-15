@@ -872,33 +872,31 @@ class ImageCombineFilter::Context : public RewriteContext {
                         OutputResourcePtr output) {
     ImageCombineFilter::Combiner combiner(filter_, &library_);
 
-    // An image that could not be fetched ends the sprite there (see
-    // FetchCombinesAvailableInputs()): the images above it keep the offsets
-    // the page's CSS uses, and nothing is drawn for the rest.
+    // When any image could not be fetched (see FetchCombinesAvailableInputs())
+    // the sprite cannot be laid out as the page's CSS expects: the size of the
+    // missing image is not known, and a shorter strip would tile under the
+    // default background-repeat and show the wrong image.  Serve a
+    // transparent image instead; nothing is drawn until the image is back.
     ResourceVector resources;
-    ResourceVector available;
-    bool ok = true;
-    bool truncated = false;
-    for (int i = 0, n = num_slots(); (i < n) && ok; ++i) {
+    bool all_available = true;
+    for (int i = 0, n = num_slots(); i < n; ++i) {
       ResourcePtr resource(slot(i)->resource());
-      if (!(resource->loaded() && resource->HttpStatusOk())) {
-        truncated = true;
+      if (resource->loaded() && resource->HttpStatusOk()) {
+        resources.push_back(resource);
       } else {
-        available.push_back(resource);
+        all_available = false;
       }
-      if (truncated) {
-        continue;
-      }
-      resources.push_back(resource);
-      RegisterResource(resource.get());
-      ok = EnsureLoaded(resource->url());
     }
-    if (ok && resources.empty() && !available.empty()) {
-      // The first image is the one that is missing, and the size of what
-      // follows it in the strip is not known, so nothing can keep its place.
-      ok = WriteBlankSprite(available, output);
-    } else if (!ok || resources.empty() || !combiner.Write(resources, output)) {
-      ok = false;
+    bool ok = false;
+    if (!all_available) {
+      ok = !resources.empty() && WriteBlankSprite(resources, output);
+    } else {
+      ok = true;
+      for (size_t i = 0; ok && i < resources.size(); ++i) {
+        RegisterResource(resources[i].get());
+        ok = EnsureLoaded(resources[i]->url());
+      }
+      ok = ok && combiner.Write(resources, output);
     }
     RewriteDone(ok ? kRewriteOk : kRewriteFailed, partition_index);
   }
@@ -929,8 +927,8 @@ class ImageCombineFilter::Context : public RewriteContext {
     RewriteDone(kTooBusy, partition_index);
   }
 
-  // A sprite whose images cannot all be fetched now is rebuilt from the ones
-  // above the first that cannot, rather than answering 404.
+  // A sprite with an image that cannot be fetched now is answered with a
+  // transparent image, rather than 404.
   bool FetchCombinesAvailableInputs() const override { return true; }
 
   bool PolicyPermitsRendering() const override {
