@@ -2438,6 +2438,13 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromRemoteConfig(
                                    &error_detail);
 }
 
+RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromUrlSegment(
+    StringPiece name, StringPiece value) {
+  GoogleString error_detail;
+  return SetOptionFromNameInternal(name, value, RewriteOptions::kDirectoryScope,
+                                   &error_detail);
+}
+
 RewriteOptions::OptionSettingResult RewriteOptions::FormatSetOptionMessage(
     OptionSettingResult result, StringPiece name, StringPiece value,
     StringPiece error_detail, GoogleString* msg) {

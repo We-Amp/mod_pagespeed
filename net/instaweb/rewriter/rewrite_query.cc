@@ -680,7 +680,7 @@ RewriteQuery::Status RewriteQuery::ParseResourceOption(
             RewriteOptions::LookupOptionNameById(name_value[0]);
         if (!option_name.empty() && opts != nullptr &&
             std::binary_search(opts->begin(), opts->end(), option_name) &&
-            options->SetOptionFromName(option_name, name_value[1]) ==
+            options->SetOptionFromUrlSegment(option_name, name_value[1]) ==
                 RewriteOptions::kOptionOk) {
           status = kSuccess;
         } else {
