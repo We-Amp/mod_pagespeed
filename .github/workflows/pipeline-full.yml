@@ -327,6 +327,9 @@ jobs:
 
       - name: Build all targets
         run: |
+          # A step with no `shell:` runs `bash -e {0}` (no pipefail), so turn it
+          # on or the `| tee` below hides a failing docker run.
+          set -o pipefail
           # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
           source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
           slot_budget 55g || exit 1
@@ -336,8 +339,8 @@ jobs:
           rm -rf "${OUT}"
           mkdir -p "${OUT}"
           # Capture combined build output to a log so the follow-on "Surface
-          # compiler warnings" step can scan it. pipefail (the default step
-          # shell) still propagates the docker exit code through the tee.
+          # compiler warnings" step can scan it. pipefail (set above) propagates
+          # the docker exit code through the tee.
           BUILD_LOG="${OUT}/build-all.log"
           # Remote cache only when the runner environment names a cache
           # host: --config=ci pulls build:remote-cache (.bazelrc) and would
@@ -2047,6 +2050,7 @@ jobs:
             -w /workspace \
             "${LINT_IMAGE}" \
             bash -c '
+              set -o pipefail
               # Toolchain guard: same rationale as the clang-tidy step -- a
               # stale image formatting with the wrong major gives a
               # misleading whole-tree --Werror verdict.
