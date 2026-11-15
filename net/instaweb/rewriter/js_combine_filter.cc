@@ -50,6 +50,7 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_partnership.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -106,6 +107,25 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
       *failure_reason = StrCat("Charset mismatch; combination thus far is ",
                                combined_charset_, " file is ", this_charset);
       return false;
+    }
+
+    // WritePiece() wraps the script in a string literal escaped byte by byte,
+    // and the combination is served without a charset, so the browser decodes
+    // it in the page's. That keeps the script intact only when it is UTF-8 on
+    // a UTF-8 page, or plain ASCII (NUL bytes betray UTF-16/32, ESC ISO-2022):
+    // in other multi-byte charsets the escaped bytes can also be part of a
+    // character, and the literal would then end early.
+    if (!StringCaseEqual(this_charset, kUtf8Charset) ||
+        !StringCaseEqual(containing_charset_, kUtf8Charset)) {
+      for (char ch : resource->ExtractUncompressedContents()) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c == 0 || c == 0x1B || c >= 0x80) {
+          *failure_reason =
+              StrCat("Cannot combine non-ASCII ", this_charset,
+                     " file for a page in charset ", containing_charset_);
+          return false;
+        }
+      }
     }
 
     // In strict mode of ES262-5 eval runs in a private variable scope,
@@ -434,7 +454,7 @@ class JsCombineFilter::Context : public RewriteContext {
     LowerString(&charsets);
     // The version is updated to make sure certain bugfixes actually deploy,
     // and we don't end up using old broken cached version.
-    return StrCat("v7_", FindServerContext()->lock_hasher()->Hash(charsets));
+    return StrCat("v8_", FindServerContext()->lock_hasher()->Hash(charsets));
   }
 
  private:
