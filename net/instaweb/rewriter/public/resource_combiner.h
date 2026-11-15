@@ -95,6 +95,12 @@ class ResourceCombiner {
   TimedBool AddResourceNoFetch(const ResourcePtr& resource,
                                MessageHandler* handler);
 
+  // True once an add was refused because the combination would exceed the
+  // URL or content size limits. Such a combination is full in practice, and
+  // each refused add costs work proportional to its size, so a caller that
+  // keeps several combinations open can stop offering resources to it.
+  bool refused_for_size() const { return refused_for_size_; }
+
  protected:
   // Removes the last resource that was added here, assuming the last call to
   // AddResource was successful.  If the last call to AddResource returned
@@ -177,6 +183,7 @@ class ResourceCombiner {
   StringVector multipart_encoder_urls_;
   int prev_num_components_;
   int accumulated_leaf_size_;
+  bool refused_for_size_;
   GoogleString resolved_base_;
   const int url_overhead_;
   RewriteFilter* filter_;
