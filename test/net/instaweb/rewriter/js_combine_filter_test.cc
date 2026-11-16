@@ -1601,6 +1601,30 @@ TEST_F(JsCombineFilterTest, NonAsciiScriptOnMultibytePageIsNotCombined) {
   VerifyUse(scripts[2], kJsUrl2);
 }
 
+// The reason a script is not combined is logged.  The charset in it comes
+// from the page and is escaped, so the message stays one line.
+TEST_F(JsCombineFilterTest, NonAsciiReasonEscapedInLog) {
+  ResponseHeaders default_header;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &default_header);
+  SetFetchResponse(StrCat(kTestDomain, "na.js"), default_header,
+                   "var s = \"caf\xC3\xA9\";");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "na.html"),
+           StrCat("<script src=na.js charset=\"iso-8859-1&#10;second\">",
+                  "</script>"));
+  EXPECT_EQ(1, scripts.size());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos,
+            messages.find("non-ASCII iso-8859-1\\nsecond file"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nsecond")) << messages;
+}
+
 // A UTF-8 script is combined on a UTF-8 page, where none of its escaped bytes
 // is part of a longer character, but not on a page in another charset or in
 // none, which the browser then guesses.
