@@ -46,6 +46,7 @@
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/iis/iis_config_util.h"
 #include "pagespeed/iis/util.h"
+#include "pagespeed/iis/iis_option_token.h"
 #include "pagespeed/iis/iis_proxy_fetch_completion.h"
 #include "pagespeed/iis/iis_daemon_record.h"
 #include "net/instaweb/public/global_constants.h"
@@ -1510,6 +1511,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnSendResponse(IN IHttpContext * pHttpContext, IN ISendResponseProvider * pProvider)
 	{
+		// The RequestOptionOverride token is a credential an origin may send
+		// with its option headers.  This port never reads it from a response,
+		// and it must not reach the client: removed from every response,
+		// before anything below bails, copies or records the headers.
+		RemoveOptionOverrideToken(pHttpContext->GetResponse());
+
 		IisModuleRequestContext* request_context = IisModuleRequestContext::GetRequestContext(pHttpContext);
 
 		if (!request_context){
