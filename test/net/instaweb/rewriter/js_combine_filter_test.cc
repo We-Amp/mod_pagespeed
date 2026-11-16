@@ -41,6 +41,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -1456,6 +1457,30 @@ TEST_F(JsCombineFilterTest, AllDifferentCharsets) {
   EXPECT_EQ(kJsUrl2, scripts[1].url);
   EXPECT_EQ(kJsUrl3, scripts[2].url);
   EXPECT_EQ(kJsUrl4, scripts[3].url);
+}
+
+// The reason a script is not combined is logged.  The charsets in it come
+// from the page and are escaped, so the message stays one line.
+TEST_F(JsCombineFilterTest, CharsetMismatchReasonEscapedInLog) {
+  ResponseHeaders default_header;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &default_header);
+  SetFetchResponse(StrCat(kTestDomain, kJsUrl1), default_header, "var a;");
+  SetFetchResponse(StrCat(kTestDomain, kJsUrl2), default_header, "var b;");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "charset.html"),
+           StrCat("<script src=", kJsUrl1, " charset=utf-8></script>",
+                  "<script src=", kJsUrl2,
+                  " charset=\"iso-8859-1&#10;second\"></script>"));
+  EXPECT_EQ(2, scripts.size());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos, messages.find("file is iso-8859-1\\nsecond"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nIsecond")) << messages;
 }
 
 // A combination is decided by the charset known at hand-off: a <meta charset>

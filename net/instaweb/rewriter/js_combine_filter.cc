@@ -104,8 +104,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
     if (num_urls() == 0) {
       combined_charset_ = this_charset;
     } else if (!StringCaseEqual(combined_charset_, this_charset)) {
+      // The charsets come from the page; the reason is logged, so escape
+      // them to keep it within one log message.
       *failure_reason = StrCat("Charset mismatch; combination thus far is ",
-                               combined_charset_, " file is ", this_charset);
+                               CEscape(combined_charset_), " file is ",
+                               CEscape(this_charset));
       return false;
     }
 

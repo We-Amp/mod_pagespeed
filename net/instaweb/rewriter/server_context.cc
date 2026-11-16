@@ -655,13 +655,15 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
     url_query_param.Reset(query_param_str);
 
     if (!url_query_param.IsWebValid()) {
+      // The value comes from the client, percent-decoded: escape it so that
+      // it stays within this one log message.
       message_handler_->Message(kWarning, "Invalid URL parameter in beacon: %s",
-                                query_param_str.c_str());
+                                CEscape(query_param_str).c_str());
       return false;
     }
   } else {
     message_handler_->Message(kWarning, "Missing URL parameter in beacon: %s",
-                              params.as_string().c_str());
+                              CEscape(params).c_str());
     return false;
   }
 

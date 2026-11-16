@@ -2320,6 +2320,22 @@ void ps_remove_stripped_option_headers(ngx_http_request_t* r,
   }
 }
 
+// An origin may send the RequestOptionOverride token in its response to have
+// its own option headers honoured.  The token is a credential: the option
+// scan drops it from the responses it reads, and this drops it from every
+// response, including the ones that are never scanned.
+void ps_remove_option_override_token(ngx_http_request_t* r) {
+  ngx_table_elt_t* header;
+  NgxListIterator it(&(r->headers_out.headers.part));
+  while ((header = it.Next()) != nullptr) {
+    if (header->hash != 0 && RewriteQuery::IsRequestOptionOverrideName(
+                                 str_to_string_piece(header->key))) {
+      // Response headers with hash of 0 are excluded from the response.
+      header->hash = 0;
+    }
+  }
+}
+
 // Wrapper around GetQueryOptions()
 RewriteOptions* ps_determine_request_options(
     ngx_http_request_t* r,
@@ -3607,7 +3623,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       driver->set_pagespeed_option_cookies(pagespeed_option_cookies);
       cfg_s->proxy_fetch_factory->StartNewProxyFetch(
           mapped_url, ctx->base_fetch, driver, nullptr /*property_callback*/,
-          nullptr /*original_content_fetch*/);
+          nullptr /*original_content_fetch*/, is_proxy);
 
       return ps_async_wait_response(r);
     }
@@ -5281,6 +5297,12 @@ ngx_int_t ps_html_rewrite_fix_headers_filter(ngx_http_request_t* r) {
   // and the header writer.
   if (r == r->main && ps_restore_daemon_fallback_cache_control(r) != NGX_OK) {
     return NGX_ERROR;
+  }
+  // Every response passes here, after the html header filter's option scan
+  // and before in-place recording, so a response is neither sent nor stored
+  // with the token.
+  if (r == r->main) {
+    ps_remove_option_override_token(r);
   }
   ps_request_ctx_t* ctx = ps_get_request_context(r);
   if (r != r->main || ctx == nullptr || !ctx->html_rewrite ||
