@@ -253,6 +253,14 @@ PY
   case "$v" in [0-9]*) printf '%s\n' "$v" ;; *) return 1 ;; esac
 }
 
+# The shell line that pins the tree's package revision to 1 (the main
+# packages' r1), whatever LASTCHANGE the source tarball stamped; it works the
+# same on an older tree, which reads the revision from the same line.
+pin_package_revision_cmd() {
+  # shellcheck disable=SC2016  # expands in the container's shell
+  printf '%s' 'f=net/instaweb/public/VERSION; if grep -q "^LASTCHANGE=" "$f"; then sed "s/^LASTCHANGE=.*/LASTCHANGE=1/" "$f" > "$f.pin" && mv "$f.pin" "$f"; else echo LASTCHANGE=1 >> "$f"; fi'
+}
+
 build() {
   local arch="" set="main" ws="" out="" distro_only=""
   while [ $# -gt 0 ]; do
@@ -357,6 +365,14 @@ build() {
       [ "$arch" = arm64 ] && aflag="-a arm64 "
       wrap="./install/nginx/build_nginx_deb.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so${deb_opt}"
     fi
+    # The rebuild lane builds from the release's source tarball, whose VERSION
+    # carries the short commit as LASTCHANGE (the stamp the module reports in
+    # its user agent). The package revision is taken from the same line, so the
+    # names would read -r<sha> where the lane (and the main packages, r1) take a
+    # number. The module is built first and keeps its stamp; the line is
+    # pinned to the package revision only for the packaging step.
+    local rev_pin=""
+    if [ -n "$pkg_name" ]; then rev_pin="$(pin_package_revision_cmd)"; fi
     # Root inside the container: apt and dnf install the build toolchain of
     # the distro. On success the leg copies its packages to /collect and
     # empties its own workspace copy, so a runner with little disk never
@@ -382,6 +398,7 @@ build() {
         mkdir -p /workspace/nginx-packages
         ./install/nginx/build_module_in_container.sh '"${build_distro}"' \
           -o /workspace/ngx_pagespeed_module_'"${distro}"'.so
+        '"${rev_pin}"'
         '"${wrap}"'
         cp -a /workspace/nginx-packages/. /collect/
         rm -rf /workspace/* /workspace/.[!.]*
@@ -820,6 +837,15 @@ self_test() {
   out="$(env -i PATH="$PATH" _RN_DIR="$t/lane" bash "$t/lane/rca.sh" 2>"$t/lane/err2")" || true
   chk "missing remote-cache helper: no flags" "$out" "0"
   grep -q "without remote-cache flags" "$t/lane/err2" || { echo "FAIL: missing remote-cache helper not announced"; fail=1; }
+  # The package revision is pinned to a number, whether the tree carried a sha
+  # stamp, a number, an empty value or no line at all; other lines stay.
+  local v
+  for v in 'LASTCHANGE=66d2bfa' 'LASTCHANGE=1' 'LASTCHANGE=' 'PRERELEASE='; do
+    mkdir -p "$t/rp/net/instaweb/public"
+    printf 'MAJOR=2\nMINOR=8\nBUILD=2\nPATCH=0\n%s\n' "$v" > "$t/rp/net/instaweb/public/VERSION"
+    (cd "$t/rp" && bash -c "$(pin_package_revision_cmd)") || { echo "FAIL: revision pin failed for '$v'"; fail=1; }
+    chk "revision pin ('$v')" "$(grep -c '^LASTCHANGE=1$' "$t/rp/net/instaweb/public/VERSION")/$(grep -c '^LASTCHANGE=' "$t/rp/net/instaweb/public/VERSION")/$(grep -c '^BUILD=2$' "$t/rp/net/instaweb/public/VERSION")" "1/1/1"
+  done
   out=""
   [ "$fail" = 0 ] && echo "release_nginx self-test: ok"
   return "$fail"
