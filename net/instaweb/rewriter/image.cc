@@ -142,7 +142,7 @@ const char kPngString[] = "png";
 //
 // No trial for a lossless WebP smaller than this: the absolute saving is too
 // small to be worth a second encode and a decode.
-const size_t kPngLossyFallbackMinLosslessBytes = 64 * 1024;
+const size_t kPngLossyFallbackMinLosslessBytes = size_t{64} * 1024;
 // No trial below this WebpRecompressionQuality. Under it the size-ratio gate
 // stops discriminating (nearly any lossy file is 5x smaller) and the quality
 // guard would carry the whole decision, which the corpus does not support. The
