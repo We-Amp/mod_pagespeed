@@ -14,3 +14,9 @@ paths-ignore:
 
 # Generated scripts and their embedded copies, built from sources that are analysed directly.
   - net/instaweb/rewriter/generated/
+
+# C/C++ is analysed with build-mode none (no Bazel build). Vendored third-party
+# trees and test code are not product code and would only add noise.
+  - third_party/
+  - test/
+  - tools/ci/testdata/
