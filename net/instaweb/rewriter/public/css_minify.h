@@ -131,6 +131,8 @@ class CssMinify {
 
   StringVector* url_collector_;
   bool in_css_calc_function_;
+  // True while serializing the values of a flex shorthand declaration.
+  bool in_flex_declaration_;
 
   CssMinify(const CssMinify&) = delete;
   CssMinify& operator=(const CssMinify&) = delete;

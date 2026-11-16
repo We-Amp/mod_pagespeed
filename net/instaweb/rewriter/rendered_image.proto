@@ -23,15 +23,23 @@ option optimize_for = LITE_RUNTIME;
 package net_instaweb;
 
 // Protobuf to store rendered image dimensions.
-// Next id for RenderedImages : 2
+// Next id for RenderedImages : 4
 message RenderedImages {
-  // Next id for Image : 4
+  // Next id for Image : 5
   message Image {
     // The src for the image.
     optional string src = 1;
     // The rendered width and height of images.
     optional int32 rendered_width = 2;
     optional int32 rendered_height = 3;
+    // In a stored value: how much recent beacon results support this size
+    // for src, decayed like CriticalKeys.KeyEvidence.support.
+    optional int32 support = 4;
   };
   repeated Image image = 1;
+  // In a stored value: the support a size would have if every recent beacon
+  // result had reported it (see CriticalKeys.maximum_possible_support).
+  optional int32 maximum_possible_support = 2;
+  // In a stored value: the number of beacon results merged into it.
+  optional int32 beacons_received = 3;
 }

@@ -40,6 +40,7 @@
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/fake_filter.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
+#include "net/instaweb/rewriter/public/js_combine_filter.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"  // for ResourcePtr, etc
@@ -3728,6 +3729,12 @@ class RewriteContextFetchQueueTest : public RewriteContextTest {
     rewrite_reached_->Wait();
   }
 
+  // The variable a combined script declares for the input with this URL.
+  static GoogleString JsVarName(const RewriteDriver* driver,
+                                const GoogleString& url) {
+    return JsCombineFilter::VarName(driver, url);
+  }
+
   // Starts a fetch of url on its own driver.
   void StartFetch(const GoogleString& url) {
     RequestContextPtr ctx = RequestContext::NewTestRequestContext(
@@ -3771,6 +3778,14 @@ class RewriteContextFetchQueueTest : public RewriteContextTest {
     driver_->WaitForCompletion();
     driver_->Cleanup();
     rewrite_driver()->WaitForShutDown();
+    // The drivers that rebuilt the inputs of a combination may still be
+    // finishing a rebuild that their fetch gave up on. Let them finish before
+    // the fixture shuts down, so that the two do not meet.
+    for (int i = 0; i < 5000 && server_context()->num_active_rewrite_drivers();
+         ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(0u, server_context()->num_active_rewrite_drivers());
   }
 
   std::unique_ptr<WorkerTestBase::SyncPoint> rewrite_reached_;
@@ -3937,15 +3952,17 @@ TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
   EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), again);
 }
 
-// A combined JavaScript resource has no usable fallback: the original of an
-// input has another content hash and so another variable name. With a
-// negative deadline the fetch waits up to the blocking fetch timeout, then
-// answers 503 with Retry-After, never the original. The result is still
-// stored when the rewrite finishes.
-TEST_F(RewriteContextFetchQueueTest, CombinedJsFetchWaitIsCapped) {
-  const int64 cap_ms = 3 * Timer::kSecondMs;
+// A combined JavaScript resource is rebuilt from its optimized inputs. With a
+// negative deadline the rebuild of an input is bounded like that of a
+// stylesheet, and the combination is made without waiting for it. The
+// combination names each script after the URL it was requested with, so the
+// page's scripts still run. The result is private, short-lived and not stored.
+// (The combiner minifies each input itself, so the body is the same as that of
+// the combination of the optimized inputs; what differs is how it is served.)
+TEST_F(RewriteContextFetchQueueTest,
+       CombinedJsFetchFallsBackWithRequestedNames) {
+  UseMd5Hasher();
   options()->set_rewrite_deadline_ms(-1);
-  options()->set_blocking_fetch_timeout_ms(cap_ms);
   options()->EnableFilter(RewriteOptions::kCombineJavascript);
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
   WedgeLowPriorityWorker();
@@ -3956,41 +3973,65 @@ TEST_F(RewriteContextFetchQueueTest, CombinedJsFetchWaitIsCapped) {
   Variable* alarms =
       statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
   const int64 alarms_before = alarms->Get();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
 
-  GoogleString url = Encode(kTestDomain, "jc", "0",
-                            MultiUrl(Encode("", "jm", "0", "x.js", "js"),
-                                     Encode("", "jm", "0", "y.js", "js")),
-                            "js");
+  const GoogleString x_url = Encode(kTestDomain, "jm", "0", "x.js", "js");
+  const GoogleString y_url = Encode(kTestDomain, "jm", "0", "y.js", "js");
+  const StringVector multi_url = MultiUrl(Encode("", "jm", "0", "x.js", "js"),
+                                          Encode("", "jm", "0", "y.js", "js"));
+  const GoogleString url = Encode(kTestDomain, "jc", "0", multi_url, "js");
   StartFetch(url);
   EXPECT_FALSE(fetch_->WaitForDone(200));
-  // The fetch is not answered before the cap has passed ...
-  AdvanceBusyMs(cap_ms - 1);
+  // Not answered before the bound has passed ...
+  AdvanceBusyMs(bound_ms - 1);
   EXPECT_FALSE(fetch_->WaitForDone(200));
-  int64 advanced_ms = cap_ms - 1;
-  // ... and is answered, with an error, once it has.
-  bool done_while_busy = AdvanceUntilDone(Timer::kSecondMs, &advanced_ms);
-  const bool success = fetch_->success();
-  const GoogleString error_out = out_;
-  ResponseHeaders error_headers;
-  error_headers.CopyFrom(*fetch_->response_headers());
+  int64 advanced_ms = bound_ms - 1;
+  // ... and answered, without the rebuilds, once it has.
+  bool done_while_busy = AdvanceUntilDone(bound_ms, &advanced_ms);
+
+  HTTPValue value;
+  ResponseHeaders cached_headers;
+  const HTTPCache::FindResult in_cache =
+      HttpBlockingFind(url, http_cache(), &value, &cached_headers);
+  const bool success = done_while_busy && fetch_->success();
+  const GoogleString fallback_out = out_;
+  ResponseHeaders fallback_headers;
+  fallback_headers.CopyFrom(*fetch_->response_headers());
 
   Release();
 
-  EXPECT_TRUE(done_while_busy);
-  EXPECT_FALSE(success);
-  EXPECT_EQ(HttpStatus::kUnavailable, error_headers.status_code());
-  EXPECT_TRUE(error_headers.Has("Retry-After"));
-  EXPECT_TRUE(error_headers.HasValue(HttpAttributes::kCacheControl, "no-store"));
-  EXPECT_FALSE(error_headers.HasValue(HttpAttributes::kCacheControl, "public"));
-  EXPECT_EQ(GoogleString::npos, error_out.find("var x"));
-  EXPECT_LE(alarms_before + 1, alarms->Get());
+  // The names the page evaluates: those of the requested input URLs.
+  const GoogleString expected =
+      StrCat("var ", JsVarName(rewrite_driver(), x_url), " = \"var x=1;\";\n",
+             "var ", JsVarName(rewrite_driver(), y_url), " = \"var y=2;\";\n");
 
-  // The rewrite went on in the background, so a retry is served.
+  EXPECT_TRUE(done_while_busy);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(HttpStatus::kOK, fallback_headers.status_code());
+  EXPECT_EQ(expected, fallback_out);
+  // Private, no longer than the implicit lifetime, and not stored.
+  EXPECT_TRUE(
+      fallback_headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(
+      fallback_headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(fallback_headers.IsProxyCacheable());
+  EXPECT_GE(RewriteOptions::kDefaultImplicitCacheTtlMs,
+            fallback_headers.cache_ttl_ms());
+  EXPECT_NE(HTTPCache::kFound, in_cache.status);
+  EXPECT_LT(alarms_before, alarms->Get());
+  // Not stored under the name of its own hash either.
+  const GoogleString fallback_url =
+      Encode(kTestDomain, "jc", server_context()->hasher()->Hash(fallback_out),
+             multi_url, "js");
+  EXPECT_NE(HTTPCache::kFound, HttpBlockingFind(fallback_url, http_cache(),
+                                                &value, &cached_headers)
+                                   .status);
+
+  // A later request, once the rebuilds have finished, declares the same
+  // names.
   GoogleString again;
-  ResponseHeaders headers;
-  EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
-  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
-  EXPECT_NE(GoogleString::npos, again.find("var x"));
+  EXPECT_TRUE(FetchResourceUrl(url, &again));
+  EXPECT_EQ(expected, again);
 }
 
 // Regression test for a data race on RewriteDriver::release_driver_. During

@@ -109,6 +109,94 @@ TEST_F(CriticalFinderSupportUtilTest,
   TestPrepareForBeaconInsertionHelper(keys, kBeaconWithNonce);
 }
 
+// A page with a key that differs on every view keeps a bounded number of
+// the keys it had before.
+TEST_F(CriticalFinderSupportUtilTest, UpdateCandidateKeysForgetsStaleKeys) {
+  for (int i = 0; i < 10 * kMaxStaleCandidateKeys; ++i) {
+    StringSet keys;
+    keys.insert("fixed");
+    keys.insert(StrCat("changing", IntegerToString(i)));
+    EXPECT_TRUE(UpdateCandidateKeys(keys, &critical_keys_proto_, true));
+    EXPECT_GE(kMaxStaleCandidateKeys + 2,
+              critical_keys_proto_.key_evidence_size());
+    // The keys on the page are still registered candidates.
+    EXPECT_FALSE(UpdateCandidateKeys(keys, &critical_keys_proto_, true));
+  }
+}
+
+// A page that alternates between a few variants settles on the union of their
+// keys instead of looking changed on every view.
+TEST_F(CriticalFinderSupportUtilTest, UpdateCandidateKeysKeepsAFewStaleKeys) {
+  StringSet variant_a, variant_b;
+  variant_a.insert("a");
+  variant_b.insert("b");
+  EXPECT_TRUE(UpdateCandidateKeys(variant_a, &critical_keys_proto_, true));
+  EXPECT_TRUE(UpdateCandidateKeys(variant_b, &critical_keys_proto_, true));
+  EXPECT_FALSE(UpdateCandidateKeys(variant_a, &critical_keys_proto_, true));
+  EXPECT_FALSE(UpdateCandidateKeys(variant_b, &critical_keys_proto_, true));
+}
+
+// The same holds for variants with more keys than kMaxStaleCandidateKeys.
+TEST_F(CriticalFinderSupportUtilTest, UpdateCandidateKeysLargeVariantsSettle) {
+  StringSet variant_a, variant_b;
+  for (int i = 0; i < kMaxStaleCandidateKeys + 50; ++i) {
+    variant_a.insert(StrCat("a", IntegerToString(i)));
+    variant_b.insert(StrCat("b", IntegerToString(i)));
+  }
+  EXPECT_TRUE(UpdateCandidateKeys(variant_a, &critical_keys_proto_, true));
+  EXPECT_TRUE(UpdateCandidateKeys(variant_b, &critical_keys_proto_, true));
+  EXPECT_FALSE(UpdateCandidateKeys(variant_a, &critical_keys_proto_, true));
+  EXPECT_FALSE(UpdateCandidateKeys(variant_b, &critical_keys_proto_, true));
+}
+
+// Support is only ever removed by decay, also for a key that left the page.
+TEST_F(CriticalFinderSupportUtilTest, UpdateCandidateKeysKeepsSupportedKeys) {
+  StringSet supported;
+  supported.insert("supported");
+  EXPECT_TRUE(UpdateCandidateKeys(supported, &critical_keys_proto_, true));
+  UpdateCriticalKeys(true /* require_prior_support */, supported, 10,
+                     &critical_keys_proto_);
+  for (int i = 0; i < 2 * kMaxStaleCandidateKeys; ++i) {
+    StringSet keys;
+    keys.insert(StrCat("changing", IntegerToString(i)));
+    EXPECT_TRUE(UpdateCandidateKeys(keys, &critical_keys_proto_, true));
+  }
+  StringSet critical_keys;
+  GetCriticalKeysFromProto(0 /* support_percentage */, critical_keys_proto_,
+                           &critical_keys);
+  EXPECT_EQ(supported, critical_keys);
+}
+
+// A page keeps a bounded number of pending nonces however often it is
+// instrumented; the newest nonce handed out stays valid.
+TEST_F(CriticalFinderSupportUtilTest, PendingNonceListIsBounded) {
+  StringSet keys;
+  keys.insert("a");
+  UpdateCandidateKeys(keys, &critical_keys_proto_, true);
+  GoogleString first_nonce;
+  GoogleString last_nonce;
+  for (int i = 0; i < kMaxPendingNonces + 50; ++i) {
+    factory()->mock_timer()->AdvanceMs(10);
+    critical_keys_proto_.clear_next_beacon_timestamp_ms();
+    BeaconMetadata result;
+    PrepareForBeaconInsertionHelper(
+        &critical_keys_proto_, factory()->nonce_generator(), rewrite_driver(),
+        true /* using_candidate_key_detection */, &result);
+    ASSERT_EQ(kBeaconWithNonce, result.status);
+    if (i == 0) {
+      first_nonce = result.nonce;
+    }
+    last_nonce = result.nonce;
+    EXPECT_GE(kMaxPendingNonces, critical_keys_proto_.pending_nonce_size());
+  }
+  const int64 now_ms = timer()->NowMs();
+  EXPECT_TRUE(
+      ValidateAndExpireNonce(now_ms, last_nonce, &critical_keys_proto_));
+  // The oldest nonces made room for the newer ones.
+  EXPECT_FALSE(
+      ValidateAndExpireNonce(now_ms, first_nonce, &critical_keys_proto_));
+}
+
 }  // namespace
 
 TEST_F(CriticalFinderSupportUtilTest, ValidateAndExpireNonceExactMatchOnly) {

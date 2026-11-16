@@ -73,6 +73,17 @@ const int64 kCriticalSelectorLowFreqBeaconMult = 12;
 // correctly and so we drop into low frequency beaconing mode.
 const int64 kNonceExpirationLimit = 5;
 
+// The number of candidate keys a page remembers that are no longer on the page
+// and that no beacon result supports (or the page's own number of keys, if
+// that is larger). A few let a page that alternates between variants settle
+// on the union of their keys instead of looking changed on every view; the
+// limit keeps a page whose keys differ on every view from keeping all of them.
+const int64 kMaxStaleCandidateKeys = 100;
+
+// The number of beacon nonces a page keeps pending at once. When all of them
+// are live, the oldest is replaced by the next one handed out.
+const int kMaxPendingNonces = 128;
+
 class MessageHandler;
 class NonceGenerator;
 class RewriteDriver;
@@ -172,7 +183,9 @@ void PrepareForBeaconInsertionHelper(CriticalKeys* proto,
 // they are inserted into proto with a support value of 0, and true is returned.
 // Otherwise returns false. If clear_rebeacon_timestamp is set, the rebeacon
 // timestamp field in the proto is cleared to force rebeaconing on the next
-// request.
+// request. When the keys change, unsupported keys in proto that are not in
+// keys are forgotten once there are too many of them (see
+// kMaxStaleCandidateKeys).
 bool UpdateCandidateKeys(const StringSet& keys, CriticalKeys* proto,
                          bool clear_rebeacon_timestamp);
 

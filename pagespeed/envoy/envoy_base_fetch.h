@@ -81,8 +81,6 @@ class EnvoyBaseFetch : public AsyncFetch {
   // Atomic: written in HandleHeadersComplete (network thread),
   // read in HandleDone (possibly different thread).
   std::atomic<bool> have_ipro_response_{false};
-  // The response is a 503 with Retry-After that is sent to the client.
-  std::atomic<bool> retryable_unavailable_{false};
   // Atomic pointer to avoid race between worker threads and dispatcher thread.
   // Use memory_order_acquire for loads, memory_order_release for stores.
   std::atomic<Envoy::Http::HttpPageSpeedDecoderFilter*> decoder_{nullptr};
