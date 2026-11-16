@@ -24,6 +24,7 @@
 #include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include "base/logging.h"
 #include "net/instaweb/public/global_constants.h"
@@ -118,6 +119,29 @@ void DecaySupportMap(int support_interval, SupportMap* support_map) {
   }
 }
 
+// Forget the candidate keys that are neither on the page now (in keys) nor
+// supported by any beacon result, once there are more of them than the page
+// has keys or kMaxStaleCandidateKeys, whichever is larger. DecaySupportMap
+// only removes a key whose support falls to 0, so a key that no beacon ever
+// supported would otherwise stay forever. Keeping a few lets a page that
+// alternates between variants settle on the union of their keys.
+void ExpireStaleCandidates(const StringSet& keys, SupportMap* support_map) {
+  std::vector<SupportMap::iterator> stale;
+  for (SupportMap::iterator it = support_map->begin(); it != support_map->end();
+       ++it) {
+    if (it->second <= 0 && keys.find(it->first) == keys.end()) {
+      stale.push_back(it);
+    }
+  }
+  const size_t limit =
+      std::max(static_cast<size_t>(kMaxStaleCandidateKeys), keys.size());
+  if (stale.size() > limit) {
+    for (SupportMap::iterator it : stale) {
+      support_map->erase(it);
+    }
+  }
+}
+
 void ClearInvalidNonces(const int64 now_ms, CriticalKeys* critical_keys) {
   // Invalidate expired entries, and if no valid entries remain then delete all
   // outstanding entries.
@@ -166,8 +190,21 @@ void AddNonceToCriticalSelectors(const int64 timestamp_ms,
     }
   }
   if (pending_nonce == nullptr) {
-    // No entry to reuse; create new entry
-    pending_nonce = critical_keys->add_pending_nonce();
+    if (critical_keys->pending_nonce_size() < kMaxPendingNonces) {
+      // No entry to reuse; create new entry
+      pending_nonce = critical_keys->add_pending_nonce();
+    } else {
+      // The list is full of live nonces: replace the oldest, whose beacon is
+      // the least likely to still arrive.
+      for (int i = 0; i < critical_keys->pending_nonce_size(); ++i) {
+        CriticalKeys::PendingNonce* entry =
+            critical_keys->mutable_pending_nonce(i);
+        if (pending_nonce == nullptr ||
+            entry->timestamp_ms() < pending_nonce->timestamp_ms()) {
+          pending_nonce = entry;
+        }
+      }
+    }
   }
   pending_nonce->set_timestamp_ms(timestamp_ms);
   pending_nonce->set_nonce(*nonce);
@@ -447,6 +484,7 @@ bool UpdateCandidateKeys(const StringSet& keys, CriticalKeys* proto,
     }
   }
   if (support_map_changed) {
+    ExpireStaleCandidates(keys, &support_map);
     // The candidate keys changed, so we need to go into high frequency
     // beaconing mode. Reset the number of beacons received to signal this.
     proto->set_valid_beacons_received(0);

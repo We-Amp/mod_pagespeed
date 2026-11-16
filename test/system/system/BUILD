@@ -61,6 +61,7 @@ pagespeed_py_test_suite(
         "test_handler_access.py",
         "test_handler_quoting.py",
         "test_headers.py",
+        "test_htaccess_fetch_directives.py",
         "test_htaccess_override.py",
         "test_image_quality_and_response.py",
         "test_image_rewrite_locking.py",

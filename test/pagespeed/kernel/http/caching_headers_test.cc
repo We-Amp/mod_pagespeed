@@ -288,4 +288,129 @@ TEST_F(CachingHeadersTest, SMaxAgeAloneDoesNotSetFreshness) {
   EXPECT_EQ(0, freshness_ms);
 }
 
+// The checks every stale response below must pass.
+#define EXPECT_STALE(cache_control)                                        \
+  do {                                                                     \
+    SetCacheControl(cache_control);                                        \
+    EXPECT_TRUE(headers_->HasExplicitNoCacheDirective()) << cache_control; \
+    EXPECT_FALSE(headers_->IsCacheable()) << cache_control;                \
+    EXPECT_FALSE(headers_->IsProxyCacheable()) << cache_control;           \
+    EXPECT_FALSE(headers_->IsExplicitlyCacheable()) << cache_control;      \
+    int64 stale_freshness_ms = -1;                                         \
+    EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&stale_freshness_ms)) \
+        << cache_control;                                                  \
+    EXPECT_EQ(0, stale_freshness_ms) << cache_control;                     \
+  } while (false)
+
+TEST_F(CachingHeadersTest, UnreadableLifetimeIsStale) {
+  // A max-age or s-maxage that cannot be read may have forbidden reuse, so
+  // the response is stale rather than cacheable by heuristics (RFC 9111
+  // 4.2.1).
+  for (const char* cache_control :
+       {"max-age=", "max-age=0.0", "max-age='0'", "max-age=\"", "max-age=0x0",
+        "max-age=-1", "max-age=600, s-maxage=", "max-age=600, s-maxage=1s",
+        "MAX-AGE=abc", "max-agex=600"}) {
+    EXPECT_STALE(cache_control);
+  }
+}
+
+TEST_F(CachingHeadersTest, LifetimeIsMatchedByNameAndForm) {
+  // Only name=value, with nothing around the '=', is a lifetime that can be
+  // read; any other spelling of the name counts as unreadable.
+  for (const char* cache_control :
+       {"max-age =600", "max-age= 600", "max-age = 600", "max-age",
+        "public, max-age", "s-maxage", "max-age=600, s-maxage",
+        "max-age=600, s-maxage =60"}) {
+    EXPECT_STALE(cache_control);
+  }
+  SetCacheControl("Max-Age=600");
+  int64 freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(600000, freshness_ms);
+}
+
+TEST_F(CachingHeadersTest, RepeatedLifetimeTakesTheShortest) {
+  int64 freshness_ms = -1;
+  SetCacheControl("max-age=60, max-age=600");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(60000, freshness_ms);
+
+  SetCacheControl("max-age=600, max-age=60");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(60000, freshness_ms);
+
+  SetCacheControl("max-age=600, s-maxage=30, s-maxage=300");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(30000, freshness_ms);
+
+  // One readable and one unreadable copy: stale.
+  EXPECT_STALE("max-age=600, max-age=abc");
+  EXPECT_STALE("max-age=600, max-age=0");
+}
+
+TEST_F(CachingHeadersTest, QuotedLifetimeIsRead) {
+  // RFC 9111 5.2: a directive argument may use the quoted-string form.
+  SetCacheControl("max-age=\"600\"");
+  EXPECT_FALSE(headers_->HasExplicitNoCacheDirective());
+  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  int64 freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(600000, freshness_ms);
+
+  SetCacheControl("max-age=\"600\", s-maxage=\"60\"");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(60000, freshness_ms);
+
+  // A quoted zero forbids reuse just like the token form.
+  EXPECT_STALE("max-age=\"0\"");
+  EXPECT_STALE("max-age=600, s-maxage=\"0\"");
+}
+
+TEST_F(CachingHeadersTest, SemicolonJoinedElements) {
+  // Restrictive directives count wherever they appear, also when an origin
+  // joins them to another with a semicolon.
+  for (const char* cache_control :
+       {"no-store; x-ext", "x-ext; no-cache", "x-ext;No-Store"}) {
+    SetCacheControl(cache_control);
+    EXPECT_TRUE(headers_->HasExplicitNoCacheDirective()) << cache_control;
+    EXPECT_FALSE(headers_->IsCacheable()) << cache_control;
+  }
+  SetCacheControl("x-ext; private");
+  EXPECT_FALSE(headers_->IsProxyCacheable());
+  SetCacheControl("x-ext; must-revalidate");
+  EXPECT_TRUE(headers_->MustRevalidate());
+
+  // A lifetime in such an element, or inside a quoted string, cannot be read.
+  for (const char* cache_control :
+       {"max-age=600;", "max-age=600; must-revalidate", "public; max-age=600",
+        "no-store; max-age=0", "max-age=\"6;0\"", "max-age=\"600;\"",
+        "x-ext=\"a;max-age=600\"", "x-ext=\"max-age=600\""}) {
+    EXPECT_STALE(cache_control);
+  }
+}
+
+TEST_F(CachingHeadersTest, OversizedLifetimeIsClamped) {
+  // A lifetime longer than an int holds is still a long lifetime.
+  SetCacheControl("max-age=99999999999");
+  EXPECT_FALSE(headers_->HasExplicitNoCacheDirective());
+  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  int64 freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(1000LL * kint32max, freshness_ms);
+
+  SetCacheControl("max-age=2147483648");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(1000LL * kint32max, freshness_ms);
+
+  SetCacheControl("max-age=\"007\"");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(7000, freshness_ms);
+
+  // An empty quoted value or a sign is not a lifetime.
+  EXPECT_STALE("max-age=\"\"");
+  EXPECT_STALE("max-age=+5");
+}
+
+#undef EXPECT_STALE
+
 }  // namespace net_instaweb

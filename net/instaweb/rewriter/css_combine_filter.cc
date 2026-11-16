@@ -342,6 +342,10 @@ class CssCombineFilter::Context : public RewriteContext {
   // rewrites of the same inputs read.
   bool FetchWritesPartition() const override { return false; }
 
+  // A stylesheet that cannot be fetched is left out of the fetched
+  // combination, so the page keeps the rest of its styles.
+  bool FetchCombinesAvailableInputs() const override { return true; }
+
   GoogleString CacheKeySuffix() const override {
     // Bumped so that entries stored by earlier versions are not reused.
     return "v1";

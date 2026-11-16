@@ -561,6 +561,12 @@ void HtmlLexer::EvalCommentStart2(char c) {
 void HtmlLexer::EvalCommentBody(char c) {
   if (c == '-') {
     state_ = COMMENT_END1;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!-->" is a complete, empty comment to browsers. token_ is empty only
+    // directly after "<!--": every way back into this state appends to it.
+    // HTML5 spec state name: Comment start state
+    EmitComment();
+    state_ = START;
   } else {
     token_ += c;
   }
@@ -572,6 +578,11 @@ void HtmlLexer::EvalCommentBody(char c) {
 void HtmlLexer::EvalCommentEnd1(char c) {
   if (c == '-') {
     state_ = COMMENT_END2;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!--->" is a complete, empty comment to browsers.
+    // HTML5 spec state name: Comment start dash state
+    EmitComment();
+    state_ = START;
   } else {
     // thought we were ending a comment cause we saw '-', but
     // now we changed our minds.   No worries mate.  That
@@ -591,6 +602,8 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     // There could be an arbitrarily long stream of dashes before
     // we see the >.  Keep looking.
     token_ += "-";
+  } else if (c == '!') {
+    state_ = COMMENT_END_BANG;
   } else {
     // thought we were ending a comment cause we saw '--', but
     // now we changed our minds.   No worries mate.  Those
@@ -598,6 +611,21 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     token_ += "--";
     token_ += c;
     state_ = COMMENT_BODY;
+  }
+}
+
+// Handle the case where "--!" has been parsed from a comment. Browsers end
+// the comment on "--!>" as they do on "-->".
+// HTML5 spec state name: Comment end bang state
+void HtmlLexer::EvalCommentEndBang(char c) {
+  if (c == '>') {
+    EmitComment();
+    state_ = START;
+  } else {
+    // Not the end of the comment after all: "--!" was part of it.
+    token_ += "--!";
+    state_ = COMMENT_BODY;
+    EvalCommentBody(c);
   }
 }
 
@@ -930,18 +958,27 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
     }
   }
 
+  // Guard against pathologically deep nesting (e.g. <div> x 50,000), which
+  // would otherwise grow element_stack_ without bound.  The element that
+  // would go past the cap is not created: its start tag, still in literal_,
+  // and the rest of the document are passed through as text (see Parse()),
+  // so the page is served whole.  The elements still open stay open, and are
+  // closed at the end without writing anything.
+  if (static_cast<int>(element_stack_.size()) - kStartStack >=
+      kMaxNestingDepth) {
+    passing_through_ = true;
+    html_parse_->Warning(id_.c_str(), line_,
+                         "HTML nested deeper than %d elements is served "
+                         "unoptimized from here",
+                         kMaxNestingDepth);
+    element_ = nullptr;  // Never added to the event stream.
+    state_ = START;
+    return;
+  }
+
   literal_.clear();
   html_parse_->AddElement(element_, tag_start_line_);
   if (size_limit_exceeded_) {
-    skip_parsing_ = true;
-  }
-
-  // Guard against pathologically deep nesting (e.g. <div> x 50,000), which
-  // would otherwise grow element_stack_ without bound.  Once we hit the cap we
-  // stop parsing the remainder of the document, mirroring the size_limit_
-  // behavior above.  We still push this element so the stack stays consistent
-  // for the close-out in FinishParse().
-  if (static_cast<int>(element_stack_.size()) >= kMaxNestingDepth) {
     skip_parsing_ = true;
   }
 
@@ -1173,7 +1210,8 @@ void HtmlLexer::FinishAttribute(char c, bool has_value, bool brief_close) {
       MakeAttribute(has_value);
     }
     EmitTagOpen(!brief_close);
-    if (brief_close) {
+    // When the nesting cap refused the element there is nothing to close.
+    if (brief_close && !passing_through_) {
       EmitTagBriefClose();
     }
 
@@ -1361,6 +1399,9 @@ void HtmlLexer::Parse(const char* text, int size) {
       case COMMENT_END2:
         EvalCommentEnd2(c);
         break;
+      case COMMENT_END_BANG:
+        EvalCommentEndBang(c);
+        break;
       case CDATA_START1:
         EvalCdataStart1(c);
         break;
@@ -1421,6 +1462,12 @@ void HtmlLexer::Parse(const char* text, int size) {
       case BOGUS_COMMENT:
         EvalBogusComment(c);
         break;
+    }
+    if (passing_through_) {
+      // The nesting cap refused an element (see EmitTagOpen()): its start tag
+      // is still in literal_, and goes out as text with everything after it.
+      PassThrough(text + i + 1, size - i - 1);
+      return;
     }
   }
 }

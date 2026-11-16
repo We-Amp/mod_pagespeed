@@ -147,6 +147,20 @@ get_version_info() {
   fi
 }
 
+# pagespeed-doctor, the read-only health check (install/common/pagespeed-doctor).
+# It lives in the package's own /usr/share directory and is offered as
+# /usr/sbin/pagespeed-doctor through update-alternatives (postinst / %post),
+# so the Apache and nginx packages can both ship it without a file conflict.
+# Not a conffile. Called by the deb and rpm staging, not by
+# stage_install_common, so builders with their own file lists are unaffected.
+stage_doctor() {
+  install -m 755 -d "${STAGEDIR}/usr/share/${PACKAGE}"
+  sed "s/^DOCTOR_VERSION=.*/DOCTOR_VERSION=\"${VERSION}\"/" \
+    "${BUILDDIR}/install/common/pagespeed-doctor" \
+    > "${STAGEDIR}/usr/share/${PACKAGE}/pagespeed-doctor"
+  chmod 755 "${STAGEDIR}/usr/share/${PACKAGE}/pagespeed-doctor"
+}
+
 stage_install_common() {
   echo "Staging common install files in '${STAGEDIR}'..."
 

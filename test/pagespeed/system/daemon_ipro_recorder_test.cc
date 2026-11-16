@@ -238,9 +238,9 @@ TEST_F(DaemonIproRecorderTest, RepeatedVaryLinesAreJoinedAndSurviveTheCall) {
 }
 
 TEST_F(DaemonIproRecorderTest, AVaryTheSharedKeyCannotSeparateIsRefused) {
-  // The joined list is what the peer's predicate sees, so a second line
-  // carrying an axis outside its four refuses the whole response even though
-  // the first line is fine. Asking per line would have admitted it.
+  // A second line carrying another axis refuses the whole response even
+  // though the first line is fine; the module refuses it before the peer is
+  // asked. Asking per line would have admitted it.
   ResponseHeaders headers;
   MakeOkHeaders(&headers);
   headers.Add(HttpAttributes::kVary, HttpAttributes::kAcceptEncoding);
@@ -248,9 +248,7 @@ TEST_F(DaemonIproRecorderTest, AVaryTheSharedKeyCannotSeparateIsRefused) {
   headers.ComputeCaching();
 
   const DaemonRecordOutcome outcome = Run(&headers, kBody);
-  EXPECT_TRUE(outcome.gate_ran);
-  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
-  EXPECT_STREQ(daemon_record_reason::kVaryNotStorable, outcome.reason);
+  EXPECT_FALSE(outcome.gate_ran);
   EXPECT_FALSE(outcome.stored);
 }
 
@@ -333,57 +331,77 @@ TEST_F(DaemonIproRecorderTest, AnAuthorizedRequestMarkedPublicIsRecorded) {
   EXPECT_TRUE(outcome.stored);
 }
 
-// --- MAJOR 5's regression: respect_vary is configured, not constant --------
+// --- a cookie on the request: handed over only when the origin allows -----
 
-TEST_F(DaemonIproRecorderTest, StrictestOfBothIsReal) {
-  // THE DIVERGENCE, re-derived on the path that actually runs -- and it is
-  // not the one this PR originally claimed. Two corrections, both found by
-  // running it rather than reasoning about it:
-  //
-  //   `Vary: Cookie` is NOT a divergence here. The module-side rule that
-  //   tolerates it needs an HTML-like content type, and the in-place path is
-  //   resources. Both sides refuse it.
-  //
-  //   `Vary: *` is NOT a divergence either. It never reaches the Vary loop:
-  //   the caching computation has already marked the response uncacheable.
-  //   The module is stricter there.
-  //
-  // What DOES diverge is an ordinary named axis outside the four the shared
-  // key separates. `Accept-Language` is one an origin really sends. With the
-  // shipped default (respect-Vary-on-resources OFF) and no validator, this
-  // module admits it on a resource -- the branch that would refuse needs
-  // either that option or an HTML-like type. The peer refuses it, because a
-  // single stored representation behind a key that cannot tell languages
-  // apart hands the next reader the wrong one.
+TEST_F(DaemonIproRecorderTest, ACookieRequestsUnmarkedResponseIsNotHandedOver) {
+  // The response the server produced for a visitor whose request carried a
+  // cookie may be that visitor's own.  A stylesheet with only the implicit
+  // lifetime is not marked shareable, so it never reaches the peer.
+  for (const RequestHeaders::Properties& cookie :
+       {RequestHeaders::Properties(true, false, false),
+        RequestHeaders::Properties(false, true, false)}) {
+    request_.request_properties = cookie;
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.RemoveAll(HttpAttributes::kCacheControl);
+    headers.ComputeCaching();
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    EXPECT_FALSE(outcome.gate_ran);
+    EXPECT_FALSE(outcome.stored);
+    EXPECT_EQ(GoogleString::npos, CallLog().find("write_original"));
+  }
+
+  // The same response for a request without a cookie gets past this module.
+  request_.request_properties = RequestHeaders::Properties(false, false, false);
   ResponseHeaders headers;
   MakeOkHeaders(&headers);
-  headers.Add(HttpAttributes::kVary, "Accept-Language");
+  headers.RemoveAll(HttpAttributes::kCacheControl);
   headers.ComputeCaching();
+  EXPECT_TRUE(Run(&headers, kBody).gate_ran);
+}
 
-  const HttpOptions shipped_default = kDefaultHttpOptionsForTests;
-  ASSERT_FALSE(shipped_default.respect_vary)
-      << "this test is about the shipped default; it no longer is one";
+TEST_F(DaemonIproRecorderTest, ACookieRequestsMarkedResponseIsHandedOver) {
+  // The control: a response the origin marked shareable is handed over for a
+  // cookie-bearing request as for any other.
+  request_.request_properties = RequestHeaders::Properties(true, false, false);
+  for (const char* cache_control :
+       {"max-age=600, public", "max-age=600, s-maxage=600"}) {
+    SCOPED_TRACE(cache_control);
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.Replace(HttpAttributes::kCacheControl, cache_control);
+    headers.ComputeCaching();
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    EXPECT_TRUE(outcome.gate_ran);
+    EXPECT_TRUE(outcome.stored);
+  }
+}
 
-  // Half one: THIS MODULE's predicate, called exactly as the recorder calls
-  // it, admits the response.
-  EXPECT_TRUE(headers.IsProxyCacheable(
-      request_.request_properties,
-      ResponseHeaders::GetVaryOption(shipped_default.respect_vary),
-      ResponseHeaders::kNoValidator))
-      << "the module-side predicate no longer admits this, so the case below "
-         "is no longer a divergence";
+// --- the recorded response is one client's: Vary beyond encoding refuses --
 
-  // Half two: THE PEER's predicate refuses it.
-  EXPECT_EQ(1, abi_->VaryUncacheable("Accept-Language"));
-
-  // And the recorder reaches the gate -- proving the module-side predicate
-  // really did admit it -- and then lands on the peer's answer.
-  const DaemonRecordOutcome outcome =
-      Run(&headers, kBody, true, &shipped_default);
-  EXPECT_TRUE(outcome.gate_ran) << "the module-side gate refused it first, so "
-                                   "the peer's predicate never ran";
-  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
-  EXPECT_STREQ(daemon_record_reason::kVaryNotStorable, outcome.reason);
+TEST_F(DaemonIproRecorderTest, AVaryBeyondEncodingIsRefusedBeforeThePeer) {
+  // The recorder captures the response the server produced for one client's
+  // request, with that client's Accept, Origin and User-Agent, and the peer
+  // keeps one original per URL.  So a response that varies on any request
+  // header but Accept-Encoding is refused module-side, whatever RespectVary
+  // says -- including the axes the peer itself would accept.
+  HttpOptions respect = kDefaultHttpOptionsForTests;
+  respect.respect_vary = true;
+  for (const HttpOptions* options :
+       {static_cast<const HttpOptions*>(nullptr),
+        static_cast<const HttpOptions*>(&respect)}) {
+    for (const char* vary : {"Accept", "User-Agent", "Save-Data", "Origin",
+                             "Accept-Language", "accept"}) {
+      SCOPED_TRACE(StrCat(vary, options == nullptr ? " default" : " respect"));
+      ResponseHeaders headers;
+      MakeOkHeaders(&headers);
+      headers.Add(HttpAttributes::kVary, vary);
+      headers.ComputeCaching();
+      const DaemonRecordOutcome outcome = Run(&headers, kBody, true, options);
+      EXPECT_FALSE(outcome.gate_ran);
+      EXPECT_FALSE(outcome.stored);
+    }
+  }
 }
 
 TEST_F(DaemonIproRecorderTest, TheModuleIsStricterOnSomeAxesAndThatIsFine) {
@@ -401,62 +419,10 @@ TEST_F(DaemonIproRecorderTest, TheModuleIsStricterOnSomeAxesAndThatIsFine) {
   }
 }
 
-TEST_F(DaemonIproRecorderTest, RespectVaryIsHonouredWhenTheOperatorSetsIt) {
-  // With the option ON the module-side predicate refuses first, so the
-  // response never reaches the gate. That is the difference a hard-coded
-  // constant erased -- and hard-coding the STRICT end, as this originally
-  // did, also made the peer's own allowlist unreachable.
-  ResponseHeaders headers;
-  MakeOkHeaders(&headers);
-  headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
-  headers.ComputeCaching();
-
-  HttpOptions respect = kDefaultHttpOptionsForTests;
-  respect.respect_vary = true;
-  const DaemonRecordOutcome strict = Run(&headers, kBody, true, &respect);
-  EXPECT_FALSE(strict.gate_ran);
-  EXPECT_FALSE(strict.stored);
-
-  // And with the default it is admitted by both sides: `Accept` is one of the
-  // axes the shared key does separate.
-  const DaemonRecordOutcome loose = Run(&headers, kBody);
-  EXPECT_TRUE(loose.gate_ran);
-  EXPECT_TRUE(loose.stored);
-}
-
-TEST_F(DaemonIproRecorderTest, AnAcceptNegotiatingOriginIsStoredMarked) {
-  // The end of the seam for the stamping obligation: a REAL response, through
-  // the real header parsing and the real join, reaching the peer with the
-  // marker set.  The gate's own suite pins the flag on the decision; what this
-  // adds is that nothing between a `Vary: Accept` header line and the write
-  // loses it -- the join, the module-side cacheability check, the gate and the
-  // writer are all in the path here and none of them is in that one.
-  ResponseHeaders headers;
-  MakeOkHeaders(&headers);
-  headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
-  headers.ComputeCaching();
-
-  const DaemonRecordOutcome outcome = Run(&headers, kBody);
-  ASSERT_TRUE(outcome.gate_ran);
-  EXPECT_TRUE(outcome.stored);
-  const GoogleString log = CallLog();
-  // 4 ALONE: the Vary-Accept marker and NOT the
-  // origin-headers-not-reproducible one.  `Accept` is a handled `Vary` axis
-  // precisely BECAUSE of the bit this response does earn -- the fact is
-  // recorded here and the serve arm emits `Vary: Accept` back off it -- so the
-  // header is reproduced and there is nothing for rule 6 to mark.  Asserted on
-  // the whole byte rather than on one bit, because that is what the peer was
-  // told and because 12 here would mean the substrate declines every
-  // Accept-negotiating origin it records.
-  EXPECT_NE(GoogleString::npos, log.find(" flags=4")) << log;
-}
-
 TEST_F(DaemonIproRecorderTest, ARepeatedVaryIsClassifiedAsOneListHereToo) {
-  // The join is load-bearing for the STAMP as well as for the refusal, and in
-  // the opposite direction: `Accept` arriving on its own line, beside another
-  // allowed axis, is still an Accept-negotiating origin.  A per-line
-  // classification that stopped at the first line would store this unmarked --
-  // storable, notified, and wrong for every later client.
+  // The join is load-bearing for the refusal: `Accept` arriving on its own
+  // line, after an `Accept-Encoding` line, still varies on the request.  A
+  // per-line classification that stopped at the first line would store it.
   ResponseHeaders headers;
   MakeOkHeaders(&headers);
   headers.Add(HttpAttributes::kVary, HttpAttributes::kAcceptEncoding);
@@ -464,12 +430,8 @@ TEST_F(DaemonIproRecorderTest, ARepeatedVaryIsClassifiedAsOneListHereToo) {
   headers.ComputeCaching();
 
   const DaemonRecordOutcome outcome = Run(&headers, kBody);
-  ASSERT_TRUE(outcome.gate_ran);
-  EXPECT_TRUE(outcome.stored);
-  const GoogleString log = CallLog();
-  // 4 alone, for the reason given on the case above -- and both axes on the
-  // two lines are handled ones, so the joined list is reproducible too.
-  EXPECT_NE(GoogleString::npos, log.find(" flags=4")) << log;
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_FALSE(outcome.stored);
 }
 
 TEST_F(DaemonIproRecorderTest, AnOrdinaryResponseReachesThePeerUnmarked) {
@@ -756,6 +718,22 @@ TEST_F(DaemonIproRecorderOriginCachingTest,
   const GoogleString log = CallLog();
   EXPECT_NE(GoogleString::npos, log.find("max_age=60 ")) << log;
   EXPECT_EQ(GoogleString::npos, log.find("max_age=300 ")) << log;
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnUnreadableServerLifetimeStillLimitsTheOrigins) {
+  // A server lifetime that cannot be read still counts as the server's
+  // statement, and it allows no lifetime at all: the origin's is not stored.
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+  origin_caching_ = &origin;
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, "x-ext; max-age=60");
+  origin_caching_ = nullptr;
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=600 ")) << log;
 }
 
 TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {

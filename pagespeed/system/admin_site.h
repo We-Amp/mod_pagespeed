@@ -179,7 +179,7 @@ class AdminSite {
   AdminSite(Timer* timer, MessageHandler* message_handler,
             DaemonReader* daemon_reader);
 
-  ~AdminSite();
+  virtual ~AdminSite();
 
   // Serves the embedded SPA console HTML.
   void ServeSpaConsole(AsyncFetch* fetch);
@@ -301,8 +301,18 @@ class AdminSite {
   void PrintHistograms(AdminSource source, AsyncFetch* fetch,
                        Statistics* stats);
 
+  // Purges url, or the whole cache when url ends in '*', with the rights of
+  // the whole server (the PURGE method, the global console).
   void PurgeHandler(StringPiece url, SystemCachePath* cache_path,
-                    AsyncFetch* fetch);
+                    AsyncFetch* fetch) {
+    Purge(url, cache_path, fetch, true /* allow_eviction */);
+  }
+
+  // As PurgeHandler.  A purge from a per-vhost console passes
+  // allow_eviction = false: its record may not evict another site's, which
+  // would flush every site on the cache path.  Virtual for tests.
+  virtual void Purge(StringPiece url, SystemCachePath* cache_path,
+                     AsyncFetch* fetch, bool allow_eviction);
 
   // Return the daemon proxy handler (for the /v1/daemon/* endpoints).
   AdminDaemonHandler* daemon_handler() { return daemon_handler_.get(); }

@@ -5099,16 +5099,20 @@ void ps_query_params_handler(ngx_http_request_t* r, StringPiece* data) {
 void ps_admin_body_handler(ngx_http_request_t* r) {
   RequestRouting::Response response_category = ps_route_request(r);
   ngx_int_t rc = ps_resource_handler(r, false, response_category);
-  // A request-body post handler must finish the request itself: handing it
-  // back to the phase engine with NGX_DECLINED would land in this module's
-  // phase again, now with the body already read.  Answer a declined admin
-  // POST with the 404 the admin location gives a path it does not handle.
+  // A request-body post handler must finish the request itself, whatever
+  // the result. Handing it back to the phase engine with NGX_DECLINED would
+  // land in this module's phase again, now with the body already read, so a
+  // declined admin POST is answered with the 404 the admin location gives a
+  // path it does not handle. The finalize call also runs for NGX_DONE:
+  // reading the body took a reference on the request that only this call
+  // gives back. An answered admin page returns NGX_DONE while its response
+  // is still being written, and holds a reference of its own until then.
+  // Without the call the request, and the connection it is on, would never
+  // be freed.
   if (rc == NGX_DECLINED) {
     rc = NGX_HTTP_NOT_FOUND;
   }
-  if (rc != NGX_DONE) {
-    ngx_http_finalize_request(r, rc);
-  }
+  ngx_http_finalize_request(r, rc);
 }
 
 // Called after nginx reads the request body from the client.  For another

@@ -34,5 +34,6 @@ docs are not here: they live in the `pagespeed-optimizer` repo at
 | [envoy-limitations.md](envoy-limitations.md) | Known Envoy limitations. |
 | [iis-limitations.md](iis-limitations.md) | Known IIS limitations. |
 | [operations-monitoring.md](operations-monitoring.md) | Operations and monitoring. |
+| [pagespeed-doctor.md](pagespeed-doctor.md) | `pagespeed-doctor`: is the module loaded, answering and optimizing, and if not, why. |
 | [external-cache.md](external-cache.md) | Redis and memcached servers, Redis `AUTH` and Unix sockets. |
 | [autocreate-directive-snippets.md](autocreate-directive-snippets.md) | AutoCreateCachePath / AutoCreateLogDir directive snippets. |

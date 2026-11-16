@@ -322,18 +322,16 @@ class CssCombineFilterTest : public RewriteTestBase {
     // (bbb.css) in addition to the two that do exist, a.css and c.css.  Using
     // an entirely non-existent resource appears to test a strict superset of
     // filter code paths when compared with returning a 404 for the resource.
+    // The combination is served without the missing stylesheet (issue #791).
     SetFetchFailOnUnexpected(false);
-    ExpectStringAsyncFetch fail_callback(
-        false, RequestContext::NewTestRequestContext(
-                   server_context()->thread_system()));
-    EXPECT_TRUE(rewrite_driver()->FetchResource(kABCUrl, &fail_callback));
+    ExpectStringAsyncFetch partial_callback(
+        true, RequestContext::NewTestRequestContext(
+                  server_context()->thread_system()));
+    EXPECT_TRUE(rewrite_driver()->FetchResource(kABCUrl, &partial_callback));
     rewrite_driver()->WaitForCompletion();
-
-    // What status we get here depends a lot on details of when exactly
-    // we detect the failure. If done early enough, nothing will be set.
-    // This test may change, but see also
-    // ResourceCombinerTest.TestContinuingFetchWhenFastFailed
-    EXPECT_EQ("", fail_callback.buffer());
+    EXPECT_EQ(HttpStatus::kOK,
+              partial_callback.response_headers()->status_code());
+    EXPECT_EQ(expected_combination, partial_callback.buffer());
   }
 
   // Common framework for testing barriers.  A null-terminated set of css
@@ -585,6 +583,175 @@ TEST_F(CssCombineFilterTest, Fetch) { TestFetch(); }
 TEST_F(CssCombineFilterTest, FetchUnhealthy) {
   lru_cache()->set_is_healthy(false);
   TestFetch();
+}
+
+// Issue #791: once the cache no longer holds a combined stylesheet, an input
+// the server cannot fetch at that moment must not turn the whole combined URL
+// into a 404. The stylesheets that can be fetched are served, in order, with
+// a short private lifetime, and the full combination comes back once the
+// input can be fetched again.
+TEST_F(CssCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
+  // A real hasher, so the partial result's hash differs from the one asked
+  // for, as it does outside tests.
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  const GoogleString combined_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  content.clear();
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  // The partial result is not kept in the HTTP cache under its own hash.
+  const GoogleString partial_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(content),
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  EXPECT_EQ(kNotFoundResult, HttpBlockingFindStatus(partial_url, http_cache()));
+
+  lru_cache()->Clear();
+  SetupCssResources(kCssA, kCssB);
+  content.clear();
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+  // Control: the complete combination is kept, so the lookup above is a
+  // meaningful one.
+  const GoogleString full_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(content),
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  EXPECT_EQ(kFoundResult, HttpBlockingFindStatus(full_url, http_cache()));
+}
+
+// A combination served without some of its inputs stays private even where
+// mismatched hashes are otherwise served publicly.
+TEST_F(CssCombineFilterTest,
+       FetchWithUnavailableInputIsPrivateWithPublicMismatchedHashes) {
+  options()->ClearSignatureForTesting();
+  options()->set_publicly_cache_mismatched_hashes_experimental(true);
+  server_context()->ComputeSignature(options());
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  const GoogleString combined_url =
+      Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+             MultiUrl(kCssA, kCssB, "c.css"), "css");
+  // Control: the complete combination under a mismatched hash is public.
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kBCssBody, kCCssBody), content);
+  EXPECT_TRUE(headers.IsProxyCacheable());
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  content.clear();
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+}
+
+// A combination served without some of its inputs is always private.
+TEST_F(CssCombineFilterTest, PartialAnswerIsPrivateUnderItsOwnHash) {
+  UseMd5Hasher();
+  SetupCssResources(kCssA, kCssB);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  GoogleString partial;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB, "c.css"), "css"),
+                       &partial));
+  ASSERT_EQ(StrCat(kACssBody, kCCssBody), partial);
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kDomain, RewriteOptions::kCssCombinerId, hasher()->Hash(partial),
+             MultiUrl(kCssA, kCssB, "c.css"), "css"),
+      &content, &headers));
+  EXPECT_EQ(partial, content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+TEST_F(CssCombineFilterTest, PartialAnswerIsPrivateWithPublicInputs) {
+  UseMd5Hasher();
+  ResponseHeaders public_css;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &public_css);
+  public_css.SetCacheControlPublic();
+  public_css.ComputeCaching();
+  SetFetchResponse(StrCat(kDomain, kCssA), public_css, kACssBody);
+  SetFetchResponse(StrCat(kDomain, kCssB), public_css, kBCssBody);
+  SetFetchResponse(StrCat(kDomain, "c.css"), public_css, kCCssBody);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB, "c.css"), "css"),
+                       &content, &headers));
+  EXPECT_EQ(StrCat(kACssBody, kCCssBody), content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+// A stylesheet that is gone for good stops being combined once what the
+// server knows about it expires: pages rewritten after that no longer
+// reference the old combined URL. Until then (the input's cache lifetime,
+// counted from when the server last fetched it) pages keep referencing it,
+// and a fetch of it after cache loss is answered by the partial fallback.
+TEST_F(CssCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
+  const int64 kTtlSec = 100;
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kACssBody, kTtlSec);
+  SetResponseWithDefaultHeaders(kCssB, kContentTypeCss, kBCssBody, kTtlSec);
+  const GoogleString html_url = StrCat(kTestDomain, "gone.html");
+  const GoogleString html =
+      StrCat("<head>\n  ", Link(kCssA), "\n  ", Link(kCssB), "\n</head>\n");
+  ParseUrl(html_url, html);
+  StringVector css_urls;
+  CollectCssLinks("gone_before", output_buffer_, &css_urls);
+  ASSERT_EQ(1, css_urls.size());
+  const GoogleString old_combined = css_urls[0];
+  ASSERT_NE(GoogleString::npos, old_combined.find(".pagespeed.cc."));
+
+  SetFetchResponse404(kCssB);
+  int64 gone_after_sec = -1;
+  for (int64 t = 10; t <= 3 * kTtlSec; t += 10) {
+    AdvanceTimeMs(10 * Timer::kSecondMs);
+    ParseUrl(html_url, html);
+    if (output_buffer_.find(old_combined) == GoogleString::npos) {
+      gone_after_sec = t;
+      break;
+    }
+  }
+  ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
+  EXPECT_LE(gone_after_sec, kTtlSec + 10);
+  css_urls.clear();
+  CollectCssLinks("gone_after", output_buffer_, &css_urls);
+  ASSERT_EQ(2, css_urls.size());
+  EXPECT_EQ(kCssA, css_urls[0]);
+  EXPECT_EQ(kCssB, css_urls[1]);
+}
+
+// When none of the inputs can be fetched there is nothing usable to serve.
+TEST_F(CssCombineFilterTest, FetchAfterCacheLossWithNoInputAvailable) {
+  SetupCssResources(kCssA, kCssB);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssA));
+  mock_url_fetcher()->SetResponseFailure(StrCat(kDomain, kCssB));
+  EXPECT_FALSE(TryFetchResource(Encode(kDomain, RewriteOptions::kCssCombinerId,
+                                       "0", MultiUrl(kCssA, kCssB), "css")));
 }
 
 TEST_F(CssCombineFilterTest, CombineCssMD5) {

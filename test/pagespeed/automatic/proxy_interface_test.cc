@@ -2830,11 +2830,12 @@ TEST_F(ProxyInterfaceTest, NoCacheVaryHtml) {
   text.clear();
   FetchFromProxy(kPageUrl, true, &text, &actual_headers);
   EXPECT_EQ("2", text);
-  // Resource was cached because we have respect_vary == false.
-  // So we serve the old value.
+  // The resource was not cached either: it was fetched with the client's
+  // own request headers and varies on one of them, so it is passed through
+  // even with respect_vary == false.  So we fetch the new value.
   text.clear();
   FetchFromProxy("style.css", true, &text, &actual_headers);
-  EXPECT_EQ("a", text);
+  EXPECT_EQ("b", text);
 }
 
 // Test https HTML responses are never cached, while https resources are cached.

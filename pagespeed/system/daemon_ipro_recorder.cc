@@ -343,12 +343,14 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     // The final headers are judged as they stand, and then again with the
     // origin's caching fields in their place when the seam supplied them:
     // storing needs both to allow it, and the stored lifetime is the shorter
-    // of the two (ApplyOriginCachingHeaders).
+    // of the two (ApplyOriginCachingHeaders).  Vary and a cookie on the
+    // request are judged as below.
     if (has_origin_caching_headers() &&
-        !response_headers->IsProxyCacheable(
-            request_.request_properties,
-            ResponseHeaders::GetVaryOption(http_options_.respect_vary),
-            ResponseHeaders::kNoValidator)) {
+        (!response_headers->IsProxyCacheable(
+             request_.request_properties,
+             ResponseHeaders::kRespectVaryOnResources,
+             ResponseHeaders::kNoValidator) ||
+         !response_headers->MayShareForRequest(request_.request_properties))) {
       break;
     }
     ApplyOriginCachingHeaders(response_headers, cache_control_saved_
@@ -363,21 +365,29 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     //       the one axis where being wrong means an authenticated user's
     //       response reaching another user's request -- through a cache
     //       shared across virtual hosts, at that.
-    //   respect_vary        the configured option, not a constant. Hard-coding
-    //       the strict end here would refuse every Vary but Accept-Encoding
-    //       module-side, which is both a regression against the classic path
-    //       and a way of making the peer's own predicate unreachable.
+    //   kRespectVaryOnResources  whatever RespectVary says.  The recorded
+    //       response is the one the server produced for THIS client's
+    //       request, with its own Accept, Origin, User-Agent and so on, and
+    //       the peer keeps one original per URL.  An answer that varies on
+    //       any of those belongs to this client only, so nothing that varies
+    //       beyond Accept-Encoding is recorded -- the same rule the classic
+    //       recorder applies.
     //   kNoValidator        this path revalidates nothing, so it must not
     //       claim it can.
     //
+    // And, as the classic recorder does, a response to a request that carried
+    // a cookie may be that visitor's own: it is handed over only when the
+    // origin marks it shareable (ResponseHeaders::MayShareForRequest).  The
+    // peer is not told about the cookie, so this gate is the only one.
+    //
     // This is the FIRST of two gates. The peer's store-side predicate is the
     // second, and it is applied inside the record gate over the same
-    // response. Strictest of both, and on the axes where they differ it is
-    // the peer's that is strict.
+    // response. Strictest of both.
     if (!response_headers->IsProxyCacheable(
             request_.request_properties,
-            ResponseHeaders::GetVaryOption(http_options_.respect_vary),
-            ResponseHeaders::kNoValidator)) {
+            ResponseHeaders::kRespectVaryOnResources,
+            ResponseHeaders::kNoValidator) ||
+        !response_headers->MayShareForRequest(request_.request_properties)) {
       break;
     }
 

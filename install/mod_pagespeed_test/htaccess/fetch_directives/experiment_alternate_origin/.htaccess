@@ -1,0 +1,2 @@
+ModPagespeedRunExperiment on
+ModPagespeedExperimentSpec "id=1;percent=100;alternate_origin_domain=localhost:origin.example.org"

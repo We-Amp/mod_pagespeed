@@ -132,6 +132,7 @@ class HtmlLexer {
   inline void EvalCommentBody(char c);
   inline void EvalCommentEnd1(char c);
   inline void EvalCommentEnd2(char c);
+  inline void EvalCommentEndBang(char c);
   inline void EvalCdataStart1(char c);
   inline void EvalCdataStart2(char c);
   inline void EvalCdataStart3(char c);
@@ -264,6 +265,7 @@ class HtmlLexer {
     COMMENT_BODY,         // "<!--"
     COMMENT_END1,         // "-"
     COMMENT_END2,         // "--"
+    COMMENT_END_BANG,     // "--!"
     CDATA_START1,         // "<!["
     CDATA_START2,         // "<![C"
     CDATA_START3,         // "<![CD"
