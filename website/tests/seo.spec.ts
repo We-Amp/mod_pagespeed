@@ -153,27 +153,23 @@ test.describe('SEO', () => {
   // grid with no current row was a past defect. The exact release from the
   // manifest is named once, on the chip above the grid (the download page is
   // where the version is the point), and there is one card per integration.
-  // Only a card for another line carries its own product label.
+  // Every card is the current release, so no card carries its own version.
   test('/download/ offers the current release above one card per integration', async ({ page }) => {
     await page.goto('/download/');
     const grid = page.locator('#integrations');
     await expect(grid.locator('p', { hasText: 'see release notes' })).toContainText(
       `v${MANIFEST_SEMVER}`,
     );
-    for (const name of ['Apache', 'nginx', 'nginx (Docker)', 'Helm']) {
+    for (const name of ['Apache', 'nginx', 'nginx (Docker)', 'Helm', 'ASP.NET Core Sidecar']) {
       await test.step(name, async () => {
         const card = grid.locator('.card', {
           has: page.getByRole('heading', { level: 3, name, exact: true }),
         });
         await expect(card).toHaveCount(1);
         await expect(card).not.toContainText(`mod_pagespeed ${MANIFEST_SEMVER}`);
+        await expect(card).not.toContainText(/mod_pagespeed \d+\.\d+/);
       });
     }
-    await expect(
-      grid.locator('.card', {
-        has: page.getByRole('heading', { level: 3, name: 'ASP.NET Core Sidecar', exact: true }),
-      }),
-    ).toContainText('mod_pagespeed 1.15');
   });
 
   // One product node everywhere (src/data/software-jsonld.ts): the plain
