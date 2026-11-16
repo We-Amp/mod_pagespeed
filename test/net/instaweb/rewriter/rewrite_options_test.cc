@@ -1622,6 +1622,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kIncreaseSpeedTracking,
       RewriteOptions::kInlineOnlyCriticalImages,
       RewriteOptions::kInlineResourcesWithoutExplicitAuthorization,
+      RewriteOptions::kInPlaceCorsGuard,
       RewriteOptions::kInPlacePreemptiveRewriteCss,
       RewriteOptions::kInPlacePreemptiveRewriteCssImages,
       RewriteOptions::kInPlacePreemptiveRewriteImages,
@@ -1658,6 +1659,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kMetadataCacheStalenessThresholdMs,
       RewriteOptions::kMinImageSizeLowResolutionBytes,
       RewriteOptions::kMinResourceCacheTimeToRewriteMs,
+      RewriteOptions::kNegativeDeadlineFetchWaitMs,
       RewriteOptions::kModifyCachingHeaders,
       RewriteOptions::kNoop,
       RewriteOptions::kNoTransformOptimizedImages,
@@ -2719,8 +2721,7 @@ TEST_F(RewriteOptionsTest, ExperimentLinesStartALineAfterEverySection) {
     }
   }
   EXPECT_EQ(options_.num_experiments(), experiments);
-  EXPECT_NE(GoogleString::npos,
-            options_string.find("\n*.example.com/*A,\n"));
+  EXPECT_NE(GoogleString::npos, options_string.find("\n*.example.com/*A,\n"));
   EXPECT_NE(GoogleString::npos,
             options_string.find("\nProxy Suffix: .proxy.example\n"));
 }
@@ -3294,6 +3295,135 @@ TEST_F(RewriteOptionsTest, SetOptionsFromName) {
       RewriteOptions::OptionStringPair("Not an Option", "nothing"));
   EXPECT_FALSE(options_.SetOptionsFromName(option_set, &handler));
   EXPECT_FALSE(handler.messages().empty());
+}
+
+// ExperimentSpec is a directory-scope directive, so the options= component of
+// a spec may set only options a directory-scope directive may set.
+TEST_F(RewriteOptionsTest, ExperimentSpecOptionsStayWithinDirectoryScope) {
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=10;default;options=CssInlineMaxBytes=66", &msg,
+                &handler));
+  // A server-scope option makes the spec invalid when it is parsed.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=2;percent=10;default;options=UrlSigningKey=abc,"
+                "RulePackRequireSigned=off,CssInlineMaxBytes=77",
+                &msg, &handler));
+  // So does a process-scope one.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=3;percent=10;default;options=ImageMaxRewritesAtOnce=0",
+                &msg, &handler));
+  bool scope_named = false;
+  for (const GoogleString& message : handler.messages()) {
+    if (message.find("Maximum allowed scope") != GoogleString::npos) {
+      scope_named = true;
+    }
+  }
+  EXPECT_TRUE(scope_named);
+
+  // An invalid spec stays in the list (a remote configuration file goes on
+  // after a bad line), so the wider-scope options must not be applied when
+  // the experiment is set up either; the directory-scope one still is.
+  options_.set_rule_pack_require_signed(true);
+  const int image_max_rewrites = options_.image_max_rewrites_at_once();
+  ASSERT_TRUE(options_.GetExperimentSpec(2) != nullptr);
+  options_.SetExperimentState(2);
+  EXPECT_EQ("", options_.url_signing_key());
+  EXPECT_TRUE(options_.rule_pack_require_signed());
+  EXPECT_EQ(77, options_.css_inline_max_bytes());
+  ASSERT_TRUE(options_.GetExperimentSpec(3) != nullptr);
+  options_.SetExperimentState(3);
+  EXPECT_EQ(image_max_rewrites, options_.image_max_rewrites_at_once());
+}
+
+// alternate_origin_domain= changes where resources are fetched from, so an
+// ExperimentSpec from a directory-level source (an .htaccess file, a remote
+// configuration line) may not carry it; the server configuration may.
+TEST_F(RewriteOptionsTest, ExperimentSpecAlternateOriginNotAtDirectoryScope) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromNameWithScope(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=50;alternate_origin_domain=foo.com:bar.com",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_TRUE(options_.GetExperimentSpec(1) == nullptr);
+
+  // Without alternate origins the spec is fine at directory scope.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                RewriteOptions::kExperimentSpec, "id=2;percent=50",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_TRUE(options_.GetExperimentSpec(2) != nullptr);
+
+  // From the server configuration it is still accepted.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=3;percent=50;alternate_origin_domain=foo.com:bar.com", &msg,
+                &handler));
+  ASSERT_TRUE(options_.GetExperimentSpec(3) != nullptr);
+  EXPECT_TRUE(options_.GetExperimentSpec(3)->has_alternate_origin_domains());
+}
+
+TEST_F(RewriteOptionsTest, LimitWorkBoundsToKeepsLooserValuesOut) {
+  RewriteOptions ceiling(&thread_system_);
+  ceiling.set_css_parse_max_bytes(1000);
+  ceiling.set_debug_output_max_bytes(500);
+  ceiling.set_max_html_parse_bytes(2000);
+  ceiling.set_image_resolution_limit_bytes(4000);
+
+  options_.set_css_parse_max_bytes(5000);            // larger: capped
+  options_.set_debug_output_max_bytes(0);            // no limit: capped
+  options_.set_max_html_parse_bytes(100);            // smaller: kept
+  options_.set_image_resolution_limit_bytes(10000);  // larger: capped
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(1000, options_.css_parse_max_bytes());
+  EXPECT_EQ(500, options_.debug_output_max_bytes());
+  EXPECT_EQ(100, options_.max_html_parse_bytes());
+  EXPECT_EQ(4000, options_.image_resolution_limit_bytes());
+
+  // A negative bound means no limit for the first three, so it is capped
+  // too; zero admits no image, which only tightens.
+  options_.set_max_html_parse_bytes(-1);
+  options_.set_image_resolution_limit_bytes(0);
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(2000, options_.max_html_parse_bytes());
+  EXPECT_EQ(0, options_.image_resolution_limit_bytes());
+
+  // A ceiling without a limit caps nothing.
+  ceiling.set_css_parse_max_bytes(0);
+  options_.set_css_parse_max_bytes(-1);
+  options_.LimitWorkBoundsTo(ceiling);
+  EXPECT_EQ(-1, options_.css_parse_max_bytes());
+}
+
+// An ExperimentSpec can come from a directory-level source, so an arm may
+// tighten the work bounds of the configuration it runs under, not loosen
+// them.
+TEST_F(RewriteOptionsTest, ExperimentArmCannotLoosenWorkBounds) {
+  TestMessageHandler handler;
+  GoogleString msg;
+  options_.set_max_html_parse_bytes(1000);
+  options_.set_css_parse_max_bytes(1000);
+  options_.set_image_resolution_limit_bytes(4000);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=100;default;options=MaxHtmlParseBytes=0,"
+                "CssParseMaxBytes=10,ImageResolutionLimitBytes=99999",
+                &msg, &handler));
+  options_.SetExperimentState(1);
+  EXPECT_EQ(1000, options_.max_html_parse_bytes());
+  EXPECT_EQ(10, options_.css_parse_max_bytes());
+  EXPECT_EQ(4000, options_.image_resolution_limit_bytes());
 }
 
 // TODO(sriharis):  Add thorough ComputeSignature tests
@@ -4492,6 +4622,67 @@ TEST_F(RewriteOptionsTest, ImageMaxAnimatedFramesNotSettableFromQuery) {
                 RewriteOptions::kImageMaxAnimatedFrames, "50",
                 RewriteOptions::kDirectoryScope, &msg, &handler));
   EXPECT_EQ(50, options.image_max_animated_frames());
+}
+
+// How long a fetch with a negative rewrite deadline waits is set in the server
+// or virtual-host configuration only: not by a request, an .htaccess file, an
+// ExperimentSpec arm or remote configuration, and never above the blocking
+// fetch timeout.
+TEST_F(RewriteOptionsTest, NegativeDeadlineFetchWaitIsServerScopeOnly) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  const char* const name = RewriteOptions::kNegativeDeadlineFetchWaitMs;
+  RewriteOptions options(&thread_system_);
+  EXPECT_EQ(1000, RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+  const RewriteOptions::PropertyBase* property =
+      RewriteOptions::LookupOptionByName(name);
+  ASSERT_TRUE(property != nullptr);
+  EXPECT_EQ(RewriteOptions::kServerScope, property->scope());
+
+  // Not from a query or a request header (the same scope as a URL option).
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.SetOptionFromQuery(name, "60000"));
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "60000", RewriteOptions::kQueryScope, &msg, &handler));
+  // Not from .htaccess or a directory block.
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "60000", RewriteOptions::kDirectoryScope, &msg,
+                &handler));
+  // Not from remote configuration.
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.SetOptionFromRemoteConfig(name, "60000"));
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+
+  // Not from an ExperimentSpec arm: the spec that sets it is invalid, and if
+  // it is kept all the same, applying the experiment leaves it alone.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options.ParseAndSetOptionFromName1(
+                RewriteOptions::kExperimentSpec,
+                "id=1;percent=10;default;options=NegativeDeadlineFetchWaitMs="
+                "60000",
+                &msg, &handler));
+  if (options.GetExperimentSpec(1) != nullptr) {
+    options.SetExperimentState(1);
+  }
+  EXPECT_EQ(RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs,
+            options.negative_deadline_fetch_wait_ms());
+
+  // From the server configuration, yes; never more than the blocking fetch
+  // timeout, never negative.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options.ParseAndSetOptionFromNameWithScope(
+                name, "300", RewriteOptions::kServerScope, &msg, &handler));
+  EXPECT_EQ(300, options.negative_deadline_fetch_wait_ms());
+  options.set_blocking_fetch_timeout_ms(2000);
+  options.set_negative_deadline_fetch_wait_ms(60000);
+  EXPECT_EQ(2000, options.negative_deadline_fetch_wait_ms());
+  options.set_negative_deadline_fetch_wait_ms(-5);
+  EXPECT_EQ(0, options.negative_deadline_fetch_wait_ms());
 }
 
 TEST_F(RewriteOptionsTest, ParseFloats) {

@@ -360,6 +360,11 @@ TEST_F(CriticalImagesFinderTest, TestRenderedImageExtractionFromPropertyCache) {
   images->set_src(url_str);
   images->set_rendered_width(40);
   images->set_rendered_height(54);
+  // A stored size is used once enough beacon results support it.
+  images->set_support(10);
+  rendered_images.set_maximum_possible_support(10);
+  rendered_images.set_beacons_received(
+      CriticalImagesFinder::kMinBeaconsForRenderedDimensions);
   PropertyPage* page = rewrite_driver()->property_page();
   UpdateInPropertyCache(rendered_images, finder()->cohort(),
                         finder()->kRenderedImageDimensionsProperty,

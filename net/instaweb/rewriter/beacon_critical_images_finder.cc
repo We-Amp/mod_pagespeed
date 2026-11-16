@@ -28,6 +28,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -67,9 +68,30 @@ bool BeaconCriticalImagesFinder::UpdateCriticalImagesCacheEntry(
           critical_images.mutable_html_critical_image_support())) {
     return false;
   }
+  // The images on the page were registered as candidate keys (support 0) by
+  // UpdateCandidateImagesForBeaconing when the page was instrumented. Beacon
+  // results for any other key are ignored, like those of the critical
+  // selector beacon, so a beacon cannot add entries of its own choosing.
+  RenderedImages candidate_rendered_images;
+  if (rendered_images_set != nullptr) {
+    const CriticalKeys& candidates =
+        critical_images.html_critical_image_support();
+    StringSet candidate_keys;
+    for (int i = 0; i < candidates.key_evidence_size(); ++i) {
+      candidate_keys.insert(candidates.key_evidence(i).key());
+    }
+    for (int i = 0; i < rendered_images_set->image_size(); ++i) {
+      const RenderedImages::Image& image = rendered_images_set->image(i);
+      if (candidate_keys.find(image.src()) != candidate_keys.end()) {
+        *candidate_rendered_images.add_image() = image;
+      }
+    }
+    rendered_images_set = &candidate_rendered_images;
+  }
   return CriticalImagesFinder::UpdateAndWriteBackCriticalImagesCacheEntry(
       html_critical_images_set, css_critical_images_set, rendered_images_set,
-      kBeaconImageSupportInterval, cohort, page, &critical_images);
+      kBeaconImageSupportInterval, true /* require_prior_support */, cohort,
+      page, &critical_images);
 }
 
 GoogleString BeaconCriticalImagesFinder::GetKeyForUrl(StringPiece url) {

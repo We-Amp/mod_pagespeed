@@ -189,6 +189,15 @@ if [ "${PACKAGE}" = "nginx-module-pagespeed-nginxorg" ]; then
   EXTRA_FILES_SED="s#^@@EXTRA_FILES@@\$#${PYSITE}/dnf-plugins/pagespeed_nginx_pin.py\\n${PYSITE}/dnf-plugins/__pycache__/pagespeed_nginx_pin.*.pyc\\n%config(noreplace) /etc/dnf/plugins/pagespeed_nginx_pin.conf#"
 fi
 
+# pagespeed-doctor, the read-only health check (install/common/pagespeed-doctor).
+# It lives in this package's own /usr/share directory and is offered as
+# /usr/sbin/pagespeed-doctor through update-alternatives, so the Apache and
+# nginx packages can both ship it without a file conflict. Not a conffile.
+install -m 755 -d "${STAGEDIR}/usr/share/${PACKAGE}"
+sed "s/^DOCTOR_VERSION=.*/DOCTOR_VERSION=\"${VERSION}\"/" \
+  "${SRCDIR}/install/common/pagespeed-doctor" > "${STAGEDIR}/usr/share/${PACKAGE}/pagespeed-doctor"
+chmod 755 "${STAGEDIR}/usr/share/${PACKAGE}/pagespeed-doctor"
+
 # The admin-restrict snippet, a conffile at
 # /etc/nginx/snippets/pagespeed_admin_localhost.conf. Shipped as config (not
 # only as the doc sample) because minimal images -- Ubuntu's container images

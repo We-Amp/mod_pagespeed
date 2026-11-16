@@ -140,8 +140,10 @@
     "Prevents the use of disabled filters", true) \
   X(kDefaultRewriteDeadlineMs, rewrite_deadline_ms_, "rdm", \
     kRewriteDeadlineMs, kDirectoryScope, \
-    "Time to wait for resource optimization (per flush window) before" \
-    "falling back to the original resource for the request.", true) \
+    "Time to wait for resource optimization (per flush window) before " \
+    "falling back to the original resource for the request. A negative " \
+    "value waits for a page without limit, and for a resource request up " \
+    "to NegativeDeadlineFetchWaitMs.", true) \
   X(kEnabledOn, enabled_, "e", kEnabled, kDirectoryScope, nullptr, true) \
   X(false, add_options_to_urls_, "aou", kAddOptionsToUrls, \
     kDirectoryScope, \
@@ -158,13 +160,19 @@
   X(false, in_place_wait_for_optimized_, "ipwo", \
     kInPlaceWaitForOptimized, kDirectoryScope, \
     "Wait for optimizations to complete", true) \
+  X(true, in_place_cors_guard_, "ipcg", \
+    kInPlaceCorsGuard, kDirectoryScope, \
+    "Serve an in-place resource to a cross-origin CORS request only when " \
+    "its Access-Control-Allow-Origin header allows that request's origin; " \
+    "otherwise let the server answer the request itself.", true) \
   X(10, in_place_s_maxage_sec_, "ipsm", \
     kInPlaceSMaxAgeSec, kServerScope, \
     "What to set s-maxage to on not-yet-optimized ipro resources", true) \
   X(kDefaultRewriteDeadlineMs, in_place_rewrite_deadline_ms_, "iprdm", \
     kInPlaceRewriteDeadlineMs, kDirectoryScope, \
-    "Time to wait for an in-place resource optimization before" \
-    "falling back to the original resource for the request.", true) \
+    "Time to wait for an in-place resource optimization before " \
+    "falling back to the original resource for the request. A negative " \
+    "value waits up to NegativeDeadlineFetchWaitMs.", true) \
   X(true, in_place_preemptive_rewrite_css_, "ipprc", \
     kInPlacePreemptiveRewriteCss, kDirectoryScope, \
     "If set, issue preemptive rewrites of CSS on the HTML path when " \
@@ -679,6 +687,12 @@
     "it is disabled.", false) \
   X(kDefaultOptionCookiesDurationMs, option_cookies_duration_ms_, "ocd", \
     kOptionCookiesDurationMs, kDirectoryScope, \
-    "The max-age in ms of cookies that set PageSpeed options.", true)
+    "The max-age in ms of cookies that set PageSpeed options.", true) \
+  X(kDefaultNegativeDeadlineFetchWaitMs, negative_deadline_fetch_wait_ms_, \
+    "ndfw", kNegativeDeadlineFetchWaitMs, kServerScope, \
+    "How long a request for a rewritten resource waits for its optimization " \
+    "when the rewrite deadline is negative (default 1000 ms), before the " \
+    "original is served. At most FetcherTimeOutMs. Server or virtual host " \
+    "configuration only.", true)
 
 // clang-format on

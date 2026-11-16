@@ -66,8 +66,8 @@ class HTTPValue : public Writer {
   bool Write(const StringPiece& str, MessageHandler* handler) override;
   bool Flush(MessageHandler* handler) override;
 
-  // Retrieves the headers, returning false if empty.  The fetched-input
-  // mark (see kFetchedInputHeader) is never among them.
+  // Retrieves the headers, returning false if empty.  The fetched-input and
+  // client-entry marks (see kFetchedInputHeader) are never among them.
   bool ExtractHeaders(ResponseHeaders* headers, MessageHandler* handler) const;
 
   // The response-header name that marks an entry stored from the module's
@@ -82,6 +82,19 @@ class HTTPValue : public Writer {
 
   // Like SetHeaders, but also stores the fetched-input mark.
   void SetHeadersMarkingFetchedInput(const ResponseHeaders& headers);
+
+  // The response-header name, and its current value, that HTTPCache stamps
+  // on every entry it stores other than through PutFetchedInput: entries
+  // stored from responses served to clients (the in-place recorder, the cache
+  // fetcher) among them.  Like the fetched-input mark it is not a valid HTTP
+  // field name and ExtractHeaders drops it.  The readers of such entries
+  // refuse one without the current value: an earlier version stored it under
+  // looser rules.
+  static const char kClientEntryHeader[];
+  static const char kClientEntryGeneration[];
+
+  // True when this value carries the current kClientEntryHeader mark.
+  bool IsCurrentClientEntry() const;
 
   // Retrieves the contents, returning false if empty.  Note that the
   // contents are only guaranteed valid as long as the HTTPValue

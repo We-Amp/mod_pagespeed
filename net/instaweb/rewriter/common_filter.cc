@@ -222,6 +222,21 @@ ResourcePtr CommonFilter::CreateInputResourceOrInsertDebugComment(
   return input_resource;
 }
 
+bool CommonFilter::IsInsideSometimesLiteralElement(const HtmlElement* element) {
+  for (const HtmlElement* ancestor = element->parent(); ancestor != nullptr;
+       ancestor = ancestor->parent()) {
+    switch (ancestor->keyword()) {
+      case HtmlName::kNoembed:
+      case HtmlName::kNoframes:
+      case HtmlName::kNoscript:
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 const GoogleUrl& CommonFilter::base_url() const { return driver_->base_url(); }
 
 const GoogleUrl& CommonFilter::decoded_base_url() const {

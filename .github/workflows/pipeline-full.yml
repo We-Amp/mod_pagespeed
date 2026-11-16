@@ -536,7 +536,7 @@ jobs:
             echo "CI_REDIS=${R}"
             echo "CI_MEMCACHED=${M}"
           } >> "$GITHUB_ENV"
-          docker network create "$NET"
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" create "$NET"
           for img in redis:7-alpine memcached:1.6-alpine; do
             for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
           done
@@ -693,7 +693,7 @@ jobs:
             echo "CI_REDIS=${R}"
             echo "CI_MEMCACHED=${M}"
           } >> "$GITHUB_ENV"
-          docker network create "$NET"
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" create "$NET"
           for img in redis:7-alpine memcached:1.6-alpine; do
             for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
           done
@@ -1992,7 +1992,7 @@ jobs:
             echo "CI_REDIS=${R}"
             echo "CI_MEMCACHED=${M}"
           } >> "$GITHUB_ENV"
-          docker network create "$NET"
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" create "$NET"
           for img in redis:7-alpine memcached:1.6-alpine; do
             for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
           done
