@@ -89,6 +89,9 @@ class ImageRewriteFilter : public RewriteFilter {
   static const char kImageRewritesSquashingForMobileScreen[];
   static const char kImageRewrites[];
   static const char kImageWebpRewrites[];
+  static const char kImagePngLossyFallbackAdopted[];
+  static const char kImagePngLossyFallbackAttempted[];
+  static const char kImagePngLossyFallbackRejectedQuality[];
   static const char kImageWebpFromGifFailureMs[];
   static const char kImageWebpFromGifSuccessMs[];
   static const char kImageWebpFromGifTimeouts[];
@@ -385,6 +388,12 @@ class ImageRewriteFilter : public RewriteFilter {
   Variable* image_webp_rewrites_;
   // # of images rewritten into AVIF format.
   Variable* image_avif_rewrites_;
+  // PNG lossy fallback (PngLossyFallbackMaxSizePercent): lossy trials started,
+  // trials whose lossy WebP was served, and trials the worst-tile quality
+  // guard turned down.
+  Variable* image_png_lossy_fallback_attempted_;
+  Variable* image_png_lossy_fallback_adopted_;
+  Variable* image_png_lossy_fallback_rejected_quality_;
   // # of images being rewritten right now.
   UpDownCounter* image_ongoing_rewrites_;
 

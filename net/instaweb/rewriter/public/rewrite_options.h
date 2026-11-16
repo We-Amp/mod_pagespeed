@@ -436,6 +436,8 @@ class RewriteOptions {
   static const char kObliviousPagespeedUrls[];
   static const char kOptionCookiesDurationMs[];
   static const char kOverrideCachingTtlMs[];
+  static const char kPngLossyFallbackMaxSizePercent[];
+  static const char kPngLossyFallbackMinBytesPerMegapixel[];
   static const char kPreserveImageProvenance[];
   static const char kPreserveSubresourceHints[];
   static const char kPreserveUrlRelativity[];
@@ -912,6 +914,9 @@ class RewriteOptions {
   static const int64 kDefaultImageWebpRecompressQualityForSmallScreens;
   static const int64 kDefaultImageWebpTimeoutMs;
   static const int64 kDefaultImageMaxAnimatedFrames;
+  // PNG lossy fallback (see PngLossyFallbackMaxSizePercent). Off by default.
+  static const int64 kDefaultPngLossyFallbackMaxSizePercent;
+  static const int64 kDefaultPngLossyFallbackMinBytesPerMegapixel;
   // AVIF defaults. Quality default mirrors the WebP default
   // shape (-1 falls back to ImageRecompressionQuality); see the spike outcome
   // (quality ~50-60) for the encoder default applied in image.cc.
@@ -2445,6 +2450,24 @@ class RewriteOptions {
   }
   void set_image_limit_rendered_area_percent(int x) {
     set_option(x, &image_limit_rendered_area_percent_);
+  }
+
+  // PNG lossy fallback: 0 (the default) turns it off; otherwise a lossy WebP
+  // trial for a lossless-WebP PNG is adopted when it is at most this percentage
+  // of the lossless size (and passes the local quality guard).
+  int64 png_lossy_fallback_max_size_percent() const {
+    return png_lossy_fallback_max_size_percent_.value();
+  }
+  void set_png_lossy_fallback_max_size_percent(int64 x) {
+    set_option(x, &png_lossy_fallback_max_size_percent_);
+  }
+  // Lossless WebP bytes per megapixel of the encoded image at or above which
+  // the trial runs; 0 means no such gate.
+  int64 png_lossy_fallback_min_bytes_per_mp() const {
+    return png_lossy_fallback_min_bytes_per_mp_.value();
+  }
+  void set_png_lossy_fallback_min_bytes_per_mp(int64 x) {
+    set_option(x, &png_lossy_fallback_min_bytes_per_mp_);
   }
 
   int64 image_jpeg_num_progressive_scans() const {
@@ -4005,6 +4028,11 @@ class RewriteOptions {
   RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
   Option<int64> image_max_animated_frames_;
+
+  // The PNG lossy fallback. Directory scope: a site or path policy, not a
+  // per-request knob.
+  RangeBoundedOption<int64, 0, 100> png_lossy_fallback_max_size_percent_;
+  RangeBoundedOption<int64, 0, 4000000> png_lossy_fallback_min_bytes_per_mp_;
 
   // Options related to AVIF compression, mirroring the WebP members above.
   RangeBoundedOption<int64, -1, 100> image_avif_recompress_quality_;

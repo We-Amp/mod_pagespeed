@@ -225,6 +225,21 @@ cc_library(
     ],
 )
 
+# Image distortion - local quality measurement between a PNG and a WebP made
+# from it (worst-tile PSNR).
+cc_library(
+    name = "image_distortion",
+    srcs = ["image_distortion.cc"],
+    hdrs = ["image_distortion.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":image_base",
+        ":png",
+        ":webp",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Image resizer - image scaling functionality.
 cc_library(
     name = "image_resizer",
@@ -328,6 +343,7 @@ cc_library(
         "gif_reader.h",
         "image_analysis.h",
         "image_converter.h",
+        "image_distortion.h",
         "image_frame_interface.h",
         "image_optimizer.h",
         "image_resizer.h",
@@ -352,6 +368,7 @@ cc_library(
         ":image_analysis",
         ":image_base",
         ":image_converter",
+        ":image_distortion",
         ":image_optimizer",
         ":image_optimizer_proto_cc",
         ":image_resizer",

@@ -6,6 +6,17 @@ load(
 
 licenses(["notice"])  # Apache 2
 
+# The generated PNGs the PNG lossy fallback is tested with (see
+# testdata/png/gen_lossy_fallback_fixtures.py); also read by the rewriter tests.
+filegroup(
+    name = "lossy_fallback_fixtures",
+    srcs = [
+        "testdata/png/chroma_text_over_noise.png",
+        "testdata/png/smooth_noisy_blobs.png",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # Common test data for all image tests
 TEST_DATA = glob([
     "testdata/gif/*",
@@ -151,6 +162,19 @@ pagespeed_cc_test(
     deps = [
         ":image_test_base",
         "//pagespeed/kernel/image:image_analysis",
+    ],
+)
+
+# Worst-tile PSNR (the PNG lossy fallback's local quality guard)
+pagespeed_cc_test(
+    name = "image_distortion_test",
+    srcs = ["image_distortion_test.cc"],
+    deps = [
+        ":image_test_base",
+        "//pagespeed/kernel/image:image_converter",
+        "//pagespeed/kernel/image:image_distortion",
+        "//pagespeed/kernel/image:png",
+        "//pagespeed/kernel/image:webp",
     ],
 )
 

@@ -1667,6 +1667,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kObliviousPagespeedUrls,
       RewriteOptions::kOptionCookiesDurationMs,
       RewriteOptions::kOverrideCachingTtlMs,
+      RewriteOptions::kPngLossyFallbackMaxSizePercent,
+      RewriteOptions::kPngLossyFallbackMinBytesPerMegapixel,
       RewriteOptions::kPreserveSubresourceHints,
       RewriteOptions::kPreserveUrlRelativity,
       RewriteOptions::kPrivateNotVaryForIE,
@@ -1751,6 +1753,67 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       << "AvifTimeoutMs must have a help string to remain an Apache directive";
   EXPECT_EQ(RewriteOptions::kLegacyProcessScope, avif_timeout_prop->scope())
       << "AvifTimeoutMs must stay process-scope by design";
+}
+
+// The PNG lossy fallback is off by default, is a directory-scope option (not
+// settable per request), rejects out-of-range values, and re-keys cached work
+// when set.
+TEST_F(RewriteOptionsTest, PngLossyFallbackOptionsChangeSignature) {
+  EXPECT_EQ(0, options_.png_lossy_fallback_max_size_percent());
+  EXPECT_EQ(250000, options_.png_lossy_fallback_min_bytes_per_mp());
+
+  for (const char* name :
+       {RewriteOptions::kPngLossyFallbackMaxSizePercent,
+        RewriteOptions::kPngLossyFallbackMinBytesPerMegapixel}) {
+    const RewriteOptions::PropertyBase* property =
+        RewriteOptions::LookupOptionByName(name);
+    ASSERT_TRUE(property != nullptr) << name;
+    EXPECT_EQ(RewriteOptions::kDirectoryScope, property->scope()) << name;
+    EXPECT_TRUE(property->help_text() != nullptr) << name;
+  }
+
+  RewriteOptions defaults(&thread_system_);
+  defaults.ComputeSignature();
+  const GoogleString default_signature = defaults.signature();
+
+  NullMessageHandler handler;
+  GoogleString msg;
+  {
+    RewriteOptions with_percent(&thread_system_);
+    EXPECT_EQ(RewriteOptions::kOptionOk,
+              with_percent.ParseAndSetOptionFromName1(
+                  "PngLossyFallbackMaxSizePercent", "20", &msg, &handler));
+    EXPECT_EQ(20, with_percent.png_lossy_fallback_max_size_percent());
+    with_percent.ComputeSignature();
+    EXPECT_NE(default_signature, with_percent.signature());
+  }
+  {
+    RewriteOptions with_bytes(&thread_system_);
+    EXPECT_EQ(
+        RewriteOptions::kOptionOk,
+        with_bytes.ParseAndSetOptionFromName1(
+            "PngLossyFallbackMinBytesPerMegapixel", "500000", &msg, &handler));
+    EXPECT_EQ(500000, with_bytes.png_lossy_fallback_min_bytes_per_mp());
+    with_bytes.ComputeSignature();
+    EXPECT_NE(default_signature, with_bytes.signature());
+  }
+
+  // Out-of-range values are rejected and leave the default in place.
+  for (const char* value : {"101", "-1", "abc"}) {
+    EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+              options_.ParseAndSetOptionFromName1(
+                  "PngLossyFallbackMaxSizePercent", value, &msg, &handler))
+        << value;
+  }
+  for (const char* value : {"4000001", "-1"}) {
+    EXPECT_EQ(
+        RewriteOptions::kOptionValueInvalid,
+        options_.ParseAndSetOptionFromName1(
+            "PngLossyFallbackMinBytesPerMegapixel", value, &msg, &handler))
+        << value;
+  }
+  EXPECT_EQ(0, options_.png_lossy_fallback_max_size_percent());
+  EXPECT_EQ(250000, options_.png_lossy_fallback_min_bytes_per_mp());
 }
 
 // All the non-base option names are explicitly enumerated here. Modifications

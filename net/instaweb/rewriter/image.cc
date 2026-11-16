@@ -45,6 +45,7 @@ extern "C" {
 #include "pagespeed/kernel/image/gif_reader.h"
 #include "pagespeed/kernel/image/image_analysis.h"
 #include "pagespeed/kernel/image/image_converter.h"
+#include "pagespeed/kernel/image/image_distortion.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_resizer.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -101,6 +102,7 @@ using pagespeed::image_compression::WEBP_LOSSLESS;
 using pagespeed::image_compression::WEBP_LOSSY;
 using pagespeed::image_compression::WEBP_NONE;
 using pagespeed::image_compression::WebpConfiguration;
+using pagespeed::image_compression::WorstTilePsnr;
 
 namespace net_instaweb {
 
@@ -133,6 +135,26 @@ namespace {
 
 const char kGifString[] = "gif";
 const char kPngString[] = "png";
+
+// PNG lossy fallback (see ImageImpl::TryPngLossyFallback). These are not
+// options: they are calibrated together, on a corpus, with the encoder
+// settings the photo arm uses, so changing one means recalibrating all four.
+//
+// No trial for a lossless WebP smaller than this: the absolute saving is too
+// small to be worth a second encode and a decode.
+const size_t kPngLossyFallbackMinLosslessBytes = 64 * 1024;
+// No trial below this WebpRecompressionQuality. Under it the size-ratio gate
+// stops discriminating (nearly any lossy file is 5x smaller) and the quality
+// guard would carry the whole decision, which the corpus does not support. The
+// guard compares absolute error, so it tightens, never loosens, as quality
+// falls from the calibrated 80 down to this floor.
+const int64 kPngLossyFallbackMinWebpQuality = 50;
+// Side, in pixels, of the tiles whose PSNR the quality guard takes the minimum
+// of, and the lowest acceptable worst-tile PSNR in dB. Calibrated on libwebp
+// 1.5.0 at quality 80, method 3: a true photo the detector misses scores 29.8
+// dB or more, a terminal screenshot 21.2 dB, coloured text over noise 20.2 dB.
+const int kPngLossyFallbackTile = 32;
+const double kPngLossyFallbackMinTilePsnrDb = 29.5;
 const uint8 kAlphaOpaque = 255;
 
 // Records the outcome of one encode attempt into the per-source-format stats
@@ -291,11 +313,15 @@ class ImageImpl : public Image {
   // probe; used by the PNG provenance-carry path, where a winning AVIF
   // candidate would be discarded anyway (the caBX/iTXt manifest can only be
   // spliced back into a PNG output).
+  // 'allow_png_lossy_fallback' is true only when the image being rewritten
+  // started as a PNG: a still GIF reaches this function as a PNG once it has
+  // been resized, and must not take the lossy fallback.
   bool ComputeOutputContentsFromGifOrPng(
       const GoogleString& string_for_image,
       const PngReaderInterface* png_reader, bool fall_back_to_png,
       const char* dbg_input_format, ImageType input_type,
-      ConversionVariables::VariableType var_type, bool suppress_avif_candidate);
+      ConversionVariables::VariableType var_type, bool suppress_avif_candidate,
+      bool allow_png_lossy_fallback);
 
   // Helper methods
   static bool ComputePngTransparency(const StringPiece& buf);
@@ -328,6 +354,30 @@ class ImageImpl : public Image {
                         const GoogleString& image_data,
                         bool compress_color_losslessly, bool has_transparency,
                         ConversionVariables::VariableType var_type);
+
+  // The encode behind ConvertPngToWebp, writing into the caller's buffer
+  // (which must be empty) and touching neither image_type_ nor the conversion
+  // statistics. It builds its own timeout handler on every call, so a trial
+  // gets a fresh budget. Reports whether the encode was cut short by the
+  // timeout and how long it ran.
+  bool EncodePngToWebp(const PngReaderInterface& png_reader,
+                       const GoogleString& image_data,
+                       bool compress_color_losslessly, bool has_transparency,
+                       GoogleString* output, bool* was_timed_out,
+                       int64* time_elapsed_ms);
+
+  // PNG lossy fallback. output_contents_ holds the lossless WebP just made
+  // from the opaque PNG 'image_data'. If the lossless file is large and costly
+  // per pixel of the image encoded, encode a lossy WebP and swap it in when it
+  // is much smaller and its worst 32x32 tile passes a PSNR check against the
+  // source. Four gates, all required: the ratio gate keeps text and UI out
+  // (lossy is no smaller for them), the worst-tile guard catches damage the
+  // ratio gate cannot see (coloured text over a noisy backdrop), and the two
+  // size gates keep the extra encode for images where it pays. Do not drop
+  // one because the others seem to cover it. Returns true when the lossy file
+  // replaced output_contents_.
+  bool TryPngLossyFallback(const PngReaderInterface& png_reader,
+                           const GoogleString& image_data);
 
   // Convert the JPEG in original_jpeg to WebP format in
   // compressed_webp using the quality specified in
@@ -1100,7 +1150,8 @@ bool ImageImpl::ComputeOutputContents() {
             string_for_image, png_reader.get(),
             (resized || options_->recompress_png) /* fall_back_to_png */,
             kPngString, IMAGE_PNG, Image::ConversionVariables::FROM_PNG,
-            png_carry /* suppress_avif_candidate */);
+            png_carry /* suppress_avif_candidate */,
+            true /* allow_png_lossy_fallback */);
         break;
       case IMAGE_GIF:
         ImageType current_image_type = IMAGE_GIF;
@@ -1121,7 +1172,8 @@ bool ImageImpl::ComputeOutputContents() {
             string_for_image, png_reader.get(),
             options_->convert_gif_to_png /* fall_back_to_png */, kGifString,
             current_image_type, Image::ConversionVariables::FROM_GIF,
-            false /* suppress_avif_candidate */);
+            false /* suppress_avif_candidate */,
+            false /* allow_png_lossy_fallback */);
         break;
     }
     // PNG carry-through: splice the ORIGINAL caBX/iTXt manifest chunks into
@@ -1561,7 +1613,8 @@ bool ImageImpl::ReduceAvifImageQuality(const GoogleString& original_avif,
 inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
     const GoogleString& string_for_image, const PngReaderInterface* png_reader,
     bool fall_back_to_png, const char* dbg_input_format, ImageType input_type,
-    ConversionVariables::VariableType var_type, bool suppress_avif_candidate) {
+    ConversionVariables::VariableType var_type, bool suppress_avif_candidate,
+    bool allow_png_lossy_fallback) {
   // Don't try to optimize empty images, it just messes things up.
   if (dims_.width() <= 0 || dims_.height() <= 0) {
     return false;
@@ -1641,6 +1694,20 @@ inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
           output_type = IMAGE_JPEG;
         } else {
           fall_back_to_png = true;
+        }
+      } else if (output_type == IMAGE_WEBP_LOSSLESS_OR_ALPHA &&
+                 compress_color_losslessly && allow_png_lossy_fallback &&
+                 input_type == IMAGE_PNG && !is_animated && !has_transparency &&
+                 !suppress_avif_candidate && options_->convert_png_to_jpeg &&
+                 options_->convert_jpeg_to_webp &&
+                 options_->png_lossy_fallback_max_size_percent > 0 &&
+                 options_->webp_quality >= kPngLossyFallbackMinWebpQuality) {
+        // The lossy file is labelled IMAGE_WEBP, but is_photo stays false: an
+        // AVIF candidate for this image stays lossless (a lossy AVIF would be
+        // an uncalibrated path), and pick-smaller then chooses between it and
+        // the lossy WebP.
+        if (TryPngLossyFallback(*png_reader, string_for_image)) {
+          output_type = IMAGE_WEBP;
         }
       }
     }
@@ -1749,11 +1816,11 @@ inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
   return ok;
 }
 
-bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
-                                 const GoogleString& input_image,
-                                 bool compress_color_losslessly,
-                                 bool has_transparency,
-                                 ConversionVariables::VariableType var_type) {
+bool ImageImpl::EncodePngToWebp(const PngReaderInterface& png_reader,
+                                const GoogleString& input_image,
+                                bool compress_color_losslessly,
+                                bool has_transparency, GoogleString* output,
+                                bool* was_timed_out, int64* time_elapsed_ms) {
   ConversionTimeoutHandler timeout_handler(options_->webp_conversion_timeout_ms,
                                            timer_, handler_.get());
   WebpConfiguration webp_config;
@@ -1767,7 +1834,6 @@ bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
   webp_config.progress_hook = ConversionTimeoutHandler::Continue;
   webp_config.user_data = &timeout_handler;
 
-  ImageType target_image_type = IMAGE_WEBP_LOSSLESS_OR_ALPHA;
   if (compress_color_losslessly) {
     // Note that webp_config.alpha_quality and
     // webp_config.alpha_compression are only meaningful in the
@@ -1781,7 +1847,6 @@ bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
     } else {
       webp_config.alpha_quality = 0;
       webp_config.alpha_compression = 0;
-      image_type_ = IMAGE_WEBP;
     }
   }
 
@@ -1790,18 +1855,33 @@ bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
   // The technique they use can only detect some of the opaque images.
   // PixelFormatOptimizer has a more expensive, but comprehensive solution.
   bool not_used;
-  timeout_handler.Start(&output_contents_);
-  bool ok = ImageConverter::ConvertPngToWebp(png_reader, input_image,
-                                             webp_config, &output_contents_,
-                                             &not_used, handler_.get());
-
-  if (ok) {
-    image_type_ = target_image_type;
-  }
+  timeout_handler.Start(output);
+  bool ok = ImageConverter::ConvertPngToWebp(
+      png_reader, input_image, webp_config, output, &not_used, handler_.get());
   timeout_handler.Stop();
 
-  bool was_timed_out = timeout_handler.was_timed_out();
-  int64 time_elapsed_ms = timeout_handler.time_elapsed_ms();
+  *was_timed_out = timeout_handler.was_timed_out();
+  *time_elapsed_ms = timeout_handler.time_elapsed_ms();
+  return ok;
+}
+
+bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
+                                 const GoogleString& input_image,
+                                 bool compress_color_losslessly,
+                                 bool has_transparency,
+                                 ConversionVariables::VariableType var_type) {
+  if (!compress_color_losslessly && !has_transparency) {
+    image_type_ = IMAGE_WEBP;
+  }
+
+  bool was_timed_out = false;
+  int64 time_elapsed_ms = 0;
+  bool ok = EncodePngToWebp(png_reader, input_image, compress_color_losslessly,
+                            has_transparency, &output_contents_, &was_timed_out,
+                            &time_elapsed_ms);
+  if (ok) {
+    image_type_ = IMAGE_WEBP_LOSSLESS_OR_ALPHA;
+  }
 
   UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
                         time_elapsed_ms, var_type,
@@ -1814,6 +1894,103 @@ bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
       options_->webp_conversion_variables);
 
   return ok;
+}
+
+bool ImageImpl::TryPngLossyFallback(const PngReaderInterface& png_reader,
+                                    const GoogleString& image_data) {
+  // The bytes per pixel are those of the image that was encoded: after a
+  // resize that is the resized image, not the natural size in dims_.
+  const ImageDim& encoded =
+      resized_image_.empty() ? dims_ : resized_dimensions_;
+  const double pixels = static_cast<double>(encoded.width()) *
+                        static_cast<double>(encoded.height());
+  const size_t lossless_bytes = output_contents_.size();
+  if (pixels <= 0) {
+    return false;
+  }
+  const double lossless_bpp = lossless_bytes * 8.0 / pixels;
+  const GoogleString lossless_note =
+      absl::StrFormat(" Lossless WebP was %.1f bpp;", lossless_bpp);
+
+  if (lossless_bytes < kPngLossyFallbackMinLosslessBytes) {
+    absl::StrAppendFormat(&debug_message_,
+                          "%s no lossy trial (under %d bytes).", lossless_note,
+                          static_cast<int>(kPngLossyFallbackMinLosslessBytes));
+    return false;
+  }
+  if (static_cast<double>(lossless_bytes) <
+      pixels *
+          static_cast<double>(options_->png_lossy_fallback_min_bytes_per_mp) /
+          1e6) {
+    absl::StrAppendFormat(
+        &debug_message_, "%s no lossy trial (under %d bytes per megapixel).",
+        lossless_note,
+        static_cast<int>(options_->png_lossy_fallback_min_bytes_per_mp));
+    return false;
+  }
+
+  if (options_->png_lossy_fallback_attempted != nullptr) {
+    options_->png_lossy_fallback_attempted->Add(1);
+  }
+
+  // The trial is not a conversion attempt (MayConvert() is not consulted): it
+  // must not take one of the kMaxConversionAttempts the AVIF candidate and the
+  // PNG fallback still need. It has its own timeout budget, and its failure
+  // leaves the lossless output in place.
+  GoogleString lossy;
+  bool was_timed_out = false;
+  int64 time_elapsed_ms = 0;
+  if (!EncodePngToWebp(png_reader, image_data,
+                       false /* compress_color_losslessly */,
+                       false /* has_transparency */, &lossy, &was_timed_out,
+                       &time_elapsed_ms) ||
+      lossy.empty()) {
+    absl::StrAppendFormat(&debug_message_,
+                          "%s lossy trial rejected: encode %s.", lossless_note,
+                          was_timed_out ? "timed out" : "failed");
+    return false;
+  }
+
+  const int percent_of_lossless = static_cast<int>(
+      static_cast<double>(lossy.size()) * 100.0 / lossless_bytes);
+  if (static_cast<double>(lossy.size()) * 100.0 >
+      static_cast<double>(lossless_bytes) *
+          static_cast<double>(options_->png_lossy_fallback_max_size_percent)) {
+    absl::StrAppendFormat(
+        &debug_message_,
+        "%s lossy trial rejected: not small enough (%d%% of lossless, the"
+        " limit is %d%%).",
+        lossless_note, percent_of_lossless,
+        static_cast<int>(options_->png_lossy_fallback_max_size_percent));
+    return false;
+  }
+
+  double worst_db = 0;
+  if (!WorstTilePsnr(png_reader, image_data, lossy, kPngLossyFallbackTile,
+                     &worst_db, handler_.get()) ||
+      worst_db < kPngLossyFallbackMinTilePsnrDb) {
+    if (options_->png_lossy_fallback_rejected_quality != nullptr) {
+      options_->png_lossy_fallback_rejected_quality->Add(1);
+    }
+    absl::StrAppendFormat(
+        &debug_message_,
+        "%s lossy trial rejected: local quality guard (worst %dx%d tile %.1f"
+        " dB, the minimum is %.1f dB).",
+        lossless_note, kPngLossyFallbackTile, kPngLossyFallbackTile, worst_db,
+        kPngLossyFallbackMinTilePsnrDb);
+    return false;
+  }
+
+  output_contents_.swap(lossy);
+  if (options_->png_lossy_fallback_adopted != nullptr) {
+    options_->png_lossy_fallback_adopted->Add(1);
+  }
+  absl::StrAppendFormat(
+      &debug_message_,
+      "%s lossy trial adopted (%d%% of lossless, worst %dx%d tile %.1f dB).",
+      lossless_note, percent_of_lossless, kPngLossyFallbackTile,
+      kPngLossyFallbackTile, worst_db);
+  return true;
 }
 
 bool ImageImpl::OptimizePng(const PngReaderInterface& png_reader,

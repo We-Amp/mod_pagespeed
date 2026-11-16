@@ -56,6 +56,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"  // for MD5Hasher
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -3121,6 +3122,60 @@ TEST_F(ImageRewriteTest, GifToWebpTestWithoutResizeWithOptimize) {
                           0, 0, 0,  // jpg
                           0, 0, 0,  // gif animated
                           true);
+}
+
+// The PNG lossy fallback, end to end through the filter: a smooth opaque PNG
+// the photo detector calls graphics is stored as lossless WebP unless
+// PngLossyFallbackMaxSizePercent is set, in which case a much smaller lossy
+// WebP that passes the local quality guard is served instead.
+TEST_F(ImageRewriteTest, PngLossyFallbackEndToEnd) {
+  StdioFileSystem stdio_file_system;
+  GoogleString png;
+  ASSERT_TRUE(stdio_file_system.ReadFile(
+      StrCat(GTestSrcDir(),
+             "/test/pagespeed/kernel/image/testdata/png/"
+             "smooth_noisy_blobs.png")
+          .c_str(),
+      &png, message_handler()));
+
+  options()->EnableFilter(RewriteOptions::kDebug);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->set_png_lossy_fallback_max_size_percent(20);
+  rewrite_driver()->AddFilters();
+  SetupForWebpLossless();
+
+  const GoogleString url = StrCat(kTestDomain, "blobs.png");
+  SetResponseWithDefaultHeaders(url, kContentTypePng, png, 100);
+  ParseUrl(StrCat(kTestDomain, "test.html"), StrCat("<img src='", url, "'>"));
+
+  EXPECT_THAT(output_buffer_, HasSubstr("lossy trial adopted"));
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(ImageRewriteFilter::kImagePngLossyFallbackAttempted)
+             ->Get());
+  EXPECT_EQ(1,
+            statistics()
+                ->GetVariable(ImageRewriteFilter::kImagePngLossyFallbackAdopted)
+                ->Get());
+  EXPECT_EQ(0,
+            statistics()
+                ->GetVariable(
+                    ImageRewriteFilter::kImagePngLossyFallbackRejectedQuality)
+                ->Get());
+
+  StringVector image_urls;
+  CollectImgSrcs(url, output_buffer_, &image_urls);
+  ASSERT_EQ(1, image_urls.size());
+  EXPECT_TRUE(StringPiece(image_urls[0]).ends_with(".webp")) << image_urls[0];
+  GoogleString served;
+  ASSERT_TRUE(FetchResourceUrl(image_urls[0], &served));
+  ASSERT_GT(served.size(), 16);
+  EXPECT_EQ("RIFF", served.substr(0, 4));
+  EXPECT_EQ("VP8 ", served.substr(12, 4));  // lossy, not "VP8L"
+  EXPECT_LT(served.size() * 5, png.size());
 }
 
 TEST_F(ImageRewriteTest, InlinableImagesInsertedIntoPropertyCache) {
