@@ -32,7 +32,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # https://apt.llvm.org/ publishes) is trusted, so a failed fetch stops the
 # build instead of leaving an empty key behind.
 ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
-RUN retry() { "$@" && return 0; for d in 10 30; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 3 attempts" >&2; return 1; } \
+RUN retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; } \
     && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update && apt-get install -y wget gnupg \
     && keytmp="$(mktemp -d)" \

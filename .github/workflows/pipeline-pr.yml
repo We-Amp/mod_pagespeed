@@ -65,7 +65,7 @@ jobs:
       # nasm (x86 SIMD).
       - name: Install clang-20 + libc++-20 toolchain
         run: |
-          retry() { "$@" && return 0; for d in 10 30; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 3 attempts" >&2; return 1; }
+          retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; }
           bash tools/ci/fetch_retry.sh https://apt.llvm.org/llvm-snapshot.gpg.key "${RUNNER_TEMP}/llvm-snapshot.gpg.key"
           # Trust only the pinned key (the one https://apt.llvm.org/ publishes),
           # scoped to this source with signed-by.
