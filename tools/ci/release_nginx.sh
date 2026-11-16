@@ -35,8 +35,30 @@
 # The gates (symbol-leak, routing, load-check, suite) work on the packages in
 # --pkgdir and on the tree in --src, which holds test/package-test/.
 set -euo pipefail
-# shellcheck source=tools/ci/docker_pull_retry.sh
-source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
+# The nginx.org rebuild workflow runs from a release tag but takes this script
+# from master, and copies only the helpers its own tag knew about next to it.
+# A helper an older tag does not copy is optional: a plain docker pull and no
+# remote-cache flags give the same packages, only without the retry and cache.
+_RN_DIR="$(dirname "${BASH_SOURCE[0]}")"
+if [ -r "${_RN_DIR}/docker_pull_retry.sh" ]; then
+  # shellcheck source=tools/ci/docker_pull_retry.sh
+  source "${_RN_DIR}/docker_pull_retry.sh"
+else
+  echo "release_nginx: docker_pull_retry.sh not next to the script; pulling images without retry" >&2
+  docker_pull_retry() { docker pull "$@"; }
+fi
+
+# remote_cache_args ARRAY: append the remote-cache docker flags to the array
+# named ARRAY, or none when the helper is not next to the script.
+remote_cache_args() {
+  if [ -r "${_RN_DIR}/remote-cache-docker-args.sh" ]; then
+    # shellcheck source=tools/ci/remote-cache-docker-args.sh
+    source "${_RN_DIR}/remote-cache-docker-args.sh"
+    remote_cache_docker_args "$1"
+  else
+    echo "release_nginx: remote-cache-docker-args.sh not next to the script; building without remote-cache flags" >&2
+  fi
+}
 
 # apt-get update + install with retries, for the throwaway gate containers: a
 # short Debian or Ubuntu mirror outage is waited out, a lasting one still fails
@@ -273,9 +295,7 @@ build() {
   echo "fan-out plan: nproc=$nproc_n cores/leg=$cores mem/leg=${leg_mem}g budget=${budget}g -> concurrency=$conc over ${#legs[@]} legs"
 
   local extra_docker=()
-  # shellcheck source=remote-cache-docker-args.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/remote-cache-docker-args.sh"
-  remote_cache_docker_args extra_docker
+  remote_cache_args extra_docker
   local cache_dir="${CACHE_DIR:-}"
   if [ -z "$cache_dir" ]; then cache_dir="$(mktemp -d)"; fi
   mkdir -p "$cache_dir"
@@ -789,6 +809,17 @@ self_test() {
   printf 'getopts ":o:s:a:h" x\n' > "$t/old_deb.sh"
   grep -q OPTIMIZER_DEB_VERSION "$t/new_deb.sh" || { echo "FAIL: flag probe missed a new script"; fail=1; }
   grep -q OPTIMIZER_DEB_VERSION "$t/old_deb.sh" && { echo "FAIL: flag probe matched an old script"; fail=1; }
+  # A lane directory that lacks the optional helpers (an older tag's copy list).
+  mkdir -p "$t/lane"
+  cp "${BASH_SOURCE[0]}" "$t/lane/release_nginx.sh"
+  out="$(env -i PATH="$PATH" bash "$t/lane/release_nginx.sh" legs --arch x64 --set nginxorg 2>"$t/lane/err")" \
+    || { echo "FAIL: script without helpers did not start"; fail=1; }
+  grep -q "pulling images without retry" "$t/lane/err" || { echo "FAIL: missing docker_pull_retry.sh not announced"; fail=1; }
+  # shellcheck disable=SC2016  # the snippet must expand in the child shell
+  { sed -n '/^remote_cache_args() {/,/^}/p' "${BASH_SOURCE[0]}"; echo 'A=(); remote_cache_args A; echo "${#A[@]}"'; } > "$t/lane/rca.sh"
+  out="$(env -i PATH="$PATH" _RN_DIR="$t/lane" bash "$t/lane/rca.sh" 2>"$t/lane/err2")" || true
+  chk "missing remote-cache helper: no flags" "$out" "0"
+  grep -q "without remote-cache flags" "$t/lane/err2" || { echo "FAIL: missing remote-cache helper not announced"; fail=1; }
   out=""
   [ "$fail" = 0 ] && echo "release_nginx self-test: ok"
   return "$fail"
