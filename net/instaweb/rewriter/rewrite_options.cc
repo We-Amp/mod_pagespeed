@@ -259,6 +259,10 @@ const char RewriteOptions::kObliviousPagespeedUrls[] = "ObliviousPagespeedUrls";
 const char RewriteOptions::kOptionCookiesDurationMs[] =
     "OptionCookiesDurationMs";
 const char RewriteOptions::kOverrideCachingTtlMs[] = "OverrideCachingTtlMs";
+const char RewriteOptions::kPngLossyFallbackMaxSizePercent[] =
+    "PngLossyFallbackMaxSizePercent";
+const char RewriteOptions::kPngLossyFallbackMinBytesPerMegapixel[] =
+    "PngLossyFallbackMinBytesPerMegapixel";
 const char RewriteOptions::kPreserveImageProvenance[] =
     "PreserveImageProvenance";
 const char RewriteOptions::kPreserveSubresourceHints[] =
@@ -528,6 +532,13 @@ const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
 // Animations with more frames than this are served unconverted. 0 or a
 // negative value disables the cap.
 const int64 RewriteOptions::kDefaultImageMaxAnimatedFrames = 200;
+
+// The PNG lossy fallback is off (0) by default. When enabled, the lossy WebP
+// trial runs for a lossless WebP of at least 250000 bytes per megapixel
+// (2 bits per pixel).
+const int64 RewriteOptions::kDefaultPngLossyFallbackMaxSizePercent = 0;
+const int64 RewriteOptions::kDefaultPngLossyFallbackMinBytesPerMegapixel =
+    250000;
 
 // AVIF quality defaults. -1 falls back to
 // ImageRecompressionQuality, mirroring the WebP defaults; the encode-side

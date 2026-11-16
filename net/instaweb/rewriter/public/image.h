@@ -143,10 +143,17 @@ class Image {
           webp_conversion_timeout_ms(-1),
           max_animated_frames(RewriteOptions::kDefaultImageMaxAnimatedFrames),
           avif_conversion_timeout_ms(-1),
+          png_lossy_fallback_max_size_percent(
+              RewriteOptions::kDefaultPngLossyFallbackMaxSizePercent),
+          png_lossy_fallback_min_bytes_per_mp(
+              RewriteOptions::kDefaultPngLossyFallbackMinBytesPerMegapixel),
           conversions_attempted(0),
           preserve_lossless(false),
           webp_conversion_variables(nullptr),
-          avif_conversion_variables(nullptr) {}
+          avif_conversion_variables(nullptr),
+          png_lossy_fallback_attempted(nullptr),
+          png_lossy_fallback_adopted(nullptr),
+          png_lossy_fallback_rejected_quality(nullptr) {}
 
     // These options are set by the client to specify what type of
     // conversion to perform:
@@ -199,6 +206,15 @@ class Image {
     int64 max_animated_frames;
     int64 avif_conversion_timeout_ms;
 
+    // PNG lossy fallback: an opaque PNG that photo detection sent to lossless
+    // WebP is also tried as lossy WebP and served that way when the lossy file
+    // is at most png_lossy_fallback_max_size_percent of the lossless size and
+    // a worst-tile quality check passes. 0 (the default) turns it off.
+    // png_lossy_fallback_min_bytes_per_mp is the lossless-bytes-per-megapixel
+    // floor below which no trial runs (0 = no floor).
+    int64 png_lossy_fallback_max_size_percent;
+    int64 png_lossy_fallback_min_bytes_per_mp;
+
     // These fields are set by the conversion routines to report
     // characteristics of the conversion process.
     int conversions_attempted;
@@ -206,6 +222,11 @@ class Image {
 
     ConversionVariables* webp_conversion_variables;
     ConversionVariables* avif_conversion_variables;
+
+    // Statistics for the PNG lossy fallback; any of them may be null.
+    Variable* png_lossy_fallback_attempted;         // a trial encode started
+    Variable* png_lossy_fallback_adopted;           // lossy WebP was served
+    Variable* png_lossy_fallback_rejected_quality;  // worst-tile guard refused
   };
 
   virtual ~Image();
