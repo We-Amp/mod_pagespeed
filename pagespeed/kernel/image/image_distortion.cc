@@ -57,6 +57,29 @@ void ScoreBand(const std::vector<double>& sums, size_t width, size_t tile,
   }
 }
 
+// libpng reports an error with a longjmp to the buffer the reader owns. A
+// longjmp skips the destructors of every C++ object live in the frames it
+// leaves, so each call that can reach libpng sits in a helper that holds the
+// setjmp and no object with a non-trivial destructor (only pointers and
+// references). The frames the jump crosses are then libpng's and the
+// reader's own, as in the PNG-to-WebP conversion. Callers keep their
+// vector and WebP reader outside any setjmp scope.
+bool InitializePngRead(PngScanlineReader* reader,
+                       const PngReaderInterface& png_reader,
+                       const GoogleString& png) {
+  if (setjmp(*reader->GetJmpBuf())) {
+    return false;
+  }
+  return reader->InitializeRead(png_reader, png);
+}
+
+bool ReadPngRow(PngScanlineReader* reader, void** row) {
+  if (setjmp(*reader->GetJmpBuf())) {
+    return false;
+  }
+  return reader->ReadNextScanline(row);
+}
+
 }  // namespace
 
 bool WorstTilePsnr(const PngReaderInterface& png_reader,
@@ -72,10 +95,7 @@ bool WorstTilePsnr(const PngReaderInterface& png_reader,
   source.set_transform(PNG_TRANSFORM_EXPAND | PNG_TRANSFORM_STRIP_16 |
                        PNG_TRANSFORM_GRAY_TO_RGB);
   source.set_require_opaque(true);
-  if (setjmp(*source.GetJmpBuf())) {
-    return false;
-  }
-  if (!source.InitializeRead(png_reader, png)) {
+  if (!InitializePngRead(&source, png_reader, png)) {
     return false;
   }
 
@@ -101,7 +121,7 @@ bool WorstTilePsnr(const PngReaderInterface& png_reader,
   for (size_t y = 0; y < height; ++y) {
     void* source_row = nullptr;
     void* decoded_row = nullptr;
-    if (!source.ReadNextScanline(&source_row) ||
+    if (!ReadPngRow(&source, &source_row) ||
         !decoded.ReadNextScanline(&decoded_row)) {
       return false;
     }
