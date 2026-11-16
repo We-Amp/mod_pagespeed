@@ -110,12 +110,17 @@ done
 
 # 4. For the coverage build, the sources as the compiler saw them: Bazel
 #    compiles from its execution root with workspace-relative paths, and the
-#    report resolves them against $OUT/proc/self/cwd.
+#    report resolves them against $OUT/proc/self/cwd. The include list covers
+#    the inline-implementation files that headers and sources #include
+#    (jsoncpp's json_valueiterator.inl is one): a file missing here fails the
+#    report with "is not a file".
 if [ "${SANITIZER:-}" = coverage ]; then
   mkdir -p "${OUT}/proc/self/cwd"
   rsync -aLkm \
     --include '*.h' --include '*.hh' --include '*.hpp' --include '*.inc' \
-    --include '*.c' --include '*.cc' --include '*.cpp' --include '*/' \
+    --include '*.c' --include '*.cc' --include '*.cpp' \
+    --include '*.cxx' --include '*.hxx' --include '*.inl' --include '*.ipp' \
+    --include '*.tcc' --include '*.def' --include '*/' \
     --exclude '*' \
     "$(bazel info execution_root)/" "${OUT}/proc/self/cwd/"
 fi
