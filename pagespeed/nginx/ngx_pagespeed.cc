@@ -692,9 +692,18 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
     // modules running after us to manipulate those responses.
     // Admin pages generate their own error responses (JSON), so we must not
     // delegate those to nginx's error handler.
-    if (!status_ok && (ctx->base_fetch->base_fetch_type() != kHtmlTransform &&
-                       ctx->base_fetch->base_fetch_type() != kIproLookup &&
-                       ctx->base_fetch->base_fetch_type() != kAdminPage)) {
+    // A resource whose optimization the rewriter gave up waiting for (a
+    // combined script) answers 503 with Retry-After and no-store. nginx's own
+    // error handling would keep the 503 but drop those two headers, so this
+    // response is sent as generated.
+    const bool retryable_unavailable =
+        status_code == 503 &&
+        ctx->base_fetch->base_fetch_type() == kPageSpeedResource &&
+        ctx->base_fetch->response_headers()->Has("Retry-After");
+    if (!status_ok && !retryable_unavailable &&
+        (ctx->base_fetch->base_fetch_type() != kHtmlTransform &&
+         ctx->base_fetch->base_fetch_type() != kIproLookup &&
+         ctx->base_fetch->base_fetch_type() != kAdminPage)) {
       ps_release_base_fetch(ctx);
       ngx_http_filter_finalize_request(r, nullptr, status_code);
       return NGX_DONE;

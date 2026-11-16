@@ -313,6 +313,13 @@ void InstawebHandler::ComputeCustomOptions() {
     custom_options_->Merge(*remote_options);
   }
 
+  // An .htaccess file may tighten the per-request work bounds of its
+  // directory but not loosen them beyond the virtual host's.
+  if (custom_options_.get() != nullptr &&
+      ApacheConfig::DynamicCast(custom_options_.get())->set_from_htaccess()) {
+    custom_options_->LimitWorkBoundsTo(*options_);
+  }
+
   if (!server_context_->GetQueryOptions(
           request_context(), directory_aware_options, &stripped_gurl_,
           request_headers_.get(), response_headers_.get(), &rewrite_query_)) {
@@ -439,6 +446,7 @@ void InstawebHandler::HandleAsPagespeedResource() {
   // buffered path did; ApacheFetch must not emit the failed fetch's
   // headers or body.
   fetch_->set_handle_error(false);
+  fetch_->set_send_retryable_unavailable(true);
   DisownDriver();
 
   StreamingPagespeedResourceFetch streaming_fetch(request_, fetch_);

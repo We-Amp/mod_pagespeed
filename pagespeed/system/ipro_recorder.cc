@@ -23,6 +23,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/kernel/http/http_names.h"
 
 namespace net_instaweb {
@@ -76,8 +77,11 @@ bool StatesLifetime(const ResponseHeaders& headers) {
   ConstStringStarVector values;
   if (headers.Lookup(HttpAttributes::kCacheControl, &values)) {
     for (const GoogleString* value : values) {
-      if (value != nullptr && (StringCaseStartsWith(*value, "max-age") ||
-                               StringCaseStartsWith(*value, "s-maxage"))) {
+      // Any element that mentions a lifetime counts, a malformed one too:
+      // ComputeCaching reads that as stale.
+      if (value != nullptr &&
+          CachingHeaders::ReadLifetimeDirective(*value).name !=
+              CachingHeaders::LifetimeDirective::kNone) {
         return true;
       }
     }

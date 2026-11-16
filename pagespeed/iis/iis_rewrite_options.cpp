@@ -483,7 +483,27 @@ IisRewriteOptions::ParseAndSetOptions(
     result = ParseAndSetOptionFromName3(
         directive, args[1], args[2], args[3], &msg, handler);
   } else {
+    // Too many arguments for any option; a deprecated name still gets its
+    // deprecation warning.
+    if (IsDeprecatedOptionName(directive)) {
+      handler->Message(kWarning,
+                       "pagespeed %s is deprecated and has no effect; please "
+                       "remove it from your configuration",
+                       directive.as_string().c_str());
+      return nullptr;
+    }
     return "unknown option";
+  }
+
+  // A name that was once a valid option is accepted as a no-op, with the
+  // same deprecation warning as nginx.
+  if (result == RewriteOptions::kOptionNameUnknown &&
+      IsDeprecatedOptionName(directive)) {
+    handler->Message(kWarning,
+                     "pagespeed %s is deprecated and has no effect; please "
+                     "remove it from your configuration",
+                     directive.as_string().c_str());
+    return nullptr;
   }
 
   if (msg.size()) {

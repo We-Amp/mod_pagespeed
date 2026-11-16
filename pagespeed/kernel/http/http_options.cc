@@ -26,6 +26,7 @@ namespace net_instaweb {
 const HttpOptions kDefaultHttpOptionsForTests = {
     false,                 // respect_vary
     5 * Timer::kMinuteMs,  // implicit_cache_ttl_ms
+    true,                  // ipro_cors_guard
 };
 const HttpOptions kDeprecatedDefaultHttpOptions = kDefaultHttpOptionsForTests;
 

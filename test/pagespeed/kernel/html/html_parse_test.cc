@@ -101,6 +101,23 @@ TEST_F(HtmlParseTest, AvoidFalseXmlComment) {
                     "</script>");
 }
 
+// Browsers end a comment on "<!-->", "<!--->" and "--!>" as well as on "-->",
+// and so does the parser. The writer writes each of these as a comment that
+// ends in "-->", which every parser reads the same way.
+TEST_F(HtmlParseTest, CommentEndsWhereBrowsersEndIt) {
+  ValidateExpected("empty_comment", "<!-->a<b>c</b>-->", "<!---->a<b>c</b>-->");
+  ValidateExpected("empty_comment_dash", "<!--->a<b>c</b>-->",
+                   "<!---->a<b>c</b>-->");
+  ValidateExpected("comment_end_bang", "<!--x--!>a<b>c</b>-->",
+                   "<!--x-->a<b>c</b>-->");
+  // "--!" not followed by ">" is part of the comment, as is a ">" that does
+  // not directly follow "<!--" or "<!---".
+  ValidateNoChanges("bang_inside", "<!--x--!y-->");
+  ValidateNoChanges("bang_then_end", "<!--x--!-->");
+  ValidateNoChanges("gt_inside", "<!-- > -->");
+  ValidateNoChanges("dash_gt_inside", "<!--x->-->");
+}
+
 TEST_F(HtmlParseTest, RetainBogusEndTag) {
   ValidateNoChanges(
       "bogus_end_tag",

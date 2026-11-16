@@ -3623,8 +3623,8 @@ TEST_F(CssFilterLessThanTest, WrittenTextIsPreparedText) {
   SetPageType("text/html; charset=utf-8");
   const char* const kCss[] = {
       "a { margin : 0 }",
-      "@property --x { syntax: \"<length>\"; inherits: false; "
-      "initial-value: 0px }",
+      ("@property --x { syntax: \"<length>\"; inherits: false; "
+       "initial-value: 0px }"),
       "@media (width < 600px) { a { margin : 0 } }",
       "a { content : \"\\3C/style\\3E\\3C b\\3E\" }",
       ".a\\3C b { color : red }",
