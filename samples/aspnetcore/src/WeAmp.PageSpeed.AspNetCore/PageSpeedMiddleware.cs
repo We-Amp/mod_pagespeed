@@ -289,7 +289,13 @@ public sealed class PageSpeedMiddleware
         // one (registered before the application runs) runs after all of
         // theirs and sees the final header set.
         context.Response.OnStarting(
-            static state => { ((MissCapture)state).Capture(); return Task.CompletedTask; },
+            static state =>
+            {
+                var c = (MissCapture)state;
+                c.Capture();
+                c.ApplyAgentVaryAccept();
+                return Task.CompletedTask;
+            },
             capture);
 
         // ── CACHE MISS — proxy to origin ─────────────────────────
@@ -564,8 +570,11 @@ public sealed class PageSpeedMiddleware
         else if (encoding == EncodingBrotli)
             context.Response.Headers.ContentEncoding = "br";
 
-        // Vary headers per content type.
-        SetVaryHeaders(context, cachedType);
+        // Vary headers per content type. While a Markdown copy can be served
+        // at this URL, the HTML names Accept too.
+        SetVaryHeaders(context, cachedType,
+            agentVaryAccept: cachedType == PageSpeedContentType.Html &&
+                             AgentMarkdownMayBeServed(opts));
 
         if (servedAgentMarkdown)
         {
@@ -576,6 +585,9 @@ public sealed class PageSpeedMiddleware
             // SetVaryHeaders leaves Vary unset for it).
             context.Response.Headers.Vary = "Accept, Accept-Encoding";
             context.Response.Headers["X-Robots-Tag"] = "noindex";
+            // Token estimate and the operator's content-signal (if any).
+            AgentMarkdownHeaders.Add(
+                context.Response.Headers, content.Length, opts.AgentContentSignal);
         }
 
         // Link preload/preconnect headers (HTML only; markdown has no browser
@@ -695,18 +707,25 @@ public sealed class PageSpeedMiddleware
     }
 
     /// <summary>
-    /// Sets Vary headers appropriate for the content type.
+    /// Sets Vary headers appropriate for the content type. With
+    /// <paramref name="agentVaryAccept"/> (cache hits only) an HTML response
+    /// names <c>Accept</c> too (see <see cref="AgentMarkdownMayBeServed"/>);
+    /// the miss path adds it through
+    /// <see cref="MissCapture.ApplyAgentVaryAccept"/> instead.
     /// </summary>
     private static void SetVaryHeaders(
         HttpContext context, PageSpeedContentType type,
-        MissCapture? capture = null)
+        MissCapture? capture = null, bool agentVaryAccept = false)
     {
         // Merged with any Vary already on the response (the application's own,
-        // or one replayed from the stored headers): the tokens of both apply.
+        // or one replayed from the stored headers): the tokens of both apply,
+        // and a token already present is not listed again.
         string? ours = type switch
         {
             PageSpeedContentType.Image => "Accept, Save-Data, User-Agent",
-            PageSpeedContentType.Html => "Accept-Encoding, User-Agent",
+            PageSpeedContentType.Html => agentVaryAccept
+                ? "Accept-Encoding, User-Agent, Accept"
+                : "Accept-Encoding, User-Agent",
             PageSpeedContentType.Css or PageSpeedContentType.Js => "Accept-Encoding",
             _ => null,
         };
@@ -941,6 +960,33 @@ public sealed class PageSpeedMiddleware
         /// <summary>Vary tokens this middleware added.</summary>
         public List<string> OwnVaryTokens { get; } = new();
 
+        /// <summary>
+        /// Set when the HTML response must name <c>Accept</c> in its
+        /// <c>Vary</c> because a Markdown copy may be served at this URL.
+        /// </summary>
+        public bool AgentVaryAccept { get; set; }
+
+        private bool _agentVaryApplied;
+
+        /// <summary>
+        /// Adds <c>Accept</c> to the outgoing <c>Vary</c> when
+        /// <see cref="AgentVaryAccept"/> is set. The origin's headers are
+        /// captured first, so the token is never stored with the entry, and it
+        /// is recorded as this middleware's own, so the store rule
+        /// (<see cref="VaryStoreRule"/>, read again by
+        /// <see cref="UncacheableNow"/>) never counts it as the origin varying
+        /// on Accept. Not listed twice when the origin already names it; the
+        /// origin's token then stays the origin's. Runs once, and only before
+        /// the response has started.
+        /// </summary>
+        public void ApplyAgentVaryAccept()
+        {
+            Capture();
+            if (_agentVaryApplied || !AgentVaryAccept || _response.HasStarted) return;
+            _agentVaryApplied = true;
+            OwnVaryTokens.AddRange(MergeVary(_response.Headers, "Accept"));
+        }
+
         private List<KeyValuePair<string, string>>? _captured;
         private bool _uncacheable;
 
@@ -1114,11 +1160,17 @@ public sealed class PageSpeedMiddleware
                     context.Response.Headers.Link.ToArray(), linksBefore));
                 context.Response.Headers["X-PageSpeed"] = "MISS";
                 SetVaryHeaders(context, PageSpeedContentType.Html, capture);
+                // Accept is added once the origin's headers are captured (when
+                // the response starts), so it is never read as the origin's.
+                capture.AgentVaryAccept = AgentMarkdownMayBeServed(opts);
 
                 var output = result.OutputMemory;
                 context.Response.ContentLength = output.Length;
                 await originalBody.WriteAsync(
                     output, context.RequestAborted);
+                // A host that does not raise OnStarting (none in production)
+                // still gets the token; a no-op once it was added.
+                capture.ApplyAgentVaryAccept();
 
                 if (!record) return;
 
@@ -1193,6 +1245,31 @@ public sealed class PageSpeedMiddleware
     /// </summary>
     private bool HostVouched(string hostname) =>
         AgentHostVouch.Vouches(_hostFiltering?.CurrentValue.AllowedHosts, hostname);
+
+    /// <summary>
+    /// Whether this middleware may answer an <c>Accept: text/markdown</c>
+    /// request for a page with the page's Markdown copy at the same URL: the
+    /// operator switch <see cref="PageSpeedOptions.EnableAgentOptimize"/> is on
+    /// and the worker's agent optimization is on (the same entitlement the
+    /// serve negotiation reads). Then every HTML response names <c>Accept</c>
+    /// in its <c>Vary</c>, so a shared cache that keyed the HTML without it
+    /// cannot hand the HTML to an agent or keep the Markdown copy for a
+    /// browser. An unreadable worker setting counts as on (the extra token is
+    /// the safe side). Affects only the outgoing Vary; which requests get the
+    /// Markdown copy is decided elsewhere and is unchanged.
+    /// </summary>
+    private bool AgentMarkdownMayBeServed(PageSpeedOptions opts)
+    {
+        if (!opts.EnableAgentOptimize) return false;
+        try
+        {
+            return _cache.ReadSharedConfigAgentEntitled() != 0;
+        }
+        catch
+        {
+            return true;
+        }
+    }
 
     /// <summary>
     /// While the worker's agent optimization is on, an HTML notification can

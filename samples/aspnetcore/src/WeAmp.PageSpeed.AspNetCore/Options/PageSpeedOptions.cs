@@ -106,4 +106,15 @@ public sealed class PageSpeedOptions
     /// markdown never reaches a non-entitled or non-markdown request.
     /// </summary>
     public bool EnableAgentOptimize { get; set; } = false;
+
+    /// <summary>
+    /// Value of the <c>content-signal</c> header sent with the Markdown copy
+    /// served to agents (for example
+    /// <c>search=yes, ai-input=yes, ai-train=no</c>). Null or empty (the
+    /// default): no header is sent; the middleware never states a policy on
+    /// the operator's behalf. Never sent with HTML. The value must be printable
+    /// ASCII on one line (spaces and tabs allowed, not at either end), at most
+    /// 512 characters; anything else fails options validation.
+    /// </summary>
+    public string? AgentContentSignal { get; set; }
 }

@@ -59,6 +59,28 @@ The middleware binds to a `PageSpeedOptions` instance with four nested sections:
 | `MaxResponseBufferBytes` | int      | `5242880` (5 MB)                                      | Max response body size to buffer. Larger responses pass through unmodified.                                                                                                                                  |
 | `MaxAssetCacheBytes`     | int      | `10485760` (10 MB)                                    | Max asset (image/CSS/JS) size to cache. Larger assets pass through without caching or worker notification.                                                                                                   |
 | `ExcludePaths`           | string[] | `["/api/", "/signalr/", "/_blazor/", "/_framework/"]` | URL path prefixes the middleware skips entirely. Override to add your own prefixes.                                                                                                                          |
+| `EnableAgentOptimize`    | bool     | `false`                                               | Serve the page's Markdown copy to a request that asks for it (`Accept: text/markdown`), when the worker runs with `--agent-optimize`. See [Agent responses](#agent-responses). |
+| `AgentContentSignal`     | string   | none                                                  | Value of the `content-signal` header sent with the Markdown copy, for example `search=yes, ai-input=yes, ai-train=no`. Unset: no header. Printable ASCII on one line, at most 512 characters; any other value fails validation at startup. |
+
+#### Agent responses
+
+With `EnableAgentOptimize` on and the worker running with `--agent-optimize`, a
+request with `Accept: text/markdown` for a page is answered with the page's
+Markdown copy at the same URL. The Markdown copy carries `Vary: Accept`,
+`X-Robots-Tag: noindex`, `Cache-Control: private, no-cache` and
+`x-markdown-tokens`, an estimate of the number of tokens in the body (the body
+size in bytes divided by four, rounded down; no tokenizer is run, so treat it as
+an order of magnitude). It carries `content-signal` only when
+`AgentContentSignal` is set; the middleware never states a policy for you, and
+the header is never sent with HTML.
+
+While both switches are on, every HTML response the middleware optimizes or
+serves from its cache names `Accept` in its `Vary` too (for example
+`Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
+exists yet, so a CDN or proxy in front of the application keys the two apart.
+An application that sends `Vary: Accept` itself does not get it twice. With
+either switch off, `Vary` is as before. Stylesheets, scripts and images are not
+affected.
 
 ### Cache (`PageSpeed:Cache`)
 

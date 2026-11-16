@@ -49,6 +49,13 @@ public sealed class PageSpeedOptionsValidator : IValidateOptions<PageSpeedOption
         if (options.HtmlMaxAgeSeconds < 0)
             failures.Add($"HtmlMaxAgeSeconds must be non-negative, got {options.HtmlMaxAgeSeconds}.");
 
+        if (!string.IsNullOrEmpty(options.AgentContentSignal) &&
+            !Internal.AgentMarkdownHeaders.IsValidContentSignalValue(options.AgentContentSignal))
+            failures.Add(
+                "AgentContentSignal must be 1 to " +
+                $"{Internal.AgentMarkdownHeaders.MaxContentSignalBytes} characters of printable " +
+                "ASCII on one line, not starting or ending with a space or tab.");
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

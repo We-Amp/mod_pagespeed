@@ -83,6 +83,55 @@ public sealed class MarkdownContentNegotiationTests
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal("private, no-cache", headers.CacheControl.ToString());
         Assert.Equal("noindex", headers["X-Robots-Tag"].ToString());
+        // floor(8 bytes / 4); no content-signal unless one is configured.
+        Assert.Equal("2", headers["x-markdown-tokens"].ToString());
+        Assert.False(headers.ContainsKey("content-signal"));
+    }
+
+    [Fact]
+    public async Task EntitledMarkdownRequest_CarriesConfiguredContentSignal()
+    {
+        if (!NativeMarkdownProbe.Available(_output)) return;
+
+        var cache = new MarkdownNegotiationCache(agentEntitled: 1);
+        var (_, ct, _, headers) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/markdown",
+            contentSignal: "search=yes, ai-input=yes, ai-train=no");
+
+        Assert.Equal("text/markdown; charset=utf-8", ct);
+        Assert.Equal("search=yes, ai-input=yes, ai-train=no",
+            headers["content-signal"].ToString());
+        Assert.Equal("2", headers["x-markdown-tokens"].ToString());
+    }
+
+    [Fact]
+    public async Task HtmlFallback_CarriesNoMarkdownHeaders_AndNamesAccept()
+    {
+        if (!NativeMarkdownProbe.Available(_output)) return;
+
+        // Not entitled: the agent request falls back to the HTML, which
+        // carries neither Markdown header, and (agent optimization being off
+        // at the worker) no Accept in its Vary.
+        var cache = new MarkdownNegotiationCache(agentEntitled: 0);
+        var (_, ct, _, headers) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/markdown",
+            contentSignal: "ai-train=no");
+
+        Assert.Equal("text/html; charset=utf-8", ct);
+        Assert.False(headers.ContainsKey("x-markdown-tokens"));
+        Assert.False(headers.ContainsKey("content-signal"));
+        Assert.Equal("Accept-Encoding, User-Agent", headers.Vary.ToString());
+
+        // Entitled, but a browser request: the HTML names Accept.
+        cache = new MarkdownNegotiationCache(agentEntitled: 1);
+        (_, ct, _, headers) = await Serve(
+            cache, enableAgentOptimize: true, accept: "text/html",
+            contentSignal: "ai-train=no");
+
+        Assert.Equal("text/html; charset=utf-8", ct);
+        Assert.False(headers.ContainsKey("x-markdown-tokens"));
+        Assert.False(headers.ContainsKey("content-signal"));
+        Assert.Equal("Accept-Encoding, User-Agent, Accept", headers.Vary.ToString());
     }
 
     [Theory]
@@ -266,12 +315,14 @@ public sealed class MarkdownContentNegotiationTests
     private async Task<(int Status, string? ContentType, byte[] Body, IHeaderDictionary Headers)>
         Serve(IPageSpeedCache cache, bool enableAgentOptimize, string accept,
               string allowedHost = "localhost", string? cookie = null,
+              string? contentSignal = null,
               string? acceptEncoding = null)
     {
         var options = new PageSpeedOptions
         {
             Enabled = true,
             EnableAgentOptimize = enableAgentOptimize,
+            AgentContentSignal = contentSignal,
         };
         var optionsMonitor = Substitute.For<IOptionsMonitor<PageSpeedOptions>>();
         optionsMonitor.CurrentValue.Returns(options);
