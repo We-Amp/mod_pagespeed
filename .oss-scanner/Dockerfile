@@ -26,7 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # apt.llvm.org key is fetched with retries and only the key with the pinned
 # fingerprint goes into the keyring (same as docker/Dockerfile).
 ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
-RUN retry() { "$@" && return 0; for d in 10 30; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 3 attempts" >&2; return 1; } \
+RUN retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; } \
     && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update && apt-get install -y --no-install-recommends \
       software-properties-common gnupg wget \
