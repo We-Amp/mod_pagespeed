@@ -55,7 +55,7 @@ test.describe('Contact page', () => {
     });
   }
 
-  test('company, role and server band show only for commercial topics', async ({ page }) => {
+  test('company, role and deployment size show only for commercial topics', async ({ page }) => {
     await page.goto('/contact/');
     const qualifiers = page.locator('#contact-qualifiers');
     await expect(qualifiers).toBeHidden();
@@ -71,7 +71,7 @@ test.describe('Contact page', () => {
       await expect(qualifiers, topic).toBeVisible();
       await expect(page.locator('#contact-org')).toBeVisible();
       await expect(page.locator('#contact-role')).toBeVisible();
-      await expect(page.locator('#contact-servers')).toBeVisible();
+      await expect(page.locator('#contact-size')).toBeVisible();
     }
     for (const topic of ['setup', 'agents', 'other']) {
       await page.selectOption('#contact-topic', topic);
@@ -119,7 +119,7 @@ test.describe('Contact page', () => {
     await page.fill('#contact-email', 'grace@example.com');
     await page.fill('#contact-org', 'Example Corp');
     await page.fill('#contact-role', 'SRE lead');
-    await page.selectOption('#contact-servers', 'Up to 25');
+    await page.fill('#contact-size', 'Twelve nginx hosts');
     await page.fill('#contact-message', 'We run nginx on twelve hosts.');
     await page.locator('#contact-submit').click();
 
@@ -130,7 +130,7 @@ test.describe('Contact page', () => {
     const message = String((posted as unknown as { message: string }).message);
     expect(message).toContain('Company: Example Corp');
     expect(message).toContain('Role: SRE lead');
-    expect(message).toContain('Production servers: Up to 25');
+    expect(message).toContain('Deployment size: Twelve nginx hosts');
     expect(message).toContain('We run nginx on twelve hosts.');
 
     const events = await trackedEvents(page);

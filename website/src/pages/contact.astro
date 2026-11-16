@@ -17,13 +17,13 @@ const TOPICS: Array<{ value: string; label: string; hint: string; commercial: bo
   {
     value: 'support',
     label: 'Support subscription',
-    hint: 'Tell us roughly how many production servers and which platforms.',
+    hint: 'Tell us which platforms you run and what you want help with.',
     commercial: true,
   },
   {
     value: 'enterprise',
     label: 'Enterprise support',
-    hint: 'Production servers, platforms and any custom build targets or backports you need.',
+    hint: 'Platforms and any custom build targets or backports you need.',
     commercial: true,
   },
   {
@@ -239,15 +239,11 @@ const nextSteps = [
           </div>
         </div>
         <div>
-          <label for="contact-servers" class="eyebrow">
-            Production servers <span class="font-normal text-text-annotation">(optional)</span>
+          <label for="contact-size" class="eyebrow">
+            Deployment size{' '}
+            <span class="font-normal text-text-annotation">(optional, helps us answer)</span>
           </label>
-          <select id="contact-servers" name="servers" class={inputClass}>
-            <option value="">Choose one</option>
-            <option value="Up to 5">Up to 5</option>
-            <option value="Up to 25">Up to 25</option>
-            <option value="More than 25">More than 25</option>
-          </select>
+          <input id="contact-size" name="size" type="text" maxlength="200" class={inputClass} />
         </div>
       </fieldset>
 
@@ -343,9 +339,8 @@ const nextSteps = [
       const hintEl = form?.querySelector<HTMLElement>('[data-topic-hint]') ?? null;
       const qualifiers = form?.querySelector<HTMLFieldSetElement>('[data-qualifiers]') ?? null;
       const messageEl = document.getElementById('contact-message') as HTMLTextAreaElement | null;
-      const serversEl = document.getElementById('contact-servers') as HTMLSelectElement | null;
 
-      // Show the optional company / role / server-band fields only for the
+      // Show the optional company / role / deployment-size fields only for the
       // commercial topics. Hidden fields are disabled so they never post.
       function syncTopic() {
         if (!topicEl) return;
@@ -384,11 +379,6 @@ const nextSteps = [
         .filter(Boolean);
       if (messageEl && prefill.length && !messageEl.value) {
         messageEl.value = `${prefill.join('\n')}\n\n`;
-      }
-      const serversParam = (params.get('servers') ?? '').trim();
-      if (serversEl && serversParam) {
-        const match = Array.from(serversEl.options).find((o) => o.value === serversParam);
-        if (match) serversEl.value = match.value;
       }
       topicEl?.addEventListener('change', syncTopic);
       syncTopic();
@@ -495,7 +485,7 @@ const nextSteps = [
         const qualifierLines = [
           ['org', 'Company'],
           ['role', 'Role'],
-          ['servers', 'Production servers'],
+          ['size', 'Deployment size'],
         ]
           .map(([key, label]) => {
             const v = String(data.get(key) ?? '').trim();

@@ -67,8 +67,8 @@ export const COMMERCIAL_EMAIL = 'info@we-amp.com';
 // /api/product.json describe. Prices are in euro, per year, excl. VAT
 // (prices are listed in EUR; checkout runs on FastSpring); the first-response target
 // of each tier is the last entry of its `includes`.
-//   servers     the production-server band the tier covers (one organization's
-//               production deployment)
+//   scope       what the tier covers: people and response, never a count of
+//               servers or installations
 //   prices      annualEur is the yearly price; from marks "from" pricing;
 //               monthlyEur stays null (annual billing only)
 //   includes    what the tier adds, in display order; the first entry of a
@@ -84,7 +84,7 @@ export const SUPPORT_TIERS = [
     name: 'Standard support',
     kind: 'support',
     hardened: false,
-    servers: 'up to 5 production servers',
+    scope: 'one organization, 1 person',
     prices: { annualEur: 490, from: false, monthlyEur: null },
     cta: {
       href: 'https://mpspro.onfastspring.com/support-standard-annual',
@@ -92,7 +92,7 @@ export const SUPPORT_TIERS = [
       offer: 'buy-standard',
       external: true,
     },
-    note: 'a direct channel to the engineers who build the product, for up to 5 production servers',
+    note: 'a direct channel to the engineers who build the product, for one organization and one person at your organization who can open tickets',
     includes: [
       'Ticket and email channel to the engineers who build the product',
       'Configuration, upgrade and incident help',
@@ -106,7 +106,7 @@ export const SUPPORT_TIERS = [
     name: 'Priority support',
     kind: 'support',
     hardened: false,
-    servers: 'up to 25 production servers',
+    scope: 'one organization, up to 3 people',
     prices: { annualEur: 1900, from: false, monthlyEur: null },
     cta: {
       href: 'https://mpspro.onfastspring.com/support-priority-annual',
@@ -114,10 +114,11 @@ export const SUPPORT_TIERS = [
       offer: 'buy-priority',
       external: true,
     },
-    note: 'everything in Standard plus vulnerability notifications timed to the EU Cyber Resilience Act reporting windows, for up to 25 production servers',
+    note: 'everything in Standard plus vulnerability notifications timed to the EU Cyber Resilience Act reporting windows, for one organization and up to 3 people at it who can open tickets, with faster first-response targets',
     includes: [
       'Everything in Standard',
       'Vulnerability notifications timed to the EU Cyber Resilience Act reporting windows',
+      'Up to 3 people at your organization who can open tickets',
       'Upgrade rehearsal on request',
       'Quarterly review call',
       'First response next business day; severity 1 (production down) within 8 business hours',
@@ -128,7 +129,7 @@ export const SUPPORT_TIERS = [
     name: 'Enterprise',
     kind: 'support',
     hardened: false,
-    servers: 'unlimited servers and sites, one organization',
+    scope: 'one organization, people as agreed',
     prices: { annualEur: 7500, from: true, monthlyEur: null },
     cta: {
       href: '/contact/?topic=enterprise',
@@ -136,10 +137,11 @@ export const SUPPORT_TIERS = [
       offer: 'enterprise',
       external: false,
     },
-    note: 'everything in Priority plus a named engineer, custom build targets and backports, for unlimited servers and sites in one organization',
+    note: 'everything in Priority plus a named engineer, response targets per agreement, custom build targets and backports, for one organization and the people at it agreed in your order',
     includes: [
       'Everything in Priority',
       'A named engineer',
+      'People at your organization who can open tickets, as agreed',
       'Custom build targets (distributions, nginx versions), published for everyone',
       'Backports, published for everyone',
       'Master agreement, purchase order and invoice',
@@ -151,7 +153,7 @@ export const SUPPORT_TIERS = [
 // The line under the tier cards: what is signed and attested is not a tier
 // feature; security fixes reach everyone at the same time.
 export const SAME_SOFTWARE_LINE =
-  'We sell support; the software and its signed packages are the same for everyone, with or without a subscription. Security fixes reach every user at the same time. A build or backport made for an Enterprise customer is published for everyone when it is delivered.';
+  'We sell support; the software and its signed packages are the same for everyone, with or without a subscription, on every server. Security fixes reach every user at the same time. A build or backport made for an Enterprise customer is published for everyone when it is delivered.';
 // The pricing terms, said the same way everywhere they are said.
 export const PRICING_TERMS_LINE = 'Prices are per year, billed annually, excl. VAT.';
 export const PRICE_HOLD_LINE =

@@ -3142,7 +3142,7 @@ const COMMERCIAL_PAGE_SOURCES = [
 // A currency symbol or code next to a number, a per-period rate ("/yr",
 // "/mo", "per year"), or an hours target ("7 business hours", "within 3
 // hours"). Deliberately blind to the bands and step counts the pages do
-// state ("up to 25 production servers", "within 3 business days").
+// state ("up to 3 people", "within 3 business days").
 const PRICE_AMOUNT =
   /[€$£]\s?\d|\b\d[\d.,]*\s?(?:EUR|USD|GBP|euros?|dollars?)\b|\d[\d.,]*\s*\/\s*(?:yr|year|mo|month)\b|\bper (?:year|month)\b|\b\d+\s*(?:business\s+)?hours?\b/i;
 // The published amounts and targets, as they appear in the sources: euro
@@ -3181,7 +3181,7 @@ describe('commercial copy: only published amounts, one commercial address', () =
       expect(PRICE_AMOUNT.test(bad), bad).toBe(true);
     }
     for (const good of [
-      'up to 25 production servers',
+      'up to 3 people',
       'within 3 business days',
       'Under 1 million pageviews a month',
       'early subscribers keep their quoted rate for three years',
@@ -3323,7 +3323,7 @@ describe('single-sourced facts: page sources import them, never type them out', 
       'BuiltWith, {BUILTWITH_AS_OF}',
       'Hacker News in May 2026',
       `version ${facts.MODULE_PACKAGE_VERSION}0`,
-      'up to 25 production servers',
+      'up to 3 people',
     ]) {
       expect(flagged(good), good).toBe(false);
     }

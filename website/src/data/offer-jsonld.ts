@@ -99,7 +99,7 @@ export function supportTierOffersJsonLd(opts: { url?: string } = {}) {
     priceValidUntil: PRICE_VALID_UNTIL,
     url: t.cta.external ? t.cta.href : `${pageUrl}#tiers`,
     description:
-      `${t.name}, ${t.servers}: ${t.prices.from ? 'from ' : ''}${formatEur(t.prices.annualEur)} ` +
+      `${t.name}, ${t.scope}: ${t.prices.from ? 'from ' : ''}${formatEur(t.prices.annualEur)} ` +
       'per year, billed annually, excl. VAT.',
   }));
 }

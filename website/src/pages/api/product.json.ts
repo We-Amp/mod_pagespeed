@@ -74,7 +74,7 @@ const productData = {
       id: t.id,
       name: t.name,
       kind: t.kind,
-      servers: t.servers,
+      scope: t.scope,
       hardened_builds: t.hardened,
       includes: t.includes,
       annual_eur: t.prices.annualEur,

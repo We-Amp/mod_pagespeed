@@ -31,8 +31,8 @@ export const faqSupport: FaqEntry[] = [
     a: `Everyone gets security fixes at the same time, as regular releases through the channel they installed from, listed under Security in the ${link('/docs/release-notes/', 'release notes')}. Subscribers get advance notice of a planned security release: the date, the severity, the affected versions and the impact class. When a vulnerability is already public or being exploited, the notice goes out with the release. Priority and Enterprise subscribers also get vulnerability notifications timed to the EU Cyber Resilience Act reporting windows. Every release from 2.6.0 on carries its SPDX SBOM and VEX document, and both are also in the source tree.`,
   },
   {
-    q: 'What counts as a production server?',
-    a: 'A server that serves production traffic with the module or the optimizer worker. You choose the band (up to 5, up to 25, or more) when you subscribe; there is no metering and the software never reports a count.',
+    q: 'Does the number of servers I run change the price?',
+    a: 'No. A subscription covers people and response, not installations: who at your organization can open tickets and how fast we answer. The software, updates and fixes are the same and free on every server, there is no metering, and the software never reports a count.',
   },
   {
     q: 'What is signed today?',
