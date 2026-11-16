@@ -5,7 +5,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [master, ci/codeql-c-cpp]
+    branches: [master]
   pull_request:
     branches: [master]
   schedule:
