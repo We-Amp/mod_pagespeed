@@ -2807,6 +2807,77 @@ TEST_F(ResponseHeadersTest, ApplySMaxAge) {
   }
 }
 
+// ApplySMaxAge reads lifetimes the way the cache does: a lifetime it cannot
+// read stops the merge, quoted values count, repeated ones take the
+// shortest, and restrictive directives count after a semicolon.
+TEST_F(ResponseHeadersTest, ApplySMaxAgeReadsLifetimesLikeTheCache) {
+  GoogleString updated = "untouched";
+  for (const char* cache_control :
+       {"max-age=abc", "public, max-age=", "max-age=\"0\"", "max-age =600",
+        "max-age", "public; max-age=600", "max-age=600;",
+        "no-store; max-age=600", "max-age=600, x-ext; private",
+        "max-age=600, No-Transform; x-ext", "max-age=600, s-maxage",
+        "no-cache=\"set-cookie\", max-age=600"}) {
+    EXPECT_FALSE(ResponseHeaders::ApplySMaxAge(300, cache_control, &updated))
+        << cache_control;
+  }
+  EXPECT_EQ("untouched", updated);
+
+  EXPECT_TRUE(ResponseHeaders::ApplySMaxAge(300, "max-age=\"600\"", &updated));
+  EXPECT_EQ("max-age=\"600\", s-maxage=300", updated);
+  EXPECT_TRUE(ResponseHeaders::ApplySMaxAge(300, "s-maxage=\"600\"", &updated));
+  EXPECT_EQ("s-maxage=300", updated);
+  updated = "untouched";
+  EXPECT_FALSE(
+      ResponseHeaders::ApplySMaxAge(300, "max-age=600, max-age=100", &updated));
+  EXPECT_EQ("untouched", updated);
+}
+
+// A script whose only lifetime directive cannot be read is not stored for
+// other clients under the implicit lifetime.
+TEST_F(ResponseHeadersTest, UnreadableMaxAgeIsNotImplicitlyCacheable) {
+  for (const char* cache_control :
+       {"max-age=\"0\"", "max-age=0.0", "max-age=600, s-maxage=\"0\"",
+        "no-store; max-age=600", "max-age =0", "max-age", "public; max-age=600",
+        "max-age=\"6;0\""}) {
+    response_headers_.Clear();
+    response_headers_.SetStatusAndReason(HttpStatus::kOK);
+    response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+    response_headers_.Add(HttpAttributes::kContentType, "text/javascript");
+    response_headers_.Add(HttpAttributes::kCacheControl, cache_control);
+    response_headers_.ComputeCaching();
+    EXPECT_FALSE(response_headers_.IsBrowserCacheable()) << cache_control;
+    EXPECT_FALSE(response_headers_.IsProxyCacheable()) << cache_control;
+    EXPECT_FALSE(response_headers_.is_implicitly_cacheable()) << cache_control;
+  }
+}
+
+// Restrictive directives survive a rewrite in any spelling an origin may
+// use, including joined to another with a semicolon.
+TEST_F(ResponseHeadersTest, RestrictiveDirectivesSurviveRewriteWhenJoined) {
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "x-ext; No-Store, no-transform;x-other");
+  EXPECT_STREQ(", no-transform, no-store",
+               response_headers_.CacheControlValuesToPreserve(false));
+}
+
+// HasCacheControlDirective matches a directive by name, never as part of a
+// longer token.
+TEST_F(ResponseHeadersTest, HasCacheControlDirectiveMatchesByName) {
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "x-ext; No-Store, no-transform;x-other");
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-store"));
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-transform"));
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("private"));
+
+  response_headers_.Clear();
+  response_headers_.Add(HttpAttributes::kCacheControl,
+                        "no-storex, x-no-transform, no-cache=\"a\"");
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("no-store"));
+  EXPECT_FALSE(response_headers_.HasCacheControlDirective("no-transform"));
+  EXPECT_TRUE(response_headers_.HasCacheControlDirective("no-cache"));
+}
+
 TEST_F(ResponseHeadersTest, CombineContentTypes) {
   // No usable original value: the fresh one is stored as-is.
   ResponseHeaders empty_headers;
@@ -2947,6 +3018,72 @@ TEST_F(ResponseHeadersTest, ClearForgetsEarlierCacheability) {
   EXPECT_FALSE(response_headers_.IsBrowserCacheable());
   EXPECT_FALSE(response_headers_.IsProxyCacheable());
   EXPECT_EQ(0, response_headers_.cache_ttl_ms());
+}
+
+// A response to a request that carried a cookie is shareable when the origin
+// marked it so: a stylesheet, script or image needs a lifetime the origin
+// stated; anything else needs public or a single s-maxage above zero.
+TEST_F(ResponseHeadersTest, ShareableForCookieRequest) {
+  struct Case {
+    const char* content_type;   // nullptr: none
+    const char* cache_control;  // nullptr: none
+    bool with_expires;          // Expires 5 minutes after Date
+    bool shareable;
+  };
+  const Case kCases[] = {
+      // Static assets: an origin-stated lifetime.
+      {"text/css", "max-age=60", false, true},
+      {"Text/CSS; charset=utf-8", "max-age=60", false, true},
+      {"application/javascript", "s-maxage=60", false, true},
+      {"image/png", "private, max-age=60", false, true},
+      {"image/png", "max-age=0", false, false},
+      {"image/png", "public", false, false},
+      {"image/png", nullptr, false, false},        // implicit lifetime only
+      {"image/png", nullptr, true, true},          // Expires, no Cache-Control
+      {"image/png", "no-transform", true, false},  // Expires beside a line
+      {"image/", "max-age=60", false, false},      // not an image type
+      // Pages and everything else: public or a single s-maxage above zero.
+      {"application/json", "max-age=60", false, false},
+      {"application/json", "public, max-age=60", false, true},
+      {"text/html", "PUBLIC", false, true},
+      {"text/html", "s-maxage=60", false, true},
+      {"text/html", "s-maxage=0", false, false},
+      {"text/html", "s-maxage=abc", false, false},
+      {"text/html", "s-maxage=60, s-maxage=60", false, false},
+      {"text/html", nullptr, true, false},
+      {"application/xhtml+xml", "max-age=60", false, false},
+      {"text/plain", "max-age=60", false, false},
+      {nullptr, "max-age=60", false, false},
+      {"application/octet-stream", "s-maxage=1", false, true},
+  };
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(StrCat(c.content_type == nullptr ? "(none)" : c.content_type,
+                        " / ",
+                        c.cache_control == nullptr ? "(none)" : c.cache_control,
+                        c.with_expires ? " / expires" : ""));
+    ResponseHeaders headers;
+    headers.SetStatusAndReason(HttpStatus::kOK);
+    headers.SetDate(MockTimer::kApr_5_2010_ms);
+    if (c.content_type != nullptr) {
+      headers.Add(HttpAttributes::kContentType, c.content_type);
+    }
+    if (c.cache_control != nullptr) {
+      headers.Add(HttpAttributes::kCacheControl, c.cache_control);
+    }
+    if (c.with_expires) {
+      headers.SetTimeHeader(HttpAttributes::kExpires,
+                            MockTimer::kApr_5_2010_ms + 5 * Timer::kMinuteMs);
+    }
+    headers.ComputeCaching();
+    EXPECT_EQ(c.shareable, headers.IsShareableForCookieRequest());
+    // Without a cookie, anything may be shared as far as this rule goes.
+    EXPECT_TRUE(headers.MayShareForRequest(
+        RequestHeaders::Properties(false, false, false)));
+    EXPECT_EQ(c.shareable, headers.MayShareForRequest(
+                               RequestHeaders::Properties(true, false, false)));
+    EXPECT_EQ(c.shareable, headers.MayShareForRequest(
+                               RequestHeaders::Properties(false, true, false)));
+  }
 }
 
 }  // namespace net_instaweb

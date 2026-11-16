@@ -663,6 +663,32 @@ TEST_F(RewriteQueryTest, OptionsNotArbitrary) {
   EXPECT_TRUE(options == nullptr);
 }
 
+// The wait of a fetch with a negative rewrite deadline is the operator's to
+// set: a request must not lengthen it, by a query parameter, a request header
+// or the options segment of a resource URL.
+TEST_F(RewriteQueryTest, NegativeDeadlineFetchWaitIsNotSetPerRequest) {
+  const GoogleString name = RewriteOptions::kNegativeDeadlineFetchWaitMs;
+  const RewriteOptions* options =
+      ParseAndScan(kHtmlUrl, StrCat("PageSpeed", name, "=60000"), "");
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  options = ParseAndScan(kHtmlUrl, "", StrCat("PageSpeed", name, ":60000"));
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  RewriteOptions scoped(factory()->thread_system());
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            scoped.SetOptionFromQuery(name, "60000"));
+
+  // The options segment of a resource URL refuses the whole segment.
+  allow_related_options_ = true;
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(
+                               Encode(kTestDomain, "cf", "0", "a.css", "css"),
+                               "ndfw=60000"),
+                           "", "") == nullptr);
+}
+
 TEST_F(RewriteQueryTest, FlattenLimitIsNotSetPerRequest) {
   GoogleString output_query, output_headers;
   const RewriteOptions* options = ParseAndScan(
@@ -1271,6 +1297,22 @@ TEST_F(RewriteQueryTest, CacheControlNoTransform) {
   EXPECT_FALSE(options->enabled());
   EXPECT_TRUE(request_headers.Lookup1(HttpAttributes::kCacheControl) !=
               nullptr);
+}
+
+TEST_F(RewriteQueryTest, CacheControlNoTransformInAnySpelling) {
+  // No-transform turns optimization off however the client spells it.
+  for (const char* cache_control :
+       {"No-Transform", "max-age=0, no-transform", "x-ext; no-transform"}) {
+    RequestHeaders request_headers;
+    request_headers.Replace(HttpAttributes::kCacheControl, cache_control);
+    ResponseHeaders response_headers;
+    GoogleString in_query, out_query, out_req_string, out_resp_string;
+    const RewriteOptions* options = ParseAndScan(
+        kHtmlUrl, in_query, StringPiece(), &request_headers, &response_headers,
+        &out_query, &out_req_string, &out_resp_string);
+    ASSERT_TRUE(options != nullptr) << cache_control;
+    EXPECT_FALSE(options->enabled()) << cache_control;
+  }
 }
 
 TEST_F(RewriteQueryTest, DisableFiltersWithXHR) {

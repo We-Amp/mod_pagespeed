@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <cstdio>
 #include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -28,6 +30,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -520,6 +523,156 @@ TEST_F(CssImageCombineTest, ServeFiles) {
   GoogleString output;
   EXPECT_TRUE(FetchResourceUrl(sprite_str, &output));
   ServeResourceFromManyContexts(sprite_str, output);
+}
+
+// The width and height a PNG declares in its header; false if it is not one.
+bool PngDimensions(const GoogleString& png, int* width, int* height) {
+  static const char kSignature[] = "\x89PNG\r\n\x1a\n";
+  if (png.size() < 24 || png.compare(0, 8, kSignature, 8) != 0) {
+    return false;
+  }
+  auto be32 = [&png](size_t pos) {
+    return (static_cast<int>(static_cast<uint8_t>(png[pos])) << 24) |
+           (static_cast<int>(static_cast<uint8_t>(png[pos + 1])) << 16) |
+           (static_cast<int>(static_cast<uint8_t>(png[pos + 2])) << 8) |
+           static_cast<int>(static_cast<uint8_t>(png[pos + 3]));
+  };
+  *width = be32(16);
+  *height = be32(20);
+  return true;
+}
+
+// Issue #818: once the cache no longer holds a sprite, an image the server
+// cannot fetch at that moment must not turn the sprite URL into a 404. The
+// size of the missing image is not known, so no shorter strip can keep the
+// positions the page's CSS uses (and under the default background-repeat a
+// cut-off strip would tile and show the wrong image). A transparent image is
+// served instead: nothing is drawn, with a short private lifetime, and the
+// full sprite comes back once the image does.
+void ExpectBlankPrivate(const GoogleString& body, const ResponseHeaders& h) {
+  EXPECT_EQ(HttpStatus::kOK, h.status_code());
+  int width = 0, height = 0;
+  ASSERT_TRUE(PngDimensions(body, &width, &height));
+  EXPECT_EQ(1, width);
+  EXPECT_EQ(1, height);
+  EXPECT_FALSE(h.IsProxyCacheable());
+  EXPECT_TRUE(h.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(h.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableLastInput) {
+  const GoogleString sprite_url = Encode(
+      kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &full));
+  int width = 0, height = 0;
+  ASSERT_TRUE(PngDimensions(full, &width, &height));
+  EXPECT_EQ(100, width);   // BikeCrashIcn.png
+  EXPECT_EQ(170, height);  // Cuppa.png (70) above BikeCrashIcn.png (100)
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kBikePngFile));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
+  ExpectBlankPrivate(partial, headers);
+
+  // The blank answer was not stored: with the input back, the full sprite.
+  lru_cache()->Clear();
+  AddFileToMockFetcher(StrCat(kTestDomain, kBikePngFile), kBikePngFile,
+                       kContentTypePng, 100);
+  GoogleString again;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &again));
+  EXPECT_EQ(full, again);
+}
+
+TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableFirstInput) {
+  const GoogleString sprite_url = Encode(
+      kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &full));
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kCuppaPngFile));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
+  ExpectBlankPrivate(partial, headers);
+}
+
+TEST_F(CssImageCombineTest, FetchAfterCacheLossWithUnavailableMiddleInput) {
+  AddFileToMockFetcher(StrCat(kTestDomain, "bike2.png"), kBikePngFile,
+                       kContentTypePng, 100);
+  const GoogleString sprite_url =
+      Encode(kTestDomain, "is", "0",
+             MultiUrl(kCuppaPngFile, kBikePngFile, "bike2.png"), "png");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &full));
+  int width = 0, height = 0;
+  ASSERT_TRUE(PngDimensions(full, &width, &height));
+  EXPECT_EQ(270, height);
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kBikePngFile));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &partial, &headers));
+  ExpectBlankPrivate(partial, headers);
+}
+
+// A sprite none of whose images can be fetched is still a 404: nothing
+// vouches for the URL, so it is not answered as a valid sprite.
+TEST_F(CssImageCombineTest, FetchWithNoAvailableInputFails) {
+  const GoogleString sprite_url = Encode(
+      kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile), "png");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(sprite_url, &full));
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kCuppaPngFile));
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kBikePngFile));
+  GoogleString content;
+  ResponseHeaders headers;
+  EXPECT_FALSE(FetchResourceUrl(sprite_url, &content, &headers));
+  EXPECT_EQ(HttpStatus::kNotFound, headers.status_code());
+}
+
+// An image that is gone for good stops being sprited once what the server
+// knows about it expires: pages rewritten after that no longer reference the
+// old sprite URL. Until then (the input's cache lifetime, counted from when
+// the server last fetched it) pages keep referencing it, and a fetch of it
+// after cache loss is answered by the fallback above.
+TEST_F(CssImageCombineTest, GoneInputStopsBeingSpritedAfterItsTtl) {
+  const int64 kTtlSec = 100;
+  AddFileToMockFetcher(StrCat(kTestDomain, "gone.png"), kBikePngFile,
+                       kContentTypePng, kTtlSec);
+  constexpr char kHtmlTemplate2Divs[] =
+      "<head><style>"
+      "#div1{background:url(%s);width:10px;height:10px}"
+      "#div2{background:url(%s);width:10px;height:10px}"
+      "</style></head>";
+  const GoogleString html =
+      absl::StrFormat(kHtmlTemplate2Divs, kCuppaPngFile, "gone.png");
+  const GoogleString old_sprite =
+      Encode("", "is", "0", MultiUrl(kCuppaPngFile, "gone.png"), "png");
+  Parse("sprite_before_gone", html);
+  ASSERT_NE(GoogleString::npos, output_buffer_.find(old_sprite));
+
+  SetFetchResponse404("gone.png");
+  int64 gone_after_sec = -1;
+  for (int64 t = 10; t <= 3 * kTtlSec; t += 10) {
+    AdvanceTimeMs(10 * Timer::kSecondMs);
+    Parse("sprite_after_gone", html);
+    if (output_buffer_.find(old_sprite) == GoogleString::npos) {
+      gone_after_sec = t;
+      break;
+    }
+  }
+  fprintf(stderr,
+          "issue-818 sprite: old sprite URL emitted until %d s "
+          "(input TTL %d s)\n",
+          static_cast<int>(gone_after_sec), static_cast<int>(kTtlSec));
+  ASSERT_LT(0, gone_after_sec) << "old sprite URL still emitted";
+  EXPECT_LE(gone_after_sec, kTtlSec + 10);
 }
 
 // Tells the test it is running, then keeps its worker busy until released,

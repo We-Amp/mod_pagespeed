@@ -381,6 +381,24 @@ function redactDomainLine(line: string): string {
   return `${m[1]}${REDACTED}${m[2].replace(/:(?:\{[^}]*\}|\S+)/g, `:${REDACTED}`)}`;
 }
 
+/** The sections of the option list whose lines are URL patterns. */
+const URL_PATTERN_SECTION = /^(?:URL cache invalidation entries|Rejected request map|Override caching wildcards)$/;
+
+/**
+ * A line of the cache invalidation entries, the rejected request map
+ * (` HeaderName pattern,...`) or the caching wildcards: the patterns can name
+ * hosts and paths, so the line is replaced, keeping only a rejected request
+ * map's header name when it is a plain token.
+ */
+function redactUrlPatternLine(section: string, line: string): string {
+  const indent = /^\s*/.exec(line)?.[0] ?? "";
+  if (section === "Rejected request map") {
+    const m = /^\s*(\S+)\s/.exec(line);
+    if (m !== null && /^[A-Za-z][A-Za-z0-9-]*$/.test(m[1])) return `${indent}${m[1]} ${REDACTED}`;
+  }
+  return `${indent}${REDACTED}`;
+}
+
 /** The section headings of the module's option list. */
 const CONFIG_SECTION =
   /^(?:Filters|Options|Domain Lawyer|URL cache invalidation entries|Rejected request map|Override caching wildcards)$/;
@@ -403,6 +421,7 @@ export function redactConfig(text: string): string {
     if (experiment === 0) return `Experiment ${redactExperiment(line.slice("Experiment ".length))}`;
     if (line.startsWith("Proxy Suffix:")) return `Proxy Suffix: ${REDACTED}`;
     if (section === "Domain Lawyer" && /^\s/.test(line)) return redactDomainLine(line);
+    if (URL_PATTERN_SECTION.test(section)) return redactUrlPatternLine(section, line);
     const option = /^(\s*([A-Za-z][\w.-]*)\s+\([^)]*\)\s+)\S.*$/.exec(line);
     if (option !== null && !safeOption(option[2])) return `${option[1]}${REDACTED}`;
     return line;

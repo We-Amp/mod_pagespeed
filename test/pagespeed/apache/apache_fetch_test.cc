@@ -333,6 +333,41 @@ TEST_F(ApacheFetchTest, IsProxySuppressesNosniffUnbuffered) {
   apache_fetch_->Done(true);
 }
 
+// The rewriter answers a resource it gave up waiting for (a combined script)
+// with 503 and Retry-After. On the .pagespeed. resource path, where errors are
+// not handled by the fetch, that response is still sent as it is: otherwise
+// the client would get the 404 of a resource that exists.
+TEST_F(ApacheFetchTest, RetryableUnavailableIsSentWhenErrorsAreNotHandled) {
+  InitFetchUnbuffered(kExampleUrl, HttpStatus::kUnavailable);
+  apache_fetch_->set_handle_error(false);
+  apache_fetch_->set_send_retryable_unavailable(true);
+  apache_fetch_->response_headers()->Add("Retry-After", "5");
+  apache_fetch_->response_headers()->Add("Cache-Control",
+                                         "no-cache, no-store");
+  EXPECT_TRUE(apache_fetch_->Write("retry later", message_handler()));
+  EXPECT_TRUE(apache_fetch_->response_committed());
+  EXPECT_EQ(503, request_.status);
+  GoogleString headers = HeadersOutToString(&request_);
+  EXPECT_NE(GoogleString::npos, headers.find("Retry-After")) << headers;
+  EXPECT_NE(GoogleString::npos, headers.find("no-store")) << headers;
+  GoogleString actions = MockApache::ActionsSinceLastCall();
+  EXPECT_NE(GoogleString::npos, actions.find("ap_rwrite(retry later)"))
+      << actions;
+  apache_fetch_->Done(false);
+}
+
+// Other error responses, and a 503 without Retry-After, are still left to the
+// caller, which answers the request itself.
+TEST_F(ApacheFetchTest, OtherErrorsAreStillLeftToTheCaller) {
+  InitFetchUnbuffered(kExampleUrl, HttpStatus::kUnavailable);
+  apache_fetch_->set_handle_error(false);
+  apache_fetch_->set_send_retryable_unavailable(true);
+  apache_fetch_->Write("origin down", message_handler());
+  EXPECT_FALSE(apache_fetch_->response_committed());
+  EXPECT_FALSE(apache_fetch_->status_ok());
+  apache_fetch_->Done(false);
+}
+
 // A response that already carries nosniff (the admin and daemon JSON
 // leaves) gets no second copy from ApacheFetch.
 TEST_F(ApacheFetchTest, ExistingNosniffIsNotDuplicated) {

@@ -162,6 +162,7 @@ export const SAFE_OPTION_NAMES: ReadonlySet<string> = new Set([
   "MinImageSizeLowResolutionBytes",
   "MinResourceCacheTimeToRewriteMs",
   "ModifyCachingHeaders",
+  "NegativeDeadlineFetchWaitMs",
   "NoTransformOptimizedImages",
   "NonCacheablesForCachePartialHtml",
   "Noop",

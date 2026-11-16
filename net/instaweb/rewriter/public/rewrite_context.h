@@ -164,6 +164,12 @@ class RewriteContext {
   // The debug message on an element left unrewritten for that reason.
   static const char kPageBudgetDebugMessage[];
   static const char kNumDeadlineAlarmInvocations[];
+
+  // With a negative rewrite deadline a fetch does not wait for ever for a
+  // rewrite: it waits at most this long (the NegativeDeadlineFetchWaitMs
+  // option) and then serves the original, with a short private lifetime. See
+  // FetchContext::SetupDeadlineAlarm().
+  int64 NegativeDeadlineFetchWaitMs() const;
   static const char kHashMismatchMessage[];
 
   // Used to pass the result of the metadata cache lookups. Recipient must
@@ -627,6 +633,19 @@ class RewriteContext {
   // and its output still goes to the HTTP cache.
   virtual bool FetchWritesPartition() const;
 
+  // Whether a fetch of an output combining several inputs may be answered
+  // when some, but not all, of those inputs cannot be fetched.  Rewrite() then
+  // sees those inputs not loaded or with an error status, and must leave
+  // their content out.  The result differs from what the requested URL names,
+  // so it is served with a short, private lifetime; FetchWritesPartition()
+  // must be false so it never decides how pages are rewritten.  Without this
+  // such a fetch fails, as the original of a combination cannot be served.
+  virtual bool FetchCombinesAvailableInputs() const { return false; }
+
+  // Returns true if this rewrite context was created to fetch a resource (e.g.,
+  // IPRO or .pagespeed. URLs) and false otherwise.
+  bool IsFetchRewrite() const { return fetch_.get() != nullptr; }
+
   // Adjust headers sent out for a stale or in-place result. We may send out
   // stale results in the fallback fetch pathway, but these results should not
   // be cached much.  By default we strip Set-Cookie* headers and Etags, and
@@ -644,6 +663,13 @@ class RewriteContext {
   // url is not rewritten.
   virtual void FetchTryFallback(const GoogleString& url,
                                 const StringPiece& hash);
+
+  // Callback for HTTP lookup on fetch path where the metadata cache suggests
+  // we should try either serving a different path or the original.  Takes
+  // ownership of `data`.  A subclass that makes the lookup itself in
+  // FetchTryFallback continues here, on a rewrite task.
+  void FetchFallbackCacheDone(HTTPCache::FindResult result,
+                              HTTPCache::Callback* data);
 
   // Whether a fetch that falls back to its original input may serve it from
   // the HTTP cache only when the module fetched it itself.
@@ -675,6 +701,19 @@ class RewriteContext {
   // alarm in FetchContext::SetupDeadlineAlarm(). Subclasses may configure the
   // deadline based on rewrite type, e.g., IPRO vs. HTML-path.
   virtual int64 GetRewriteDeadlineAlarmMs() const;
+
+  // A fetch of a combination that has to rebuild its inputs may serve the
+  // unoptimized original of an input that is slow to rebuild, if the output
+  // does not depend on which version of the input it got. The combined output
+  // is then private and is not stored. Returns false when the output names its
+  // inputs by their content hash (combined JavaScript), because the original
+  // has a different hash and so a different name. Such a fetch waits at most
+  // CombinedFetchCapMs() and then fails with a retryable error.
+  virtual bool FetchInputsMayFallBack() const { return true; }
+
+  // Upper bound of the wait of a combination fetch with a negative rewrite
+  // deadline whose inputs may not fall back: the blocking fetch timeout.
+  int64 CombinedFetchCapMs() const;
 
   // Should the context call LockForCreation before checking the cache?
   virtual bool CreationLockBeforeStartFetch() const;
@@ -864,10 +903,6 @@ class RewriteContext {
                                        StringPiece content,
                                        OutputResourcePtr* output_resource);
 
-  // Returns true if this rewrite context was created to fetch a resource (e.g.,
-  // IPRO or .pagespeed. URLs) and false otherwise.
-  bool IsFetchRewrite() const { return fetch_.get() != nullptr; }
-
   // Called on the parent from a nested Rewrite when it is complete.
   // Note that we don't track rewrite success/failure here.  We only
   // care whether the nested rewrites are complete, and whether there
@@ -994,11 +1029,6 @@ class RewriteContext {
 
   // Called on the metadata lookup for FetchNotModified.
   void FetchNotModifiedCacheDone(CacheLookupResult* cache_result);
-
-  // Callback for HTTP lookup on fetch path where the metadata cache suggests
-  // we should try either serving a different path or the original.
-  void FetchFallbackCacheDone(HTTPCache::FindResult result,
-                              HTTPCache::Callback* data);
 
   // Returns true if we can attempt to serve the original file for a fetch
   // request in case something goes wrong with rewriting (circumstance ==
@@ -1163,6 +1193,11 @@ class RewriteContext {
   // in the failure case we also set was_too_busy_, which does get copied to the
   // parent.
   bool ok_to_write_output_partitions_;
+
+  // True when a fetch is answered with a combination that leaves out inputs
+  // it could not fetch (FetchCombinesAvailableInputs()).  Such a result is
+  // never stored in the HTTP cache and is always served private and short.
+  bool fetch_left_out_inputs_ = false;
 
   // True if the rewrite was incomplete due to heavy load; if this is true
   // ok_to_write_output_partitions_ must be false.  This is copied from nested
