@@ -324,6 +324,67 @@ TEST_F(RewriteDriverTest, TestIgnoringUrlSignatures) {
       << "no signature, ignored";
 }
 
+// With URL signing on, a .pagespeed. URL whose signature does not verify is
+// refused with 403 Forbidden.  It is not handed on to any other handling
+// (in-place included): no fetch is issued and nothing is written to cache.
+TEST_F(RewriteDriverTest, InvalidUrlSignatureIsRefusedWith403) {
+  options()->set_url_signing_key("helloworld");
+  options()->set_in_place_rewriting_enabled(true);
+  rewrite_driver()->AddFilters();
+  const char kBadUrl[] =
+      "http://signed-urls.example.com/mod_pagespeed_example/styles/"
+      "A.all_styles.css.pagespeed.cf.UAAAAAAAAAA.css";
+  StringVector decoded;
+  ASSERT_TRUE(rewrite_driver()->DecodeUrl(GoogleUrl(kBadUrl), &decoded));
+  ASSERT_EQ(1, decoded.size());
+  SetResponseWithDefaultHeaders(decoded[0], kContentTypeCss, ".a{color:red}",
+                                100);
+  ClearStats();
+
+  GoogleString content;
+  ResponseHeaders response;
+  FetchResourceUrl(kBadUrl, &content, &response);
+  EXPECT_EQ(HttpStatus::kForbidden, response.status_code());
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(0, lru_cache()->num_inserts());
+  EXPECT_EQ(GoogleString::npos, content.find("color")) << content;
+
+  // The same resource with a valid signature is still served.
+  const char kGoodUrl[] =
+      "http://signed-urls.example.com/mod_pagespeed_example/styles/"
+      "A.all_styles.css.pagespeed.cf.UQ_aP9rObnq.css";
+  ClearStats();
+  content.clear();
+  response.Clear();
+  EXPECT_TRUE(FetchResourceUrl(kGoodUrl, &content, &response));
+  EXPECT_EQ(HttpStatus::kOK, response.status_code());
+  EXPECT_EQ(".a{color:red}", content);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+}
+
+// With AcceptInvalidSignatures on, an invalid signature is still accepted.
+TEST_F(RewriteDriverTest, AcceptInvalidSignaturesStillServes) {
+  options()->set_url_signing_key("helloworld");
+  options()->set_accept_invalid_signatures(true);
+  rewrite_driver()->AddFilters();
+  const char kBadUrl[] =
+      "http://signed-urls.example.com/mod_pagespeed_example/styles/"
+      "A.all_styles.css.pagespeed.cf.UAAAAAAAAAA.css";
+  StringVector decoded;
+  ASSERT_TRUE(rewrite_driver()->DecodeUrl(GoogleUrl(kBadUrl), &decoded));
+  ASSERT_EQ(1, decoded.size());
+  SetResponseWithDefaultHeaders(decoded[0], kContentTypeCss, ".a{color:red}",
+                                100);
+  ClearStats();
+
+  GoogleString content;
+  ResponseHeaders response;
+  EXPECT_TRUE(FetchResourceUrl(kBadUrl, &content, &response));
+  EXPECT_EQ(HttpStatus::kOK, response.status_code());
+  EXPECT_EQ(".a{color:red}", content);
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+}
+
 // A rejected signature is logged for diagnostics, but the log line must name
 // only the URL and the provided signature: logging the computed signature
 // would hand anyone with log access a valid signed URL for that resource.

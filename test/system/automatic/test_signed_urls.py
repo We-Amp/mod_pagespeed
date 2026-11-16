@@ -75,10 +75,10 @@ def _assert_served(client: PageSpeedClient, path: str) -> None:
 
 
 def _assert_refused(client: PageSpeedClient, path: str) -> None:
-    """Bash: check_not $WGET ...; check_from "$OUT" egrep -q "403 Forbidden|404 Not Found" """
+    """A URL whose signature does not verify is refused with 403 Forbidden."""
     response = client.get(path)
-    assert response.status in (403, 404), (
-        f"Expected 403 or 404 for {path}, got {response.status}:\n"
+    assert response.status == 403, (
+        f"Expected 403 for {path}, got {response.status}:\n"
         f"{response.text[:500]}"
     )
 

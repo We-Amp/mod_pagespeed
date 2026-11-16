@@ -435,6 +435,13 @@ class RewriteDriver : public HtmlParse {
   OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
                                          RewriteFilter** filter) const;
 
+  // As above, and sets *invalid_signature to whether the URL decoded as a
+  // .pagespeed. resource but was refused because its URL signature did not
+  // verify (UrlSigningKey set, AcceptInvalidSignatures off).
+  OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
+                                         RewriteFilter** filter,
+                                         bool* invalid_signature) const;
+
   // As above, but does not actually create a resource object,
   // and instead outputs the decoded information into the various out
   // parameters. Returns whether decoding successful or not.
