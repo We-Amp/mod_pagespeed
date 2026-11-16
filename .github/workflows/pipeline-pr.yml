@@ -1350,6 +1350,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 120
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -1393,7 +1395,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -1534,6 +1536,12 @@ jobs:
           retention-days: 3
           include-hidden-files: true
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
 
   linux-unit-tests:
     permissions:
@@ -1546,6 +1554,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 120
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -1589,7 +1599,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -1749,6 +1759,12 @@ jobs:
           docker volume rm "${TSVC_SOCK:-none}" 2>/dev/null || true
           docker network rm "${TEST_NET:-none}" 2>/dev/null || true
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
 
   lint:
     permissions:
@@ -1758,6 +1774,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 120
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -1803,7 +1821,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -1994,6 +2012,12 @@ jobs:
       - name: Doc version-literal drift
         run: bash tools/ci/check_doc_commands.sh
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
 
   js-minify-corpus:
     permissions:
@@ -2003,6 +2027,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 60
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -2046,7 +2072,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -2161,6 +2187,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
 
   html-parse-corpus:
     permissions:
@@ -2170,6 +2202,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 45
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -2213,7 +2247,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -2271,6 +2305,12 @@ jobs:
                 --probe bazel-bin/pagespeed/kernel/html/html_parse_probe
             '
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
 
   fuzz-smoke:
     permissions:
@@ -2281,6 +2321,8 @@ jobs:
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ needs.changes.outputs.fuzz == 'true' }}
     timeout-minutes: 90
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -2324,7 +2366,7 @@ jobs:
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
           # the image cold every time: the degraded mode.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-runner directory for the Bazel disk cache, mounted at /cache.
@@ -2536,6 +2578,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
 
 
   windows-build:
