@@ -30,6 +30,9 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 # revisions but breaking — by design, with a build-time load-check alarm — on a
 # distro nginx-minor rebase.
 Requires        : @@NGINX_DEP@@
+# pagespeed-doctor is offered as /usr/sbin/pagespeed-doctor via alternatives.
+Requires(post)  : /usr/sbin/update-alternatives
+Requires(preun) : /usr/sbin/update-alternatives
 @@PKG_RELATIONS@@
 
 # PSOL / Cyclone / BoringSSL / curl are statically linked inside the .so and
@@ -79,6 +82,8 @@ rm -rf "$RPM_BUILD_ROOT"
 @@NGINX_DOCDIR@@/README.md
 @@NGINX_DOCDIR@@/pagespeed.conf.sample
 @@NGINX_DOCDIR@@/pagespeed_admin_restrict.conf.sample
+%dir /usr/share/@@PACKAGE@@
+/usr/share/@@PACKAGE@@/pagespeed-doctor
 @@EXTRA_FILES@@
 
 %pre
@@ -103,6 +108,10 @@ if getent group pagespeed >/dev/null 2>&1 && id nginx >/dev/null 2>&1; then
   usermod -a -G pagespeed nginx || true
 fi
 
+# Offer pagespeed-doctor (a read-only health check) as /usr/sbin/pagespeed-doctor.
+update-alternatives --install /usr/sbin/pagespeed-doctor pagespeed-doctor \
+  /usr/share/@@PACKAGE@@/pagespeed-doctor 50 >/dev/null 2>&1 || true
+
 exit 0
 
 %preun
@@ -113,6 +122,8 @@ if [ "$1" -eq "0" ]; then
     sed -i 's/^load_module/#load_module/' \
       @@NGINX_LOADDIR@@/mod-pagespeed.conf 2>/dev/null || true
   fi
+  update-alternatives --remove pagespeed-doctor \
+    /usr/share/@@PACKAGE@@/pagespeed-doctor >/dev/null 2>&1 || true
 fi
 exit 0
 

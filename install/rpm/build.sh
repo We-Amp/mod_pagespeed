@@ -25,6 +25,7 @@ prep_staging_rpm() {
 stage_install_rpm() {
   prep_staging_rpm
   stage_install_common
+  stage_doctor
   echo "Staging RPM install files in '${STAGEDIR}'..."
   # For CentOS, the load and conf files are combined into a single
   # 'conf' file. So we install the load template as the conf file, and

@@ -326,6 +326,29 @@ TEST_F(JsInlineFilterTest, DoNotInlineIntegrityScript) {
   EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
 }
 
+// Browsers may read the content of <noscript>, <noembed> and <noframes> as
+// text that ends at the element's first end tag, and a script there never
+// runs: such scripts are not inlined. A script elsewhere still is.
+TEST_F(JsInlineFilterTest, ScriptInsideNoscriptLikeElementIsNotInlined) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "var s = 'a';\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateNoChanges("noscript",
+                    "<noscript><script src=\"script.js\"></script></noscript>");
+  ValidateNoChanges("noembed",
+                    "<noembed><p><script src=\"script.js\"></script></p>"
+                    "</noembed>");
+  ValidateNoChanges("noframes",
+                    "<noframes><script src=\"script.js\"></script></noframes>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+  ValidateExpected("elsewhere",
+                   "<div><script src=\"script.js\"></script></div>",
+                   StrCat("<div><script>", kJs, "</script></div>"));
+}
+
 TEST_F(JsInlineFilterTest, DoNotInlineModuleScript) {
   SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineJavascript);
@@ -381,6 +404,14 @@ TEST_F(JsInlineFilterTest, DoInlineJavascriptSimpleXhtml) {
   TestInlineJavascriptXhtml("http://www.example.com/index.html",
                             "http://www.example.com/script.js",
                             "function id(x) { return x; }\n", true);
+}
+
+// CE-HTML is XHTML: an inlined script is written as XML, in CDATA.
+TEST_F(JsInlineFilterTest, InlinedScriptOnCeHtmlPageIsInCdata) {
+  SetMimetype("application/ce-html+xml");
+  TestInlineJavascriptXhtml("http://www.example.com/index.html",
+                            "http://www.example.com/script.js",
+                            "var label = \"<b/>\";\n", true);
 }
 
 TEST_F(JsInlineFilterTest, DoInlineJavascriptWhitespace) {

@@ -800,15 +800,31 @@ class RewriteContext::FetchContext {
       // OutputResources, and hence the JS variables may turn out not be
       // what was expected.
 
-      return;
+      // The exception is the rebuild of one input of a combination that a
+      // request is fetching, when the rewrite deadline is negative. Without
+      // an alarm that fetch would wait for the rebuild for ever, so it falls
+      // back like any other: the combination is made from the unoptimized
+      // input. That is only done when the combination's output does not
+      // depend on the input's content (FetchInputsMayFallBack()), and the
+      // combination of several inputs is never stored in the metadata cache
+      // for a fetch, so the fallback is not remembered.
+      if (!driver->nested_fetch_may_fall_back() ||
+          rewrite_context_->GetRewriteDeadlineAlarmMs() >= 0) {
+        return;
+      }
     }
 
     Timer* timer = rewrite_context_->FindServerContext()->timer();
 
-    // Negative rewrite deadline means unlimited.
+    // A negative rewrite deadline means: wait for the rewrite, up to a bound.
     int deadline_ms = rewrite_context_->GetRewriteDeadlineAlarmMs();
     bool test_force_alarm =
         driver->options()->test_instant_fetch_rewrite_deadline();
+    if (deadline_ms < 0 && !test_force_alarm) {
+      // A negative deadline asks to wait for the optimization, but not for
+      // ever: the wait is bounded, then the original is served.
+      deadline_ms = rewrite_context_->NegativeDeadlineFetchWaitMs();
+    }
     if (deadline_ms >= 0 || test_force_alarm) {
       if (test_force_alarm) {
         deadline_ms = 0;
@@ -820,6 +836,43 @@ class RewriteContext::FetchContext {
                           timer->NowUs() + (deadline_ms * Timer::kMsUs),
                           MakeFunction(this, &FetchContext::HandleDeadline));
     }
+  }
+
+  // Arms the alarm that ends the fetch of a combination whose inputs cannot
+  // fall back (combined JavaScript) with a negative rewrite deadline. It
+  // replaces the wait for ever by an error the client may retry.
+  void SetupCapAlarm(int64 cap_ms) {
+    RewriteDriver* driver = rewrite_context_->Driver();
+    if (deadline_alarm_ != nullptr || detached_) {
+      return;
+    }
+    Timer* timer = rewrite_context_->FindServerContext()->timer();
+    deadline_alarm_ =
+        new QueuedAlarm(driver->scheduler(), driver->rewrite_worker(),
+                        timer->NowUs() + (cap_ms * Timer::kMsUs),
+                        MakeFunction(this, &FetchContext::HandleCap));
+  }
+
+  // Fired by QueuedAlarm in main rewrite thread. The unoptimized original is
+  // no answer here: its content hash, and so the name the combined script
+  // gives it, differs from what the page expects.
+  void HandleCap() {
+    deadline_alarm_ = nullptr;
+    rewrite_context_->DetachFetch();
+    num_deadline_alarm_invocations_->Add(1);
+    handler_->Message(kWarning,
+                      "Waited too long for the inputs of a combined resource "
+                      "with %s; answering 503",
+                      rewrite_context_->id());
+    ResponseHeaders* headers = async_fetch_->response_headers();
+    headers->Clear();
+    headers->SetStatusAndReason(HttpStatus::kUnavailable);
+    headers->Add("Retry-After", "5");
+    headers->Add(HttpAttributes::kCacheControl, "no-cache, no-store");
+    headers->Add(HttpAttributes::kContentType, "text/plain");
+    async_fetch_->HeadersComplete();
+    async_fetch_->Write("Temporarily unavailable, please retry.\n", handler_);
+    rewrite_context_->FetchCallbackDone(false);
   }
 
   // Must be invoked from main rewrite thread.
@@ -864,7 +917,11 @@ class RewriteContext::FetchContext {
     bool ok = false;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
-      if (output_resource_->hash() == requested_hash_) {
+      // A combination served without some of its inputs is not the one the
+      // URL names, whatever its hash: it is never served as the immutable
+      // public resource.
+      if (output_resource_->hash() == requested_hash_ &&
+          !rewrite_context_->fetch_left_out_inputs_) {
         // The body below is the uncompressed one, so the headers must
         // describe that one as well.
         response_headers->CopyFrom(*(output_resource_->UncompressedHeaders()));
@@ -888,7 +945,8 @@ class RewriteContext::FetchContext {
         StringPiece contents = output_resource_->ExtractUncompressedContents();
         ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
                                                 async_fetch_, handler_);
-      } else if (rewrite_context_->FailOnHashMismatch()) {
+      } else if (rewrite_context_->FailOnHashMismatch() &&
+                 !rewrite_context_->fetch_left_out_inputs_) {
         FailForHashMismatch();
         return;
       } else {
@@ -1007,7 +1065,9 @@ class RewriteContext::FetchContext {
     // compute the cache-control for a hidden .pagespeed. resource in a
     // nested RewriteContext, and we need to propogate that to the ipro
     // resource response headers.
-    if (headers->HasValue(HttpAttributes::kCacheControl, "public")) {
+    // A combination served without some of its inputs stays private.
+    if (!rewrite_context_->fetch_left_out_inputs_ &&
+        headers->HasValue(HttpAttributes::kCacheControl, "public")) {
       async_fetch_->response_headers()->SetCacheControlPublic();
     }
 
@@ -1970,6 +2030,11 @@ void RewriteContext::FetchInputs() {
         ResourceCallbackUtils(this, resource, i).Done(false);
       } else if (is_pagespeed_resource) {
         RewriteDriver* nested_driver = Driver()->Clone();
+        // When this context combines several inputs for a fetch, the rebuild
+        // of an input may be given up on for the unoptimized input, if that
+        // does not change the combination's name. See SetupDeadlineAlarm().
+        nested_driver->set_nested_fetch_may_fall_back(
+            IsFetchRewrite() && (num_slots() > 1) && FetchInputsMayFallBack());
         RewriteFilter* filter = nullptr;
         // We grab the filter now (and not just call DecodeOutputResource
         // earlier instead of IsPagespeedResource) so we get a filter that's
@@ -2816,22 +2881,43 @@ void RewriteContext::StartRewriteForFetch() {
         fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     ok_to_rewrite = false;
   }
+  // A combination whose filter allows it is still served when some of its
+  // inputs cannot be fetched right now, leaving those out, rather than
+  // failing the whole URL (the original of a combination cannot be served).
+  const bool may_skip_unavailable = (num_slots() > 1) &&
+                                    FetchCombinesAvailableInputs() &&
+                                    !FetchWritesPartition();
+  int num_available = 0;
   for (int i = 0, n = slots_.size(); ok_to_rewrite && (i < n); ++i) {
     ResourcePtr resource(slot(i)->resource());
     if (resource->loaded() && resource->HttpStatusOk() &&
         !(Options()->disable_rewrite_on_no_transform() &&
-          resource->response_headers()->HasValue(HttpAttributes::kCacheControl,
-                                                 "no-transform"))) {
+          resource->response_headers()->HasCacheControlDirective(
+              "no-transform"))) {
       bool on_the_fly = (kind() == kOnTheFlyResource);
       Resource::HashHint hash_hint =
           on_the_fly ? Resource::kOmitInputHash : Resource::kIncludeInputHash;
       resource->AddInputInfoToPartition(hash_hint, i, partition);
+      ++num_available;
+    } else if (may_skip_unavailable &&
+               !(resource->loaded() && resource->HttpStatusOk())) {
+      fetch_left_out_inputs_ = true;
+      fetch_->handler()->Message(
+          kWarning, "Input %s unavailable; serving %s without it",
+          resource->UrlForDebug().c_str(),
+          fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     } else {
       ok_to_rewrite = false;
       break;
     }
   }
+  if (may_skip_unavailable && (num_available == 0)) {
+    ok_to_rewrite = false;
+  }
   OutputResourcePtr output(fetch_->output_resource());
+  if (fetch_left_out_inputs_) {
+    output->set_store_in_http_cache(false);
+  }
 
   // During normal rewrite path, Partition() is responsible for syncing up
   // the output resource's CachedResult and the partition tables. As it does
@@ -2847,7 +2933,13 @@ void RewriteContext::StartRewriteForFetch() {
     // set OptimizationOnly() to false).
     InvokeRewriteFunction* call_rewrite =
         new InvokeRewriteFunction(this, 0, output);
-    if (CanFetchFallbackToOriginal(kFallbackDiscretional)) {
+    // On-the-fly resources (such as cache-extended ones) are cheap to
+    // reconstruct, and FetchContext::SetupDeadlineAlarm() never arms a
+    // deadline fallback for them. On the low-priority queue such a fetch
+    // would have nothing to bound its wait behind expensive work (image
+    // optimization), so it runs on the normal rewrite sequence instead.
+    if (kind() != kOnTheFlyResource &&
+        CanFetchFallbackToOriginal(kFallbackDiscretional)) {
       // To avoid rewrites from delaying fetches, we try to fallback to the
       // original version if rewriting takes too long.
       fetch_->SetupDeadlineAlarm();
@@ -3340,11 +3432,14 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
 
   StringPiece contents;
   ResponseHeaders* response_headers = data->response_headers();
-  bool usable =
-      (result.status == HTTPCache::kFound) &&
-      data->http_value()->ExtractContents(&contents) &&
-      (response_headers->status_code() == HttpStatus::kOK) &&
-      (!fallback_needs_fetched_input_ || data->http_value()->IsFetchedInput());
+  bool usable = (result.status == HTTPCache::kFound) &&
+                data->http_value()->ExtractContents(&contents) &&
+                (response_headers->status_code() == HttpStatus::kOK) &&
+                (data->http_value()->IsFetchedInput() ||
+                 // A response served to a client is a fallback only when it was
+                 // stored under the current rules.
+                 (!fallback_needs_fetched_input_ &&
+                  data->http_value()->IsCurrentClientEntry()));
   // De-alias a borrowed mmap view before the port write, exactly like
   // CacheUrlAsyncFetcher's hit serve (see the zero-copy note there): the
   // pin ('data', released when this function returns) must not be relied on
@@ -3446,6 +3541,12 @@ void RewriteContext::StartFetchReconstruction() {
   // take the lock.
   CheckNotFrozen();
   partitions_->Clear();
+  if ((num_slots() > 1) && !FetchInputsMayFallBack() &&
+      (GetRewriteDeadlineAlarmMs() < 0)) {
+    // Neither a deadline nor a fallback applies to this combination, so
+    // bound the wait by an error that may be retried.
+    fetch_->SetupCapAlarm(CombinedFetchCapMs());
+  }
   FetchInputs();
 }
 
@@ -3515,7 +3616,8 @@ void RewriteContext::FixFetchFallbackHeaders(const CachedResult& cached_result,
     }
   }
   int64 ttl_ms = min_cache_expiry_time_ms - date_ms;
-  if (!Options()->publicly_cache_mismatched_hashes_experimental()) {
+  if (!Options()->publicly_cache_mismatched_hashes_experimental() ||
+      fetch_left_out_inputs_) {
     // Shorten cache length, and prevent proxies caching this, as it's under
     // the "wrong" URL.
     cache_control_suffix = ",private";
@@ -3633,6 +3735,15 @@ MessageHandler* RewriteContext::fetch_message_handler() {
 
 int64 RewriteContext::GetRewriteDeadlineAlarmMs() const {
   return Driver()->rewrite_deadline_ms();
+}
+
+int64 RewriteContext::NegativeDeadlineFetchWaitMs() const {
+  return Driver()->options()->negative_deadline_fetch_wait_ms();
+}
+
+int64 RewriteContext::CombinedFetchCapMs() const {
+  int64 ms = Driver()->options()->blocking_fetch_timeout_ms();
+  return (ms > 0) ? ms : 5 * Timer::kSecondMs;
 }
 
 bool RewriteContext::CreationLockBeforeStartFetch() const {

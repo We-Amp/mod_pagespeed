@@ -51,6 +51,10 @@ namespace net_instaweb {
 class MessageHandler;
 
 const char HTTPValue::kFetchedInputHeader[] = "@Fetched-Input";
+const char HTTPValue::kClientEntryHeader[] = "@Client-Entry";
+// Generation 1: responses to requests carrying a cookie are stored only when
+// the origin marks them shareable (ResponseHeaders::MayShareForRequest).
+const char HTTPValue::kClientEntryGeneration[] = "1";
 
 void HTTPValue::CopyOnWrite() {
   CollapseToOwned();
@@ -184,8 +188,12 @@ unsigned int HTTPValue::SizeOfFirstChunk() const {
 bool HTTPValue::ExtractHeaders(ResponseHeaders* headers,
                                MessageHandler* handler) const {
   bool ret = ExtractRawHeaders(headers, handler);
-  if (ret && headers->RemoveAll(kFetchedInputHeader)) {
-    headers->ComputeCaching();
+  if (ret) {
+    const bool removed_fetched_input = headers->RemoveAll(kFetchedInputHeader);
+    const bool removed_client_entry = headers->RemoveAll(kClientEntryHeader);
+    if (removed_fetched_input || removed_client_entry) {
+      headers->ComputeCaching();
+    }
   }
   return ret;
 }
@@ -199,9 +207,23 @@ bool HTTPValue::IsFetchedInput() const {
          headers.Has(kFetchedInputHeader);
 }
 
+bool HTTPValue::IsCurrentClientEntry() const {
+  if (Empty()) {
+    return false;
+  }
+  ResponseHeaders headers;
+  if (!ExtractRawHeaders(&headers, nullptr)) {
+    return false;
+  }
+  const char* generation = headers.Lookup1(kClientEntryHeader);
+  return generation != nullptr &&
+         StringPiece(generation) == StringPiece(kClientEntryGeneration);
+}
+
 void HTTPValue::SetHeadersMarkingFetchedInput(const ResponseHeaders& headers) {
   ResponseHeaders marked;
   marked.CopyFrom(headers);
+  marked.RemoveAll(kClientEntryHeader);
   marked.Replace(kFetchedInputHeader, "1");
   SetHeaders(&marked);
 }

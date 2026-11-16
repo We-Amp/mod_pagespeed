@@ -23,6 +23,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/request_timing_info.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -117,6 +118,9 @@ bool AsyncFetch::Flush(MessageHandler* handler) {
 
 void AsyncFetch::HeadersComplete() {
   DCHECK_NE(0, response_headers()->status_code());
+  // The HTTP cache's internal client-entry stamp belongs to stored values
+  // only and never to headers on their way to a client.
+  DCHECK(!response_headers()->Has(HTTPValue::kClientEntryHeader));
   if (headers_complete_) {
     LOG(DFATAL) << "AsyncFetch::HeadersComplete() called twice.";
   } else {
