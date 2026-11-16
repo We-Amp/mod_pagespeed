@@ -146,7 +146,9 @@ If you run nginx from the nginx.org repo (which does NOT auto-include
 \`modules-enabled/\`), add \`load_module modules/ngx_pagespeed_module.so;\` to
 the top of \`/etc/nginx/nginx.conf\` yourself."
   INSTALLCMD="sudo apt install nginx-module-pagespeed"
-  WORKERCMD="sudo apt install pagespeed-optimizer"
+  SKIPNOTE="With \`--no-install-recommends\` apt skips the worker, and nginx then
+runs with classic in-place optimization. To add the worker later, run
+\`sudo apt install pagespeed-optimizer\` (the same release as the module)."
   WEBUSER="www-data"
   if [ "${NGINXORG}" = 1 ]; then
     LOADNOTE="nginx.org's \`nginx.conf\` does not read \`/etc/nginx/modules-enabled/\`: add
@@ -164,7 +166,9 @@ auto-includes from the main context — no manual edit. If you run nginx from th
 nginx.org repo, ensure your \`nginx.conf\` includes
 \`/usr/share/nginx/modules/*.conf\` (or add the \`load_module\` line manually)."
   INSTALLCMD="sudo dnf install ${PKG}"
-  WORKERCMD="sudo dnf install pagespeed-optimizer"
+  SKIPNOTE="With \`--setopt=install_weak_deps=False\` dnf skips the worker, and
+nginx then runs with classic in-place optimization. To add the worker later,
+run \`sudo dnf install pagespeed-optimizer\` (the same release as the module)."
   WEBUSER="nginx"
   if [ "${NGINXORG}" = 1 ]; then
     LOADNOTE="nginx.org's \`nginx.conf\` does not read \`/usr/share/nginx/modules/\`: add
@@ -252,14 +256,15 @@ If you haven't added the We-Amp package repository yet, add it first:
 curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
 \`\`\`
 
-Then install the optimizer worker and the module, as two separate commands,
-worker first:
+Then install the module. The package recommends the matching
+\`pagespeed-optimizer\` worker, so a normal install pulls it in:
 
 \`\`\`
-${WORKERCMD}
 ${INSTALLCMD}
 sudo nginx -t && sudo systemctl restart nginx
 \`\`\`
+
+${SKIPNOTE}
 
 The module package adds the nginx user to the worker's \`pagespeed\` group
 only if that group already exists when its install script runs. Installed in

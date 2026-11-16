@@ -226,10 +226,14 @@ unset, the classic in-place path is unchanged.
 
 ### Before you start
 
-- **Install the worker of the same release.** Install `pagespeed-optimizer`
-  from the same package repository, at the same release as
-  `nginx-module-pagespeed`, and start it. The module and the worker are a
-  matched pair: install, upgrade and roll them back together.
+- **Install the worker of the same release.** `nginx-module-pagespeed`
+  recommends `pagespeed-optimizer` at the same release, so a normal
+  `apt install` or `dnf install` of the module pulls it in. Start it before you
+  set the daemon directives. The module and the worker are a matched pair:
+  install, upgrade and roll them back together. If you install with
+  `--no-install-recommends` (apt) or `--setopt=install_weak_deps=False` (dnf),
+  the worker is skipped and nginx runs with classic in-place optimization;
+  install `pagespeed-optimizer` at the same release when you want the worker.
 - **Let nginx reach the worker's files.** The worker runs as the unprivileged
   `pagespeed` user; its cache directory, notification socket and shared
   configuration are open to members of the `pagespeed` group only. When

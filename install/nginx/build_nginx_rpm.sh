@@ -38,6 +38,9 @@ HOST_ARCH="x86_64"
 # in the default publish run — so the el10 nginx module needs NO separate publish
 # invocation (unlike the dist-tagless stock Apache RPM).
 DIST="${DIST:-.el9}"
+# When set (-O), the package Recommends pagespeed-optimizer at exactly this
+# version (a weak dependency: nginx also works without the worker).
+OPTIMIZER_RPM_VERSION=""
 
 usage() {
   echo "usage: $(basename "$0") [-o output_dir] [-s module.so] [-a x86_64] [-d .el9]"
@@ -45,15 +48,21 @@ usage() {
   echo "  -s file    prebuilt ngx_pagespeed_module.so (built vs the matching stock nginx)"
   echo "  -a arch    rpm architecture            [${HOST_ARCH}]"
   echo "  -d dist    rpm dist tag (.el9 | .el10)  [${DIST}]"
+  echo "  -O version pagespeed-optimizer version for an exact-version Recommends;"
+  echo "             omitting it packages without the Recommends, with a warning"
   echo "  -h         this help"
 }
 
-while getopts ":o:s:a:d:h" opt; do
+while getopts ":o:s:a:d:O:h" opt; do
   case $opt in
     o) OUTPUTDIR=$(readlink -f "$OPTARG"); mkdir -p "${OUTPUTDIR}" ;;
     s) SO_PATH=$(readlink -f "$OPTARG") ;;
     a) HOST_ARCH="$OPTARG" ;;
     d) DIST="$OPTARG" ;;
+    O) OPTIMIZER_RPM_VERSION="$OPTARG"
+       case "$OPTIMIZER_RPM_VERSION" in
+         *[!A-Za-z0-9.~^+]* | "" ) echo "'-O' takes an RPM package version." >&2; exit 1 ;;
+       esac ;;
     h) usage; exit 0 ;;
     :) echo "'-$OPTARG' needs an argument."; usage; exit 1 ;;
     *) echo "invalid option: -$OPTARG"; usage; exit 1 ;;
@@ -247,6 +256,14 @@ fi
 "${SCRIPTDIR}/assert_symbol_hygiene.sh" \
   "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.so"
 
+if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
+  OPTIMIZER_RECOMMENDS_SED="s#^@@OPTIMIZER_RECOMMENDS@@\$#Recommends      : pagespeed-optimizer = ${OPTIMIZER_RPM_VERSION}#"
+else
+  OPTIMIZER_RECOMMENDS_SED="/^@@OPTIMIZER_RECOMMENDS@@\$/d"
+  echo "warning: packaging WITHOUT a pagespeed-optimizer Recommends;" \
+    "a serving pair build must pass -O <optimizer-rpm-version>" >&2
+fi
+
 # --- spec -------------------------------------------------------------------
 export PACKAGE COMPANY_FULLNAME VERSION REVISION DIST PRODUCTURL MAINTNAME \
   MAINTMAIL SHORTDESC FULLDESC NGINX_DEP NGINX_MODULEDIR NGINX_LOADDIR NGINX_DOCDIR \
@@ -274,6 +291,7 @@ sed \
   -e "s#@@FULLDESC@@#${FULLDESC}#g" \
   -e "s#@@NGINX_DEP@@#${NGINX_DEP}#g" \
   -e "${PKG_RELATIONS_SED}" \
+  -e "${OPTIMIZER_RECOMMENDS_SED}" \
   -e "${EXTRA_FILES_SED}" \
   -e "s#@@NGINX_MODULEDIR@@#${NGINX_MODULEDIR}#g" \
   -e "s#@@NGINX_LOADDIR@@#${NGINX_LOADDIR}#g" \
