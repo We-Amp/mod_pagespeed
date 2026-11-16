@@ -439,7 +439,6 @@ void InstawebHandler::HandleAsPagespeedResource() {
   // buffered path did; ApacheFetch must not emit the failed fetch's
   // headers or body.
   fetch_->set_handle_error(false);
-  fetch_->set_send_retryable_unavailable(true);
   DisownDriver();
 
   StreamingPagespeedResourceFetch streaming_fetch(request_, fetch_);
