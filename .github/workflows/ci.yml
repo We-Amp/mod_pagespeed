@@ -188,6 +188,8 @@ jobs:
       # Hermetic: docker, ssh, rsync and gh are shims inside each test.
       - name: Release ref guard
         run: tools/ci/test_ref_guard.sh
+      - name: Release attestation subject names
+        run: tools/ci/test_check_attest_subjects.sh
       - name: System-test gate
         run: tools/ci/test_systest_gate.sh
       - name: Queued-run sweep
