@@ -83,7 +83,8 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 - [Combine JavaScript (combine_javascript)](https://modpagespeed.com/docs/filters/combine_javascript/): Combines multiple JS files into one.
 - [Convert GIF to PNG (convert_gif_to_png)](https://modpagespeed.com/docs/filters/convert_gif_to_png/): Converts GIF to PNG.
 - [Convert JPEG to WebP (convert_jpeg_to_webp)](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/): Converts JPEG to WebP for capable browsers.
-- [Convert PNG to JPEG (convert_png_to_jpeg)](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Converts PNG to JPEG when no transparency.
+- [Convert PNG to JPEG (convert_png_to_jpeg)](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Converts opaque photographic PNGs to lossy WebP or JPEG.
+- [Lossless WebP (convert_to_webp_lossless)](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/): Converts PNG/GIF graphics (not photos) to lossless WebP.
 - [Deduplicate inlined images (dedup_inlined_images)](https://modpagespeed.com/docs/filters/dedup_inlined_images/): Replaces repeated inlined images with JS reference.
 - [Defer JavaScript (defer_javascript)](https://modpagespeed.com/docs/filters/defer_javascript/): Defers JS execution until after page load.
 - [In-place browser optimization (in_place_optimize_for_browser)](https://modpagespeed.com/docs/filters/in_place_optimize_for_browser/): Browser-specific in-place optimization.

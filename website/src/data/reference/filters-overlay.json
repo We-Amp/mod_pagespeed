@@ -105,7 +105,7 @@
     },
     "convert_png_to_jpeg": {
       "category": "Image",
-      "summary": "Converts PNG to JPEG when no transparency",
+      "summary": "Converts opaque photographic PNGs to lossy WebP or JPEG",
       "risk": "Generally safe",
       "note": null
     },
@@ -129,7 +129,7 @@
     },
     "convert_to_webp_lossless": {
       "category": "Image",
-      "summary": "Converts PNG/GIF to lossless WebP",
+      "summary": "Converts PNG/GIF graphics (not photos) to lossless WebP",
       "risk": "Test first",
       "note": null
     },

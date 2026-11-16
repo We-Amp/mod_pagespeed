@@ -83,7 +83,8 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 - [Combine JavaScript (combine_javascript)](https://modpagespeed.com/docs/filters/combine_javascript/): Combines multiple JS files into one.
 - [Convert GIF to PNG (convert_gif_to_png)](https://modpagespeed.com/docs/filters/convert_gif_to_png/): Converts GIF to PNG.
 - [Convert JPEG to WebP (convert_jpeg_to_webp)](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/): Converts JPEG to WebP for capable browsers.
-- [Convert PNG to JPEG (convert_png_to_jpeg)](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Converts PNG to JPEG when no transparency.
+- [Convert PNG to JPEG (convert_png_to_jpeg)](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Converts opaque photographic PNGs to lossy WebP or JPEG.
+- [Lossless WebP (convert_to_webp_lossless)](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/): Converts PNG/GIF graphics (not photos) to lossless WebP.
 - [Deduplicate inlined images (dedup_inlined_images)](https://modpagespeed.com/docs/filters/dedup_inlined_images/): Replaces repeated inlined images with JS reference.
 - [Defer JavaScript (defer_javascript)](https://modpagespeed.com/docs/filters/defer_javascript/): Defers JS execution until after page load.
 - [In-place browser optimization (in_place_optimize_for_browser)](https://modpagespeed.com/docs/filters/in_place_optimize_for_browser/): Browser-specific in-place optimization.
@@ -13442,7 +13443,7 @@ See [IIS configuration](https://modpagespeed.com/docs/iis-configuration/) for th
 | [`convert_png_to_jpeg`](https://modpagespeed.com/docs/image-filters/#convert_formats)                                 | via `rewrite_images` | Yes | Convert opaque PNGs to JPEG                                   | Yes           |
 | [`convert_gif_to_png`](https://modpagespeed.com/docs/image-filters/#convert_formats)                                  | via `rewrite_images` | Yes | Convert GIF to PNG                                            | Yes           |
 | [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_formats)                            | No                   | No  | Convert animated GIF to animated WebP                         | Test first    |
-| [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_formats)                            | via `rewrite_images` | No  | Use lossless WebP instead of lossy                            | Test first    |
+| [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_formats)                            | via `rewrite_images` | No  | Lossless WebP for PNGs and GIFs classed as graphics           | Test first    |
 | [`convert_jpeg_to_avif`](https://modpagespeed.com/docs/image-filters/#avif)                                           | No                   | No  | Serve AVIF for photographic JPEG sources                      | Test first    |
 | [`convert_to_avif_lossless`](https://modpagespeed.com/docs/image-filters/#avif)                                       | No                   | No  | Serve lossless AVIF for PNG/GIF sources                       | Test first    |
 | [`convert_to_avif_animated`](https://modpagespeed.com/docs/image-filters/#avif)                                       | No                   | No  | Serve AVIF for animated sources                               | Test first    |
@@ -13623,14 +13624,14 @@ Format conversion filters serve images in the most efficient format for each bro
 
 - **`convert_jpeg_to_progressive`** converts large baseline JPEGs to progressive encoding. Progressive JPEGs render incrementally and are often smaller for images above ~10 KB.
 - **`convert_jpeg_to_webp`** serves WebP versions of JPEG images to browsers that send `Accept: image/webp`. The original JPEG is preserved for other browsers.
-- **`convert_png_to_jpeg`** converts PNG images with no alpha channel (fully opaque) to JPEG, which is typically much smaller for photographic content.
+- **`convert_png_to_jpeg`** converts PNG images with no alpha channel (fully opaque) that the image analysis classifies as photographic to lossy WebP or JPEG, which is typically much smaller for photographic content.
 - **`convert_gif_to_png`** converts non-animated GIF images to PNG, which uses better compression.
 - **`convert_to_webp_animated`** converts animated GIF images to animated WebP. Not a CoreFilter.
-- **`convert_to_webp_lossless`** uses lossless WebP encoding instead of lossy. Produces larger files than lossy WebP but preserves every pixel. A CoreFilter, enabled by default through `rewrite_images`.
+- **`convert_to_webp_lossless`** serves PNG and GIF images that the image analysis classifies as graphics (not photographic) as lossless WebP, which preserves every pixel. It does not make photographic PNGs lossless: those take the lossy path of `convert_png_to_jpeg` when that filter is on (the default). Without it, a PNG graphic stays PNG and a GIF graphic becomes PNG (with `convert_gif_to_png` on, the default). A CoreFilter, enabled by default through `rewrite_images`.
 
 `convert_jpeg_to_webp` is the member of the family with the widest reach, because JPEG is where photographic weight usually sits. For a WebP-capable request, the filter encodes a WebP candidate at `WebpRecompressionQuality` (default 80) and keeps it when it is smaller than the original JPEG. WebP-capable requests (by `Accept: image/webp` or a known user agent) get HTML pointing at a `.webp` URL; others get the JPEG URL, so the HTML differs per browser; a CDN caching rewritten HTML must not share it across browsers. The filter runs in CoreFilters through `rewrite_images` and is listed in OptimizeForBandwidth, but in that level's in-place mode no WebP is selected.
 
-`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
+`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The analysis is a heuristic, and a large, smooth photo (soft sky, landscape, a photo re-saved as PNG) can be classified as a graphic. It then takes the lossless path of `convert_to_webp_lossless` and ships as lossless WebP, which is much larger than a lossy encode. For photographic images, serve the source as JPEG, which the analysis always treats as photographic, or keep the original URL (`ImagePreserveURLs on`, see [`ImagePreserveURLs`](https://modpagespeed.com/docs/configuration/#imagepreserveurls), or `data-pagespeed-no-transform` on a single `<img>`) so the optimizer worker negotiates AVIF or lossy WebP, which gives smaller files. The cost is that the module's image inlining, resizing and lazy loading no longer apply to those images; the format rule is described in [Image format and the Accept header](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation). The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
 
 `convert_gif_to_png` re-encodes a non-animated GIF as PNG. Without this filter, and without one of the animated-format conversions or the low-resolution preview path that need the same decode, a GIF that is not resized passes through the module untouched: no other filter re-encodes it. A resized GIF is decoded and resized as a PNG, so with this filter on it ships as PNG (or, if photographic and the lossy conversions apply, as JPEG or WebP); it never goes back out as a GIF. The conversion is lossless in intent (a GIF's at-most-256-color palette maps into PNG), and the result is kept only when it is smaller than the original GIF under `ImageLimitOptimizedPercent`. One non-obvious effect: the filter also unlocks lossy treatment of photographic GIFs, because the lossy decision path accepts a GIF only when it may first be treated as a PNG-style source. With the filter off, a photographic GIF is never turned into a JPEG or lossy WebP; it can still leave as lossless WebP or AVIF when those conversions are enabled, and otherwise stays a GIF. The filter runs in CoreFilters through `rewrite_images`.
 
@@ -13671,6 +13672,7 @@ pagespeed EnableFilters convert_to_webp_lossless;
 - `convert_png_to_jpeg` drops the alpha channel on opaque PNGs. mod_pagespeed checks for alpha before converting, but semi-transparent pixels at the boundary may cause subtle edge artifacts.
 - `convert_jpeg_to_webp` decides per request, so the rewritten HTML names a `.webp` image for some browsers and a JPEG for others. A CDN or proxy that caches the HTML must not serve one browser's copy to another; test with your CDN configuration.
 - `convert_to_webp_animated` can produce large files for complex animations. Verify output sizes.
+- `convert_to_webp_lossless` applies to PNGs and GIFs the image analysis classes as graphics. A large, smooth photograph can be classed as a graphic and then served as lossless WebP, which can be much larger than a lossy encoding. Serve photographs as JPEG, or keep the original URL (`ImagePreserveURLs on`, or `data-pagespeed-no-transform`) so the optimizer worker negotiates a lossy format.
 
 ## AVIF filters
 
@@ -28815,11 +28817,11 @@ A PageSpeed filter is one named optimization that mod_pagespeed, the in-process 
 | [`convert_jpeg_to_avif`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_avif) | - | - | Test first | Converts photographic JPEG to AVIF for capable browsers |
 | [`convert_jpeg_to_progressive`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_progressive) | Yes | Yes | Generally safe | Converts large JPEGs to progressive format |
 | [`convert_jpeg_to_webp`](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/) | Yes | Yes | Generally safe | Converts JPEG to WebP for capable browsers |
-| [`convert_png_to_jpeg`](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/) | Yes | Yes | Generally safe | Converts PNG to JPEG when no transparency |
+| [`convert_png_to_jpeg`](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/) | Yes | Yes | Generally safe | Converts opaque photographic PNGs to lossy WebP or JPEG |
 | [`convert_to_avif_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_animated) | - | - | Test first | Converts animated images to AVIF |
 | [`convert_to_avif_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_lossless) | - | - | Test first | Converts PNG/GIF to lossless AVIF |
 | [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_animated) | - | - | Test first | Converts animated GIF to WebP |
-| [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_lossless) | Yes | - | Test first | Converts PNG/GIF to lossless WebP |
+| [`convert_to_webp_lossless`](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/) | Yes | - | Test first | Converts PNG/GIF graphics (not photos) to lossless WebP |
 | [`dedup_inlined_images`](https://modpagespeed.com/docs/filters/dedup_inlined_images/) | - | - | Generally safe | Replaces repeated inlined images with JS reference |
 | [`experiment_collect_mob_image_info`](https://modpagespeed.com/docs/image-filters/#experiment_collect_mob_image_info) | - | - | Dangerous | Experiment: collects image information for mobilization |
 | [`extend_cache_images`](https://modpagespeed.com/docs/image-filters/#extend_cache_images) | Yes | - | Generally safe | Content-hashed URLs with a 1-year browser cache for images |
@@ -29409,6 +29411,10 @@ Canonical URL: https://modpagespeed.com/docs/filters/convert_gif_to_png/
 
 ## How it works
 
+Format conversion filters serve images in the most efficient format for each browser and image type:
+
+- **`convert_to_webp_lossless`** serves PNG and GIF images that the image analysis classifies as graphics (not photographic) as lossless WebP, which preserves every pixel. It does not make photographic PNGs lossless: those take the lossy path of `convert_png_to_jpeg` when that filter is on (the default). Without it, a PNG graphic stays PNG and a GIF graphic becomes PNG (with `convert_gif_to_png` on, the default). A CoreFilter, enabled by default through `rewrite_images`.
+
 `convert_gif_to_png` re-encodes a non-animated GIF as PNG. Without this filter, and without one of the animated-format conversions or the low-resolution preview path that need the same decode, a GIF that is not resized passes through the module untouched: no other filter re-encodes it. A resized GIF is decoded and resized as a PNG, so with this filter on it ships as PNG (or, if photographic and the lossy conversions apply, as JPEG or WebP); it never goes back out as a GIF. The conversion is lossless in intent (a GIF's at-most-256-color palette maps into PNG), and the result is kept only when it is smaller than the original GIF under `ImageLimitOptimizedPercent`. One non-obvious effect: the filter also unlocks lossy treatment of photographic GIFs, because the lossy decision path accepts a GIF only when it may first be treated as a PNG-style source. With the filter off, a photographic GIF is never turned into a JPEG or lossy WebP; it can still leave as lossless WebP or AVIF when those conversions are enabled, and otherwise stays a GIF. The filter runs in CoreFilters through `rewrite_images`.
 
 ## When to use it
@@ -29480,7 +29486,7 @@ Add `ModPagespeedDisableFilters convert_gif_to_png` on Apache or `pagespeed Disa
 - [`convert_jpeg_to_webp`](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/): Convert JPEG to WebP
 - [`convert_png_to_jpeg`](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Convert PNG to JPEG
 - [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_animated): Animated WebP
-- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_lossless): Lossless WebP
+- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/): Lossless WebP
 - [`convert_jpeg_to_avif`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_avif): Convert JPEG to AVIF
 - [`convert_to_avif_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_animated): Animated AVIF
 - [`convert_to_avif_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_lossless): Lossless AVIF
@@ -29506,7 +29512,7 @@ Canonical URL: https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/
 
 `convert_jpeg_to_webp` is the member of the family with the widest reach, because JPEG is where photographic weight usually sits. For a WebP-capable request, the filter encodes a WebP candidate at `WebpRecompressionQuality` (default 80) and keeps it when it is smaller than the original JPEG. WebP-capable requests (by `Accept: image/webp` or a known user agent) get HTML pointing at a `.webp` URL; others get the JPEG URL, so the HTML differs per browser; a CDN caching rewritten HTML must not share it across browsers. The filter runs in CoreFilters through `rewrite_images` and is listed in OptimizeForBandwidth, but in that level's in-place mode no WebP is selected.
 
-`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
+`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The analysis is a heuristic, and a large, smooth photo (soft sky, landscape, a photo re-saved as PNG) can be classified as a graphic. It then takes the lossless path of `convert_to_webp_lossless` and ships as lossless WebP, which is much larger than a lossy encode. For photographic images, serve the source as JPEG, which the analysis always treats as photographic, or keep the original URL (`ImagePreserveURLs on`, see [`ImagePreserveURLs`](https://modpagespeed.com/docs/configuration/#imagepreserveurls), or `data-pagespeed-no-transform` on a single `<img>`) so the optimizer worker negotiates AVIF or lossy WebP, which gives smaller files. The cost is that the module's image inlining, resizing and lazy loading no longer apply to those images; the format rule is described in [Image format and the Accept header](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation). The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
 
 ## When to use it
 
@@ -29590,7 +29596,7 @@ Add `ModPagespeedDisableFilters convert_jpeg_to_webp` on Apache or `pagespeed Di
 - [`convert_jpeg_to_progressive`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_progressive): Progressive JPEG
 - [`convert_png_to_jpeg`](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Convert PNG to JPEG
 - [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_animated): Animated WebP
-- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_lossless): Lossless WebP
+- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/): Lossless WebP
 
 This page is drawn from the [convert_jpeg_to_webp entry on Image filters](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_webp). Every filter in one table: [PageSpeed filters](https://modpagespeed.com/docs/filters/).
 
@@ -29598,7 +29604,7 @@ This page is drawn from the [convert_jpeg_to_webp entry on Image filters](https:
 
 # Convert PNG to JPEG (convert_png_to_jpeg)
 
-Converts PNG to JPEG when no transparency. The convert_png_to_jpeg filter: what it does, its risks and the Apache, nginx and IIS directives.
+Converts opaque photographic PNGs to lossy WebP or JPEG. The convert_png_to_jpeg filter: what it does, its risks and the Apache, nginx and IIS directives.
 
 Canonical URL: https://modpagespeed.com/docs/filters/convert_png_to_jpeg/
 
@@ -29607,11 +29613,15 @@ Canonical URL: https://modpagespeed.com/docs/filters/convert_png_to_jpeg/
 - OptimizeForBandwidth: Yes
 - Risk: Generally safe
 
-**`convert_png_to_jpeg`** converts PNG images with no alpha channel (fully opaque) to JPEG, which is typically much smaller for photographic content.
+**`convert_png_to_jpeg`** converts PNG images with no alpha channel (fully opaque) that the image analysis classifies as photographic to lossy WebP or JPEG, which is typically much smaller for photographic content.
 
 ## How it works
 
-`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
+Format conversion filters serve images in the most efficient format for each browser and image type:
+
+- **`convert_to_webp_lossless`** serves PNG and GIF images that the image analysis classifies as graphics (not photographic) as lossless WebP, which preserves every pixel. It does not make photographic PNGs lossless: those take the lossy path of `convert_png_to_jpeg` when that filter is on (the default). Without it, a PNG graphic stays PNG and a GIF graphic becomes PNG (with `convert_gif_to_png` on, the default). A CoreFilter, enabled by default through `rewrite_images`.
+
+`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The analysis is a heuristic, and a large, smooth photo (soft sky, landscape, a photo re-saved as PNG) can be classified as a graphic. It then takes the lossless path of `convert_to_webp_lossless` and ships as lossless WebP, which is much larger than a lossy encode. For photographic images, serve the source as JPEG, which the analysis always treats as photographic, or keep the original URL (`ImagePreserveURLs on`, see [`ImagePreserveURLs`](https://modpagespeed.com/docs/configuration/#imagepreserveurls), or `data-pagespeed-no-transform` on a single `<img>`) so the optimizer worker negotiates AVIF or lossy WebP, which gives smaller files. The cost is that the module's image inlining, resizing and lazy loading no longer apply to those images; the format rule is described in [Image format and the Accept header](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation). The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
 
 ## When to use it
 
@@ -29666,7 +29676,7 @@ Scoping, `ForbidFilters` and the thresholds filters read: [Choosing filters](htt
 
 **What does the convert_png_to_jpeg filter do?**
 
-`convert_png_to_jpeg` converts PNG images with no alpha channel (fully opaque) to JPEG, which is typically much smaller for photographic content.
+`convert_png_to_jpeg` converts PNG images with no alpha channel (fully opaque) that the image analysis classifies as photographic to lossy WebP or JPEG, which is typically much smaller for photographic content.
 
 **Is convert_png_to_jpeg enabled by default?**
 
@@ -29682,12 +29692,112 @@ Add `ModPagespeedDisableFilters convert_png_to_jpeg` on Apache or `pagespeed Dis
 - [`convert_jpeg_to_progressive`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_progressive): Progressive JPEG
 - [`convert_jpeg_to_webp`](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/): Convert JPEG to WebP
 - [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_animated): Animated WebP
-- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_lossless): Lossless WebP
+- [`convert_to_webp_lossless`](https://modpagespeed.com/docs/filters/convert_to_webp_lossless/): Lossless WebP
 - [`convert_jpeg_to_avif`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_avif): Convert JPEG to AVIF
 - [`convert_to_avif_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_animated): Animated AVIF
 - [`convert_to_avif_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_lossless): Lossless AVIF
 
 This page is drawn from the [convert_png_to_jpeg entry on Image filters](https://modpagespeed.com/docs/image-filters/#convert_png_to_jpeg). Every filter in one table: [PageSpeed filters](https://modpagespeed.com/docs/filters/).
+
+---
+
+# Lossless WebP (convert_to_webp_lossless)
+
+Converts PNG/GIF graphics (not photos) to lossless WebP. The convert_to_webp_lossless filter: what it does, its risks and the directives.
+
+Canonical URL: https://modpagespeed.com/docs/filters/convert_to_webp_lossless/
+
+- Category: Image
+- CoreFilters: Yes
+- OptimizeForBandwidth: No
+- Risk: Test first
+
+**`convert_to_webp_lossless`** serves PNG and GIF images that the image analysis classifies as graphics (not photographic) as lossless WebP, which preserves every pixel. It does not make photographic PNGs lossless: those take the lossy path of `convert_png_to_jpeg` when that filter is on (the default). Without it, a PNG graphic stays PNG and a GIF graphic becomes PNG (with `convert_gif_to_png` on, the default).
+
+## How it works
+
+A CoreFilter, enabled by default through `rewrite_images`.
+
+`convert_png_to_jpeg` turns a PNG into a JPEG only when the module's image analysis says the file is photographic, meaning not sensitive to compression noise, and it has no transparent pixels. The analysis is what protects flat graphics: a logo or a diagram analyzes as non-photographic and keeps its PNG. On a photographic PNG without transparency the filter authorizes lossy encoding, and the format that ships depends on the browser: when the request prefers WebP and `convert_jpeg_to_webp` is on, the file becomes WebP rather than JPEG; otherwise it is re-encoded as JPEG at the JPEG quality setting. A PNG with transparency is never made a JPEG. The analysis is a heuristic, and a large, smooth photo (soft sky, landscape, a photo re-saved as PNG) can be classified as a graphic. It then takes the lossless path of `convert_to_webp_lossless` and ships as lossless WebP, which is much larger than a lossy encode. For photographic images, serve the source as JPEG, which the analysis always treats as photographic, or keep the original URL (`ImagePreserveURLs on`, see [`ImagePreserveURLs`](https://modpagespeed.com/docs/configuration/#imagepreserveurls), or `data-pagespeed-no-transform` on a single `<img>`) so the optimizer worker negotiates AVIF or lossy WebP, which gives smaller files. The cost is that the module's image inlining, resizing and lazy loading no longer apply to those images; the format rule is described in [Image format and the Accept header](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation). The converted file is kept only when it is smaller (`ImageLimitOptimizedPercent`), and a PNG carrying a C2PA content-credentials manifest is left untouched so its provenance chain survives. The filter runs in CoreFilters through `rewrite_images`.
+
+## When to use it
+
+- In CoreFilters, the default RewriteLevel: it runs unless you disable it.
+- Also switched on by [`rewrite_images`](https://modpagespeed.com/docs/filters/rewrite_images/).
+- Risk rating on these docs: **Test first**.
+
+## Risks
+
+- `convert_to_webp_lossless` applies to PNGs and GIFs the image analysis classes as graphics. A large, smooth photograph can be classed as a graphic and then served as lossless WebP, which can be much larger than a lossy encoding. Serve photographs as JPEG, or keep the original URL (`ImagePreserveURLs on`, or `data-pagespeed-no-transform`) so the optimizer worker negotiates a lossy format.
+
+## Configuration
+
+Enable it in the module configuration, at server, virtual-host or location scope:
+
+**Apache**
+
+```apache
+ModPagespeedEnableFilters convert_to_webp_lossless
+```
+
+**nginx**
+
+```nginx
+pagespeed EnableFilters convert_to_webp_lossless;
+```
+
+**IIS (pagespeed.config)**
+
+```text
+pagespeed EnableFilters convert_to_webp_lossless
+```
+
+It is on by default under CoreFilters; to turn it off:
+
+```text
+ModPagespeedDisableFilters convert_to_webp_lossless   # Apache
+pagespeed DisableFilters convert_to_webp_lossless;   # nginx
+pagespeed DisableFilters convert_to_webp_lossless   # IIS
+```
+
+| Parameter                          | Default | Description                                        |
+| ---------------------------------- | ------- | -------------------------------------------------- |
+| `ProgressiveJpegMinBytes`          | 10240   | Minimum JPEG size before converting to progressive |
+| `WebpRecompressionQuality`         | 80      | Quality for lossy WebP conversion                  |
+| `WebpAnimatedRecompressionQuality` | 70      | Quality for animated WebP conversion               |
+
+### On the worker
+
+The worker runs its own pipeline, configured by flags. Its equivalent of this filter is the [image pipeline](https://modpagespeed.com/docs/worker-configuration/#image-pipeline) transform. Always-on baseline under `pagespeed on;`; there is no per-transform off switch.
+
+Scoping, `ForbidFilters` and the thresholds filters read: [Choosing filters](https://modpagespeed.com/docs/filter-selection/).
+
+## Frequently asked questions
+
+**What does the convert_to_webp_lossless filter do?**
+
+`convert_to_webp_lossless` serves PNG and GIF images that the image analysis classifies as graphics (not photographic) as lossless WebP, which preserves every pixel. It does not make photographic PNGs lossless: those take the lossy path of `convert_png_to_jpeg` when that filter is on (the default). Without it, a PNG graphic stays PNG and a GIF graphic becomes PNG (with `convert_gif_to_png` on, the default).
+
+**Is convert_to_webp_lossless enabled by default?**
+
+Yes. `convert_to_webp_lossless` is in CoreFilters, the default RewriteLevel, so it runs unless you turn it off with `DisableFilters`.
+
+**How do I turn off convert_to_webp_lossless?**
+
+Add `ModPagespeedDisableFilters convert_to_webp_lossless` on Apache or `pagespeed DisableFilters convert_to_webp_lossless;` on nginx. On IIS, add `pagespeed DisableFilters convert_to_webp_lossless` to pagespeed.config.
+
+## Related filters
+
+- [`convert_gif_to_png`](https://modpagespeed.com/docs/filters/convert_gif_to_png/): Convert GIF to PNG
+- [`convert_jpeg_to_progressive`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_progressive): Progressive JPEG
+- [`convert_jpeg_to_webp`](https://modpagespeed.com/docs/filters/convert_jpeg_to_webp/): Convert JPEG to WebP
+- [`convert_png_to_jpeg`](https://modpagespeed.com/docs/filters/convert_png_to_jpeg/): Convert PNG to JPEG
+- [`convert_to_webp_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_webp_animated): Animated WebP
+- [`convert_jpeg_to_avif`](https://modpagespeed.com/docs/image-filters/#convert_jpeg_to_avif): Convert JPEG to AVIF
+- [`convert_to_avif_animated`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_animated): Animated AVIF
+- [`convert_to_avif_lossless`](https://modpagespeed.com/docs/image-filters/#convert_to_avif_lossless): Lossless AVIF
+
+This page is drawn from the [convert_to_webp_lossless entry on Image filters](https://modpagespeed.com/docs/image-filters/#convert_to_webp_lossless). Every filter in one table: [PageSpeed filters](https://modpagespeed.com/docs/filters/).
 
 ---
 
