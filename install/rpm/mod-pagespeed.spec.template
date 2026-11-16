@@ -27,6 +27,9 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 Provides        : @@PROVIDES@@ = %{version}
 Requires        : @@DEPENDS@@
 Conflicts       : @@REPLACES@@
+# pagespeed-doctor is offered as /usr/sbin/pagespeed-doctor via alternatives.
+Requires(post)  : /usr/sbin/update-alternatives
+Requires(preun) : /usr/sbin/update-alternatives
 @@SELINUX_REQUIRES_POST@@
 @@SELINUX_REQUIRES_POSTUN@@
 
@@ -81,6 +84,8 @@ rm -rf "$RPM_BUILD_ROOT"
 %license /usr/share/doc/@@PACKAGE@@/LICENSE
 %doc /usr/share/doc/@@PACKAGE@@/NOTICE
 %doc /usr/share/doc/@@PACKAGE@@/THIRD-PARTY-NOTICES
+%dir /usr/share/@@PACKAGE@@
+/usr/share/@@PACKAGE@@/pagespeed-doctor
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed_libraries.conf
 @@DAEMON_DROPIN_FILES@@
@@ -156,6 +161,10 @@ if [ -f /usr/share/selinux/targeted/pagespeed-optimizer.pp ] && \
   systemctl try-restart pagespeed-optimizer.service >/dev/null 2>&1 || true
 fi
 
+# Offer pagespeed-doctor (a read-only health check) as /usr/sbin/pagespeed-doctor.
+update-alternatives --install /usr/sbin/pagespeed-doctor pagespeed-doctor \
+  /usr/share/@@PACKAGE@@/pagespeed-doctor 50 >/dev/null 2>&1 || true
+
 exit 0
 
 #------------------------------------------------------------------------------
@@ -170,6 +179,8 @@ if [ "$1" -eq "0" ]; then
     sed -i 's/^LoadModule pagespeed_module/#LoadModule pagespeed_module/' \
       @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
   fi
+  update-alternatives --remove pagespeed-doctor \
+    /usr/share/@@PACKAGE@@/pagespeed-doctor >/dev/null 2>&1 || true
 fi
 
 exit 0

@@ -57,6 +57,8 @@ const char PurgeContext::kFileStats[] = "purge_file_stats";
 const char PurgeContext::kFileWriteFailures[] = "purge_file_write_failures";
 const char PurgeContext::kFileWrites[] = "purge_file_writes";
 const char PurgeContext::kPurgeIndex[] = "purge_index";
+const char PurgeContext::kPurgeSetFull[] =
+    "purge set is full: purge this URL from the global admin console";
 
 // TODO(jmarantz): make it possible to avoid showing this implementation detail
 // in the statistics page.
@@ -261,6 +263,8 @@ void PurgeContext::UpdateCachePurgeFile() {
   PurgeSet purges_from_file(max_bytes_in_cache_);
   PurgeSet return_purges(max_bytes_in_cache_);
   PurgeCallbackVector callbacks;
+  NonEvictingPurgeVector non_evicting;
+  PurgeCallbackVector refused_callbacks;
   bool lock_and_update = false;
   bool success = true;
   int failures = 0;
@@ -272,16 +276,26 @@ void PurgeContext::UpdateCachePurgeFile() {
   GoogleString buffer;
   ReadPurgeFile(&purges_from_file);  // read
   ModifyPurgeSet(&purges_from_file, &buffer, &callbacks, &return_purges,
-                 &failures);      // modify
-  if (!WritePurgeFile(buffer) ||  // write
-      !Verify(buffer)) {          // verify
+                 &non_evicting, &refused_callbacks, &failures);  // modify
+  // A round whose only purges were refused changes nothing: leave the file
+  // as it is.
+  const bool nothing_to_write = callbacks.empty() && non_evicting.empty();
+  if (!nothing_to_write && (!WritePurgeFile(buffer) ||  // write
+                            !Verify(buffer))) {         // verify
     contentions_->Add(1);
     success = false;
-    HandleWriteFailure(failures, &callbacks, &return_purges, &lock_and_update);
+    HandleWriteFailure(failures, &callbacks, &return_purges, &non_evicting,
+                       &lock_and_update);
   }
 
   interprocess_lock_->Unlock();
 
+  for (auto& callback : refused_callbacks) {
+    callback->Run(false, kPurgeSetFull);
+  }
+  for (auto& purge : non_evicting) {
+    callbacks.push_back(purge.callback);
+  }
   if (!callbacks.empty()) {
     if (success) {
       // Induce a file-read the next time PollFileSystem() is called.
@@ -303,6 +317,7 @@ void PurgeContext::UpdateCachePurgeFile() {
 void PurgeContext::HandleWriteFailure(int failures,
                                       PurgeCallbackVector* callbacks,
                                       PurgeSet* return_purges,
+                                      NonEvictingPurgeVector* non_evicting,
                                       bool* lock_and_update) {
   ScopedMutex lock(mutex_.get());
 
@@ -313,17 +328,24 @@ void PurgeContext::HandleWriteFailure(int failures,
     // the lock.  In either case we need to restore the callbacks so
     // we can try again and notify interested parties.
     if (waiting_for_interprocess_lock_) {
-      DCHECK(!pending_callbacks_.empty());
+      DCHECK(!pending_callbacks_.empty() ||
+             !pending_non_evicting_purges_.empty());
       pending_callbacks_.insert(pending_callbacks_.end(), callbacks->begin(),
                                 callbacks->end());
       pending_purges_.Merge(*return_purges);
       callbacks->clear();
+      pending_non_evicting_purges_.insert(pending_non_evicting_purges_.end(),
+                                          non_evicting->begin(),
+                                          non_evicting->end());
+      non_evicting->clear();
     } else {
       DCHECK(pending_callbacks_.empty());
-      DCHECK(!callbacks->empty());
+      DCHECK(pending_non_evicting_purges_.empty());
+      DCHECK(!callbacks->empty() || !non_evicting->empty());
       waiting_for_interprocess_lock_ = true;
       callbacks->swap(pending_callbacks_);
       pending_purges_.Swap(return_purges);
+      non_evicting->swap(pending_non_evicting_purges_);
       *lock_and_update = true;
     }
   } else {
@@ -340,7 +362,7 @@ void PurgeContext::HandleWriteFailure(int failures,
     //
     // TODO(jmarantz): capture the file-system logs and return those
     // to PURGE clients as the response body.
-    file_write_failures_->Add(callbacks->size());
+    file_write_failures_->Add(callbacks->size() + non_evicting->size());
     num_consecutive_failures_ = 0;
   }
 }
@@ -348,7 +370,10 @@ void PurgeContext::HandleWriteFailure(int failures,
 void PurgeContext::ModifyPurgeSet(PurgeSet* purges_from_file,
                                   GoogleString* buffer,
                                   PurgeCallbackVector* return_callbacks,
-                                  PurgeSet* return_purges, int* failures) {
+                                  PurgeSet* return_purges,
+                                  NonEvictingPurgeVector* return_non_evicting,
+                                  PurgeCallbackVector* refused_callbacks,
+                                  int* failures) {
   // Note that while were are reading the file, another Purge might
   // arrive in pending_purges_, protected by mutex_.  We avoid holding
   // the that mutex when reading/writing the file as that might create
@@ -368,6 +393,17 @@ void PurgeContext::ModifyPurgeSet(PurgeSet* purges_from_file,
   purges_from_file->Merge(pending_purges_);
   return_purges->Swap(&pending_purges_);
   pending_purges_.Clear();
+
+  // Merged last, against the set as it now stands in the file: a record
+  // that does not fit is refused rather than evicting someone else's.
+  for (NonEvictingPurge& purge : pending_non_evicting_purges_) {
+    if (purges_from_file->PutWithoutEviction(purge.url, purge.timestamp_ms)) {
+      return_non_evicting->push_back(purge);
+    } else {
+      refused_callbacks->push_back(purge.callback);
+    }
+  }
+  pending_non_evicting_purges_.clear();
   waiting_for_interprocess_lock_ = false;
   // Now if another Purge arrives it will have to wait for the next lock
   // again.
@@ -413,10 +449,14 @@ void PurgeContext::CancelCachePurgeFile() {
   {
     ScopedMutex lock(mutex_.get());
     callbacks.swap(pending_callbacks_);
+    for (NonEvictingPurge& purge : pending_non_evicting_purges_) {
+      callbacks.push_back(purge.callback);
+    }
 
     // We are giving up on these pending invalidations rather than having
     // them take effect at some random time in the future.
     pending_purges_.Clear();
+    pending_non_evicting_purges_.clear();
 
     waiting_for_interprocess_lock_ = false;
   }
@@ -483,6 +523,28 @@ void PurgeContext::AddPurgeUrl(StringPiece url, int64 timestamp_ms,
     if (grab_lock) {
       WaitForTimerAndGrabLock();
     }
+  }
+}
+
+void PurgeContext::AddPurgeUrlWithoutEviction(StringPiece url,
+                                              int64 timestamp_ms,
+                                              PurgeCallback* callback) {
+  if (!enable_purge_) {
+    callback->Run(false, "EnableCachePurge is off");
+    return;
+  }
+  bool grab_lock = false;
+  {
+    ScopedMutex lock(mutex_.get());
+    pending_non_evicting_purges_.push_back(
+        NonEvictingPurge{url.as_string(), timestamp_ms, callback});
+    if (!waiting_for_interprocess_lock_) {
+      waiting_for_interprocess_lock_ = true;
+      grab_lock = true;
+    }
+  }
+  if (grab_lock) {
+    WaitForTimerAndGrabLock();
   }
 }
 

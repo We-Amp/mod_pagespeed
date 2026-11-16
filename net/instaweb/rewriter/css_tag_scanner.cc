@@ -316,17 +316,21 @@ LexResult CssExtractUntil(bool is_string,
 // Tries to extract a string from current position into out.
 // If successful, *quote_out will contain its delimeter, and *found_term
 // will say whether the trailing terminator was present.
+// If there is a string but we can not decode it, returns kLexNo and leaves *in
+// at the opening quote, so the caller can step over the whole token.
 LexResult CssExtractString(CssTagScanner::InputPortion input_kind,
                            StringPiece* in, GoogleString* out, char* quote_out,
                            bool* found_term) {
-  if (in->starts_with("'")) {
+  if (in->starts_with("'") || in->starts_with("\"")) {
+    const StringPiece original_input = *in;
+    *quote_out = (*in)[0];
     in->remove_prefix(1);
-    *quote_out = '\'';
-    return CssExtractUntil(true, input_kind, '\'', in, out, found_term);
-  } else if (in->starts_with("\"")) {
-    in->remove_prefix(1);
-    *quote_out = '\"';
-    return CssExtractUntil(true, input_kind, '"', in, out, found_term);
+    LexResult result =
+        CssExtractUntil(true, input_kind, *quote_out, in, out, found_term);
+    if (result == kLexNo) {
+      *in = original_input;
+    }
+    return result;
   } else {
     if (in->empty() && input_kind == CssTagScanner::kInputDoesNotIncludeEnd) {
       // Empty chunk of streaming input -> can't tell if string or not?
@@ -334,6 +338,46 @@ LexResult CssExtractString(CssTagScanner::InputPortion input_kind,
     }
     return kLexNo;
   }
+}
+
+// Consumes the rest of a string token whose opening quote has already been
+// consumed, without decoding it: we only need to know where it ends. As in
+// CssExtractUntil, \ takes the next character (or CR LF) with it, and an
+// unescaped newline ends the string.
+LexResult CssSkipString(CssTagScanner::InputPortion input_kind, char quote,
+                        StringPiece* in) {
+  char c;
+  while (PopFirst(in, &c)) {
+    if (c == quote || c == '\n' || c == '\r' || c == '\f') {
+      return kLexYes;
+    } else if (c == '\\') {
+      if (PopFirst(in, &c) && c == '\r') {
+        EatLiteral(input_kind, "\n", in);
+      }
+    }
+  }
+  // The closing quote may be in the next chunk of streaming input; otherwise
+  // the string is simply unclosed.
+  if (input_kind == CssTagScanner::kInputDoesNotIncludeEnd) {
+    return kLexInterrupted;
+  }
+  return kLexYes;
+}
+
+// Consumes the rest of a comment whose opening "/*" has already been consumed.
+LexResult CssSkipComment(CssTagScanner::InputPortion input_kind,
+                         StringPiece* in) {
+  const size_t end = in->find("*/");
+  if (end != StringPiece::npos) {
+    in->remove_prefix(end + 2);
+    return kLexYes;
+  }
+  if (input_kind == CssTagScanner::kInputDoesNotIncludeEnd) {
+    return kLexInterrupted;
+  }
+  // An unclosed comment extends to the end of the input.
+  in->remove_prefix(in->size());
+  return kLexYes;
 }
 
 bool WriteRange(const char* out_begin, const char* out_end, Writer* writer,
@@ -463,8 +507,10 @@ bool CssTagScanner::TransformUrlsStreaming(
           } else if (quoted_url_argument == kLexInterrupted) {
             reparse_candidate.CopyToString(&reparse_);
             return ok && WriteRange(out_begin, out_end, writer, handler_);
-          } else {
-            // No quoted argument.
+          } else if (!remaining.starts_with("'") &&
+                     !remaining.starts_with("\"")) {
+            // No quoted argument. (A quoted argument we could not decode is
+            // left alone, and is stepped over like any other string.)
             LexResult unquoted_url_argument =
                 CssExtractUntil(false, input_portion, ')', &remaining,
                                 &wrapped_url, &have_term_paren);
@@ -483,6 +529,31 @@ bool CssTagScanner::TransformUrlsStreaming(
           return ok && WriteRange(out_begin, out_end, writer, handler_);
         case kLexNo:
           break;
+      }
+    } else if (c == '"' || c == '\'') {
+      // A string that is not the argument of @import or url(. What looks like
+      // a URL use inside it is just text: lexing a URL out of it would run
+      // past its closing quote.
+      if (CssSkipString(input_portion, c, &remaining) == kLexInterrupted) {
+        reparse_candidate.CopyToString(&reparse_);
+        return ok && WriteRange(out_begin, out_end, writer, handler_);
+      }
+    } else if (c == '/') {
+      // Likewise for comments, which may also hold unpaired quotes.
+      LexResult comment = EatLiteral(input_portion, "*", &remaining);
+      if (comment == kLexYes) {
+        comment = CssSkipComment(input_portion, &remaining);
+      }
+      if (comment == kLexInterrupted) {
+        reparse_candidate.CopyToString(&reparse_);
+        return ok && WriteRange(out_begin, out_end, writer, handler_);
+      }
+    } else if (c == '\\') {
+      // An escaped character does not start anything, notably not a string.
+      if (!PopFirst(&remaining, &c) &&
+          input_portion == kInputDoesNotIncludeEnd) {
+        reparse_candidate.CopyToString(&reparse_);
+        return ok && WriteRange(out_begin, out_end, writer, handler_);
       }
     }
 

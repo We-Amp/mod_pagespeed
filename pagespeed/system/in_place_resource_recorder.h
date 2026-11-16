@@ -193,6 +193,7 @@ class InPlaceResourceRecorder : public IproRecorder {
   Variable* num_error_status_;
   Variable* num_skipped_transient_;
   Variable* num_empty_;
+  Variable* num_dropped_cors_specific_;
 
   // Track how many simultaneous recordings are underway in this process.  Not
   // used when max_concurrent_recordings_ == 0 (unlimited).

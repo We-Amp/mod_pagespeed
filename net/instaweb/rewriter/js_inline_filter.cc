@@ -126,6 +126,12 @@ void JsInlineFilter::StartElementImpl(HtmlElement* element) {
       script_tag_scanner_.ParseScriptElement(element, &src);
   if (classification == ScriptTagScanner::kJavaScript) {
     should_inline_ = (src != nullptr) && (src->DecodedValueOrNull() != nullptr);
+    // The script's text would be written where browsers may read it as the
+    // text of the enclosing element, which its bytes could then end early;
+    // and the script never runs there anyway.
+    if (should_inline_ && IsInsideSometimesLiteralElement(element)) {
+      should_inline_ = false;
+    }
     // Inlining drops integrity= enforcement (browsers ignore it on an inline
     // script), so the check the author asked for would silently stop
     // happening. Leave the script alone.

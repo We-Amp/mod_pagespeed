@@ -247,16 +247,23 @@ class NullResourceSlot : public ResourceSlot {
 class FetchResourceSlot : public ResourceSlot {
  public:
   explicit FetchResourceSlot(const ResourcePtr& resource)
-      : ResourceSlot(resource) {}
+      : ResourceSlot(resource), requested_url_(resource->url()) {}
   HtmlElement* element() const override { return nullptr; }
   void Render() override;
   GoogleString LocationString() const override;
+
+  // The input URL as the fetched URL names it.  The slot's resource can be
+  // replaced later (a .pagespeed. input is rebuilt into a new resource whose
+  // URL carries the hash of what was rebuilt), so this is kept separately.
+  const GoogleString& requested_url() const { return requested_url_; }
 
  protected:
   REFCOUNT_FRIEND_DECLARATION(FetchResourceSlot);
   ~FetchResourceSlot() override;
 
  private:
+  const GoogleString requested_url_;
+
   FetchResourceSlot(const FetchResourceSlot&) = delete;
   FetchResourceSlot& operator=(const FetchResourceSlot&) = delete;
 };

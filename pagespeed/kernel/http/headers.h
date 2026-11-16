@@ -113,6 +113,11 @@ class Headers {
   bool HasValueCaseInsensitive(const StringPiece& name,
                                const StringPiece& value) const;
 
+  // Does Cache-Control carry the directive `name`?  Matched as
+  // CachingHeaders::ElementHasDirective does.  Meant for restrictive
+  // directives.
+  bool HasCacheControlDirective(StringPiece name) const;
+
   // NumAttributeNames is also const but not thread-safe.
   int NumAttributeNames() const;
 

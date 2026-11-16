@@ -74,6 +74,9 @@ class PurgeContext {
   static const char kPurgePollTimestampMs[];
   static const char kStatCalls[];
 
+  // Reason passed to the callback of a refused AddPurgeUrlWithoutEviction.
+  static const char kPurgeSetFull[];
+
   PurgeContext(StringPiece filename, FileSystem* file_system, Timer* timer,
                int max_bytes_in_cache, ThreadSystem* thread_system,
                NamedLockManager* lock_manager, Scheduler* scheduler,
@@ -103,6 +106,15 @@ class PurgeContext {
   // on the floor, and statistics "purge_cancellations" is bumped.
   void AddPurgeUrl(StringPiece url, int64 timestamp_ms,
                    PurgeCallback* callback);
+
+  // Like AddPurgeUrl, but the record never evicts another one.  An eviction
+  // moves the global invalidation timestamp, which invalidates the cache of
+  // every site sharing this purge file, so this is the entry point for a
+  // purge a single site may make.  When the record does not fit in the
+  // purge set as read from the file, the purge is refused with
+  // callback(false, kPurgeSetFull) and nothing is written for it.
+  void AddPurgeUrlWithoutEviction(StringPiece url, int64 timestamp_ms,
+                                  PurgeCallback* callback);
 
   // Sets the global invalidation timestamp.
   //
@@ -135,6 +147,15 @@ class PurgeContext {
   friend class PurgeContextTest;
 
   using PurgeCallbackVector = std::vector<PurgeCallback*>;
+
+  // A purge from AddPurgeUrlWithoutEviction, with its own callback, as it
+  // can be refused on its own.
+  struct NonEvictingPurge {
+    GoogleString url;
+    int64 timestamp_ms;
+    PurgeCallback* callback;
+  };
+  using NonEvictingPurgeVector = std::vector<NonEvictingPurge>;
 
   // Having acquired the lock, merges all sources of purge information and
   // write the purge file.  This must be called with interprocess_lock_
@@ -174,15 +195,24 @@ class PurgeContext {
   // transaction which should be made an explicit class or struct.
   //
   // This method is thread-safe; it grabs mutex_.
+  //
+  // The non-evicting purges are merged last.  Those that fit are moved into
+  // *return_non_evicting (to be restored like return_purges on a write
+  // failure); the callbacks of those that do not are moved into
+  // *refused_callbacks.
   void ModifyPurgeSet(PurgeSet* purges_from_file, GoogleString* buffer,
                       PurgeCallbackVector* return_callbacks,
-                      PurgeSet* return_purges, int* failures);
+                      PurgeSet* return_purges,
+                      NonEvictingPurgeVector* return_non_evicting,
+                      PurgeCallbackVector* refused_callbacks, int* failures);
 
   // When a write fails, we must do one of these:
   //  a) restore the pending purges & callbacks and try to re-take the lock.
   //  b) call the callbacks with 'false' and drop return_purges.
   void HandleWriteFailure(int failures, PurgeCallbackVector* callbacks,
-                          PurgeSet* return_purges, bool* lock_and_update);
+                          PurgeSet* return_purges,
+                          NonEvictingPurgeVector* non_evicting,
+                          bool* lock_and_update);
 
   // Writes the serialized purge data into filename_.  This method must
   // be called with the interprocess_lock_ held, but does not reference
@@ -226,13 +256,14 @@ class PurgeContext {
 
   Statistics* statistics_;
   std::unique_ptr<AbstractMutex> mutex_;
-  CopyOnWrite<PurgeSet> purge_set_;        // protected by mutex_
-  PurgeSet pending_purges_;                // protected by mutex_
-  PurgeCallbackVector pending_callbacks_;  // protected by mutex_
-  int64 local_purge_index_;                // protected by mutex_
-  int num_consecutive_failures_;           // protected_by mutex_
-  bool waiting_for_interprocess_lock_;     // protected_by mutex_
-  bool reading_;                           // protected_by mutex_
+  CopyOnWrite<PurgeSet> purge_set_;                     // protected by mutex_
+  PurgeSet pending_purges_;                             // protected by mutex_
+  PurgeCallbackVector pending_callbacks_;               // protected by mutex_
+  NonEvictingPurgeVector pending_non_evicting_purges_;  // protected by mutex_
+  int64 local_purge_index_;                             // protected by mutex_
+  int num_consecutive_failures_;                        // protected_by mutex_
+  bool waiting_for_interprocess_lock_;                  // protected_by mutex_
+  bool reading_;                                        // protected_by mutex_
 
   bool enable_purge_;  // When false, can only flush entire cache.
   int max_bytes_in_cache_;

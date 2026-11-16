@@ -58,7 +58,7 @@
    "input": "seeds/comment-forms.html",
    "input_sha256": "8f2c02d556e5b06ef82d5cee7e71ee030938092e6621ef27113f30ee46f5e6be",
    "status": "ok",
-   "output_sha256": "985a7a48e03cbaf7a95ec96e2064a98263ea1a20d323d6c3e8d46052ad3c2ad1"
+   "output_sha256": "1560e4cb8f9ccc64dc308b947f08a5dd841dbad3b01487b54d789225089a1def"
   },
   {
    "input": "seeds/comment-ie-directive.html",

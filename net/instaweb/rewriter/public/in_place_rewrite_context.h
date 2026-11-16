@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/http_value_writer.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
@@ -46,6 +47,7 @@ class CacheUrlAsyncFetcher;
 class HtmlElement;
 class InputInfo;
 class MessageHandler;
+class RequestHeaders;
 class ResourceContext;
 class ResponseHeaders;
 class RewriteDriver;
@@ -86,6 +88,9 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // is true.
   static const char kInPlaceOversizedOptStream[];
   static const char kInPlaceUncacheableRewrites[];
+  // Requests carrying Origin that were not given an in-place copy, because
+  // the copy's own CORS headers do not allow the request's origin.
+  static const char kInPlaceCorsDeclined[];
 
   InPlaceRewriteContext(RewriteDriver* driver, const StringPiece& url);
   ~InPlaceRewriteContext() override;
@@ -125,8 +130,20 @@ class InPlaceRewriteContext : public SingleRewriteContext {
     return true;
   }
 
+  // Whether a stored copy (or loaded file) with these headers may answer a
+  // request with these headers: always when InPlaceCorsGuard is off or the
+  // request carries no Origin, else only when the copy's
+  // Access-Control-Allow-Origin allows the request's origin.  A refusal is
+  // counted once per request in in_place_cors_declined.
+  bool CorsAllowsServing(const RequestHeaders* request,
+                         const ResponseHeaders& response);
+
  private:
   friend class RecordingFetch;
+  class CorsCheckedFallbackCallback;
+  // Continues a fallback lookup made by CorsCheckedFallbackCallback.
+  void CorsCheckedFallbackDone(HTTPCache::FindResult find_result,
+                               HTTPCache::Callback* data);
   bool PolicyPermitsRendering() const override;
   // Implements RewriteContext::Harvest().
   void Harvest() override;
@@ -181,6 +198,10 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // and let the origin itself serve the resource.
   bool proxy_mode_;
 
+  // Set once this request was refused a copy by CorsAllowsServing.
+  bool cors_declined_;
+  Variable* in_place_cors_declined_;
+
   InPlaceRewriteContext(const InPlaceRewriteContext&) = delete;
   InPlaceRewriteContext& operator=(const InPlaceRewriteContext&) = delete;
 };
@@ -204,6 +225,8 @@ class RecordingFetch : public SharedAsyncFetch {
   bool HandleFlush(MessageHandler* handler) override;
   // Implements SharedAsyncFetch::HandleDone().
   void HandleDone(bool success) override;
+  // A stored copy that may not answer this request is a miss.
+  bool IsCachedResultValid(const ResponseHeaders& headers) override;
 
   // A zero-copy aliased serve must NOT bypass IPRO recording: de-alias
   // with the verified copy (CopyMappedVerified), then run the copying

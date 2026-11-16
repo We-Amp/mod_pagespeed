@@ -561,6 +561,12 @@ void HtmlLexer::EvalCommentStart2(char c) {
 void HtmlLexer::EvalCommentBody(char c) {
   if (c == '-') {
     state_ = COMMENT_END1;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!-->" is a complete, empty comment to browsers. token_ is empty only
+    // directly after "<!--": every way back into this state appends to it.
+    // HTML5 spec state name: Comment start state
+    EmitComment();
+    state_ = START;
   } else {
     token_ += c;
   }
@@ -572,6 +578,11 @@ void HtmlLexer::EvalCommentBody(char c) {
 void HtmlLexer::EvalCommentEnd1(char c) {
   if (c == '-') {
     state_ = COMMENT_END2;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!--->" is a complete, empty comment to browsers.
+    // HTML5 spec state name: Comment start dash state
+    EmitComment();
+    state_ = START;
   } else {
     // thought we were ending a comment cause we saw '-', but
     // now we changed our minds.   No worries mate.  That
@@ -591,6 +602,8 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     // There could be an arbitrarily long stream of dashes before
     // we see the >.  Keep looking.
     token_ += "-";
+  } else if (c == '!') {
+    state_ = COMMENT_END_BANG;
   } else {
     // thought we were ending a comment cause we saw '--', but
     // now we changed our minds.   No worries mate.  Those
@@ -598,6 +611,21 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     token_ += "--";
     token_ += c;
     state_ = COMMENT_BODY;
+  }
+}
+
+// Handle the case where "--!" has been parsed from a comment. Browsers end
+// the comment on "--!>" as they do on "-->".
+// HTML5 spec state name: Comment end bang state
+void HtmlLexer::EvalCommentEndBang(char c) {
+  if (c == '>') {
+    EmitComment();
+    state_ = START;
+  } else {
+    // Not the end of the comment after all: "--!" was part of it.
+    token_ += "--!";
+    state_ = COMMENT_BODY;
+    EvalCommentBody(c);
   }
 }
 
@@ -1370,6 +1398,9 @@ void HtmlLexer::Parse(const char* text, int size) {
         break;
       case COMMENT_END2:
         EvalCommentEnd2(c);
+        break;
+      case COMMENT_END_BANG:
+        EvalCommentEndBang(c);
         break;
       case CDATA_START1:
         EvalCdataStart1(c);
