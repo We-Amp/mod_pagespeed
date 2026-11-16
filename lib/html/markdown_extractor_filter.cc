@@ -1019,7 +1019,11 @@ void MarkdownExtractorFilter::EndElement(HtmlElement* element) {
 
 void MarkdownExtractorFilter::Characters(HtmlCharactersNode* characters) {
   if (Skipping()) return;
-  if (AtOutputCap()) return;         // post-cap: stop accumulating any text
+  if (AtOutputCap()) return;  // post-cap: stop accumulating any text
+  if (parser_ != nullptr && parser_->passing_through()) {
+    truncated_ = true;  // the rest of the page is raw markup: not copied
+    return;
+  }
   if (OutsideContentRoot()) return;  // Issue F (4): drop bare-body chrome text
   if (in_inline_code_) {             // buffered raw, adaptive-fenced at </code>
     // Bound code_buf_ to the output cap too (a giant <code> span must not grow
@@ -1158,21 +1162,55 @@ bool HasContentRoot(std::string_view html, const std::string& parse_url) {
   return detector.found();
 }
 
-std::string RunExtractor(std::string_view html, const std::string& parse_url,
-                         bool strip_soft_chrome, bool content_root_only,
-                         const HtmlMetadata& meta) {
+// Runs one extraction over `html`. The page is fed in pieces with a Flush after
+// each, so the filter sees the parser switch to passing the rest of the page
+// through (nesting past the depth limit) and stops copying there. Pieces are
+// kPiece bytes up to `fine_from`, then one byte at a time, so the copy ends at
+// the exact point of the switch. If the switch is seen in a coarse piece,
+// *switch_at is set to where that piece began and the caller runs again with
+// fine_from there (rare: only pages that pass the rest through).
+std::string RunExtractorOnce(std::string_view html,
+                             const std::string& parse_url,
+                             bool strip_soft_chrome, bool content_root_only,
+                             const HtmlMetadata& meta, size_t fine_from,
+                             size_t* switch_at) {
   MarkdownExtractorFilter filter(strip_soft_chrome, content_root_only);
   filter.SetFrontMatter(meta.title, meta.meta_description, meta.canonical);
   NullMessageHandler message_handler;
   HtmlParse parser(&message_handler);  // ctor auto-inits HtmlKeywords
   parser.AddFilter(&filter);
+  filter.SetParser(&parser);
   if (!parser.StartParse(parse_url)) return std::string();
-  parser.ParseText(html);
+  constexpr size_t kPiece = 4096;
+  *switch_at = std::string_view::npos;
+  for (size_t pos = 0; pos < html.size();) {
+    const size_t n = pos < fine_from ? kPiece : 1;
+    parser.ParseText(html.substr(pos, n));
+    parser.Flush();
+    if (parser.passing_through()) {
+      if (pos < fine_from) *switch_at = pos;
+      break;
+    }
+    pos += n;
+  }
   parser.FinishParse();
   // dropped_content_root signals a fail-open re-extract is needed; encode it by
   // returning empty so the caller re-runs (only meaningful on the strip pass).
   if (strip_soft_chrome && filter.dropped_content_root()) return std::string();
   return filter.markdown();
+}
+
+std::string RunExtractor(std::string_view html, const std::string& parse_url,
+                         bool strip_soft_chrome, bool content_root_only,
+                         const HtmlMetadata& meta) {
+  size_t switch_at = std::string_view::npos;
+  std::string md = RunExtractorOnce(
+      html, parse_url, strip_soft_chrome, content_root_only, meta,
+      /*fine_from=*/std::string_view::npos, &switch_at);
+  if (switch_at == std::string_view::npos) return md;
+  size_t unused;
+  return RunExtractorOnce(html, parse_url, strip_soft_chrome, content_root_only,
+                          meta, switch_at, &unused);
 }
 }  // namespace
 

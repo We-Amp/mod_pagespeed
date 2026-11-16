@@ -15,6 +15,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "lib/base/url_util.h"
+#include "src/worker/html_css_injector.h"
 #include "src/worker/html_scanner.h"
 
 namespace pagespeed {
@@ -250,12 +251,12 @@ std::string InjectBaseHrefIfAbsent(std::string_view html,
   size_t insert_at = 0;
   for (size_t i = 0; i + 5 <= html.size(); ++i) {
     if (html[i] != '<') continue;
-    if (html.compare(i, 4, "<!--") == 0) {
-      size_t comment_end = html.find("-->", i + 4);
+    if (html_scan::StartsComment(html, i)) {
+      size_t comment_end = html_scan::ScanComment(html, i);
       // Unterminated comment swallows the rest of the input; fall back to
       // prepending.
       if (comment_end == std::string_view::npos) break;
-      i = comment_end + 2;  // Loop increment steps past the '>'.
+      i = comment_end - 1;  // Loop increment steps past the comment.
       continue;
     }
     if (!absl::EqualsIgnoreCase(html.substr(i + 1, 4), "head")) continue;

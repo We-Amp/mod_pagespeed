@@ -75,7 +75,8 @@ this clones):
 - **2.0-owned (editable):**
   - `compat/` — flat `.h`-only adaptation headers (`message_handler.h`,
     `google_url.h`, `string.h`, `string_util.h`, `logging.h`,
-    `sparse_hash_map.h`, `string_hash.h`, `stl_util.h`, `timer.h`)
+    `sparse_hash_map.h`, `string_hash.h`, `stl_util.h`, `timer.h`,
+    `html_page_limit.h`)
     standing in for the canonical headers the vendored kernel includes.
     `compat/` is optimizer-owned and NEVER synced: the sync rewrites vendored
     includes to land here, never writes into it. New compat headers must

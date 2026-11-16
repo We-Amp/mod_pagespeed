@@ -745,5 +745,46 @@ TEST_F(MarkdownExtractorFilterTest,
   EXPECT_EQ(Md("<ul><li>| a | b |</li></ul>"), "- \\| a | b |");
 }
 
+// A page nested past the parser's depth limit is passed through from there as
+// raw text. The Markdown copy stops at that point: script bodies, hidden form
+// values and other markup in the rest of the page are not copied.
+TEST_F(MarkdownExtractorFilterTest, StopsWhereTheRestOfAPageIsPassedThrough) {
+  std::string html = "<html><body><p>ordinary paragraph</p>";
+  for (int i = 0; i < 520; ++i) html += "<div>";
+  html +=
+      "<script>secret()</script><input type=hidden value=tok123>"
+      "<!-- hidden note --><p>after the limit</p>";
+  for (int i = 0; i < 520; ++i) html += "</div>";
+  html += "</body></html>";
+  const std::string md = Md(html);
+  EXPECT_NE(md.find("ordinary paragraph"), std::string::npos) << md;
+  EXPECT_EQ(md.find("secret"), std::string::npos) << md;
+  EXPECT_EQ(md.find("tok123"), std::string::npos) << md;
+  EXPECT_EQ(md.find("hidden note"), std::string::npos) << md;
+  EXPECT_EQ(md.find("<script"), std::string::npos) << md;
+}
+
+// Same, with more than one 4 KiB feed piece of ordinary content before the
+// limit, so the switch is first seen in a later piece and the extraction runs
+// again, a byte at a time, from the start of that piece.
+TEST_F(MarkdownExtractorFilterTest,
+       StopsWhereTheRestIsPassedThroughAfterManyPieces) {
+  std::string html = "<html><body><p>ordinary paragraph</p>";
+  while (html.size() < 3 * 4096 + 100) html += "<p>filler text here</p>";
+  html += "<p>last ordinary</p>";
+  for (int i = 0; i < 520; ++i) html += "<div>";
+  html +=
+      "<script>secret()</script><input type=hidden value=tok123>"
+      "<!-- hidden note --><p>after the limit</p>";
+  for (int i = 0; i < 520; ++i) html += "</div>";
+  html += "</body></html>";
+  const std::string md = Md(html);
+  EXPECT_NE(md.find("ordinary paragraph"), std::string::npos) << md;
+  EXPECT_NE(md.find("last ordinary"), std::string::npos) << md;
+  EXPECT_EQ(md.find("secret"), std::string::npos) << md;
+  EXPECT_EQ(md.find("tok123"), std::string::npos) << md;
+  EXPECT_EQ(md.find("hidden note"), std::string::npos) << md;
+}
+
 }  // namespace
 }  // namespace net_instaweb

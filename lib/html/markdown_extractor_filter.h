@@ -15,6 +15,7 @@ namespace net_instaweb {
 
 class HtmlElement;
 class HtmlCharactersNode;
+class HtmlParse;
 
 // First-cut SAX HTML -> markdown extractor for the agent_optimize render.
 // PURE: it consumes the SAX event stream of the RENDERED
@@ -58,6 +59,14 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   void StartElement(HtmlElement* element) override;
   void EndElement(HtmlElement* element) override;
   void Characters(HtmlCharactersNode* characters) override;
+
+  // The parser that feeds this filter. When it has switched to passing the
+  // rest of a page through (a page nested past the depth limit, or past the
+  // page limit), the text it still delivers is raw markup, not parsed content:
+  // it is dropped and the copy is marked truncated. The caller must flush the
+  // parser often enough (see RunExtractor) for the switch to be seen close to
+  // where it happens.
+  void SetParser(const HtmlParse* parser) { parser_ = parser; }
 
   // Page metadata captured by a separate ExtractHtmlMetadata pass over the same
   // HTML. When non-empty, EndDocument prepends a YAML front-matter block (Issue
@@ -134,6 +143,7 @@ class MarkdownExtractorFilter : public EmptyHtmlFilter {
   std::string fm_title_;
   std::string fm_description_;
   std::string fm_canonical_;
+  const HtmlParse* parser_ = nullptr;
   std::string fm_date_;
   // Block-in-anchor (Issue F (5)): byte offset in cur_ where the open anchor's
   // link text begins, so a wrapped <h2>/<p> flattens to one '[text](href)'.

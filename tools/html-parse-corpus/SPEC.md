@@ -233,9 +233,11 @@ flags <FLAGS>
 - `<FLAGS>`: `none`, or `size-limit-exceeded` when the parser reported its
   size/token ceiling tripped (1.15: `HtmlParse::size_limit_exceeded()`).
 
-The nesting cap (`kMaxNestingDepth = 512`) has no flag of its own: tripping
-it truncates the event sequence, which is itself the compared signal, and
-both products converge on that behavior.
+The nesting cap (`kMaxNestingDepth = 512`) has no flag of its own. A start
+tag that would open element number 513 does not create an element: that tag
+and the rest of the input are emitted as text, the elements still open are
+closed as unclosed, and nothing of the input is dropped. That event sequence
+is itself the compared signal, and both products converge on that behavior.
 
 ### 3.5 Example
 

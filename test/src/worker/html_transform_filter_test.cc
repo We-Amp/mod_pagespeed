@@ -1696,6 +1696,57 @@ TEST(HtmlTransformFilterTest, InjectsSpeculationRules) {
   EXPECT_LT(script_pos, body_end);
 }
 
+// Past the parser's page limit the rest of a page is passed through as text,
+// and the elements still open (here <body> and <html>) end at the end of
+// input. Their real end tags are in that text, so nothing is injected "before
+// </body>" there: the passed-through part is the end of the output, as it came
+// in, with every transform on.
+TEST(HtmlTransformFilterTest, PassedThroughTailIsTheEndOfTheOutput) {
+  HtmlTransformConfig config;
+  config.enable_critical_css = true;
+  config.enable_lazy_load = true;
+  config.enable_image_dimensions = true;
+  config.enable_lcp_preload = true;
+  config.enable_preconnect_injection = true;
+  config.enable_speculation_rules = true;
+  const std::vector<std::string> spec_urls = {"https://example.com/next"};
+
+  const std::string head_and_start =
+      "<html><head><title>t</title></head><body>"
+      "<img src=\"a.jpg\"><img src=\"b.jpg\"><p>" +
+      std::string(4096, 'x');
+  const std::string tail =
+      std::string(100, 'y') +
+      "</p><img src=\"late.jpg\"><p>after</p></body></html>";
+  const std::string html = head_and_start + tail;
+
+  net_instaweb::HtmlKeywords::Init();
+  net_instaweb::NullMessageHandler message_handler;
+  net_instaweb::HtmlParse parser(&message_handler);
+  // Switch inside the run of 'x': the text there is all that is pending.
+  parser.set_pass_through_after(static_cast<int64_t>(head_and_start.size()));
+  HtmlTransformFilter transform(&parser, config, ".a{color:red}", nullptr, "",
+                                "https", {}, {}, spec_urls, {}, {});
+  transform.set_subresource_gate(AdmitAllGate(), /*host_fetch_allowed=*/true);
+  transform.set_document_is_text_html(true);
+  parser.AddFilter(&transform);
+  std::string output;
+  net_instaweb::StringWriter writer(&output);
+  net_instaweb::HtmlWriterFilter writer_filter(&parser);
+  writer_filter.set_writer(&writer);
+  parser.AddFilter(&writer_filter);
+  ASSERT_TRUE(parser.StartParse("http://example.com/"));
+  parser.ParseText(html);
+  parser.FinishParse();
+
+  ASSERT_TRUE(parser.passing_through());
+  ASSERT_GE(output.size(), tail.size());
+  EXPECT_EQ(tail, std::string_view(output).substr(output.size() - tail.size()))
+      << output.substr(output.size() > 300 ? output.size() - 300 : 0);
+  // The parsed part before the limit is still optimized.
+  EXPECT_NE(html, output);
+}
+
 TEST(HtmlTransformFilterTest, SpeculationRulesDisabledByDefault) {
   HtmlTransformConfig config;
   config.enable_critical_css = false;
@@ -5575,7 +5626,7 @@ void ExpectBlockTextNeverHoldsMarkup(std::string_view page) {
   }
 }
 
-// `<!-->`: a browser ends the comment at once; the parser runs on to `-->`.
+// `<!-->`: a browser and the parser end the comment at once.
 TEST(HtmlTransformFilterTest, CriticalCssTextNeverHoldsMarkupShortComment) {
   ExpectBlockTextNeverHoldsMarkup(
       "<html><head><!--><select>--><link rel=stylesheet href=/s.css></head>"
@@ -5589,7 +5640,7 @@ TEST(HtmlTransformFilterTest, CriticalCssTextNeverHoldsMarkupShortComment3) {
       "<body><p>x</p></body></html>");
 }
 
-// `--!>`: a browser ends a comment there; the parser does not.
+// `--!>`: a browser and the parser end a comment there.
 TEST(HtmlTransformFilterTest, CriticalCssTextNeverHoldsMarkupBangComment) {
   ExpectBlockTextNeverHoldsMarkup(
       "<html><head><!-- x --!><select>--><link rel=stylesheet href=/s.css>"

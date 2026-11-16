@@ -293,13 +293,15 @@ but block all network via offline mode + Fetch interception + DNS blocking.
   brace or comma outside a string (`CombinedCssHasStructuralEscape`:
   misread before that fix, so their records are made again once). Keep JS disabled; enabling it is not
   the fix. `tools/async-css-probe/noscript_compare.mjs` checks the removal
-  against Chromium. Comments: the removal reads them as a browser does, but
-  `html_scan::ScanComment` (the validator's placement replay, the injector)
-  follows the serve path's vendored HtmlLexer, which runs `<!-->`, `<!--->`
-  and `--!>` on to the next `-->`; placement parity needs the lexer's view.
-  Where a removed `<noscript>` and a lexer-rule comment partially overlap,
-  the two readings disagree about which markup is comment text, so
-   `BuildValidationDocuments` refuses.
+  against Chromium. Comments: the removal, the validator's placement replay
+  and the injector all read them with `html_scan::ScanComment`, which is the
+  serve path's vendored HtmlLexer reading and a browser's (`<!-->` and
+  `<!--->` end at once, `--!>` ends a comment); `html_css_injector_test`
+  checks it against the lexer. The replay writes comments as the serve path
+  writes them (`html_scan::CommentText`). The removal reads `<noscript>`
+  content as raw text and the lexer as markup, so where a removed
+  `<noscript>` and a comment the lexer reads partially overlap,
+  `BuildValidationDocuments` refuses.
 - **Inline scripts get no per-element coverage**: V8's precise coverage
   collapses ALL inline scripts onto the document URL, so no per-element join
   exists. Inline scripts are reported (`is_inline`, empty url) but classify

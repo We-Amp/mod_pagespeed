@@ -503,7 +503,9 @@ TEST_F(HtmlForeignContentTest, NestingCapInForeignContent) {
     ++starts;
   }
   EXPECT_EQ(HtmlLexer::kMaxNestingDepth - 1, starts);
-  EXPECT_EQ(std::string::npos, events.find("style"));
+  // What follows the cap is text, with no element of its own.
+  EXPECT_EQ(std::string::npos, events.find("+~style"));
+  EXPECT_EQ(std::string::npos, events.find("+style"));
 }
 
 TEST_F(HtmlForeignContentTest, EndOfFileInForeignContent) {

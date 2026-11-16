@@ -117,7 +117,10 @@ cc_library(
     srcs = ["noscript_strip.cc"],
     hdrs = ["noscript_strip.h"],
     visibility = ["//visibility:public"],
-    deps = [":html_scanner"],
+    deps = [
+        ":html_css_injector",
+        ":html_scanner",
+    ],
 )
 
 # Cascade-layer order of a page, and where a layered critical block may go
@@ -179,6 +182,7 @@ cc_library(
     hdrs = ["analysis_resource_map.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":html_css_injector",
         ":html_scanner",
         "//lib/base:url_util",
         "//lib/classify:url_normalizer",

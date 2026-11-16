@@ -569,6 +569,17 @@ TEST(InjectBaseHrefIfAbsent, CommentedHeadNotAnInsertionPoint) {
   EXPECT_TRUE(out.starts_with("<!-- legacy <head> markup -->"));
 }
 
+// `<!-->` is a whole comment, as a browser reads it: the <head> after it is
+// the real one.
+TEST(InjectBaseHrefIfAbsent, ShortCommentEndsBeforeTheHead) {
+  std::string html =
+      "<!--><html><head><title>t</title></head><body><!-- x --></body></html>";
+  std::string out =
+      InjectBaseHrefIfAbsent(html, "/p.html", "example.com", "https");
+  const std::string expected = "<base href=\"https://example.com/p.html\">";
+  EXPECT_EQ(out.find(expected), out.find("<html><head>") + 12) << out;
+}
+
 TEST(InjectBaseHrefIfAbsent, EscapesHrefAttributeSpecials) {
   std::string out = InjectBaseHrefIfAbsent(
       "<html><head></head></html>", "/p?a=1&b=\"x\"", "example.com", "https");

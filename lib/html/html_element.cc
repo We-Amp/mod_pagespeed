@@ -106,6 +106,7 @@ HtmlElement::Data::Data(const HtmlName& name,
                         const HtmlEventListIterator& end)
     : begin_line_number_(0),
       live_(1),
+      begins_in_first_1024_bytes_(0),
       end_line_number_(0),
       style_(AUTO_CLOSE),
       name_(name),

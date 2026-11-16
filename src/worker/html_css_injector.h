@@ -40,11 +40,20 @@ RawTextElement ScanRawTextElement(std::string_view html, size_t pos);
 // True when html[pos] opens an HTML comment.
 bool StartsComment(std::string_view html, size_t pos);
 
-// One past the "-->" closing the comment opened at html[pos], or npos when the
-// comment is never closed. This is the serve path's HtmlLexer reading, kept
-// for placement parity: unlike a browser, it runs `<!-->` and
-// `<!--->` on to the next "-->" and does not end a comment at `--!>`.
+// One past the end of the comment opened at html[pos], or npos when the
+// comment is never closed. This is the serve path's HtmlLexer reading (lib/html,
+// vendored), which is also a browser's: `<!-->` and `<!--->` end at once, and
+// otherwise the first `-->` or `--!>` ends the comment. Placement parity needs
+// the lexer's view and the <noscript> removal a browser's; both use this one
+// function, and test/src/worker/html_css_injector_test.cc checks it against
+// the lexer itself.
 size_t ScanComment(std::string_view html, size_t pos);
+
+// The text of the comment html[pos, end) (end from ScanComment), as the serve
+// path's lexer keeps it: what lies between `<!--` and the `-->` or `--!>`
+// that ends it, empty for `<!-->` and `<!--->`. The serve path writes every
+// comment back as `<!--` + this text + `-->`.
+std::string_view CommentText(std::string_view html, size_t pos, size_t end);
 
 // Position of the first case-insensitive `needle` that is NOT inside a comment
 // or a raw-text element, or npos.

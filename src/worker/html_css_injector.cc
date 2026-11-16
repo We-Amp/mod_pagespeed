@@ -234,16 +234,28 @@ bool StartsComment(std::string_view html, size_t pos) {
 }
 
 size_t ScanComment(std::string_view html, size_t pos) {
-  // The serve path's HtmlLexer reading (lib/html, synced from mod_pagespeed
-  // 1.15 and not edited here): after `<!--`, the first `-->`. That is NOT the
-  // HTML tokenizer's rule for `<!-->`, `<!--->` and `--!>`:
-  // the block placement this module and the critical-CSS validator replay
-  // must agree with the serve path, which decides it on the lexer's tree.
-  // The <noscript> removal, which must agree with the browser instead, reads
-  // comments by the spec (noscript_strip.cc).
-  size_t end = html.find("-->", pos + 4);
-  if (end == std::string_view::npos) return std::string_view::npos;
-  return end + 3;
+  // The serve path's HtmlLexer (lib/html, synced from mod_pagespeed and not
+  // edited here) and the HTML tokenizer read comments alike: the comment
+  // start states end `<!-->` and `<!--->` at once, and otherwise the first
+  // `-->` or `--!>` ends the comment.
+  const size_t i = pos + 4;
+  if (i < html.size() && html[i] == '>') return i + 1;
+  if (i + 1 < html.size() && html[i] == '-' && html[i + 1] == '>') {
+    return i + 2;
+  }
+  const size_t a = html.find("-->", i);
+  const size_t b = html.find("--!>", i);
+  if (a == std::string_view::npos && b == std::string_view::npos) {
+    return std::string_view::npos;
+  }
+  return a <= b ? a + 3 : b + 4;
+}
+
+std::string_view CommentText(std::string_view html, size_t pos, size_t end) {
+  // `<!-->` and `<!--->` are the only comments shorter than `<!---->`.
+  if (end - pos < 7) return {};
+  const size_t close = html.substr(end - 4, 4) == "--!>" ? 4 : 3;
+  return html.substr(pos + 4, end - close - (pos + 4));
 }
 
 size_t FindOutsideCommentsAndRawText(std::string_view html,

@@ -403,7 +403,19 @@ void HtmlTransformFilter::EndElement(net_instaweb::HtmlElement* element) {
     if (!select_above) in_select_ = false;
   }
 
-  if (keyword == HtmlName::kHead) {
+  // Past the parser's page limit the rest of the page is passed through as
+  // text, and an element still open there ends with the input: its real end
+  // tag is in that text. There is no "before </head>" or "before </body>" to
+  // inject at then, and anything inserted would follow the end of the page.
+  const bool end_tag_passed_through =
+      parser_->passing_through() &&
+      element->style() == net_instaweb::HtmlElement::UNCLOSED;
+
+  if (keyword == HtmlName::kHead && end_tag_passed_through) {
+    in_head_ = false;
+  } else if (keyword == HtmlName::kBody && end_tag_passed_through) {
+    in_body_ = false;
+  } else if (keyword == HtmlName::kHead) {
     if (config_.enable_font_preload && !font_preload_injected_) {
       InjectFontPreload(element);
     }

@@ -45,7 +45,7 @@ TEST(ContentTypeTest, IsXmlLike) {
   EXPECT_TRUE(kContentTypeXhtml.IsXmlLike());
   EXPECT_TRUE(kContentTypeXml.IsXmlLike());
   EXPECT_FALSE(kContentTypeHtml.IsXmlLike());
-  EXPECT_FALSE(kContentTypeCeHtml.IsXmlLike());
+  EXPECT_TRUE(kContentTypeCeHtml.IsXmlLike());
   EXPECT_FALSE(kContentTypePng.IsXmlLike());
 }
 

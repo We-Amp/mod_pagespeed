@@ -230,13 +230,14 @@ TRANSFORMED=(
 #   * lib/html/compat/*.h — 2.0-owned adaptation shims for canonical headers
 #     lib/base has no equivalent of (string/string_util additions, logging,
 #     sparse_hash_map, string_hash, stl_util, timer, message_handler family,
-#     google_url policy seam).
+#     google_url policy seam, html_page_limit).
 #   * lib/base/*.h — the 2.0-native equivalents of the canonical base
 #     headers (same net_instaweb namespace, API-compatible: basictypes,
 #     arena, atom, inline_slist, printf_format, symbol_table, writer).
 #     Mapping directly avoids duplicating them under lib/html/compat/.
 transform_includes() {
-  sed -e 's|^#include "pagespeed/kernel/html/|#include "lib/html/|' \
+  sed -e 's|^#include "pagespeed/kernel/html/html_page_limit.h"|#include "lib/html/compat/html_page_limit.h"|' \
+      -e 's|^#include "pagespeed/kernel/html/|#include "lib/html/|' \
       -e 's|^#include "pagespeed/kernel/http/content_type.h"|#include "lib/html/content_type.h"|' \
       -e 's|^#include "pagespeed/kernel/http/google_url.h"|#include "lib/html/compat/google_url.h"|' \
       -e 's|^#include "pagespeed/kernel/base/message_handler.h"|#include "lib/html/compat/message_handler.h"|' \

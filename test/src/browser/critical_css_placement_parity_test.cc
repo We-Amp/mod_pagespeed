@@ -336,9 +336,9 @@ TEST(CriticalCssPlacementParityTest, TailwindV4BlockIsWrittenTheSameWay) {
 // The validator renders the page without its <noscript>
 // elements (a browser running scripts never renders them); the placement is
 // the serve path's all the same, the worker's fallback copy included.
-// A `<!-->` comment, which the serve path's HtmlLexer runs on to the
-// next "-->" (a browser ends it at once). The validator replays the lexer's
-// reading, so the stylesheet in that span is not an anchor on either side.
+// A `<!-->` comment, which the serve path's HtmlLexer ends at once, as a
+// browser does. The validator replays the lexer's reading, so the stylesheet
+// right after it is the anchor on both sides.
 TEST(CriticalCssPlacementParityTest, AShortCommentIsReadLikeTheServePath) {
   for (bool async_css : {false, true}) {
     ExpectParity(
@@ -347,6 +347,23 @@ TEST(CriticalCssPlacementParityTest, AShortCommentIsReadLikeTheServePath) {
         "<link rel=\"stylesheet\" href=\"/b.css\"></head><body></body>"
         "</html>",
         kCritical, async_css);
+  }
+}
+
+// The other comment endings a browser and the serve path's lexer share: an
+// empty `<!--->` and a `--!>`, ahead of the first sheet.
+TEST(CriticalCssPlacementParityTest, EveryCommentEndingIsReadLikeTheServePath) {
+  for (bool async_css : {false, true}) {
+    for (const char* comment : {"<!--->", "<!-- a --!>", "<!---->",
+                                "<!-- a -->", "<!-- a -!> b -->"}) {
+      std::string page = "<html><head><title>T</title>";
+      page += comment;
+      page +=
+          "<link rel=\"stylesheet\" href=\"/a.css\"><!-- x -->"
+          "<meta name=\"x\" content=\"y\"><link rel=\"stylesheet\" "
+          "href=\"/b.css\"></head><body></body></html>";
+      ExpectParity(page, kCritical, async_css);
+    }
   }
 }
 

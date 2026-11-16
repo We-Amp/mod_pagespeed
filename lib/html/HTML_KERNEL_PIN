@@ -14,5 +14,5 @@
 # floor — for changes arriving via PR, the floor only moves forward.
 # Convention: on a routine pin bump, move the floor to the new pin in the
 # same commit. See lib/html/CLAUDE.md.
-8447fa07a6d9153c24d1a473be35c6651d7f0aa4  module: 2.8.0 part 2/2: cache integrity, input provenance, HTML parsing
-floor 8447fa07a6d9153c24d1a473be35c6651d7f0aa4
+67344671acede7fd9ad9dde37f08fd1dfbfef78b  html: keep the rest of a page that nests past the depth limit (#802)
+floor 67344671acede7fd9ad9dde37f08fd1dfbfef78b

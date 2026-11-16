@@ -544,7 +544,10 @@ StripResult StripStylesheetSources(
         out.error = "unterminated HTML comment";
         return out;
       }
-      out.html.append(html.substr(pos, end - pos));
+      // As the serve path writes it: `<!-->` goes out as `<!---->`, and a
+      // comment ended by `--!>` with `-->`.
+      absl::StrAppend(&out.html, "<!--", html_scan::CommentText(html, pos, end),
+                      "-->");
       pos = end;
       continue;
     }
@@ -718,9 +721,9 @@ bool NoscriptHoldsPrelude(std::string_view markup) {
 }
 
 // The comments of `html` as the serve path's HtmlLexer reads them
-// (html_scan::ScanComment: after `<!--`, the first `-->`; an unterminated one
-// runs to the end), outside raw-text elements, <noscript> content read as
-// markup as the lexer does. [begin, end) in document order.
+// (html_scan::ScanComment; an unterminated one runs to the end), outside
+// raw-text elements, <noscript> content read as markup as the lexer does.
+// [begin, end) in document order.
 std::vector<std::pair<size_t, size_t>> LexerCommentExtents(
     std::string_view html) {
   std::vector<std::pair<size_t, size_t>> out;

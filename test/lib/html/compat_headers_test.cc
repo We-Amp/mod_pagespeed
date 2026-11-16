@@ -13,11 +13,13 @@
 // contracts; the real behavioral coverage lives in the sibling
 // compat_message_handler_test.cc and compat_google_url_test.cc suites.
 
+#include <cstdint>
 #include <string_view>
 #include <type_traits>
 
 #include "gtest/gtest.h"
 #include "lib/html/compat/google_url.h"
+#include "lib/html/compat/html_page_limit.h"
 #include "lib/html/compat/logging.h"
 #include "lib/html/compat/message_handler.h"
 #include "lib/html/compat/sparse_hash_map.h"
@@ -55,6 +57,11 @@ TEST(HtmlCompatHeadersTest, GoogleUrlSeamCompilesStandalone) {
   EXPECT_EQ(url.Spec(), "http://example.com/");
   net_instaweb::GoogleUrl empty;
   EXPECT_FALSE(empty.IsValid());
+}
+
+TEST(HtmlCompatHeadersTest, PageLimitIsCanonical) {
+  static_assert(net_instaweb::kHtmlPageLimitBytes == int64_t{64} << 20);
+  EXPECT_GT(net_instaweb::kHtmlPageLimitBytes, 0);
 }
 
 }  // namespace

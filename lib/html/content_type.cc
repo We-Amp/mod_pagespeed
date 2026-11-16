@@ -182,6 +182,7 @@ bool ContentType::IsHtmlLike() const {
 bool ContentType::IsXmlLike() const {
   switch (type_) {
     case kXhtml:
+    case kCeHtml:  // CE-HTML (CEA-2014) is XHTML, parsed as XML.
     case kXml:
       return true;
     default:

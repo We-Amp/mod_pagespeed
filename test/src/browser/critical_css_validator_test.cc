@@ -444,17 +444,15 @@ TEST(BuildValidationDocumentsTest, AnUntrustedNoscriptRemovalRefuses) {
   EXPECT_NE(docs.error.find("<noscript>"), std::string::npos) << docs.error;
 }
 
-// The removal reads comments as a browser does and the placement
-// replay as the serve path's lexer does. Where a lexer comment's "-->" sits in
-// a removed <noscript>, or a lexer comment starts in one and ends past it, the
-// two disagree about which markup is comment text, so the validator refuses.
+// The removal reads <noscript> content as raw text, as a browser running
+// scripts does, and the placement replay reads it as markup, as the serve
+// path's lexer does. Where a lexer comment's "-->" sits in a removed
+// <noscript>, or a lexer comment starts in one and ends past it, the two
+// disagree about which markup is comment text, so the validator refuses.
 TEST(BuildValidationDocumentsTest, ANoscriptCrossingALexerCommentRefuses) {
   for (const char* head :
-       {"<!--><noscript>x --></noscript><link rel=stylesheet href=/a.css>",
-        "<!---><noscript>x --></noscript><link rel=stylesheet href=/a.css>",
-        "<!-- a --!><noscript>x --></noscript><link rel=stylesheet "
-        "href=/a.css>",
-        "<noscript><!-- </noscript> --><link rel=stylesheet href=/a.css>"}) {
+       {"<noscript><!-- </noscript> --><link rel=stylesheet href=/a.css>",
+        "<noscript><!-- </noscript> --!><link rel=stylesheet href=/a.css>"}) {
     SCOPED_TRACE(head);
     auto docs = BuildValidationDocuments(
         absl::StrCat("<html><head><title>T</title>", head,
@@ -463,11 +461,15 @@ TEST(BuildValidationDocumentsTest, ANoscriptCrossingALexerCommentRefuses) {
     EXPECT_FALSE(docs.ok);
     EXPECT_NE(docs.error.find("overlap"), std::string::npos) << docs.error;
   }
-  // A comment inside a <noscript>, or a <noscript> inside a lexer comment, is
-  // read the same way by both.
+  // A comment inside a <noscript>, a <noscript> inside a comment, or one after
+  // a comment that `<!-->`, `<!--->` or `--!>` ends is read the same way by
+  // both.
   for (const char* head :
        {"<noscript><!-- c --></noscript><link rel=stylesheet href=/a.css>",
-        "<!--><noscript>x</noscript> --><link rel=stylesheet href=/a.css>"}) {
+        "<!-- <noscript>x</noscript> --><link rel=stylesheet href=/a.css>",
+        "<!--><noscript>x --></noscript><link rel=stylesheet href=/a.css>",
+        "<!---><noscript>x --></noscript><link rel=stylesheet href=/a.css>",
+        "<!--a--!><noscript>--></noscript><link rel=stylesheet href=/a.css>"}) {
     SCOPED_TRACE(head);
     auto docs = BuildValidationDocuments(
         absl::StrCat("<html><head><title>T</title>", head,
@@ -500,25 +502,25 @@ TEST(BuildValidationDocumentsTest, AScannerDisagreementRefuses) {
       << disagree.error;
 }
 
-// The serve path places the block on the HtmlLexer's reading, which
-// runs `<!-->` on to the next "-->". The validator must place it the same way
-// (here: the first link sits in that comment for the serve path, so the block
-// goes before the second), although a browser ends the comment at once; and
-// a `<!-->` with no later "-->" reads to the end, where no placement can be
-// replayed, so the validator refuses instead.
+// The serve path places the block on the HtmlLexer's reading, which ends
+// `<!-->` at once, as a browser does. The validator must place it the same
+// way (here: the first link follows that comment, so the block goes before
+// it) and write the comments as the serve path writes them (`<!-->` as
+// `<!---->`, `--!>` as `-->`); and a comment with no end reads to the end,
+// where no placement can be replayed, so the validator refuses instead.
 TEST(BuildValidationDocumentsTest, CommentsAreReadAsTheServePathReadsThem) {
   auto docs = BuildValidationDocuments(
       "<html><head><title>T</title><!--><link rel=stylesheet href=/a.css>"
-      "<!-- x --><link rel=stylesheet href=/b.css></head><body>x</body>"
+      "<!-- x --!><link rel=stylesheet href=/b.css></head><body>x</body>"
       "</html>",
       ".a{color:red}.b{}", ".a{color:red}");
   ASSERT_TRUE(docs.ok) << docs.error;
   EXPECT_EQ(docs.candidate,
-            "<html><head><title>T</title><!--><link rel=stylesheet href=/a.css>"
-            "<!-- x --><style data-pagespeed-critical>.a{color:red}</style>"
+            "<html><head><title>T</title><!---->"
+            "<style data-pagespeed-critical>.a{color:red}</style><!-- x -->"
             "</head><body>x</body></html>");
   auto open = BuildValidationDocuments(
-      "<html><head><title>T</title></head><body><!--><div class=hero>HERO"
+      "<html><head><title>T</title></head><body><!-- <div class=hero>HERO"
       "</div></body></html>",
       ".a{color:red}.b{}", ".a{color:red}");
   EXPECT_FALSE(open.ok);

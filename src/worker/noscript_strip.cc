@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include "src/worker/html_css_injector.h"
 #include "src/worker/html_scanner.h"
 
 namespace pagespeed {
@@ -224,16 +225,11 @@ Tag ScanTag(std::string_view html, size_t pos) {
 // html[pos..] is "<!--". One past the comment's end as the HTML tokenizer
 // reads it, or npos when it runs to the end of the input: the comment start
 // states end `<!-->` and `<!--->` at once, and otherwise the first `-->` or
-// `--!>` ends it. Deliberately not html_scan::ScanComment, which follows the
-// serve path's HtmlLexer (see there): this removal must agree with a browser.
+// `--!>` ends it. The serve path's HtmlLexer reads comments the same way, so
+// this is html_scan::ScanComment; noscript_strip_test pins the browser's
+// reading and html_css_injector_test the lexer's.
 size_t CommentEnd(std::string_view html, size_t pos) {
-  const size_t i = pos + 4;
-  if (i < html.size() && html[i] == '>') return i + 1;
-  if (i + 1 < html.size() && html[i] == '-' && html[i + 1] == '>') return i + 2;
-  const size_t a = html.find("-->", i);
-  const size_t b = html.find("--!>", i);
-  if (a == npos && b == npos) return npos;
-  return a <= b ? a + 3 : b + 4;
+  return html_scan::ScanComment(html, pos);
 }
 
 // At html[i]: `</name` followed by whitespace, `/` or `>`, the "appropriate

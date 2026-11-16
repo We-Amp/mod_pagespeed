@@ -358,6 +358,13 @@ class HtmlElement : public HtmlNode {
   int begin_line_number() const { return data_->begin_line_number_; }
   int end_line_number() const { return data_->end_line_number_; }
 
+  // Whether the element's start tag begins within the first 1024 bytes of
+  // the document, the part a browser looks at for a meta charset before it
+  // parses the page. False for an element no parse created.
+  bool begins_in_first_1024_bytes() const {
+    return data_->begins_in_first_1024_bytes_;
+  }
+
  protected:
   void SynthesizeEvents(const HtmlEventListIterator& iter,
                         HtmlEventList* queue) override;
@@ -389,7 +396,8 @@ class HtmlElement : public HtmlNode {
     // deleting element->data_.  Flushing an ElementClose deletes
     // data_ but HtmlElement knows that null data_ implies !live().
     unsigned begin_line_number_ : 24;
-    unsigned live_ : 8;
+    unsigned live_ : 7;
+    unsigned begins_in_first_1024_bytes_ : 1;
     unsigned end_line_number_ : 24;
     Style style_ : 8;
 
@@ -406,6 +414,9 @@ class HtmlElement : public HtmlNode {
   void set_end(const HtmlEventListIterator& end) { data_->end_ = end; }
 
   void set_begin_line_number(int line) { data_->begin_line_number_ = line; }
+  void set_begins_in_first_1024_bytes(bool x) {
+    data_->begins_in_first_1024_bytes_ = x;
+  }
   void set_end_line_number(int line) { data_->end_line_number_ = line; }
 
   // construct via HtmlParse::NewElement

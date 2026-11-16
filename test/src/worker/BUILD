@@ -104,7 +104,19 @@ gtest_test(
 
 gtest_test(
     name = "html_css_injector_test",
+    # Vendored lib/html headers name unused parameters (canonical idiom).
+    copts = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-Wno-error=unused-parameter"],
+    }),
     deps = [
+        "//lib/base:string_writer",
+        "//lib/html:compat",
+        "//lib/html:empty_html_filter",
+        "//lib/html:html_keywords",
+        "//lib/html:html_node",
+        "//lib/html:html_parse",
+        "//lib/html:html_writer_filter",
         "//src/worker:html_css_injector",
     ],
 )

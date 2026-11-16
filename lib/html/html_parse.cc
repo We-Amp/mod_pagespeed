@@ -1084,6 +1084,10 @@ bool HtmlParse::TagAllowsBriefTermination(HtmlName::Keyword keyword) const {
 
 const DocType& HtmlParse::doctype() const { return lexer_->doctype(); }
 
+const ContentType& HtmlParse::content_type() const {
+  return lexer_->content_type();
+}
+
 void HtmlParse::InfoV(const char* file, int line, const char* msg,
                       va_list args) {
   message_handler_->InfoV(file, line, msg, args);
@@ -1253,6 +1257,12 @@ void HtmlParse::set_size_limit(int64 x) { lexer_->set_size_limit(x); }
 bool HtmlParse::size_limit_exceeded() const {
   return lexer_->size_limit_exceeded();
 }
+
+void HtmlParse::set_pass_through_after(int64 x) {
+  lexer_->set_pass_through_after(x);
+}
+
+bool HtmlParse::passing_through() const { return lexer_->passing_through(); }
 
 bool HtmlParse::InsertComment(StringPiece unescaped) {
   HtmlElement* parent = nullptr;

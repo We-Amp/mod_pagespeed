@@ -28,13 +28,15 @@ HTML_PKG_COPTS = select({
 # StringSetInsensitive), logging (DCHECK/CHECK families, LOG, VLOG),
 # sparse_hash_map (std::unordered_map subclass), string_hash (case-folding
 # hash functors), stl_util (canonical STLDeleteElements mirror), timer
-# (minimal abstract Timer).
+# (minimal abstract Timer), html_page_limit (the page-length bound past
+# which the lexer passes the rest of a page through).
 # Header-only; nothing production references it yet (the vendored kernel
 # lands with the first sync).
 cc_library(
     name = "compat",
     hdrs = [
         "compat/google_url.h",
+        "compat/html_page_limit.h",
         "compat/logging.h",
         "compat/message_handler.h",
         "compat/sparse_hash_map.h",

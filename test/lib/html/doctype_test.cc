@@ -64,6 +64,16 @@ TEST(DocTypeTest, DetectXhtml5) {
   EXPECT_EQ(DocType::kXHTML5, doctype);
 }
 
+// CE-HTML (CEA-2014) is XHTML, read by XML parsers: it gets the rules for
+// pages that may be parsed as XML, so the HTML5 doctype is the XHTML one.
+TEST(DocTypeTest, CeHtmlIsReadAsXml) {
+  EXPECT_TRUE(kContentTypeCeHtml.IsXmlLike());
+  DocType doctype;
+  EXPECT_TRUE(doctype.Parse("DOCTYPE html", kContentTypeCeHtml));
+  EXPECT_EQ(DocType::kXHTML5, doctype);
+  EXPECT_TRUE(doctype.IsXhtml());
+}
+
 TEST(DocTypeTest, DetectHtml4) {
   EXPECT_EQ(DocType::kHTML4Strict,
             ParseHtml("DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" "

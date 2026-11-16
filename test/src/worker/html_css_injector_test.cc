@@ -10,6 +10,14 @@
 #include <string_view>
 
 #include "gtest/gtest.h"
+#include "lib/base/string_writer.h"
+#include "lib/html/compat/message_handler.h"
+#include "lib/html/empty_html_filter.h"
+#include "lib/html/html_element.h"
+#include "lib/html/html_keywords.h"
+#include "lib/html/html_node.h"
+#include "lib/html/html_parse.h"
+#include "lib/html/html_writer_filter.h"
 
 namespace pagespeed {
 namespace {
@@ -547,17 +555,116 @@ TEST(HtmlCssInjectorTest, NamesCascadeLayer) {
       << "\"layer\" counts only as the import condition, not inside a URL";
 }
 
-// Comments end where the serve path's HtmlLexer ends them, not where a
-// browser does: the placement replayed on this reading must be
-// the serve path's.
+// Comments end where the serve path's HtmlLexer ends them, which is where a
+// browser does: the placement replayed on this reading must be the serve
+// path's, and the served page is read by a browser.
 TEST(HtmlScanTest, CommentsEndWhereTheServePathLexerEndsThem) {
   EXPECT_EQ(html_scan::ScanComment("<!---->x", 0), 7u);
   EXPECT_EQ(html_scan::ScanComment("<!-- a -->x", 0), 10u);
-  // A browser ends these at once, or at `--!>`; the lexer runs on.
-  EXPECT_EQ(html_scan::ScanComment("<!-->x<!-- y -->", 0), 16u);
-  EXPECT_EQ(html_scan::ScanComment("<!--->x<!-- y -->", 0), 17u);
-  EXPECT_EQ(html_scan::ScanComment("<!-- a --!> b -->", 0), 17u);
+  // These end at once, or at `--!>`.
+  EXPECT_EQ(html_scan::ScanComment("<!-->x<!-- y -->", 0), 5u);
+  EXPECT_EQ(html_scan::ScanComment("<!--->x<!-- y -->", 0), 6u);
+  EXPECT_EQ(html_scan::ScanComment("<!-- a --!> b -->", 0), 11u);
+  EXPECT_EQ(html_scan::ScanComment("<!-- a -!> b -->", 0), 16u);
+  EXPECT_EQ(html_scan::ScanComment("<!-- a --!x b -->", 0), 17u);
   EXPECT_EQ(html_scan::ScanComment("<!-- never closed", 0), std::string::npos);
+  EXPECT_EQ(html_scan::ScanComment("<!--", 0), std::string::npos);
+  EXPECT_EQ(html_scan::ScanComment("<!---", 0), std::string::npos);
+
+  EXPECT_EQ(html_scan::CommentText("<!-->", 0, 5), "");
+  EXPECT_EQ(html_scan::CommentText("<!--->", 0, 6), "");
+  EXPECT_EQ(html_scan::CommentText("<!---->", 0, 7), "");
+  EXPECT_EQ(html_scan::CommentText("<!-- a --!>", 0, 11), " a ");
+  EXPECT_EQ(html_scan::CommentText("<!--a--->", 0, 9), "a-");
+}
+
+// Records what the serve path's parser read: the first comment's text, and
+// whether the <b> after the comment under test was read as an element.
+class CommentRecorder : public net_instaweb::EmptyHtmlFilter {
+ public:
+  void StartDocument() override {
+    comments = 0;
+    first_comment.clear();
+    b_elements = 0;
+  }
+  void Comment(net_instaweb::HtmlCommentNode* comment) override {
+    if (comments++ == 0) first_comment = comment->contents();
+  }
+  void StartElement(net_instaweb::HtmlElement* element) override {
+    if (element->name_str() == "b") ++b_elements;
+  }
+  const char* Name() const override { return "CommentRecorder"; }
+
+  int comments = 0;
+  std::string first_comment;
+  int b_elements = 0;
+};
+
+// html_scan::ScanComment and CommentText against the vendored lexer itself,
+// on every comment body up to six bytes long made of the bytes that matter
+// to the comment states. Where ScanComment says the comment ends, the parser
+// must have ended it there with the same text (the page is written back as
+// `<!--` + CommentText + `-->` followed by the rest as it came in); where it
+// says the comment never ends, the parser must read no element after it.
+TEST(HtmlScanTest, CommentsEndExactlyWhereTheVendoredLexerEndsThem) {
+  net_instaweb::HtmlKeywords::Init();
+  net_instaweb::NullMessageHandler message_handler;
+  net_instaweb::HtmlParse parser(&message_handler);
+  CommentRecorder recorder;
+  parser.AddFilter(&recorder);
+  std::string written;
+  net_instaweb::StringWriter writer(&written);
+  net_instaweb::HtmlWriterFilter writer_filter(&parser);
+  writer_filter.set_writer(&writer);
+  parser.AddFilter(&writer_filter);
+
+  constexpr std::string_view kBytes = "-!>a";
+  constexpr std::string_view kTail = "<b>t</b>";
+  std::string body;
+  int checked = 0;
+  auto check = [&] {
+    std::string page = "<!--";
+    page += body;
+    page += kTail;
+    SCOPED_TRACE(page);
+    written.clear();
+    ASSERT_TRUE(parser.StartParse("http://example.com/"));
+    parser.ParseText(page);
+    parser.FinishParse();
+    const size_t end = html_scan::ScanComment(page, 0);
+    if (end == std::string::npos) {
+      EXPECT_EQ(recorder.b_elements, 0);
+    } else {
+      ASSERT_GE(recorder.comments, 1);
+      EXPECT_EQ(recorder.first_comment, html_scan::CommentText(page, 0, end));
+      std::string expected = "<!--";
+      expected += html_scan::CommentText(page, 0, end);
+      expected += "-->";
+      expected += page.substr(end);
+      EXPECT_EQ(written, expected);
+      EXPECT_EQ(recorder.b_elements, 1);
+    }
+    ++checked;
+  };
+  // Every string over kBytes of length 0..6, in order of length.
+  for (size_t len = 0; len <= 6; ++len) {
+    body.assign(len, kBytes[0]);
+    while (true) {
+      check();
+      size_t k = len;
+      while (k > 0) {
+        const size_t at = kBytes.find(body[k - 1]);
+        if (at + 1 < kBytes.size()) {
+          body[k - 1] = kBytes[at + 1];
+          break;
+        }
+        body[k - 1] = kBytes[0];
+        --k;
+      }
+      if (k == 0) break;
+    }
+  }
+  EXPECT_EQ(checked, 5461);  // 4^0 + ... + 4^6
 }
 
 // ---------------------------------------------------------------------------

@@ -1206,6 +1206,57 @@ TEST(PageSpeedCApi, HtmlProcessBasic) {
   ps_html_result_free(result);
 }
 
+// With max_html_size raised above the parser's 64 MiB page limit
+// (lib/html/compat/html_page_limit.h), a longer page is optimized up to the
+// limit, and everything from the limit on comes out as it came in, with the
+// default transforms on.
+TEST(PageSpeedCApi, HtmlProcessPastThePageLimitKeepsItsTail) {
+  constexpr size_t kPageLimit = size_t{64} << 20;
+  std::string html =
+      "<html><head><title>t</title></head><body>"
+      "<img src=\"/p1.jpg\"><img src=\"/p2.jpg\"><img src=\"/p3.jpg\">"
+      "<img src=\"/p4.jpg\"><img src=\"/p5.jpg\">";
+  // Short paragraphs up to just before the limit (no single token comes near
+  // the lexer's 10 MB token cap), then one run of text across the limit: the
+  // parser passes the rest through from the first byte past it.
+  const std::string paragraph = "<p>" + std::string(1000, 'x') + "</p>\n";
+  while (html.size() + paragraph.size() < kPageLimit - 2048) {
+    html += paragraph;
+  }
+  html += "<p>";
+  html.append(kPageLimit + 2048 - html.size(), 'x');
+  html +=
+      "</p><img src=\"/late1.jpg\"><img src=\"/late2.jpg\">"
+      "<p>tail</p></body></html>";
+  const std::string_view tail = std::string_view(html).substr(kPageLimit);
+
+  ps_html_config_t config;
+  ps_html_config_init(&config);
+  config.max_html_size = kPageLimit + (size_t{16} << 20);
+  ASSERT_LE(html.size(), config.max_html_size);
+
+  ps_html_result_t* result = nullptr;
+  ASSERT_EQ(ps_html_process(html.data(), html.size(), "http://example.com/page",
+                            nullptr, &config, nullptr, &result),
+            PS_OK);
+  ASSERT_NE(result, nullptr);
+  size_t out_len = 0;
+  const char* out = ps_html_result_output(result, &out_len);
+  ASSERT_NE(out, nullptr);
+  const std::string_view output(out, out_len);
+
+  // Optimized before the limit...
+  EXPECT_NE(output.substr(0, 4096).find("loading=\"lazy\""),
+            std::string_view::npos);
+  // ...and the tail is the end of the output, byte for byte.
+  ASSERT_GE(output.size(), tail.size());
+  EXPECT_TRUE(output.substr(output.size() - tail.size()) == tail)
+      << "output ends with: "
+      << output.substr(output.size() > 300 ? output.size() - 300 : 0);
+
+  ps_html_result_free(result);
+}
+
 TEST(PageSpeedCApi, HtmlProcessNull) {
   ps_html_result_t* result = nullptr;
   EXPECT_EQ(ps_html_process(nullptr, 0, "http://example.com/", nullptr, nullptr,
