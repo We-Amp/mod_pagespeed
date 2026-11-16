@@ -126,19 +126,17 @@ Module versions before the one that made the handler lookup case-sensitive (see 
 
 ```apache
 <Location /pagespeed_admin>
-    Order allow,deny
-    Allow from localhost
-    Allow from 127.0.0.1
+    Require local
     SetHandler pagespeed_admin
 </Location>
 
 <Location /pagespeed_global_admin>
-    Order allow,deny
-    Allow from localhost
-    Allow from 127.0.0.1
+    Require local
     SetHandler pagespeed_global_admin
 </Location>
 ```
+
+The Debian/Ubuntu and RHEL-family packages already ship both blocks with `Require local`, so nothing needs editing after install. To allow another address as well, add a `Require ip <address>` line inside the block.
 
 </div>
 

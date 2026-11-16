@@ -45,7 +45,9 @@ mod_pagespeed configuration carries over unchanged — see the
 [configuration reference](/docs/configuration/) for the full directive
 set. The package also drops a default `pagespeed.conf` (in
 `/etc/apache2/mods-available/` on Debian/Ubuntu, `/etc/httpd/conf.d/` on
-RHEL) — edit that file to turn filters on. The Apache packages also install the
+RHEL) — edit that file to turn filters on. The admin console
+(`/pagespeed_admin/` and `/pagespeed_global_admin/`) is on after install and
+limited to localhost; see the [admin console](/docs/admin-console/). The Apache packages also install the
 configuration that points the module at the `pagespeed-optimizer` worker, so the
 module reaches the worker without further configuration.
 
@@ -169,7 +171,11 @@ module's own filters also work without the worker: leave out step 2 and the
    blocks. Remove the `include` lines before purging (deb) or removing (rpm)
    the package, or `nginx -t` fails.
 
-   Then, in each `server` block that should be optimized:
+   Then add the `pagespeed` and `include` lines below to each existing
+   `server` block that should be optimized (on Debian and Ubuntu,
+   `/etc/nginx/sites-available/default` or your site's own file), and keep
+   that block's `root` and `location` lines. A `server` block without a `root`
+   serves nginx's built-in welcome page, not your site:
 
    ```nginx
    server {
@@ -347,10 +353,12 @@ optimization works exactly as before.
 
 ### Before you start
 
-- **Install the optimizer of the same release.** Install the
-  `pagespeed-optimizer` package from the same repository, at the same release
-  as `nginx-module-pagespeed`, and start it. The module and the optimizer are
-  a matched pair: install, upgrade and roll them back together.
+- **Install the optimizer.** Install the `pagespeed-optimizer` package from
+  the same repository (`sudo apt-get install pagespeed-optimizer` or
+  `sudo dnf install pagespeed-optimizer`) and start it. The module and the
+  optimizer are versioned separately, so their version numbers can differ:
+  install the optimizer the repository currently offers, and upgrade or roll
+  back the two together.
 - **Let nginx reach the optimizer's files.** The optimizer runs as the
   unprivileged `pagespeed` user. Its cache directory, notification socket and
   shared configuration are open to members of the `pagespeed` group only. When
@@ -369,7 +377,11 @@ optimization works exactly as before.
 
 ### Configuration
 
-Set both directives in each `server` block that should use the optimizer:
+Add the `pagespeed` lines below to each existing `server` block that should
+use the optimizer (on Debian and Ubuntu, `/etc/nginx/sites-available/default`
+or your site's own file), and keep that block's `root` and `location` lines.
+A `server` block without a `root` serves nginx's built-in welcome page, not
+your site:
 
 ```nginx
 server {
