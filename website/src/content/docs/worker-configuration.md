@@ -355,8 +355,9 @@ rewrites its shared config (the ~1s poll).
 
 A mismatch clears itself: once the worker publishes the matching generation,
 the module turns its cache back on without a reload and logs "now matches".
-The fix is to run the same release of both, from packages or from one image
-tag.
+The module and the worker are versioned separately, so their version numbers
+can differ. The fix is to upgrade or roll back both together, from packages or
+from one image tag.
 
 Three variables expose the result, as this nginx worker last saw it:
 

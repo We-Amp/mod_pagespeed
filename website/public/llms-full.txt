@@ -8299,8 +8299,9 @@ rewrites its shared config (the ~1s poll).
 
 A mismatch clears itself: once the worker publishes the matching generation,
 the module turns its cache back on without a reload and logs "now matches".
-The fix is to run the same release of both, from packages or from one image
-tag.
+The module and the worker are versioned separately, so their version numbers
+can differ. The fix is to upgrade or roll back both together, from packages or
+from one image tag.
 
 Three variables expose the result, as this nginx worker last saw it:
 
@@ -11686,7 +11687,7 @@ Three rules decide the outcome, all in the module:
 - **A header can only narrow.** An optimization is used only if the list names it and the request itself supports it. The header never grants a capability the client lacks.
 - **A value that names nothing allows nothing.** `fully general optimizations only` is the conventional value for "no client-dependent optimizations". Do not use an empty value: nginx does not send an empty header, and without the header the module decides from the client's own headers.
 
-Choose a small number of classes. Every class is a separate copy of every page and a separate trip to the origin. The two examples below use three: AVIF, WebP and neither. The AVIF class is `ja,jw:`: the AVIF filters are off by default, and with them off a browser in that class still gets WebP.
+Choose a small number of classes. Every class is a separate copy of every page and a separate trip to the origin. The two examples below use three: AVIF, WebP and neither. The AVIF class is `ja,jw:`: the AVIF filters are off by default, and with them off the module's rewritten image URLs for a browser in that class are WebP. (Direct requests for the original image URL are a separate path: with the optimizer worker connected they can return AVIF with no filter enabled.)
 
 ### The Vary header on HTML
 
@@ -13684,7 +13685,9 @@ Four filters transcode images to AVIF. Each one targets a different kind of sour
 - **`convert_to_avif_animated`** encodes animated sources as AVIF.
 - **`recompress_avif`** re-encodes AVIF images you already serve.
 
-All four are opt-in. They sit outside `rewrite_images` and outside the CoreFilters set, so enabling `rewrite_images` alone produces no AVIF output — you have to name the AVIF filters you want.
+All four are opt-in for the images the module rewrites in your HTML. They sit outside `rewrite_images` and outside the CoreFilters set, so enabling `rewrite_images` alone produces no rewritten AVIF URLs — you have to name the AVIF filters you want.
+
+**Direct image requests are different when the optimizer worker is connected.** When a browser requests the original image URL (in-place optimization) and the module is configured with the [optimizer worker](https://modpagespeed.com/docs/worker-configuration/), the worker chooses the format from the request's `Accept` header and needs no AVIF filter: a client that names `image/avif` gets AVIF; any other client that accepts WebP (by naming `image/webp`, `image/*` or `*/*`, or by sending no `Accept`) gets WebP; and when the copy in the negotiated format is not smaller or fails the quality check, the optimized original is served. A client that names `image/avif` never gets WebP instead. A current Chrome therefore typically receives AVIF for original image URLs and WebP for the rewritten URLs in the page. See [Image format and the Accept header](https://modpagespeed.com/docs/cdn-integration/#image-format-negotiation).
 
 AVIF is served only when the request advertises `Accept: image/avif`. There is no User-Agent sniffing. A client that does not advertise AVIF falls through the existing format order unchanged. The cache key folds in the client's AVIF capability, so variants are stored and served per capability exactly as WebP variants are.
 
@@ -14272,7 +14275,7 @@ The image filters above descend from a 2010 design for server-side image rewriti
 3. **Recompress per format, and only keep a smaller result.** Each format has its own codec strategy (`recompress_jpeg`, `recompress_png`, `recompress_webp`). A conversion (`convert_jpeg_to_webp`, `convert_png_to_jpeg`, `convert_gif_to_png`) or recompression is kept only when the output is smaller, which is what `ImageLimitOptimizedPercent` enforces.
 4. **Cache the negative result too.** If no variant is meaningfully smaller, the original URL is kept, and mod_pagespeed remembers that so it does not re-attempt a losing rewrite on every request.
 
-The output formats have changed since 2010: the native module transcodes to WebP through `rewrite_images`, and to AVIF through [opt-in filters](https://modpagespeed.com/docs/image-filters/#avif) enabled separately from it. The mod_pagespeed optimizer worker adds SVG auto-vectorization and Jpegli through its own independent optimization engine. The four invariants above describe how the native module's `rewrite_images` pipeline works. For how this works in production, see [Automatic WebP/AVIF on nginx: One Decode, 37 Variants](https://modpagespeed.com/blog/viewport-aware-image-optimization/) and [Image optimization cost: self-hosted vs CDN](https://modpagespeed.com/blog/economics-of-image-optimization/).
+The output formats have changed since 2010: the native module transcodes to WebP through `rewrite_images`, and to AVIF through [opt-in filters](https://modpagespeed.com/docs/image-filters/#avif) enabled separately from it (direct requests for the original image URL are negotiated by the optimizer worker and need no AVIF filter, see [AVIF filters](https://modpagespeed.com/docs/image-filters/#avif)). The mod_pagespeed optimizer worker adds SVG auto-vectorization and Jpegli through its own independent optimization engine. The four invariants above describe how the native module's `rewrite_images` pipeline works. For how this works in production, see [Automatic WebP/AVIF on nginx: One Decode, 37 Variants](https://modpagespeed.com/blog/viewport-aware-image-optimization/) and [Image optimization cost: self-hosted vs CDN](https://modpagespeed.com/blog/economics-of-image-optimization/).
 
 _Adapted from the original mod_pagespeed image-rewriting design (Google, 2010), an open-source project now maintained by We-Amp B.V. Original material © Google Inc., released under the Apache License 2.0. mod_pagespeed and PageSpeed are trademarks of Google LLC. We-Amp B.V. is not affiliated with, endorsed by, or sponsored by Google, and maintains the open-source mod_pagespeed project independently._
 
@@ -18379,7 +18382,7 @@ for steady state. Log rotation is covered under
 | `cache.size_bytes` approaching the configured cache size                                 | metrics                                | eviction is active; grow the cache (see [cache sizing](https://modpagespeed.com/docs/deployment/#cache-sizing-recommendations))     |
 | `connections.active` near `connections.max`                                              | metrics; console alert "Optimizer connections" | change notifications from the web server are being dropped; raise `--max-connections`                |
 | Console alerts "Optimizer unreachable" or "Optimizer health check failing"               | admin console                          | the pairing is broken; the module serves without the worker                                                  |
-| `X-PageSpeed: MISS` on every request, or `$pagespeed_cache_generation` reading `mismatch` | the reverse proxy's access log        | module and worker on different cache formats; install the same release of both                               |
+| `X-PageSpeed: MISS` on every request, or `$pagespeed_cache_generation` reading `mismatch` | the reverse proxy's access log        | module and worker on different cache formats; upgrade or roll back both together                              |
 | Entrypoint exit status 78 (container images)                                             | container status                       | the worker image's entrypoint refused to start on a configuration or volume fault, never a transient one; the message names the path. The packaged unit has no exit 78: a refusal to start exits 1 and, after five tries in a minute, `systemctl status` shows the unit `failed` |
 | `systemctl status` showing `code=dumped, status=31/SYS`                                  | systemd                                | the system-call filter stopped the worker; the unit file's comments say how to read the kill                 |
 | `notifications.skipped_dedup` a large share of `notifications.received`                  | metrics                                | normal: the worker is avoiding redundant work. Not an alert                                                  |
@@ -18692,8 +18695,9 @@ been requested before.
    and the nginx module use different cache formats (typically one was rolled
    back, or the packages were upgraded separately). The module then serves
    with its cache off, so every response is a `MISS`. The line names both
-   generations and which side is older. Install the same release of both, or
-   run both containers from the same image tag; the module turns its cache
+   generations and which side is older. Install the optimizer the repository
+   offers and upgrade or roll back both together, or run both containers from
+   the same image tag; the module turns its cache
    back on by itself once they match. Check the current state:
 
    ```bash

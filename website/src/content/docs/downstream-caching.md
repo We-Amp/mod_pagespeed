@@ -67,7 +67,7 @@ Three rules decide the outcome, all in the module:
 - **A header can only narrow.** An optimization is used only if the list names it and the request itself supports it. The header never grants a capability the client lacks.
 - **A value that names nothing allows nothing.** `fully general optimizations only` is the conventional value for "no client-dependent optimizations". Do not use an empty value: nginx does not send an empty header, and without the header the module decides from the client's own headers.
 
-Choose a small number of classes. Every class is a separate copy of every page and a separate trip to the origin. The two examples below use three: AVIF, WebP and neither. The AVIF class is `ja,jw:`: the AVIF filters are off by default, and with them off a browser in that class still gets WebP.
+Choose a small number of classes. Every class is a separate copy of every page and a separate trip to the origin. The two examples below use three: AVIF, WebP and neither. The AVIF class is `ja,jw:`: the AVIF filters are off by default, and with them off the module's rewritten image URLs for a browser in that class are WebP. (Direct requests for the original image URL are a separate path: with the optimizer worker connected they can return AVIF with no filter enabled.)
 
 ### The Vary header on HTML {#vary}
 

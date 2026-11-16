@@ -15,6 +15,8 @@ The mod_pagespeed module is that module. It runs inside nginx (and Apache) as a 
 
 > **Update — 2026-07-19:** This post originally sent readers to ModPageSpeed 2.0 for AVIF, because the 1.15 module only transcoded WebP. mod_pagespeed 1.15 now encodes AVIF too, on nginx as well as Apache and the native IIS module, with the AV1 encoder linked into the module — there is no extra package to install. The two formats reach you differently and the post has been revised to say so: WebP conversion is part of the default rewriting, while AVIF is enabled by turning on its filters. The sections below reflect the current module; the 2.0 comparisons have been rescoped to what is still 2.0-only.
 
+> **Correction — 2026-11-15:** The statement below that AVIF is something you turn on holds for the image URLs the module rewrites in your pages. It does not hold for direct requests to the original image URL when the optimizer worker is connected: the worker negotiates the format from the browser's `Accept` header, and a browser that names `image/avif` (current Chrome does) gets AVIF with no AVIF filter enabled, provided it is smaller and passes the quality check. See [AVIF filters](/docs/image-filters/#avif).
+
 ## What a server-layer image module does
 
 Serving a smaller image involves more than the encode step. A module that lives inside nginx handles four things on your behalf.

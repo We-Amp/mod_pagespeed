@@ -73,8 +73,9 @@ been requested before.
    and the nginx module use different cache formats (typically one was rolled
    back, or the packages were upgraded separately). The module then serves
    with its cache off, so every response is a `MISS`. The line names both
-   generations and which side is older. Install the same release of both, or
-   run both containers from the same image tag; the module turns its cache
+   generations and which side is older. Install the optimizer the repository
+   offers and upgrade or roll back both together, or run both containers from
+   the same image tag; the module turns its cache
    back on by itself once they match. Check the current state:
 
    ```bash
