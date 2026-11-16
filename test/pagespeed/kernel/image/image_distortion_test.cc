@@ -158,6 +158,42 @@ TEST_F(ImageDistortionTest, WorstTilePsnrSkipsEdgeSlivers) {
   EXPECT_EQ(kIdenticalTilePsnrDb, worst);
 }
 
+// A partial edge tile that holds at least a quarter of a full tile is scored:
+// damage confined to a 16-pixel right-hand column (half a tile wide) or a
+// 16-pixel bottom band must decide the result, not hide behind clean tiles.
+TEST_F(ImageDistortionTest, WorstTilePsnrScoresDamagedPartialEdgeTile) {
+  PngReader reader(&message_handler_);
+  struct Shape {
+    size_t width, height, x0, y0;
+  };
+  // Right column: columns 32..47 of a 48x64 image. Bottom band: rows 32..47 of
+  // a 64x48 image. Either partial tile covers 16*32 pixels, twice the minimum.
+  for (const Shape& shape : {Shape{48, 64, 32, 0}, Shape{64, 48, 0, 32}}) {
+    std::vector<uint8_t> clean = Gradient(shape.width, shape.height);
+    std::vector<uint8_t> damaged = clean;
+    for (size_t y = shape.y0; y < shape.height; ++y) {
+      for (size_t x = shape.x0; x < shape.width; ++x) {
+        // Off by exactly 40 in every channel, towards mid-range so that it
+        // never wraps.
+        for (size_t c = 0; c < 3; ++c) {
+          uint8_t& v = damaged[(y * shape.width + x) * 3 + c];
+          v = v < 128 ? v + 40 : v - 40;
+        }
+      }
+    }
+    const GoogleString png = EncodePng(clean, shape.width, shape.height);
+    const GoogleString webp =
+        LosslessWebp(EncodePng(damaged, shape.width, shape.height));
+    double worst = 0;
+    ASSERT_TRUE(WorstTilePsnr(reader, png, webp, 32, &worst, &message_handler_))
+        << shape.width << "x" << shape.height;
+    // Uniform error 40 over the partial tile: MSE 1600, 16.09 dB, far below
+    // the 29.5 dB the fallback demands.
+    EXPECT_NEAR(16.09, worst, 0.01) << shape.width << "x" << shape.height;
+    EXPECT_LT(worst, 29.5);
+  }
+}
+
 TEST_F(ImageDistortionTest, WorstTilePsnrMismatchedDims) {
   const GoogleString png = EncodePng(Gradient(64, 64), 64, 64);
   const GoogleString other = EncodePng(Gradient(64, 96), 64, 96);
