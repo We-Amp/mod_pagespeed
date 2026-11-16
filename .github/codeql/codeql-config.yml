@@ -15,8 +15,14 @@ paths-ignore:
 # Generated scripts and their embedded copies, built from sources that are analysed directly.
   - net/instaweb/rewriter/generated/
 
-# C/C++ is analysed with build-mode none (no Bazel build). Vendored third-party
+# These ignores apply to every language in the matrix, not only C/C++.
+# C/C++ is analysed with build-mode none (no Bazel build). Vendored upstream
 # trees and test code are not product code and would only add noise.
-  - third_party/
+# third_party/css_parser is our own code and stays analysed.
+  - third_party/apr/
+  - third_party/aprutil/
+  - third_party/libjpeg_turbo/
+  - third_party/zlib_alias_module/
+  - third_party/redis-crc/
   - test/
   - tools/ci/testdata/
