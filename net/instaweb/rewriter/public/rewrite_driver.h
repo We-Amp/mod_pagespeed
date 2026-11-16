@@ -1217,8 +1217,8 @@ class RewriteDriver : public HtmlParse {
 
   // A nested driver that rebuilds one input of a combination fetched by a
   // request may stop waiting for that rebuild and serve the unoptimized input
-  // (see RewriteContext::FetchContext::SetupDeadlineAlarm). The context that
-  // makes the nested driver says whether that is safe for its output.
+  // (see RewriteContext::FetchContext::SetupDeadlineAlarm). The combination
+  // is then made from the original input; it is private and not stored.
   bool nested_fetch_may_fall_back() const {
     return nested_fetch_may_fall_back_;
   }

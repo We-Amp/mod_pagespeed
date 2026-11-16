@@ -795,11 +795,6 @@ class RewriteContext::FetchContext {
       // HTML-targeted rewrite already has a way of dealing with slowness, by
       // detaching from rendering.
 
-      // We also do not want nested rewrites to early-return in case of fetches
-      // as it can affect correctness of JS combine, as the names of the
-      // OutputResources, and hence the JS variables may turn out not be
-      // what was expected.
-
       // The exception is the rebuild of one input of a combination that a
       // request is fetching, when the rewrite deadline is negative. Without
       // an alarm that fetch would wait for the rebuild for ever, so it falls
