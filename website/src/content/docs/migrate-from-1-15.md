@@ -88,8 +88,9 @@ confident you will not roll back.
   and `iisreset`. Running the MSI takes every IIS site on the server down for
   the duration; plan a maintenance window. See
   [Install on IIS](/docs/install-iis/#install-the-module).
-- **Debian 11 (bullseye).** The repository's bullseye suite carries the 1.15.0
-  module packages; the current packages need Debian 12 or newer.
+- **Debian 11 (bullseye).** Debian 11 is end of life and no longer supported,
+  and the repository's bullseye suite carries no packages. Upgrade to Debian 12
+  or later, then install the current packages.
 - **cPanel EasyApache 4 (EL8).** The module runs without the optimizer worker.
 
 ## Verify

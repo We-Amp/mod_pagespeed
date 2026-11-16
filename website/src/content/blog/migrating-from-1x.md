@@ -106,7 +106,7 @@ Deploy the three components using Docker Compose or systemd. The Docker Compose 
 # docker-compose.yml (simplified)
 services:
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.0.21
+    image: ghcr.io/we-amp/pagespeed-worker:2.8.1
     command: >
       /usr/bin/factory_worker
       --socket /shared/pagespeed.sock
@@ -116,7 +116,7 @@ services:
       - shared:/shared
 
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:2.0.21
+    image: ghcr.io/we-amp/pagespeed-nginx:2.8.1
     volumes:
       - shared:/shared
       - ./nginx.conf:/etc/nginx/nginx.conf:ro

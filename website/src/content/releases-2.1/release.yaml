@@ -83,7 +83,7 @@ compat:
   # The 2.1 module continues the 1.15-line module packaging: Apache 2.4+;
   # nginx builds pinned per distro to each distribution's stock nginx (the
   # signed apt matrix for this line runs Debian 12/13 + Ubuntu 22.04/24.04/26.04 on
-  # amd64+arm64; Debian 11 (bullseye) stays on the final 1.15 packages;
+  # amd64+arm64; Debian 11 (bullseye) is end of life and no longer supported;
   # see product-facts NGINX_APT_DISTROS).
   apache:
     apache_versions: ["2.4+"]

@@ -43,8 +43,8 @@ mod_pagespeed 2 runs inside Apache and nginx as a native in-process module, with
 **What changed:**
 
 - **Modernized build and dependencies.** The build system was migrated to Bazel and every dependency updated to current versions. No more pinned-to-2018 libraries or bespoke build scripts.
-- **Actively maintained against current distributions.** Compiled and tested on Debian 11, 12, and 13, Ubuntu 22.04 and 24.04, AlmaLinux/RHEL/Rocky 9 and 10, and current nginx/Apache releases. The compatibility issues that plague the Google version (no longer actively developed) do not exist here.
-- **Prebuilt, signed packages.** Apache and nginx packages ship as signed `.deb`/`.rpm` from [packages.modpagespeed.com](https://packages.modpagespeed.com/). The nginx dynamic module — `nginx-module-pagespeed` — is prebuilt for Debian 11/12/13 and Ubuntu 22.04/24.04 on amd64 and arm64, each pinned to its distro's stock nginx, so there is nothing to compile. The IIS module ships as a signed MSI on the mod_pagespeed GitHub release.
+- **Actively maintained against current distributions.** Compiled and tested on Debian 12 and 13, Ubuntu 22.04 and 24.04, AlmaLinux/RHEL/Rocky 9 and 10, and current nginx/Apache releases. The compatibility issues that plague the Google version (no longer actively developed) do not exist here.
+- **Prebuilt, signed packages.** Apache and nginx packages ship as signed `.deb`/`.rpm` from [packages.modpagespeed.com](https://packages.modpagespeed.com/). The nginx dynamic module — `nginx-module-pagespeed` — is prebuilt for Debian 12/13 and Ubuntu 22.04/24.04 on amd64 and arm64, each pinned to its distro's stock nginx, so there is nothing to compile. The IIS module ships as a signed MSI on the mod_pagespeed GitHub release.
 - **Cyclone cache.** The file-based cache from the original was replaced with Cyclone, a variant-aware, memory-mapped cache. Faster lookups, proper LRU eviction, and one cache format shared between the module and the optimizer worker.
 - **Admin console.** A web-based admin console for cache management and statistics.
 
@@ -87,7 +87,7 @@ The practical effect: the first request gets the original content (`X-PageSpeed:
 
 **If you are already running mod_pagespeed on Apache** and it works, the native in-process module is the direct path. It integrates directly into Apache's output filter chain, reads your exact `ModPagespeed*` directives, and is maintained and tested on current distributions.
 
-**If you are running ngx_pagespeed** and you are tired of downloading the matching nginx source tree and recompiling the module on every upgrade, mod_pagespeed 2 ships a prebuilt, signed `nginx-module-pagespeed` for Debian 11, 12, and 13 and Ubuntu 22.04 and 24.04, on both amd64 and arm64 — no compiling. AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) are covered via the yum repo. Each module is pinned to its distro's stock nginx; if you run a different nginx version, [contact us](/contact/) for a matching build. See [/download/](/download/).
+**If you are running ngx_pagespeed** and you are tired of downloading the matching nginx source tree and recompiling the module on every upgrade, mod_pagespeed 2 ships a prebuilt, signed `nginx-module-pagespeed` for Debian 12 and 13 and Ubuntu 22.04 and 24.04, on both amd64 and arm64 — no compiling. AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) are covered via the yum repo. Each module is pinned to its distro's stock nginx; if you run a different nginx version, [contact us](/contact/) for a matching build. See [/download/](/download/).
 
 **If you want a reverse proxy in front of any HTTP origin,** the same product deploys as a container, running the optimizer worker outside the request path so optimization adds no latency to the response. The 32-bit capability mask generates up to 37 variants per image, matched to each visitor's browser, viewport, density, and Save-Data preference.
 
@@ -116,6 +116,6 @@ curl -I http://localhost:8080/
 
 See the [getting started guide](/docs/getting-started/) for full setup instructions, or the [migration guide](/blog/migrating-from-1x/) if you are moving from the archived mod_pagespeed.
 
-**The native module** ships prebuilt packages for Apache (`.deb`/`.rpm`) and a prebuilt, signed `nginx-module-pagespeed` for Debian 11/12/13 and Ubuntu 22.04/24.04 (amd64 + arm64), plus AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) — see [Downloads](https://modpagespeed.com/download/) or [packages.modpagespeed.com](https://packages.modpagespeed.com/) for the signed apt/yum repo.
+**The native module** ships prebuilt packages for Apache (`.deb`/`.rpm`) and a prebuilt, signed `nginx-module-pagespeed` for Debian 12/13 and Ubuntu 22.04/24.04 (amd64 + arm64), plus AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) — see [Downloads](https://modpagespeed.com/download/) or [packages.modpagespeed.com](https://packages.modpagespeed.com/) for the signed apt/yum repo.
 
 Licensing is the same either way: mod_pagespeed is open source under the Apache License 2.0, free to install and run on any number of servers whichever integration you use. See the [pricing page](/pricing/) for what's sold alongside it: support. The software and its signed packages are the same for everyone.

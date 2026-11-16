@@ -340,7 +340,7 @@ nginx refuses to load a module built for a different version, and
 distribution's nginx package, or nginx.org's stable with the
 [separate package](#nginxorgs-nginx-and-the-nginx-docker-image). Running an
 nginx we do not package? [Contact us](/contact/) for a matching pinned build. Debian 11
-(bullseye) stays on the repository's final 1.15.0 module packages.
+(bullseye) is end of life and no longer supported: upgrade to Debian 12 or later.
 
 ## Using the optimizer worker with nginx {#using-the-optimizer-daemon-with-nginx}
 

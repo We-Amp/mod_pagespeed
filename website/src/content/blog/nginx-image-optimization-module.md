@@ -43,7 +43,7 @@ Browsers announce what they can decode in the `Accept` header. A request carryin
 
 ## How to install it
 
-The module ships as a prebuilt, signed package from `packages.modpagespeed.com`. No compiler, no nginx source tree, no matching the module ABI to your nginx build by hand. Debian 11/12/13 and Ubuntu 22.04/24.04 are covered on both amd64 and arm64; Enterprise Linux 9 (AlmaLinux, Rocky, RHEL) is covered on x86_64 and aarch64, and Enterprise Linux 10 on x86_64.
+The module ships as a prebuilt, signed package from `packages.modpagespeed.com`. No compiler, no nginx source tree, no matching the module ABI to your nginx build by hand. Debian 12/13 and Ubuntu 22.04/24.04 are covered on both amd64 and arm64; Enterprise Linux 9 (AlmaLinux, Rocky, RHEL) is covered on x86_64 and aarch64, and Enterprise Linux 10 on x86_64.
 
 On Debian or Ubuntu:
 

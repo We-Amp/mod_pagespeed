@@ -1036,7 +1036,7 @@ nginx refuses to load a module built for a different version, and
 distribution's nginx package, or nginx.org's stable with the
 [separate package](https://modpagespeed.com/docs/installation-module/#nginxorgs-nginx-and-the-nginx-docker-image). Running an
 nginx we do not package? [Contact us](https://modpagespeed.com/contact/) for a matching pinned build. Debian 11
-(bullseye) stays on the repository's final 1.15.0 module packages.
+(bullseye) is end of life and no longer supported: upgrade to Debian 12 or later.
 
 ## Using the optimizer worker with nginx
 
@@ -3390,8 +3390,9 @@ confident you will not roll back.
   and `iisreset`. Running the MSI takes every IIS site on the server down for
   the duration; plan a maintenance window. See
   [Install on IIS](https://modpagespeed.com/docs/install-iis/#install-the-module).
-- **Debian 11 (bullseye).** The repository's bullseye suite carries the 1.15.0
-  module packages; the current packages need Debian 12 or newer.
+- **Debian 11 (bullseye).** Debian 11 is end of life and no longer supported,
+  and the repository's bullseye suite carries no packages. Upgrade to Debian 12
+  or later, then install the current packages.
 - **cPanel EasyApache 4 (EL8).** The module runs without the optimizer worker.
 
 ## Verify
@@ -25860,7 +25861,9 @@ available and keeps serving the final 1.15 packages, so existing bullseye
 systems continue to work as they do today. The 2.1 serving components
 require glibc 2.34 or newer, which Debian 11 does not provide, so new
 releases are published for Debian 12 (bookworm) and newer, where the package
-names and configuration are unchanged.
+names and configuration are unchanged. Update (November 2026): Debian 11 is now end of life
+and no longer supported, and the bullseye suite no longer carries packages;
+upgrade to Debian 12 or later.
 
 Security and hardening — update recommended for every
 deployment:

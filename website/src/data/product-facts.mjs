@@ -528,10 +528,10 @@ export const STOCK_NGINX_ALMA = '1.20.1'; // AlmaLinux 9 (rpm/Apache target)
 
 // The signed apt matrix for nginx-module-pagespeed (Debian + Ubuntu), each row
 // pinned to the distro's stock nginx. Order is the install-doc display order.
-// Debian 11 (bullseye) is deliberately absent: the repository's bullseye
-// suite tops out at the final 1.15.0 module packages (glibc 2.34, needed by
-// the 2.1 serving components, is not available there) — see
-// migrating-to-2-1.md's Debian 11 platform note and release-notes.mdx's
+// Debian 11 (bullseye) is deliberately absent: it is end of life and no
+// longer supported, and the repository's bullseye suite carries no packages
+// (glibc 2.34, needed by the serving components, is not available there) — see
+// migrate-from-1-15.md's Debian 11 platform note and release-notes.mdx's
 // current-release operator note.
 export const NGINX_APT_DISTROS = [
   { distro: 'Debian 12 bookworm', nginx: '1.22.1' },

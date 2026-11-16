@@ -70,7 +70,7 @@ curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
 Then install the nginx module:
 
 ```sh
-# Debian 11/12/13, Ubuntu 22.04/24.04
+# Debian 12/13, Ubuntu 22.04/24.04
 sudo apt-get install nginx-module-pagespeed
 ```
 
@@ -93,7 +93,7 @@ The header carries the version of the package you installed.
 
 If that header is present, the module loaded and is rewriting responses on the request path, with no compile step on your end.
 
-One constraint to know up front: each prebuilt `.so` is pinned to its distro's stock nginx version, because nginx's `--with-compat` does not relax the version check for a native module. The repository currently covers Debian 11 (nginx 1.18.0), Debian 12 (1.22.1), Debian 13 (1.26.3), Ubuntu 22.04 (1.18.0), and Ubuntu 24.04 (1.24.0), on amd64 and arm64. If you run a hand-rolled nginx newer than your distro's stock build, you still need a module compiled against that exact version. The difference is that it becomes our build to maintain, not yours. The Apache module ships the same way (`mod-pagespeed` via apt, plus el9 and el10 via yum), so a mixed Apache and nginx fleet stays on one repository.
+One constraint to know up front: each prebuilt `.so` is pinned to its distro's stock nginx version, because nginx's `--with-compat` does not relax the version check for a native module. The repository currently covers Debian 12 (nginx 1.22.1), Debian 13 (1.26.3), Ubuntu 22.04 (1.18.0), and Ubuntu 24.04 (1.24.0), on amd64 and arm64. If you run a hand-rolled nginx newer than your distro's stock build, you still need a module compiled against that exact version. The difference is that it becomes our build to maintain, not yours. The Apache module ships the same way (`mod-pagespeed` via apt, plus el9 and el10 via yum), so a mixed Apache and nginx fleet stays on one repository.
 
 ## When to move to mod_pagespeed {#when-to-reach-for-20-instead}
 

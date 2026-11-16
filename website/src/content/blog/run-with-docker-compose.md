@@ -32,7 +32,7 @@ for readability:
 ```yaml
 services:
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.0.21}
+    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.8.1}
     volumes:
       - pagespeed-data:/data
     environment:
@@ -47,7 +47,7 @@ services:
       start_period: 5s
 
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.0.21}
+    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.8.1}
     ports:
       - '${NGINX_PORT:-80}:80'
       - '${NGINX_SSL_PORT:-443}:443'
@@ -102,7 +102,7 @@ BACKEND_PORT=8081
 CACHE_SIZE=1073741824
 
 # Image tag (pin in production)
-PAGESPEED_VERSION=latest
+PAGESPEED_VERSION=2.8.1
 ```
 
 ## Start it
@@ -222,7 +222,7 @@ Two non-obvious config items worth flagging:
 
 Before pointing real traffic at this:
 
-- Pin the image tag (`ghcr.io/we-amp/pagespeed-worker:2.0.21`, not `:latest`).
+- Pin the image tag (`ghcr.io/we-amp/pagespeed-worker:2.8.1`, not `:latest`).
 - Set `CACHE_SIZE` to ~10% of the variants you expect (rule of thumb: 1
   GiB per 5000 unique image URLs).
 - Add a logging driver. `json-file` with rotation is the compose-file

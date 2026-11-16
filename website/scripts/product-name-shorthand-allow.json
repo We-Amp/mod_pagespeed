@@ -139,7 +139,7 @@
     },
     {
       "file": "src/content/blog/mod-pagespeed-alternatives.md",
-      "line": "**If you are running ngx_pagespeed** and you are tired of downloading the matching nginx source tree and recompiling the module on every upgrade, mod_pagespeed 2 ships a prebuilt, signed `nginx-module-pagespeed` for Debian 11, 12, and 13 and Ubuntu 22.04 and 24.04, on both amd64 and arm64 — no compiling. AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) are covered via the yum repo. Each module is pinned to its distro's stock nginx; if you run a different nginx version, [contact us](/contact/) for a matching build. See [/download/](/download/).",
+      "line": "**If you are running ngx_pagespeed** and you are tired of downloading the matching nginx source tree and recompiling the module on every upgrade, mod_pagespeed 2 ships a prebuilt, signed `nginx-module-pagespeed` for Debian 12 and 13 and Ubuntu 22.04 and 24.04, on both amd64 and arm64 — no compiling. AlmaLinux/RHEL/Rocky 9 (x86_64 + aarch64) and 10 (x86_64) are covered via the yum repo. Each module is pinned to its distro's stock nginx; if you run a different nginx version, [contact us](/contact/) for a matching build. See [/download/](/download/).",
       "why": "a dated blog post: it used the shorthand when it was published"
     },
     {
