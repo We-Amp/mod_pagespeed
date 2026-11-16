@@ -35,7 +35,7 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
 >
   <PageHero title="Terms of Service" size="utility" width="prose">
     <p class="mt-4 text-small text-text-annotation">
-      Effective date: 14 November 2026 &middot; Version 2026-11-14
+      Effective date: 16 November 2026 &middot; Version 2026-11-16
     </p>
     <p class="lede mt-6 max-w-2xl">
       These terms are written in plain language. If something is unclear, email
@@ -63,7 +63,7 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         <ul class="mt-2 list-disc list-inside text-text-muted space-y-1">
           <li>the websites we operate for the product, and the tools on them;</li>
           <li>
-            the free standard package repository at
+            the free public package repository at
             <code class="font-mono text-sm">packages.modpagespeed.com</code>; and
           </li>
           <li>support subscriptions.</li>
@@ -84,8 +84,8 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
           ModPageSpeed
           {V2_LINE} &mdash; is licensed under the {LICENSE}. That license, not these terms, governs
           your rights to install, run, copy, modify and redistribute the software. It applies to
-          every artifact we publish: an artifact you obtain through a subscription carries the same
-          license as a standard package.
+          every artifact we publish, including any build or backport we make for a customer, which
+          we publish for everyone when we deliver it.
         </p>
         <p class="mt-2 text-text-muted">
           Nothing in these terms narrows the rights the {LICENSE} grants you. Where these terms and
@@ -103,9 +103,9 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         </p>
       </div>
 
-      <!-- Free standard channel -->
+      <!-- Free public channel -->
       <div>
-        <h2 class="text-2xl font-bold text-text-body">The free standard packages</h2>
+        <h2 class="text-2xl font-bold text-text-body">The free public packages</h2>
         <p class="mt-4 text-text-muted">
           The signed packages at
           <code class="font-mono text-sm">packages.modpagespeed.com</code> are free of charge for
@@ -114,7 +114,7 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
           you install. Every package is signed so you can verify what you install.
         </p>
         <p class="mt-2 text-text-muted">
-          We run the standard repository on a best-effort basis. We aim to keep it available and to
+          We run the public repository on a best-effort basis. We aim to keep it available and to
           keep its packages current, but we do not promise uptime, a release schedule, or continued
           publication of any particular package, and we may reorganize the repository with
           reasonable notice on this site. The software in it comes with the warranty terms of the{' '}
@@ -184,6 +184,41 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
           describes how we handle support mail.
         </p>
         <p class="mt-2 text-text-muted">
+          <strong>Advance notices of security releases.</strong> If your tier includes advance
+          notice, we email the security contact named in your order, or the address you ordered with
+          if none is named, before a planned security release. A notice gives the planned public
+          date, the severity band, the affected versions and the impact class. It carries no patch,
+          binary, mitigation or technical detail. A notice is not a security update: the release,
+          and the public advisory with any mitigation, reach every user at the same time through the
+          public channels. A public security advisory is not an advance notice. A notice is planning
+          information, not a promise: the date, the severity band and the affected versions can
+          change, and we send an updated notice if they do. We do not promise a fixed lead time. You
+          can change your security contact by email to your support address.
+        </p>
+        <p class="mt-2 text-text-muted">
+          A notice is confidential until the release is public. Share it only with people in your
+          organization, including its contractors, who need it to plan the update. You may also
+          share it in confidence with your auditors and security advisers, and with a CSIRT or a
+          competent authority. If you subscribe as an individual, share it only with the people who
+          help you run your servers. You are responsible for the people in your organization and the
+          contractors, auditors and advisers you share a notice with keeping it confidential. A
+          notice stops being confidential when the release is public, when we publish its contents,
+          or when they otherwise become public through no fault of yours. This duty continues after
+          your subscription ends, until the release is public. Nothing here stops you from making a
+          disclosure the law requires, such as a report to a public authority or under a court
+          order.
+        </p>
+        <p class="mt-2 text-text-muted">
+          If a notice is shared in breach of these terms, we may stop sending you advance notices;
+          our other rights under these terms are not affected. We do not hold a release back to send
+          a notice: when a vulnerability is already exploited or public, the notice goes out when
+          the release is published. If the law or a competent authority requires it, we may stop
+          sending advance notices, or send them when the release is published; we tell you if we do.{' '}
+          <em>Warranty and liability</em> applies to advance notices. These terms for advance
+          notices also apply to the vulnerability notifications timed to the EU Cyber Resilience Act
+          reporting windows that some tiers include.
+        </p>
+        <p class="mt-2 text-text-muted">
           <strong>Ordering and payment.</strong> Prices are published on the
           <a href="/pricing/" class="text-interactive hover:text-interactive-hover underline">
             pricing page
@@ -209,9 +244,9 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
           consumers, see below). Apart from refunds under FastSpring&rsquo;s terms for a checkout
           purchase and those mandatory law requires, fees already paid are not refunded, except for
           the pro-rata refunds described under <em>Circumstances beyond our control</em> and
-          <em>Changes to these terms</em>. Where your order or a subscription agreement states
-          something different from these terms, the order or agreement prevails for that
-          subscription; the
+          <em>Changes to these terms</em>. Where an order form or subscription agreement signed by{' '}
+          {VENDOR} states something different, it prevails for that subscription. We reject your own
+          general or purchasing terms; they do not apply, even if an order refers to them. The
           <a
             href={LICENSING_TERMS_URL}
             class="text-interactive hover:text-interactive-hover underline"
@@ -232,11 +267,11 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         </p>
         <p class="mt-2 text-text-muted">
           <strong>Ending a subscription.</strong> We may suspend or end a subscription if you
-          materially breach these terms and do not remedy the breach within 14 days of our written
-          notice. When a subscription ends, for whatever reason, support ends with it. Your right to
-          keep using, modifying and redistributing every artifact you already obtained does not end:
-          those artifacts are licensed under the {LICENSE}, and nothing we do under these terms
-          revokes that license.
+          materially breach these terms or the We-Amp support terms and do not remedy the breach
+          within 14 days of our written notice. When a subscription ends, for whatever reason,
+          support ends with it. Your right to keep using, modifying and redistributing every
+          artifact you already obtained does not end: those artifacts are licensed under the{' '}
+          {LICENSE}, and nothing we do under these terms revokes that license.
         </p>
       </div>
 
@@ -321,11 +356,11 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         </p>
         <p class="mt-2 text-text-muted">
           <strong>Cap on our liability.</strong> For all other loss, our total liability to you in
-          connection with these terms, for all claims combined, is limited to the greater of (a) the
-          total fees you paid us in the 12 months immediately before the first event giving rise to
-          a claim, or (b) &euro;500. This is an aggregate cap across all claims, not a cap per
-          claim. It applies regardless of the legal basis of the claim &mdash; contract, tort (
-          <em>onrechtmatige daad</em>), statute or otherwise.
+          connection with these terms and the We-Amp support terms, for all claims combined, is
+          limited to the greater of (a) the total fees you paid us in the 12 months immediately
+          before the first event giving rise to a claim, or (b) &euro;500. This is an aggregate cap
+          across all claims, not a cap per claim. It applies regardless of the legal basis of the
+          claim &mdash; contract, tort (<em>onrechtmatige daad</em>), statute or otherwise.
         </p>
         <p class="mt-2 text-text-muted">
           <strong>Time limit for claims.</strong> You must tell us about a claim in writing within
@@ -334,10 +369,13 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         </p>
         <p class="mt-2 text-text-muted">
           <strong>What we never limit or exclude.</strong> Nothing in these terms limits or excludes
-          our liability for fraud; for intent (<em>opzet</em>) or deliberate recklessness (
-          <em>bewuste roekeloosheid</em>) of {VENDOR} or of the persons charged with its management
-          or direction; for death or personal injury caused by our negligence; or for anything else
-          that cannot be limited or excluded under applicable law.
+          our liability for fraud; for intent (<em>opzet</em>) or deliberate recklessness
+          <span class="whitespace-nowrap">
+            (<em>bewuste roekeloosheid</em>)
+          </span>{' '}
+          of {VENDOR} or of the persons charged with its management or direction; for death or
+          personal injury caused by our negligence; or for anything else that cannot be limited or
+          excluded under applicable law.
         </p>
         <p class="mt-4 text-text-muted">
           <strong>Consumers (EU/EEA).</strong> If you are a consumer, nothing in this section
@@ -408,10 +446,11 @@ const SUPPORT_TARGETS = SUPPORT_TIERS.filter((t) => t.kind === 'support')
         <p class="mt-4 text-text-muted">
           If a provision of these terms (or part of one) is found invalid or unenforceable, it is
           reduced to the minimum extent needed to make it enforceable or, if it cannot be, severed;
-          the remaining provisions stay in full force. <em>The software license</em>,
-          <em>Warranty and liability</em>, <em>Acceptable use of the services</em> and
-          <em>Governing law and venue</em> continue to apply after a subscription or these terms
-          end.
+          the remaining provisions stay in full force. <em>The software license</em>, the
+          confidentiality of advance notices until the release is public,{' '}
+          <em>Warranty and liability</em>, <em>Acceptable use of the services</em> and{' '}
+          <em>Governing law and venue</em> continue to apply after a subscription, these terms or
+          the We-Amp support terms end.
         </p>
       </div>
 

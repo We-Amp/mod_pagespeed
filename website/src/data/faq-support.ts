@@ -39,7 +39,7 @@ export const faqSupport: FaqEntry[] = [
     a: `The apt and yum repositories are GPG-signed with the repository signing key. From 2.5.0 on, each mod_pagespeed GitHub release carries one signature, SHA256SUMS.asc, made with a separate release signing key over the SHA256SUMS file that lists every release file; the release files carry no per-file .asc signatures. The Windows installer is Authenticode-signed by We-Amp B.V. The optimizer worker's release assets on GitHub carry no signature; every one is listed in SHA256SUMS. The container images are cosign-signed and carry an SBOM attestation and build provenance. Every release from 2.6.0 on carries its SPDX SBOM and VEX document, and both are also in the source tree. Everything is the same software under the ${SOURCE_PUBLICATION.license}. See ${link('#hardened-builds', 'signed packages and images')}.`,
   },
   {
-    q: 'Can I verify the standard packages without a subscription?',
+    q: 'Can I verify the public packages without a subscription?',
     a: `Yes. The apt and yum repositories are GPG-signed, every release asset is listed in SHA256SUMS, the mod_pagespeed releases sign that file from 2.5.0 on, and the SPDX SBOM and OpenVEX file are published in the source tree. The ${link('#verify', 'recipe')} on this page checks both keys, the signature and the checksums.`,
   },
   {
