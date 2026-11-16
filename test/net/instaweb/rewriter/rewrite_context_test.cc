@@ -22,7 +22,10 @@
 
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 
+#include <chrono>  // NOLINT
 #include <memory>
+#include <thread>  // NOLINT
+#include <utility>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/async_fetch_with_lock.h"
@@ -3988,6 +3991,56 @@ TEST_F(RewriteContextFetchQueueTest, CombinedJsFetchWaitIsCapped) {
   EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
   EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
   EXPECT_NE(GoogleString::npos, again.find("var x"));
+}
+
+// Regression test for a data race on RewriteDriver::release_driver_. During
+// shutdown ServerContext::ShutDownDrivers() waits for the active drivers one
+// by one, and a driver that a background fetch finishes with in the meantime
+// is released by that worker thread (and so is kept, for the server context to
+// free) while the shutdown thread later takes and drops a reference of its
+// own on it. The worker thread's write to release_driver_ must not race with
+// the shutdown thread's. The threads are ordered by wall-clock sleeps, not by
+// synchronization, so ThreadSanitizer sees that nothing orders the writes.
+TEST_F(RewriteContextTest, ShutDownWhileDriverIsReleasedInBackground) {
+  RequestContextPtr ctx =
+      RequestContext::NewTestRequestContext(server_context()->thread_system());
+  RewriteOptions* options_a = options()->Clone();
+  options_a->ComputeSignature();
+  RewriteOptions* options_b = options()->Clone();
+  options_b->ComputeSignature();
+  RewriteDriver* first =
+      server_context()->NewCustomRewriteDriver(options_a, ctx);
+  RewriteDriver* second =
+      server_context()->NewCustomRewriteDriver(options_b, ctx);
+  // The drivers are waited for in address order.
+  if (second < first) {
+    std::swap(first, second);
+  }
+  // The shutdown waits for this one, which keeps it busy.
+  // Its user reference is kept until the end, so that the shutdown thread does
+  // not release it, which would order it after this thread's release of the
+  // other driver (through the server context's mutex).
+  first->IncrementRenderBlockingAsyncEventsCount();
+
+  std::thread shutdown_thread([this]() {
+    server_context()->ShutDownDrivers(factory()->timer()->NowMs() +
+                                      Timer::kMinuteMs);
+  });
+  // Much later, let the shutdown go on to the second driver. This thread is
+  // started before the second driver is finished, so that nothing but time
+  // orders the two.
+  std::thread finish_thread([first]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    first->DecrementRenderBlockingAsyncEventsCount();
+  });
+  // Let the shutdown get to waiting for the first driver.
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  // Finish the other driver, as a background fetch does when it completes: it
+  // is not freed, because the shutdown is under way.
+  second->Cleanup();
+  finish_thread.join();
+  shutdown_thread.join();
+  first->Cleanup();
 }
 
 TEST_F(RewriteContextTest, CombinationFetchMissing) {

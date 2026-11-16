@@ -2034,8 +2034,15 @@ void RewriteDriver::DeleteRewriteContext(RewriteContext* rewrite_context) {
 void RewriteDriver::PossiblyPurgeCachedResponseAndReleaseDriver() {
   DCHECK(!externally_managed_);
   // We might temporarily (due to purging) revive the object here, so
-  // better clear the "we were told it's dead!" bit.
-  release_driver_ = false;
+  // better clear the "we were told it's dead!" bit. release_driver_ is
+  // guarded by rewrite_mutex(), which LastRefRemoved() holds when it sets it,
+  // and which the caller (DropReference) has already dropped. Take it just
+  // for the write; the purge and the release below must run without it,
+  // since they can call back into this driver and into the server context.
+  {
+    ScopedMutex lock(rewrite_mutex());
+    release_driver_ = false;
+  }
   if (downstream_cache_purger_.MaybeIssuePurge(google_url())) {
     return;
   }
