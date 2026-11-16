@@ -520,7 +520,9 @@ TEST_F(CssMinifyTest, FlexShorthandKeepsZeroLengthUnit) {
       ".d { FLEX: 1 0px !important }"
       ".e { flex-basis: 0px }"
       ".f { flex: 1 1 0% }"
-      ".g { margin: 0px; flex: 1 0px; padding: 0em }";
+      ".g { margin: 0px; flex: 1 0px; padding: 0em }"
+      ".h { -webkit-flex: 1 0px }"
+      ".i { -ms-flex: 1 0px }";
 
   GoogleString minified;
   StringWriter writer(&minified);
@@ -535,6 +537,8 @@ TEST_F(CssMinifyTest, FlexShorthandKeepsZeroLengthUnit) {
   EXPECT_HAS_SUBSTR(".f{flex:1 1 0%}", minified);
   // Zero units are still stripped on other declarations, before and after.
   EXPECT_HAS_SUBSTR(".g{margin:0;flex:1 0px;padding:0}", minified);
+  EXPECT_HAS_SUBSTR(".h{-webkit-flex:1 0px}", minified);
+  EXPECT_HAS_SUBSTR(".i{-ms-flex:1 0px}", minified);
 }
 
 // checking unicode-range descriptor minification

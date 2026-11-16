@@ -463,8 +463,11 @@ void CssMinify::Minify(const Css::Declaration& declaration) {
           JoinMinify(*declaration.values(), "");
         } else {
           const bool was_in_flex_declaration = in_flex_declaration_;
+          // -webkit-flex and -ms-flex are aliases with the same grammar.
           in_flex_declaration_ =
-              StringCaseEqual(declaration.prop_text(), "flex");
+              StringCaseEqual(declaration.prop_text(), "flex") ||
+              StringCaseEqual(declaration.prop_text(), "-webkit-flex") ||
+              StringCaseEqual(declaration.prop_text(), "-ms-flex");
           JoinMinify(*declaration.values(), " ");
           in_flex_declaration_ = was_in_flex_declaration;
         }
