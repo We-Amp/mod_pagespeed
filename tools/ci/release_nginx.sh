@@ -206,6 +206,31 @@ legs() {
   fi
 }
 
+# pair_version DIR: the optimizer version the packages of the tree in DIR pair
+# with, in package form. The tree's own version, unless (a) a dry run recorded
+# the pinned version in optimizer-pair-version (untracked, so a git archive
+# lacks it), or (b) the tracked pin marks this final version as a module-only
+# release ("unpaired_for" equal to it), in which case the pin's tag is the pair.
+pair_version() {
+  local dir="$1" v
+  # shellcheck disable=SC1091
+  v="$(cd "$dir" && . net/instaweb/public/VERSION && v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE:-}" ] && v="${v}~${PRERELEASE}"; echo "$v")" || return 1
+  if [ -f "$dir/optimizer-pair-version" ]; then
+    v="$(cat "$dir/optimizer-pair-version")"
+  elif [ -f "$dir/install/debian/optimizer-pin.json" ]; then
+    local pinned
+    pinned="$(python3 -I - "$dir/install/debian/optimizer-pin.json" "$v" <<'PY'
+import json, sys
+pin = json.load(open(sys.argv[1]))
+if pin.get("unpaired_for") == sys.argv[2] and str(pin.get("tag", "")).startswith("optimizer-v"):
+    print(pin["tag"][len("optimizer-v"):].replace("-", "~", 1))
+PY
+)" || return 1
+    [ -z "$pinned" ] || v="$pinned"
+  fi
+  case "$v" in [0-9]*) printf '%s\n' "$v" ;; *) return 1 ;; esac
+}
+
 build() {
   local arch="" set="main" ws="" out="" distro_only=""
   while [ $# -gt 0 ]; do
@@ -296,22 +321,21 @@ build() {
       return 90
     fi
     cp -a "$ws" "$wsdir" || { echo "::error::leg '${distro}': could not seed its workspace"; return 91; }
-    # The package Recommends the optimizer at the pair version: the version of
-    # this tree in package form, or the pinned one when a dry run or a
-    # module-only release recorded it in optimizer-pair-version (the same
-    # choice as the Apache builds).
-    local opt_ver
-    # shellcheck disable=SC1091
-    opt_ver="$(cd "$wsdir" && . net/instaweb/public/VERSION && v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE:-}" ] && v="${v}~${PRERELEASE}"; echo "$v")" || return 94
-    if [ -f "$wsdir/optimizer-pair-version" ]; then opt_ver="$(cat "$wsdir/optimizer-pair-version")"; fi
-    case "$opt_ver" in [0-9]*) ;; *) echo "::error::leg '${distro}': unusable optimizer pair version '${opt_ver}'"; return 94 ;; esac
+    # The package Recommends the optimizer at the pair version (see
+    # pair_version). A tree from an older release has build scripts that do not
+    # take the flag (the rebuild lane runs this script against them), so it is
+    # passed only to a script that knows it.
+    local opt_ver deb_opt="" rpm_opt=""
+    opt_ver="$(pair_version "$wsdir")" || { echo "::error::leg '${distro}': unusable optimizer pair version"; return 94; }
+    if grep -q OPTIMIZER_DEB_VERSION "$wsdir/install/nginx/build_nginx_deb.sh" 2>/dev/null; then deb_opt=" -d ${opt_ver}"; fi
+    if grep -q OPTIMIZER_RPM_VERSION "$wsdir/install/nginx/build_nginx_rpm.sh" 2>/dev/null; then rpm_opt=" -O ${opt_ver}"; fi
     local aflag=""
     if [ "$pkg" = rpm ]; then
       [ "$arch" = arm64 ] && aflag="-a aarch64 "
-      wrap="./install/nginx/build_nginx_rpm.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${rpm_dist} -O ${opt_ver}"
+      wrap="./install/nginx/build_nginx_rpm.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${rpm_dist}${rpm_opt}"
     else
       [ "$arch" = arm64 ] && aflag="-a arm64 "
-      wrap="./install/nginx/build_nginx_deb.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${opt_ver}"
+      wrap="./install/nginx/build_nginx_deb.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so${deb_opt}"
     fi
     # Root inside the container: apt and dnf install the build toolchain of
     # the distro. On success the leg copies its packages to /collect and
@@ -748,6 +772,23 @@ self_test() {
   # An empty directory, so only the refused arch can fail the check.
   mkdir -p "$t/empty"
   check_set --arch arm64 --pkgdir "$t/empty" --set nginxorg >/dev/null 2>&1 && { echo "FAIL: nginxorg check-set for arm64 accepted"; fail=1; }
+  # the optimizer pair version a package Recommends
+  mkdir -p "$t/pv/net/instaweb/public" "$t/pv/install/debian"
+  printf 'MAJOR=2\nMINOR=8\nBUILD=2\nPATCH=0\n' > "$t/pv/net/instaweb/public/VERSION"
+  chk "pair version, paired" "$(pair_version "$t/pv")" "2.8.2"
+  printf '{"tag":"optimizer-v2.8.1"}\n' > "$t/pv/install/debian/optimizer-pin.json"
+  chk "pair version, pin without unpaired_for" "$(pair_version "$t/pv")" "2.8.2"
+  printf '{"tag":"optimizer-v2.8.1","unpaired_for":"2.8.2"}\n' > "$t/pv/install/debian/optimizer-pin.json"
+  chk "pair version, module-only from the tracked pin" "$(pair_version "$t/pv")" "2.8.1"
+  printf '{"tag":"optimizer-v2.8.1","unpaired_for":"2.8.3"}\n' > "$t/pv/install/debian/optimizer-pin.json"
+  chk "pair version, stale unpaired_for" "$(pair_version "$t/pv")" "2.8.2"
+  printf '2.7.0~rc1' > "$t/pv/optimizer-pair-version"
+  chk "pair version, recorded file wins" "$(pair_version "$t/pv")" "2.7.0~rc1"
+  # An older tree's build scripts take no optimizer flag: it must not be passed.
+  printf 'OPTIMIZER_DEB_VERSION=""\n' > "$t/new_deb.sh"
+  printf 'getopts ":o:s:a:h" x\n' > "$t/old_deb.sh"
+  grep -q OPTIMIZER_DEB_VERSION "$t/new_deb.sh" || { echo "FAIL: flag probe missed a new script"; fail=1; }
+  grep -q OPTIMIZER_DEB_VERSION "$t/old_deb.sh" && { echo "FAIL: flag probe matched an old script"; fail=1; }
   out=""
   [ "$fail" = 0 ] && echo "release_nginx self-test: ok"
   return "$fail"
