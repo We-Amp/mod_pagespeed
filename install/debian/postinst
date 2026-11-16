@@ -84,6 +84,14 @@ case "$1" in
            id www-data >/dev/null 2>&1; then
             usermod -a -G pagespeed www-data || true
         fi
+
+        # Offer pagespeed-doctor (a read-only health check) as
+        # /usr/sbin/pagespeed-doctor.
+        if [ -x /usr/share/@@PACKAGE@@/pagespeed-doctor ]; then
+            update-alternatives --install /usr/sbin/pagespeed-doctor \
+                pagespeed-doctor /usr/share/@@PACKAGE@@/pagespeed-doctor 50 \
+                >/dev/null 2>&1 || true
+        fi
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)
     ;;

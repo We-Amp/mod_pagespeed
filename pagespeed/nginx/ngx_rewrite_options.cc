@@ -419,6 +419,14 @@ RewriteOptions::OptionScope NgxRewriteOptions::GetOptionScope(
                                                     : option->scope();
     }
   }
+  // A deprecated name keeps the scope it had when it was a valid option, as in
+  // Apache, so it is only accepted where the option itself used to be.
+  const Properties* deprecated = deprecated_properties();
+  for (int i = 0, n = deprecated->size(); i < n; ++i) {
+    if (StringCaseEqual(deprecated->property(i)->option_name(), option_name)) {
+      return deprecated->property(i)->scope();
+    }
+  }
   return kDirectoryScope;
 }
 

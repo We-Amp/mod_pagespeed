@@ -55,6 +55,7 @@
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/purge_context.h"
+#include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -217,6 +218,34 @@ bool TargetBelongsToRequestHost(const GoogleUrl& request_url,
                                 const GoogleUrl& target) {
   return StringCaseEqual(request_url.Host(), target.Host()) &&
          ExplicitPort(request_url) == ExplicitPort(target);
+}
+
+// The purge set of a cache path holds the records of every site on that path.
+// A per-vhost console lists only the records of its own host and port, in
+// the PurgeSet::ToString() format.  The first line, the whole-cache flush
+// time, names no URL and applies to this site too, so it stays.
+GoogleString PurgeSetStringForRequestHost(const PurgeSet& purge_set,
+                                          const GoogleUrl& request_url) {
+  GoogleString str("Global@");
+  GoogleString buf;
+  int64 global_ms = purge_set.global_invalidation_timestamp_ms();
+  StrAppend(&str, ConvertTimeToString(global_ms, &buf)
+                      ? buf
+                      : Integer64ToString(global_ms));
+  for (PurgeSet::Iterator it = purge_set.Begin(), end = purge_set.End();
+       it != end; ++it) {
+    GoogleUrl target(it.Key());
+    if (!target.IsWebValid() ||
+        !TargetBelongsToRequestHost(request_url, target)) {
+      continue;
+    }
+    buf.clear();
+    StrAppend(&str, "\n", it.Key(), "@",
+              ConvertTimeToString(it.Value(), &buf)
+                  ? buf
+                  : Integer64ToString(it.Value()));
+  }
+  return str;
 }
 
 // Renders a double as a bare JSON number, or the JSON literal null for a
@@ -708,7 +737,10 @@ void AdminSite::PrintCaches(
         options->Clone());
   } else if ((source == kPageSpeedAdmin) &&
              query_params.Lookup1Unescaped("new_set", &url)) {
-    GoogleString purge_set = options->PurgeSetString();
+    GoogleString purge_set = is_global
+                                 ? options->PurgeSetString()
+                                 : PurgeSetStringForRequestHost(
+                                       *options->purge_set(), stripped_gurl);
     GoogleString json =
         StrCat("{\"purge_set\":\"", JsonEscape(purge_set), "\"}");
     WriteJsonResponse(fetch, json, timer_, message_handler_);
@@ -773,7 +805,8 @@ void AdminSite::PrintCaches(
             "{\"success\":false,\"error\":\"Invalid URL: ", escaped_url, "\"}");
         WriteJsonResponse(fetch, json, timer_, message_handler_);
       } else {
-        PurgeHandler(resolved.Spec(), cache_path, fetch);
+        Purge(resolved.Spec(), cache_path, fetch,
+              is_global /* allow_eviction */);
       }
     }
   } else {
@@ -1365,8 +1398,8 @@ void AdminSite::StatisticsPage(
   }
 }
 
-void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
-                             AsyncFetch* fetch) {
+void AdminSite::Purge(StringPiece url, SystemCachePath* cache_path,
+                      AsyncFetch* fetch, bool allow_eviction) {
   PurgeContext* purge_context = cache_path->purge_context();
   int64 now_ms = timer_->NowMs();
   PurgeFetchCallbackGasket* gasket =
@@ -1375,8 +1408,10 @@ void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
       NewCallback(gasket, &PurgeFetchCallbackGasket::Done);
   if (strings::EndsWith(url, "*")) {
     purge_context->SetCachePurgeGlobalTimestampMs(now_ms, callback);
-  } else {
+  } else if (allow_eviction) {
     purge_context->AddPurgeUrl(url, now_ms, callback);
+  } else {
+    purge_context->AddPurgeUrlWithoutEviction(url, now_ms, callback);
   }
 }
 

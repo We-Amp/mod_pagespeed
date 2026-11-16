@@ -2,6 +2,8 @@
 
 case "$1" in
     remove)
+        update-alternatives --remove pagespeed-doctor \
+            /usr/share/@@PACKAGE@@/pagespeed-doctor >/dev/null 2>&1 || true
         # -m records "disabled by the package" so a reinstall after this
         # remove enables them again (see postinst); an administrator's own
         # a2dismod / a2disconf is recorded differently and is left alone.

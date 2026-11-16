@@ -163,6 +163,10 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     if (value.IsFetchedInput()) {
       headers->Replace(HTTPValue::kFetchedInputHeader, "1");
       headers->ComputeCaching();
+    } else if (value.IsCurrentClientEntry()) {
+      headers->Replace(HTTPValue::kClientEntryHeader,
+                       HTTPValue::kClientEntryGeneration);
+      headers->ComputeCaching();
     }
     return true;
   }
@@ -258,6 +262,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
             // headers, keeping the fetched-input mark.
             const bool fetched_input =
                 callback_->http_value()->IsFetchedInput();
+            const bool client_entry =
+                callback_->http_value()->IsCurrentClientEntry();
             StringPiece content;
             callback_->http_value()->ExtractContents(&content);
             callback_->http_value()->Clear();
@@ -272,6 +278,13 @@ class HTTPCacheCallback : public CacheInterface::Callback {
             callback_->http_value()->Write(content, handler_);
             if (fetched_input) {
               callback_->http_value()->SetHeadersMarkingFetchedInput(*headers);
+            } else if (client_entry) {
+              ResponseHeaders marked;
+              marked.CopyFrom(*headers);
+              marked.Replace(HTTPValue::kClientEntryHeader,
+                             HTTPValue::kClientEntryGeneration);
+              marked.ComputeCaching();
+              callback_->http_value()->SetHeaders(&marked);
             } else {
               callback_->http_value()->SetHeaders(headers);
             }
@@ -434,6 +447,15 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(
              (value != nullptr && value->IsFetchedInput())) {
     headers_mutated = true;
   }
+  // Every other entry is stamped with the current client-entry generation
+  // (the readers of entries stored from responses served to clients refuse
+  // ones an earlier version stored under looser rules).  The stamp goes on
+  // the stored value's own copy of the headers only: 'headers' may be the
+  // caller's response headers, still to be sent to a client.
+  const bool stamp_client_entry = !fetched_input;
+  if (fetched_input && headers->RemoveAll(HTTPValue::kClientEntryHeader)) {
+    headers_mutated = true;
+  }
   if (headers_mutated) {
     headers->ComputeCaching();
   }
@@ -455,9 +477,23 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(
     headers_mutated = true;
   }
 
-  if (headers_mutated || value == nullptr) {
+  if (headers_mutated || value == nullptr || stamp_client_entry) {
     HTTPValue* new_value = new HTTPValue;  // Will be deleted by calling Put.
-    new_value->SetHeaders(headers);
+    if (stamp_client_entry) {
+      // As SetHeaders would have done for 'headers' themselves: callers go
+      // on to read their caching fields.
+      if (headers->cache_fields_dirty()) {
+        headers->ComputeCaching();
+      }
+      ResponseHeaders stamped(headers->http_options());
+      stamped.CopyFrom(*headers);
+      stamped.Replace(HTTPValue::kClientEntryHeader,
+                      HTTPValue::kClientEntryGeneration);
+      stamped.ComputeCaching();
+      new_value->SetHeaders(&stamped);
+    } else {
+      new_value->SetHeaders(headers);
+    }
     if (content == nullptr) {
       bool success = value->ExtractContents(&new_content);
       DCHECK(success);
@@ -470,7 +506,7 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(
   return value;
 }
 
-void HTTPCache::PutInternal(bool preserve_response_headers,
+void HTTPCache::PutInternal(bool preserve_response_headers, bool client_entry,
                             const GoogleString& key,
                             const GoogleString& fragment,
                             int64 start_monotonic_us, HTTPValue* value,
@@ -490,9 +526,15 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
         !response_headers->IsGzipped()) {
       ResponseHeaders* headers_to_gzip = response_headers;
       ResponseHeaders headers_copy;
-      if (preserve_response_headers) {
+      if (preserve_response_headers || client_entry) {
         headers_copy.CopyFrom(*response_headers);
         headers_to_gzip = &headers_copy;
+      }
+      if (client_entry) {
+        // The value is rebuilt from these headers; keep the stamp on it.
+        headers_copy.Replace(HTTPValue::kClientEntryHeader,
+                             HTTPValue::kClientEntryGeneration);
+        headers_copy.ComputeCaching();
       }
 
       // Canonicalize header order so x-original-content-length is always
@@ -518,9 +560,15 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
   } else if ((compression_level_ == 0) && response_headers->IsGzipped()) {
     ResponseHeaders* headers_to_unzip = response_headers;
     ResponseHeaders headers_copy;
-    if (preserve_response_headers) {
+    if (preserve_response_headers || client_entry) {
       headers_copy.CopyFrom(*response_headers);
       headers_to_unzip = &headers_copy;
+    }
+    if (client_entry) {
+      // The value is rebuilt from these headers; keep the stamp on it.
+      headers_copy.Replace(HTTPValue::kClientEntryHeader,
+                           HTTPValue::kClientEntryGeneration);
+      headers_copy.ComputeCaching();
     }
 
     if (InflatingFetch::UnGzipValueIfCompressed(*value, headers_to_unzip,
@@ -589,7 +637,8 @@ void HTTPCache::PutValue(const GoogleString& key, const GoogleString& fragment,
       start_us, nullptr, &headers, value, fetched_input, handler);
   // Put into underlying cache.
   if (new_value != nullptr) {
-    PutInternal(false /* preserve_response_headers */, key, fragment,
+    PutInternal(false /* preserve_response_headers */,
+                !fetched_input /* client_entry */, key, fragment,
                 start_monotonic_us, new_value, &headers, handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
@@ -628,8 +677,9 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
                                false /* fetched_input */, handler));
   // Put into underlying cache.
   if (value.get() != nullptr) {
-    PutInternal(true /* preserve_response_headers */, key, fragment,
-                start_monotonic_us, value.get(), headers, handler);
+    PutInternal(true /* preserve_response_headers */, true /* client_entry */,
+                key, fragment, start_monotonic_us, value.get(), headers,
+                handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
     }

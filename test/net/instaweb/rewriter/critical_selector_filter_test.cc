@@ -1621,8 +1621,8 @@ TEST_F(CriticalSelectorLessThanTest, WrittenTextIsPreparedText) {
   SetPageType("text/html; charset=utf-8");
   const char* const kCss[] = {
       "*{color:red}",
-      "@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
-      "*{color:red}",
+      ("@property --x{syntax:\"<length>\";inherits:false;initial-value:0px}"
+       "*{color:red}"),
       "@media (width < 600px){div{margin:0}}*{color:red}",
       "*[title=\"</style><b>\"]{color:red}",
       "@huh { a: \"<!--\"; }*{color:red}",

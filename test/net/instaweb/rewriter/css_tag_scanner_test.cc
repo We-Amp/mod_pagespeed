@@ -548,6 +548,74 @@ TEST_F(RewriteDomainTransformerTest, BrokenEscape) {
                Transform("@import 'foo/\\1234'; url(foo\\"));
 }
 
+// Text inside a string is not a URL use, whatever it looks like: lexing a URL
+// out of it would run past the closing quote and change where the string
+// ends. What follows the string is still rewritten.
+TEST_F(RewriteDomainTransformerTest, UrlInsideStringIsText) {
+  const char kTwoStrings[] = "p{content:\"url(a\"} q r{content:\"}s{}\"}";
+  EXPECT_STREQ(kTwoStrings, Transform(kTwoStrings));
+  const char kEscapedQuote[] = "p{content:'\\'url(a'}";
+  EXPECT_STREQ(kEscapedQuote, Transform(kEscapedQuote));
+  const char kLineContinuation[] = "p{content:'\\\r\nurl(a'}";
+  EXPECT_STREQ(kLineContinuation, Transform(kLineContinuation));
+  // An escaped quote outside a string does not start one.
+  const char kEscapedQuoteInName[] = "p\\'q{content:'url(a'}";
+  EXPECT_STREQ(kEscapedQuoteInName, Transform(kEscapedQuoteInName));
+  EXPECT_STREQ("p{content:'url(a'}q{b:url(http://old-base.com/a)}",
+               Transform("p{content:'url(a'}q{b:url(a)}"));
+  // An unescaped newline ends a string.
+  EXPECT_STREQ("p{content:'a\n}q{b:url(http://old-base.com/a)}",
+               Transform("p{content:'a\n}q{b:url(a)}"));
+}
+
+TEST_F(RewriteDomainTransformerTest, ImportInsideStringIsText) {
+  // The closing quote of the string is not the opening quote of an argument.
+  const char kImportInString[] = "p{content:\"@import\"}q{content:\"}s{}\"}";
+  EXPECT_STREQ(kImportInString, Transform(kImportInString));
+}
+
+TEST_F(RewriteDomainTransformerTest, CustomPropertyStringIsText) {
+  const char kCustomProperties[] = ":root{--a:\"url(b\"} p q{--c:\"}s{}\"}";
+  EXPECT_STREQ(kCustomProperties, Transform(kCustomProperties));
+}
+
+TEST_F(RewriteDomainTransformerTest, UrlInsideCommentIsText) {
+  EXPECT_STREQ("/* it's url(a) */url(http://old-base.com/a)/*/ url(a",
+               Transform("/* it's url(a) */url(a)/*/ url(a"));
+  // Licence comments, which minification keeps, are comments too.
+  EXPECT_STREQ("/*! \"url(a) */p{b:url(http://old-base.com/a)}",
+               Transform("/*! \"url(a) */p{b:url(a)}"));
+}
+
+TEST_F(RewriteDomainTransformerTest, UndecodableStringIsSteppedOver) {
+  // A quoted argument we can not decode is left alone (see BrokenEscape), and
+  // neither its tail nor what follows it is mistaken for something else.
+  EXPECT_STREQ("url('a\\62 c') url(http://old-base.com/x) 'url(x'",
+               Transform("url('a\\62 c') url(x) 'url(x'"));
+  EXPECT_STREQ("url(\"a\\62 )}p{}\") q{b:url(http://old-base.com/x)}",
+               Transform("url(\"a\\62 )}p{}\") q{b:url(x)}"));
+  EXPECT_STREQ("@import 'a\\62 c'; url(http://old-base.com/x) 'url(x'",
+               Transform("@import 'a\\62 c'; url(x) 'url(x'"));
+}
+
+TEST_F(RewriteDomainTransformerTest, StreamingStringAndComment) {
+  // A string or comment cut by a chunk boundary is retained until its end is
+  // seen, since until then text inside it can not be told from a URL use.
+  const char* string_input[] = {"p{content:'url(", "a'}", "q{b:url(a)}",
+                                nullptr};
+  EXPECT_EQ(
+      "portion=p{content:, retain='url(|"
+      "portion='url(a'}, retain=|"
+      "portion=q{b:url(http://old-base.com/a)}, retain=|",
+      TransformStreaming(string_input));
+  const char* comment_input[] = {"a/", "* url(x", ") */b{c:url(x)}", nullptr};
+  EXPECT_EQ(
+      "portion=a, retain=/|"
+      "portion=, retain=/* url(x|"
+      "portion=/* url(x) */b{c:url(http://old-base.com/x)}, retain=|",
+      TransformStreaming(comment_input));
+}
+
 TEST_F(RewriteDomainTransformerTest, StreamingUrlInterrupt) {
   const char* input[] = {"u",       "rl(", "\"foo", ".png\"",
                          ") bar u", "x",   nullptr};
