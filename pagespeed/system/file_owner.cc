@@ -45,13 +45,16 @@ SetOwnerResult SetOwnerThroughDescriptor(const GoogleString& path, uid_t uid,
   } else if (!S_ISDIR(st.st_mode) &&
              !(S_ISREG(st.st_mode) && st.st_nlink == 1)) {
     *error = "not a plain file or directory";
-  } else if (st.st_uid == uid &&
-             (match == OwnerMatch::kUserOnly || st.st_gid == gid)) {
-    ok = true;  // already right
-  } else if (fchown(fd, uid, gid) != 0) {
-    *error = strerror(errno);
   } else {
-    ok = true;
+    const bool already_right =
+        st.st_uid == uid &&
+        (match == OwnerMatch::kUserOnly || st.st_gid == gid);
+    // fchown only when the owner is not already right.
+    if (already_right || fchown(fd, uid, gid) == 0) {
+      ok = true;
+    } else {
+      *error = strerror(errno);
+    }
   }
   close(fd);
   return ok ? SetOwnerResult::kDone : SetOwnerResult::kFailed;
