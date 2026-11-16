@@ -33,11 +33,14 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
 #include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
@@ -211,6 +214,60 @@ class CriticalCssBeaconFilterTest : public CriticalCssBeaconFilterTestBase {
   CriticalCssBeaconFilterTest(const CriticalCssBeaconFilterTest&) = delete;
   CriticalCssBeaconFilterTest& operator=(const CriticalCssBeaconFilterTest&) = delete;
 };
+
+// The selectors written into the beacon's script, as written.
+GoogleString BeaconSelectors(StringPiece html) {
+  const size_t start = html.find("pagespeed.selectors=[");
+  if (start == StringPiece::npos) {
+    return "NO BEACON";
+  }
+  const size_t end = html.find("];", start);
+  return GoogleString(html.substr(start, end - start + 2));
+}
+
+// The beacon's script never holds a selector that could be read as markup in
+// it, on HTML and XHTML pages, whichever kind of page the summary was cached
+// for.
+TEST_F(CriticalCssBeaconFilterTest, SelectorsWithLessThanAreLeftOut) {
+  SetResponseWithDefaultHeaders("m.css", kContentTypeCss,
+                                "*[title=\"]]><i>\"]{color:red}p{color:green}",
+                                100);
+  SetResponseWithDefaultHeaders(
+      "c.css", kContentTypeCss,
+      "*[title=\"]]>\"]{color:red}a{color:green}span{color:red}", 100);
+  const GoogleString html =
+      InputHtml(StrCat(CssLinkHref("m.css"), CssLinkHref("c.css")));
+  const char* const kPages[] = {"text/html; charset=utf-8",
+                                "application/xhtml+xml; charset=utf-8",
+                                "text/html; charset=utf-8",
+                                "application/xhtml+xml; charset=utf-8"};
+  for (const char* page : kPages) {
+    NextView();
+    factory()->mock_timer()->AdvanceMs(
+        options()->beacon_reinstrument_time_sec() * Timer::kSecondMs);
+    response_headers_.Replace(HttpAttributes::kContentType, page);
+    response_headers_.ComputeCaching();
+    ParseUrl(kTestDomain, html);
+    // The selector whose string holds "]]>" is written with the brackets
+    // escaped by the CSS serializer; the one holding a '<' is left out.
+    const GoogleString selectors = BeaconSelectors(output_buffer_);
+    EXPECT_EQ(
+        "pagespeed.selectors=[\"*[title=\\\"\\\\]\\\\]>\\\"]\","
+        "\"a\",\"span\"];",
+        selectors)
+        << page;
+    EXPECT_EQ(GoogleString::npos, selectors.find("]]>")) << page;
+    EXPECT_EQ(GoogleString::npos, output_buffer_.find("<i>")) << page;
+    EXPECT_EQ(GoogleString::npos, output_buffer_.find("<i\"")) << page;
+  }
+}
+
+TEST_F(CriticalCssBeaconFilterTest, SelectorFitsScript) {
+  EXPECT_TRUE(CriticalCssBeaconFilter::SelectorFitsScript("div > p"));
+  EXPECT_TRUE(CriticalCssBeaconFilter::SelectorFitsScript("[title=\"]]\"]"));
+  EXPECT_FALSE(CriticalCssBeaconFilter::SelectorFitsScript("[title=\"<b\"]"));
+  EXPECT_FALSE(CriticalCssBeaconFilter::SelectorFitsScript("[title=\"]]>\"]"));
+}
 
 TEST_F(CriticalCssBeaconFilterTest, ExtractFromStylesheet) {
   ValidateExpectedUrl(kTestDomain, InputHtml(kLinkI),

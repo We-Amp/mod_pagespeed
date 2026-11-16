@@ -419,6 +419,14 @@ RewriteOptions::OptionScope NgxRewriteOptions::GetOptionScope(
                                                     : option->scope();
     }
   }
+  // A deprecated name keeps the scope it had when it was a valid option, as in
+  // Apache, so it is only accepted where the option itself used to be.
+  const Properties* deprecated = deprecated_properties();
+  for (int i = 0, n = deprecated->size(); i < n; ++i) {
+    if (StringCaseEqual(deprecated->property(i)->option_name(), option_name)) {
+      return deprecated->property(i)->scope();
+    }
+  }
   return kDirectoryScope;
 }
 
@@ -672,6 +680,26 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
     case RewriteOptions::kOptionOk:
       return NGX_CONF_OK;
     case RewriteOptions::kOptionNameUnknown:
+      // As in Apache: a name that was once a valid option is accepted as a
+      // no-op with a warning, so an older configuration still loads. Names
+      // that were never options still fail.
+      if (IsDeprecatedOptionName(directive)) {
+        if (driver_factory->FirstUseOfDeprecatedOption(directive)) {
+          if (cf != nullptr) {
+            ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                               "pagespeed %*s is deprecated and has no "
+                               "effect; please remove it from your "
+                               "configuration",
+                               directive.size(), directive.data());
+          } else {
+            handler->Message(kWarning,
+                             "pagespeed %s is deprecated and has no effect; "
+                             "please remove it from your configuration",
+                             directive.as_string().c_str());
+          }
+        }
+        return NGX_CONF_OK;
+      }
       return ps_error_string_for_option(pool, directive,
                                         "not recognized or too many arguments");
     case RewriteOptions::kOptionValueInvalid: {

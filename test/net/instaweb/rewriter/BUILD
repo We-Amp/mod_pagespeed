@@ -1,3 +1,4 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
 load(
     "//bazel:pagespeed_test.bzl",
     "pagespeed_cc_test",
@@ -32,6 +33,7 @@ pagespeed_cc_test_library(
         "older_result_cache.h",
         "oob_slot_index_cache.h",
         "option_context_worst_case.h",
+        "prepared_style_text_recorder.h",
         "rewrite_context_test_base.h",
         "rewrite_options_test_base.h",
         "rewrite_test_base.h",
@@ -97,5 +99,23 @@ pagespeed_cc_test(
     srcs = glob(["config/*_test.cc"]),
     deps = [
         "//test/pagespeed/automatic:test_base",
+    ],
+)
+
+# Fails when a new writer of text into the page, or a new reader of CSS
+# summaries, appears in the rewriter without going through the checked path
+# for CSS written into <style> elements and scripts. See the test's header.
+cc_test(
+    name = "inline_style_writers_test",
+    srcs = ["inline_style_writers_lint.cc"],
+    data = ["//net/instaweb/rewriter:inline_style_writer_lint_sources"],
+    env = {
+        "INLINE_STYLE_LINT_SOURCES": "$(rootpaths //net/instaweb/rewriter:inline_style_writer_lint_sources)",
+    },
+    linkstatic = True,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test:main",
+        "//test/pagespeed/kernel/base:pagespeed_gtest",
     ],
 )

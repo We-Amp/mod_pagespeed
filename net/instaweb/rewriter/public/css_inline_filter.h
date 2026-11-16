@@ -24,6 +24,7 @@
 
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/common_filter.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -31,6 +32,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 
@@ -65,9 +67,6 @@ class CssInlineFilter : public CommonFilter {
   bool IntendedForInlining() const override { return true; }
 
   static void InitStats(Statistics* statistics);
-  // Could a browser see markup in contents if it were the text of an inline
-  // <style> element?  Such CSS must not be written into the HTML.
-  static bool MayContainMarkup(StringPiece contents);
 
  protected:
   // Changes filter id code (which shows up in cache keys and
@@ -86,11 +85,11 @@ class CssInlineFilter : public CommonFilter {
 
   bool ShouldInline(const ResourcePtr& resource,
                     const StringPiece& attrs_attribute,
-                    const StringPiece& htmls_charset,
+                    const StringPiece& htmls_charset, InlineStyleMode mode,
                     GoogleString* reason) const;
   void RenderInline(const ResourcePtr& resource, const CachedResult& cached,
                     const GoogleUrl& base_url, const StringPiece& text,
-                    HtmlElement* element);
+                    InlineStyleMode mode, HtmlElement* element);
 
   const char* id_;  // filter ID code.
   size_t size_threshold_bytes_;
@@ -99,6 +98,9 @@ class CssInlineFilter : public CommonFilter {
 
   Variable* num_css_inlined_;
   bool in_body_;
+  // The charset the meta tags seen so far declare (see
+  // InlineStyleModeForDocument).
+  InlineStyleMetaCharset meta_charset_;
 
   CssInlineFilter(const CssInlineFilter&) = delete;
   CssInlineFilter& operator=(const CssInlineFilter&) = delete;

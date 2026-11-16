@@ -1167,6 +1167,39 @@ TEST_F(RewriteDriverTest, InvalidBaseTag) {
   EXPECT_EQ("slwly:example.com/subdir", BaseUrlSpec());
 }
 
+TEST_F(RewriteDriverTest, BaseUrlObtainedEarlierSurvivesLaterBaseTag) {
+  // The base URL a caller obtained stays valid, with its original value,
+  // until the driver is cleared, even after a later <base> tag changes the
+  // document's base.
+  const char kPageUrl[] = "http://www.example.com/dir/page.html";
+  rewrite_driver()->AddFilters();
+  ASSERT_TRUE(rewrite_driver()->StartParse(kPageUrl));
+  rewrite_driver()->ParseText("<head><title>t</title>");
+  rewrite_driver()->Flush();
+
+  const GoogleUrl* page_base = &rewrite_driver()->base_url();
+  const GoogleUrl* page_decoded = &rewrite_driver()->decoded_base_url();
+  StringPiece page_base_dir = page_base->AllExceptLeaf();
+  StringPiece page_decoded_spec = rewrite_driver()->decoded_base();
+
+  rewrite_driver()->ParseText("<base href='../other/'></head>");
+  rewrite_driver()->Flush();
+
+  // The document now resolves against the new base.
+  GoogleUrl resolved(rewrite_driver()->base_url(), "a.css");
+  EXPECT_EQ("http://www.example.com/other/a.css", resolved.Spec());
+  EXPECT_EQ("http://www.example.com/other/", rewrite_driver()->decoded_base());
+
+  // What was obtained before the tag still reads the page URL.
+  EXPECT_EQ(kPageUrl, page_base->Spec());
+  EXPECT_EQ(kPageUrl, page_decoded->Spec());
+  EXPECT_EQ("http://www.example.com/dir/", page_base_dir);
+  EXPECT_EQ(kPageUrl, page_decoded_spec);
+
+  rewrite_driver()->ParseText("<body></body>");
+  rewrite_driver()->FinishParse();
+}
+
 // The TestUrlNamer produces a url like below which is too long.
 // http://cdn.com/http/base.example.com/http/unmapped.example.com/dir/test.jpg.pagespeed.xy.#.
 // NOLINT

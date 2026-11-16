@@ -22,9 +22,11 @@
 
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
+#include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -32,11 +34,13 @@
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -44,6 +48,7 @@
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
@@ -1023,14 +1028,14 @@ TEST_F(JsCombineFilterTest, TestCombineShard) {
 
 TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
   // Regression test where a combination involving a 404 gets fetched,
-  // and then the page is rewritten.  The fetch fails and leaves nothing
-  // behind for the HTML path, which then rewrites the page exactly as it
-  // would have without the fetch: the two scripts that exist are combined
-  // and the missing one is left alone.
+  // and then the page is rewritten.  The fetch is answered without the
+  // missing script and leaves nothing behind for the HTML path, which then
+  // rewrites the page exactly as it would have without the fetch: the two
+  // scripts that exist are combined and the missing one is left alone.
   SetFetchResponse404("404.js");
   SetResponseWithDefaultHeaders(kJsUrl1, kContentTypeJavascript, "var a;", 100);
   SetResponseWithDefaultHeaders(kJsUrl2, kContentTypeJavascript, "var b;", 100);
-  EXPECT_FALSE(TryFetchResource(Encode(
+  EXPECT_TRUE(TryFetchResource(Encode(
       kTestDomain, "jc", "0", MultiUrl(kJsUrl1, kJsUrl2, "404.js"), "js")));
 
   ScriptInfoVector scripts;
@@ -1043,6 +1048,296 @@ TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
   VerifyUse(scripts[1], kJsUrl1);
   VerifyUse(scripts[2], kJsUrl2);
   EXPECT_EQ("404.js", scripts[3].url);
+}
+
+// Issue #791: once the cache no longer holds a combined script, an input the
+// server cannot fetch at that moment must not turn the whole combined URL into
+// a 404. The scripts that can be fetched are served; the missing one is
+// declared empty, so the page's eval() of it does nothing instead of throwing.
+// The response has a short private lifetime, and the full combination comes
+// back once the input can be fetched again.
+TEST_F(JsCombineFilterTest, FetchAfterCacheLossWithUnavailableInput) {
+  const char kJsX[] = "x.js";
+  const char kJsY[] = "y.js";
+  const char kJsZ[] = "z.js";
+  SetResponseWithDefaultHeaders(kJsX, kContentTypeJavascript, "var x;", 300);
+  SetResponseWithDefaultHeaders(kJsY, kContentTypeJavascript, "var y;", 300);
+  SetResponseWithDefaultHeaders(kJsZ, kContentTypeJavascript, "var z;", 300);
+  const GoogleString js_url =
+      Encode(kTestDomain, "jc", "0", MultiUrl(kJsX, kJsY, kJsZ), "js");
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(js_url, &full));
+  // Three "var <name> = <code>;" lines, y's in the middle.
+  const GoogleString y_code = " = \"var y;\";\n";
+  const size_t y_pos = full.find(y_code);
+  ASSERT_NE(GoogleString::npos, y_pos);
+  ASSERT_NE(GoogleString::npos, full.find("\"var x;\""));
+  ASSERT_NE(GoogleString::npos, full.find("\"var z;\""));
+  GoogleString expected_partial = full;
+  expected_partial.replace(y_pos, y_code.size(), " = \"\";\n");
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kJsY));
+  GoogleString js_out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(js_url, &js_out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(expected_partial, js_out);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+
+  lru_cache()->Clear();
+  SetResponseWithDefaultHeaders(kJsY, kContentTypeJavascript, "var y;", 300);
+  js_out.clear();
+  ASSERT_TRUE(FetchResourceUrl(js_url, &js_out));
+  EXPECT_EQ(full, js_out);
+}
+
+// The same with inputs that are themselves optimized resources, as in URLs
+// that older versions put in pages (see ReconstructNoTimeout): the script
+// that cannot be fetched is declared under the name the page evaluates,
+// which comes from the URL the combination names, not from the failed
+// rebuild of that input.
+TEST_F(JsFilterAndCombineFilterTest,
+       FetchChainedCombinationWithUnavailableInput) {
+  const GoogleString url = Encode(kTestDomain, "jc", "FA3Pqioukh",
+                                  MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js",
+                                           "b.js.pagespeed.jm.Y1kknPfzVs.js"),
+                                  "js");
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  const char kLegacyVar2[] = "mod_pagespeed_ose8Vzgyj9";
+  GoogleString full;
+  ASSERT_TRUE(FetchResourceUrl(url, &full));
+  ASSERT_NE(GoogleString::npos, full.find(StrCat("var ", kLegacyVar1, " = ")));
+  ASSERT_NE(GoogleString::npos, full.find(StrCat("var ", kLegacyVar2, " = ")));
+
+  lru_cache()->Clear();
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, kJsUrl2));
+  GoogleString partial;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &partial, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_NE(GoogleString::npos,
+            partial.find(StrCat("var ", kLegacyVar1, " = ")));
+  EXPECT_NE(GoogleString::npos,
+            partial.find(StrCat("var ", kLegacyVar2, " = \"\";\n")));
+  EXPECT_FALSE(headers.IsProxyCacheable());
+}
+
+// A page rewritten by an older version names a minified script inside the
+// combination (jm inside jc) and evaluates it under a name derived from that
+// URL. When the rebuild of the minified script falls back to the unoptimized
+// original (here because minifying it no longer saves anything, so the
+// rebuild serves the original), the original has another content hash; the
+// combination must still declare the script under the name the page
+// evaluates, or the page's eval() throws a ReferenceError.
+TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithFallbackInput) {
+  const GoogleString url =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js", kJsUrl2), "js");
+  // The names an older page evaluates (see ReconstructNoTimeout).
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  const char kVar2[] = "mod_pagespeed_dzsx6RqvJJ";
+
+  // Already minimal: the rebuild of a.js.pagespeed.jm falls back to the
+  // unoptimized original.
+  SimulateJsResource(kJsUrl1, "var a=1;");
+
+  GoogleString out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = \"var a=1;\";\n", "var ", kVar2,
+                   " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+  // Not what the URL names, so not publicly cacheable.
+  EXPECT_FALSE(headers.IsProxyCacheable());
+}
+
+// The same when the script's content changed since the page was rewritten:
+// the rebuilt input has a new hash, and the page still evaluates the name
+// from the URL it has.
+TEST_F(JsFilterAndCombineFilterTest, FetchChainedCombinationWithChangedInput) {
+  const GoogleString url = Encode(kTestDomain, "jc", "0",
+                                  MultiUrl("a.js.pagespeed.jm.FUEwDOA7jh.js",
+                                           "b.js.pagespeed.jm.Y1kknPfzVs.js"),
+                                  "js");
+  const char kLegacyVar1[] = "mod_pagespeed_S$0tgbTH0O";
+  const char kLegacyVar2[] = "mod_pagespeed_ose8Vzgyj9";
+  SimulateJsResource(kJsUrl1, "// changed\nvar a=1;");
+
+  GoogleString out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
+  EXPECT_EQ(StrCat("var ", kLegacyVar1, " = \"var a=1;\";\n", "var ",
+                   kLegacyVar2, " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+  // Not what the URL names, so not publicly cacheable.
+  EXPECT_FALSE(headers.IsProxyCacheable());
+}
+
+// A page rewritten by this version evaluates the names the fetched
+// combination declares after a cache loss.
+TEST_F(JsFilterAndCombineFilterTest, PageNamesMatchFetchedCombination) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain, TestHtml());
+  ASSERT_EQ(3, scripts.size());
+  const GoogleString url =
+      GoogleUrl(GoogleUrl(kTestDomain), scripts[0].url).Spec().as_string();
+  const GoogleString eval1 = scripts[1].text_content;
+  const GoogleString eval2 = scripts[2].text_content;
+  ASSERT_TRUE(StringPiece(eval1).starts_with("eval("));
+  ASSERT_TRUE(StringPiece(eval2).starts_with("eval("));
+  const GoogleString var1 = eval1.substr(5, eval1.size() - 7);
+  const GoogleString var2 = eval2.substr(5, eval2.size() - 7);
+
+  lru_cache()->Clear();
+  GoogleString out;
+  ASSERT_TRUE(FetchResourceUrl(url, &out));
+  EXPECT_EQ(StrCat("var ", var1, " = ", kMinifiedEscapedJs1, ";\n", "var ",
+                   var2, " = ", kMinifiedEscapedJs2, ";\n"),
+            out);
+}
+
+// Checks that a fetched combination is only lines of the form
+// var <identifier> = <double-quoted string literal>;
+static void ExpectOnlyNamesAndLiterals(StringPiece out) {
+  StringPieceVector lines;
+  SplitStringPieceToVector(out, "\n", &lines, true /* omit empty */);
+  EXPECT_FALSE(lines.empty());
+  for (StringPiece line : lines) {
+    ASSERT_TRUE(line.starts_with("var mod_pagespeed_")) << line;
+    size_t name_end = line.find(" = \"");
+    ASSERT_NE(StringPiece::npos, name_end) << line;
+    for (char c : line.substr(4, name_end - 4)) {
+      EXPECT_TRUE(IsAsciiAlphaNumeric(c) || c == '_' || c == '$') << line;
+    }
+    StringPiece literal = line.substr(name_end + 3);
+    ASSERT_TRUE(literal.ends_with("\";")) << line;
+    literal = literal.substr(1, literal.size() - 3);
+    for (size_t i = 0; i < literal.size(); ++i) {
+      if (literal[i] == '\\') {
+        ++i;  // An escape: the next character is part of it.
+        continue;
+      }
+      EXPECT_NE('"', literal[i]) << line;
+      EXPECT_NE('\r', literal[i]) << line;
+    }
+    GoogleString lower(literal.data(), literal.size());
+    LowerString(&lower);
+    EXPECT_EQ(GoogleString::npos, lower.find("</script")) << line;
+  }
+}
+
+// Input URLs come from the requested combined URL, which the client
+// chooses. Whatever they contain, the combination's text is only hashed
+// identifiers and escaped string literals.
+TEST_F(JsCombineFilterTest, HostileInputUrlsYieldOnlyNamesAndLiterals) {
+  // The test encoder takes no '/', so "</script" is spelled with %2F.
+  const char kHostile1[] = "q\"u'o\\te<%2Fscript>\n.js";
+  const char kHostile2[] = "x<%2Fscript><script>alert(1).js";
+  const GoogleString url = Encode(
+      kTestDomain, "jc", "0", MultiUrl(kHostile1, kJsUrl2, kHostile2), "js");
+  // One cannot be fetched; serve the other, under whatever URL the requested
+  // name resolves to.
+  const GoogleString hostile1_url =
+      GoogleUrl(GoogleUrl(kTestDomain), kHostile1).Spec().as_string();
+  SimulateJsResourceOnDomain("", hostile1_url, "var unused;");
+  mock_url_fetcher()->SetResponseFailure(hostile1_url);
+  SimulateJsResource(
+      GoogleUrl(GoogleUrl(kTestDomain), kHostile2).PathAndLeaf().substr(1),
+      "var h = \"</script><script>\\\"\";\n");
+  GoogleString out;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &out, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  // One line per input, the served one with its code in it.
+  EXPECT_EQ(3, std::count(out.begin(), out.end(), '\n')) << out;
+  EXPECT_NE(GoogleString::npos, out.find("var h =")) << out;
+  ExpectOnlyNamesAndLiterals(out);
+}
+
+// A combination served without some of its inputs is always private.
+TEST_F(JsCombineFilterTest, PartialAnswerIsPrivateUnderItsOwnHash) {
+  SetResponseWithDefaultHeaders("pa.js", kContentTypeJavascript, "var pa;",
+                                300);
+  SetResponseWithDefaultHeaders("pb.js", kContentTypeJavascript, "var pb;",
+                                300);
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, "pb.js"));
+  GoogleString partial;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl("pa.js", "pb.js"), "js"),
+      &partial));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jc", hasher()->Hash(partial),
+                              MultiUrl("pa.js", "pb.js"), "js"),
+                       &content, &headers));
+  EXPECT_EQ(partial, content);
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+TEST_F(JsCombineFilterTest, PartialAnswerIsPrivateWithPublicInputs) {
+  ResponseHeaders public_js;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &public_js);
+  public_js.SetCacheControlPublic();
+  public_js.ComputeCaching();
+  SetFetchResponse(StrCat(kTestDomain, "qa.js"), public_js, "var qa;");
+  SetFetchResponse(StrCat(kTestDomain, "qb.js"), public_js, "var qb;");
+  mock_url_fetcher()->SetResponseFailure(StrCat(kTestDomain, "qb.js"));
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl("qa.js", "qb.js"), "js"),
+      &content, &headers));
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
+// A script that is gone for good stops being combined once what the server
+// knows about it expires: pages rewritten after that no longer reference the
+// old combined URL. Until then (the input's cache lifetime, counted from when
+// the server last fetched it) pages keep referencing it, and a fetch of it
+// after cache loss is answered by the partial fallback.
+TEST_F(JsCombineFilterTest, GoneInputStopsBeingCombinedAfterItsTtl) {
+  const int64 kTtlSec = 100;
+  SetResponseWithDefaultHeaders("ga.js", kContentTypeJavascript, "var ga;",
+                                kTtlSec);
+  SetResponseWithDefaultHeaders("gb.js", kContentTypeJavascript, "var gb;",
+                                kTtlSec);
+  const GoogleString html =
+      "<script src=ga.js></script><script src=gb.js></script>";
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain, html);
+  ASSERT_EQ(3, scripts.size());
+  const GoogleString old_combined = scripts[0].url;
+  ASSERT_NE(GoogleString::npos, old_combined.find(".pagespeed.jc."));
+
+  SetFetchResponse404("gb.js");
+  int64 gone_after_sec = -1;
+  for (int64 t = 10; t <= 3 * kTtlSec; t += 10) {
+    AdvanceTimeMs(10 * Timer::kSecondMs);
+    scripts.clear();
+    ParseUrl(kTestDomain, html);
+    if (output_buffer_.find(old_combined) == GoogleString::npos) {
+      gone_after_sec = t;
+      break;
+    }
+  }
+  ASSERT_LT(0, gone_after_sec) << "old combined URL still emitted";
+  EXPECT_LE(gone_after_sec, kTtlSec + 10);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ("ga.js", scripts[0].url);
+  EXPECT_EQ("gb.js", scripts[1].url);
 }
 
 TEST_F(JsCombineFilterTest, FetchWithNoInputsIsRefused) {
@@ -1161,6 +1456,157 @@ TEST_F(JsCombineFilterTest, AllDifferentCharsets) {
   EXPECT_EQ(kJsUrl2, scripts[1].url);
   EXPECT_EQ(kJsUrl3, scripts[2].url);
   EXPECT_EQ(kJsUrl4, scripts[3].url);
+}
+
+// A combination is decided by the charset known at hand-off: a <meta charset>
+// in a later flush window does not change the decision for scripts handed off
+// before it. Here a.js names its charset and b.js takes the page's, which is
+// not known yet when they are handed off.
+TEST_F(JsCombineFilterTest,
+       CharsetFromLaterFlushWindowDoesNotReachCombination) {
+  const GoogleString scripts_html =
+      StrCat("<script src=", kJsUrl1, " charset=us-ascii></script>",
+             "<script src=", kJsUrl2, "></script>");
+  const char kMeta[] = "<meta charset=\"us-ascii\">";
+
+  // The fetches, and so the partitioning, complete only after the whole page
+  // has been parsed.
+  SetupWaitFetcher();
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  SetupWriter();
+  html_parse()->StartParse(kTestDomain);
+  html_parse()->ParseText(StrCat("<head>", scripts_html));
+  html_parse()->Flush();
+  html_parse()->ParseText(StrCat(kMeta, "</head>"));
+  html_parse()->FinishParse();
+  CallFetcherCallbacks();
+
+  // The decision is in the metadata cache now. A page with the same scripts
+  // and no charset gets it: the two do not match there either, so they stay
+  // apart. Had the partitioning seen the late <meta>, they would be combined.
+  scripts.clear();
+  ClearStats();
+  Parse("no_page_charset", StrCat("<head>", scripts_html, "</head>"));
+  // The cached decision was used: no metadata cache miss and no fetch.
+  EXPECT_EQ(0,
+            server_context()->rewrite_stats()->cached_output_misses()->Get());
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  // With the <meta> in the same flush window as the scripts, they match and
+  // are combined.
+  lru_cache()->Clear();
+  scripts.clear();
+  const GoogleString meta_first_html =
+      StrCat("<head>", kMeta, scripts_html, "</head>");
+  Parse("meta_first_fetch", meta_first_html);
+  CallFetcherCallbacks();
+  scripts.clear();
+  Parse("meta_first", meta_first_html);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+}
+
+// Two pages in different charsets reference the same scripts. a.js names its
+// charset and b.js takes the page's, so they match on one page and not on the
+// other. Whichever page is rewritten first, each page gets its own decision:
+// it is not carried from one page to the other through the metadata cache.
+TEST_F(JsCombineFilterTest, PagesInDifferentCharsetsDoNotShareDecision) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  const GoogleString scripts_html =
+      StrCat("<script src=", kJsUrl1, " charset=iso-8859-1></script>",
+             "<script src=", kJsUrl2, "></script>");
+  const GoogleString latin1_page =
+      StrCat("<head><meta charset=\"iso-8859-1\">", scripts_html, "</head>");
+  const GoogleString utf8_page =
+      StrCat("<head><meta charset=\"utf-8\">", scripts_html, "</head>");
+
+  Parse("latin1_first", latin1_page);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  scripts.clear();
+  Parse("utf8_second", utf8_page);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  lru_cache()->Clear();
+  scripts.clear();
+  Parse("utf8_first", utf8_page);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kJsUrl1, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+  scripts.clear();
+  Parse("latin1_second", latin1_page);
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+}
+
+// Each script is wrapped in a string literal escaped byte by byte, and the
+// combination is decoded in the page's charset. In Big5 the character U+529F
+// is the bytes A5 5C, whose second byte is also a backslash, so the escaper
+// would change what the script means: a script in such a charset is not
+// combined. ASCII scripts on the same page still are.
+TEST_F(JsCombineFilterTest, NonAsciiScriptOnMultibytePageIsNotCombined) {
+  const char kBig5Url[] = "big5.js";
+  SimulateJsResource(kBig5Url, "var s = \"\xA5\x5Cn\"; var t = 1;");
+  const char kBig5Page[] = "<head><meta charset=\"Big5\"></head>";
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "big5.html"),
+           StrCat(kBig5Page, "<script src=", kBig5Url, "></script>",
+                  "<script src=", kJsUrl2, "></script>"));
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kBig5Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "big5_ascii.html"),
+           StrCat(kBig5Page, TestHtml()));
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+}
+
+// A UTF-8 script is combined on a UTF-8 page, where none of its escaped bytes
+// is part of a longer character, but not on a page in another charset or in
+// none, which the browser then guesses.
+TEST_F(JsCombineFilterTest, NonAsciiUtf8ScriptIsCombinedOnlyOnUtf8Page) {
+  const char kUtf8Url[] = "utf8.js";
+  SimulateJsResource(kUtf8Url, "var s = \"caf\xC3\xA9\"; var t = 1;");
+  const GoogleString scripts_html =
+      StrCat("<script src=", kUtf8Url, " charset=utf-8></script>",
+             "<script src=", kJsUrl2, " charset=utf-8></script>");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "utf8.html"),
+           StrCat("<head><meta charset=\"utf-8\"></head>", scripts_html));
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kUtf8Url, kJsUrl2));
+  VerifyUse(scripts[1], kUtf8Url);
+  VerifyUse(scripts[2], kJsUrl2);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "sjis.html"),
+           StrCat("<head><meta charset=\"Shift_JIS\"></head>", scripts_html));
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kUtf8Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
+
+  scripts.clear();
+  ParseUrl(StrCat(kTestDomain, "nocharset.html"), scripts_html);
+  ASSERT_EQ(2, scripts.size());
+  EXPECT_EQ(kUtf8Url, scripts[0].url);
+  EXPECT_EQ(kJsUrl2, scripts[1].url);
 }
 
 TEST_F(JsCombineFilterTest, BomMismatch) {

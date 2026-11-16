@@ -801,6 +801,36 @@ TEST_F(ProxyInterfaceTest, RedirectWithDifferentOtherQueryStillGetsParams) {
                              "http://www.example.com/a?x=2"));
 }
 
+// https://github.com/apache/incubator-pagespeed-mod/issues/1622
+// A site answers /?PageSpeed=noscript with a permanent redirect to the same
+// page without the parameter, to keep it out of search indexes. The client
+// gets that Location as the origin wrote it, absolute or relative, so the
+// redirect ends on the clean URL.
+TEST_F(ProxyInterfaceTest, PermanentRedirectDroppingNoscriptReachesCleanUrl) {
+  struct Case {
+    const char* origin_url;
+    const char* location;
+  };
+  const Case kCases[] = {
+      {"http://www.example.com/", "http://www.example.com/"},
+      {"http://www.example.com/shop/", "/shop/"},
+  };
+  for (const Case& c : kCases) {
+    SCOPED_TRACE(c.location);
+    GoogleString get_text;
+    RequestHeaders request_headers;
+    ResponseHeaders set_headers, get_headers;
+    set_headers.Add(HttpAttributes::kContentType, kContentTypeHtml.mime_type());
+    set_headers.Add(HttpAttributes::kLocation, c.location);
+    set_headers.SetStatusAndReason(HttpStatus::kMovedPermanently);
+    mock_url_fetcher_.SetResponse(c.origin_url, set_headers, "");
+    FetchFromProxy(StrCat(c.origin_url, "?PageSpeed=noscript"), request_headers,
+                   true, &get_text, &get_headers);
+    EXPECT_EQ(HttpStatus::kMovedPermanently, get_headers.status_code());
+    EXPECT_STREQ(c.location, get_headers.Lookup1(HttpAttributes::kLocation));
+  }
+}
+
 TEST_F(ProxyInterfaceTest, RedirectOptionNameCaseIsIgnoredWhenReAdding) {
   // The option name after the PageSpeed prefix is case-insensitive in
   // requests, so a Location that spells it differently already carries it.
@@ -2789,11 +2819,12 @@ TEST_F(ProxyInterfaceTest, NoCacheVaryHtml) {
   text.clear();
   FetchFromProxy(kPageUrl, true, &text, &actual_headers);
   EXPECT_EQ("2", text);
-  // Resource was cached because we have respect_vary == false.
-  // So we serve the old value.
+  // The resource was not cached either: it was fetched with the client's
+  // own request headers and varies on one of them, so it is passed through
+  // even with respect_vary == false.  So we fetch the new value.
   text.clear();
   FetchFromProxy("style.css", true, &text, &actual_headers);
-  EXPECT_EQ("a", text);
+  EXPECT_EQ("b", text);
 }
 
 // Test https HTML responses are never cached, while https resources are cached.

@@ -17,9 +17,10 @@
 # Each harness is one source file with two build modes (see its header): a
 # replay main() by default, LLVMFuzzerTestOneInput behind -D<NAME>_LIBFUZZER.
 # The define goes in through --per_file_copt, so one Bazel invocation builds
-# every harness, each linked against $LIB_FUZZING_ENGINE. The CSS and JS
-# harnesses carry their seed corpus in the source (--dump_corpus on the replay
-# binary); the other three read theirs from tools/*-corpus/seeds.
+# every harness, each linked against $LIB_FUZZING_ENGINE. The CSS, JS and
+# inline style text harnesses carry their seed corpus in the source
+# (--dump_corpus on the replay binary); the other three read theirs from
+# tools/*-corpus/seeds.
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
 
@@ -32,6 +33,7 @@ export USE_BAZEL_VERSION
 # label | name in $OUT | source path (a --per_file_copt regex) | defines | seeds
 readonly HARNESSES=(
   "//pagespeed/kernel/html:html_fuzz|html_parse_fuzzer|pagespeed/kernel/html/html_fuzz[.]cc|HTML_PARSE_LIBFUZZER|dir:tools/html-parse-corpus/seeds"
+  "//pagespeed/kernel/html:inline_style_text_fuzz|inline_style_text_fuzzer|pagespeed/kernel/html/inline_style_text_fuzz[.]cc|INLINE_STYLE_TEXT_LIBFUZZER|dump"
   "//pagespeed/kernel/js:js_minify_fuzz|js_minify_fuzzer|pagespeed/kernel/js/js_minify_fuzz[.]cc|JS_MINIFY_LIBFUZZER JS_MINIFY_FUZZ_SANITIZER_ONLY|dump"
   "//pagespeed/kernel/packs:pack_loader_fuzz|pack_loader_fuzzer|pagespeed/kernel/packs/pack_loader_fuzz[.]cc|PACK_LOADER_LIBFUZZER|dir:tools/pack-loader-corpus/seeds"
   "//pagespeed/kernel/packs:rule_pack_filter_fuzz|rule_pack_filter_fuzzer|pagespeed/kernel/packs/rule_pack_filter_fuzz[.]cc|RULE_PACK_FILTER_LIBFUZZER|dir:tools/rule-pack-filter-corpus/seeds"

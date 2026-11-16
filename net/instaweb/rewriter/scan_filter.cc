@@ -59,6 +59,7 @@ void ScanFilter::StartDocument() {
   const ResponseHeaders* headers = driver_->response_headers();
   driver_->set_containing_charset(
       headers == nullptr ? "" : headers->DetermineCharset());
+  driver_->set_document_bom_charset("");
 
   detect_hydration_ = driver_->options()->detect_hydrated_pages();
   if (detect_hydration_ && headers != nullptr &&
@@ -117,9 +118,10 @@ void ScanFilter::Characters(HtmlCharactersNode* characters) {
   // Check for a BOM at the start of the document. All other event handlers
   // set the flag to false without using it, so if it's true on entry then
   // this must be the first event.
-  if (!seen_any_nodes_ && driver_->containing_charset().empty()) {
+  if (!seen_any_nodes_) {
     StringPiece charset = GetCharsetForBom(characters->contents());
-    if (!charset.empty()) {
+    driver_->set_document_bom_charset(charset);
+    if (!charset.empty() && driver_->containing_charset().empty()) {
       driver_->set_containing_charset(charset);
     }
   }

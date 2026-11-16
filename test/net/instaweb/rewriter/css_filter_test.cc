@@ -29,7 +29,9 @@
 #include "net/instaweb/http/public/logging_proto.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/rewriter/public/data_url_input_resource.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
+#include "net/instaweb/rewriter/public/inline_resource_slot.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -38,14 +40,25 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/data_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
+#include "test/net/instaweb/rewriter/prepared_style_text_recorder.h"
 #include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/net/instaweb/rewriter/test_url_namer.h"
@@ -545,6 +558,253 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   EXPECT_TRUE(out_headers.FindContentLength(&content_length));
   EXPECT_EQ(STATIC_STRLEN(kCss), content_length);
   EXPECT_FALSE(out_headers.IsGzipped());
+}
+
+// With the HTTP cache storing compressed copies (HttpCacheCompressionLevel
+// above zero), .pagespeed. stylesheets requested by a client that accepts
+// gzip must come back consistent: the declared coding is the body's coding,
+// a Content-Length is the number of bytes sent, and the decoded body is the
+// stylesheet.
+class CssFilterGzipConsistencyTest : public CssFilterTestCustomOptions {
+ protected:
+  // Fetches `url` as a client that sends "Accept-Encoding: gzip" (or, with
+  // `accept_gzip` false, no Accept-Encoding), checks the response is
+  // consistent, and returns the decoded body in `decoded` and whether the
+  // body was gzip in `gzipped`. Returns whether the fetch succeeded.
+  bool FetchConsistent(const GoogleString& url, bool accept_gzip,
+                       GoogleString* decoded, bool* gzipped = nullptr) {
+    RequestHeaders request_headers;
+    PopulateRequestHeaders(&request_headers);
+    if (accept_gzip) {
+      request_headers.Replace(HttpAttributes::kAcceptEncoding,
+                              HttpAttributes::kGzip);
+    } else {
+      request_headers.RemoveAll(HttpAttributes::kAcceptEncoding);
+    }
+    rewrite_driver()->SetRequestHeaders(request_headers);
+    GoogleString raw;
+    StringAsyncFetch async_fetch(rewrite_driver()->request_context(), &raw);
+    async_fetch.set_request_headers(&request_headers);
+    ResponseHeaders response;
+    async_fetch.set_response_headers(&response);
+    bool fetched = rewrite_driver()->FetchResource(url, &async_fetch);
+    rewrite_driver()->WaitForShutDown();
+    ClearRewriteDriver();
+    EXPECT_EQ(fetched, async_fetch.done());
+    if (!fetched || !async_fetch.success()) {
+      return false;
+    }
+    int64 content_length = 0;
+    if (response.FindContentLength(&content_length)) {
+      EXPECT_EQ(static_cast<int64>(raw.size()), content_length)
+          << "Content-Length is not the number of bytes sent for " << url;
+    }
+    // Some servers frame the response with this length instead.
+    if (async_fetch.content_length_known()) {
+      EXPECT_EQ(static_cast<int64>(raw.size()), async_fetch.content_length())
+          << "the length passed on is not the number of bytes sent for " << url;
+    }
+    decoded->clear();
+    if (gzipped != nullptr) {
+      *gzipped = response.IsGzipped();
+    }
+    if (response.IsGzipped()) {
+      EXPECT_TRUE(accept_gzip) << "gzip sent to a client without gzip";
+      StringWriter writer(decoded);
+      EXPECT_TRUE(GzipInflater::Inflate(raw, GzipInflater::kGzip, &writer))
+          << "labelled gzip but the body is not gzip for " << url;
+    } else {
+      *decoded = raw;
+    }
+    return true;
+  }
+
+  bool FetchAcceptingGzip(const GoogleString& url, GoogleString* decoded) {
+    return FetchConsistent(url, true, decoded);
+  }
+
+  // How many times a rewrite of a stylesheet was attempted and found it over
+  // CssParseMaxBytes; flat once the failure is remembered.
+  int64 ParseMaxBytesExceeded() {
+    return statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get();
+  }
+
+  static GoogleString WithoutWhitespace(StringPiece in) {
+    GoogleString out;
+    for (char c : in) {
+      if (!IsHtmlSpace(c)) {
+        out.push_back(c);
+      }
+    }
+    return out;
+  }
+
+  // Puts `css` at `url` and loads it once, so the HTTP cache holds the
+  // compressed copy the module's own fetch stores.
+  void SeedCompressedInput(const GoogleString& url, StringPiece css) {
+    ResponseHeaders headers;
+    DefaultResponseHeaders(kContentTypeCss, 5000, &headers);
+    SetFetchResponse(url, headers, css);
+    ResourcePtr input(
+        rewrite_driver()->CreateInputResourceAbsoluteUncheckedForTestsOnly(
+            url));
+    MockResourceCallback callback(input, server_context()->thread_system());
+    input->LoadAsync(Resource::kReportFailureIfNotCacheable,
+                     rewrite_driver()->request_context(), &callback);
+    ASSERT_TRUE(callback.done());
+    ASSERT_TRUE(callback.success());
+    ClearRewriteDriver();
+  }
+};
+
+// The rewrite fails (here: the stylesheet is over CssParseMaxBytes), so the
+// original stylesheet is served in its place, from the compressed cache
+// entry, on the first request and on the requests after it.
+TEST_F(CssFilterGzipConsistencyTest, FailedRewriteServesAConsistentOriginal) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { color: red; }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    EXPECT_EQ(css, decoded);
+  }
+  // Only the first request tried the rewrite; the others served the
+  // remembered failure's original from the cache.
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+}
+
+// As above, but the stylesheet's resources are mapped to another domain, so
+// its relative URLs are corrected on the way out and the body is longer than
+// the stored original. Gzip and plain clients get the same stylesheet.
+TEST_F(CssFilterGzipConsistencyTest,
+       FailedRewriteWithCorrectedUrlsIsConsistent) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png); }\n");
+  }
+  GoogleString expected;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".rule", IntegerToString(i),
+              " { background: url(http://cdn.example.com/i", IntegerToString(i),
+              ".png); }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  options()->EnableFilter(RewriteOptions::kRewriteDomains);
+  options()->WriteableDomainLawyer()->AddRewriteDomainMapping(
+      "http://cdn.example.com", kTestDomain, message_handler());
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    EXPECT_EQ(expected, decoded);
+  }
+}
+
+// With a URL naming scheme that serves resources under another host and
+// path, the original's relative URLs are made absolute on the way out. After
+// the first request the failed rewrite is remembered and the original is
+// served from the compressed cache entry; gzip and plain clients still get
+// the same corrected stylesheet, with headers that describe it.
+class CssFilterGzipConsistencyUrlNamerTest
+    : public CssFilterGzipConsistencyTest {
+ public:
+  CssFilterGzipConsistencyUrlNamerTest() { SetUseTestUrlNamer(true); }
+};
+
+TEST_F(CssFilterGzipConsistencyUrlNamerTest,
+       RememberedFailureServesCorrectedUrlsToEveryClient) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png); }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(64);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  GoogleString first;
+  for (int i = 0; i < 5; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    if (i == 0) {
+      first = decoded;
+      EXPECT_NE(css, first);
+      for (int j = 0; j < 64; ++j) {
+        EXPECT_TRUE(StringPiece(first).find(
+                        StrCat("url(http://test.com/i", IntegerToString(j),
+                               ".png)")) != StringPiece::npos)
+            << j;
+      }
+    } else {
+      EXPECT_EQ(first, decoded);
+    }
+  }
+  // Only the first request tried the rewrite.
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+}
+
+// A minified combination of two stylesheets, requested under a combination
+// hash that is not the current one, repeatedly, with both inputs in the
+// compressed cache.
+TEST_F(CssFilterGzipConsistencyTest, MismatchedCombinationIsConsistent) {
+  GoogleString css_a;
+  GoogleString css_b;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css_a, ".a", IntegerToString(i), " { color: red; }\n");
+    StrAppend(&css_b, ".b", IntegerToString(i), " { color: blue; }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css_a);
+  SeedCompressedInput("http://test.com/b.css", css_b);
+
+  GoogleString expected;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".a", IntegerToString(i), "{color:red}");
+  }
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&expected, ".b", IntegerToString(i), "{color:#00f}");
+  }
+  const GoogleString url =
+      Encode(kTestDomain, "cf", "0",
+             Encode("", "cc", "1", MultiUrl("a.css", "b.css"), "css"), "css");
+  for (int i = 0; i < 3; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString decoded;
+    ASSERT_TRUE(FetchAcceptingGzip(url, &decoded));
+    // Minified or not, the content is the two stylesheets, in order.
+    if (decoded != expected) {
+      EXPECT_EQ(WithoutWhitespace(StrCat(css_a, css_b)),
+                WithoutWhitespace(decoded));
+    }
+  }
 }
 
 // Builds a stylesheet of exactly `size` bytes out of numbered rulesets and
@@ -3112,6 +3372,273 @@ TEST_F(CssFilterTest, InlineStyleThatWouldHoldMarkupIsLeftAlone) {
   ValidateNoChanges("frameset",
                     "<frameset><style>*[title=\"\\3C frame\\3E\"] "
                     "{ color : red }</style></frameset>");
+}
+
+// Inline <style> elements holding a '<' that cannot be read as markup, on
+// HTML pages that declare a supported charset.
+class CssFilterLessThanTest : public CssFilterTest {
+ protected:
+  void SetPageType(StringPiece content_type) {
+    rewrite_driver()->set_response_headers_ptr(&response_headers_);
+    response_headers_.Replace(HttpAttributes::kContentType, content_type);
+    response_headers_.ComputeCaching();
+  }
+
+  // The text of the first <style> after rewriting `html`.
+  GoogleString StyleText(StringPiece id, StringPiece html) {
+    Parse(id, html);
+    const size_t start = output_buffer_.find("<style>");
+    const size_t end = output_buffer_.find("</style>");
+    if (start == GoogleString::npos || end == GoogleString::npos) {
+      ADD_FAILURE() << output_buffer_;
+      return "";
+    }
+    return output_buffer_.substr(start + 7, end - start - 7);
+  }
+};
+
+const char kInlineLessThanCss[] =
+    "@property --x { syntax: \"<length>\"; inherits: false; "
+    "initial-value: 0px }\n@media (width < 600px) { p { margin: 0 } }";
+
+TEST_F(CssFilterLessThanTest, InlineStyleWithLessThanSign) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected(
+      "html", StrCat("<style>", kInlineLessThanCss, "</style>"),
+      "<style>@property --x { syntax: \"\\3c length>\"; inherits: false; "
+      "initial-value: 0px }@media (width < 600px){p{margin:0}}</style>");
+}
+
+TEST_F(CssFilterLessThanTest, LessThanSignNeedsADeclaredSupportedCharset) {
+  SetPageType("text/html");
+  ValidateNoChanges("undeclared",
+                    StrCat("<style>", kInlineLessThanCss, "</style>"));
+  SetPageType("text/html; charset=gbk");
+  ValidateNoChanges("gbk", StrCat("<style>", kInlineLessThanCss, "</style>"));
+  SetPageType("text/html");
+  ValidateNoChanges("meta_after",
+                    StrCat("<style>", kInlineLessThanCss,
+                           "</style><meta charset=\"utf-8\">"));
+  ValidateExpected(
+      "meta_before",
+      StrCat("<meta charset=\"utf-8\"><style>", kInlineLessThanCss,
+             "</style>"),
+      "<meta charset=\"utf-8\"><style>@property --x { syntax: "
+      "\"\\3c length>\"; inherits: false; initial-value: 0px }"
+      "@media (width < 600px){p{margin:0}}</style>");
+}
+
+TEST_F(CssFilterLessThanTest, XhtmlWithLessThanSignIsNotRewritten) {
+  SetPageType("application/xhtml+xml; charset=utf-8");
+  ValidateNoChanges("xhtml", StrCat("<style>", kInlineLessThanCss, "</style>"));
+}
+
+// What the serializer decodes is prepared again on the way out.
+TEST_F(CssFilterLessThanTest, DecodedEscapesArePreparedAgain) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected("selector",
+                   "<style>li[title=\"1\\3C 2\\3E 0\"]{color:blue}</style>",
+                   "<style>li[title=\"1\\3c 2>0\"]{color:#00f}</style>");
+  ValidateExpected("id_start_escape", "<style>#\\3Cnav{margin:2px}</style>",
+                   "<style>#\\3c nav{margin:2px}</style>");
+}
+
+// An escaped '<' in an identifier, before a digit. Pinned as it is written
+// today.
+TEST_F(CssFilterLessThanTest, EscapedIdentifierBeforeDigitIsPinned) {
+  SetPageType("text/html; charset=utf-8");
+  const GoogleString text =
+      StyleText("ident_digit", "<style>.a\\3c 1 { color : red }</style>");
+  EXPECT_EQ(".a\\3c 1{color:red}", text);
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+}
+
+// Escaping that costs more than minifying saves leaves the style alone.
+TEST_F(CssFilterLessThanTest, EscapedSizeCountsForTheGain) {
+  options()->ClearSignatureForTesting();
+  options()->set_always_rewrite_css(false);
+  server_context()->ComputeSignature(options());
+  SetPageType("text/html; charset=utf-8");
+  ValidateNoChanges("no_gain", "<style>a{content:\"<<<<\"} </style>");
+  ValidateExpected("gain", "<style>a{content:\"<\"}         </style>",
+                   "<style>a{content:\"\\3c \"}</style>");
+}
+
+// A style attribute keeps any '<' out, as before.
+TEST_F(CssFilterLessThanTest, StyleAttributeWithLessThanSignIsLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributes);
+  server_context()->ComputeSignature(options());
+  ValidateNoChanges("attribute",
+                    "<div style='content: \"<b>\" ; color: red'/>");
+}
+
+// Where a link or style can be, and text that would be markup there. Covers
+// every placement and payload of the markup placement tests of inline_css,
+// prioritize_critical_css and rewrite_css.
+struct MarkupPlacement {
+  const char* id;
+  const char* before;
+  const char* after;
+  const char* end_tag;  // its own end tag, as a payload
+};
+const MarkupPlacement kMarkupPlacements[] = {
+    {"top", "", "", "</head>"},
+    {"noembed", "<noembed>", "</noembed>", "</noembed>"},
+    {"noframes", "<noframes>", "</noframes>", "</noframes>"},
+    {"textarea", "<textarea/>", "", "</textarea>"},
+    {"select", "<select>", "</select>", "</select>"},
+    {"frameset", "<frameset>", "</frameset>", "</frameset>"},
+    {"noscript", "<noscript>", "</noscript>", "</noscript>"},
+};
+const char* const kMarkupPayloads[] = {"", "</style>", "</STYLE >", "<input>",
+                                       "<frame>", "<!--"};
+
+// On a page that declares UTF-8: a payload in a string is written so it is no
+// longer markup, wherever the style is; the same payload outside a string
+// leaves the style as it is.
+TEST_F(CssFilterLessThanTest, MarkupPlacementsAreRewrittenSafelyOrLeftAlone) {
+  SetPageType("text/html; charset=utf-8");
+  int n = 0;
+  for (const MarkupPlacement& p : kMarkupPlacements) {
+    for (const char* payload_or_empty : kMarkupPayloads) {
+      const StringPiece payload =
+          *payload_or_empty == '\0' ? p.end_tag : payload_or_empty;
+      // The payload as the style's text holds it: escaped in a string (the
+      // serializer decodes it), and as a raw '<' in a string.
+      GoogleString escaped(payload.data(), payload.size());
+      GlobalReplaceSubstring("<", "\\3C ", &escaped);
+      const GoogleString kept[] = {
+          StrCat("*[title=\"", escaped, "\"] { color : red }"),
+          StrCat("*[title=\"", payload, "\"] { color : red }"),
+      };
+      // A raw closing style tag would end the element in the source.
+      const bool raw_ok = !StringCaseStartsWith(payload, "</style");
+      for (const GoogleString& css : kept) {
+        if (!raw_ok && css.find(payload) != GoogleString::npos) {
+          continue;
+        }
+        Parse(StrCat("k", IntegerToString(n++)),
+              StrCat(p.before, "<style>", css, "</style>", p.after));
+        const size_t start = output_buffer_.find("<style>");
+        const size_t end = output_buffer_.find("</style>", start);
+        ASSERT_NE(GoogleString::npos, start) << output_buffer_;
+        ASSERT_NE(GoogleString::npos, end) << output_buffer_;
+        const GoogleString text =
+            output_buffer_.substr(start + 7, end - start - 7);
+        EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml))
+            << p.id << ": " << text;
+        EXPECT_EQ(GoogleString::npos, text.find('<')) << p.id << ": " << text;
+        EXPECT_NE(GoogleString::npos, text.find("color:red")) << p.id << ": "
+                                                              << text;
+      }
+      if (payload == "<!--") {
+        // Outside a string this is a CSS token the parser drops, as it did
+        // before.
+        ValidateExpected(StrCat("b", IntegerToString(n++)),
+                         StrCat(p.before, "<style>* { color : red }", payload,
+                                "</style>", p.after),
+                         StrCat(p.before, "<style>*{color:red}</style>",
+                                p.after));
+      } else if (raw_ok) {
+        // The same payload outside a string.
+        ValidateNoChanges(StrCat("b", IntegerToString(n++)),
+                          StrCat(p.before, "<style>* { color : red }", payload,
+                                 "</style>", p.after));
+      }
+      if (raw_ok) {
+        ValidateNoChanges(StrCat("b", IntegerToString(n++)),
+                          StrCat(p.before, "<style>@huh { a: ", payload,
+                                 "; }* { color : red }</style>", p.after));
+      }
+    }
+  }
+}
+
+// Outside a string, a comment opener in an inline style is a CSS token the
+// parser drops: it is not in the text written.
+TEST_F(CssFilterLessThanTest, CommentOpenerOutsideAStringIsDropped) {
+  SetPageType("text/html; charset=utf-8");
+  ValidateExpected("cdo", "<style><!-- * { color : red } --></style>",
+                   "<style>*{color:red}</style>");
+  ValidateExpected("cdo_after", "<style>* { color : red }<!--</style>",
+                   "<style>*{color:red}</style>");
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("<!--")) << output_buffer_;
+}
+
+// The text written into an inline style is exactly what InlineStyleText
+// prepared.
+TEST_F(CssFilterLessThanTest, WrittenTextIsPreparedText) {
+  SetPageType("text/html; charset=utf-8");
+  const char* const kCss[] = {
+      "a { margin : 0 }",
+      ("@property --x { syntax: \"<length>\"; inherits: false; "
+       "initial-value: 0px }"),
+      "@media (width < 600px) { a { margin : 0 } }",
+      "a { content : \"\\3C/style\\3E\\3C b\\3E\" }",
+      ".a\\3C b { color : red }",
+      "a { content : '<' } b { color : red }",
+  };
+  int n = 0;
+  for (const char* css : kCss) {
+    PreparedStyleTextRecorder recorder;
+    const GoogleString text =
+        StyleText(StrCat("p", IntegerToString(n++)),
+                  StrCat("<style>", css, "</style>"));
+    EXPECT_TRUE(recorder.WasPrepared(text)) << css << ": " << text;
+    EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml)) << text;
+    EXPECT_NE(GoogleString(css), text) << "not rewritten";
+  }
+}
+
+// The output of Tailwind CSS 4 as an inline style.
+TEST_F(CssFilterLessThanTest, TailwindV4InlineStyleIsRewritten) {
+  StdioFileSystem stdio_file_system;
+  GoogleString css;
+  ASSERT_TRUE(stdio_file_system.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, "tailwind_v4.css").c_str(), &css,
+      message_handler()));
+  SetPageType("text/html; charset=utf-8");
+  PreparedStyleTextRecorder recorder;
+  const GoogleString text =
+      StyleText("tailwind", StrCat("<style>", css, "</style>"));
+  EXPECT_NE(css, text);
+  EXPECT_TRUE(recorder.WasPrepared(text));
+  EXPECT_TRUE(IsSafeInlineStyleText(text, InlineStyleMode::kHtml));
+  EXPECT_NE(GoogleString::npos, text.find("\\3c percentage>")) << text;
+}
+
+// The text a slot writes into a style element must pass the check for the
+// document; otherwise the element keeps its text.
+TEST_F(CssFilterLessThanTest, SlotWritesOnlyTextThatPassesTheCheck) {
+  struct Case {
+    const char* css;
+    InlineStyleMode mode;
+    bool written;
+  };
+  const Case kCases[] = {
+      {"a{b:c}", InlineStyleMode::kStrict, true},
+      {"@media (a < 1px){b{c:d}}", InlineStyleMode::kHtml, true},
+      {"@media (a < 1px){b{c:d}}", InlineStyleMode::kStrict, false},
+      {"a{b:c}</style>", InlineStyleMode::kHtml, false},
+      {"a{b:\"<c\"}", InlineStyleMode::kHtml, false},
+  };
+  for (const Case& c : kCases) {
+    GoogleString data_url;
+    DataUrl(kContentTypeCss, PLAIN, c.css, &data_url);
+    ResourcePtr resource(DataUrlInputResource::Make(data_url, rewrite_driver()));
+    ASSERT_TRUE(resource.get() != nullptr);
+    resource->response_headers()->ComputeCaching();
+    HtmlCharactersNode* node =
+        rewrite_driver()->NewCharactersNode(nullptr, "original");
+    InlineResourceSlotPtr slot(
+        new InlineResourceSlot(resource, node, "test", c.mode));
+    slot->Render();
+    EXPECT_EQ(c.written ? GoogleString(c.css) : GoogleString("original"),
+              node->contents())
+        << c.css;
+  }
 }
 
 }  // namespace

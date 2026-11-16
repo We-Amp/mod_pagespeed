@@ -48,14 +48,18 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/simple_text_filter.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
+#include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -68,6 +72,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/older_result_cache.h"
@@ -81,6 +86,7 @@
 #include "test/pagespeed/kernel/base/named_lock_tester.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
 #include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
+#include "test/pagespeed/kernel/thread/mock_scheduler.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 
 namespace net_instaweb {
@@ -291,6 +297,81 @@ TEST_F(RewriteContextTest, TrimOnTheFlyOptimizable) {
   ClearStats();
   EXPECT_EQ(0, fetch_successes_->Get());  // no more fetches.
   EXPECT_EQ(0, fetch_failures_->Get());
+}
+
+// A whole-body response goes out with the length it declares.
+TEST_F(RewriteContextTest, WholeResponseWithMatchingLengthIsServed) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->SetContentLength(10);
+  EXPECT_TRUE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", "0123456789", &fetch, message_handler()));
+  EXPECT_TRUE(fetch.headers_complete());
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_EQ("0123456789", body);
+  int64 declared = 0;
+  EXPECT_TRUE(headers->FindContentLength(&declared));
+  EXPECT_EQ(10, declared);
+  EXPECT_EQ(10, fetch.content_length());
+}
+
+// When the declared length is not the length of the body, neither is sent:
+// the response becomes a 500 with an empty body.
+TEST_F(RewriteContextTest, WholeResponseWithOtherLengthIsRefused) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->SetContentLength(4);
+  EXPECT_FALSE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", "0123456789", &fetch, message_handler()));
+  EXPECT_TRUE(fetch.headers_complete());
+  EXPECT_EQ(HttpStatus::kInternalServerError, headers->status_code());
+  EXPECT_TRUE(body.empty());
+  EXPECT_FALSE(headers->Has(HttpAttributes::kContentEncoding));
+  int64 declared = -1;
+  EXPECT_TRUE(headers->FindContentLength(&declared));
+  EXPECT_EQ(0, declared);
+  EXPECT_EQ(0, fetch.content_length());
+}
+
+// A body labelled gzip must be gzip, whether or not a length is declared.
+TEST_F(RewriteContextTest, WholeResponseLabelledGzipOverPlainBodyIsRefused) {
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->ComputeCaching();
+  ASSERT_FALSE(headers->Has(HttpAttributes::kContentLength));
+  EXPECT_FALSE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", ".a { color: red; } .b { color: blue; }", &fetch,
+      message_handler()));
+  EXPECT_EQ(HttpStatus::kInternalServerError, headers->status_code());
+  EXPECT_TRUE(body.empty());
+  EXPECT_FALSE(headers->IsGzipped());
+}
+
+// A gzip body under a gzip label goes out as it is.
+TEST_F(RewriteContextTest, WholeResponseLabelledGzipOverGzipBodyIsServed) {
+  GoogleString gzipped;
+  StringWriter writer(&gzipped);
+  ASSERT_TRUE(GzipInflater::Deflate(".a { color: red; }", GzipInflater::kGzip,
+                                    &writer));
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  ResponseHeaders* headers = fetch.response_headers();
+  SetDefaultLongCacheHeaders(&kContentTypeCss, headers);
+  headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  headers->SetContentLength(gzipped.size());
+  EXPECT_TRUE(RewriteContext::WriteWholeResponse(
+      "http://test.com/a.css", gzipped, &fetch, message_handler()));
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_EQ(gzipped, body);
+  EXPECT_TRUE(headers->IsGzipped());
 }
 
 // The OutputPartitions metadata protobuf is parsed straight off the (possibly
@@ -1626,6 +1707,26 @@ TEST_F(RewriteContextTest, HonorNoTransform) {
   EXPECT_EQ(2, lru_cache()->num_misses());
   EXPECT_EQ(2, lru_cache()->num_inserts());  // metadata & output resource
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
+// Cache-control: no-transform is honored however the origin spells it.
+TEST_F(RewriteContextTest, HonorNoTransformInAnySpelling) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  ResponseHeaders origin;
+  origin.SetStatusAndReason(HttpStatus::kOK);
+  origin.SetDateAndCaching(timer()->NowMs(), 12 * Timer::kMinuteMs,
+                           ",x-ext; No-Transform");
+  origin.Add(HttpAttributes::kContentType, "text/css");
+  origin.ComputeCaching();
+  SetFetchResponse(StrCat(kTestDomain, "a_joined_no_transform.css"), origin,
+                   " a ");
+  GoogleString content;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                            "a_joined_no_transform.css", "css", &content,
+                            &headers));
+  EXPECT_EQ(" a ", content);
 }
 
 // Verifies that we can rewrite uncacheable resources without caching them.
@@ -3473,6 +3574,420 @@ TEST_F(RewriteContextTest, LoadSheddingTest) {
   STLDeleteElements(&fetchers);
 
   rewrite_driver()->WaitForShutDown();
+}
+
+// A fetch that signals a condition variable when done, so the test can wait
+// for it with a bound instead of hanging if it never completes.
+class SignalingStringAsyncFetch : public StringAsyncFetch {
+ public:
+  SignalingStringAsyncFetch(const RequestContextPtr& ctx, GoogleString* out,
+                            ThreadSystem* thread_system)
+      : StringAsyncFetch(ctx, out),
+        mutex_(thread_system->NewMutex()),
+        cond_(mutex_->NewCondvar()),
+        signaled_(false) {}
+
+  void HandleDone(bool success) override {
+    StringAsyncFetch::HandleDone(success);
+    ScopedMutex lock(mutex_.get());
+    signaled_ = true;
+    cond_->Signal();
+  }
+
+  // Returns true if the fetch completed within roughly timeout_ms of
+  // wall-clock time.
+  bool WaitForDone(int64 timeout_ms) {
+    const int64 kStepMs = 50;
+    ScopedMutex lock(mutex_.get());
+    for (int64 waited_ms = 0; !signaled_ && waited_ms < timeout_ms;
+         waited_ms += kStepMs) {
+      cond_->TimedWait(kStepMs);
+    }
+    return signaled_;
+  }
+
+ private:
+  std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
+  std::unique_ptr<ThreadSystem::Condvar> cond_;
+  bool signaled_;
+};
+
+// A fetch of an on-the-fly (cache-extended) resource must not queue behind
+// expensive work on the low-priority pool: unlike rewritten resources, it
+// has no deadline fallback that would bound the wait.
+//
+// With a load-shedding threshold of 1 and a second low-priority fetch queued
+// next to it, a cache-extended fetch that still went through the low-priority
+// queue would make the pool shed one of the two, so no rewrite may be dropped.
+TEST_F(RewriteContextTest, OnTheFlyFetchNotBlockedByLowPriorityWork) {
+  server_context()->low_priority_rewrite_workers()->SetLoadSheddingThreshold(1);
+
+  const char kCss[] = " * { display: none; } ";
+  const char kMinifiedCss[] = "*{display:none}";
+  InitResources();
+  SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kCss,
+                                Timer::kYearMs / Timer::kSecondMs);
+  TimedVariable* dropped =
+      server_context()->rewrite_stats()->num_rewrites_dropped();
+  const int64 dropped_before = dropped->Get(TimedVariable::START);
+
+  // Wedge the only low-priority worker with the combining filter.
+  InitCombiningFilter(0);
+  combining_filter_->set_prefix("|");
+  WorkerTestBase::SyncPoint rewrite_reached(server_context()->thread_system());
+  WorkerTestBase::SyncPoint resume_rewrite(server_context()->thread_system());
+  combining_filter_->set_rewrite_signal_on(&rewrite_reached);
+  combining_filter_->set_rewrite_block_on(&resume_rewrite);
+
+  GoogleString combined_url =
+      Encode(kTestDomain, CombiningFilter::kFilterId, "0", "a.css", "css");
+  GoogleString out_combine;
+  StringAsyncFetch combine_fetch(CreateRequestContext(), &out_combine);
+  rewrite_driver()->FetchResource(combined_url, &combine_fetch);
+  rewrite_reached.Wait();
+
+  // Fetch a cache-extended resource on a separate driver while the
+  // low-priority worker is still blocked.
+  GoogleString out_ce;
+  RequestContextPtr ctx =
+      RequestContext::NewTestRequestContext(server_context()->thread_system());
+  SignalingStringAsyncFetch ce_fetch(ctx, &out_ce,
+                                     server_context()->thread_system());
+  RewriteDriver* ce_driver = server_context()->NewRewriteDriver(ctx);
+  ce_driver->FetchResource(Encode(kTestDomain, RewriteOptions::kCacheExtenderId,
+                                  "0", "a.css", "css"),
+                           &ce_fetch);
+
+  // A CSS minification fetch, which does belong on the low-priority queue.
+  GoogleString out_cf;
+  RequestContextPtr cf_ctx =
+      RequestContext::NewTestRequestContext(server_context()->thread_system());
+  StringAsyncFetch cf_fetch(cf_ctx, &out_cf);
+  RewriteDriver* cf_driver = server_context()->NewRewriteDriver(cf_ctx);
+  cf_driver->FetchResource(Encode(kTestDomain, "cf", "0", "x.css", "css"),
+                           &cf_fetch);
+
+  bool done_while_wedged = ce_fetch.WaitForDone(10 * Timer::kSecondMs);
+
+  // Release the wedged worker either way so that a failure does not hang.
+  resume_rewrite.Notify();
+  ce_driver->WaitForCompletion();
+  ce_driver->Cleanup();
+  cf_driver->WaitForCompletion();
+  cf_driver->Cleanup();
+
+  EXPECT_TRUE(done_while_wedged)
+      << "cache-extended fetch waited for the low-priority worker";
+  EXPECT_TRUE(ce_fetch.success());
+  EXPECT_EQ(" a ", out_ce);
+  EXPECT_FALSE(ce_fetch.response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(kMinifiedCss, out_cf);
+  EXPECT_FALSE(cf_fetch.response_headers()->HasValue(
+      HttpAttributes::kCacheControl, "private"));
+  EXPECT_EQ(dropped_before, dropped->Get(TimedVariable::START));
+
+  rewrite_driver()->WaitForShutDown();
+}
+
+// Fetches of rewritten resources that go through the low-priority rewrite
+// queue. These tests pin how such a fetch behaves while the queue's only
+// worker is busy, with an explicitly negative rewrite deadline and for a
+// combined resource.
+class RewriteContextFetchQueueTest : public RewriteContextTest {
+ protected:
+  static const char kCss[];
+  static const char kMinifiedCss[];
+
+  // Occupies the only low-priority worker with the combining filter, and
+  // returns once that rewrite has started.
+  void WedgeLowPriorityWorker() {
+    InitResources();
+    SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kCss,
+                                  Timer::kYearMs / Timer::kSecondMs);
+    SetResponseWithDefaultHeaders("y.css", kContentTypeCss, kCss,
+                                  Timer::kYearMs / Timer::kSecondMs);
+    InitCombiningFilter(0);
+    EnableDebug();
+    combining_filter_->set_prefix("|");
+    rewrite_reached_.reset(
+        new WorkerTestBase::SyncPoint(server_context()->thread_system()));
+    resume_rewrite_.reset(
+        new WorkerTestBase::SyncPoint(server_context()->thread_system()));
+    combining_filter_->set_rewrite_signal_on(rewrite_reached_.get());
+    combining_filter_->set_rewrite_block_on(resume_rewrite_.get());
+
+    wedge_fetch_.reset(
+        new StringAsyncFetch(CreateRequestContext(), &wedge_out_));
+    rewrite_driver()->FetchResource(
+        Encode(kTestDomain, CombiningFilter::kFilterId, "0", "a.css", "css"),
+        wedge_fetch_.get());
+    rewrite_reached_->Wait();
+  }
+
+  // Starts a fetch of url on its own driver.
+  void StartFetch(const GoogleString& url) {
+    RequestContextPtr ctx = RequestContext::NewTestRequestContext(
+        server_context()->thread_system());
+    fetch_.reset(new SignalingStringAsyncFetch(
+        ctx, &out_, server_context()->thread_system()));
+    // The fetch gets a copy of the test's options (the deadline set by the
+    // test), which a driver from the server context's pool would not.
+    RewriteOptions* fetch_options = options()->Clone();
+    fetch_options->ComputeSignature();
+    driver_ = server_context()->NewCustomRewriteDriver(fetch_options, ctx);
+    driver_->FetchResource(url, fetch_.get());
+  }
+
+  // Moves the mock time forward and runs the alarms that are due. Unlike
+  // AdvanceTimeMs() this does not wait for the busy worker threads to go idle,
+  // which the wedged worker never does.
+  void AdvanceBusyMs(int64 ms) {
+    factory()->mock_timer()->AdvanceMs(ms);
+    ScopedMutex lock(mock_scheduler()->mutex());
+    mock_scheduler()->ProcessAlarmsOrWaitUs(0);
+  }
+
+  // Advances the mock time by step_ms until the fetch is answered, giving each
+  // step a little wall-clock time, so that an alarm that is set up only after
+  // the first step still fires. Adds the time advanced to *advanced_ms.
+  bool AdvanceUntilDone(int64 step_ms, int64* advanced_ms) {
+    for (int i = 0; i < 100; ++i) {
+      AdvanceBusyMs(step_ms);
+      *advanced_ms += step_ms;
+      if (fetch_->WaitForDone(100)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Lets the wedged worker go on, and waits for everything to finish.
+  void Release() {
+    resume_rewrite_->Notify();
+    driver_->WaitForCompletion();
+    driver_->Cleanup();
+    rewrite_driver()->WaitForShutDown();
+  }
+
+  std::unique_ptr<WorkerTestBase::SyncPoint> rewrite_reached_;
+  std::unique_ptr<WorkerTestBase::SyncPoint> resume_rewrite_;
+  GoogleString wedge_out_;
+  std::unique_ptr<StringAsyncFetch> wedge_fetch_;
+  GoogleString out_;
+  std::unique_ptr<SignalingStringAsyncFetch> fetch_;
+  RewriteDriver* driver_ = nullptr;
+};
+
+const char RewriteContextFetchQueueTest::kCss[] = " * { display: none; } ";
+const char RewriteContextFetchQueueTest::kMinifiedCss[] = "*{display:none}";
+
+// With a negative rewrite deadline a fetch of a rewritten resource waits for
+// its optimization, but only up to NegativeDeadlineFetchWaitMs(). Then the
+// original is served with a short private lifetime. The rewrite is queued
+// behind the busy worker.
+TEST_F(RewriteContextFetchQueueTest, NegativeDeadlineFetchWaitIsBounded) {
+  // Real hashes, so that the original and the optimized content have names of
+  // their own, other than the requested one.
+  UseMd5Hasher();
+  options()->set_rewrite_deadline_ms(-1);
+  WedgeLowPriorityWorker();
+  Variable* alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  const int64 alarms_before = alarms->Get();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "x.css", "css");
+
+  StartFetch(url);
+  // Not answered while the time that has passed is below the bound.
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  AdvanceBusyMs(bound_ms - 1);
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  int64 advanced_ms = bound_ms - 1;
+  bool done_while_busy = AdvanceUntilDone(bound_ms, &advanced_ms);
+  EXPECT_LE(bound_ms, advanced_ms);
+
+  // Nothing of the fallback has been stored while the worker is still busy:
+  // not under the requested name, and not under the name of the original's
+  // own hash either.
+  HTTPValue value;
+  ResponseHeaders cached_headers;
+  const HTTPCache::FindResult in_cache =
+      HttpBlockingFind(url, http_cache(), &value, &cached_headers);
+  const GoogleString original_url =
+      Encode(kTestDomain, "cf", server_context()->hasher()->Hash(kCss),
+             "x.css", "css");
+  const GoogleString optimized_url =
+      Encode(kTestDomain, "cf", server_context()->hasher()->Hash(kMinifiedCss),
+             "x.css", "css");
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(original_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(optimized_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+
+  const bool success = done_while_busy && fetch_->success();
+  const GoogleString fallback_out = out_;
+  ResponseHeaders fallback_headers;
+  fallback_headers.CopyFrom(*fetch_->response_headers());
+
+  // Release the worker either way so that a failure does not hang.
+  Release();
+
+  EXPECT_TRUE(done_while_busy);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(kCss, fallback_out);
+  EXPECT_NE(HTTPCache::kFound, in_cache.status);
+  EXPECT_TRUE(
+      fallback_headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_FALSE(
+      fallback_headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_GE(RewriteOptions::kDefaultImplicitCacheTtlMs,
+            fallback_headers.cache_ttl_ms());
+  // (The wedging fetch is a single-input fetch too, so its own alarm fires
+  // when the time is moved.)
+  EXPECT_LE(alarms_before + 1, alarms->Get());
+
+  // The fallback was not stored by our cache: a later request gets the
+  // optimized result that the detached rewrite stored, not the original.
+  GoogleString again;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
+  EXPECT_EQ(kMinifiedCss, again);
+  // The optimized result is stored under its own name, the original never.
+  EXPECT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(optimized_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(original_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+}
+
+// A combined CSS resource is rebuilt from its optimized inputs. With a
+// negative deadline the rebuild of an input is bounded in the same way, and
+// the combination is made of the original input. That combination is private
+// and is not stored.
+TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
+  UseMd5Hasher();
+  options()->set_rewrite_deadline_ms(-1);
+  // Use the regular CSS filters for the combined resource and its inputs.
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  WedgeLowPriorityWorker();
+  Variable* alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  const int64 alarms_before = alarms->Get();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
+
+  GoogleString url = Encode(kTestDomain, "cc", "0",
+                            MultiUrl(Encode("", "cf", "0", "x.css", "css"),
+                                     Encode("", "cf", "0", "y.css", "css")),
+                            "css");
+  StartFetch(url);
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  AdvanceBusyMs(bound_ms - 1);
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  int64 advanced_ms = bound_ms - 1;
+  bool done_while_busy = AdvanceUntilDone(bound_ms, &advanced_ms);
+
+  HTTPValue value;
+  ResponseHeaders cached_headers;
+  const HTTPCache::FindResult in_cache =
+      HttpBlockingFind(url, http_cache(), &value, &cached_headers);
+  const bool success = done_while_busy && fetch_->success();
+  const GoogleString fallback_out = out_;
+  ResponseHeaders fallback_headers;
+  fallback_headers.CopyFrom(*fetch_->response_headers());
+
+  Release();
+
+  EXPECT_TRUE(done_while_busy);
+  EXPECT_TRUE(success);
+  // Made of the original inputs, not the minified ones.
+  EXPECT_EQ(StrCat(kCss, "\n", kCss), fallback_out);
+  EXPECT_TRUE(
+      fallback_headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_NE(HTTPCache::kFound, in_cache.status);
+  EXPECT_LT(alarms_before, alarms->Get());
+  // The combination of the originals is not stored under the name of its own
+  // hash.
+  const GoogleString fallback_url =
+      Encode(kTestDomain, "cc", server_context()->hasher()->Hash(fallback_out),
+             MultiUrl(Encode("", "cf", "0", "x.css", "css"),
+                      Encode("", "cf", "0", "y.css", "css")),
+             "css");
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(fallback_url, http_cache(), &value,
+                             &cached_headers)
+                .status);
+
+  // Never stored: a later request gets the combination of the optimized
+  // inputs.
+  GoogleString again;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
+  EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), again);
+}
+
+// A combined JavaScript resource has no usable fallback: the original of an
+// input has another content hash and so another variable name. With a
+// negative deadline the fetch waits up to the blocking fetch timeout, then
+// answers 503 with Retry-After, never the original. The result is still
+// stored when the rewrite finishes.
+TEST_F(RewriteContextFetchQueueTest, CombinedJsFetchWaitIsCapped) {
+  const int64 cap_ms = 3 * Timer::kSecondMs;
+  options()->set_rewrite_deadline_ms(-1);
+  options()->set_blocking_fetch_timeout_ms(cap_ms);
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  WedgeLowPriorityWorker();
+  SetResponseWithDefaultHeaders("x.js", kContentTypeJavascript, "var x =  1;",
+                                Timer::kYearMs / Timer::kSecondMs);
+  SetResponseWithDefaultHeaders("y.js", kContentTypeJavascript, "var y =  2;",
+                                Timer::kYearMs / Timer::kSecondMs);
+  Variable* alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  const int64 alarms_before = alarms->Get();
+
+  GoogleString url = Encode(kTestDomain, "jc", "0",
+                            MultiUrl(Encode("", "jm", "0", "x.js", "js"),
+                                     Encode("", "jm", "0", "y.js", "js")),
+                            "js");
+  StartFetch(url);
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  // The fetch is not answered before the cap has passed ...
+  AdvanceBusyMs(cap_ms - 1);
+  EXPECT_FALSE(fetch_->WaitForDone(200));
+  int64 advanced_ms = cap_ms - 1;
+  // ... and is answered, with an error, once it has.
+  bool done_while_busy = AdvanceUntilDone(Timer::kSecondMs, &advanced_ms);
+  const bool success = fetch_->success();
+  const GoogleString error_out = out_;
+  ResponseHeaders error_headers;
+  error_headers.CopyFrom(*fetch_->response_headers());
+
+  Release();
+
+  EXPECT_TRUE(done_while_busy);
+  EXPECT_FALSE(success);
+  EXPECT_EQ(HttpStatus::kUnavailable, error_headers.status_code());
+  EXPECT_TRUE(error_headers.Has("Retry-After"));
+  EXPECT_TRUE(error_headers.HasValue(HttpAttributes::kCacheControl, "no-store"));
+  EXPECT_FALSE(error_headers.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_EQ(GoogleString::npos, error_out.find("var x"));
+  EXPECT_LE(alarms_before + 1, alarms->Get());
+
+  // The rewrite went on in the background, so a retry is served.
+  GoogleString again;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResourceUrl(url, &again, &headers));
+  EXPECT_FALSE(headers.HasValue(HttpAttributes::kCacheControl, "private"));
+  EXPECT_NE(GoogleString::npos, again.find("var x"));
 }
 
 TEST_F(RewriteContextTest, CombinationFetchMissing) {

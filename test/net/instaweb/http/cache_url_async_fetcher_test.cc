@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -50,6 +51,7 @@
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/sequence.h"
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
@@ -1476,10 +1478,10 @@ TEST_F(CacheUrlAsyncFetcherTest, ProxyHitOnModuleFetchedEntryKeepsMaxAge) {
   GoogleString content;
   bool done = false, success = false, cacheable = false;
   ResponseHeaders served(http_options_);
-  MockFetch* fetch = new MockFetch(
-      RequestContextPtr(
-          new RequestContext(http_options_, thread_system_->NewMutex(), nullptr)),
-      &content, &done, &success, &cacheable);
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
   fetch->set_response_headers(&served);
   cache_fetcher_->Fetch(kUrl, &handler_, fetch);
   ASSERT_TRUE(done);
@@ -1654,10 +1656,11 @@ TEST_F(CacheUrlAsyncFetcherTest, CacheVaryForNonHtml) {
   ExpectNoCache(vary_url_, vary_body_);
   lru_cache_.Clear();
 
-  // Respect Vary is disabled. Vary: Accept-Encoding,User-Agent is cached.
+  // Respect Vary is disabled. Vary: Accept-Encoding,User-Agent is still not
+  // cached: the fetch carried the client's own request headers.
   cache_fetcher_->set_respect_vary(false);
   http_options_.respect_vary = false;
-  ExpectCache(vary_url_, vary_body_);
+  ExpectNoCache(vary_url_, vary_body_);
   lru_cache_.Clear();
 
   // Respect Vary is disabled, but we still respect Vary: Cookie for
@@ -1695,6 +1698,400 @@ TEST_F(CacheUrlAsyncFetcherTest, CacheVaryForNonHtml) {
   ExpectNoCacheWithRequestHeaders(vary_url_, vary_body_,
                                   request_headers_with_cookies);
 
+  lru_cache_.Clear();
+}
+
+// gzip is the only content coding the cache can undo for a client that did
+// not ask for it, so a response in any other coding is not stored.
+TEST_F(CacheUrlAsyncFetcherTest, ResponseInNonGzipContentCodingIsNotCached) {
+  mutable_vary_headers_.Add(HttpAttributes::kVary, "Accept-Encoding");
+  for (const char* coding :
+       {"br", "zstd", "deflate", "br, gzip", "gzip, gzip"}) {
+    mutable_vary_headers_.Replace(HttpAttributes::kContentEncoding, coding);
+    mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+    ExpectNoCache(vary_url_, vary_body_);
+    lru_cache_.Clear();
+  }
+  // A response without a real coding is still stored.
+  mutable_vary_headers_.Replace(HttpAttributes::kContentEncoding, "identity");
+  mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+  ExpectCache(vary_url_, vary_body_);
+  lru_cache_.Clear();
+}
+
+// A gzip response is stored once and adapted to each client on a hit:
+// served as stored to a client that accepts gzip, inflated for one that
+// does not.
+TEST_F(CacheUrlAsyncFetcherTest, SingleGzipResponseIsCachedAndAdapted) {
+  const GoogleString url = "http://www.example.com/gzipped.css";
+  const char kStyles[] = ".a { color: red; } .b { color: blue; }";
+  GoogleString gzipped;
+  StringWriter writer(&gzipped);
+  ASSERT_TRUE(GzipInflater::Deflate(kStyles, GzipInflater::kGzip, &writer));
+  ResponseHeaders gzip_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &gzip_headers);
+  gzip_headers.Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  gzip_headers.ComputeCaching();
+  mock_fetcher_.SetResponse(url, gzip_headers, gzipped);
+  // Keep gzip in the cache rather than inflating it on the way in.
+  http_cache_->SetCompressionLevel(9);
+
+  struct Expectation {
+    bool accepts_gzip;
+    int origin_fetches;
+    const char* content_encoding;
+    StringPiece body;
+  };
+  const Expectation kSteps[] = {
+      {true, 1, HttpAttributes::kGzip, gzipped},  // Miss: filled from origin.
+      {true, 0, HttpAttributes::kGzip, gzipped},  // Hit, as stored.
+      {false, 0, nullptr, kStyles},               // Hit, inflated.
+  };
+  for (const Expectation& step : kSteps) {
+    ClearStats();
+    RequestContextPtr context(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    context->SetAcceptsGzip(step.accepts_gzip);
+    StringAsyncFetch fetch(context);
+    if (step.accepts_gzip) {
+      fetch.request_headers()->Add(HttpAttributes::kAcceptEncoding,
+                                   HttpAttributes::kGzip);
+    }
+    cache_fetcher_->Fetch(url, &handler_, &fetch);
+    ASSERT_TRUE(fetch.done());
+    EXPECT_TRUE(fetch.success());
+    EXPECT_EQ(step.origin_fetches, counting_fetcher_.fetch_count());
+    EXPECT_STREQ(step.content_encoding, fetch.response_headers()->Lookup1(
+                                            HttpAttributes::kContentEncoding));
+    EXPECT_EQ(step.body, fetch.buffer());
+  }
+}
+
+// A cache-filling fetch asks the origin for gzip or for no content coding.
+TEST_F(CacheUrlAsyncFetcherTest, CacheFillingFetchAsksOriginForGzipOrNothing) {
+  const struct {
+    const char* client_offers;
+    const char* origin_receives;
+  } kCases[] = {
+      {"gzip, deflate, br", "gzip"},
+      {"br;q=1.0, gzip", "gzip"},
+      {"br, zstd", ""},
+      {"deflate", ""},
+      {"", ""},
+  };
+  for (const auto& c : kCases) {
+    lru_cache_.Clear();
+    ClearStats();
+    StringAsyncFetch fetch(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    if (*c.client_offers != '\0') {
+      fetch.request_headers()->Add(HttpAttributes::kAcceptEncoding,
+                                   c.client_offers);
+    }
+    cache_fetcher_->Fetch(cache_css_url_, &handler_, &fetch);
+    ASSERT_TRUE(fetch.done()) << c.client_offers;
+    EXPECT_EQ(1, counting_fetcher_.fetch_count()) << c.client_offers;
+    EXPECT_EQ(c.origin_receives, mock_fetcher_.last_accept_encoding())
+        << c.client_offers;
+  }
+}
+
+// The background freshen of an entry about to expire carries the client's
+// request headers too, and is held to the same rule.
+TEST_F(CacheUrlAsyncFetcherTest, BackgroundFreshenAsksOriginForGzipOrNothing) {
+  ClearStats();
+  FetchAndValidate(cache_url_, empty_request_headers_, true, HttpStatus::kOK,
+                   cache_body_, kBackendFetch, true);
+  cache_fetcher_->set_proactively_freshen_user_facing_request(true);
+  timer_.AdvanceMs(ttl_ms_ - 3 * Timer::kMinuteMs);
+
+  ClearStats();
+  RequestHeaders client_headers;
+  client_headers.Add(HttpAttributes::kAcceptEncoding, "zstd, gzip, br");
+  FetchAndValidate(cache_url_, client_headers, true, HttpStatus::kOK,
+                   cache_body_, kBackendFetch, true);
+  // Served from the cache; the only origin request is the freshen.
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
+  EXPECT_EQ("gzip", mock_fetcher_.last_accept_encoding());
+}
+
+// A stored copy in a coding the cache cannot adapt, as written before the
+// cache refused to store one, is never served: neither as a hit nor as the
+// stale fallback when the origin fails.  It is fetched again instead.
+TEST_F(CacheUrlAsyncFetcherTest, StoredCopyInOtherCodingIsFetchedAgain) {
+  const char kStoredCopy[] = "stored copy in another coding";
+  ResponseHeaders coded_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &coded_headers);
+  coded_headers.Add(HttpAttributes::kVary, HttpAttributes::kAcceptEncoding);
+  coded_headers.Add(HttpAttributes::kContentEncoding, "br");
+  coded_headers.ComputeCaching();
+  RequestHeaders::Properties no_properties;
+  http_cache_->Put(cache_css_url_, fragment_, no_properties,
+                   ResponseHeaders::kRespectVaryOnResources, &coded_headers,
+                   kStoredCopy, &handler_);
+
+  ClearStats();
+  StringAsyncFetch fresh_fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  cache_fetcher_->Fetch(cache_css_url_, &handler_, &fresh_fetch);
+  ASSERT_TRUE(fresh_fetch.done());
+  EXPECT_TRUE(fresh_fetch.success());
+  EXPECT_EQ(cache_body_, fresh_fetch.buffer());
+  EXPECT_FALSE(
+      fresh_fetch.response_headers()->Has(HttpAttributes::kContentEncoding));
+  EXPECT_EQ(0, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+
+  // Stale: with the origin failing, the stale copy must not be the fallback.
+  lru_cache_.Clear();
+  http_cache_->Put(cache_css_url_, fragment_, no_properties,
+                   ResponseHeaders::kRespectVaryOnResources, &coded_headers,
+                   kStoredCopy, &handler_);
+  timer_.AdvanceMs(200 * Timer::kSecondMs);
+  mock_fetcher_.Disable();
+  ClearStats();
+  StringAsyncFetch stale_fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  cache_fetcher_->Fetch(cache_css_url_, &handler_, &stale_fetch);
+  ASSERT_TRUE(stale_fetch.done());
+  EXPECT_FALSE(stale_fetch.success());
+  EXPECT_EQ(StringPiece::npos,
+            StringPiece(stale_fetch.buffer()).find(kStoredCopy));
+  EXPECT_EQ(0, cache_fetcher_->fallback_responses_served()->Get());
+  mock_fetcher_.Enable();
+}
+
+// A fetch through this fetcher goes to the origin with the client's own
+// request headers, so an answer the origin says varies on them is that
+// client's alone.  With RespectVary off (the default) it must still not be
+// stored and handed to the next client.
+TEST_F(CacheUrlAsyncFetcherTest, AnswerVaryingOnClientHeadersIsNotShared) {
+  ASSERT_FALSE(cache_fetcher_->respect_vary());
+  ASSERT_FALSE(http_options_.respect_vary);
+
+  RequestHeaders first_client;
+  first_client.Add(HttpAttributes::kAccept, "image/webp,*/*");
+  first_client.Add(HttpAttributes::kOrigin, "http://one.example.com");
+  RequestHeaders second_client;
+
+  for (const char* vary :
+       {"Accept", "Origin", "accept", "Accept-Encoding, Origin", "*"}) {
+    SCOPED_TRACE(vary);
+    mutable_vary_headers_.Replace(HttpAttributes::kVary, vary);
+    mutable_vary_headers_.ComputeCaching();
+    mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_,
+                              "first client's answer");
+    // Fetched from the origin both times, never inserted.
+    ExpectNoCacheWithRequestHeaders(vary_url_, "first client's answer",
+                                    first_client);
+
+    // The next client gets the origin's answer for its own request.
+    mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_,
+                              "second client's answer");
+    ClearStats();
+    FetchAndValidate(vary_url_, second_client, true, HttpStatus::kOK,
+                     "second client's answer", kBackendFetch, false);
+    EXPECT_EQ(1, counting_fetcher_.fetch_count());
+    EXPECT_EQ(0, http_cache_->cache_hits()->Get());
+    lru_cache_.Clear();
+  }
+
+  // Answers that vary on nothing, or only on Accept-Encoding, are still
+  // stored and shared.
+  mutable_vary_headers_.RemoveAll(HttpAttributes::kVary);
+  mutable_vary_headers_.ComputeCaching();
+  mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+  ExpectCacheWithRequestHeaders(vary_url_, vary_body_, first_client);
+  lru_cache_.Clear();
+
+  mutable_vary_headers_.Replace(HttpAttributes::kVary,
+                                HttpAttributes::kAcceptEncoding);
+  mutable_vary_headers_.ComputeCaching();
+  mock_fetcher_.SetResponse(vary_url_, mutable_vary_headers_, vary_body_);
+  ExpectCacheWithRequestHeaders(vary_url_, vary_body_, first_client);
+  lru_cache_.Clear();
+}
+
+// An entry stored from a response served to a client, before the store side
+// refused ones that vary on the request, is not served on a lookup either.
+// One the module fetched itself still is, under the configured RespectVary.
+TEST_F(CacheUrlAsyncFetcherTest, StoredClientAnswerVaryingOnRequestIsAMiss) {
+  ASSERT_FALSE(cache_fetcher_->respect_vary());
+  for (bool fetched_input : {false, true}) {
+    SCOPED_TRACE(fetched_input ? "module-fetched" : "served to a client");
+    lru_cache_.Clear();
+    ResponseHeaders stored(http_options_);
+    stored.CopyFrom(mutable_vary_headers_);
+    stored.Replace(HttpAttributes::kVary, HttpAttributes::kAccept);
+    stored.ComputeCaching();
+    HTTPValue value;
+    value.SetHeaders(&stored);
+    value.Write("stored answer", &handler_);
+    if (fetched_input) {
+      http_cache_->PutFetchedInput(vary_url_, fragment_,
+                                   RequestHeaders::Properties(), http_options_,
+                                   &value, &handler_);
+    } else {
+      http_cache_->Put(vary_url_, fragment_, RequestHeaders::Properties(),
+                       http_options_, &value, &handler_);
+    }
+    mock_fetcher_.SetResponse(vary_url_, stored, "origin answer");
+
+    // With a backend: a miss, answered by the origin for this client.
+    RequestHeaders client;
+    client.Add(HttpAttributes::kAccept, "image/webp,*/*");
+    ClearStats();
+    FetchAndValidate(vary_url_, client, true, HttpStatus::kOK,
+                     fetched_input ? "stored answer" : "origin answer",
+                     kBackendFetch, fetched_input);
+    EXPECT_EQ(fetched_input ? 1 : 0, http_cache_->cache_hits()->Get());
+    EXPECT_EQ(fetched_input ? 0 : 1, counting_fetcher_.fetch_count());
+
+    // Cache only, as in-place serving at the origin looks it up: not found.
+    if (!fetched_input) {
+      CacheUrlAsyncFetcher cache_only(&mock_hasher_, &lock_manager_,
+                                      http_cache_.get(), fragment_,
+                                      &mock_async_op_hooks_, nullptr);
+      StringAsyncFetch fetch(
+          RequestContext::NewTestRequestContext(thread_system_.get()));
+      cache_only.Fetch(vary_url_, &handler_, &fetch);
+      EXPECT_TRUE(fetch.done());
+      EXPECT_FALSE(fetch.success());
+      EXPECT_EQ(CacheUrlAsyncFetcher::kNotInCacheStatus,
+                fetch.response_headers()->status_code());
+    }
+  }
+  lru_cache_.Clear();
+}
+
+// The answer to a request that carried a cookie may be that visitor's own:
+// it is stored for other requests only when the origin marks it shareable.
+TEST_F(CacheUrlAsyncFetcherTest, CookieRequestAnswerIsSharedOnlyWhenMarked) {
+  const char kUrl[] = "http://www.example.com/cookie/answer";
+  struct Case {
+    const char* content_type;
+    const char* cache_control;  // nullptr: none
+    bool stored_for_cookie;
+    bool stored_without_cookie;
+  };
+  const Case kCases[] = {
+      {"application/json", "max-age=600", false, true},
+      {"application/json", "public, max-age=600", true, true},
+      {"text/html", "max-age=600, s-maxage=600", true, true},
+      {"text/html", "max-age=600, s-maxage=600, s-maxage=600", false, true},
+      // An unreadable lifetime makes the response stale, so it is stored
+      // for no request at all.
+      {"text/html", "max-age=600, s-maxage=abc", false, false},
+      {"application/unknown", "max-age=600", false, true},
+      {"image/png", "max-age=600", true, true},
+      {"text/css; charset=utf-8", "max-age=600", true, true},
+      {"image/png", nullptr, false, true},  // the implicit lifetime only
+  };
+  RequestHeaders cookie;
+  cookie.Add(HttpAttributes::kCookie, "session=1");
+  RequestHeaders empty_cookie;
+  empty_cookie.Add(HttpAttributes::kCookie, "");
+  ASSERT_TRUE(empty_cookie.GetProperties().has_cookie);
+  RequestHeaders cookie2;
+  cookie2.Add(HttpAttributes::kCookie2, "$Version=1");
+  RequestHeaders no_cookie;
+
+  for (const Case& c : kCases) {
+    for (const RequestHeaders* request :
+         {&cookie, &empty_cookie, &cookie2, &no_cookie}) {
+      SCOPED_TRACE(
+          StrCat(c.content_type, " / ",
+                 c.cache_control == nullptr ? "(none)" : c.cache_control,
+                 request == &no_cookie ? " / no cookie" : " / cookie"));
+      lru_cache_.Clear();
+      ResponseHeaders headers;
+      headers.SetStatusAndReason(HttpStatus::kOK);
+      headers.SetDate(timer_.NowMs());
+      headers.Add(HttpAttributes::kContentType, c.content_type);
+      if (c.cache_control != nullptr) {
+        headers.Add(HttpAttributes::kCacheControl, c.cache_control);
+      }
+      mock_fetcher_.SetResponse(kUrl, headers, "answer");
+      if (request == &no_cookie ? c.stored_without_cookie
+                                : c.stored_for_cookie) {
+        ExpectCacheWithRequestHeaders(kUrl, "answer", *request);
+      } else {
+        ExpectNoCacheWithRequestHeaders(kUrl, "answer", *request);
+      }
+    }
+  }
+  lru_cache_.Clear();
+}
+
+// A background freshen repeats the request that triggered it, cookie
+// included, and stores its answer under the same rule.
+TEST_F(CacheUrlAsyncFetcherTest, CookieTriggeredFreshenFollowsTheCookieRule) {
+  const char kUrl[] = "http://www.example.com/cookie/freshen.json";
+  ResponseHeaders headers;
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, "application/json");
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  mock_fetcher_.SetResponse(kUrl, headers, "anonymous answer");
+  // Stored for a request without a cookie.
+  ExpectCache(kUrl, "anonymous answer");
+
+  cache_fetcher_->set_proactively_freshen_user_facing_request(true);
+  timer_.AdvanceMs(ttl_ms_ - 3 * Timer::kMinuteMs);
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  mock_fetcher_.SetResponse(kUrl, headers, "this visitor's answer");
+
+  RequestHeaders cookie;
+  cookie.Add(HttpAttributes::kCookie, "session=1");
+  ClearStats();
+  // Served from the cache; the freshen it starts shares this request's log
+  // record, which records that its answer was not stored.
+  FetchAndValidate(kUrl, cookie, true, HttpStatus::kOK, "anonymous answer",
+                   kBackendFetch, false);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  // The freshen ran, with the cookie, and did not store its answer.
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(0, http_cache_->cache_inserts()->Get());
+  cache_fetcher_->set_proactively_freshen_user_facing_request(false);
+
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "anonymous answer", kBackendFetch, true);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(0, counting_fetcher_.fetch_count());
+  lru_cache_.Clear();
+}
+
+// An entry stored by an earlier version, without the current generation
+// stamp, may have been stored for a request that carried a cookie: it is not
+// served.  A current entry for the same response is.
+TEST_F(CacheUrlAsyncFetcherTest, ClientEntryFromAnEarlierVersionIsAMiss) {
+  const char kUrl[] = "http://www.example.com/cookie/earlier.png";
+  ResponseHeaders headers(http_options_);
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, "image/png");
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  headers.Add(HttpAttributes::kEtag, "\"earlier\"");
+  headers.ComputeCaching();
+  HTTPValue earlier;
+  earlier.SetHeaders(&headers);
+  earlier.Write("earlier answer", &handler_);
+  ASSERT_FALSE(earlier.IsCurrentClientEntry());
+  lru_cache_.Put(http_cache_->CompositeKey(kUrl, fragment_), earlier.share());
+  mock_fetcher_.SetResponse(kUrl, headers, "origin answer");
+
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "origin answer", kBackendFetch, true);
+  EXPECT_EQ(0, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  // The answer stored now carries the stamp and is served.
+  ClearStats();
+  FetchAndValidate(kUrl, empty_request_headers_, true, HttpStatus::kOK,
+                   "origin answer", kBackendFetch, true);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(0, counting_fetcher_.fetch_count());
   lru_cache_.Clear();
 }
 
@@ -2248,6 +2645,89 @@ TEST_F(CacheUrlAsyncFetcherTest, CycloneZeroCopyHitTornFailsClosed) {
   EXPECT_EQ("", content);
   // The borrow was returned despite the failed serve.
   EXPECT_EQ(mapped_backend.mapped_hits(), mapped_backend.release_count());
+}
+
+// Which stored copies may answer a request that carries Origin.
+TEST(CacheUrlAsyncFetcherCorsTest, CorsAllowsSharedCopy) {
+  RequestHeaders plain;
+  RequestHeaders from_a;
+  from_a.Add(HttpAttributes::kOrigin, "https://a.example");
+  ResponseHeaders none;
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  ResponseHeaders only_b;
+  only_b.Add(HttpAttributes::kAccessControlAllowOrigin, "https://b.example");
+  ResponseHeaders two;
+  two.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  two.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+
+  for (const ResponseHeaders* r : {&none, &any, &only_a, &only_b, &two}) {
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(nullptr, *r));
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&plain, *r));
+  }
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, none));
+  EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, any));
+  EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, only_a));
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, only_b));
+  // Browsers refuse more than one Access-Control-Allow-Origin.
+  EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(&from_a, two));
+}
+
+// A credentialed cross-origin request (it carries cookies or credentials)
+// is answered only by a copy that names its origin and allows credentials.
+TEST(CacheUrlAsyncFetcherCorsTest, CredentialedRequest) {
+  RequestHeaders with_cookie;
+  with_cookie.Add(HttpAttributes::kOrigin, "https://a.example");
+  with_cookie.Add(HttpAttributes::kCookie, "session=1");
+  RequestHeaders with_auth;
+  with_auth.Add(HttpAttributes::kOrigin, "https://a.example");
+  with_auth.Add(HttpAttributes::kAuthorization, "Basic dTpw");
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  ResponseHeaders any_with_credentials;
+  any_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  any_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                           "true");
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  ResponseHeaders only_a_with_credentials;
+  only_a_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin,
+                              "https://a.example");
+  only_a_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                              "true");
+  ResponseHeaders only_b_with_credentials;
+  only_b_with_credentials.Add(HttpAttributes::kAccessControlAllowOrigin,
+                              "https://b.example");
+  only_b_with_credentials.Add(HttpAttributes::kAccessControlAllowCredentials,
+                              "true");
+  for (const RequestHeaders* request : {&with_cookie, &with_auth}) {
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(request, any));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, any_with_credentials));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(request, only_a));
+    EXPECT_TRUE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, only_a_with_credentials));
+    EXPECT_FALSE(CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+        request, only_b_with_credentials));
+  }
+}
+
+// Which responses were made for the one request that got them.
+TEST(CacheUrlAsyncFetcherCorsTest, IsCorsSpecificResponse) {
+  ResponseHeaders none;
+  EXPECT_FALSE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(none));
+  ResponseHeaders any;
+  any.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  EXPECT_FALSE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(any));
+  ResponseHeaders only_a;
+  only_a.Add(HttpAttributes::kAccessControlAllowOrigin, "https://a.example");
+  EXPECT_TRUE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(only_a));
+  ResponseHeaders vary;
+  vary.Add(HttpAttributes::kAccessControlAllowOrigin, "*");
+  vary.Add(HttpAttributes::kVary, "Accept-Encoding, origin");
+  EXPECT_TRUE(CacheUrlAsyncFetcher::IsCorsSpecificResponse(vary));
 }
 
 }  // namespace

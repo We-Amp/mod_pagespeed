@@ -470,6 +470,108 @@ bool ResponseHeaders::IsProxyCacheable(
   return true;
 }
 
+namespace {
+
+// A delta-seconds value (RFC 9111 1.2.2): one or more digits, nothing else.
+bool ParseDeltaSeconds(StringPiece value, int64* seconds) {
+  if (value.empty()) {
+    return false;
+  }
+  int64 result = 0;
+  for (char c : value) {
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    if (result < (int64{1} << 40)) {  // Saturate; any large value is > 0.
+      result = result * 10 + (c - '0');
+    }
+  }
+  *seconds = result;
+  return true;
+}
+
+// Is this Content-Type a stylesheet, a script or an image?
+bool IsStaticAssetContentType(const char* content_type) {
+  if (content_type == nullptr) {
+    return false;
+  }
+  StringPiece media(content_type);
+  const size_t semicolon = media.find(';');
+  if (semicolon != StringPiece::npos) {
+    media = media.substr(0, semicolon);
+  }
+  TrimWhitespace(&media);
+  if (StringCaseStartsWith(media, "image/") && media.size() > 6) {
+    return true;
+  }
+  for (const char* type : {"text/css", "application/javascript",
+                           "text/javascript", "application/x-javascript",
+                           "application/ecmascript", "text/ecmascript"}) {
+    if (StringCaseEqual(media, type)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool ResponseHeaders::IsShareableForCookieRequest() const {
+  ConstStringStarVector values;
+  const bool has_cache_control = Lookup(HttpAttributes::kCacheControl, &values);
+  bool is_public = false;
+  int s_maxage_count = 0;
+  bool s_maxage_valid = false;
+  int64 s_maxage = 0;
+  int64 max_age = 0;
+  for (const GoogleString* value : values) {
+    if (value == nullptr) {
+      continue;
+    }
+    StringPiece directive(*value);
+    TrimWhitespace(&directive);
+    StringPiece name = directive;
+    StringPiece argument;
+    const size_t equals = directive.find('=');
+    if (equals != StringPiece::npos) {
+      name = directive.substr(0, equals);
+      argument = directive.substr(equals + 1);
+      TrimWhitespace(&name);
+      TrimWhitespace(&argument);
+    }
+    if (equals == StringPiece::npos && StringCaseEqual(name, "public")) {
+      is_public = true;
+    } else if (StringCaseEqual(name, "s-maxage")) {
+      ++s_maxage_count;
+      s_maxage = 0;
+      s_maxage_valid = ParseDeltaSeconds(argument, &s_maxage);
+    } else if (StringCaseEqual(name, "max-age")) {
+      int64 seconds = 0;
+      max_age = ParseDeltaSeconds(argument, &seconds) ? seconds : 0;
+    }
+  }
+
+  if (IsStaticAssetContentType(Lookup1(HttpAttributes::kContentType))) {
+    if (s_maxage_valid && s_maxage > 0) {
+      return true;
+    }
+    // ComputeCaching writes the implicit lifetime in as a max-age; that is
+    // not one the origin stated.
+    if (is_implicitly_cacheable()) {
+      return false;
+    }
+    if (has_cache_control) {
+      return max_age > 0;
+    }
+    int64 expires_ms = 0;
+    int64 date_ms = 0;
+    return ParseDateHeader(HttpAttributes::kExpires, &expires_ms) &&
+           ParseDateHeader(HttpAttributes::kDate, &date_ms) &&
+           expires_ms > date_ms;
+  }
+  return is_public || (s_maxage_count == 1 && s_maxage_valid && s_maxage > 0);
+}
+
 // Returns the ms-since-1970 absolute time when this resource
 // should be expired out of caches.
 int64 ResponseHeaders::CacheExpirationTimeMs() const {
@@ -863,10 +965,10 @@ GoogleString ResponseHeaders::CacheControlValuesToPreserve(
   // Cache-Control directive names are case-insensitive (RFC 7234 5.2), so a
   // mixed-case No-Transform or No-Store must survive the rewrite as well.
   GoogleString to_preserve;
-  if (HasValueCaseInsensitive(HttpAttributes::kCacheControl, "no-transform")) {
+  if (HasCacheControlDirective("no-transform")) {
     to_preserve = ", no-transform";
   }
-  if (HasValueCaseInsensitive(HttpAttributes::kCacheControl, "no-store")) {
+  if (HasCacheControlDirective("no-store")) {
     to_preserve += ", no-store";
   }
 
@@ -874,7 +976,10 @@ GoogleString ResponseHeaders::CacheControlValuesToPreserve(
     ConstStringStarVector cc_values;
     Lookup(HttpAttributes::kCacheControl, &cc_values);
     for (auto value : cc_values) {
-      if (StringCaseStartsWith(*value, "s-maxage=")) {
+      CachingHeaders::LifetimeDirective lifetime =
+          CachingHeaders::ReadLifetimeDirective(*value);
+      if (lifetime.name == CachingHeaders::LifetimeDirective::kSMaxAge &&
+          !lifetime.embedded) {
         to_preserve += ", " + *value;
       }
     }
@@ -922,6 +1027,24 @@ bool ResponseHeaders::WasGzippedLast() const {
     int index = v.size() - 1;
     if ((index > -1) && (v[index] != nullptr) &&
         StringCaseEqual(*v[index], HttpAttributes::kGzip)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ResponseHeaders::HasContentCodingOtherThanSingleGzip() const {
+  ConstStringStarVector v;
+  if (!Lookup(HttpAttributes::kContentEncoding, &v)) {
+    return false;
+  }
+  int num_gzip = 0;
+  for (const GoogleString* coding : v) {
+    if (coding == nullptr || coding->empty() ||
+        StringCaseEqual(*coding, "identity")) {
+      continue;
+    }
+    if (!StringCaseEqual(*coding, HttpAttributes::kGzip) || ++num_gzip > 1) {
       return true;
     }
   }
@@ -1298,16 +1421,24 @@ bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
                            true /* omit empty strings */);
   for (StringPiece& segment : segments) {
     TrimWhitespace(&segment);
-    if (StringCaseEqual(segment, "no-transform")) {
+    if (CachingHeaders::ElementHasDirective(segment, "no-transform")) {
       // We're not allowed to touch this, so don't.
       return false;
     }
-    if (StringCaseEqual(segment, "no-cache") ||
-        StringCaseEqual(segment, "no-store") ||
-        StringCaseEqual(segment, "private")) {
+    if (CachingHeaders::ElementHasDirective(segment, "no-cache") ||
+        CachingHeaders::ElementHasDirective(segment, "no-store") ||
+        CachingHeaders::ElementHasDirective(segment, "private")) {
       // Downstream shared caches shouldn't be caching these, and adding
       // s-maxage might confuse one into thinking that it should actually go
       // ahead and cache, so if any of these are present, don't add it.
+      return false;
+    }
+    CachingHeaders::LifetimeDirective lifetime =
+        CachingHeaders::ReadLifetimeDirective(segment);
+    if (lifetime.name != CachingHeaders::LifetimeDirective::kNone &&
+        !lifetime.readable) {
+      // A lifetime we cannot read makes the response stale for us, so don't
+      // invite a shared cache to keep it.
       return false;
     }
   }
@@ -1318,23 +1449,18 @@ bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
   bool found_existing_s_maxage = false;
   bool updated_existing_s_maxage = false;
   for (StringPiece& segment : segments) {
-    if (StringCaseStartsWith(segment, "s-maxage=")) {
+    CachingHeaders::LifetimeDirective lifetime =
+        CachingHeaders::ReadLifetimeDirective(segment);
+    if (lifetime.name == CachingHeaders::LifetimeDirective::kSMaxAge) {
       // Found existing s-maxage.  If it's larger than s_maxage_sec update it.
       found_existing_s_maxage = true;
-
-      StringPiece existing_value_s = segment;
-      existing_value_s.remove_prefix(STATIC_STRLEN("s-maxage="));
-      int existing_value;
-      if (!StringToInt(existing_value_s,
-                       &existing_value)) {  // NOLINT(bugprone-branch-clone)
-        // Failed to parse existing s-maxage value; leave it alone.
-      } else if (existing_value <= s_maxage_sec) {
-        // It's already small enough, don't change this one.  But there might be
-        // additional ones that need to be lowered, so keep going.
-      } else {
+      if (lifetime.seconds > s_maxage_sec) {
         segment = s_maxage_str;
         updated_existing_s_maxage = true;
       }
+      // Otherwise it's already small enough, don't change this one.  But
+      // there might be additional ones that need to be lowered, so keep
+      // going.
     }
   }
   if (found_existing_s_maxage) {
@@ -1353,15 +1479,12 @@ bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
   bool found_existing_maxage = false;
   int lowest_existing_maxage_value = s_maxage_sec + 1;
   for (StringPiece& segment : segments) {
-    if (StringCaseStartsWith(segment, "max-age=")) {
+    CachingHeaders::LifetimeDirective lifetime =
+        CachingHeaders::ReadLifetimeDirective(segment);
+    if (lifetime.name == CachingHeaders::LifetimeDirective::kMaxAge) {
       found_existing_maxage = true;
-      StringPiece existing_value_s = segment;
-      existing_value_s.remove_prefix(STATIC_STRLEN("max-age="));
-      int existing_value;
-      if (!StringToInt(existing_value_s, &existing_value)) {
-        // Failed to parse existing max-age value; ignore it.
-      } else if (existing_value < lowest_existing_maxage_value) {
-        lowest_existing_maxage_value = existing_value;
+      if (lifetime.seconds < lowest_existing_maxage_value) {
+        lowest_existing_maxage_value = lifetime.seconds;
       }
     }
   }

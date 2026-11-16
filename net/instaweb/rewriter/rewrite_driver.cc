@@ -262,6 +262,9 @@ RewriteDriver::RewriteDriver(MessageHandler* message_handler,
   // content_security_policy() is always dereferenceable, even before
   // the first Clear().
   ClearCspPolicies();
+
+  // Likewise for base_url() and decoded_base_url().
+  ClearBaseUrls();
 }
 
 void RewriteDriver::PopulateRequestContext() {
@@ -415,9 +418,8 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   release_driver_ = false;
   downstream_cache_purger_.Clear();
   write_property_cache_dom_cohort_ = false;
-  base_url_.Clear();
-  DCHECK(!base_url_.IsAnyValid());
-  decoded_base_url_.Clear();
+  ClearBaseUrls();
+  DCHECK(!base_url().IsAnyValid());
   fetch_url_.clear();
 
   if (!server_context_->shutting_down()) {
@@ -451,6 +453,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   refs_before_base_ = false;
   other_base_problem_ = false;
   containing_charset_.clear();
+  document_bom_charset_.clear();
   fully_rewrite_on_flush_ = false;
   fast_blocking_rewrite_ = true;
   num_inline_preview_images_ = 0;
@@ -463,6 +466,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   flush_early_info_.reset(nullptr);
   can_rewrite_resources_ = true;
   is_nested_ = false;
+  nested_fetch_may_fall_back_ = false;
   num_initiated_rewrites_ = 0;
   num_detached_rewrites_ = 0;
   if (request_context_.get() != nullptr) {
@@ -1455,17 +1459,17 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
           driver_->server_context()->ApplyRewrittenUrlCacheControl(
               response_headers);
         }
-        async_fetch_->set_content_length(content.size());
         async_fetch_->FixCacheControlForGoogleCache();
-        async_fetch_->HeadersComplete();
         // value->share() is owned heap storage by construction (share()
         // collapses any mapped view first); mapped bytes never ride the
         // WriteShared path -- their protection window is bounded, and they
         // go through WriteMapped with their keepalive instead.
-        success =
-            alias_serve
-                ? async_fetch_->WriteMapped(content, mapped_keepalive, handler_)
-                : async_fetch_->WriteShared(content, value->share(), handler_);
+        success = RewriteContext::CompleteWholeResponseHeaders(
+                      canonical_url_, content, async_fetch_, handler_) &&
+                  (alias_serve ? async_fetch_->WriteMapped(
+                                     content, mapped_keepalive, handler_)
+                               : async_fetch_->WriteShared(
+                                     content, value->share(), handler_));
       }
       async_fetch_->Done(success);
       driver_->FetchComplete();
@@ -1476,7 +1480,7 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         // FetchOutputResource() somehow got called on an already written
         // resource object (while the cache somehow decided not to store it).
         content = output_resource_->ExtractUncompressedContents();
-        response_headers->CopyFrom(*output_resource_->response_headers());
+        response_headers->CopyFrom(*output_resource_->UncompressedHeaders());
         ServerContext* server_context = driver_->server_context();
         HTTPCache* http_cache = server_context->http_cache();
         http_cache->Put(canonical_url_, driver_->CacheFragment(),
@@ -1490,7 +1494,8 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         if (!driver_->is_nested()) {
           server_context->ApplyRewrittenUrlCacheControl(response_headers);
         }
-        async_fetch_->Done(async_fetch_->Write(content, handler_));
+        async_fetch_->Done(RewriteContext::WriteWholeResponse(
+            canonical_url_, content, async_fetch_, handler_));
         driver_->FetchComplete();
       } else {
         // Use the filter to reconstruct.
@@ -1688,9 +1693,9 @@ bool RewriteDriver::MayRewriteUrl(
 }
 
 bool RewriteDriver::MatchesBaseUrl(const GoogleUrl& input_url) const {
-  return (decoded_base_url_.IsWebValid() &&
-          options()->IsAllowed(input_url.Spec()) &&
-          decoded_base_url_.Origin() == input_url.Origin());
+  const GoogleUrl& decoded_base = decoded_base_url();
+  return (decoded_base.IsWebValid() && options()->IsAllowed(input_url.Spec()) &&
+          decoded_base.Origin() == input_url.Origin());
 }
 
 ResourcePtr RewriteDriver::CreateInputResource(const GoogleUrl& input_url,
@@ -1707,13 +1712,14 @@ ResourcePtr RewriteDriver::CreateInputResource(
   *is_authorized = true;  // Must be false iff we fail b/c of authorization.
   ResourcePtr resource;
   bool may_rewrite = false;
+  const GoogleUrl& decoded_base = decoded_base_url();
   if (input_url.SchemeIs("data")) {
     // Skip and silently ignore; don't log a failure.
     // For the moment we assume data: urls are small enough to not be worth
     // optimizing.  We have optimized them in the past, but that code is likely
     // to have bit-rotted since it was disabled.
     return resource;
-  } else if (decoded_base_url_.IsAnyValid()) {
+  } else if (decoded_base.IsAnyValid()) {
     if (!IsLoadPermittedByCsp(input_url, role)) {
       *is_authorized = false;
       server_context_->rewrite_stats()->csp_blocked_rewrites()->Add(1);
@@ -1723,7 +1729,7 @@ ResourcePtr RewriteDriver::CreateInputResource(
     }
 
     may_rewrite =
-        MayRewriteUrl(decoded_base_url_, input_url, inline_authorization_policy,
+        MayRewriteUrl(decoded_base, input_url, inline_authorization_policy,
                       intended_for, is_authorized);
     // In the case where we are proxying and we have resources that have been
     // rewritten multiple times, input_url will still have the encoded domain,
@@ -1733,14 +1739,14 @@ ResourcePtr RewriteDriver::CreateInputResource(
       GoogleString decoded_input;
       if (namer->Decode(input_url, options(), &decoded_input)) {
         GoogleUrl decoded_url(decoded_input);
-        may_rewrite = MayRewriteUrl(decoded_base_url_, decoded_url,
+        may_rewrite = MayRewriteUrl(decoded_base, decoded_url,
                                     inline_authorization_policy, intended_for,
                                     is_authorized);
       }
     }
   } else {
     // Shouldn't happen?
-    message_handler()->Message(kFatal, "invalid decoded_base_url_ for '%s'",
+    message_handler()->Message(kFatal, "invalid decoded base url for '%s'",
                                input_url.spec_c_str());
     LOG(DFATAL);
   }
@@ -1792,17 +1798,32 @@ ResourcePtr RewriteDriver::CreateInputResourceUnchecked(
     // Note: type may be NULL if url has an unexpected or malformed extension.
     const ContentType* type = NameExtensionToContentType(url.LeafSansQuery());
     GoogleString filename;
-    if (options()->file_load_policy()->ShouldLoadFromFile(url, &filename)) {
+    // A URL under a MapProxyDomain path lives on the proxied origin, not on
+    // local disk, so a LoadFromFile prefix covering the proxy path itself must
+    // not apply. A LoadFromFile rule written for the proxied origin does apply,
+    // matching what happens when the origin URL is the input during HTML
+    // rewriting.
+    GoogleString mapped_url;
+    GoogleString host_header;
+    bool is_proxy = false;
+    options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
+                                             &is_proxy);
+    bool load_from_file = false;
+    if (is_proxy) {
+      GoogleUrl mapped_origin_gurl(mapped_url);
+      load_from_file = mapped_origin_gurl.IsWebValid() &&
+                       options()->file_load_policy()->ShouldLoadFromFile(
+                           mapped_origin_gurl, &filename);
+    } else {
+      load_from_file =
+          options()->file_load_policy()->ShouldLoadFromFile(url, &filename);
+    }
+    if (load_from_file) {
       resource.reset(new FileInputResource(this, type, url_string, filename));
     } else {
-      // If the scheme is https and the fetcher doesn't support https, map
-      // the URL to what will ultimately be fetched to see if that will be
-      // http, in which case the fetcher will be able to handle it.
-      GoogleString mapped_url;
-      GoogleString host_header;
-      bool is_proxy = false;
-      options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
-                                               &is_proxy);
+      // If the scheme is https and the fetcher doesn't support https, check
+      // the mapped URL to see if that will be http, in which case the
+      // fetcher will be able to handle it.
       GoogleUrl mapped_gurl(mapped_url);
       if (mapped_gurl.SchemeIs("http") ||
           (mapped_gurl.SchemeIs("https") &&
@@ -1866,8 +1887,7 @@ bool RewriteDriver::StartParseId(const StringPiece& url, const StringPiece& id,
     debug_output_truncated_ = false;
     debug_truncation_noted_ = false;
     if (is_url_valid()) {
-      base_url_.Reset(google_url());
-      SetDecodedUrlFromBase();
+      SetBaseUrl(google_url());
     }
   }
 
@@ -1889,15 +1909,29 @@ void RewriteDriver::ParseTextInternal(const char* content, int size) {
   }
 }
 
-void RewriteDriver::SetDecodedUrlFromBase() {
+void RewriteDriver::SetBaseUrl(const GoogleUrl& url) {
+  // Copy-on-write: rewrite threads may be reading the current version, so a
+  // published version is never changed or freed before ClearBaseUrls().
+  auto new_version = std::make_unique<BaseUrls>();
+  new_version->base_url.Reset(url);
   UrlNamer* namer = server_context()->url_namer();
   GoogleString decoded_base;
-  if (namer->Decode(base_url_, options(), &decoded_base)) {
-    decoded_base_url_.Reset(decoded_base);
+  if (namer->Decode(url, options(), &decoded_base)) {
+    new_version->decoded_base_url.Reset(decoded_base);
   } else {
-    decoded_base_url_.Reset(base_url_);
+    new_version->decoded_base_url.Reset(url);
   }
-  DCHECK(decoded_base_url_.IsAnyValid());
+  DCHECK(new_version->decoded_base_url.IsAnyValid());
+  base_urls_versions_.push_back(std::move(new_version));
+  base_urls_snapshot_.store(base_urls_versions_.back().get(),
+                            std::memory_order_release);
+}
+
+void RewriteDriver::ClearBaseUrls() {
+  base_urls_versions_.clear();
+  base_urls_versions_.push_back(std::make_unique<BaseUrls>());
+  base_urls_snapshot_.store(base_urls_versions_.back().get(),
+                            std::memory_order_release);
 }
 
 bool RewriteDriver::ShouldSkipParsing() {
@@ -1988,7 +2022,7 @@ void RewriteDriver::ReportSlowRewrites(int num) {
   ScopedMutex lock(rewrite_mutex());
   bool signal_cookie = PrepareShouldSignal();
   possibly_quick_rewrites_ -= num;
-  CHECK_LE(0, possibly_quick_rewrites_) << base_url_.Spec();
+  CHECK_LE(0, possibly_quick_rewrites_) << base_url().Spec();
   SignalIfRequired(signal_cookie);
 }
 
@@ -2406,21 +2440,21 @@ void RewriteDriver::SetBaseUrlIfUnset(const StringPiece& new_base) {
   // Base url is relative to the document URL in HTML5, but not in
   // HTML4.01.  FF3.x does it HTML4.01 way, Chrome, Opera 11 and FF4
   // betas do it according to HTML5, as is our implementation here.
-  GoogleUrl new_base_url(base_url_, new_base);
+  const GoogleUrl& current_base_url = base_url();
+  GoogleUrl new_base_url(current_base_url, new_base);
   if (new_base_url.IsAnyValid()) {
     if (base_was_set_) {
-      if (new_base_url.Spec() != base_url_.Spec()) {
+      if (new_base_url.Spec() != current_base_url.Spec()) {
         InfoHere("Conflicting base tags: %s and %s", new_base_url.spec_c_str(),
-                 base_url_.spec_c_str());
+                 current_base_url.spec_c_str());
       }
     } else {
       base_was_set_ = true;
-      base_url_.Swap(&new_base_url);
-      SetDecodedUrlFromBase();
+      SetBaseUrl(new_base_url);
     }
   } else {
     InfoHere("Invalid base tag %s relative to %s", new_base.as_string().c_str(),
-             base_url_.spec_c_str());
+             current_base_url.spec_c_str());
   }
 }
 
@@ -2431,11 +2465,11 @@ void RewriteDriver::SetBaseUrlForFetch(const StringPiece& url) {
 
   // TODO(jmaessen): we're re-constructing a GoogleUrl after having already
   // done so (repeatedly over several calls) in DecodeOutputResource!  Gah!
-  // We at least assume that base_url_ is valid since it was checked when
+  // We at least assume that the base url is valid since it was checked when
   // output_resource was created.
-  base_url_.Reset(url);
-  DCHECK(base_url_.IsAnyValid());
-  SetDecodedUrlFromBase();
+  GoogleUrl base_gurl(url);
+  DCHECK(base_gurl.IsAnyValid());
+  SetBaseUrl(base_gurl);
   base_was_set_ = false;
 }
 
@@ -2464,9 +2498,10 @@ HtmlResourceSlotPtr RewriteDriver::GetSlot(const ResourcePtr& resource,
 }
 
 InlineResourceSlotPtr RewriteDriver::GetInlineSlot(
-    const ResourcePtr& resource, HtmlCharactersNode* char_node) {
+    const ResourcePtr& resource, HtmlCharactersNode* char_node,
+    InlineStyleMode mode) {
   InlineResourceSlotPtr slot(
-      new InlineResourceSlot(resource, char_node, UrlLine()));
+      new InlineResourceSlot(resource, char_node, UrlLine(), mode));
   std::pair<InlineResourceSlotSet::iterator, bool> iter_inserted =
       inline_slots_.insert(slot);
   if (!iter_inserted.second) {
@@ -3169,7 +3204,7 @@ bool RewriteDriver::Write(const ResourceVector& inputs,
 
     HTTPCache* http_cache = server_context_->http_cache();
     if (output->kind() != kOnTheFlyResource &&
-        output->kind() != kInlineResource &&
+        output->kind() != kInlineResource && output->store_in_http_cache() &&
         (http_cache->force_caching() || meta_data->IsProxyCacheable())) {
       // This URL should already be mapped to the canonical rewrite domain,
       // But we should store its unsharded form in the cache.

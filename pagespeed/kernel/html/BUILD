@@ -18,6 +18,7 @@ cc_library(
             # out of the library glob.
             "html_parse_probe.cc",
             "html_fuzz.cc",
+            "inline_style_text_fuzz.cc",
         ],
     ) + [":html_name_gperf"],
     hdrs = glob(["*.h"]),
@@ -58,3 +59,17 @@ cc_binary(
     ],
 )
 
+# Property harness for InlineStyleText (the text written into <style>
+# elements). Same two-mode shape as html_fuzz; DEFAULT-OFF via `manual`.
+#   bazel run --config=clang-asan -c opt \
+#       //pagespeed/kernel/html:inline_style_text_fuzz -- FILES...
+# For coverage-guided mode, add -DINLINE_STYLE_TEXT_LIBFUZZER and
+# -fsanitize=fuzzer (see the file header and .oss-fuzz/build.sh).
+cc_binary(
+    name = "inline_style_text_fuzz",
+    srcs = ["inline_style_text_fuzz.cc"],
+    tags = ["manual"],
+    deps = [
+        ":html",
+    ],
+)

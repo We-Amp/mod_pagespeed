@@ -751,6 +751,168 @@ TEST_F(CacheExtenderTest, NoLinkCanonicalIfDomainMapComplexity) {
   EXPECT_FALSE(headers.Has(HttpAttributes::kLink));
 }
 
+// https://github.com/apache/incubator-pagespeed-ngx/issues/1535
+// ModifyCachingHeaders off leaves a page's own caching headers alone; a
+// cache-extended resource is still served with the long-lived public
+// headers, from the first fetch and after it is rebuilt from the origin.
+// (The nginx port's side of this is in ngx_caching_header_policy_test.)
+TEST_F(CacheExtenderTest, ExtendedResourceKeepsLongCacheWithoutModifyHeaders) {
+  options()->ClearSignatureForTesting();
+  options()->set_modify_caching_headers(false);
+  options()->set_critical_images_beacon_enabled(false);
+  InitTest(kShortTtlSec);
+  ValidateExpected(
+      "extend_without_modify_caching_headers",
+      GenerateHtml(kCssFile, "b.jpg", "c.js", kInput),
+      GenerateHtml(Encode(kCssSubdir, kFilterId, "0", kCssTail, "css"),
+                   Encode("", kFilterId, "0", "b.jpg", "jpg"),
+                   Encode("", kFilterId, "0", "c.js", "js"), kOutput));
+  for (bool rebuilt : {false, true}) {
+    SCOPED_TRACE(rebuilt ? "rebuilt" : "cached");
+    if (rebuilt) {
+      lru_cache()->Clear();
+    }
+    GoogleString content;
+    ResponseHeaders headers;
+    ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "b.jpg", "jpg", &content,
+                              &headers));
+    EXPECT_EQ(kImageData, content);
+    EXPECT_STREQ("max-age=31536000, public, immutable",
+                 headers.LookupJoined(HttpAttributes::kCacheControl));
+  }
+}
+
+// https://github.com/apache/incubator-pagespeed-ngx/issues/1709
+// An image on another host, proxied under a path of the site with
+// MapProxyDomain, is rewritten to a .pagespeed. URL under that path. The URL
+// keeps answering 200 with the image after its cache entries are gone and
+// after the origin's TTL has run out: it is fetched again from the origin.
+// Scope: the module-side rebuild path with a mock fetcher and an in-process
+// cache only; a shared memcache and a slow origin are not covered here.
+TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLoss) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  InitTest(kShortTtlSec);
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+  InitResource(origin_url, kContentTypeJpeg, kImageData, kShortTtlSec);
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  struct Step {
+    const char* name;
+    int64 advance_ms;
+    bool clear_cache;
+  };
+  const Step kSteps[] = {
+      {"cached", 0, false},
+      {"cache cleared", 0, true},
+      {"origin ttl expired and cache cleared",
+       2 * kShortTtlSec * Timer::kSecondMs, true},
+  };
+  for (const Step& step : kSteps) {
+    SCOPED_TRACE(step.name);
+    AdvanceTimeMs(step.advance_ms);
+    if (step.clear_cache) {
+      lru_cache()->Clear();
+    }
+    GoogleString content;
+    ResponseHeaders headers;
+    ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+    EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+    EXPECT_EQ(kImageData, content);
+  }
+}
+
+// A LoadFromFile prefix that also covers a MapProxyDomain path must not make
+// the proxied resource be read from local disk when it is rebuilt: the file
+// does not exist there, the content lives on the proxied origin.
+TEST_F(CacheExtenderTest, ProxiedResourceIsRebuiltAfterCacheLossWithFileLoad) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/nonexistent-dir/");
+  InitTest(kShortTtlSec);
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+  InitResource(origin_url, kContentTypeJpeg, kImageData, kShortTtlSec);
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
+// A LoadFromFile rule written for the proxied (external) origin applies when a
+// proxied resource is rebuilt, as it does while the HTML is rewritten. The
+// docroot mirror under the proxy path is not read: the proxied origin wins.
+TEST_F(CacheExtenderTest, ProxiedResourceRebuildHonorsOriginLoadFromFile) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/docroot/");
+  options()->file_load_policy()->Associate(kOrigin, "/origin-files/");
+  InitTest(kShortTtlSec);
+  // Deliberately no InitResource: the origin cannot be fetched.
+  WriteFile("/origin-files/256/photo.jpg", kImageData);
+  WriteFile("/docroot/shared_img/256/photo.jpg", "docroot mirror");
+  const GoogleString origin_url = StrCat(kOrigin, "256/photo.jpg");
+
+  const GoogleString rewritten =
+      Encode(StrCat(proxy_path, "256/"), kFilterId, "0", "photo.jpg", "jpg");
+  ValidateExpected("proxied_image", StrCat("<img src='", origin_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
+// Control for the test above: in the same setup, a URL that is not proxied is
+// still loaded from file.
+TEST_F(CacheExtenderTest, UnproxiedResourceStillLoadsFromFileWithProxyMapping) {
+  const char kOrigin[] = "http://images.example.org/";
+  const GoogleString proxy_path = StrCat(kTestDomain, "shared_img/");
+  options()->ClearSignatureForTesting();
+  ASSERT_TRUE(options()->WriteableDomainLawyer()->AddProxyDomainMapping(
+      proxy_path, kOrigin, StringPiece(), message_handler()));
+  options()->file_load_policy()->Associate(kTestDomain, "/docroot/");
+  options()->file_load_policy()->Associate(kOrigin, "/origin-files/");
+  InitTest(kShortTtlSec);
+  WriteFile("/docroot/local.jpg", kImageData);
+  const GoogleString local_url = StrCat(kTestDomain, "local.jpg");
+
+  const GoogleString rewritten =
+      Encode(kTestDomain, kFilterId, "0", "local.jpg", "jpg");
+  ValidateExpected("local_image", StrCat("<img src='", local_url, "'/>"),
+                   StrCat("<img src='", rewritten, "'/>"));
+
+  lru_cache()->Clear();
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(rewritten, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  EXPECT_EQ(kImageData, content);
+}
+
 void CacheExtenderTest::TestCanonicalOnFallback(
     bool fallback_to_pagespeed_resource) {
   // Make sure canonical header is correct if we have to go through fallback
@@ -1269,6 +1431,72 @@ TEST_F(CacheExtenderTest, DefangHtml) {
   const GoogleString css_before = StrCat(
       CssLinkHref("a.html"), CssLinkHref("a.xhtml"), CssLinkHref("a.xml"));
   ValidateNoChanges("defang", css_before);
+}
+
+// A Content-Type we don't recognize is still the origin's statement of what
+// the resource is: no extension in the URL, in the path or after it, turns
+// it into a script or stylesheet that gets cache-extended.
+TEST_F(CacheExtenderTest, UnrecognizedContentTypeIsNotGuessedFromUrl) {
+  options()->EnableExtendCacheFilters();
+  rewrite_driver()->AddFilters();
+  ResponseHeaders response_headers;
+  DefaultResponseHeaders(kContentTypeJavascript, kMediumTtlSec,
+                         &response_headers);
+  response_headers.Replace(HttpAttributes::kContentType,
+                           "application/x-unlisted-type");
+  response_headers.ComputeCaching();
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.js"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.css"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("files/named.js"), response_headers, kJsData);
+
+  ValidateNoChanges("unrecognized_type",
+                    "<script src='data.bin?format=.js'></script>"
+                    "<link rel=stylesheet href='data.bin?format=.css'>"
+                    "<script src='files/named.js'></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get());
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.js", "js"),
+      &content));
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.css", "css"),
+      &content));
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(StrCat(kTestDomain, "files/"), kFilterId, "0", "named.js", "js"),
+      &content));
+  EXPECT_EQ(0, num_cache_extended_->Get());
+}
+
+// Without any Content-Type the type may be guessed from the extension of the
+// URL's path, never from text after the path.
+TEST_F(CacheExtenderTest, MissingContentTypeIsGuessedFromPathOnly) {
+  options()->EnableExtendCacheFilters();
+  rewrite_driver()->AddFilters();
+  ResponseHeaders response_headers;
+  DefaultResponseHeaders(kContentTypeJavascript, kMediumTtlSec,
+                         &response_headers);
+  response_headers.RemoveAll(HttpAttributes::kContentType);
+  response_headers.ComputeCaching();
+  SetFetchResponse(AbsolutifyUrl("data.bin?format=.js"), response_headers,
+                   kJsData);
+  SetFetchResponse(AbsolutifyUrl("named.js?format=.bin"), response_headers,
+                   kJsData);
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "data.bin?format=.js", "js"),
+      &content));
+  EXPECT_EQ(0, num_cache_extended_->Get());
+
+  ResponseHeaders fetched_headers;
+  EXPECT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, kFilterId, "0", "named.js?format=.bin", "js"),
+      &content, &fetched_headers));
+  EXPECT_EQ(GoogleString(kJsData), content);
+  EXPECT_EQ(&kContentTypeJavascript, fetched_headers.DetermineContentType());
 }
 
 // Negative test to ensure we do not cache-extend CSS that was already

@@ -26,10 +26,10 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/common_filter.h"
 #include "net/instaweb/rewriter/public/css_filter.h"
-#include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/data_url_input_resource.h"
 #include "net/instaweb/rewriter/public/inline_resource_slot.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -47,6 +47,7 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/util/url_segment_encoder.h"
@@ -249,7 +250,17 @@ void CssSummarizerBase::Context::RewriteSingle(
         input_resource.get(), StringPiece() /* attribute_charset */,
         StringPiece() /* enclosing_charset */));
   }
-  if (CssInlineFilter::MayContainMarkup(result->inlined_data())) {
+  // A summary written as <style> text is dropped here when it could not be
+  // written into any page; where it is written, it is prepared again for that
+  // page (see CriticalSelectorFilter::RenderSummary). Any other summary is
+  // dropped when it holds a '<'.
+  if (filter_->SummariesAreStyleText()) {
+    InlineStyleText prepared;
+    if (!InlineStyleText::Prepare(result->inlined_data(),
+                                  InlineStyleMode::kHtml, &prepared, nullptr)) {
+      result->clear_inlined_data();
+    }
+  } else if (result->inlined_data().find('<') != GoogleString::npos) {
     result->clear_inlined_data();
   }
 
@@ -278,7 +289,8 @@ bool CssSummarizerBase::Context::Partition(OutputPartitions* partitions,
 }
 
 GoogleString CssSummarizerBase::Context::CacheKeySuffix() const {
-  return filter_->CacheKeySuffix();
+  // The summary is dropped by rules that carry a version.
+  return StrCat(filter_->CacheKeySuffix(), "_", kInlineStyleScanVersion);
 }
 
 const char CssSummarizerBase::kNumCssUsedForCriticalCssComputation[] =
@@ -330,6 +342,7 @@ void CssSummarizerBase::StartDocumentImpl() {
   // once the data type is refined.
   DCHECK(canceled_summaries_.empty());
   Clear();
+  meta_charset_.Clear();
 }
 
 void CssSummarizerBase::EndDocument() {
@@ -351,6 +364,7 @@ void CssSummarizerBase::EndDocument() {
 void CssSummarizerBase::StartElementImpl(HtmlElement* element) {
   // HtmlParse should not pass us elements inside a style element.
   CHECK(style_element_ == nullptr);
+  meta_charset_.NoteElement(*element);
   if (element->keyword() == HtmlName::kStyle &&
       element->FindAttribute(HtmlName::kScoped) == nullptr) {
     style_element_ = element;
@@ -516,7 +530,9 @@ ResourceSlotPtr CssSummarizerBase::MakeSlotForInlineCss(
   // copying. Get rid of them.
   DataUrl(kContentTypeCss, PLAIN, char_node->contents(), &data_url);
   ResourcePtr input_resource(DataUrlInputResource::Make(data_url, driver()));
-  return ResourceSlotPtr(driver()->GetInlineSlot(input_resource, char_node));
+  return ResourceSlotPtr(driver()->GetInlineSlot(
+      input_resource, char_node,
+      InlineStyleModeForDocument(driver(), meta_charset_)));
 }
 
 CssSummarizerBase::Context* CssSummarizerBase::CreateContextAndSummaryInfo(
@@ -537,6 +553,8 @@ CssSummarizerBase::Context* CssSummarizerBase::CreateContextAndSummaryInfo(
   rel.CopyToString(&new_summary.rel);
   new_summary.is_external = external;
   new_summary.is_inside_noscript = (noscript_element() != nullptr);
+  new_summary.inline_style_mode =
+      InlineStyleModeForDocument(driver(), meta_charset_);
 
   ++outstanding_rewrites_;
 

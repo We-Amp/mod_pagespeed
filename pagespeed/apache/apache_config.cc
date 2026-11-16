@@ -209,6 +209,7 @@ void ApacheConfig::Merge(const RewriteOptions& src) {
   // Can't use Merge() since we don't have names here.
   measurement_proxy_root_.MergeHelper(&asrc->measurement_proxy_root_);
   measurement_proxy_password_.MergeHelper(&asrc->measurement_proxy_password_);
+  set_from_htaccess_ = set_from_htaccess_ || asrc->set_from_htaccess_;
 }
 
 RewriteOptions::OptionSettingResult ApacheConfig::ParseAndSetOptionFromName2(

@@ -97,6 +97,8 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   // of filters before us, like rewrite_css; so we run this even on things
   // that will not contain on-screen critical CSS.
   void Summarize(Css::Stylesheet* stylesheet, GoogleString* out) const override;
+  // The summaries are written only by RenderSummary, into <style> elements.
+  bool SummariesAreStyleText() const override { return true; }
   void RenderSummary(int pos, HtmlElement* element,
                      HtmlCharactersNode* char_node,
                      bool* is_element_deleted) override;

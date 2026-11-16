@@ -81,6 +81,13 @@ class MockUrlFetcher : public UrlAsyncFetcher {
     return last_referer_;
   }
 
+  // Return the Accept-Encoding of the last fetching request, joined, or the
+  // empty string when it carried none.
+  const GoogleString& last_accept_encoding() {
+    ScopedMutex lock(mutex_.get());
+    return last_accept_encoding_;
+  }
+
   // Indicates that the specified URL should respond with headers and data,
   // but still return a 'false' status.  This is similar to a live fetcher
   // that times out or disconnects while streaming data.
@@ -221,6 +228,7 @@ class MockUrlFetcher : public UrlAsyncFetcher {
   GoogleString error_message_;  // If non empty, we write out this on error
   Timer* timer_;                // Timer to use for updating header dates.
   GoogleString last_referer_;   // Referer string.
+  GoogleString last_accept_encoding_;            // Accept-Encoding, joined.
   std::unique_ptr<ThreadSystem> thread_system_;  // Thread system for mutex.
   std::unique_ptr<AbstractMutex> mutex_;         // Mutex Protect.
 

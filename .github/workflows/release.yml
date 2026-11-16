@@ -84,10 +84,14 @@ jobs:
     # The called workflow keeps every job read-only except the release job of
     # the `release` environment, which raises its own permission to this.
     # `actions: read` is for the candidate seal, which lists the artifacts of
-    # its own run.
+    # its own run. `id-token` and `attestations: write` are for the Sigstore
+    # signature and the attestations of `sign-checksums`, also a job of the
+    # `release` environment.
     permissions:
       contents: write
       actions: read
+      id-token: write
+      attestations: write
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
     with:
       tag: ${{ inputs.tag || '' }}

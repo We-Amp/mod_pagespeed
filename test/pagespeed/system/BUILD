@@ -766,6 +766,46 @@ pagespeed_cc_test(
     ],
 )
 
+# Configurations written for 1.13, 1.14 and ngx_pagespeed keep loading: a
+# corpus of their directives (testdata/legacy_config/) applied the way each
+# port applies them. One source, built once per port: option registration is
+# process-wide, so the nginx view (SystemRewriteOptions) and the Apache view
+# (ApacheConfig) need separate binaries. Each reads its port parser's source
+# to pin the steps it follows. Linux only, like ApacheConfig.
+pagespeed_cc_test(
+    name = "legacy_config_compat_nginx_test",
+    srcs = ["legacy_config_compat_test.cc"],
+    data = [
+        "testdata/legacy_config/nginx.conf",
+        "//pagespeed/nginx:ngx_rewrite_options_src",
+    ],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//test/net/instaweb/rewriter:test_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+pagespeed_cc_test(
+    name = "legacy_config_compat_apache_test",
+    srcs = ["legacy_config_compat_test.cc"],
+    copts = ["-DLEGACY_CONFIG_APACHE"],
+    data = [
+        "testdata/legacy_config/apache.conf",
+        "//pagespeed/apache:mod_instaweb_src",
+    ],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/apache:apache_core",
+        "//test/net/instaweb/rewriter:test_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # DaemonHtmlCache report-only: what the module does with the policy's answers,
 # against the dlopen-able stand-in.
 pagespeed_cc_test(

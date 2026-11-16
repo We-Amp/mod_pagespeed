@@ -311,7 +311,10 @@ class ConfigurationFile:public ReferenceCounter
 								GoogleString msg;
 								RewriteOptions::OptionSettingResult r =
 									currewriteoptions->SetOptionFromName(StringPiece(option),GoogleString(svalue),&msg);
-								if (r != RewriteOptions::kOptionOk) {
+								if (r == RewriteOptions::kOptionNameUnknown &&
+									RewriteOptions::IsDeprecatedOptionName(scope_directive)) {
+									mh->Message(kWarning, "pagespeed %s is deprecated and has no effect; please remove it from your configuration", scope_directive.as_string().c_str());
+								} else if (r != RewriteOptions::kOptionOk) {
 									mh->Message(kWarning, "Failed to set option [%s]: %s", option.c_str(), msg.c_str());
 								}
 							}

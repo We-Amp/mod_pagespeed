@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# Tokens for the inline_style_text_fuzzer harness: the CSS string, comment,
+# escape and url forms the scanner tracks, and markup-like text. Served to the
+# fuzzer as $OUT/inline_style_text_fuzzer.dict by .oss-fuzz/build.sh.
+
+"\""
+"'"
+"\\"
+"\\<"
+"\\3c "
+"/*"
+"*/"
+"url("
+"URL("
+"url( \""
+")"
+"\x0a"
+"\x0d\x0a"
+"\x0c"
+"<"
+"< "
+"<="
+"<1"
+"<."
+"</style>"
+"</STYLE "
+"<!--"
+"-->"
+"<?"
+"<a"
+"@property --x{syntax:\"<length>\"}"
+"@media (width<"
+"\x1b"
+"\x00"
+"\xc3\xa9"
+"\xe9"

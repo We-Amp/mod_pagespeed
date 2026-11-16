@@ -38,7 +38,6 @@
 #include "net/instaweb/rewriter/public/css_flatten_imports_context.h"
 #include "net/instaweb/rewriter/public/css_hierarchy.h"
 #include "net/instaweb/rewriter/public/css_image_rewriter.h"
-#include "net/instaweb/rewriter/public/css_inline_filter.h"
 #include "net/instaweb/rewriter/public/css_minify.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_url_counter.h"
@@ -49,6 +48,7 @@
 #include "net/instaweb/rewriter/public/inline_attribute_slot.h"
 #include "net/instaweb/rewriter/public/inline_output_resource.h"
 #include "net/instaweb/rewriter/public/inline_resource_slot.h"
+#include "net/instaweb/rewriter/public/inline_style_util.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -73,11 +73,14 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
+#include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
@@ -211,6 +214,7 @@ CssFilter::Context::Context(CssFilter* filter, RewriteDriver* driver,
       rewrite_inline_char_node_(nullptr),
       rewrite_inline_attribute_(nullptr),
       rewrite_inline_css_kind_(kInsideStyleTag),
+      inline_style_mode_(InlineStyleMode::kStrict),
       in_text_size_(-1) {
   initial_css_base_gurl_.Reset(filter_->decoded_base_url());
   DCHECK(initial_css_base_gurl_.IsWebValid());
@@ -276,10 +280,6 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
     return false;
   }
 
-  // Do not set the content length, since we may need to mutate the
-  // content as we stream out the bytes to correct for URL changes.
-  async_fetch->HeadersComplete();
-
   DCHECK_EQ(1, num_slots());
   ResourcePtr input_resource(slot(0)->resource());
   DCHECK(input_resource.get() != nullptr);
@@ -290,29 +290,46 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
   GoogleUrl css_trim_gurl_to_use;
   GetCssTrimUrlToUse(input_resource, output_url_base, &css_trim_gurl_to_use);
 
-  bool ret = false;
-  switch (Driver()->ResolveCssUrls(css_base_gurl_to_use,
-                                   css_trim_gurl_to_use.Spec(), input_contents,
-                                   async_fetch, handler)) {
-    case RewriteDriver::kNoResolutionNeeded:
-    case RewriteDriver::kWriteFailed:
-      // If kNoResolutionNeeded, we just write out the input_contents, because
-      // nothing needed to be changed.
-      //
-      // If kWriteFailed, this means that the URLs couldn't be transformed
-      // (or that writer->Write() actually failed ... I think this shouldn't
-      // generally happen). So, we just push out the unedited original,
-      // figuring that must be better than nothing.
-      //
-      // TODO(sligocki): In the fetch path ResolveCssUrls should never fail
-      // to transform URLs. We should just absolutify all the ones we can.
-      ret = async_fetch->Write(input_contents, handler);
-      break;
-    case RewriteDriver::kSuccess:
-      ret = true;
-      break;
+  // The URLs in the stylesheet may need correcting for the URL it is served
+  // under. Correction works on the stylesheet's text, so a compressed copy is
+  // inflated first; if it cannot be, it is served as stored, with the headers
+  // that describe it. The corrected text is resolved before the headers go
+  // out, so they can describe it. If no URL needs changing, or they cannot be
+  // changed, the input is served as it is, with its own headers.
+  ResponseHeaders* headers = async_fetch->response_headers();
+  StringPiece text = input_contents;
+  GoogleString inflated;
+  const bool compressed = headers->IsGzipped();
+  if (compressed) {
+    StringWriter inflate_writer(&inflated);
+    int64 limit = FindServerContext()
+                      ->global_options()
+                      ->max_cacheable_response_content_length();
+    if (!GzipInflater::InflateWithLimit(
+            input_contents, GzipInflater::kGzip,
+            limit < 0 ? static_cast<size_t>(-1) : static_cast<size_t>(limit),
+            &inflate_writer)) {
+      return WriteWholeResponse(output_url_base, input_contents, async_fetch,
+                                handler);
+    }
+    text = inflated;
   }
-  return ret;
+  GoogleString resolved;
+  StringWriter resolved_writer(&resolved);
+  if (Driver()->ResolveCssUrls(
+          css_base_gurl_to_use, css_trim_gurl_to_use.Spec(), text,
+          &resolved_writer, handler) != RewriteDriver::kSuccess) {
+    return WriteWholeResponse(output_url_base, input_contents, async_fetch,
+                              handler);
+  }
+  if (compressed) {
+    headers->Remove(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+    headers->SetContentLength(resolved.size());
+    headers->ComputeCaching();
+  } else if (headers->Has(HttpAttributes::kContentLength)) {
+    headers->SetContentLength(resolved.size());
+  }
+  return WriteWholeResponse(output_url_base, resolved, async_fetch, handler);
 }
 
 bool CssFilter::Context::PolicyPermitsRendering() const {
@@ -360,13 +377,15 @@ void CssFilter::Context::Render() {
 }
 
 void CssFilter::Context::SetupInlineRewrite(HtmlElement* style_element,
-                                            HtmlCharactersNode* text) {
+                                            HtmlCharactersNode* text,
+                                            InlineStyleMode mode) {
   // To handle nested rewrites of inline CSS, we internally handle it
   // as a rewrite of a data: URL.
   rewrite_element_ = style_element;
   rewrite_inline_element_ = style_element;
   rewrite_inline_char_node_ = text;
   rewrite_inline_css_kind_ = kInsideStyleTag;
+  inline_style_mode_ = mode;
 }
 
 void CssFilter::Context::SetupAttributeRewrite(HtmlElement* element,
@@ -738,9 +757,9 @@ void CssFilter::Context::Harvest() {
       ServerContext* server_context = FindServerContext();
       server_context->MergeNonCachingResponseHeaders(input_resource_,
                                                      output_resource_);
-    } else if (CssInlineFilter::MayContainMarkup(out_text)) {
-      // Leave the element unchanged when the serialized CSS could read as
-      // markup.
+    } else if (!PrepareInlineText(&out_text)) {
+      // Leave the element unchanged when the rewritten CSS could not be
+      // written into it.
       ok = false;
       mutable_output_partition(0)->add_debug_message(
           "CSS not rewritten since it contains a less-than sign");
@@ -790,6 +809,14 @@ bool CssFilter::Context::SerializeCss(
     css_util::InsertLicenseComments(license_comments, out_text);
   }
 
+  // Text for a <style> element is compared and counted as it is written.
+  // (Harvest() prepares it again, whatever path produced it.)
+  if (IsInsideStyleTag() && !PrepareInlineText(out_text)) {
+    mutable_output_partition(0)->add_debug_message(
+        "CSS not rewritten since it contains a less-than sign");
+    return false;
+  }
+
   // Get signed versions so that we can subtract them.
   int64 out_text_size = static_cast<int64>(out_text->size());
   int64 bytes_saved = in_text_size - out_text_size;
@@ -819,6 +846,21 @@ bool CssFilter::Context::SerializeCss(
     filter_->total_original_bytes_->Add(in_text_size);
   }
   return ret;
+}
+
+bool CssFilter::Context::PrepareInlineText(GoogleString* text) const {
+  if (!IsInsideStyleTag()) {
+    // A style attribute: the attribute's own escaping applies when it is
+    // written; any '<' still leaves it alone.
+    return text->find('<') == GoogleString::npos;
+  }
+  InlineStyleText prepared;
+  if (!InlineStyleText::Prepare(*text, inline_style_mode_, &prepared,
+                                nullptr)) {
+    return false;
+  }
+  *text = prepared.text();
+  return true;
 }
 
 int64 CssFilter::Context::ImageInlineMaxBytes() const {
@@ -887,6 +929,10 @@ GoogleString CssFilter::Context::CacheKeySuffix() const {
         const Hasher* hasher = FindServerContext()->lock_hasher();
         StrAppend(&suffix, "_@",
                   hasher->Hash(initial_css_base_gurl_.AllExceptLeaf()));
+        // The rewritten text depends on how CSS may be written into this
+        // document, and on the version of those rules.
+        StrAppend(&suffix, "_", kInlineStyleScanVersion,
+                  InlineStyleModeKey(inline_style_mode_));
         break;
       }
 
@@ -1050,11 +1096,13 @@ void CssFilter::AddRelatedOptions(StringPieceVector* target) {
 void CssFilter::StartDocumentImpl() {
   in_style_element_ = false;
   meta_tag_charset_.clear();
+  inline_style_meta_charset_.Clear();
 }
 
 void CssFilter::StartElementImpl(HtmlElement* element) {
   // HtmlParse should not pass us elements inside a style element.
   CHECK(!in_style_element_);
+  inline_style_meta_charset_.NoteElement(*element);
   if (element->keyword() == HtmlName::kStyle) {
     in_style_element_ = true;
     style_element_ = element;
@@ -1141,14 +1189,19 @@ void CssFilter::StartInlineRewrite(HtmlCharactersNode* char_node,
   }
 
   ResourcePtr input_resource(MakeInlineResource(char_node->contents()));
-  ResourceSlotPtr slot(driver()->GetInlineSlot(input_resource, char_node));
+  // How the rewritten text may be written into this document, from what the
+  // page has declared up to here.
+  const InlineStyleMode mode =
+      InlineStyleModeForDocument(driver(), inline_style_meta_charset_);
+  ResourceSlotPtr slot(
+      driver()->GetInlineSlot(input_resource, char_node, mode));
 
   CssFilter::Context* rewriter = StartRewriting(slot);
   if (rewriter == nullptr) {
     return;
   }
   HtmlElement* element = char_node->parent();
-  rewriter->SetupInlineRewrite(element, char_node);
+  rewriter->SetupInlineRewrite(element, char_node, mode);
 
   // Get the applicable media and charset. As style elements can't have a
   // charset attribute pass NULL to GetApplicableCharset instead of 'element'.

@@ -305,6 +305,7 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
       tag_start_line_(-1),
       script_escape_state_(HtmlCommentEscapeState::kNone),
       discard_until_start_state_for_error_recovery_(false),
+      content_type_(kContentTypeXml),  // Not HTML until StartParse().
       size_limit_exceeded_(false),
       skip_parsing_(false),
       size_limit_(-1),
@@ -342,6 +343,7 @@ void HtmlLexer::EvalStart(char c) {
     state_ = TAG;
     discard_until_start_state_for_error_recovery_ = false;
     tag_start_line_ = line_;
+    tag_start_byte_offset_ = current_byte_offset_;
   } else {
     state_ = START;
   }
@@ -559,6 +561,12 @@ void HtmlLexer::EvalCommentStart2(char c) {
 void HtmlLexer::EvalCommentBody(char c) {
   if (c == '-') {
     state_ = COMMENT_END1;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!-->" is a complete, empty comment to browsers. token_ is empty only
+    // directly after "<!--": every way back into this state appends to it.
+    // HTML5 spec state name: Comment start state
+    EmitComment();
+    state_ = START;
   } else {
     token_ += c;
   }
@@ -570,6 +578,11 @@ void HtmlLexer::EvalCommentBody(char c) {
 void HtmlLexer::EvalCommentEnd1(char c) {
   if (c == '-') {
     state_ = COMMENT_END2;
+  } else if ((c == '>') && token_.empty()) {
+    // "<!--->" is a complete, empty comment to browsers.
+    // HTML5 spec state name: Comment start dash state
+    EmitComment();
+    state_ = START;
   } else {
     // thought we were ending a comment cause we saw '-', but
     // now we changed our minds.   No worries mate.  That
@@ -589,6 +602,8 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     // There could be an arbitrarily long stream of dashes before
     // we see the >.  Keep looking.
     token_ += "-";
+  } else if (c == '!') {
+    state_ = COMMENT_END_BANG;
   } else {
     // thought we were ending a comment cause we saw '--', but
     // now we changed our minds.   No worries mate.  Those
@@ -596,6 +611,21 @@ void HtmlLexer::EvalCommentEnd2(char c) {
     token_ += "--";
     token_ += c;
     state_ = COMMENT_BODY;
+  }
+}
+
+// Handle the case where "--!" has been parsed from a comment. Browsers end
+// the comment on "--!>" as they do on "-->".
+// HTML5 spec state name: Comment end bang state
+void HtmlLexer::EvalCommentEndBang(char c) {
+  if (c == '>') {
+    EmitComment();
+    state_ = START;
+  } else {
+    // Not the end of the comment after all: "--!" was part of it.
+    token_ += "--!";
+    state_ = COMMENT_BODY;
+    EvalCommentBody(c);
   }
 }
 
@@ -988,6 +1018,8 @@ void HtmlLexer::MakeElement() {
     }
     element_ = html_parse_->NewElement(Parent(), token_);
     element_->set_begin_line_number(tag_start_line_);
+    element_->set_begins_in_first_1024_bytes(tag_start_byte_offset_ >= 0 &&
+                                             tag_start_byte_offset_ < 1024);
     token_.clear();
   }
 }
@@ -1012,6 +1044,8 @@ void HtmlLexer::StartParse(const StringPiece& id,
   size_limit_exceeded_ = false;
   skip_parsing_ = false;
   num_bytes_parsed_ = 0;
+  current_byte_offset_ = -1;
+  tag_start_byte_offset_ = -1;
   passing_through_ = false;
   script_escape_state_ = HtmlCommentEscapeState::kNone;
   discard_until_start_state_for_error_recovery_ = false;
@@ -1294,6 +1328,7 @@ void HtmlLexer::Parse(const char* text, int size) {
       return;
     }
     char c = text[i];
+    current_byte_offset_ = parsed_before + i;
     if (c == '\n') {
       ++line_;
     }
@@ -1353,6 +1388,9 @@ void HtmlLexer::Parse(const char* text, int size) {
         break;
       case COMMENT_END2:
         EvalCommentEnd2(c);
+        break;
+      case COMMENT_END_BANG:
+        EvalCommentEndBang(c);
         break;
       case CDATA_START1:
         EvalCdataStart1(c);

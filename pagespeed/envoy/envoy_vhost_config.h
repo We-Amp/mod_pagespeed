@@ -45,6 +45,16 @@ struct VHostEntry {
         options(std::move(opts)) {}
 };
 
+// Applies one custom option of a virtual host and logs the outcome. A name
+// that is no longer an option but is in the shared deprecated table is
+// accepted as a no-op and logged as deprecated (the wording nginx uses, with
+// a "VHost <pattern>:" prefix); any other failure logs "Failed to set option".
+// Returns true if the option was set.
+bool ApplyVHostCustomOption(EnvoyRewriteOptions* options,
+                            const std::string& host_pattern,
+                            const std::string& key, const std::string& value,
+                            MessageHandler* handler);
+
 // Manages virtual host configurations and provides host-based option lookup.
 // Thread-safe for concurrent reads after initialization.
 class EnvoyVHostConfigManager {

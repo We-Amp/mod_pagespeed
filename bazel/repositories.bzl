@@ -569,7 +569,17 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # holds non-ASCII characters works.  The rest is tests and CI only.  One new
 # header (src/io/win_path.hpp) is picked up by the existing globs; no new
 # source file, define or link flag.  POSIX builds are unaffected.
-CYCLONE_COMMIT = "03c5e8af8bec3f6b4c7088516829294f52864103"
+# Bumped to cyclone 2d4db30 (13 commits past 03c5e8a).  A start or config
+# test as root no longer leaves a cache file the workers cannot use: new,
+# unset by default, VolumeConfig::owner, for which a process running as root
+# creates the volume file.  A volume path that is not a plain file is
+# reported (new, tail-appended CacheError::VolumeFileRefused; the C API maps
+# it to CYCLONE_IO_ERROR) and not used.  An idle cache handle no longer wakes
+# up every 100 ms (the hit-count flusher and directory syncer wait for work).
+# No on-disk format or shared-mapping change, no new source file, define or
+# link flag; //bazel:cyclone.bzl needs no change.  The other 11 commits are
+# tests, CI and documentation only.  Windows builds are unaffected.
+CYCLONE_COMMIT = "2d4db3015c5de022cfd1bd7b40af7771b6d96664"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
