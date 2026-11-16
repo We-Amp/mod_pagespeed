@@ -41,6 +41,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -1574,6 +1575,30 @@ TEST_F(JsCombineFilterTest, NonAsciiScriptOnMultibytePageIsNotCombined) {
   VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
   VerifyUse(scripts[1], kJsUrl1);
   VerifyUse(scripts[2], kJsUrl2);
+}
+
+// The reason a script is not combined is logged.  The charset in it comes
+// from the page and is escaped, so the message stays one line.
+TEST_F(JsCombineFilterTest, NonAsciiReasonEscapedInLog) {
+  ResponseHeaders default_header;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &default_header);
+  SetFetchResponse(StrCat(kTestDomain, "na.js"), default_header,
+                   "var s = \"caf\xC3\xA9\";");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "na.html"),
+           StrCat("<script src=na.js charset=\"iso-8859-1&#10;second\">",
+                  "</script>"));
+  EXPECT_EQ(1, scripts.size());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos,
+            messages.find("non-ASCII iso-8859-1\\nsecond file"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nsecond")) << messages;
 }
 
 // A UTF-8 script is combined on a UTF-8 page, where none of its escaped bytes

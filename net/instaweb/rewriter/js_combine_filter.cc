@@ -120,9 +120,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
       for (char ch : resource->ExtractUncompressedContents()) {
         const unsigned char c = static_cast<unsigned char>(ch);
         if (c == 0 || c == 0x1B || c >= 0x80) {
-          *failure_reason =
-              StrCat("Cannot combine non-ASCII ", this_charset,
-                     " file for a page in charset ", containing_charset_);
+          // The charsets come from the page; the reason is logged, so
+          // escape them to keep it within one log message.
+          *failure_reason = StrCat(
+              "Cannot combine non-ASCII ", CEscape(this_charset),
+              " file for a page in charset ", CEscape(containing_charset_));
           return false;
         }
       }
