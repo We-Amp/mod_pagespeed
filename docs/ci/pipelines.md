@@ -689,15 +689,18 @@ base commit) and the repository variable `DOCS_LANE`.
 
 ## WEBSITE_GATE: the website checks in `CI gate`
 
-The `website` job of `pipeline-pr.yml` runs only when the repository variable
-`WEBSITE_GATE` is `on`. Unset (the default) or any other value keeps today's
-behaviour: `website.yml` runs from its own `pull_request` trigger as an
-advisory check, outside `CI gate` and outside the merge queue. With the
-variable `on`, the CI pipeline calls `website.yml` and every job of a direct
-`pull_request` run of `website.yml` skips, so the checks run once, inside
-`CI gate`; flipping the variable is the only step
-(`gh variable set WEBSITE_GATE --body on --repo We-Amp/pagespeed-optimizer`,
-rollback `gh variable delete WEBSITE_GATE --repo We-Amp/pagespeed-optimizer`).
+The `website` job of `pipeline-pr.yml` runs for every pull request and merge
+group that changes the site or its sources, unless the repository variable
+`WEBSITE_GATE` is `off`. Unset (the default) or any value but `off`: the CI
+pipeline calls `website.yml` and every job of a direct `pull_request` run of
+`website.yml` skips, so the checks run once, inside `CI gate` and the merge
+queue, and a website check that fails fails the gate. `off` is the rollback:
+`website.yml` runs from its own `pull_request` trigger again, as an advisory
+check outside `CI gate` and outside the merge queue
+(`gh variable set WEBSITE_GATE --body off --repo We-Amp/pagespeed-optimizer`,
+undo with `gh variable delete WEBSITE_GATE --repo We-Amp/pagespeed-optimizer`).
+Before this default, an unset variable meant advisory, and a pull request
+merged with its website build red because no required check reported it.
 **Release windows.** The build job's release-state guards are release-window
 tolerant, so turning the gate on does not block the pull requests that
 carry a release. A run is a release window when it is a pull request (or a

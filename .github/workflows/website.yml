@@ -33,13 +33,13 @@ name: Website
 #
 # Two ways in for a pull request, switched by the repository variable
 # WEBSITE_GATE (docs/ci/pipelines.md, "WEBSITE_GATE"):
-#   * off (unset, the default): this workflow's own pull_request trigger runs
-#     it, as an advisory check outside `CI gate`;
-#   * `on`: the CI pipeline calls it (pipeline-pr.yml, job `website`) for a
-#     pull request or merge group that changes the site or its sources, so
-#     its result feeds the required `CI gate`, and every job of a direct
-#     pull_request run skips (the `direct_pr_off` term below), so nothing
-#     runs twice.
+#   * unset or any value but `off` (the default): the CI pipeline calls it
+#     (pipeline-pr.yml, job `website`) for a pull request or merge group that
+#     changes the site or its sources, so its result feeds the required
+#     `CI gate`, and every job of a direct pull_request run skips (the
+#     `direct_pr_off` term below), so nothing runs twice;
+#   * `off` (rollback only): this workflow's own pull_request trigger runs
+#     it, as an advisory check outside `CI gate`.
 # A called run has inputs.called set (its default); a direct run has no
 # inputs. In the merge queue only the build and reference drift run: the
 # browser suite and Lighthouse ran on the same change in the pull request. A
@@ -67,8 +67,8 @@ on:
       - 'src/worker/main.cc'
       - 'src/nginx/ngx_pagespeed_module.cc'
       - 'docker/nginx-version.txt'
-  # Called by pipeline-pr.yml for pull requests and merge groups once
-  # WEBSITE_GATE is on.
+  # Called by pipeline-pr.yml for pull requests and merge groups unless
+  # WEBSITE_GATE is `off`.
   workflow_call:
     inputs:
       called:
@@ -95,9 +95,9 @@ jobs:
       # Only the merge queue lookup of the release window step reads a pull request.
       pull-requests: read
     name: Website unit tests & build (ubuntu)
-    # direct_pr_off: a direct pull_request run skips once WEBSITE_GATE is on
-    # (the CI pipeline runs the gate then). Same term on every job.
-    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE == 'on')
+    # direct_pr_off: a direct pull_request run skips unless WEBSITE_GATE is
+    # `off` (the CI pipeline runs the gate then). Same term on every job.
+    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -244,7 +244,7 @@ jobs:
     permissions:
       contents: read
     name: Reference data matches the pinned module source (ubuntu)
-    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE == 'on')
+    if: github.event_name != 'schedule' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -298,7 +298,7 @@ jobs:
       contents: read
     name: Website browser suite (Playwright, ubuntu)
     # Not in the merge queue: it ran on the same change in the pull request.
-    if: github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE == 'on')
+    if: github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 30 }}
@@ -372,7 +372,7 @@ jobs:
       contents: read
     name: Website Lighthouse budgets (ubuntu)
     # Not in the merge queue: it ran on the same change in the pull request.
-    if: github.event_name != 'schedule' && github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE == 'on')
+    if: github.event_name != 'schedule' && github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: 30

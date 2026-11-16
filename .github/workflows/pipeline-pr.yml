@@ -732,13 +732,14 @@ jobs:
   # the Lighthouse budgets on the pull request only (the queue re-checks the
   # rebased build, not the browser suite). A failure fails `pr` and with it
   # `CI gate`; a run without website changes skips the job, which counts as
-  # success. Hosted only. Off until the repository variable WEBSITE_GATE is
-  # `on` (docs/ci/pipelines.md, "WEBSITE_GATE"); while it is off, website.yml
-  # runs from its own pull_request trigger and does not feed `CI gate`.
+  # success. Hosted only. On unless the repository variable WEBSITE_GATE is
+  # `off` (docs/ci/pipelines.md, "WEBSITE_GATE"), the rollback: then
+  # website.yml runs from its own pull_request trigger and does not feed
+  # `CI gate`.
   website:
     name: Website
     needs: changes
-    if: ${{ needs.changes.outputs.website == 'true' && vars.WEBSITE_GATE == 'on' }}
+    if: ${{ needs.changes.outputs.website == 'true' && vars.WEBSITE_GATE != 'off' }}
     permissions:
       contents: read
       # Passed to website.yml's build job (merge queue release-window lookup).
