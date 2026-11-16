@@ -296,18 +296,22 @@ build() {
       return 90
     fi
     cp -a "$ws" "$wsdir" || { echo "::error::leg '${distro}': could not seed its workspace"; return 91; }
+    # The package Recommends the optimizer at the pair version: the version of
+    # this tree in package form, or the pinned one when a dry run or a
+    # module-only release recorded it in optimizer-pair-version (the same
+    # choice as the Apache builds).
+    local opt_ver
+    # shellcheck disable=SC1091
+    opt_ver="$(cd "$wsdir" && . net/instaweb/public/VERSION && v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE:-}" ] && v="${v}~${PRERELEASE}"; echo "$v")" || return 94
+    if [ -f "$wsdir/optimizer-pair-version" ]; then opt_ver="$(cat "$wsdir/optimizer-pair-version")"; fi
+    case "$opt_ver" in [0-9]*) ;; *) echo "::error::leg '${distro}': unusable optimizer pair version '${opt_ver}'"; return 94 ;; esac
+    local aflag=""
     if [ "$pkg" = rpm ]; then
-      if [ "$arch" = arm64 ]; then
-        wrap="./install/nginx/build_nginx_rpm.sh -a aarch64 -o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${rpm_dist}"
-      else
-        wrap="./install/nginx/build_nginx_rpm.sh -o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${rpm_dist}"
-      fi
+      [ "$arch" = arm64 ] && aflag="-a aarch64 "
+      wrap="./install/nginx/build_nginx_rpm.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${rpm_dist} -O ${opt_ver}"
     else
-      if [ "$arch" = arm64 ]; then
-        wrap="./install/nginx/build_nginx_deb.sh -a arm64 -o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so"
-      else
-        wrap="./install/nginx/build_nginx_deb.sh -o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so"
-      fi
+      [ "$arch" = arm64 ] && aflag="-a arm64 "
+      wrap="./install/nginx/build_nginx_deb.sh ${aflag}-o /workspace/nginx-packages -s /workspace/ngx_pagespeed_module_${distro}.so -d ${opt_ver}"
     fi
     # Root inside the container: apt and dnf install the build toolchain of
     # the distro. On success the leg copies its packages to /collect and

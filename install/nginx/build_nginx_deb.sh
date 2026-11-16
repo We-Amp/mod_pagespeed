@@ -35,20 +35,30 @@ SRCDIR=$(readlink -f "${SCRIPTDIR}/../..")
 OUTPUTDIR="${PWD}"
 SO_PATH=""
 TARGETARCH="amd64"
+# When set (-d), the package Recommends pagespeed-optimizer at exactly this
+# version: the module and the optimizer worker are a matched pair, but nginx
+# also works without the worker (classic in-place optimization).
+OPTIMIZER_DEB_VERSION=""
 
 usage() {
   echo "usage: $(basename "$0") [-o output_dir] [-s module.so] [-a amd64]"
   echo "  -o dir     .deb output directory       [${OUTPUTDIR}]"
   echo "  -s file    prebuilt ngx_pagespeed_module.so (noble-targeted)"
   echo "  -a arch    dpkg architecture            [${TARGETARCH}]"
+  echo "  -d version pagespeed-optimizer version for an exact-version Recommends;"
+  echo "             omitting it packages without the Recommends, with a warning"
   echo "  -h         this help"
 }
 
-while getopts ":o:s:a:h" opt; do
+while getopts ":o:s:a:d:h" opt; do
   case $opt in
     o) OUTPUTDIR=$(readlink -f "$OPTARG"); mkdir -p "${OUTPUTDIR}" ;;
     s) SO_PATH=$(readlink -f "$OPTARG") ;;
     a) TARGETARCH="$OPTARG" ;;
+    d) OPTIMIZER_DEB_VERSION="$OPTARG"
+       case "$OPTIMIZER_DEB_VERSION" in
+         *[!A-Za-z0-9.~+-]* | "" ) echo "'-d' takes a deb package version." >&2; exit 1 ;;
+       esac ;;
     h) usage; exit 0 ;;
     :) echo "'-$OPTARG' needs an argument."; usage; exit 1 ;;
     *) echo "invalid option: -$OPTARG"; usage; exit 1 ;;
@@ -247,6 +257,15 @@ if [ "${PACKAGE}" != "nginx-module-pagespeed" ]; then
   PKG_RELATIONS="Conflicts: nginx-module-pagespeed
 Replaces: nginx-module-pagespeed
 "
+fi
+# Weak dependency on the matching optimizer worker: a normal apt install pulls
+# it in, --no-install-recommends skips it and nginx then runs classically.
+if [ -n "${OPTIMIZER_DEB_VERSION}" ]; then
+  PKG_RELATIONS="${PKG_RELATIONS}Recommends: pagespeed-optimizer (= ${OPTIMIZER_DEB_VERSION})
+"
+else
+  echo "warning: packaging WITHOUT a pagespeed-optimizer Recommends;" \
+    "a serving pair build must pass -d <optimizer-deb-version>" >&2
 fi
 INSTSIZE=$(du -k -s "${STAGEDIR}" | cut -f1)
 cat > "${STAGEDIR}/DEBIAN/control" <<EOF

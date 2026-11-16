@@ -30,6 +30,9 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 # revisions but breaking — by design, with a build-time load-check alarm — on a
 # distro nginx-minor rebase.
 Requires        : @@NGINX_DEP@@
+# Weak dependency on the matching optimizer worker (a normal dnf install pulls
+# it in; --setopt=install_weak_deps=False skips it and nginx runs classically).
+@@OPTIMIZER_RECOMMENDS@@
 # pagespeed-doctor is offered as /usr/sbin/pagespeed-doctor via alternatives.
 Requires(post)  : /usr/sbin/update-alternatives
 Requires(preun) : /usr/sbin/update-alternatives
