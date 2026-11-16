@@ -370,6 +370,7 @@ cc_library(
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:file_owner",
         "//pagespeed/system:inplace_url_agreement",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/system:optimization_thread_policy",

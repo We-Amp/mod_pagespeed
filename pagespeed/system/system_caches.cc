@@ -154,8 +154,8 @@ SystemCachePath* SystemCaches::GetCache(SystemRewriteOptions* config) {
       path_cache_map_.insert(PathCacheMap::value_type(path, system_cache_path));
   PathCacheMap::iterator iter = result.first;
   if (result.second) {
-    iter->second = system_cache_path =
-        new SystemCachePath(path, config, factory_, shared_mem_runtime_);
+    iter->second = system_cache_path = new SystemCachePath(
+        path, config, factory_, shared_mem_runtime_, cache_file_owner_);
     factory_->TakeOwnership(system_cache_path);
   } else {
     system_cache_path = iter->second;

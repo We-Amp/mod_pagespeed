@@ -93,6 +93,18 @@ cc_library(
     ],
 )
 
+# Gives what a server started as root creates to its workers' user.  POSIX;
+# empty on Windows.
+cc_library(
+    name = "file_owner",
+    srcs = ["file_owner.cc"],
+    hdrs = ["file_owner.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # The cache keyspace of a site without a CacheFragment of its own.
 cc_library(
     name = "site_cache_fragment",

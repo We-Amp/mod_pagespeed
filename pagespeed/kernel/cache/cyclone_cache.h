@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -106,6 +107,17 @@ class CycloneCache : public CacheInterface {
     // tier silently disables itself and small-tier operations fall back to
     // default routing -- check small_tier_active().
     int small_tier_percent;
+
+    // POSIX: the user (and group) the volume files must belong to; unset
+    // means no owner requirement.  When set, the volume must be a plain file
+    // owned by this user: a server running as root creates the volume files
+    // for it, so workers that run as this user can use the cache, and a
+    // volume file owned by another user is not used.  Ignored on Windows.
+    struct Owner {
+      uint32_t uid = 0;
+      uint32_t gid = 0;
+    };
+    std::optional<Owner> owner;
 
     Config()
         : cache_size_bytes(int64{100} * 1024 * 1024),  // 100 MB default

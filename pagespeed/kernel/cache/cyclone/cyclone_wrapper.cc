@@ -297,6 +297,10 @@ CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
     cyclone::VolumeConfig vc;
     vc.path = config->cache_path;
     vc.size = config->cache_size_bytes;
+    if (config->has_owner != 0) {
+      vc.owner =
+          cyclone::VolumeConfig::Owner{config->owner_uid, config->owner_gid};
+    }
 
     auto add_result = handle->impl->add_volume(vc);
     if (!add_result) {

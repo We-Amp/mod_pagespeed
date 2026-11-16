@@ -310,9 +310,8 @@ class RewriteDriverFactory {
   //
   // Contract: |path| is a DIRECTORY the implementation will create if missing.
   // Callers MUST NOT pass a file path (e.g. Cyclone's
-  // system_cache_path.cc:122 <file_cache_path>/cyclone.dat data file is a
-  // FILE and is wired through AddCreatedDirectory only for Apache's chown
-  // sweep — it must not be passed through this hook).
+  // <file_cache_path>/cyclone.dat volume is a FILE; Cyclone creates it for
+  // the workers' user, see SystemCaches::set_cache_file_owner).
   //
   // Caller contract: out-of-prefix gating is the caller's responsibility
   // via IsPathInAutoCreatePrefix() — implementations may assume the path

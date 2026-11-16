@@ -20,8 +20,10 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_CACHES_H_
 #define PAGESPEED_SYSTEM_SYSTEM_CACHES_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -30,6 +32,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
 #include "pagespeed/system/redis_cache.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -115,6 +118,16 @@ class SystemCaches {
   ~SystemCaches();
 
   bool is_root_process() const { return is_root_process_; }
+
+  // POSIX: the user (and group) the server's workers run as, when the root
+  // process creates the file caches for them.  Every Cyclone volume this
+  // creates afterwards is created for that user and must be a plain file
+  // owned by it (CycloneCache::Config::owner).
+  // Call before RegisterConfig/RootInit.  Unset by default: no owner
+  // requirement.
+  void set_cache_file_owner(uint32_t uid, uint32_t gid) {
+    cache_file_owner_ = CycloneCache::Config::Owner{uid, gid};
+  }
 
   // Note: RegisterConfig must be called for all relevant configurations
   // before calling RootInit()
@@ -314,6 +327,8 @@ class SystemCaches {
   MD5Hasher cache_hasher_;
 
   bool default_shm_metadata_cache_creation_failed_;
+
+  std::optional<CycloneCache::Config::Owner> cache_file_owner_;
 
   SystemCaches(const SystemCaches&) = delete;
   SystemCaches& operator=(const SystemCaches&) = delete;

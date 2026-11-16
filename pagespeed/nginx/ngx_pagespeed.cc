@@ -92,6 +92,7 @@
 #include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/daemon_ipro_recorder.h"
 #include "pagespeed/system/daemon_serve_arm.h"
+#include "pagespeed/system/file_owner.h"
 #include "pagespeed/system/in_place_resource_recorder.h"  // the gate returns it
 #include "pagespeed/system/inplace_url_agreement.h"
 #include "pagespeed/system/ipro_record_gate.h"
@@ -1440,6 +1441,16 @@ void ps_ignore_sigpipe() {
   sigaction(SIGPIPE, &act, nullptr);
 }
 
+// Directories ps_init_dir created or found while the worker user was not
+// known yet: the `user` directive follows the http block, or there is none
+// and nginx picks its default once the configuration is complete.
+// ps_give_pending_dirs_to_worker_user gives them away from ps_init_module,
+// which runs for a configuration test too.
+std::vector<GoogleString>* ps_pending_worker_dirs() {
+  static std::vector<GoogleString>* dirs = new std::vector<GoogleString>;
+  return dirs;
+}
+
 // Given a directory path that pagespeed needs, create it and set permissions so
 // the worker can access, but only if needed.
 char* ps_init_dir(const StringPiece& directive, const StringPiece& path,
@@ -1466,20 +1477,33 @@ char* ps_init_dir(const StringPiece& directive, const StringPiece& path,
     return nullptr;  // We're not root, so we're staying whoever we are.
   }
 
-  // chown if owner differs from nginx worker user.
+  // Give the directory to the nginx worker user unless that user owns it
+  // already; one configured as a symbolic link is left for the operator.
   ngx_core_conf_t* ccf = reinterpret_cast<ngx_core_conf_t*>(
       ngx_get_conf(cf->cycle->conf_ctx, ngx_core_module));
   CHECK(ccf != nullptr);
-  struct stat gs_stat;
-  if (stat(gs_path.c_str(), &gs_stat) != 0) {
-    return string_piece_to_pool_string(
-        cf->pool, StrCat(directive, " ", path, " stat() failed"));
+  if (ccf->user == static_cast<ngx_uid_t>(NGX_CONF_UNSET_UINT)) {
+    ps_pending_worker_dirs()->push_back(gs_path);
+    return nullptr;
   }
-  if (gs_stat.st_uid != ccf->user) {
-    if (chown(gs_path.c_str(), ccf->user, ccf->group) != 0) {
+  GoogleString why;
+  switch (net_instaweb::SetOwnerThroughDescriptor(
+      gs_path, ccf->user, ccf->group, net_instaweb::OwnerMatch::kUserOnly,
+      &why)) {
+    case net_instaweb::SetOwnerResult::kDone:
+      break;
+    case net_instaweb::SetOwnerResult::kSymbolicLink:
+      ngx_conf_log_error(
+          NGX_LOG_WARN, cf, 0, "%s",
+          StrCat(directive, " ", path,
+                 " is a symbolic link: not changing its owner; make its "
+                 "target writable by the worker user")
+              .c_str());
+      break;
+    case net_instaweb::SetOwnerResult::kFailed:
       return string_piece_to_pool_string(
-          cf->pool, StrCat(directive, " ", path, " unable to set permissions"));
-    }
+          cf->pool,
+          StrCat(directive, " ", path, " unable to set permissions: ", why));
   }
 
   return nullptr;
@@ -5522,6 +5546,10 @@ ngx_int_t ps_etag_filter_init(ngx_conf_t* cf) {
 
 // Called before configuration.
 ngx_int_t ps_pre_init(ngx_conf_t* cf) {
+  // Directories queued by an earlier configuration (one that failed before
+  // ps_init_module ran) do not belong to this one.
+  ps_pending_worker_dirs()->clear();
+
   // Setup an intervention setter for gzip configuration and check
   // gzip configuration command signatures.
   g_gzip_setter.Init(cf);
@@ -5644,6 +5672,43 @@ ngx_http_module_t ps_module = {ps_pre_init,  // preconfiguration
                                ps_create_loc_conf,
                                ps_merge_loc_conf};
 
+// Gives the directories ps_init_dir could not yet give to the worker user
+// (see ps_pending_worker_dirs), now that the configuration is complete.
+ngx_int_t ps_give_pending_dirs_to_worker_user(ngx_cycle_t* cycle) {
+  std::vector<GoogleString> dirs;
+  dirs.swap(*ps_pending_worker_dirs());
+  if (dirs.empty() || geteuid() != 0) {
+    return NGX_OK;
+  }
+  ngx_core_conf_t* ccf = reinterpret_cast<ngx_core_conf_t*>(
+      ngx_get_conf(cycle->conf_ctx, ngx_core_module));
+  if (ccf == nullptr ||
+      ccf->user == static_cast<ngx_uid_t>(NGX_CONF_UNSET_UINT)) {
+    return NGX_OK;
+  }
+  for (const GoogleString& dir : dirs) {
+    GoogleString why;
+    switch (net_instaweb::SetOwnerThroughDescriptor(
+        dir, ccf->user, ccf->group, net_instaweb::OwnerMatch::kUserOnly,
+        &why)) {
+      case net_instaweb::SetOwnerResult::kDone:
+        break;
+      case net_instaweb::SetOwnerResult::kSymbolicLink:
+        ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
+                      "pagespeed: %s is a symbolic link: not changing its "
+                      "owner; make its target writable by the worker user",
+                      dir.c_str());
+        break;
+      case net_instaweb::SetOwnerResult::kFailed:
+        ngx_log_error(NGX_LOG_EMERG, cycle->log, 0,
+                      "pagespeed: %s unable to set permissions: %s",
+                      dir.c_str(), why.c_str());
+        return NGX_ERROR;
+    }
+  }
+  return NGX_OK;
+}
+
 // called after configuration is complete, but before nginx starts forking
 ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(
@@ -5651,7 +5716,14 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
 
   // See https://github.com/apache/incubator-pagespeed-ngx/issues/1220
   if (cfg_m == nullptr) {
+    ps_pending_worker_dirs()->clear();
     return NGX_OK;
+  }
+
+  // Before anything else, a configuration test included: a test must not
+  // leave a directory behind that the workers cannot use.
+  if (ps_give_pending_dirs_to_worker_user(cycle) != NGX_OK) {
+    return NGX_ERROR;
   }
 
   ps_install_origin_caching_filter();
@@ -5803,6 +5875,15 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     // and syncing, on a fresh directory) its volumes, which takes over a
     // minute on a slow disk.  Nothing below depends on it.
     if (!ngx_test_config) {
+      // The volumes RootInit opens (creating them on a fresh directory)
+      // are created for the worker user.
+      if (geteuid() == 0 &&
+          ccf->user != static_cast<ngx_uid_t>(NGX_CONF_UNSET_UINT) &&
+          ccf->user != 0) {
+        cfg_m->driver_factory->caches()->set_cache_file_owner(
+            static_cast<uint32_t>(ccf->user),
+            static_cast<uint32_t>(ccf->group));
+      }
       cfg_m->driver_factory->RootInit();
     }
 

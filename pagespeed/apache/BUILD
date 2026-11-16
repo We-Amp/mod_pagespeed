@@ -206,5 +206,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":apache_core",
+        "//pagespeed/system:file_owner",
     ],
 )

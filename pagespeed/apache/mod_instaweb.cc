@@ -64,6 +64,7 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/system/file_owner.h"
 #include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_server_context.h"
@@ -360,6 +361,9 @@ class ApacheProcessContext {
     }
     return factory_.get();
   }
+
+  // The factory if the configuration created one, else nullptr.
+  ApacheRewriteDriverFactory* existing_factory() { return factory_.get(); }
 
   // Checks cmd to see if it's process scope, and if so if it's used in an
   // incorrect context, returning an error message if so.
@@ -1220,29 +1224,51 @@ void pagespeed_child_init(apr_pool_t* pool, server_rec* server_list) {
   }
 }
 
-bool give_dir_apache_user_permissions(ApacheRewriteDriverFactory* factory,
-                                      const GoogleString& path) {
+// True when this process runs as root and Apache has parsed a non-root
+// User and Group for its children to switch to: then what the root process
+// creates is for that user.
+bool apache_children_switch_user() {
   // (Apache will not switch from current euid if it's not root --- see
   //  http://httpd.apache.org/docs/2.2/mod/mpm_common.html#user).
   if (geteuid() != 0) {
-    return true;
+    return false;
   }
 
   // .user_id, .group_id default to -1 if they haven't been parsed yet.
-  if ((unixd_config.user_id == 0) ||
-      (unixd_config.user_id == static_cast<uid_t>(-1)) ||
-      (unixd_config.group_id == 0) ||
-      (unixd_config.group_id == static_cast<gid_t>(-1))) {
+  return (unixd_config.user_id != 0) &&
+         (unixd_config.user_id != static_cast<uid_t>(-1)) &&
+         (unixd_config.group_id != 0) &&
+         (unixd_config.group_id != static_cast<gid_t>(-1));
+}
+
+bool give_dir_apache_user_permissions(ApacheRewriteDriverFactory* factory,
+                                      const GoogleString& path) {
+  if (!apache_children_switch_user()) {
     return true;
   }
 
-  if (chown(path.c_str(), unixd_config.user_id, unixd_config.group_id) != 0) {
-    factory->message_handler()->Message(
-        kError, "Unable to set proper ownership of %s (%s)", path.c_str(),
-        strerror(errno));
-    return false;
+  // The directory must be a plain directory for the children's user; one
+  // configured as a symbolic link is left for the operator.
+  GoogleString why;
+  switch (SetOwnerThroughDescriptor(path, unixd_config.user_id,
+                                    unixd_config.group_id,
+                                    OwnerMatch::kUserAndGroup, &why)) {
+    case SetOwnerResult::kDone:
+      return true;
+    case SetOwnerResult::kSymbolicLink:
+      factory->message_handler()->Message(
+          kWarning,
+          "Not setting ownership of %s: it is a symbolic link; make its "
+          "target writable by the server's User yourself",
+          path.c_str());
+      return true;
+    case SetOwnerResult::kFailed:
+      break;
   }
-  return true;
+  factory->message_handler()->Message(
+      kError, "Unable to set proper ownership of %s (%s)", path.c_str(),
+      why.c_str());
+  return false;
 }
 
 // If we are running as root, hands over the ownership of data directories
@@ -1274,6 +1300,18 @@ const char* init_dir(ApacheServerContext* server_context, apr_pool_t* pool,
     }
   }
   return ret;
+}
+
+// Hook from Apache for a configuration test (-t), which runs no post_config:
+// a directory the configuration created before Apache knew its User and
+// Group is given to them here, as post_config would, so a test as root does
+// not leave one the children cannot use.  Opens no cache volume.
+void pagespeed_test_config(apr_pool_t* pconf, server_rec* server_list) {
+  ApacheRewriteDriverFactory* factory =
+      apache_process_context.existing_factory();
+  if (factory != nullptr) {
+    give_apache_user_permissions(factory);
+  }
 }
 
 // Hook from Apache for initialization after config is read.
@@ -1469,6 +1507,13 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
     ApacheRewriteDriverFactory::InitStats(factory->statistics());
   }
 
+  // The cache volumes RootInit is about to open (creating them on a fresh
+  // directory) are created for the children's user.
+  if (apache_children_switch_user()) {
+    factory->caches()->set_cache_file_owner(unixd_config.user_id,
+                                            unixd_config.group_id);
+  }
+
   factory->RootInit();
 
   return APACHE_OK;
@@ -1589,6 +1634,7 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
       nullptr, static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET + 1));
 
   ap_hook_post_config(pagespeed_post_config, nullptr, nullptr, APR_HOOK_MIDDLE);
+  ap_hook_test_config(pagespeed_test_config, nullptr, nullptr, APR_HOOK_MIDDLE);
   ap_hook_child_init(pagespeed_child_init, nullptr, nullptr, APR_HOOK_LAST);
   ap_hook_log_transaction(pagespeed_log_transaction, nullptr, nullptr,
                           APR_HOOK_LAST);

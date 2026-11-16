@@ -196,7 +196,7 @@ CycloneCache::CycloneCache(const Config& config, Statistics* statistics,
   }
 
   // Create the Cyclone cache configuration
-  CycloneCacheConfig c_config;
+  CycloneCacheConfig c_config = {};
   c_config.cache_path = config_.cache_path.c_str();
   c_config.cache_size_bytes = config_.cache_size_bytes;
   c_config.ram_cache_size_bytes = config_.ram_cache_size_bytes;
@@ -207,6 +207,11 @@ CycloneCache::CycloneCache(const Config& config, Statistics* statistics,
       config_.small_tier_percent > 0
           ? static_cast<uint32_t>(config_.small_tier_percent)
           : 0;
+  if (config_.owner.has_value()) {
+    c_config.has_owner = 1;
+    c_config.owner_uid = config_.owner->uid;
+    c_config.owner_gid = config_.owner->gid;
+  }
 
   // Create the cache
   cache_ = cyclone_cache_create(&c_config);
