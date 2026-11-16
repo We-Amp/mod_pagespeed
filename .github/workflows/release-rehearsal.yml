@@ -44,10 +44,16 @@ jobs:
     # environment, and a called workflow cannot get more than its caller
     # grants, so the grant is the release caller's. That job never runs in a
     # rehearsal. `actions: read` is what its seal job requests; that job does
-    # not run either.
+    # not run either. `id-token` and `attestations: write` are what
+    # `sign-checksums` requests for the Sigstore signature and the
+    # attestations; it never runs in a rehearsal (its if: excludes one, and
+    # the shape gate's release-env rule pins that), so a rehearsal signs and
+    # attests nothing.
     permissions:
       contents: write
       actions: read
+      id-token: write
+      attestations: write
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
     with:
       tag: ''

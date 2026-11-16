@@ -65,6 +65,11 @@ class CommonFilter : public EmptyHtmlFilter {
   RewriteDriver* driver() const { return driver_; }
   HtmlElement* noscript_element() const { return noscript_element_; }
 
+  // Whether element is inside a <noscript>, <noembed> or <noframes>. Browsers
+  // may read the content of those as text that ends at the first end tag of
+  // the enclosing element, and a script inside one never runs.
+  static bool IsInsideSometimesLiteralElement(const HtmlElement* element);
+
   // Insert a node at the best available location in or near the closing body
   // tag during EndDocument. This is useful for filters that want to insert
   // scripts or summary data at the end of body, but need to wait until

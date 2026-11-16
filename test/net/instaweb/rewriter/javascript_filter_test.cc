@@ -937,6 +937,96 @@ TEST_F(JavascriptFilterTest, XhtmlInlineJavascriptWithoutCdataNeverEmitsCdataEnd
   ValidateExpected("xhtml no cdata", original, original);
 }
 
+// A CDATA section opened outside a JavaScript comment and closed inside one:
+// minification keeps the "<![CDATA[" but drops the "//]]>", which would leave
+// the section open past the script. The script is left as it was. The same
+// holds when only one of two sections would survive, and when minification
+// would join brackets into a "]]>" inside a kept section.
+TEST_F(JavascriptFilterTest, XhtmlInlineScriptKeepsCdataMarkers) {
+  InitFiltersAndTest(100);
+  ValidateNoChanges(
+      "xhtml commented cdata end",
+      StrCat(kXhtmlDtd, absl::StrFormat(kInlineJs,
+                                        "<![CDATA[\n"
+                                        "f = function () { g(); }\n"
+                                        "//]]>")));
+  ValidateNoChanges(
+      "xhtml two cdata sections",
+      StrCat(kXhtmlDtd,
+             absl::StrFormat(kInlineJs,
+                             "<![CDATA[]]>/*<![CDATA[*/ var s = \"<i>x</i>\"; "
+                             "/*]]>*/")));
+  ValidateNoChanges(
+      "xhtml joined cdata end",
+      StrCat(kXhtmlDtd,
+             absl::StrFormat(kInlineJs, "<![CDATA[ x[y[0] ] > 1 ]]>")));
+}
+
+// A script hidden from an XML parser by an XML comment: without the comment
+// the string would be read as markup, so on an XHTML page the script is left
+// as it was.
+TEST_F(JavascriptFilterTest, XhtmlInlineScriptKeepsXmlComment) {
+  SetXhtmlMimetype();
+  InitFiltersAndTest(100);
+  ValidateNoChanges("xhtml xml comment",
+                    absl::StrFormat(kInlineJs,
+                                    "<!--\n"
+                                    "var s = \"<i>x</i>\";\n"
+                                    "//-->"));
+}
+
+// With response headers that are never finalized (as on Apache), the type
+// the parse was started with decides whether the page is XHTML.
+TEST_F(JavascriptFilterTest, XmlCommentKeptWithoutFinalizedHeaders) {
+  server_context()->set_response_headers_finalized(false);
+  InitFiltersAndTest(100);
+  const GoogleString script = absl::StrFormat(kInlineJs,
+                                              "<!--\n"
+                                              "var s = \"<i>x</i>\";\n"
+                                              "//-->");
+  SetupWriter();
+  rewrite_driver()->StartParseWithType(StrCat(kTestDomain, "x.xhtml"),
+                                       kContentTypeXhtml);
+  rewrite_driver()->ParseText(script);
+  rewrite_driver()->FinishParse();
+  EXPECT_EQ(script, output_buffer_);
+
+  SetupWriter();
+  rewrite_driver()->StartParseWithType(StrCat(kTestDomain, "x.html"),
+                                       kContentTypeHtml);
+  rewrite_driver()->ParseText(script);
+  rewrite_driver()->FinishParse();
+  EXPECT_EQ(absl::StrFormat(kInlineJs, "var s=\"<i>x</i>\";"), output_buffer_);
+}
+
+// An HTML parser reads a script as text, so there the comment can go.
+TEST_F(JavascriptFilterTest, HtmlInlineScriptLosesXmlComment) {
+  SetHtmlMimetype();
+  InitFiltersAndTest(100);
+  ValidateExpected("html xml comment",
+                   absl::StrFormat(kInlineJs,
+                                   "<!--\n"
+                                   "var s = \"<i>x</i>\";\n"
+                                   "//-->"),
+                   absl::StrFormat(kInlineJs, "var s=\"<i>x</i>\";"));
+}
+
+// An inline script inside <noscript>, <noembed> or <noframes> never runs, and
+// browsers may read it as the text of that element: it is not minified.
+TEST_F(JavascriptFilterTest, InlineScriptInsideNoscriptLikeElementIsKept) {
+  SetHtmlMimetype();
+  InitFiltersAndTest(100);
+  const GoogleString script = absl::StrFormat(kInlineScriptFormat, kJsData);
+  ValidateNoChanges("noscript", StrCat("<noscript>", script, "</noscript>"));
+  ValidateNoChanges("noembed",
+                    StrCat("<noembed><p>", script, "</p></noembed>"));
+  ValidateNoChanges("noframes", StrCat("<noframes>", script, "</noframes>"));
+  ValidateExpected(
+      "elsewhere", StrCat("<div>", script, "</div>"),
+      StrCat("<div>", absl::StrFormat(kInlineScriptFormat, kJsMinData),
+             "</div>"));
+}
+
 // http://github.com/apache/incubator-pagespeed-mod/issues/324
 TEST_F(JavascriptFilterTest, RetainExtraHeaders) {
   InitFilters();

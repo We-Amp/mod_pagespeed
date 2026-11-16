@@ -532,9 +532,26 @@ RewriteOptions::OptionScope NgxOptionScope(const NgxTables& t,
   return RewriteOptions::kDirectoryScope;
 }
 
+// True when `arg` holds a `$` that does not start a variable name. nginx's
+// script compile refuses that ("invalid variable name"); `$ps_dollar` is the
+// documented spelling for a literal trailing dollar.
+bool HasBareDollar(StringPiece arg) {
+  for (size_t i = 0; i < arg.size(); ++i) {
+    if (arg[i] != '$') continue;
+    const char next = i + 1 < arg.size() ? arg[i + 1] : '\0';
+    if (!(next == '{' || next == '_' || (next >= '0' && next <= '9') ||
+          (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `script_variables` tracks whether ProcessScriptVariables on/all was seen
+// earlier in the file; when set, LoadFromFile* arguments are script-compiled.
 Result ApplyNginx(const Directive& d, const NgxTables& t,
                   SystemRewriteOptions* options, OptionParsingFactory* factory,
-                  RecordingHandler* handler) {
+                  RecordingHandler* handler, bool script_variables = false) {
   handler->Clear();
   RewriteOptions::ResetDeprecatedFilterWarnings();
   StringPiece directive = d.args[0];
@@ -542,6 +559,14 @@ Result ApplyNginx(const Directive& d, const NgxTables& t,
     directive.remove_prefix(strlen("ModPagespeed"));
   }
   Result refused;
+  if (script_variables && StringCaseStartsWith(directive, "LoadFromFile")) {
+    for (size_t i = 1; i < d.args.size(); ++i) {
+      if (HasBareDollar(d.args[i])) {
+        refused.message = "invalid variable name";
+        return refused;
+      }
+    }
+  }
   if (NgxOptionScope(t, *options, directive) > d.scope) {
     refused.message = "cannot be set at this scope";
     return refused;
@@ -650,9 +675,164 @@ bool InApacheCommandTable(const ApacheConfig& config,
          GoogleString::npos;
 }
 
+// Where in the httpd configuration a directive is written.
+enum class ApacheWhere { kServerConfig, kVirtualHost, kDirectory };
+
+// What httpd and mod_instaweb do with a command by scope, read from the
+// module: the command table's override class (OR_ALL allows <Directory>,
+// RSRC_CONF does not) and the vhost handling of process-scope options
+// (CheckGlobalOption).
+struct ApacheCommandScope {
+  bool in_directory = true;
+  bool errors_in_vhost = false;  // "used inside a <VirtualHost> ..."
+};
+
+// The hand-written entries of mod_pagespeed_filter_cmds:
+// APACHE_CONFIG_[DIR_]OPTION[2|3|23](name, ...).  The DIR_ forms register
+// OR_ALL, the others RSRC_CONF.  The name is a kModPagespeedFoo constant
+// (the directive is "ModPagespeedFoo"), RewriteQuery::kModPagespeed (the
+// plain "ModPagespeed" directive) or a string literal.  Returns the option
+// names (lower case, without "ModPagespeed") mapped to "allowed in
+// <Directory>".
+std::map<GoogleString, bool> ReadHandWrittenCommands(
+    const GoogleString& source) {
+  std::map<GoogleString, bool> out;
+  const size_t table = source.find("mod_pagespeed_filter_cmds[] = {");
+  if (table == GoogleString::npos) {
+    return out;
+  }
+  const GoogleString kMacro = "APACHE_CONFIG_";
+  size_t pos = table;
+  while ((pos = source.find(kMacro, pos)) != GoogleString::npos) {
+    pos += kMacro.size();
+    const bool dir = source.compare(pos, 4, "DIR_") == 0;
+    if (dir) {
+      pos += 4;
+    }
+    if (source.compare(pos, 6, "OPTION") != 0) {
+      continue;
+    }
+    pos += 6;
+    while (pos < source.size() &&
+           isdigit(static_cast<unsigned char>(source[pos]))) {
+      ++pos;
+    }
+    if (pos >= source.size() || source[pos] != '(') {
+      continue;
+    }
+    ++pos;
+    while (pos < source.size() &&
+           isspace(static_cast<unsigned char>(source[pos]))) {
+      ++pos;
+    }
+    size_t end = pos;
+    GoogleString name;
+    if (source[pos] == '"') {
+      end = source.find('"', pos + 1);
+      name = source.substr(pos + 1, end - pos - 1);
+    } else {
+      while (end < source.size() &&
+             (isalnum(static_cast<unsigned char>(source[end])) ||
+              source[end] == '_' || source[end] == ':')) {
+        ++end;
+      }
+      name = source.substr(pos, end - pos);
+      const size_t colons = name.rfind("::");
+      if (colons != GoogleString::npos) {
+        name = name.substr(colons + 2);
+      }
+      if (name.compare(0, 1, "k") == 0) {
+        name = name.substr(1);
+      }
+    }
+    if (name.compare(0, 12, "ModPagespeed") != 0) {
+      continue;
+    }
+    out[Lower(name.substr(12))] = dir;
+  }
+  return out;
+}
+
+const char* ScopeLabel(RewriteOptions::OptionScope scope) {
+  switch (scope) {
+    case RewriteOptions::kDirectoryScope:
+      return "kDirectoryScope";
+    case RewriteOptions::kQueryScope:
+      return "kQueryScope";
+    case RewriteOptions::kServerScope:
+      return "kServerScope";
+    case RewriteOptions::kProcessScopeStrict:
+      return "kProcessScopeStrict";
+    case RewriteOptions::kLegacyProcessScope:
+      return "kLegacyProcessScope";
+  }
+  return "";
+}
+
+// What FillInApacheCommand does for an option scope, read from the switch in
+// mod_instaweb.cc rather than copied: the case's statements, up to its
+// break, say whether the command is OR_ALL (allowed in <Directory>) and
+// whether it is registered as kErrorInVHost.  A case label that is missing
+// from the switch fails the test.
+ApacheCommandScope ScopeOf(const GoogleString& mod_instaweb_source,
+                           RewriteOptions::OptionScope scope) {
+  ApacheCommandScope s;
+  const GoogleString body = FunctionBody(
+      mod_instaweb_source, "void ApacheProcessContext::FillInApacheCommand(");
+  const GoogleString label =
+      StrCat("case RewriteOptions::", ScopeLabel(scope), ":");
+  const size_t at = body.find(label);
+  if (at == GoogleString::npos) {
+    ADD_FAILURE() << "FillInApacheCommand has no `" << label << "`";
+    return s;
+  }
+  // Labels that fall through share the statements after the last one.
+  const size_t end = body.find("break;", at);
+  const GoogleString block = body.substr(
+      at, end == GoogleString::npos ? GoogleString::npos : end - at);
+  const bool or_all = block.find("OR_ALL") != GoogleString::npos;
+  const bool rsrc_conf = block.find("RSRC_CONF") != GoogleString::npos;
+  EXPECT_NE(or_all, rsrc_conf) << label << " must set one req_override";
+  s.in_directory = or_all;
+  s.errors_in_vhost = block.find("kErrorInVHost") != GoogleString::npos;
+  return s;
+}
+
+// The command httpd would find for ModPagespeed<option>: the hand-written
+// table comes first, then one entry per registered option with help text,
+// then one per deprecated name (InstallCommands).  Only the generated entries
+// are in vhost_command_handling_map_, so only they can refuse in a vhost with
+// CheckGlobalOption; the hand-written names that are global are refused by
+// the factory instead (is_process_scope).
+ApacheCommandScope CommandScope(
+    const ApacheConfig& config, const GoogleString& mod_instaweb_source,
+    const std::map<GoogleString, bool>& hand_written, StringPiece option) {
+  ApacheCommandScope s;
+  const auto hw = hand_written.find(Lower(option));
+  if (hw != hand_written.end()) {
+    s.in_directory = hw->second;
+    return s;
+  }
+  for (const RewriteOptions::OptionBase* o : config.all_options()) {
+    if (o != nullptr && o->help_text() != nullptr &&
+        StringCaseEqual(o->option_name(), option)) {
+      return ScopeOf(mod_instaweb_source, o->scope());
+    }
+  }
+  const RewriteOptions::Properties* deprecated =
+      RewriteOptions::deprecated_properties();
+  for (int i = 0, n = deprecated->size(); i < n; ++i) {
+    if (StringCaseEqual(deprecated->property(i)->option_name(), option)) {
+      return ScopeOf(mod_instaweb_source, deprecated->property(i)->scope());
+    }
+  }
+  return s;
+}
+
 Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
                    ApacheConfig* config, OptionParsingFactory* factory,
-                   RecordingHandler* handler) {
+                   RecordingHandler* handler,
+                   ApacheWhere where = ApacheWhere::kServerConfig) {
   handler->Clear();
   RewriteOptions::ResetDeprecatedFilterWarnings();
   Result refused;
@@ -666,6 +846,24 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
     refused.message = "Invalid command (not in the module's command table)";
     return refused;
   }
+  if (where != ApacheWhere::kServerConfig) {
+    const ApacheCommandScope scope = CommandScope(
+        *config, mod_instaweb_source,
+        ReadHandWrittenCommands(mod_instaweb_source), option);
+    if (where == ApacheWhere::kDirectory && !scope.in_directory) {
+      refused.message =
+          StrCat(d.args[0], " not allowed in <Directory> context");
+      return refused;
+    }
+    if (where == ApacheWhere::kVirtualHost && scope.errors_in_vhost) {
+      refused.message = StrCat("Directive ", d.args[0],
+                               " used inside a <VirtualHost> but applies "
+                               "globally.");
+      return refused;
+    }
+  }
+  // ParseDirective passes !cmd->server->is_virtual as is_process_scope.
+  const bool process_scope = where != ApacheWhere::kVirtualHost;
   const int n_values = static_cast<int>(d.args.size()) - 1;
   GoogleString msg;
   RewriteOptions::OptionSettingResult r = RewriteOptions::kOptionNameUnknown;
@@ -692,8 +890,8 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
     }
     r = config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
     if (r == RewriteOptions::kOptionNameUnknown) {
-      r = factory->ParseAndSetOption1(option, arg, true /* process scope */,
-                                      &msg, handler);
+      r = factory->ParseAndSetOption1(option, arg, process_scope, &msg,
+                                      handler);
     }
     if (r == RewriteOptions::kOptionNameUnknown &&
         RewriteOptions::IsDeprecatedOptionName(option)) {
@@ -706,7 +904,7 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
                                            handler);
     if (r == RewriteOptions::kOptionNameUnknown) {
       r = factory->ParseAndSetOption2(option, d.args[1], d.args[2],
-                                      true /* process scope */, &msg, handler);
+                                      process_scope, &msg, handler);
     }
   } else if (n_values == 3) {
     r = config->ParseAndSetOptionFromName3(option, d.args[1], d.args[2],
@@ -721,6 +919,27 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
 // The fixture and the report.
 // ---------------------------------------------------------------------------
 
+// One ProcessContext for the whole binary.  Its destructor shuts protobuf
+// down, so a second ProcessContext in the same process (one per test)
+// crashes on the first enum descriptor lookup of the next test.
+class ProcessContextEnvironment : public testing::Environment {
+ public:
+  void SetUp() override { context_ = std::make_unique<ProcessContext>(); }
+  void TearDown() override { context_.reset(); }
+  const ProcessContext& context() const { return *context_; }
+
+ private:
+  std::unique_ptr<ProcessContext> context_;
+};
+
+ProcessContextEnvironment* const kProcessContextEnvironment =
+    static_cast<ProcessContextEnvironment*>(
+        testing::AddGlobalTestEnvironment(new ProcessContextEnvironment));
+
+const ProcessContext& ProcessContextForBinary() {
+  return kProcessContextEnvironment->context();
+}
+
 class LegacyConfigCompatTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -729,11 +948,9 @@ class LegacyConfigCompatTest : public testing::Test {
 #else
     SystemRewriteOptions::Initialize();
 #endif
-    process_context_ = std::make_unique<ProcessContext>();
   }
 
   void TearDown() override {
-    process_context_.reset();
 #ifdef LEGACY_CONFIG_APACHE
     ApacheConfig::Terminate();
 #else
@@ -746,7 +963,7 @@ class LegacyConfigCompatTest : public testing::Test {
     // caches that CreateSharedMemoryMetadataCache registers with, as the
     // ports do before reading their configuration.
     auto factory = std::make_unique<OptionParsingFactory>(
-        *process_context_, new SystemThreadSystem);
+        ProcessContextForBinary(), new SystemThreadSystem);
     factory->Init();
     // The factory's ShutDown() reads the timer, which is otherwise created
     // only when something asks for it.
@@ -849,7 +1066,73 @@ class LegacyConfigCompatTest : public testing::Test {
     GTEST_LOG_(INFO) << summary << "\n" << report;
   }
 
-  std::unique_ptr<ProcessContext> process_context_;
+#ifdef LEGACY_CONFIG_APACHE
+  // The same corpus written inside <VirtualHost> and inside <Directory>, as
+  // httpd applies it.  The expectation is not a list: each option's scope comes
+  // from the module (the hand-written command table's APACHE_CONFIG_* macros,
+  // each registered option's scope as FillInApacheCommand maps it, the deprecated
+  // names' scope, and the factory's own refusal of the global names in a vhost).
+  // The counts are what `apachectl configtest` reported on released 2.8.2 for the
+  // same 370 lines: 327 accepted and 43 refused in a vhost (the 31 never-loaded
+  // names plus 12 process-scope names), 239 and 131 in a directory (the 31 plus
+  // 100 names that are not allowed in <Directory> context).
+  //
+  void CheckApacheScopes() {
+    const std::vector<Directive> corpus = ReadCorpus("apache.conf", false);
+    ASSERT_GE(corpus.size(), 300u);
+    const GoogleString mod_instaweb = ReadSource(kModInstawebCc);
+    ASSERT_FALSE(mod_instaweb.empty());
+    ASSERT_GE(ReadHandWrittenCommands(mod_instaweb).size(), 30u);
+    std::unique_ptr<OptionParsingFactory> factory = NewFactory();
+    RecordingHandler handler;
+    struct Case {
+      const char* name;
+      ApacheWhere where;
+      int accepted;
+      int refused;
+      int refused_by_scope;
+    };
+    for (const Case& c :
+         {Case{"server config", ApacheWhere::kServerConfig, 339, 31, 0},
+          Case{"<VirtualHost>", ApacheWhere::kVirtualHost, 327, 43, 12},
+          Case{"<Directory>", ApacheWhere::kDirectory, 239, 131, 100}}) {
+      int accepted = 0;
+      int refused = 0;
+      int by_scope = 0;
+      GoogleString report;
+      for (const Directive& d : corpus) {
+        ApacheConfig config("legacy-apache", &thread_system_);
+        const Result r = ApplyApache(d, mod_instaweb, &config, factory.get(),
+                                     &handler, c.where);
+        if (r.outcome != Outcome::kRefused) {
+          ++accepted;
+          EXPECT_NE(Expect::kNeverLoaded, d.expect) << c.name << ": " << d.text;
+          continue;
+        }
+        ++refused;
+        if (d.expect != Expect::kNeverLoaded) {
+          ++by_scope;
+          StrAppend(&report, "  line ", IntegerToString(d.line), "  ", d.text,
+                    "  [", r.message, "]\n");
+          // Only a scope rule may refuse a line the server scope accepts.
+          EXPECT_TRUE(r.message.find("not allowed in <Directory>") !=
+                          GoogleString::npos ||
+                      r.message.find("<VirtualHost>") != GoogleString::npos ||
+                      r.message.find("is global") != GoogleString::npos)
+              << c.name << ": `" << d.text << "` refused: " << r.message;
+        }
+      }
+      GTEST_LOG_(INFO) << c.name << ": " << accepted << " accepted, " << refused
+                       << " refused\n"
+                       << report;
+      EXPECT_EQ(c.accepted, accepted) << c.name;
+      EXPECT_EQ(c.refused, refused) << c.name;
+      EXPECT_EQ(c.refused_by_scope, by_scope) << c.name;
+    }
+  }
+
+#endif
+
   NullThreadSystem thread_system_;
 };
 
@@ -863,11 +1146,17 @@ TEST_F(LegacyConfigCompatTest, NginxDirectivesKeepLoading) {
   ASSERT_FALSE(tables.server_only.empty());
   std::unique_ptr<OptionParsingFactory> factory = NewFactory();
   RecordingHandler handler;
+  bool script_variables = false;
   Check("nginx", corpus, [&](const Directive& d) {
+    if (d.args.size() == 2 &&
+        StringCaseEqual(d.args[0], "ProcessScriptVariables")) {
+      script_variables = !StringCaseEqual(d.args[1], "off");
+    }
     // NgxRewriteOptions derives from SystemRewriteOptions and adds only the
     // options read from its source above.
     SystemRewriteOptions options("legacy-nginx", &thread_system_);
-    return ApplyNginx(d, tables, &options, factory.get(), &handler);
+    return ApplyNginx(d, tables, &options, factory.get(), &handler,
+                      script_variables);
   });
 }
 
@@ -886,6 +1175,11 @@ TEST_F(LegacyConfigCompatTest, ApacheDirectivesKeepLoading) {
     ApacheConfig config("legacy-apache", &thread_system_);
     return ApplyApache(d, mod_instaweb, &config, factory.get(), &handler);
   });
+}
+
+// The corpus at vhost and directory scope (see CheckApacheScopes).
+TEST_F(LegacyConfigCompatTest, ApacheScopesHoldInVhostAndDirectory) {
+  CheckApacheScopes();
 }
 
 // The harness refuses what httpd refuses: a name that was never a command and
@@ -923,6 +1217,8 @@ TEST_F(LegacyConfigCompatTest, NginxRefusalsAreSeen) {
     RewriteOptions::OptionScope scope;
   };
   for (const Case& c : {
+           Case{"LoadFromFileRuleMatch Disallow \\.php$",
+                RewriteOptions::kServerScope},
            Case{"NoSuchOptionEver on", RewriteOptions::kServerScope},
            Case{"FileCacheSizeKb lots", RewriteOptions::kServerScope},
            Case{"UseNativeFetcher on", RewriteOptions::kServerScope},
@@ -933,10 +1229,21 @@ TEST_F(LegacyConfigCompatTest, NginxRefusalsAreSeen) {
     d.args = Words(c.line);
     d.scope = c.scope;
     SystemRewriteOptions options("legacy-nginx", &thread_system_);
+    // Script variables are on, so a bare trailing `$` is refused as in nginx.
     EXPECT_EQ(Outcome::kRefused,
-              ApplyNginx(d, tables, &options, factory.get(), &handler).outcome)
+              ApplyNginx(d, tables, &options, factory.get(), &handler, true)
+                  .outcome)
         << c.line;
   }
+  // The documented spelling is accepted.
+  Directive ok;
+  ok.text = "LoadFromFileRuleMatch Disallow \\.php$ps_dollar";
+  ok.args = Words(ok.text.c_str());
+  ok.scope = RewriteOptions::kServerScope;
+  SystemRewriteOptions options("legacy-nginx", &thread_system_);
+  EXPECT_NE(Outcome::kRefused,
+            ApplyNginx(ok, tables, &options, factory.get(), &handler, true)
+                .outcome);
 }
 
 // Every filter name and compound filter name the 1.14.36.1 release knew is in
@@ -1049,6 +1356,14 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   EXPECT_NE(GoogleString::npos, all.find("if(option->help_text()!=nullptr)"));
   EXPECT_NE(GoogleString::npos,
             all.find("RewriteOptions::deprecated_properties()"));
+  // The scope rules ScopeOf and CheckApacheScopes read.
+  EXPECT_NE(GoogleString::npos,
+            all.find("caseRewriteOptions::kProcessScopeStrict:"
+                     "vhost_command_handling_map_[cmd]=kErrorInVHost;"
+                     "cmd->req_override=RSRC_CONF;"));
+  EXPECT_NE(GoogleString::npos, all.find("!cmd->server->is_virtual"));
+  EXPECT_NE(GoogleString::npos, all.find("NULL,RSRC_CONF,help)"));
+  EXPECT_NE(GoogleString::npos, all.find("NULL,OR_ALL,help)"));
 }
 
 #endif  // LEGACY_CONFIG_APACHE

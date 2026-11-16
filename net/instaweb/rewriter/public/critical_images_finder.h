@@ -76,6 +76,10 @@ class CriticalImagesFinder {
   // render response for the page.
   static const char kRenderedImageDimensionsProperty[];
 
+  // The number of beacon results that must have been merged into the stored
+  // rendered image sizes before any of them is used.
+  static const int kMinBeaconsForRenderedDimensions = 3;
+
   CriticalImagesFinder(const PropertyCache::Cohort* cohort, Statistics* stats);
   virtual ~CriticalImagesFinder();
 
@@ -213,13 +217,15 @@ class CriticalImagesFinder {
 
  protected:
   // Completes a critical image set update operation and writes the data back to
-  // the property cache.
+  // the property cache. If require_prior_support, html critical images that
+  // are not registered candidates (see UpdateCandidateImagesForBeaconing) are
+  // ignored.
   static bool UpdateAndWriteBackCriticalImagesCacheEntry(
       const StringSet* html_critical_images_set,
       const StringSet* css_critical_images_set,
       const RenderedImages* rendered_images_set, int support_interval,
-      const PropertyCache::Cohort* cohort, AbstractPropertyPage* page,
-      CriticalImages* critical_images);
+      bool require_prior_support, const PropertyCache::Cohort* cohort,
+      AbstractPropertyPage* page, CriticalImages* critical_images);
 
   // Gets critical images if present in the property cache and updates the
   // critical_images set in RewriteDriver with the obtained set.  If you
@@ -240,11 +246,13 @@ class CriticalImagesFinder {
 
   // Update a CriticalImages protobuf value with new critical image sets. If
   // either of the html or css sets are NULL, those fields in critical_images
-  // will not be updated. Returns true if either of the critical image sets in
-  // critical_images was updated.
+  // will not be updated. If require_prior_support, html critical images that
+  // critical_images does not already know are ignored. Returns true if either
+  // of the critical image sets in critical_images was updated.
   static bool UpdateCriticalImages(const StringSet* html_critical_images,
                                    const StringSet* css_critical_images,
                                    int support_interval,
+                                   bool require_prior_support,
                                    CriticalImages* critical_images);
 
   // By default, store 1 critical image set and require an image to be in that

@@ -408,10 +408,13 @@ class HTTPCache {
   // start_monotonic_us is a Timer::NowMonotonicUs() reading captured by the
   // caller at the start of the Put; it is used only for the insert-latency
   // stat (cache_time_us_), never for header/freshness math.
-  void PutInternal(bool preserve_response_headers, const GoogleString& key,
-                   const GoogleString& fragment, int64 start_monotonic_us,
-                   HTTPValue* value, ResponseHeaders* headers,
-                   MessageHandler* handler);
+  // client_entry: the stored value carries the client-entry stamp (see
+  // HTTPValue::kClientEntryHeader); a value rebuilt here keeps it, and
+  // 'headers' never receives it.
+  void PutInternal(bool preserve_response_headers, bool client_entry,
+                   const GoogleString& key, const GoogleString& fragment,
+                   int64 start_monotonic_us, HTTPValue* value,
+                   ResponseHeaders* headers, MessageHandler* handler);
   void DeleteInternal(const GoogleString& key_fragment);
 
   // Used by constructor and tests.

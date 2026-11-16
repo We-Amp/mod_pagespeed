@@ -512,8 +512,28 @@ It does everything a dry run does, and then, in this order:
    with exactly one good signature and no revoked or expired key. The pin is a
    consistency check between the secret and the committed key, not an
    independent trust root: whoever can change master can change both.
-4. `create-release` creates a draft release for the tag with every asset and
-   `SHA256SUMS.asc`, downloads the draft's assets and checks them against
+   With the keyrings removed, the same job then records a build provenance
+   attestation (SLSA v1, keyless Sigstore, in the GitHub attestation store)
+   for every file the lane built, `SHA256SUMS` and `manifest.json`, and an
+   SBOM attestation binding the SPDX SBOM to each module package; signs
+   `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`); and verifies the
+   bundle and the attestations against the signer identity
+   `pipeline-release-module.yml@refs/heads/master` and the release tag, as a
+   user would. Its first step refuses a run whose ref (`github.ref`, which
+   the certificate records) is not `refs/tags/<the tag>`, before anything is
+   signed: a dispatched real run must be started with `--ref <tag>`, so the
+   documented verify commands always name the tag. The subjects are chosen earlier, in `validate` (which every run executes, so a rehearsal exercises the selection and a path or name mismatch fails before a real tag) and handed over as the `attestation-subjects` artifact; this job re-checks them against its own download. The pinned optimizer packages are not attested here: their
+   attestations are in the pagespeed-optimizer repository. In an adopting
+   run the attestation names the releasing run; `manifest.json`, an attested
+   subject, names the candidate run that built the files (`build_run_id`).
+   The job holds the OIDC token (`id-token: write`) and `attestations:
+   write`, never a write token to the repository contents; both callers
+   (`release.yml`, `release-rehearsal.yml`) grant them, because a called
+   workflow cannot get more than its caller grants, but the job's if: keeps
+   a dry run, a candidate and a rehearsal out, so none of them signs or
+   attests anything.
+4. `create-release` creates a draft release for the tag with every asset,
+   `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`, downloads the draft's assets and checks them against
    `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
    release flagged as a pre-release and not as the latest one. The release
    is never promoted any further: nothing is published to a package
@@ -627,7 +647,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
 | `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets`; in an adopting run applies the adoption rule above |
-| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
+| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master; then, keyless, records the build provenance and SBOM attestations of the module's files and signs `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`), and verifies both as a user would |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
@@ -790,7 +810,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `msi-unsigned` | the installer before signing (real run) | no |
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
 | `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`: signed in a real run, unsigned in a dry run | yes |
-| `release-signature` | `SHA256SUMS.asc` (real run) | the signature is added to the release by `create-release` |
+| `release-signature` | `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json` (real run) | both are added to the release by `create-release` |
 | `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
 | `adopt-binding` | `adopt-binding.json`, what an adopting run took over and the candidate's job list and `SHA256SUMS` rows (adopting run only) | no |
 

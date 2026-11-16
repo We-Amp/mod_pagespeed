@@ -539,6 +539,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash pagespeed/system/console/check-no-drift.sh
 
+      # pagespeed-doctor carries copies of the option names, the removed and
+      # deprecated options and the deprecated filters; they must match the
+      # C++ source.
+      - name: pagespeed-doctor tables are in sync with the source
+        if: ${{ !cancelled() }}
+        run: python3 -I test/doctor/doctor_tables.py --check
+
       # Security gates: SBOM drift (the committed SPDX must match what
       # MODULE.bazel.lock, bazel/repositories.bzl and the bundled console
       # dependencies produce today), module version drift, notices drift, OpenVEX format, and a grype scan of the
@@ -1405,6 +1412,7 @@ jobs:
 
       - name: Build all targets
         run: |
+          set -o pipefail
           # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
           source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
           slot_budget 55g || exit 1
@@ -1609,7 +1617,7 @@ jobs:
           { echo "TEST_NET=${NET}"; echo "TEST_REDIS=${R}"; echo "TEST_MEMCACHED=${M}"; } >> "$GITHUB_ENV"
           for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
           docker info >/dev/null 2>&1 || { echo "::error::Docker daemon unreachable after 60s"; exit 1; }
-          docker network create "$NET" 2>/dev/null || true
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" create "$NET"
           for img in redis:7-alpine memcached:1.6-alpine; do
             for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
           done
@@ -1646,6 +1654,11 @@ jobs:
           for a in $(seq 1 30); do docker exec "$RA" redis-cli -p 6380 -a "$AUTHPW" --no-auth-warning ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::authenticated redis never became ready"; docker logs "$RA" 2>&1 | tail; exit 1; }; done
           for a in $(seq 1 15); do docker exec "$MS" test -S /sock/memcached.sock 2>/dev/null && break; sleep 1; [ "$a" = 15 ] && echo "::warning::memcached socket not seen after 15s (continuing; the socket case will skip or fail visibly)"; done
           for a in $(seq 1 15); do echo version | docker exec -i "$M" sh -c 'cat | nc -w1 127.0.0.1 11211' 2>/dev/null | grep -q VERSION && break; sleep 1; [ "$a" = 15 ] && echo "::warning::memcached readiness probe unconfirmed after 15s (container is running; continuing)"; done
+
+      - name: Self-test the docker network reaper
+        run: |
+          bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" reap-stale
+          SELFTEST_IMAGE=redis:7-alpine bash "${GITHUB_WORKSPACE}/tools/ci/docker-net.sh" selftest
 
       - name: Run unit tests
         run: |
@@ -1966,6 +1979,7 @@ jobs:
             -w /workspace \
             "${DOCKER_IMAGE}" \
             bash -c '
+              set -o pipefail
               # Skip generated files: they carry a GENERATED banner and follow
               # the canonical source style. net/instaweb/rewriter/generated/
               # is data2c output, regenerated wholesale, never hand-formatted.
@@ -1973,7 +1987,7 @@ jobs:
                 \( -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) \
                 -not -path "pagespeed/iis/*" \
                 -not -path "net/instaweb/rewriter/generated/*" \
-                | xargs -r grep -L "DO NOT EDIT BY HAND" \
+                | xargs -r sh -c "grep -L \"DO NOT EDIT BY HAND\" \"\$@\" || [ \$? -eq 1 ]" sh \
                 | xargs -r clang-format-20 --dry-run --Werror
             '
 
@@ -3184,14 +3198,23 @@ jobs:
       # the first attempt failed on holds that runner, without testing, until
       # its sibling leg has started on another runner (so the sibling cannot
       # be given the same runner), then ends green; with no other runner in
-      # 40 minutes it fails. It reads this run's job list (actions: read). A
-      # leg re-run on its own lands in a new run attempt without its sibling:
-      # it tests when it lands on another runner, and fails at once when it
-      # lands on the failed one (re-run all jobs instead).
+      # the hold limit (10 minutes; vars.IIS_RETRY_HOLD_MINUTES, 1 to 45) it
+      # fails with a plain message. The limit is short on purpose: a second IIS
+      # runner that is online and idle takes the sibling within seconds, while
+      # with only one runner online the hold can never end and a long limit only
+      # stalls the merge group. The runners API needs an organization admin
+      # scope that this job's token (actions: read, repository only) lacks, so
+      # the online count cannot be asked up front, and a job cannot change its
+      # runner after it has landed (the IIS tests are not run on hosted
+      # windows-2022 for merge groups). It reads this run's job list (actions:
+      # read). A leg re-run on its own lands in a new run attempt without its
+      # sibling: it tests when it lands on another runner, and fails at once
+      # when it lands on the failed one (re-run all jobs instead).
       - name: Pick this job's role
         id: role
         env:
           GH_TOKEN: ${{ github.token }}
+          IIS_HOLD_MINUTES: ${{ vars.IIS_RETRY_HOLD_MINUTES || '10' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $role = 'test'
@@ -3200,7 +3223,10 @@ jobs:
             $other = if ($env:IIS_LEG -eq '1') { '2' } else { '1' }
             $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
             $base = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
-            $deadline = (Get-Date).AddMinutes(40)
+            $holdMinutes = 10
+            $parsed = 0
+            if ([int]::TryParse($env:IIS_HOLD_MINUTES, [ref]$parsed)) { $holdMinutes = [Math]::Min(45, [Math]::Max(1, $parsed)) }
+            $deadline = (Get-Date).AddMinutes($holdMinutes)
             $placed = $null
             while (-not $placed -and (Get-Date) -lt $deadline) {
               try {
@@ -3225,7 +3251,7 @@ jobs:
               if (-not $placed) { Start-Sleep -Seconds 15 }
             }
             if (-not $placed) {
-              Write-Host "::error::no other IIS runner took the retry within 40 minutes; $($env:RUNNER_NAME) just failed for a reason of the host"
+              Write-Host "::error::no other IIS runner took the retry within $holdMinutes minutes; $($env:RUNNER_NAME) just failed for a reason of the host and the retry needs a second fleet-iis runner online. Re-run all jobs when another IIS runner is online."
               exit 1
             }
             Write-Host "this leg landed on $($env:RUNNER_NAME), where the first attempt failed; the other leg tests on $placed"

@@ -857,6 +857,44 @@ TEST_F(ImageTest, AnimatedFilterNotEnabledTest) {
                      200, 150, 583374, false);
 }
 
+// The size of a GIF is the canvas the frame reader decodes. When the first
+// frame is larger than the logical screen in the header, the reader grows the
+// canvas to that frame, and Dimensions() has to say so.
+TEST_F(ImageTest, GifDimensionsAreTheDecodedCanvas) {
+  // red_empty_screen.gif declares a 0x0 screen around a 5x3 frame.
+  GoogleString empty_screen;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, "red_empty_screen.gif").c_str(),
+      &empty_screen, &message_handler_));
+  ImagePtr empty_screen_image(
+      ImageFromString(IMAGE_PNG, "red_empty_screen.gif", empty_screen, false));
+  ExpectDimensions(IMAGE_GIF, empty_screen.size(), 5, 3,
+                   empty_screen_image.get());
+
+  // transparent.gif is 320x320 throughout. Declare a screen of half its
+  // height; the frame stays as it is.
+  GoogleString half_screen;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kTransparent).c_str(), &half_screen,
+      &message_handler_));
+  const size_t height_pos =
+      ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize;
+  ASSERT_GT(half_screen.size(), height_pos + 1);
+  half_screen[height_pos] = static_cast<char>(160);
+  half_screen[height_pos + 1] = 0;
+  ImagePtr half_screen_image(
+      ImageFromString(IMAGE_PNG, kTransparent, half_screen, false));
+  ExpectDimensions(IMAGE_GIF, half_screen.size(), 320, 320,
+                   half_screen_image.get());
+
+  // With only the header present nothing else is known, so the header holds.
+  GoogleString header_only(half_screen, 0, height_pos + 2);
+  ImagePtr header_only_image(
+      ImageFromString(IMAGE_PNG, kTransparent, header_only, false));
+  ExpectDimensions(IMAGE_GIF, header_only.size(), 320, 160,
+                   header_only_image.get());
+}
+
 TEST_F(ImageTest, JpegTest) {
   options_->recompress_jpeg = true;
   CheckImageFromFile(kPuzzle, IMAGE_JPEG, IMAGE_JPEG,

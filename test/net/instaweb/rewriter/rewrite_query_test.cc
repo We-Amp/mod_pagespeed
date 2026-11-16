@@ -19,7 +19,9 @@
 
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 
+#include <algorithm>
 #include <memory>
+#include <utility>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -661,6 +663,32 @@ TEST_F(RewriteQueryTest, OptionsNotArbitrary) {
   EXPECT_TRUE(options == nullptr);
 }
 
+// The wait of a fetch with a negative rewrite deadline is the operator's to
+// set: a request must not lengthen it, by a query parameter, a request header
+// or the options segment of a resource URL.
+TEST_F(RewriteQueryTest, NegativeDeadlineFetchWaitIsNotSetPerRequest) {
+  const GoogleString name = RewriteOptions::kNegativeDeadlineFetchWaitMs;
+  const RewriteOptions* options =
+      ParseAndScan(kHtmlUrl, StrCat("PageSpeed", name, "=60000"), "");
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  options = ParseAndScan(kHtmlUrl, "", StrCat("PageSpeed", name, ":60000"));
+  EXPECT_TRUE(options == nullptr ||
+              options->negative_deadline_fetch_wait_ms() ==
+                  RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs);
+  RewriteOptions scoped(factory()->thread_system());
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            scoped.SetOptionFromQuery(name, "60000"));
+
+  // The options segment of a resource URL refuses the whole segment.
+  allow_related_options_ = true;
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(
+                               Encode(kTestDomain, "cf", "0", "a.css", "css"),
+                               "ndfw=60000"),
+                           "", "") == nullptr);
+}
+
 TEST_F(RewriteQueryTest, FlattenLimitIsNotSetPerRequest) {
   GoogleString output_query, output_headers;
   const RewriteOptions* options = ParseAndScan(
@@ -1058,6 +1086,55 @@ TEST_F(RewriteQueryTest, OnlyAllowWhitelistedResources) {
 // The stylesheet flatten limit is not settable per request: an options
 // segment that names it is refused as a whole, whether its value would lower
 // or raise the configured limit, and the request keeps the configured value.
+namespace {
+
+// A filter whose URL options list names the given options, to check what an
+// options segment may set whatever a real filter lists.
+class ListedOptionsFilter : public RewriteFilter {
+ public:
+  ListedOptionsFilter(RewriteDriver* driver, StringPieceVector options)
+      : RewriteFilter(driver), options_(std::move(options)) {
+    std::sort(options_.begin(), options_.end());
+  }
+
+  const char* id() const override { return "lo"; }
+  const char* Name() const override { return "ListedOptions"; }
+  void StartDocumentImpl() override {}
+  void StartElementImpl(HtmlElement* element) override {}
+  void EndElementImpl(HtmlElement* element) override {}
+  const StringPieceVector* RelatedOptions() const override { return &options_; }
+
+ private:
+  StringPieceVector options_;
+};
+
+}  // namespace
+
+// An options segment sets only options valid at directory scope or narrower,
+// whatever a filter lists: a server or process setting is refused.
+TEST_F(RewriteQueryTest, OptionSegmentCannotSetServerScopeOption) {
+  ListedOptionsFilter filter(
+      rewrite_driver(), {RewriteOptions::kMaxCacheableResponseContentLength,
+                         RewriteOptions::kImageJpegRecompressionQuality});
+  const int64 configured = server_context()
+                               ->global_options()
+                               ->max_cacheable_response_content_length();
+  const GoogleString server_value = Integer64ToString(configured / 2 + 1);
+
+  std::unique_ptr<RewriteOptions> parsed(
+      server_context()->factory()->NewRewriteOptionsForQuery());
+  EXPECT_EQ(RewriteQuery::kInvalid,
+            ParseResourceOptionForTest(StrCat("rcl=", server_value),
+                                       parsed.get(), &filter));
+  EXPECT_NE(configured / 2 + 1,
+            parsed->max_cacheable_response_content_length());
+
+  // A listed option of query scope is still accepted.
+  parsed.reset(server_context()->factory()->NewRewriteOptionsForQuery());
+  EXPECT_EQ(RewriteQuery::kSuccess,
+            ParseResourceOptionForTest("iq=61", parsed.get(), &filter));
+}
+
 TEST_F(RewriteQueryTest, OptionSegmentNamingFlattenLimitIsRefused) {
   const RewriteFilter* css_filter =
       server_context()->FindFilterForDecoding(RewriteOptions::kCssFilterId);
@@ -1220,6 +1297,22 @@ TEST_F(RewriteQueryTest, CacheControlNoTransform) {
   EXPECT_FALSE(options->enabled());
   EXPECT_TRUE(request_headers.Lookup1(HttpAttributes::kCacheControl) !=
               nullptr);
+}
+
+TEST_F(RewriteQueryTest, CacheControlNoTransformInAnySpelling) {
+  // No-transform turns optimization off however the client spells it.
+  for (const char* cache_control :
+       {"No-Transform", "max-age=0, no-transform", "x-ext; no-transform"}) {
+    RequestHeaders request_headers;
+    request_headers.Replace(HttpAttributes::kCacheControl, cache_control);
+    ResponseHeaders response_headers;
+    GoogleString in_query, out_query, out_req_string, out_resp_string;
+    const RewriteOptions* options = ParseAndScan(
+        kHtmlUrl, in_query, StringPiece(), &request_headers, &response_headers,
+        &out_query, &out_req_string, &out_resp_string);
+    ASSERT_TRUE(options != nullptr) << cache_control;
+    EXPECT_FALSE(options->enabled()) << cache_control;
+  }
 }
 
 TEST_F(RewriteQueryTest, DisableFiltersWithXHR) {

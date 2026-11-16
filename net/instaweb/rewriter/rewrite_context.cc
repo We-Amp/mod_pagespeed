@@ -795,20 +795,33 @@ class RewriteContext::FetchContext {
       // HTML-targeted rewrite already has a way of dealing with slowness, by
       // detaching from rendering.
 
-      // We also do not want nested rewrites to early-return in case of fetches
-      // as it can affect correctness of JS combine, as the names of the
-      // OutputResources, and hence the JS variables may turn out not be
-      // what was expected.
-
-      return;
+      // The exception is the rebuild of one input of a combination that a
+      // request is fetching, when the rewrite deadline is negative. Without
+      // an alarm that fetch would wait for the rebuild for ever, so it falls
+      // back like any other: the combination is made from the unoptimized
+      // input. The combination of several inputs is never stored in the
+      // metadata cache for a fetch, so the fallback is not remembered, and
+      // the combined output is private because its input is. Combined
+      // JavaScript names each script after the URL the fetched URL gives it
+      // (JsCombiner::NameUrl), not after the hash of what was rebuilt, so the
+      // fallback does not change what the page evaluates.
+      if (!driver->nested_fetch_may_fall_back() ||
+          rewrite_context_->GetRewriteDeadlineAlarmMs() >= 0) {
+        return;
+      }
     }
 
     Timer* timer = rewrite_context_->FindServerContext()->timer();
 
-    // Negative rewrite deadline means unlimited.
+    // A negative rewrite deadline means: wait for the rewrite, up to a bound.
     int deadline_ms = rewrite_context_->GetRewriteDeadlineAlarmMs();
     bool test_force_alarm =
         driver->options()->test_instant_fetch_rewrite_deadline();
+    if (deadline_ms < 0 && !test_force_alarm) {
+      // A negative deadline asks to wait for the optimization, but not for
+      // ever: the wait is bounded, then the original is served.
+      deadline_ms = rewrite_context_->NegativeDeadlineFetchWaitMs();
+    }
     if (deadline_ms >= 0 || test_force_alarm) {
       if (test_force_alarm) {
         deadline_ms = 0;
@@ -864,7 +877,11 @@ class RewriteContext::FetchContext {
     bool ok = false;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
-      if (output_resource_->hash() == requested_hash_) {
+      // A combination served without some of its inputs is not the one the
+      // URL names, whatever its hash: it is never served as the immutable
+      // public resource.
+      if (output_resource_->hash() == requested_hash_ &&
+          !rewrite_context_->fetch_left_out_inputs_) {
         // The body below is the uncompressed one, so the headers must
         // describe that one as well.
         response_headers->CopyFrom(*(output_resource_->UncompressedHeaders()));
@@ -888,7 +905,8 @@ class RewriteContext::FetchContext {
         StringPiece contents = output_resource_->ExtractUncompressedContents();
         ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
                                                 async_fetch_, handler_);
-      } else if (rewrite_context_->FailOnHashMismatch()) {
+      } else if (rewrite_context_->FailOnHashMismatch() &&
+                 !rewrite_context_->fetch_left_out_inputs_) {
         FailForHashMismatch();
         return;
       } else {
@@ -1007,7 +1025,9 @@ class RewriteContext::FetchContext {
     // compute the cache-control for a hidden .pagespeed. resource in a
     // nested RewriteContext, and we need to propogate that to the ipro
     // resource response headers.
-    if (headers->HasValue(HttpAttributes::kCacheControl, "public")) {
+    // A combination served without some of its inputs stays private.
+    if (!rewrite_context_->fetch_left_out_inputs_ &&
+        headers->HasValue(HttpAttributes::kCacheControl, "public")) {
       async_fetch_->response_headers()->SetCacheControlPublic();
     }
 
@@ -1828,10 +1848,22 @@ void RewriteContext::RepeatedSuccess(const RewriteContext* primary) {
   // repetition is left undone and uncached.
   int64 num_entries = primary->partitions_->partition_size() +
                       primary->partitions_->other_dependency_size();
+  // Inlined content is copied with the partitions, so a resource referenced
+  // many times also counts its inlined bytes once per copy.
+  int64 inline_bytes = 0;
   for (const CachedResult& partition : primary->partitions_->partition()) {
     num_entries += partition.input_size();
+    inline_bytes += partition.inlined_data().size() +
+                    partition.low_resolution_inlined_data().size();
   }
-  if (!ChargePagePartitionEntries(num_entries, PageBudgetNote::kNow)) {
+  bool within_budget =
+      ChargePagePartitionEntries(num_entries, PageBudgetNote::kNow);
+  if (within_budget && inline_bytes > 0 && ChargesPageBudget() &&
+      !Driver()->page_work_budget()->TakeRepeatedInlineBytes(inline_bytes)) {
+    NotePageBudgetHit(kRewriteBudgetPartitionEntriesHits);
+    within_budget = false;
+  }
+  if (!within_budget) {
     MarkTooBusy();
     RepeatedFailure();
     return;
@@ -1970,6 +2002,11 @@ void RewriteContext::FetchInputs() {
         ResourceCallbackUtils(this, resource, i).Done(false);
       } else if (is_pagespeed_resource) {
         RewriteDriver* nested_driver = Driver()->Clone();
+        // When this context combines several inputs for a fetch, the rebuild
+        // of an input may be given up on for the unoptimized input, if that
+        // does not change the combination's name. See SetupDeadlineAlarm().
+        nested_driver->set_nested_fetch_may_fall_back(IsFetchRewrite() &&
+                                                      (num_slots() > 1));
         RewriteFilter* filter = nullptr;
         // We grab the filter now (and not just call DecodeOutputResource
         // earlier instead of IsPagespeedResource) so we get a filter that's
@@ -2816,22 +2853,43 @@ void RewriteContext::StartRewriteForFetch() {
         fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     ok_to_rewrite = false;
   }
+  // A combination whose filter allows it is still served when some of its
+  // inputs cannot be fetched right now, leaving those out, rather than
+  // failing the whole URL (the original of a combination cannot be served).
+  const bool may_skip_unavailable = (num_slots() > 1) &&
+                                    FetchCombinesAvailableInputs() &&
+                                    !FetchWritesPartition();
+  int num_available = 0;
   for (int i = 0, n = slots_.size(); ok_to_rewrite && (i < n); ++i) {
     ResourcePtr resource(slot(i)->resource());
     if (resource->loaded() && resource->HttpStatusOk() &&
         !(Options()->disable_rewrite_on_no_transform() &&
-          resource->response_headers()->HasValue(HttpAttributes::kCacheControl,
-                                                 "no-transform"))) {
+          resource->response_headers()->HasCacheControlDirective(
+              "no-transform"))) {
       bool on_the_fly = (kind() == kOnTheFlyResource);
       Resource::HashHint hash_hint =
           on_the_fly ? Resource::kOmitInputHash : Resource::kIncludeInputHash;
       resource->AddInputInfoToPartition(hash_hint, i, partition);
+      ++num_available;
+    } else if (may_skip_unavailable &&
+               !(resource->loaded() && resource->HttpStatusOk())) {
+      fetch_left_out_inputs_ = true;
+      fetch_->handler()->Message(
+          kWarning, "Input %s unavailable; serving %s without it",
+          resource->UrlForDebug().c_str(),
+          fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
     } else {
       ok_to_rewrite = false;
       break;
     }
   }
+  if (may_skip_unavailable && (num_available == 0)) {
+    ok_to_rewrite = false;
+  }
   OutputResourcePtr output(fetch_->output_resource());
+  if (fetch_left_out_inputs_) {
+    output->set_store_in_http_cache(false);
+  }
 
   // During normal rewrite path, Partition() is responsible for syncing up
   // the output resource's CachedResult and the partition tables. As it does
@@ -3346,11 +3404,14 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
 
   StringPiece contents;
   ResponseHeaders* response_headers = data->response_headers();
-  bool usable =
-      (result.status == HTTPCache::kFound) &&
-      data->http_value()->ExtractContents(&contents) &&
-      (response_headers->status_code() == HttpStatus::kOK) &&
-      (!fallback_needs_fetched_input_ || data->http_value()->IsFetchedInput());
+  bool usable = (result.status == HTTPCache::kFound) &&
+                data->http_value()->ExtractContents(&contents) &&
+                (response_headers->status_code() == HttpStatus::kOK) &&
+                (data->http_value()->IsFetchedInput() ||
+                 // A response served to a client is a fallback only when it was
+                 // stored under the current rules.
+                 (!fallback_needs_fetched_input_ &&
+                  data->http_value()->IsCurrentClientEntry()));
   // De-alias a borrowed mmap view before the port write, exactly like
   // CacheUrlAsyncFetcher's hit serve (see the zero-copy note there): the
   // pin ('data', released when this function returns) must not be relied on
@@ -3521,7 +3582,8 @@ void RewriteContext::FixFetchFallbackHeaders(const CachedResult& cached_result,
     }
   }
   int64 ttl_ms = min_cache_expiry_time_ms - date_ms;
-  if (!Options()->publicly_cache_mismatched_hashes_experimental()) {
+  if (!Options()->publicly_cache_mismatched_hashes_experimental() ||
+      fetch_left_out_inputs_) {
     // Shorten cache length, and prevent proxies caching this, as it's under
     // the "wrong" URL.
     cache_control_suffix = ",private";
@@ -3639,6 +3701,10 @@ MessageHandler* RewriteContext::fetch_message_handler() {
 
 int64 RewriteContext::GetRewriteDeadlineAlarmMs() const {
   return Driver()->rewrite_deadline_ms();
+}
+
+int64 RewriteContext::NegativeDeadlineFetchWaitMs() const {
+  return Driver()->options()->negative_deadline_fetch_wait_ms();
 }
 
 bool RewriteContext::CreationLockBeforeStartFetch() const {

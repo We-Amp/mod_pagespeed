@@ -161,13 +161,15 @@ install -m 755 -d \
 install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.so"
 
 # nginx.org module-package layout: ship the load_module snippet in
-# modules-available/ and symlink it into modules-enabled/, which stock noble's
-# nginx.conf auto-includes (`include /etc/nginx/modules-enabled/*.conf;`).
+# modules-available/ and symlink it into modules-enabled/, which the stock
+# Debian/Ubuntu nginx.conf auto-includes (nginx.org's does not; see
+# nginx_package_docs.sh) (`include /etc/nginx/modules-enabled/*.conf;`).
 # A high-numbered prefix keeps load ordering predictable relative to other
 # nginx-module-* packages (PageSpeed is an aux filter; load late).
 cat > "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf" <<SNIP
 # ngx_pagespeed dynamic module (We-Amp mod_pagespeed ${VERSION}).
-# Auto-included by stock noble nginx via /etc/nginx/modules-enabled/.
+# Auto-included by a distribution's nginx via /etc/nginx/modules-enabled/;
+# nginx.org builds need an "include /etc/nginx/modules-enabled/*.conf;" line in nginx.conf.
 load_module modules/ngx_pagespeed_module.so;
 SNIP
 chmod 644 "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf"
@@ -182,6 +184,16 @@ ln -s "../../../usr/share/nginx/modules-available/mod-pagespeed.conf" \
 # build_nginx_package.sh with the corrected compat string + the cache note).
 "${SCRIPTDIR}/nginx_package_docs.sh" "${STAGEDIR}${NGINX_DOCDIR}" "${VERSION}" "deb" \
   "${NGINX_UPSTREAM_VERSION}"
+
+# pagespeed-doctor, the read-only health check (install/common/pagespeed-doctor).
+# It lives in this package's own /usr/share directory and is offered as
+# /usr/sbin/pagespeed-doctor through update-alternatives, so the Apache and
+# nginx packages can both ship it without a file conflict. Not a conffile.
+DOCTOR_DIR="/usr/share/${PACKAGE}"
+install -m 755 -d "${STAGEDIR}${DOCTOR_DIR}"
+sed "s/^DOCTOR_VERSION=.*/DOCTOR_VERSION=\"${VERSION}\"/" \
+  "${SRCDIR}/install/common/pagespeed-doctor" > "${STAGEDIR}${DOCTOR_DIR}/pagespeed-doctor"
+chmod 755 "${STAGEDIR}${DOCTOR_DIR}/pagespeed-doctor"
 
 # The admin-restrict snippet, a conffile at
 # /etc/nginx/snippets/pagespeed_admin_localhost.conf. Shipped as config (not
@@ -287,9 +299,15 @@ if [ "$1" = "configure" ]; then
       fi
     done
   fi
+  # Offer pagespeed-doctor as /usr/sbin/pagespeed-doctor.
+  if [ -x @@DOCTOR_DIR@@/pagespeed-doctor ]; then
+    update-alternatives --install /usr/sbin/pagespeed-doctor pagespeed-doctor \
+      @@DOCTOR_DIR@@/pagespeed-doctor 50 >/dev/null 2>&1 || true
+  fi
 fi
 exit 0
 EOF
+sed -i "s#@@DOCTOR_DIR@@#${DOCTOR_DIR}#g" "${STAGEDIR}/DEBIAN/postinst"
 chmod 755 "${STAGEDIR}/DEBIAN/postinst"
 
 cat > "${STAGEDIR}/DEBIAN/postrm" <<'EOF'
@@ -305,6 +323,9 @@ cat > "${STAGEDIR}/DEBIAN/prerm" <<EOF
 # cannot wedge \`nginx -t\` between file removal and the symlink going away.
 if [ "\$1" = "remove" ] && [ -L ${NGINX_MODENABLED}/50-mod-pagespeed.conf ]; then
   rm -f ${NGINX_MODENABLED}/50-mod-pagespeed.conf || true
+fi
+if [ "\$1" = "remove" ] || [ "\$1" = "deconfigure" ]; then
+  update-alternatives --remove pagespeed-doctor ${DOCTOR_DIR}/pagespeed-doctor >/dev/null 2>&1 || true
 fi
 exit 0
 EOF

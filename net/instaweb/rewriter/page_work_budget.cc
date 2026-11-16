@@ -45,6 +45,7 @@ void PageWorkBudget::Reset() {
   contexts_taken_ = 0;
   contexts_refused_ = 0;
   partition_entries_taken_ = 0;
+  repeated_inline_bytes_taken_ = 0;
 }
 
 bool PageWorkBudget::TakeContext() {
@@ -71,6 +72,18 @@ bool PageWorkBudget::TakePartitionEntries(int64 num_entries) {
     return false;
   }
   partition_entries_taken_ += num_entries;
+  return true;
+}
+
+bool PageWorkBudget::TakeRepeatedInlineBytes(int64 num_bytes) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (num_bytes < 0 || num_bytes > limits_.repeated_inline_bytes -
+                                       repeated_inline_bytes_taken_) {
+    repeated_inline_bytes_taken_ =
+        std::max(repeated_inline_bytes_taken_, limits_.repeated_inline_bytes);
+    return false;
+  }
+  repeated_inline_bytes_taken_ += num_bytes;
   return true;
 }
 
@@ -148,6 +161,11 @@ int64 PageWorkBudget::contexts_refused() const {
 int64 PageWorkBudget::partition_entries_taken() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return partition_entries_taken_;
+}
+
+int64 PageWorkBudget::repeated_inline_bytes_taken() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return repeated_inline_bytes_taken_;
 }
 
 }  // namespace net_instaweb

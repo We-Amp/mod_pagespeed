@@ -60,6 +60,8 @@ const char InPlaceRewriteContext::kInPlaceOversizedOptStream[] =
     "in_place_oversized_opt_stream";
 const char InPlaceRewriteContext::kInPlaceUncacheableRewrites[] =
     "in_place_uncacheable_rewrites";
+const char InPlaceRewriteContext::kInPlaceCorsDeclined[] =
+    "in_place_cors_declined";
 
 InPlaceRewriteResourceSlot::InPlaceRewriteResourceSlot(
     const ResourcePtr& resource)
@@ -99,8 +101,22 @@ RecordingFetch::RecordingFetch(bool proxy_mode, AsyncFetch* async_fetch,
 
 RecordingFetch::~RecordingFetch() {}
 
+bool RecordingFetch::IsCachedResultValid(const ResponseHeaders& headers) {
+  return SharedAsyncFetch::IsCachedResultValid(headers) &&
+         context_->CorsAllowsServing(request_headers(), headers);
+}
+
 void RecordingFetch::HandleHeadersComplete() {
-  can_in_place_rewrite_ = CanInPlaceRewrite();
+  // At the origin, a response that may not answer this CORS request (a
+  // loaded file carries no CORS headers) is left to the server, as one we
+  // do not rewrite is.  Stored copies were already checked as cache hits.
+  // A request refused a stored copy is answered as fetched for it, and is
+  // neither recorded nor optimized.
+  const bool cors_declined =
+      context_->cors_declined_ ||
+      (!proxy_mode_ &&
+       !context_->CorsAllowsServing(request_headers(), *response_headers()));
+  can_in_place_rewrite_ = !cors_declined && CanInPlaceRewrite();
   streaming_ = ShouldStream();
   if (can_in_place_rewrite_) {
     // Save the headers, and wait to finalize them in HandleDone().
@@ -284,6 +300,18 @@ void RecordingFetch::HandleDone(bool success) {
 }
 
 void RecordingFetch::FetchedInputLoaded(bool loaded) {
+  if (loaded && context_->Options()->in_place_cors_guard()) {
+    const ResponseHeaders& input = *resource_->response_headers();
+    // An optimized version built from a response made for one origin would
+    // be shared with every origin, without its Vary: Origin.  And a response
+    // held back for the optimized version is answered with it only if the
+    // module's input allows this request's origin; else as recorded.
+    if (CacheUrlAsyncFetcher::IsCorsSpecificResponse(input) ||
+        (!streaming_ && !CacheUrlAsyncFetcher::CorsAllowsSharedCopy(
+                            request_headers(), input))) {
+      loaded = false;
+    }
+  }
   if (loaded) {
     if (streaming_) {
       context_->DetachFetch();
@@ -341,8 +369,34 @@ bool RecordingFetch::CanInPlaceRewrite() {
   if (!cache_value_writer_.CheckCanCacheElseClear(response_headers())) {
     return false;
   }
+  // A response made for one origin is not the basis of a shared optimized
+  // version (see FetchedInputLoaded).
+  if (context_->Options()->in_place_cors_guard() &&
+      CacheUrlAsyncFetcher::IsCorsSpecificResponse(*response_headers())) {
+    VLOG(2) << "CanInPlaceRewrite false, response is specific to one origin."
+            << " Url: " << resource_->url();
+    return false;
+  }
+
   if (type->type() == ContentType::kCss || type->IsJsLike() ||
       type->IsImage()) {
+    // When proxying, the response was fetched with the client's own request
+    // headers.  One that varies on them beyond Accept-Encoding is passed
+    // through as it is: not rewritten, and not loaded again by the module,
+    // whose copy would then be served to every client in its place.
+    if (proxy_mode_ &&
+        response_headers()->IsProxyCacheable(
+            request_headers()->GetProperties(),
+            ResponseHeaders::kIgnoreVaryOnResources,
+            ResponseHeaders::kNoValidator) &&
+        !response_headers()->IsProxyCacheable(
+            request_headers()->GetProperties(),
+            ResponseHeaders::kRespectVaryOnResources,
+            ResponseHeaders::kNoValidator)) {
+      VLOG(2) << "CanInPlaceRewrite false: the proxied response varies on the "
+              << "request. Url: " << resource_->url();
+      return false;
+    }
     RewriteDriver* driver = context_->Driver();
     HTTPCache* const cache = driver->server_context()->http_cache();
     if (response_headers()->IsProxyCacheable(
@@ -366,7 +420,11 @@ InPlaceRewriteContext::InPlaceRewriteContext(RewriteDriver* driver,
     : SingleRewriteContext(driver, nullptr, new ResourceContext),
       url_(url.data(), url.size()),
       is_rewritten_(true),
-      proxy_mode_(true) {
+      proxy_mode_(true),
+      cors_declined_(false),
+      in_place_cors_declined_(
+          driver->server_context()->statistics()->GetVariable(
+              kInPlaceCorsDeclined)) {
   set_notify_driver_on_fetch_done(true);
   const RewriteOptions* options = Options();
   set_rewrite_uncacheable(options->rewrite_uncacheable_resources() &&
@@ -378,6 +436,7 @@ InPlaceRewriteContext::~InPlaceRewriteContext() {}
 void InPlaceRewriteContext::InitStats(Statistics* statistics) {
   statistics->AddVariable(kInPlaceOversizedOptStream);
   statistics->AddVariable(kInPlaceUncacheableRewrites);
+  statistics->AddVariable(kInPlaceCorsDeclined);
 }
 
 int64 InPlaceRewriteContext::GetRewriteDeadlineAlarmMs() const {
@@ -449,6 +508,59 @@ void InPlaceRewriteContext::Harvest() {
   RewriteDone(kRewriteFailed, 0);
 }
 
+bool InPlaceRewriteContext::CorsAllowsServing(const RequestHeaders* request,
+                                              const ResponseHeaders& response) {
+  // Only a 200 is ever served as an in-place copy; remembered failures and
+  // the not-in-cache answer are left as they are.
+  if (!Options()->in_place_cors_guard() ||
+      response.status_code() != HttpStatus::kOK ||
+      CacheUrlAsyncFetcher::CorsAllowsSharedCopy(request, response)) {
+    return true;
+  }
+  if (!cors_declined_) {
+    cors_declined_ = true;
+    in_place_cors_declined_->Add(1);
+  }
+  return false;
+}
+
+// The fallback lookup for a request carrying Origin: an entry whose own CORS
+// headers do not allow the request's origin is a miss, so the request goes
+// on to StartFetchReconstruction before any response header is written.
+class InPlaceRewriteContext::CorsCheckedFallbackCallback
+    : public OptionsAwareHTTPCacheCallback {
+ public:
+  explicit CorsCheckedFallbackCallback(InPlaceRewriteContext* context)
+      : OptionsAwareHTTPCacheCallback(context->Options(),
+                                      context->Driver()->request_context()),
+        context_(context) {}
+
+  bool IsCacheValid(const GoogleString& key,
+                    const ResponseHeaders& headers) override {
+    return OptionsAwareHTTPCacheCallback::IsCacheValid(key, headers) &&
+           context_->CorsAllowsServing(
+               context_->async_fetch()->request_headers(), headers);
+  }
+
+  void Done(HTTPCache::FindResult find_result) override {
+    context_->Driver()->AddRewriteTask(
+        MakeFunction(context_, &InPlaceRewriteContext::CorsCheckedFallbackDone,
+                     find_result, static_cast<HTTPCache::Callback*>(this)));
+  }
+
+ private:
+  InPlaceRewriteContext* context_;
+
+  CorsCheckedFallbackCallback(const CorsCheckedFallbackCallback&) = delete;
+  CorsCheckedFallbackCallback& operator=(const CorsCheckedFallbackCallback&) =
+      delete;
+};
+
+void InPlaceRewriteContext::CorsCheckedFallbackDone(
+    HTTPCache::FindResult find_result, HTTPCache::Callback* data) {
+  FetchFallbackCacheDone(find_result, data);
+}
+
 void InPlaceRewriteContext::FetchTryFallback(const GoogleString& url,
                                              const StringPiece& hash) {
   const char* request_etag =
@@ -473,7 +585,15 @@ void InPlaceRewriteContext::FetchTryFallback(const GoogleString& url,
       // Save the hash of the resource.
       rewritten_hash_ = hash.as_string();
     }
-    RewriteContext::FetchTryFallback(url, hash);
+    if (Options()->in_place_cors_guard() &&
+        async_fetch()->request_headers()->Has(HttpAttributes::kOrigin)) {
+      FindServerContext()->http_cache()->Find(
+          url, Driver()->CacheFragment(),
+          FindServerContext()->message_handler(),
+          new CorsCheckedFallbackCallback(this));
+    } else {
+      RewriteContext::FetchTryFallback(url, hash);
+    }
   }
 }
 
@@ -723,12 +843,18 @@ void InPlaceRewriteContext::StartFetchReconstruction() {
         // Since we are proxying resources to user, we want to fetch it even
         // if there is a kRecentFetchNotCacheable message in the cache.
         cache_fetcher_->set_ignore_recent_fetch_failed(true);
+        // A stored copy that varies on the request beyond Accept-Encoding is
+        // not served to this client, whoever fetched it; the origin is asked
+        // with the client's own headers instead (see CanInPlaceRewrite).
+        cache_fetcher_->set_respect_vary(true);
       } else {
         cache_fetcher_.reset(Driver()->CreateCacheOnlyFetcher());
         // Since we are not proxying resources to user, we can respect
         // kRecentFetchNotCacheable messages.
         cache_fetcher_->set_ignore_recent_fetch_failed(false);
       }
+      // A response made for this client's origin is not stored for others.
+      cache_fetcher_->set_cors_guard(Options()->in_place_cors_guard());
       cache_fetcher_->Fetch(url_, fetch_message_handler(), fetch);
     } else {
       ServerContext* server_context = resource->server_context();

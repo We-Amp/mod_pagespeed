@@ -226,7 +226,7 @@ class HTTPCacheTest : public testing::Test {
   size_t CacheSizeAfterPut(int cache_compression_level,
                            bool compress_before_put) {
     ResponseHeaders response_headers;
-    PutGzippedEntry("max-age:300", &response_headers, compress_before_put,
+    PutGzippedEntry("max-age=300", &response_headers, compress_before_put,
                     cache_compression_level);
     HTTPValue value;
     response_headers.Clear();
@@ -285,6 +285,49 @@ TEST_F(HTTPCacheTest, FetchedInputMark) {
   Put(kUrl, kFragment, &headers_in, "content");
   ASSERT_EQ(kFoundResult, Find(kUrl, kFragment, &unmarked, &headers_out));
   EXPECT_FALSE(unmarked.IsFetchedInput());
+}
+
+// Every Put other than PutFetchedInput stamps the stored value with the
+// current client-entry generation, and only the stored value: the headers a
+// caller hands in may still be sent to a client.
+TEST_F(HTTPCacheTest, ClientEntryStampStaysOnTheStoredCopy) {
+  for (int compression_level : {0, 9}) {
+    SCOPED_TRACE(compression_level);
+    http_cache_->SetCompressionLevel(compression_level);
+    ResponseHeaders headers_in, headers_out;
+    InitHeaders(&headers_in, "max-age=300");
+    headers_in.Add(HttpAttributes::kContentType, "text/css");
+    headers_in.ComputeCaching();
+
+    // The overload taking the caller's headers.
+    Put(kUrl, kFragment, &headers_in, ".a { color: red; }");
+    EXPECT_FALSE(headers_in.Has(HTTPValue::kClientEntryHeader));
+    HTTPValue found;
+    ASSERT_EQ(kFoundResult, Find(kUrl, kFragment, &found, &headers_out));
+    EXPECT_TRUE(found.IsCurrentClientEntry());
+    EXPECT_FALSE(headers_out.Has(HTTPValue::kClientEntryHeader));
+
+    // The overload taking a value: the caller's value is not stamped either.
+    HTTPValue in;
+    in.SetHeaders(&headers_in);
+    in.Write(".b { color: blue; }", &message_handler_);
+    http_cache_->Put(kUrl2, kFragment, RequestHeaders::Properties(),
+                     kDefaultHttpOptionsForTests, &in, &message_handler_);
+    EXPECT_FALSE(in.IsCurrentClientEntry());
+    HTTPValue found2;
+    ASSERT_EQ(kFoundResult, Find(kUrl2, kFragment, &found2, &headers_out));
+    EXPECT_TRUE(found2.IsCurrentClientEntry());
+
+    // The module's own fetch is not a client entry.
+    http_cache_->PutFetchedInput(kUrl2, kFragment, RequestHeaders::Properties(),
+                                 kDefaultHttpOptionsForTests, &found2,
+                                 &message_handler_);
+    HTTPValue fetched;
+    ASSERT_EQ(kFoundResult, Find(kUrl2, kFragment, &fetched, &headers_out));
+    EXPECT_TRUE(fetched.IsFetchedInput());
+    EXPECT_FALSE(fetched.IsCurrentClientEntry());
+  }
+  http_cache_->SetCompressionLevel(0);
 }
 
 // A marked entry's headers are ready for caching checks once the mark has
@@ -1364,14 +1407,14 @@ TEST_F(HTTPCacheWriteThroughTest, PutGet) {
 // Check size-limits for the small cache
 TEST_F(HTTPCacheWriteThroughTest, SizeLimit) {
   ClearStats();
-  write_through_cache_.set_cache1_limit(183);  // See below.
+  write_through_cache_.set_cache1_limit(203);  // See below.
   ResponseHeaders headers_in;
   InitHeaders(&headers_in, "max-age=300");
 
   // This one will fit. Size:
   // Key: v2/www.test.com/http://www.test.com/1 --- 37 bytes.
-  // Value: 145 bytes
-  // 145 + 37 = 182.
+  // Value: 165 bytes, 20 of them the client-entry generation stamp.
+  // 165 + 37 = 202.
   Put(key_, fragment_, &headers_in, "Name");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));

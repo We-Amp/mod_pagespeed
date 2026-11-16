@@ -31,6 +31,10 @@ struct HttpOptions {
   bool respect_vary;
   // TTL assigned to resources with no explicit caching headers.
   int64 implicit_cache_ttl_ms;
+  // InPlaceCorsGuard: in-place recording skips a response made for one
+  // origin (its Access-Control-Allow-Origin names one, or it varies on
+  // Origin), so it never replaces the entry other requests are served from.
+  bool ipro_cors_guard = true;
 
   // Allow copy and assign.
 };
