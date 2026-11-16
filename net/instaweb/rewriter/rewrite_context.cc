@@ -795,19 +795,16 @@ class RewriteContext::FetchContext {
       // HTML-targeted rewrite already has a way of dealing with slowness, by
       // detaching from rendering.
 
-      // We also do not want nested rewrites to early-return in case of fetches
-      // as it can affect correctness of JS combine, as the names of the
-      // OutputResources, and hence the JS variables may turn out not be
-      // what was expected.
-
       // The exception is the rebuild of one input of a combination that a
       // request is fetching, when the rewrite deadline is negative. Without
       // an alarm that fetch would wait for the rebuild for ever, so it falls
       // back like any other: the combination is made from the unoptimized
-      // input. That is only done when the combination's output does not
-      // depend on the input's content (FetchInputsMayFallBack()), and the
-      // combination of several inputs is never stored in the metadata cache
-      // for a fetch, so the fallback is not remembered.
+      // input. The combination of several inputs is never stored in the
+      // metadata cache for a fetch, so the fallback is not remembered, and
+      // the combined output is private because its input is. Combined
+      // JavaScript names each script after the URL the fetched URL gives it
+      // (JsCombiner::NameUrl), not after the hash of what was rebuilt, so the
+      // fallback does not change what the page evaluates.
       if (!driver->nested_fetch_may_fall_back() ||
           rewrite_context_->GetRewriteDeadlineAlarmMs() >= 0) {
         return;
@@ -836,43 +833,6 @@ class RewriteContext::FetchContext {
                           timer->NowUs() + (deadline_ms * Timer::kMsUs),
                           MakeFunction(this, &FetchContext::HandleDeadline));
     }
-  }
-
-  // Arms the alarm that ends the fetch of a combination whose inputs cannot
-  // fall back (combined JavaScript) with a negative rewrite deadline. It
-  // replaces the wait for ever by an error the client may retry.
-  void SetupCapAlarm(int64 cap_ms) {
-    RewriteDriver* driver = rewrite_context_->Driver();
-    if (deadline_alarm_ != nullptr || detached_) {
-      return;
-    }
-    Timer* timer = rewrite_context_->FindServerContext()->timer();
-    deadline_alarm_ =
-        new QueuedAlarm(driver->scheduler(), driver->rewrite_worker(),
-                        timer->NowUs() + (cap_ms * Timer::kMsUs),
-                        MakeFunction(this, &FetchContext::HandleCap));
-  }
-
-  // Fired by QueuedAlarm in main rewrite thread. The unoptimized original is
-  // no answer here: its content hash, and so the name the combined script
-  // gives it, differs from what the page expects.
-  void HandleCap() {
-    deadline_alarm_ = nullptr;
-    rewrite_context_->DetachFetch();
-    num_deadline_alarm_invocations_->Add(1);
-    handler_->Message(kWarning,
-                      "Waited too long for the inputs of a combined resource "
-                      "with %s; answering 503",
-                      rewrite_context_->id());
-    ResponseHeaders* headers = async_fetch_->response_headers();
-    headers->Clear();
-    headers->SetStatusAndReason(HttpStatus::kUnavailable);
-    headers->Add("Retry-After", "5");
-    headers->Add(HttpAttributes::kCacheControl, "no-cache, no-store");
-    headers->Add(HttpAttributes::kContentType, "text/plain");
-    async_fetch_->HeadersComplete();
-    async_fetch_->Write("Temporarily unavailable, please retry.\n", handler_);
-    rewrite_context_->FetchCallbackDone(false);
   }
 
   // Must be invoked from main rewrite thread.
@@ -2033,8 +1993,8 @@ void RewriteContext::FetchInputs() {
         // When this context combines several inputs for a fetch, the rebuild
         // of an input may be given up on for the unoptimized input, if that
         // does not change the combination's name. See SetupDeadlineAlarm().
-        nested_driver->set_nested_fetch_may_fall_back(
-            IsFetchRewrite() && (num_slots() > 1) && FetchInputsMayFallBack());
+        nested_driver->set_nested_fetch_may_fall_back(IsFetchRewrite() &&
+                                                      (num_slots() > 1));
         RewriteFilter* filter = nullptr;
         // We grab the filter now (and not just call DecodeOutputResource
         // earlier instead of IsPagespeedResource) so we get a filter that's
@@ -3541,12 +3501,6 @@ void RewriteContext::StartFetchReconstruction() {
   // take the lock.
   CheckNotFrozen();
   partitions_->Clear();
-  if ((num_slots() > 1) && !FetchInputsMayFallBack() &&
-      (GetRewriteDeadlineAlarmMs() < 0)) {
-    // Neither a deadline nor a fallback applies to this combination, so
-    // bound the wait by an error that may be retried.
-    fetch_->SetupCapAlarm(CombinedFetchCapMs());
-  }
   FetchInputs();
 }
 
@@ -3739,11 +3693,6 @@ int64 RewriteContext::GetRewriteDeadlineAlarmMs() const {
 
 int64 RewriteContext::NegativeDeadlineFetchWaitMs() const {
   return Driver()->options()->negative_deadline_fetch_wait_ms();
-}
-
-int64 RewriteContext::CombinedFetchCapMs() const {
-  int64 ms = Driver()->options()->blocking_fetch_timeout_ms();
-  return (ms > 0) ? ms : 5 * Timer::kSecondMs;
 }
 
 bool RewriteContext::CreationLockBeforeStartFetch() const {

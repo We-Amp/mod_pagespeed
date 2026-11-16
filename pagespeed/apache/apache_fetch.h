@@ -68,14 +68,6 @@ class ApacheFetch : public AsyncFetch {
   // a reverse-proxy.
   void set_handle_error(bool x) { handle_error_ = x; }
 
-  // With handle_error off, still send a 503 that carries a Retry-After header.
-  // The rewriter answers a fetch it gave up waiting for that way (a combined
-  // script whose inputs are still being optimized); the client is told to
-  // retry, instead of being given a 404 for a resource that exists.
-  void set_send_retryable_unavailable(bool x) {
-    send_retryable_unavailable_ = x;
-  }
-
   // If all calls to an ApacheFetch are on the apache request thread it is safe
   // to set buffered to false.  All calls Write()/Flush() will be passed through
   // to the underlying writer immediately.  Otherwise, leave it as true and they
@@ -146,7 +138,6 @@ class ApacheFetch : public AsyncFetch {
   bool done_ GUARDED_BY(scheduler_->mutex());
   bool wait_called_;
   bool handle_error_;
-  bool send_retryable_unavailable_ = false;
   bool squelch_output_;
   // Whether SendOutHeaders() actually handed headers to the ApacheWriter.
   // False when handle_error_ is false and the response was an error: in
