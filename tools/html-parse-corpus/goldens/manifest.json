@@ -454,13 +454,13 @@
    "input": "seeds/nesting-512.html",
    "input_sha256": "bb0c0efe7c1187902cc42787674a34f6a73083ba45cd5ad5113428b448b90070",
    "status": "ok",
-   "output_sha256": "e5663dff6ff6a96f688881ea1244ad20cb17113e19479bc6536838465f9cbbb5"
+   "output_sha256": "0ebf6d374e9a7975747665ab1b2bdf228f320f53da31aa7dba7798c13d954564"
   },
   {
    "input": "seeds/nesting-513.html",
    "input_sha256": "b11e7f7c2ce9304e408f866368896ec9b48f5bb6bd0789d47c32634b374fd032",
    "status": "ok",
-   "output_sha256": "e5663dff6ff6a96f688881ea1244ad20cb17113e19479bc6536838465f9cbbb5"
+   "output_sha256": "8f3584cede440042f21a1ae39d28dbb46d44f9f81145f7df5f5963b7345ace0c"
   },
   {
    "input": "seeds/new-keywords.html",
