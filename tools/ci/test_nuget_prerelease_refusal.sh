@@ -21,6 +21,10 @@
 #      and only for -pre.<digits>.
 # Then it proves the assertions bite by running them on broken copies.
 #
+# Text matching cannot be complete: this test catches the common ways to widen
+# the real path, not every way. The environment match on the nuget.org Trusted
+# Publishing policy is the stop that does not depend on this file.
+#
 # Run: tools/ci/test_nuget_prerelease_refusal.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,7 +75,7 @@ jobs, cur, injobs = {}, None, False
 for l in text:
     if l == "jobs:": injobs = True; continue
     if not injobs: continue
-    m = re.match(r"^  ([a-z0-9][a-z0-9-]*):\s*$", l)
+    m = re.match(r"^  [\"']?([A-Za-z_][A-Za-z0-9_-]*)[\"']?:\s*(#.*)?$", l)
     if m: cur = m.group(1); jobs[cur] = {"needs": [], "env": False, "if": "", "text": ""}; continue
     if cur is None: continue
     jobs[cur]["text"] += l + "\n"
@@ -120,6 +124,38 @@ if envjobs != sorted(ENV): errs.append("the jobs naming an environment are %s, e
 for j, want in EXPECT_IF.items():
     got = re.sub(r"\s+", " ", re.sub(r"^\s*if:\s*(>-\s*)?", "", jobs.get(j, {"if": ""})["if"])).strip()
     if got != want: errs.append("%s: its if: is %r, expected %r" % (j, got, want))
+# nuget push and NuGet/login live in publish-nuget and nowhere else in the lane.
+def codeonly(t): return "\n".join(l for l in t.split("\n") if not l.lstrip().startswith("#"))
+for j, d in jobs.items():
+    if j == "publish-nuget": continue
+    if re.search(r"nuget\s+push|nuget/login", codeonly(d["text"]), re.I): errs.append("%s: runs nuget push or NuGet/login (only publish-nuget may)" % j)
+pn = codeonly(jobs.get("publish-nuget", {"text": ""})["text"])
+if not re.search(r"nuget\s+push", pn, re.I) or "nuget/login@" not in pn.lower(): errs.append("publish-nuget: no longer holds nuget push and NuGet/login (test needs updating)")
+# publish-nuget writes its steps and env out: no YAML anchor or alias there. The
+# other environment jobs may define only the shared package step list and env.
+ALLOWED_ANCHORS = {"package-steps", "package-env"}
+for j in ENV:
+    for m in re.finditer(r"^    [A-Za-z_][A-Za-z0-9_-]*:\s*[&*]([A-Za-z0-9_-]+)", jobs.get(j, {"text": ""})["text"], re.M):
+        if j == "publish-nuget" or m.group(1) not in ALLOWED_ANCHORS: errs.append("%s: uses the YAML anchor or alias %s" % (j, m.group(1)))
+# publish-nuget has no YAML anchor, alias or merge key anywhere (step-level and
+# scalar-level included): nothing it runs can be defined once and reused elsewhere.
+ANCHOR = re.compile(r"^\s*(-\s+)?([\w-]+:\s*)?(<<:\s*)?[&*][A-Za-z_][\w-]*(\s|$)", re.M)
+for m in ANCHOR.finditer(jobs.get("publish-nuget", {"text": ""})["text"]):
+    errs.append("publish-nuget: a YAML anchor, alias or merge key: %s" % m.group(0).strip())
+# every environment job names exactly the release environment
+for j in ENV:
+    if not re.search(r"^    environment:\s*release\s*(#.*)?$", jobs.get(j, {"text": ""})["text"], re.M): errs.append("%s: its environment is not exactly `release`" % j)
+# the literal real output of ref-guard, and nothing that could skip or soften the guard
+rg = jobs.get("ref-guard", {"text": ""})["text"]
+if "\n      real: ${{ steps.mode.outputs.real }}\n" not in "\n" + rg: errs.append("ref-guard: the real output is not exactly steps.mode.outputs.real")
+if '            echo "real=$REAL"\n' not in rg: errs.append("ref-guard: the mode step does not write real=$REAL")
+for j in ("event-guard", "ref-guard") + ENV:
+    jt = jobs.get(j, {"text": ""})["text"]
+    if re.search(r"^    continue-on-error:", jt, re.M): errs.append("%s: has continue-on-error" % j)
+for j in ("event-guard", "ref-guard"):
+    jt = jobs.get(j, {"text": ""})["text"]
+    if re.search(r"^    if:", jt, re.M): errs.append("%s: has a job-level if" % j)
+    if re.search(r"^(        |      - )(if|continue-on-error):", jt, re.M): errs.append("%s: a step has if: or continue-on-error" % j)
 for j in ("vendor", "vendor-hosted"):  # the version step reads REAL_RUN
     if "REAL_RUN: ${{ needs.ref-guard.outputs.real }}" not in jobs.get(j, {"text": ""})["text"]: errs.append("%s: REAL_RUN is not passed to the job" % j)
 c = open(caller).read()
@@ -134,7 +170,7 @@ for f in sorted(glob.glob(wfdir + "/*.yml")):
     code = "\n".join(l for l in t.split("\n") if not l.lstrip().startswith("#"))
     if b != "release.yml" and re.search(r"^    tags:", code, re.M): errs.append("%s has a tag trigger" % b)
     if b not in LANES and re.search(r"^\s*environment:", code, re.M): errs.append("%s names an environment" % b)
-    if b != "pipeline-release-nuget.yml" and re.search(r"nuget\s+push|NuGet/login|api\.nuget\.org/v3/index\.json[^\n]*push", code):
+    if b != "pipeline-release-nuget.yml" and re.search(r"nuget\s+push|nuget/login|api\.nuget\.org/v3/index\.json[^\n]*push", code, re.I):
         errs.append("%s pushes to nuget.org" % b)
     if b not in ("release.yml",) and b != "pipeline-release-nuget.yml" and re.search(r"uses:\s*\S*pipeline-release-nuget", code): errs.append("%s calls the release lane" % b)
 print("\n".join(errs))
@@ -167,6 +203,11 @@ modes() {
   done
   for t in v2.8.0-pre.1 v2.8.0-rc.1 v2.8.0+pre.1; do
     try ok workflow_dispatch true "refs/tags/$t" "dispatch dry run of $t" false
+  done
+  # dry_run is real only when it is exactly false: an empty or odd value is a dry run
+  for t in v2.8.0-pre.1 v2.8.0; do
+    try ok workflow_dispatch ''      "refs/tags/$t" "dispatch with an empty dry_run of $t" false
+    try ok workflow_dispatch maybe   "refs/tags/$t" "dispatch with dry_run=maybe of $t" false
   done
   try ok push ''    refs/tags/v2.8.0         'push of a release tag' true
   try ok workflow_dispatch false refs/tags/v2.8.0 'dispatch dry_run false of a release tag' true
@@ -227,6 +268,7 @@ wants() {
   tryw ok yes v2.8.0       false module-v2.7.0 'dry run, another release: note'
   tryw ok no  v2.8.0       true  module-v2.8.0 'real run, module-v<X>'
   tryw no no  v2.8.0       true  module-v2.7.0 'real run, another release'
+  tryw no no  v2.8.0-pre.1 true  module-v2.8.0 'real run of a prerelease tag never takes the base release'
   [ "$bad" = 0 ]
 }
 
@@ -240,7 +282,8 @@ all() { local root="$1" n=0 o
 fail=0
 if out="$(all "$ROOT")"; then echo "ok   prerelease refusal, job dependencies and version guard hold"; structure "$ROOT" 2>&1 >/dev/null | sed 's/^/     /'; else echo "FAIL"; echo "$out" | sed 's/^/     /'; fail=1; fi
 
-mutate() { # mutate <desc> <file> <python expression over s>; the checks must fail
+mutate() { # mutate <desc> <file> <python expression over s>; the checks must fail (permit: must pass)
+  local want=fail; [ "${MUT_PERMIT:-}" = 1 ] && want=pass
   local d="$W/m"; rm -rf "$d"; mkdir -p "$d/.github/workflows"
   cp "$ROOT"/.github/workflows/*.yml "$d/.github/workflows/"
   python3 -I - "$d/$2" "$3" <<'PY'
@@ -257,7 +300,12 @@ open(p, "w").write(s2)
 sys.exit(0 if s2 != s else 3)
 PY
   [ $? = 0 ] || { echo "FAIL mutation did not change anything: $1"; fail=1; return; }
-  if all "$d" >/dev/null 2>&1; then echo "FAIL not caught: $1"; fail=1; else echo "ok   caught: $1"; fi
+  local why
+  if why="$(all "$d" 2>&1)"; then
+    if [ "$want" = pass ]; then echo "ok   allowed: $1"; else echo "FAIL not caught: $1"; fail=1; fi
+  else
+    if [ "$want" = pass ]; then echo "FAIL wrongly refused: $1  <-  $(printf '%s' "$why" | head -n 1 | cut -c1-150)"; fail=1; else echo "ok   caught: $1  <-  $(printf '%s' "$why" | head -n 1 | cut -c1-150)"; fi
+  fi
 }
 COND='! [[ "${REF#refs/tags/}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
 mutate 'the refusal removed' $LANE "s.replace('[ \"\$REAL\" = true ] && $COND', 'false')"
@@ -280,9 +328,10 @@ mutate 'the dry-run base rule removed' $LANE "s.replace('EXPECTED=\"\${EXPECTED%
 mutate 'the tag regex widened to any -pre suffix' $LANE "s.replace('(-pre\\\\.(0|[1-9][0-9]*))?\$ ]]; then\n            echo \"::error::release tag', '(-pre\\\\..*)?\$ ]]; then\n            echo \"::error::release tag')"
 mutate '-pre.01 allowed' $LANE "s.replace('(0|[1-9][0-9]*)', '[0-9]+')"
 mutate 'build metadata allowed in the tag' $LANE "s.replace('^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-pre', '^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(\\\\+[0-9a-z.]+)?(-pre')"
-mutate 'the tag regex removed' $LANE "s.replace('if ! [[ \"\$RELEASE_TAG\" =~', 'if false \&\& ! [[ \"\$RELEASE_TAG\" =~')"
+mutate 'the tag regex removed' $LANE "s.replace('if ! [[ \"\$RELEASE_TAG\" =~', 'if false && ! [[ \"\$RELEASE_TAG\" =~')"
 
 mutate 'the base rule applied to real runs too' $LANE "s.replace('if [ \"\$REAL_RUN\" != true ]; then\n            EXPECTED', 'if true; then\n            EXPECTED')"
+mutate 'the WANT rule applied to real runs' $LANE "s.replace('if [ \"\$REAL_RUN\" != true ]; then WANT', 'if true; then WANT')"
 mutate 'the WANT rule removed' $LANE "s.replace('if [ \"\$REAL_RUN\" != true ]; then WANT=\"module-\${RELEASE_TAG%%-pre.*}\"; fi', ':')"
 mutate 'a || term added to the package condition' $LANE "setif(s, 'package', \"\${{ !cancelled() || needs.ref-guard.outputs.real == 'true' }}\")"
 mutate '|| failure() added to publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace(\"needs.attach-signature.result == 'success' }}\", \"needs.attach-signature.result == 'success' || failure() }}\", 1))"
@@ -296,4 +345,33 @@ mutate 'a new workflow on v* tags that pushes without an environment' .github/wo
 mutate 'dry_run: false hard-coded in release.yml' $CALLER "s.replace(\"      dry_run: \${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n      auto_promote:\", '      dry_run: false\n      auto_promote:')"
 mutate 'an extra release.yml job calling the lane' $CALLER "s + '\n  again:\n    if: startsWith(github.ref, \"refs/tags/v\")\n    uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-nuget.yml@main\n    with:\n      dry_run: false\n'"
 mutate 'the v* trigger changed' $CALLER "s.replace(\"'v*'\", \"'w*'\")"
+mutate 'nuget push added to another job' $LANE "jobedit(s, 'security-gates', lambda t: t.replace('    steps:', '    steps:\\n      - run: dotnet nuget push x.nupkg', 1))"
+mutate 'NuGet/login added to another job' $LANE "jobedit(s, 'package', lambda t: t.replace('    steps:', '    steps:\\n      - uses: NuGet/login@v1', 1))"
+mutate 'publish-nuget environment changed' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('    environment: release', '    environment: staging', 1))"
+mutate 'sign-windows environment changed' $LANE "jobedit(s, 'sign-windows', lambda t: t.replace('    environment: release', '    environment: staging', 1))"
+mutate 'the real output hard-coded' $LANE "s.replace('      real: \${{ steps.mode.outputs.real }}', \"      real: 'true'\")"
+mutate 'the real output read from another step' $LANE "s.replace('      real: \${{ steps.mode.outputs.real }}', '      real: \${{ steps.guard.outputs.real }}')"
+mutate 'dry_run compared with != true' $LANE "s.replace('[ \"\$DRY_RUN_INPUT\" = false ]', '[ \"\$DRY_RUN_INPUT\" != true ]')"
+mutate 'continue-on-error on the mode step' $LANE "s.replace('        id: mode\n', '        id: mode\n        continue-on-error: true\n')"
+mutate 'continue-on-error on the ref-guard job' $LANE "jobedit(s, 'ref-guard', lambda t: t.replace('    runs-on: ubuntu-24.04', '    runs-on: ubuntu-24.04\n    continue-on-error: true', 1))"
+mutate 'continue-on-error on the event-guard job' $LANE "jobedit(s, 'event-guard', lambda t: t.replace('    runs-on: ubuntu-24.04', '    runs-on: ubuntu-24.04\n    continue-on-error: true', 1))"
+mutate 'continue-on-error on publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('    timeout-minutes: 15', '    timeout-minutes: 15\n    continue-on-error: true', 1))"
+mutate 'if: false on the mode step' $LANE "s.replace('        id: mode\n', '        id: mode\n        if: false\n')"
+mutate 'if on the guard step' $LANE "s.replace('      - id: guard\n', '      - id: guard\n        if: false\n')"
+mutate 'a job-level if on ref-guard' $LANE "jobedit(s, 'ref-guard', lambda t: t.replace('    runs-on: ubuntu-24.04', '    runs-on: ubuntu-24.04\n    if: false', 1))"
+PUSHJOB='\n  %s:%s\n    needs: ref-guard\n    runs-on: ubuntu-latest\n    steps:\n      - run: dotnet nuget push x.nupkg\n'
+mutate 'a pushing job named extra_job after publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t + '$PUSHJOB' % ('extra_job', ''))"
+mutate 'a pushing job named Extra after publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t + '$PUSHJOB' % ('Extra', ''))"
+mutate 'a pushing job with a trailing comment after publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t + '$PUSHJOB' % ('extra', ' # x'))"
+mutate 'nuget/login in lower case in another job' $LANE "jobedit(s, 'security-gates', lambda t: t.replace('    steps:', '    steps:\\n      - uses: nuget/login@v1', 1))"
+mutate 'NUGET/LOGIN in upper case in another job' $LANE "jobedit(s, 'security-gates', lambda t: t.replace('    steps:', '    steps:\\n      - uses: NUGET/LOGIN@v1', 1))"
+mutate 'a Nuget Push in mixed case in another job' $LANE "jobedit(s, 'security-gates', lambda t: t.replace('    steps:', '    steps:\\n      - run: dotnet Nuget Push x.nupkg', 1))"
+mutate 'an anchor on the steps of publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('    steps:', '    steps: &pub', 1)) + '\\n  extra:\\n    needs: ref-guard\\n    runs-on: ubuntu-latest\\n    steps: *pub\\n'"
+mutate 'a step with if: as its first key on the guard' $LANE "s.replace('      - id: guard\\n', '      - if: false\\n        id: guard\\n')"
+mutate 'a step with continue-on-error as its first key' $LANE "s.replace('      - id: guard\\n', '      - continue-on-error: true\\n        id: guard\\n')"
+mutate 'an anchor on the push step with an alias in a new job' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('      - name: Push packages to nuget.org', '      - &pushstep\\n        name: Push packages to nuget.org', 1)) + '\\n  extra:\\n    needs: ref-guard\\n    runs-on: ubuntu-latest\\n    steps:\\n      - *pushstep\\n'"
+mutate 'an anchor on the push command with an alias in a new job' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('        run: |\\n          set -euo pipefail\\n          for pkg', '        run: &r |\\n          set -euo pipefail\\n          for pkg', 1)) + '\\n  extra:\\n    needs: ref-guard\\n    runs-on: ubuntu-latest\\n    steps:\\n      - run: *r\\n'"
+mutate 'a quoted job name after publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t + '\\n  \\x22extra\\x22:\\n    needs: ref-guard\\n    runs-on: ubuntu-latest\\n    steps:\\n      - run: dotnet nuget push x.nupkg\\n')"
+mutate 'a single-quoted job name after publish-nuget' $LANE "jobedit(s, 'publish-nuget', lambda t: t + \"\\n  'extra':\\n    needs: ref-guard\\n    runs-on: ubuntu-latest\\n    steps:\\n      - run: dotnet nuget push x.nupkg\\n\")"
+MUT_PERMIT=1 mutate 'a trailing comment on an environment line' $LANE "jobedit(s, 'publish-nuget', lambda t: t.replace('    environment: release', '    environment: release # the protected environment', 1))"
 [ "$fail" = 0 ] && echo PASS || { echo FAILED; exit 1; }
