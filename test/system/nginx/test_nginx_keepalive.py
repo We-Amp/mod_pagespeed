@@ -548,5 +548,65 @@ class TestKeepaliveConnectionReuse:
         assert_http_status(response2, 200, "Second request on same connection failed")
 
 
+@pytest.mark.nginx_only
+class TestKeepaliveAdminPost:
+    """Admin pages answered to a POST release their connection like a GET.
+
+    An admin POST is answered after its body has been read. The request must
+    then be finished as usual, so the connection serves the next request.
+    """
+
+    @pytest.mark.requires_module
+    def test_request_after_admin_post_on_same_connection(
+        self,
+        server_config,
+        example_root: str,
+    ):
+        """Each admin POST is followed by a GET on the same connection.
+
+        The POSTs need not succeed: whatever the admin page answers, the
+        connection must stay usable and the GET after it must be answered.
+        """
+        # Bounded wait: an unanswered request should fail the test quickly.
+        conn = KeepaliveConnection(
+            host=server_config.host, port=server_config.port, timeout=10.0
+        )
+        conn.connect()
+        try:
+            posts = [
+                (f"{server_config.admin_path}/", b""),
+                (f"{server_config.admin_path}/config", b"a=b"),
+                (server_config.stats_path, b""),
+            ]
+            for index, (path, body) in enumerate(posts):
+                post = conn.request(
+                    "POST",
+                    path,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Content-Length": str(len(body)),
+                    },
+                    body=body,
+                )
+                assert post.status < 500, (
+                    f"POST {path} answered {post.status}"
+                )
+                try:
+                    response = conn.get(
+                        f"{example_root}/?PageSpeed=off&after_post={index}"
+                    )
+                except (OSError, http.client.HTTPException) as error:
+                    pytest.fail(
+                        f"the request after POST {path} on the same "
+                        f"connection was not answered: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                assert_http_status(
+                    response, 200, f"request after POST {path}"
+                )
+        finally:
+            conn.close()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

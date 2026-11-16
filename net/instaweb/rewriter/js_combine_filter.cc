@@ -104,8 +104,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
     if (num_urls() == 0) {
       combined_charset_ = this_charset;
     } else if (!StringCaseEqual(combined_charset_, this_charset)) {
+      // The charsets come from the page; the reason is logged, so escape
+      // them to keep it within one log message.
       *failure_reason = StrCat("Charset mismatch; combination thus far is ",
-                               combined_charset_, " file is ", this_charset);
+                               CEscape(combined_charset_), " file is ",
+                               CEscape(this_charset));
       return false;
     }
 
@@ -469,11 +472,6 @@ class JsCombineFilter::Context : public RewriteContext {
   // combination (see JsCombiner::WriteUnavailablePiece), so the rest of the
   // page's scripts still run.
   bool FetchCombinesAvailableInputs() const override { return true; }
-
-  // The page evaluates each script under a variable named after the script's
-  // rewritten URL, which contains its content hash. The unoptimized original
-  // has another hash, so a combination made from it would not run.
-  bool FetchInputsMayFallBack() const override { return false; }
 
   // Which scripts may be combined depends on the page's charset and on each
   // <script> element's charset attribute, not only on the scripts, so pages

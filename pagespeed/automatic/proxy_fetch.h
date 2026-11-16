@@ -69,10 +69,17 @@ class ProxyFetchFactory {
 
   // Convenience method that calls CreateNewProxyFetch and then StartFetch() on
   // the resulting fetch.
+  //
+  // Pass is_proxy_mapped = true when the request is served through
+  // MapProxyDomain (see DomainLawyer::MapOriginUrl), so the content comes from
+  // a different host than the one the client addressed.  The caller has to say
+  // so, because it may pass the already mapped url.  The client's cookies and
+  // credentials are then not sent to that host, and that host's cookies are
+  // not passed back to the client.
   void StartNewProxyFetch(
       const GoogleString& url, AsyncFetch* async_fetch, RewriteDriver* driver,
       ProxyFetchPropertyCallbackCollector* property_callback,
-      AsyncFetch* original_content_fetch);
+      AsyncFetch* original_content_fetch, bool is_proxy_mapped = false);
 
   // Creates a new proxy fetch and passes it to the fetcher to start it.  If the
   // UrlNamer doesn't authorize this url it calls CleanUp() on the driver,
@@ -83,10 +90,11 @@ class ProxyFetchFactory {
   // StartNewProxyFetch() instead. CreateNewProxyFetch is for callers who will
   // not be calling StartFetch() and instead will call HeadersComplete(),
   // Write(), Flush(), and Done() as they get data in from another source.
+  // is_proxy_mapped is as for StartNewProxyFetch().
   ProxyFetch* CreateNewProxyFetch(
       const GoogleString& url, AsyncFetch* async_fetch, RewriteDriver* driver,
       ProxyFetchPropertyCallbackCollector* property_callback,
-      AsyncFetch* original_content_fetch);
+      AsyncFetch* original_content_fetch, bool is_proxy_mapped = false);
 
   // Initiates the PropertyCache lookup.  See ngx_pagespeed.cc or
   // proxy_interface.cc for example usage.
@@ -374,8 +382,9 @@ class ProxyFetch : public SharedAsyncFetch {
       ProxyFetchPropertyCallbackCollector* collector);
 
   // If cross_domain is true, we're requested under a domain different from
-  // the underlying host, using proxy mode in UrlNamer.
-  ProxyFetch(const GoogleString& url, bool cross_domain,
+  // the underlying host, using proxy mode in UrlNamer.  If is_proxy_mapped is
+  // true, the underlying host differs because of MapProxyDomain.
+  ProxyFetch(const GoogleString& url, bool cross_domain, bool is_proxy_mapped,
              ProxyFetchPropertyCallbackCollector* property_cache_callback,
              AsyncFetch* async_fetch, AsyncFetch* original_content_fetch,
              RewriteDriver* driver, ServerContext* server_context, Timer* timer,
@@ -446,6 +455,10 @@ class ProxyFetch : public SharedAsyncFetch {
   // True if we're handling a cross-domain request in proxy mode, which
   // should do some additional checking.
   bool cross_domain_;
+
+  // True if the content comes from another host because of MapProxyDomain.
+  // Cookies and credentials must not cross over, as for cross_domain_.
+  bool is_proxy_mapped_;
 
   // Does page claim to be "Content-Type: text/html"? (It may be lying)
   bool claims_html_;

@@ -106,7 +106,7 @@ ProxyFetchFactory::~ProxyFetchFactory() {
 ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
     const GoogleString& url_in, AsyncFetch* async_fetch, RewriteDriver* driver,
     ProxyFetchPropertyCallbackCollector* property_callback,
-    AsyncFetch* original_content_fetch) {
+    AsyncFetch* original_content_fetch, bool is_proxy_mapped) {
   const GoogleString* url_to_fetch = &url_in;
 
   // Check whether this an encoding of a non-rewritten resource served
@@ -146,16 +146,21 @@ ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
     }
   }
 
-  ProxyFetch* fetch = new ProxyFetch(
-      *url_to_fetch, cross_domain, property_callback, async_fetch,
-      original_content_fetch, driver, server_context_, timer_, this);
+  ProxyFetch* fetch =
+      new ProxyFetch(*url_to_fetch, cross_domain, is_proxy_mapped,
+                     property_callback, async_fetch, original_content_fetch,
+                     driver, server_context_, timer_, this);
   if (cross_domain) {
     // If we're proxying resources from a different domain, the host header is
     // likely set to the proxy host rather than the origin host.  Depending on
     // the origin, this will not work: it will not expect to see
     // the Proxy Host in its headers.
     fetch->request_headers()->RemoveAll(HttpAttributes::kHost);
-
+  }
+  if (cross_domain || is_proxy_mapped) {
+    // The browser attached this site's cookies and credentials to the
+    // request, but the content comes from another host.
+    //
     // The domain is also supposed to be cookieless, so enforce not
     // sending any cookies to origin, as a precaution against contamination.
     fetch->request_headers()->RemoveAll(HttpAttributes::kCookie);
@@ -181,9 +186,10 @@ ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
 void ProxyFetchFactory::StartNewProxyFetch(
     const GoogleString& url_in, AsyncFetch* async_fetch, RewriteDriver* driver,
     ProxyFetchPropertyCallbackCollector* property_callback,
-    AsyncFetch* original_content_fetch) {
-  ProxyFetch* fetch = CreateNewProxyFetch(
-      url_in, async_fetch, driver, property_callback, original_content_fetch);
+    AsyncFetch* original_content_fetch, bool is_proxy_mapped) {
+  ProxyFetch* fetch =
+      CreateNewProxyFetch(url_in, async_fetch, driver, property_callback,
+                          original_content_fetch, is_proxy_mapped);
   if (fetch != nullptr) {
     fetch->StartFetch();
   }
@@ -494,7 +500,7 @@ void ProxyFetchPropertyCallbackCollector::ExecuteAddPostLookupTask(
 }
 
 ProxyFetch::ProxyFetch(
-    const GoogleString& url, bool cross_domain,
+    const GoogleString& url, bool cross_domain, bool is_proxy_mapped,
     ProxyFetchPropertyCallbackCollector* property_cache_callback,
     AsyncFetch* async_fetch, AsyncFetch* original_content_fetch,
     RewriteDriver* driver, ServerContext* server_context, Timer* timer,
@@ -504,6 +510,7 @@ ProxyFetch::ProxyFetch(
       server_context_(server_context),
       timer_(timer),
       cross_domain_(cross_domain),
+      is_proxy_mapped_(is_proxy_mapped),
       claims_html_(false),
       started_parse_(false),
       parse_text_called_(false),
@@ -759,7 +766,7 @@ void ProxyFetch::HandleHeadersComplete() {
     original_content_fetch_->HeadersComplete();
   }
 
-  bool sanitize = cross_domain_;
+  bool sanitize = cross_domain_ || is_proxy_mapped_;
   if (claims_html_ && !server_context_->ProxiesHtml() && !trusted_input_) {
     response_headers()->SetStatusAndReason(HttpStatus::kForbidden);
     sanitize = true;

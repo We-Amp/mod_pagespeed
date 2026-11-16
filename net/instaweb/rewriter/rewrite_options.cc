@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_rw_lock.h"
 #include "pagespeed/kernel/base/stl_util.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/purge_set.h"
@@ -259,6 +260,10 @@ const char RewriteOptions::kObliviousPagespeedUrls[] = "ObliviousPagespeedUrls";
 const char RewriteOptions::kOptionCookiesDurationMs[] =
     "OptionCookiesDurationMs";
 const char RewriteOptions::kOverrideCachingTtlMs[] = "OverrideCachingTtlMs";
+const char RewriteOptions::kPngLossyFallbackMaxSizePercent[] =
+    "PngLossyFallbackMaxSizePercent";
+const char RewriteOptions::kPngLossyFallbackMinBytesPerMegapixel[] =
+    "PngLossyFallbackMinBytesPerMegapixel";
 const char RewriteOptions::kPreserveImageProvenance[] =
     "PreserveImageProvenance";
 const char RewriteOptions::kPreserveSubresourceHints[] =
@@ -528,6 +533,13 @@ const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
 // Animations with more frames than this are served unconverted. 0 or a
 // negative value disables the cap.
 const int64 RewriteOptions::kDefaultImageMaxAnimatedFrames = 200;
+
+// The PNG lossy fallback is off (0) by default. When enabled, the lossy WebP
+// trial runs for a lossless WebP of at least 250000 bytes per megapixel
+// (2 bits per pixel).
+const int64 RewriteOptions::kDefaultPngLossyFallbackMaxSizePercent = 0;
+const int64 RewriteOptions::kDefaultPngLossyFallbackMinBytesPerMegapixel =
+    250000;
 
 // AVIF quality defaults. -1 falls back to
 // ImageRecompressionQuality, mirroring the WebP defaults; the encode-side
@@ -2214,8 +2226,10 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
       }
     } else {
       if (handler != nullptr) {
+        // The name may come from a request: escape it so that it stays
+        // within this one log message.
         handler->Message(kWarning, "Invalid filter name: %s",
-                         option.as_string().c_str());
+                         CEscape(option).c_str());
       }
       ret = false;
     }
@@ -2451,6 +2465,13 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromQuery(
 }
 
 RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromRemoteConfig(
+    StringPiece name, StringPiece value) {
+  GoogleString error_detail;
+  return SetOptionFromNameInternal(name, value, RewriteOptions::kDirectoryScope,
+                                   &error_detail);
+}
+
+RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromUrlSegment(
     StringPiece name, StringPiece value) {
   GoogleString error_detail;
   return SetOptionFromNameInternal(name, value, RewriteOptions::kDirectoryScope,

@@ -114,6 +114,11 @@ const char kResourceUrlYes[] = "<YES>";
 // instance).
 const size_t kMaxPostSizeBytes = 131072;
 
+// Request note left when a .pagespeed. resource fetch was refused with 403
+// (e.g. its URL signature does not verify) and nothing was written to the
+// client: the handler then returns HTTP_FORBIDDEN.
+const char kPagespeedForbiddenNote[] = "mod_pagespeed_forbidden";
+
 }  // namespace
 
 // Declared extern in instaweb_handler.h; defined outside the anonymous
@@ -446,7 +451,6 @@ void InstawebHandler::HandleAsPagespeedResource() {
   // buffered path did; ApacheFetch must not emit the failed fetch's
   // headers or body.
   fetch_->set_handle_error(false);
-  fetch_->set_send_retryable_unavailable(true);
   DisownDriver();
 
   StreamingPagespeedResourceFetch streaming_fetch(request_, fetch_);
@@ -473,7 +477,12 @@ void InstawebHandler::HandleAsPagespeedResource() {
   WaitForFetch();
 
   if (!fetch_->status_ok()) {
-    if (!fetch_->response_committed()) {
+    if (!fetch_->response_committed() &&
+        fetch_->response_headers()->status_code() == HttpStatus::kForbidden) {
+      // The resource fetch refused the request (e.g. an invalid URL
+      // signature): let the handler return HTTP_FORBIDDEN.
+      apr_table_set(request_->notes, kPagespeedForbiddenNote, "1");
+    } else if (!fetch_->response_committed()) {
       // Nothing was sent to the client: with handle_error disabled,
       // ApacheFetch suppresses all output for error responses.  Count and
       // log the 404 (resource_404_count) and let the handler return
@@ -1174,7 +1183,7 @@ bool InstawebHandler::HandleAsProxy() {
     fetch_->set_strip_cookies(true);
     DisownDriver();
     server_context_->proxy_fetch_factory()->StartNewProxyFetch(
-        mapped_url, fetch_, driver, nullptr, nullptr);
+        mapped_url, fetch_, driver, nullptr, nullptr, is_proxy);
     WaitForFetch();
     return true;  // handled
   }
@@ -1878,6 +1887,10 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
   if (ret == APACHE_OK &&
       apr_table_get(request->notes, kPagespeedNotFoundNote) != nullptr) {
     ret = HTTP_NOT_FOUND;
+  }
+  if (ret == APACHE_OK &&
+      apr_table_get(request->notes, kPagespeedForbiddenNote) != nullptr) {
+    ret = HTTP_FORBIDDEN;
   }
   return ret;
 }

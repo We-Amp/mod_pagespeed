@@ -435,6 +435,13 @@ class RewriteDriver : public HtmlParse {
   OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
                                          RewriteFilter** filter) const;
 
+  // As above, and sets *invalid_signature to whether the URL decoded as a
+  // .pagespeed. resource but was refused because its URL signature did not
+  // verify (UrlSigningKey set, AcceptInvalidSignatures off).
+  OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
+                                         RewriteFilter** filter,
+                                         bool* invalid_signature) const;
+
   // As above, but does not actually create a resource object,
   // and instead outputs the decoded information into the various out
   // parameters. Returns whether decoding successful or not.
@@ -1217,8 +1224,8 @@ class RewriteDriver : public HtmlParse {
 
   // A nested driver that rebuilds one input of a combination fetched by a
   // request may stop waiting for that rebuild and serve the unoptimized input
-  // (see RewriteContext::FetchContext::SetupDeadlineAlarm). The context that
-  // makes the nested driver says whether that is safe for its output.
+  // (see RewriteContext::FetchContext::SetupDeadlineAlarm). The combination
+  // is then made from the original input; it is private and not stored.
   bool nested_fetch_may_fall_back() const {
     return nested_fetch_may_fall_back_;
   }

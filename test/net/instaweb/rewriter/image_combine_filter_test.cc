@@ -38,6 +38,7 @@
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/oob_slot_index_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 
@@ -912,6 +913,44 @@ TEST_F(CssImageCombineTest, CombineManyFiles) {
   result.append("</style></head>");
 
   ValidateExpected("manymanyimages", html, result);
+}
+
+// Once a sprite is full, later images are not offered to it again: each
+// full sprite refuses one image, however many images follow it.
+TEST_F(CssImageCombineTest, FullSpriteIsNotOfferedLaterImages) {
+  // Same layout as CombineManyFiles: 100 images fill two sprites of 47 and
+  // leave 6 for a third.
+  const int kNumImages = 100;
+  GoogleString html = "<head><style>";
+  for (int i = 0; i < kNumImages; ++i) {
+    GoogleString url =
+        absl::StrFormat("%s%02d%s", kTestDomain, i, kBikePngFile);
+    AddFileToMockFetcher(url, kBikePngFile, kContentTypePng, 100);
+    html.append(absl::StrFormat(
+        "#d%d{background:url(%s) 0 0;width:10px;height:10px}", i, url.c_str()));
+  }
+  html.append("</style></head>");
+
+  // The test factory gives drivers a MockMessageHandler.
+  MockMessageHandler* handler =
+      static_cast<MockMessageHandler*>(rewrite_driver()->message_handler());
+  handler->AddPatternToSkipPrinting("*combined url too long*");
+  const int refused_before = handler->SkippedMessagesOfType(kInfo);
+  Parse("full_sprites", html);
+  GoogleString output = output_buffer_;
+
+  // Three sprites were written.
+  StringSet sprites;
+  for (size_t pos = output.find(".pagespeed.is."); pos != GoogleString::npos;
+       pos = output.find(".pagespeed.is.", pos + 1)) {
+    size_t start = output.rfind("url(", pos);
+    ASSERT_NE(GoogleString::npos, start);
+    sprites.insert(output.substr(start, pos - start));
+  }
+  EXPECT_EQ(3, sprites.size());
+
+  // The first two sprites refused one image each; the third had room.
+  EXPECT_EQ(2, handler->SkippedMessagesOfType(kInfo) - refused_before);
 }
 
 TEST_F(CssImageCombineTest, SpritesBrokenUp) {

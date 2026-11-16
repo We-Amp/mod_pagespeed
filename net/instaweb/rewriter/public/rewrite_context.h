@@ -702,19 +702,6 @@ class RewriteContext {
   // deadline based on rewrite type, e.g., IPRO vs. HTML-path.
   virtual int64 GetRewriteDeadlineAlarmMs() const;
 
-  // A fetch of a combination that has to rebuild its inputs may serve the
-  // unoptimized original of an input that is slow to rebuild, if the output
-  // does not depend on which version of the input it got. The combined output
-  // is then private and is not stored. Returns false when the output names its
-  // inputs by their content hash (combined JavaScript), because the original
-  // has a different hash and so a different name. Such a fetch waits at most
-  // CombinedFetchCapMs() and then fails with a retryable error.
-  virtual bool FetchInputsMayFallBack() const { return true; }
-
-  // Upper bound of the wait of a combination fetch with a negative rewrite
-  // deadline whose inputs may not fall back: the blocking fetch timeout.
-  int64 CombinedFetchCapMs() const;
-
   // Should the context call LockForCreation before checking the cache?
   virtual bool CreationLockBeforeStartFetch() const;
 

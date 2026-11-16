@@ -33,11 +33,13 @@
 #include "pagespeed/kernel/base/base64_util.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -60,6 +62,7 @@ using pagespeed::image_compression::kMessagePatternPixelFormat;
 using pagespeed::image_compression::kMessagePatternStats;
 using pagespeed::image_compression::kMessagePatternUnexpectedEOF;
 using pagespeed::image_compression::kMessagePatternWritingToWebp;
+using pagespeed::image_compression::LIBAVIF_LOSSLESS;
 using pagespeed::image_compression::LIBAVIF_LOSSY;
 using pagespeed::image_compression::PixelFormat;
 using pagespeed::image_compression::WEBP_ANIMATED;
@@ -283,6 +286,53 @@ class ConversionVarChecker {
   Image::ConversionVariables avif_conversion_variables_;
 };
 
+// Counters for the PNG lossy fallback, attached to a CompressionOptions.
+class PngLossyFallbackStats {
+ public:
+  explicit PngLossyFallbackStats(Image::CompressionOptions* options)
+      : thread_system_(Platform::CreateThreadSystem()),
+        simple_stats_(thread_system_.get()) {
+    attempted_ = simple_stats_.AddVariable("png_lossy_fallback_attempted");
+    adopted_ = simple_stats_.AddVariable("png_lossy_fallback_adopted");
+    rejected_quality_ =
+        simple_stats_.AddVariable("png_lossy_fallback_rejected_quality");
+    options->png_lossy_fallback_attempted = attempted_;
+    options->png_lossy_fallback_adopted = adopted_;
+    options->png_lossy_fallback_rejected_quality = rejected_quality_;
+  }
+
+  Variable* attempted_var() { return attempted_; }
+  int64 attempted() const { return attempted_->Get(); }
+  int64 adopted() const { return adopted_->Get(); }
+  int64 rejected_quality() const { return rejected_quality_->Get(); }
+
+ private:
+  std::unique_ptr<ThreadSystem> thread_system_;
+  SimpleStats simple_stats_;
+  Variable* attempted_;
+  Variable* adopted_;
+  Variable* rejected_quality_;
+};
+
+// A timer that stands still until the lossy trial has started (the attempted
+// counter moves), then jumps ten seconds on every reading, so the trial and
+// only the trial runs past its timeout.
+class TrialSlowTimer : public MockTimer {
+ public:
+  explicit TrialSlowTimer(Variable* attempted)
+      : MockTimer(new NullMutex, 0), attempted_(attempted) {}
+
+  int64 NowUs() const override {
+    if (attempted_->Get() > 0) {
+      const_cast<TrialSlowTimer*>(this)->AdvanceUs(10 * Timer::kSecondUs);
+    }
+    return MockTimer::NowUs();
+  }
+
+ private:
+  Variable* attempted_;
+};
+
 }  // namespace
 
 class ImageTest : public ImageTestBase {
@@ -491,6 +541,45 @@ class ImageTest : public ImageTestBase {
     options->recompress_jpeg = true;
   }
 
+  // The PNG lossy fallback fixtures are generated PNGs kept with the kernel
+  // image test data (see gen_lossy_fallback_fixtures.py there).
+  static constexpr char kLossyFallbackDir[] =
+      "/test/pagespeed/kernel/image/testdata/png/";
+  static constexpr char kSmoothNoisyBlobs[] = "smooth_noisy_blobs.png";
+  static constexpr char kChromaTextOverNoise[] = "chroma_text_over_noise.png";
+
+  GoogleString ReadLossyFallbackFixture(const char* name) {
+    GoogleString contents;
+    EXPECT_TRUE(file_system_.ReadFile(
+        StrCat(GTestSrcDir(), kLossyFallbackDir, name).c_str(), &contents,
+        &message_handler_));
+    return contents;
+  }
+
+  // Options of a client that takes lossless WebP, on a site that allows lossy
+  // PNG output, with the fallback set to adopt a lossy file up to
+  // 'max_size_percent' of the lossless size (0 is off).
+  Image::CompressionOptions* LossyFallbackOptions(int max_size_percent) {
+    Image::CompressionOptions* options = new Image::CompressionOptions();
+    options->preferred_webp = WEBP_LOSSLESS;
+    options->allow_webp_alpha = true;
+    options->convert_png_to_jpeg = true;
+    options->convert_jpeg_to_webp = true;
+    options->webp_quality = 80;
+    options->jpeg_quality = 85;
+    options->png_lossy_fallback_max_size_percent = max_size_percent;
+    return options;
+  }
+
+  // The fourcc of the first WebP chunk: "VP8 " lossy, "VP8L" lossless.
+  static GoogleString WebpChunk(StringPiece contents) {
+    if (contents.size() < 16 || !contents.starts_with("RIFF") ||
+        contents.substr(8, 4) != "WEBP") {
+      return "not webp";
+    }
+    return contents.substr(12, 4).as_string();
+  }
+
   ImageUrlEncoder encoder_;
   std::unique_ptr<Image::CompressionOptions> options_;
 
@@ -586,6 +675,267 @@ TEST_F(ImageTest, PngToWebpLaTest) {
                               0, 0, 0,  // jpeg
                               0, 0, 0,  // gif animated
                               true);
+}
+
+// ---- PNG lossy fallback (PngLossyFallbackMaxSizePercent) ----
+//
+// smooth_noisy_blobs.png is a smooth, noisy picture the photo detector calls
+// graphics (PhotoMetric 5): 9.4 bits per pixel as lossless WebP, a few percent
+// of that as lossy. chroma_text_over_noise.png passes the same size and ratio
+// gates but carries saturated text a lossy encode smears (worst 32x32 tile near
+// 20 dB), so only the local quality guard stops it. Margins below are wide
+// against any encoder drift.
+
+TEST_F(ImageTest, PngLossyFallbackAdoptsSmoothPhoto) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+
+  // The lossless size, with the fallback off.
+  ImagePtr lossless(NewImage(png, "lossless", GTestTempDir(),
+                             LossyFallbackOptions(0), &timer_,
+                             &message_handler_));
+  const size_t lossless_size = lossless->output_size();
+  ASSERT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, lossless->image_type());
+
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "adopts", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  const size_t size = image->output_size();
+  EXPECT_EQ(IMAGE_WEBP, image->image_type());
+  EXPECT_EQ(ContentType::kWebp, image->content_type()->type());
+  EXPECT_EQ("VP8 ", WebpChunk(image->Contents()));
+  EXPECT_LE(size * 100, lossless_size * 20);
+  EXPECT_GT(size, 0);
+  EXPECT_NE(GoogleString::npos,
+            image->debug_message().find("lossy trial adopted"))
+      << image->debug_message();
+  EXPECT_NE(GoogleString::npos, image->debug_message().find(" bpp;"))
+      << image->debug_message();
+  EXPECT_EQ(1, stats.attempted());
+  EXPECT_EQ(1, stats.adopted());
+  EXPECT_EQ(0, stats.rejected_quality());
+}
+
+TEST_F(ImageTest, PngLossyFallbackOffByDefault) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  // Not even set: the option's default is off.
+  Image::CompressionOptions* options = LossyFallbackOptions(0);
+  PngLossyFallbackStats stats(options);
+  EXPECT_EQ(0, Image::CompressionOptions().png_lossy_fallback_max_size_percent);
+  ImagePtr image(NewImage(png, "off", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_EQ("VP8L", WebpChunk(image->Contents()));
+  EXPECT_EQ(GoogleString::npos, image->debug_message().find("lossy trial"))
+      << image->debug_message();
+  EXPECT_EQ(0, stats.attempted());
+  EXPECT_EQ(0, stats.adopted());
+}
+
+TEST_F(ImageTest, PngLossyFallbackRejectsChromaTextOverNoise) {
+  const GoogleString png = ReadLossyFallbackFixture(kChromaTextOverNoise);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "chroma", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  // It passes the size floor, the bits-per-pixel gate and the ratio gate (the
+  // lossy file is about 5% of the lossless one), and still stays lossless.
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_EQ("VP8L", WebpChunk(image->Contents()));
+  EXPECT_NE(GoogleString::npos,
+            image->debug_message().find("local quality guard"))
+      << image->debug_message();
+  EXPECT_EQ(1, stats.attempted());
+  EXPECT_EQ(0, stats.adopted());
+  EXPECT_EQ(1, stats.rejected_quality());
+}
+
+TEST_F(ImageTest, PngLossyFallbackRejectsWhenLossyNotSmallEnough) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  // The lossy file is about 1.2% of the lossless one; 1% is not enough.
+  Image::CompressionOptions* options = LossyFallbackOptions(1);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "ratio", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_NE(GoogleString::npos, image->debug_message().find("not small enough"))
+      << image->debug_message();
+  EXPECT_EQ(1, stats.attempted());
+  EXPECT_EQ(0, stats.adopted());
+  EXPECT_EQ(0, stats.rejected_quality());
+}
+
+// The bits per pixel gate divides by the pixels of the image that was encoded,
+// which after a resize is the resized image, not the natural one.
+TEST_F(ImageTest, PngLossyFallbackUsesResizedDimensions) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  ImageDim resized_dim;
+  resized_dim.set_width(360);
+  resized_dim.set_height(270);
+
+  ImagePtr lossless(NewImage(png, "resized-lossless", GTestTempDir(),
+                             LossyFallbackOptions(0), &timer_,
+                             &message_handler_));
+  ASSERT_TRUE(lossless->ResizeTo(resized_dim));
+  const double lossless_size = lossless->output_size();
+  ASSERT_GT(lossless_size, 65536);
+  ASSERT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, lossless->image_type());
+
+  // Bytes per megapixel of the lossless file, over the pixels it encodes and
+  // over the natural pixels (the bug). A gate between the two lets the trial
+  // run only when the right pixel count is used.
+  const double right = lossless_size / (360.0 * 270.0 / 1e6);
+  const double wrong = lossless_size / (400.0 * 300.0 / 1e6);
+  ASSERT_GT(right, wrong);
+
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->png_lossy_fallback_min_bytes_per_mp =
+      static_cast<int64>((right + wrong) / 2);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "resized", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  ASSERT_TRUE(image->ResizeTo(resized_dim));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP, image->image_type());
+  EXPECT_EQ(1, stats.attempted());
+  EXPECT_EQ(1, stats.adopted());
+}
+
+TEST_F(ImageTest, PngLossyFallbackSaveDataTier) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  {
+    // The Save-Data tier (quality 50) still takes the fallback.
+    Image::CompressionOptions* options = LossyFallbackOptions(20);
+    options->webp_quality = 50;
+    PngLossyFallbackStats stats(options);
+    ImagePtr image(NewImage(png, "q50", GTestTempDir(), options, &timer_,
+                            &message_handler_));
+    image->output_size();
+    EXPECT_EQ(IMAGE_WEBP, image->image_type());
+    EXPECT_EQ(1, stats.adopted());
+  }
+  {
+    // Below the floor there is no trial at all.
+    Image::CompressionOptions* options = LossyFallbackOptions(20);
+    options->webp_quality = 49;
+    PngLossyFallbackStats stats(options);
+    ImagePtr image(NewImage(png, "q49", GTestTempDir(), options, &timer_,
+                            &message_handler_));
+    image->output_size();
+    EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+    EXPECT_EQ(0, stats.attempted());
+  }
+}
+
+// AVIF stays lossless for an image that took the fallback: the candidate is
+// built exactly as without the fallback and loses pick-smaller to the lossy
+// WebP; no lossy AVIF is made.
+TEST_F(ImageTest, PngLossyFallbackAvifStaysLossless) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->preferred_avif = LIBAVIF_LOSSLESS;
+  options->avif_quality = 60;
+  ConversionVarChecker conversion_var_checker(options);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "avif", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP, image->image_type());
+  EXPECT_EQ("VP8 ", WebpChunk(image->Contents()));
+  EXPECT_EQ(1, stats.adopted());
+  // The (lossless) AVIF candidate was encoded, and was not the smaller one.
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_PNG));
+}
+
+// A trial that runs past the WebP timeout is dropped and the lossless result
+// is served; it is not a failure of the image.
+TEST_F(ImageTest, PngLossyFallbackTimeoutKeepsLossless) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->webp_conversion_timeout_ms = 500;
+  PngLossyFallbackStats stats(options);
+  TrialSlowTimer slow_timer(stats.attempted_var());
+  ImagePtr image(NewImage(png, "timeout", GTestTempDir(), options, &slow_timer,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_EQ("VP8L", WebpChunk(image->Contents()));
+  EXPECT_NE(GoogleString::npos, image->debug_message().find("timed out"))
+      << image->debug_message();
+  EXPECT_EQ(1, stats.attempted());
+  EXPECT_EQ(0, stats.adopted());
+  EXPECT_EQ(0, stats.rejected_quality());
+}
+
+// Under 64 KiB of lossless WebP there is no trial, however good the ratio.
+TEST_F(ImageTest, PngLossyFallbackSizeFloor) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  ImageDim small_dim;
+  small_dim.set_width(200);
+  small_dim.set_height(150);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->png_lossy_fallback_min_bytes_per_mp = 0;  // only the floor applies
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "floor", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  ASSERT_TRUE(image->ResizeTo(small_dim));
+  const size_t size = image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_LT(size, 65536);
+  EXPECT_NE(GoogleString::npos, image->debug_message().find("no lossy trial"))
+      << image->debug_message();
+  EXPECT_EQ(0, stats.attempted());
+}
+
+TEST_F(ImageTest, PngLossyFallbackBitsPerPixelGate) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  // 9.4 bpp is 1.18 MB per megapixel; ask for more.
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->png_lossy_fallback_min_bytes_per_mp = 1500000;
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "bpp", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_NE(GoogleString::npos, image->debug_message().find("per megapixel"))
+      << image->debug_message();
+  EXPECT_EQ(0, stats.attempted());
+}
+
+TEST_F(ImageTest, PngLossyFallbackNeedsPngToJpeg) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->convert_png_to_jpeg = false;  // the site does not allow lossy PNG
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "no-lossy", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_EQ(0, stats.attempted());
+}
+
+// The trial is not one of the kMaxConversionAttempts: with one already used,
+// the WebP encode takes the second and the AVIF candidate still gets the third.
+TEST_F(ImageTest, PngLossyFallbackKeepsConversionBudget) {
+  const GoogleString png = ReadLossyFallbackFixture(kSmoothNoisyBlobs);
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->preferred_avif = LIBAVIF_LOSSLESS;
+  options->avif_quality = 60;
+  options->conversions_attempted = 1;
+  ConversionVarChecker conversion_var_checker(options);
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(png, "budget", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  image->output_size();
+  EXPECT_EQ(IMAGE_WEBP, image->image_type());
+  EXPECT_EQ(1, stats.adopted());
+  EXPECT_EQ(3, options->conversions_attempted);
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_PNG));
 }
 
 TEST_F(ImageTest, PngAlphaFailToWebpLossyTest) {
@@ -855,6 +1205,44 @@ TEST_F(ImageTest, AnimatedFilterNotEnabledTest) {
                      8,  // Min bytes to bother checking file type at all.
                      ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize * 2,
                      200, 150, 583374, false);
+}
+
+// The size of a GIF is the canvas the frame reader decodes. When the first
+// frame is larger than the logical screen in the header, the reader grows the
+// canvas to that frame, and Dimensions() has to say so.
+TEST_F(ImageTest, GifDimensionsAreTheDecodedCanvas) {
+  // red_empty_screen.gif declares a 0x0 screen around a 5x3 frame.
+  GoogleString empty_screen;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, "red_empty_screen.gif").c_str(),
+      &empty_screen, &message_handler_));
+  ImagePtr empty_screen_image(
+      ImageFromString(IMAGE_PNG, "red_empty_screen.gif", empty_screen, false));
+  ExpectDimensions(IMAGE_GIF, empty_screen.size(), 5, 3,
+                   empty_screen_image.get());
+
+  // transparent.gif is 320x320 throughout. Declare a screen of half its
+  // height; the frame stays as it is.
+  GoogleString half_screen;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kTransparent).c_str(), &half_screen,
+      &message_handler_));
+  const size_t height_pos =
+      ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize;
+  ASSERT_GT(half_screen.size(), height_pos + 1);
+  half_screen[height_pos] = static_cast<char>(160);
+  half_screen[height_pos + 1] = 0;
+  ImagePtr half_screen_image(
+      ImageFromString(IMAGE_PNG, kTransparent, half_screen, false));
+  ExpectDimensions(IMAGE_GIF, half_screen.size(), 320, 320,
+                   half_screen_image.get());
+
+  // With only the header present nothing else is known, so the header holds.
+  GoogleString header_only(half_screen, 0, height_pos + 2);
+  ImagePtr header_only_image(
+      ImageFromString(IMAGE_PNG, kTransparent, header_only, false));
+  ExpectDimensions(IMAGE_GIF, header_only.size(), 320, 160,
+                   header_only_image.get());
 }
 
 TEST_F(ImageTest, JpegTest) {
@@ -2758,6 +3146,23 @@ TEST_F(ImageTest, CarryC2paPngToJpegFallsBackToSkip) {
   // Served the ORIGINAL PNG (Level-B skip): stayed PNG, byte-identical.
   EXPECT_EQ(IMAGE_PNG, image->image_type());
   EXPECT_EQ(with_c2pa, out);
+}
+
+// The PNG provenance carry path needs a PNG output, so it takes no lossy trial.
+TEST_F(ImageTest, PngLossyFallbackSkipsC2paCarry) {
+  const GoogleString with_c2pa = SpliceC2paCaBxIntoPng(
+      ReadLossyFallbackFixture(kSmoothNoisyBlobs), /*extra_bytes=*/0);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->recompress_png = true;
+  options->c2pa_carry = true;
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(with_c2pa, "carry", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+  EXPECT_EQ(0, stats.attempted());
+  EXPECT_EQ(IMAGE_PNG, image->image_type());
+  EXPECT_EQ(with_c2pa, out);  // served as it came: the manifest is intact
 }
 
 TEST_F(ImageTest, CarryC2paPngCleanImageRecompresses) {

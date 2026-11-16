@@ -370,8 +370,9 @@ void ProxyInterface::GetRewriteOptionsDone(RequestData* request_data,
         query.pagespeed_option_cookies().ToEscapedString());
 
     // Takes ownership of property_callback.
-    proxy_fetch_factory_->StartNewProxyFetch(url_string, async_fetch, driver,
-                                             property_callback, nullptr);
+    proxy_fetch_factory_->StartNewProxyFetch(
+        url_string, async_fetch, driver, property_callback, nullptr,
+        driver->options()->domain_lawyer()->IsProxyMapped(*request_url));
   }
 }
 

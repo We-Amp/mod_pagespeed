@@ -1862,8 +1862,9 @@ exit "$EXIT"
 #: NegativeDeadlineFetchWaitMs NonCacheablesForCachePartialHtml
 #: NoTransformOptimizedImages NumExpensiveRewriteThreads NumRewriteThreads
 #: ObliviousPagespeedUrls off on OptionCookiesDurationMs OverrideCachingTtlMs
-#: PermitIdsForCssCombining PreserveImageProvenance PreserveSubresourceHints
-#: PreserveUrlRelativity PrivateNotVaryForIE
+#: PermitIdsForCssCombining PngLossyFallbackMaxSizePercent
+#: PngLossyFallbackMinBytesPerMegapixel PreserveImageProvenance
+#: PreserveSubresourceHints PreserveUrlRelativity PrivateNotVaryForIE
 #: ProactivelyFreshenUserFacingRequest ProactiveResourceFreshening
 #: ProcessScriptVariables ProgressiveJpegMinBytes ProxyAuth ProxySuffix
 #: PubliclyCacheMismatchedHashesExperimental RateLimitBackgroundFetches

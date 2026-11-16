@@ -1459,6 +1459,30 @@ TEST_F(JsCombineFilterTest, AllDifferentCharsets) {
   EXPECT_EQ(kJsUrl4, scripts[3].url);
 }
 
+// The reason a script is not combined is logged.  The charsets in it come
+// from the page and are escaped, so the message stays one line.
+TEST_F(JsCombineFilterTest, CharsetMismatchReasonEscapedInLog) {
+  ResponseHeaders default_header;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &default_header);
+  SetFetchResponse(StrCat(kTestDomain, kJsUrl1), default_header, "var a;");
+  SetFetchResponse(StrCat(kTestDomain, kJsUrl2), default_header, "var b;");
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(StrCat(kTestDomain, "charset.html"),
+           StrCat("<script src=", kJsUrl1, " charset=utf-8></script>",
+                  "<script src=", kJsUrl2,
+                  " charset=\"iso-8859-1&#10;second\"></script>"));
+  EXPECT_EQ(2, scripts.size());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos, messages.find("file is iso-8859-1\\nsecond"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nIsecond")) << messages;
+}
+
 // A combination is decided by the charset known at hand-off: a <meta charset>
 // in a later flush window does not change the decision for scripts handed off
 // before it. Here a.js names its charset and b.js takes the page's, which is

@@ -421,6 +421,25 @@ TEST_F(PageWorkBudgetTest, RepeatedRewritesStopAtPartitionEntries) {
   EXPECT_GT(10, CountOf(output_buffer_, ".pagespeed.cf."));
 }
 
+// Each repeated reference to an inlined script copies the script; the copies
+// count against the document's repeated inline bytes, and a reference past
+// them keeps its src.
+TEST_F(PageWorkBudgetTest, RepeatedInlineScriptsStopAtInlineBytes) {
+  AddFilter(RewriteOptions::kInlineJavascript);
+  SetResponseWithDefaultHeaders("a.js", kContentTypeJavascript, Script('a'),
+                                100);
+  PageWorkBudget::Limits limits;
+  limits.repeated_inline_bytes = 3 * kInputBytes;
+  SetLimits(limits);
+
+  ParseUrl(kTestDomain, Repeat("<script src=\"a.js\"></script>", 10));
+  // The first reference and three copies are inlined.
+  EXPECT_EQ(4, CountOf(output_buffer_, "var s = 'a")) << output_buffer_;
+  EXPECT_EQ(6, CountOf(output_buffer_, "src=\"a.js\"")) << output_buffer_;
+  EXPECT_EQ(3 * kInputBytes, budget()->repeated_inline_bytes_taken());
+  EXPECT_LE(1, Stat(RewriteContext::kRewriteBudgetPartitionEntriesHits));
+}
+
 // With debug on, an element left for a later view says so, once.
 TEST_F(PageWorkBudgetTest, DebugMessageOnElementLeftUndone) {
   options()->EnableFilter(RewriteOptions::kDebug);

@@ -38,6 +38,7 @@
 #include "net/instaweb/rewriter/public/dom_stats_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/image.h"
+#include "net/instaweb/rewriter/public/image_data_lookup.h"
 #include "net/instaweb/rewriter/public/image_url_encoder.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -56,6 +57,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"  // for MD5Hasher
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -3123,6 +3125,60 @@ TEST_F(ImageRewriteTest, GifToWebpTestWithoutResizeWithOptimize) {
                           true);
 }
 
+// The PNG lossy fallback, end to end through the filter: a smooth opaque PNG
+// the photo detector calls graphics is stored as lossless WebP unless
+// PngLossyFallbackMaxSizePercent is set, in which case a much smaller lossy
+// WebP that passes the local quality guard is served instead.
+TEST_F(ImageRewriteTest, PngLossyFallbackEndToEnd) {
+  StdioFileSystem stdio_file_system;
+  GoogleString png;
+  ASSERT_TRUE(stdio_file_system.ReadFile(
+      StrCat(GTestSrcDir(),
+             "/test/pagespeed/kernel/image/testdata/png/"
+             "smooth_noisy_blobs.png")
+          .c_str(),
+      &png, message_handler()));
+
+  options()->EnableFilter(RewriteOptions::kDebug);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->set_png_lossy_fallback_max_size_percent(20);
+  rewrite_driver()->AddFilters();
+  SetupForWebpLossless();
+
+  const GoogleString url = StrCat(kTestDomain, "blobs.png");
+  SetResponseWithDefaultHeaders(url, kContentTypePng, png, 100);
+  ParseUrl(StrCat(kTestDomain, "test.html"), StrCat("<img src='", url, "'>"));
+
+  EXPECT_THAT(output_buffer_, HasSubstr("lossy trial adopted"));
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(ImageRewriteFilter::kImagePngLossyFallbackAttempted)
+             ->Get());
+  EXPECT_EQ(1,
+            statistics()
+                ->GetVariable(ImageRewriteFilter::kImagePngLossyFallbackAdopted)
+                ->Get());
+  EXPECT_EQ(0,
+            statistics()
+                ->GetVariable(
+                    ImageRewriteFilter::kImagePngLossyFallbackRejectedQuality)
+                ->Get());
+
+  StringVector image_urls;
+  CollectImgSrcs(url, output_buffer_, &image_urls);
+  ASSERT_EQ(1, image_urls.size());
+  EXPECT_TRUE(StringPiece(image_urls[0]).ends_with(".webp")) << image_urls[0];
+  GoogleString served;
+  ASSERT_TRUE(FetchResourceUrl(image_urls[0], &served));
+  ASSERT_GT(served.size(), 16);
+  EXPECT_EQ("RIFF", served.substr(0, 4));
+  EXPECT_EQ("VP8 ", served.substr(12, 4));  // lossy, not "VP8L"
+  EXPECT_LT(served.size() * 5, png.size());
+}
+
 TEST_F(ImageRewriteTest, InlinableImagesInsertedIntoPropertyCache) {
   // If image_inlining_identify_and_cache_without_rewriting() is set in
   // RewriteOptions, images that would have been inlined are instead inserted
@@ -4505,6 +4561,39 @@ TEST_F(ImageRewriteTest, ResolutionLimitInt64OverflowIsDropped) {
   EXPECT_EQ(1, no_rewrites->Get())
       << "int64 overflow bypassed the resolution guard; the oversized image "
          "was not dropped";
+}
+
+// The resolution limit applies to the canvas a GIF is decoded at. When the
+// header declares a screen smaller than the first frame, the frame reader
+// grows the canvas to that frame, so the frame's size is what counts.
+TEST_F(ImageRewriteTest, GifResolutionLimitCountsTheDecodedCanvas) {
+  options()->EnableFilter(RewriteOptions::kConvertGifToPng);
+  // transparent.gif is 320x320. The limit admits a 320x160 image but not the
+  // whole frame.
+  options()->set_image_resolution_limit_bytes(320 * 320 * 4 - 1);
+  rewrite_driver()->AddFilters();
+
+  GoogleString gif;
+  ASSERT_TRUE(LoadFile("transparent.gif", &gif));
+  // The logical screen height is the 16-bit little-endian field after the
+  // width (ImageHeaders::kGifDimStart + kGifIntSize). Halve it.
+  const size_t height_pos =
+      ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize;
+  ASSERT_GT(gif.size(), height_pos + 1);
+  gif[height_pos] = static_cast<char>(160);
+  gif[height_pos + 1] = 0;
+
+  const GoogleString url = StrCat(kTestDomain, "short_screen.gif");
+  SetResponseWithDefaultHeaders(url, kContentTypeGif, gif, 100);
+  ParseUrl(StrCat(kTestDomain, "short_screen.html"),
+           StrCat("<img src='", url, "'>"));
+
+  EXPECT_EQ(
+      0, statistics()->GetVariable(ImageRewriteFilter::kImageRewrites)->Get());
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(ImageRewriteFilter::kImageNoRewritesHighResolution)
+             ->Get());
 }
 
 // recompress_webp is a core filter; convert_to_webp_animated is opt-in. Without
