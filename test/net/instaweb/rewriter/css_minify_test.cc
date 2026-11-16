@@ -509,6 +509,38 @@ TEST_F(CssMinifyTest, ZeroUnitStillStrippedOutsideCalc) {
   EXPECT_HAS_SUBSTR("width:calc(600px - 0px);margin:0 10px 0 0%", minified);
 }
 
+// In the flex shorthand a unitless 0 after a single flex factor is read as the
+// shrink factor, not as a zero basis ("flex:1 0px" is shrink 1, "flex:1 0" is
+// shrink 0), so zero units must survive there.
+TEST_F(CssMinifyTest, FlexShorthandKeepsZeroLengthUnit) {
+  static const char kCss[] =
+      ".a { flex: 1 0px }"
+      ".b { flex: 0px 1 }"
+      ".c { flex: 1 1 0px }"
+      ".d { FLEX: 1 0px !important }"
+      ".e { flex-basis: 0px }"
+      ".f { flex: 1 1 0% }"
+      ".g { margin: 0px; flex: 1 0px; padding: 0em }"
+      ".h { -webkit-flex: 1 0px }"
+      ".i { -ms-flex: 1 0px }";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR(".a{flex:1 0px}", minified);
+  EXPECT_HAS_SUBSTR(".b{flex:0px 1}", minified);
+  EXPECT_HAS_SUBSTR(".c{flex:1 1 0px}", minified);
+  EXPECT_HAS_SUBSTR(".d{flex:1 0px!important}", minified);
+  EXPECT_HAS_SUBSTR(".e{flex-basis:0}", minified);
+  EXPECT_HAS_SUBSTR(".f{flex:1 1 0%}", minified);
+  // Zero units are still stripped on other declarations, before and after.
+  EXPECT_HAS_SUBSTR(".g{margin:0;flex:1 0px;padding:0}", minified);
+  EXPECT_HAS_SUBSTR(".h{-webkit-flex:1 0px}", minified);
+  EXPECT_HAS_SUBSTR(".i{-ms-flex:1 0px}", minified);
+}
+
 // checking unicode-range descriptor minification
 TEST_F(CssMinifyTest, CssUnicodeRangeDescriptor) {
   static const char kCss[] =

@@ -95,6 +95,12 @@ class ResourceCombiner {
   TimedBool AddResourceNoFetch(const ResourcePtr& resource,
                                MessageHandler* handler);
 
+  // True once an add was refused because the combination would exceed the
+  // URL or content size limits. Such a combination is full in practice, and
+  // each refused add costs work proportional to its size, so a caller that
+  // keeps several combinations open can stop offering resources to it.
+  bool refused_for_size() const { return refused_for_size_; }
+
  protected:
   // Removes the last resource that was added here, assuming the last call to
   // AddResource was successful.  If the last call to AddResource returned
@@ -121,6 +127,17 @@ class ResourceCombiner {
   virtual bool WritePiece(int index, int num_pieces, const Resource* input,
                           OutputResource* combination, Writer* writer,
                           MessageHandler* handler);
+
+  // Called by WriteCombination() in place of WritePiece() for an input that
+  // could not be fetched (not loaded, or not a 200).  Only the fetch of a
+  // combination whose context returns true from
+  // RewriteContext::FetchCombinesAvailableInputs() passes such inputs.  The
+  // default writes nothing, leaving the input out.  Returns whether
+  // successful.
+  virtual bool WriteUnavailablePiece(int index, int num_pieces,
+                                     const Resource* input,
+                                     OutputResource* combination,
+                                     Writer* writer, MessageHandler* handler);
 
   // Returns whether the origin labelled resource as CombinationContentType(),
   // setting *failure_reason if not. The combination is labelled with
@@ -177,6 +194,7 @@ class ResourceCombiner {
   StringVector multipart_encoder_urls_;
   int prev_num_components_;
   int accumulated_leaf_size_;
+  bool refused_for_size_;
   GoogleString resolved_base_;
   const int url_overhead_;
   RewriteFilter* filter_;

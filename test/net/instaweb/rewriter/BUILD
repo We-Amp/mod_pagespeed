@@ -66,7 +66,11 @@ pagespeed_cc_test(
         ["*_test.cc"],
         exclude = ["rule_pack_fixture_test.cc"],
     ),
-    data = [":testdata"],
+    data = [
+        ":testdata",
+        # The PNG lossy fallback tests (image_test, image_rewrite_filter_test).
+        "//test/pagespeed/kernel/image:lossy_fallback_fixtures",
+    ],
     deps = [
         "//pagespeed/kernel/packs:pack_loader",
         "//test/net/instaweb/rewriter:test_base",

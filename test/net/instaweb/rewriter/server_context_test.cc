@@ -57,6 +57,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -761,6 +762,9 @@ TEST_F(ServerContextTest, RequestCannotChangePageWorkBudget) {
     EXPECT_EQ(4, limits.input_loads_in_flight);
     EXPECT_EQ(32768, limits.contexts);
     EXPECT_EQ(256 * 1024, limits.partition_entries);
+    EXPECT_EQ(defaults.repeated_inline_bytes, limits.repeated_inline_bytes)
+        << source;
+    EXPECT_EQ(16 * 1024 * 1024, limits.repeated_inline_bytes);
     driver->Cleanup();
   }
 }
@@ -777,6 +781,39 @@ TEST_F(ServerContextTest, QueryOptionsWithInvalidUrl) {
 }
 
 TEST_F(ServerContextTest, TestNamed) { TestNamed(); }
+
+// An optimized resource that was written but is no longer in the HTTP cache is
+// served from the written copy and stored again.  The cache's internal stamp
+// goes on the stored copy only, never on the response the client gets.
+TEST_F(ServerContextTest, WrittenOutputServedOutsideTheCacheIsNotStamped) {
+  GoogleString failure_reason;
+  OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
+      kUrlPrefix, RewriteOptions::kCssFilterId, "I.name", kRewrittenResource,
+      &failure_reason));
+  ASSERT_TRUE(output.get() != nullptr);
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(), "contents",
+                                      &kContentTypeCss, "utf-8", output.get()));
+  ASSERT_TRUE(output->IsWritten());
+  lru_cache()->Clear();
+
+  StringAsyncFetch fetch(CreateRequestContext());
+  ResponseHeaders served;
+  fetch.set_response_headers(&served);
+  EXPECT_TRUE(rewrite_driver()->FetchOutputResource(output, nullptr, &fetch));
+  rewrite_driver()->WaitForCompletion();
+  ASSERT_TRUE(fetch.done());
+  EXPECT_TRUE(fetch.success());
+  EXPECT_EQ("contents", fetch.buffer());
+  EXPECT_FALSE(served.Has(HTTPValue::kClientEntryHeader));
+  EXPECT_FALSE(output->response_headers()->Has(HTTPValue::kClientEntryHeader));
+
+  HTTPValue stored;
+  ResponseHeaders stored_headers;
+  ASSERT_EQ(kFoundResult, HttpBlockingFind(output->HttpCacheKey(), http_cache(),
+                                           &stored, &stored_headers));
+  EXPECT_TRUE(stored.IsCurrentClientEntry());
+  EXPECT_FALSE(stored_headers.Has(HTTPValue::kClientEntryHeader));
+}
 
 TEST_F(ServerContextTest, TestOutputInputUrl) {
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
@@ -1322,6 +1359,30 @@ TEST_F(ServerContextTest, TestHandleBeaconInvalidUrl) {
       UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
 }
 
+TEST_F(ServerContextTest, TestHandleBeaconRejectedValueEscapedInLog) {
+  // A rejected beacon is quoted in a warning.  Control characters from the
+  // client are escaped, so each warning stays one message line.
+  EXPECT_FALSE(server_context()->HandleBeacon(
+      "url=not-a-url%0Asecond&ets=load:34",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_FALSE(server_context()->HandleBeacon(
+      "ets=load:34\nsecond", UserAgentMatcherTestBase::kChromeUserAgent,
+      CreateRequestContext()));
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(
+      GoogleString::npos,
+      messages.find("Invalid URL parameter in beacon: not-a-url\\nsecond"))
+      << messages;
+  EXPECT_NE(
+      GoogleString::npos,
+      messages.find("Missing URL parameter in beacon: ets=load:34\\nsecond"))
+      << messages;
+  EXPECT_EQ(GoogleString::npos, messages.find("\nWsecond")) << messages;
+}
+
 TEST_F(ServerContextTest, TestHandleBeaconMissingValue) {
   EXPECT_FALSE(server_context()->HandleBeacon(
       "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:",
@@ -1479,6 +1540,12 @@ class BeaconTest : public ServerContextTest {
             rewrite_driver());
     ASSERT_EQ(kBeaconWithNonce, last_beacon_metadata_.status);
     ASSERT_FALSE(last_beacon_metadata_.nonce.empty());
+    // Register the page's images, as CriticalImagesBeaconFilter does at the end
+    // of an instrumented document.
+    server_context()
+        ->critical_images_finder()
+        ->UpdateCandidateImagesForBeaconing(
+            candidate_image_hashes_, rewrite_driver(), true /* beaconing */);
     rewrite_driver()->property_page()->WriteCohort(
         server_context()->beacon_cohort());
   }
@@ -1543,6 +1610,8 @@ class BeaconTest : public ServerContextTest {
   std::unique_ptr<RenderedImages> rendered_images_;
   // This field holds candidate critical css selectors.
   StringSet candidates_;
+  // This field holds the hashes of the images on the page.
+  StringSet candidate_image_hashes_;
   BeaconMetadata last_beacon_metadata_;
 };
 
@@ -1571,6 +1640,7 @@ TEST_F(BeaconTest, HandleBeaconRenderedDimensionsofImages) {
   images->set_rendered_height(50);
   GoogleString json_map_rendered_dimensions = StrCat(
       "{\"", hash1, "\":{\"rw\":40,", "\"rh\":50,\"ow\":160,\"oh\":200}}");
+  candidate_image_hashes_.insert(hash1);
   InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
   TestBeacon(nullptr, nullptr, &json_map_rendered_dimensions,
              UserAgentMatcherTestBase::kChromeUserAgent);
@@ -1589,6 +1659,8 @@ TEST_F(BeaconTest, HandleBeaconCritImages) {
   GoogleString hash2 = IntegerToString(
       HashString<CasePreserve, unsigned>(img2.c_str(), img2.size()));
 
+  candidate_image_hashes_.insert(hash1);
+  candidate_image_hashes_.insert(hash2);
   StringSet critical_image_hashes;
   critical_image_hashes.insert(hash1);
   InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
@@ -1627,6 +1699,28 @@ TEST_F(BeaconTest, HandleBeaconCritImages) {
   TestBeacon(&critical_image_hashes, nullptr, nullptr,
              UserAgentMatcherTestBase::kChromeUserAgent);
   EXPECT_STREQ(hash1, JoinCollection(critical_html_images_, ","));
+}
+
+// A beacon only counts for the images the page was instrumented with.
+TEST_F(BeaconTest, HandleBeaconKeepsOnlyPageImages) {
+  GoogleString img1 = "http://www.example.com/img1.png";
+  GoogleString hash1 = IntegerToString(
+      HashString<CasePreserve, unsigned>(img1.c_str(), img1.size()));
+  options()->EnableFilter(RewriteOptions::kResizeToRenderedImageDimensions);
+  candidate_image_hashes_.insert(hash1);
+  StringSet critical_image_hashes;
+  critical_image_hashes.insert(hash1);
+  critical_image_hashes.insert("12345");
+  GoogleString json_map_rendered_dimensions =
+      StrCat("{\"", hash1, "\":{\"rw\":40,\"rh\":50,\"ow\":160,\"oh\":200},",
+             "\"12345\":{\"rw\":40,\"rh\":50,\"ow\":160,\"oh\":200}}");
+  InsertImageBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
+  TestBeacon(&critical_image_hashes, nullptr, &json_map_rendered_dimensions,
+             UserAgentMatcherTestBase::kChromeUserAgent);
+  EXPECT_STREQ(hash1, JoinCollection(critical_html_images_, ","));
+  ASSERT_FALSE(rendered_images_.get() == nullptr);
+  ASSERT_EQ(1, rendered_images_->image_size());
+  EXPECT_STREQ(hash1, rendered_images_->image(0).src());
 }
 
 TEST_F(BeaconTest, HandleBeaconCriticalCss) {
@@ -1964,6 +2058,18 @@ TEST_F(ServerContextCacheControlTest, NoStoreMixedCase) {
   EXPECT_TRUE(HasCacheControl("max-age=0"));
 }
 
+TEST_F(ServerContextCacheControlTest, NoStoreJoinedToAnotherDirective) {
+  // A no-store an origin joined to another directive with a semicolon still
+  // propagates to the output.
+  ResourcePtr joined_no_store_200 =
+      CreateCustomCachingResource("nos_joined_200", 200, ",x-ext; no-store");
+  resources_.push_back(implicit_public_100_);
+  resources_.push_back(joined_no_store_200);
+  server_context()->ApplyInputCacheControl(resources_, &response_headers_);
+  EXPECT_FALSE(HasCacheControl("public"));
+  EXPECT_TRUE(HasCacheControl("no-store"));
+}
+
 TEST_F(ServerContextCacheControlTest, ExplicitPublicMixedCase) {
   // A mixed-case Public on every input still marks the output public.
   ResourcePtr mixed_public_200 =
@@ -2150,31 +2256,33 @@ TEST_F(ServerContextTest, FillInPartitionInputInfo) {
 }
 
 // Test of referer for BackgroundFetch: When the resource fetching request
-// header misses referer, we set the driver base url as its referer.
+// header misses referer, we set the driver base url's origin as its referer.
 TEST_F(ServerContextTest, TestRefererBackgroundFetch) {
   RefererTest(nullptr, true);
-  EXPECT_EQ(rewrite_driver()->base_url().Spec(),
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
             mock_url_fetcher()->last_referer());
 }
 
 // Test of referer for NonBackgroundFetch: When the resource fetching request
-// header misses referer and the original request referer header misses, no
-// referer would be added.
+// header misses referer and the original request referer header misses, the
+// base url's origin is sent.
 TEST_F(ServerContextTest, TestRefererNonBackgroundFetch) {
   RequestHeaders headers;
   RefererTest(&headers, false);
-  EXPECT_EQ("", mock_url_fetcher()->last_referer());
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
+            mock_url_fetcher()->last_referer());
 }
 
 // Test of referer for NonBackgroundFetch: When the resource fetching request
-// header misses referer but the original request header has referer set, we set
-// this referer as the referer of resource fetching request.
+// header misses referer but the original request header has referer set, the
+// visitor's referer is not forwarded; the base url's origin is sent.
 TEST_F(ServerContextTest, TestRefererNonBackgroundFetchWithDriverRefer) {
   RequestHeaders headers;
   const char kReferer[] = "http://other.com/";
   headers.Add(HttpAttributes::kReferer, kReferer);
   RefererTest(&headers, false);
-  EXPECT_EQ(kReferer, mock_url_fetcher()->last_referer());
+  EXPECT_EQ(StrCat(rewrite_driver()->base_url().Origin(), "/"),
+            mock_url_fetcher()->last_referer());
 }
 
 // Regression test for RewriteTestBase::DefaultResponseHeaders, which is based

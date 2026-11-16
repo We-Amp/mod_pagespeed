@@ -335,7 +335,7 @@ describe("redactConfig", () => {
       "  [redacted] Auth",
       "Proxy Suffix: [redacted]Experiment id=1;percent=15;options=RedisUser=[redacted],ImageMaxRewritesAtOnce=8",
       "Override caching wildcards",
-      "*.example.com/*A,Experiment id=2;percent=15;options=NotAnOption=[redacted]",
+      "[redacted]Experiment id=2;percent=15;options=NotAnOption=[redacted]",
       "Experiment id=3;percent=15;enabled=dj",
     ]);
   });
@@ -364,7 +364,37 @@ describe("redactConfig", () => {
       "Proxy Suffix: [redacted]",
       "",
       "Override caching wildcards",
-      "  FileCachePath (afcp)  /kept",
+      "  [redacted]",
+    ]);
+  });
+  it("replaces the URL patterns of the cache invalidation, rejected request and caching wildcard sections", () => {
+    const config = [
+      "URL cache invalidation entries",
+      "  http://www.example.com/private/*, 1700000000000 (ignores metadata cache)",
+      "",
+      "Rejected request map",
+      " RejectedUrl *.internal.example/*D,*admin*D,",
+      " UserAgent *bot*D,",
+      " X-Odd/Header *x*D,",
+      " lonely",
+      "",
+      "Override caching wildcards",
+      "*.example.com/assets/*A,*D,",
+      "Experiment id=3;percent=15;enabled=dj",
+    ].join("\n");
+    expect(redactConfig(config).split("\n")).toEqual([
+      "URL cache invalidation entries",
+      "  [redacted]",
+      "",
+      "Rejected request map",
+      " RejectedUrl [redacted]",
+      " UserAgent [redacted]",
+      " [redacted]",
+      " [redacted]",
+      "",
+      "Override caching wildcards",
+      "[redacted]",
+      "Experiment id=3;percent=15;enabled=dj",
     ]);
   });
 });

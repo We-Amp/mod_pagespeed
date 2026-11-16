@@ -225,6 +225,17 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
     return status_code;
   }
 
+  // Serves the content of http://origin.com/ under kTestDomain/ext/, the way
+  // MapProxyDomain does.
+  void MapProxyDomainExtToOrigin() {
+    RewriteOptions* options = server_context()->global_options();
+    options->ClearSignatureForTesting();
+    options->WriteableDomainLawyer()->AddProxyDomainMapping(
+        StrCat(kTestDomain, "ext/"), "http://origin.com/", "",
+        message_handler());
+    server_context()->ComputeSignature(options);
+  }
+
   void DisableAjax() {
     RewriteOptions* options = server_context()->global_options();
     options->ClearSignatureForTesting();
@@ -2819,11 +2830,12 @@ TEST_F(ProxyInterfaceTest, NoCacheVaryHtml) {
   text.clear();
   FetchFromProxy(kPageUrl, true, &text, &actual_headers);
   EXPECT_EQ("2", text);
-  // Resource was cached because we have respect_vary == false.
-  // So we serve the old value.
+  // The resource was not cached either: it was fetched with the client's
+  // own request headers and varies on one of them, so it is passed through
+  // even with respect_vary == false.  So we fetch the new value.
   text.clear();
   FetchFromProxy("style.css", true, &text, &actual_headers);
-  EXPECT_EQ("a", text);
+  EXPECT_EQ("b", text);
 }
 
 // Test https HTML responses are never cached, while https resources are cached.
@@ -3027,6 +3039,130 @@ TEST_F(ProxyInterfaceTest, CrossDomainAuthorization) {
   EXPECT_FALSE(out_headers.Has(HttpAttributes::kAuthorization));
   EXPECT_FALSE(out_headers.Has(HttpAttributes::kProxyAuthorization));
   mock_scheduler()->AwaitQuiescence();
+}
+
+TEST_F(ProxyInterfaceTest, MapProxyDomainDropsOriginCookies) {
+  // Content of origin.com served under kTestDomain through MapProxyDomain must
+  // not set cookies for kTestDomain.
+  const char kText[] = "* { pretty; }";
+  MapProxyDomainExtToOrigin();
+
+  ResponseHeaders orig_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &orig_headers);
+  orig_headers.Add(HttpAttributes::kSetCookie, "tasty");
+  SetFetchResponse("http://origin.com/file.css", orig_headers, kText);
+
+  ResponseHeaders out_headers;
+  GoogleString out_text;
+  FetchFromProxy("ext/file.css", true, &out_text, &out_headers);
+  EXPECT_STREQ(kText, out_text);
+  EXPECT_STREQ(nullptr, out_headers.Lookup1(HttpAttributes::kSetCookie));
+}
+
+TEST_F(ProxyInterfaceTest, MapProxyDomainDisallowedUrlPassesThrough) {
+  // The client addressed kTestDomain, not origin.com, so a disallowed URL
+  // under the mapped prefix is passed through rather than redirected
+  // (compare CrossDomainRedirectIfBlacklisted), still without cookies.
+  const char kText[] = "* { pretty; }";
+  MapProxyDomainExtToOrigin();
+
+  ResponseHeaders orig_headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &orig_headers);
+  orig_headers.Add(HttpAttributes::kSetCookie, "tasty");
+  SetFetchResponse("http://origin.com/blacklist.css", orig_headers, kText);
+
+  ResponseHeaders out_headers;
+  GoogleString out_text;
+  FetchFromProxy("ext/blacklist.css", true, &out_text, &out_headers);
+  EXPECT_EQ(HttpStatus::kOK, out_headers.status_code());
+  EXPECT_STREQ(kText, out_text);
+  EXPECT_STREQ(nullptr, out_headers.Lookup1(HttpAttributes::kSetCookie));
+}
+
+TEST_F(ProxyInterfaceTest, MapProxyDomainDropsClientCredentials) {
+  // The browser sends kTestDomain's cookies and credentials with requests
+  // under the mapped prefix.  They are not passed on to origin.com.
+  ReflectingTestFetcher reflect;
+  server_context()->set_default_system_fetcher(&reflect);
+  MapProxyDomainExtToOrigin();
+
+  RequestHeaders request_headers;
+  request_headers.Add("Was", "Here");
+  request_headers.Add(HttpAttributes::kCookie, "session=one");
+  request_headers.Add(HttpAttributes::kCookie2, "session=two");
+  request_headers.Add(HttpAttributes::kAuthorization, "Secret");
+  request_headers.Add(HttpAttributes::kProxyAuthorization, "OurSecret");
+
+  ResponseHeaders out_headers;
+  GoogleString out_text;
+  // Using .txt here so we don't try any AJAX rewriting.
+  FetchFromProxy("ext/file.txt", request_headers, true, &out_text,
+                 &out_headers);
+  EXPECT_STREQ("http://origin.com/file.txt", out_text);
+  EXPECT_STREQ("Here", out_headers.Lookup1("Was"));
+  EXPECT_FALSE(out_headers.Has(HttpAttributes::kCookie));
+  EXPECT_FALSE(out_headers.Has(HttpAttributes::kCookie2));
+  EXPECT_FALSE(out_headers.Has(HttpAttributes::kAuthorization));
+  EXPECT_FALSE(out_headers.Has(HttpAttributes::kProxyAuthorization));
+  mock_scheduler()->AwaitQuiescence();
+}
+
+TEST_F(ProxyInterfaceTest, MapProxyDomainKeepsCookiesOutsidePrefix) {
+  // Only the mapped prefix is another host's content; the site's own URLs
+  // keep their cookies.
+  ReflectingTestFetcher reflect;
+  server_context()->set_default_system_fetcher(&reflect);
+  MapProxyDomainExtToOrigin();
+
+  RequestHeaders request_headers;
+  request_headers.Add(HttpAttributes::kCookie, "session=one");
+  request_headers.Add(HttpAttributes::kAuthorization, "Secret");
+
+  ResponseHeaders out_headers;
+  GoogleString out_text;
+  FetchFromProxy("own/file.txt", request_headers, true, &out_text,
+                 &out_headers);
+  EXPECT_STREQ(AbsolutifyUrl("own/file.txt"), out_text);
+  EXPECT_STREQ("session=one", out_headers.Lookup1(HttpAttributes::kCookie));
+  EXPECT_STREQ("Secret", out_headers.Lookup1(HttpAttributes::kAuthorization));
+  mock_scheduler()->AwaitQuiescence();
+}
+
+TEST_F(ProxyInterfaceTest, MapProxyDomainMappedUrlDropsCredentials) {
+  // The nginx and Apache modules resolve MapProxyDomain themselves and pass
+  // ProxyFetchFactory the mapped URL, together with is_proxy_mapped.
+  ReflectingTestFetcher reflect;
+  server_context()->set_default_system_fetcher(&reflect);
+  MapProxyDomainExtToOrigin();
+
+  GoogleUrl gurl(StrCat(kTestDomain, "ext/file.txt"));
+  GoogleString mapped_url, host_header;
+  bool is_proxy = false;
+  ASSERT_TRUE(server_context()->global_options()->domain_lawyer()->MapOriginUrl(
+      gurl, &mapped_url, &host_header, &is_proxy));
+  ASSERT_TRUE(is_proxy);
+
+  ExpectStringAsyncFetch fetch(true, CreateRequestContext());
+  fetch.request_headers()->Add("Was", "Here");
+  fetch.request_headers()->Add(HttpAttributes::kCookie, "session=one");
+  fetch.request_headers()->Add(HttpAttributes::kAuthorization, "Secret");
+  // The reflecting fetcher turns this into a cookie set by origin.com.
+  fetch.request_headers()->Add(HttpAttributes::kSetCookie, "tasty");
+
+  ProxyFetchFactory factory(server_context());
+  RewriteDriver* driver =
+      server_context()->NewRewriteDriver(fetch.request_context());
+  driver->SetRequestHeaders(*fetch.request_headers());
+  factory.StartNewProxyFetch(mapped_url, &fetch, driver, nullptr, nullptr,
+                             is_proxy);
+  mock_scheduler()->AwaitQuiescence();
+
+  ASSERT_TRUE(fetch.done());
+  EXPECT_STREQ("http://origin.com/file.txt", fetch.buffer());
+  EXPECT_STREQ("Here", fetch.response_headers()->Lookup1("Was"));
+  EXPECT_FALSE(fetch.response_headers()->Has(HttpAttributes::kCookie));
+  EXPECT_FALSE(fetch.response_headers()->Has(HttpAttributes::kAuthorization));
+  EXPECT_FALSE(fetch.response_headers()->Has(HttpAttributes::kSetCookie));
 }
 
 TEST_F(ProxyInterfaceTest, CrossDomainHeadersWithUncacheableResourceOnProxy) {

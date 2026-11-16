@@ -52,6 +52,7 @@ using pagespeed::image_compression::kGifTestDir;
 using pagespeed::image_compression::kJpegTestDir;
 using pagespeed::image_compression::kNumColorHistogramBins;
 using pagespeed::image_compression::kPngSuiteTestDir;
+using pagespeed::image_compression::kPngTestDir;
 using pagespeed::image_compression::PixelFormat;
 using pagespeed::image_compression::ReadImage;
 using pagespeed::image_compression::ReadTestFile;
@@ -355,6 +356,39 @@ TEST_F(ImageAnalysisTest, PhotoMetric) {
     float min_photo_metric = *std::min_element(metric + kJpegImageFirstPhotoIdx,
                                                metric + kJpegImageCount);
     EXPECT_LT(max_graphics_metric, min_photo_metric);
+  }
+}
+
+// The PNG lossy fallback fixtures are only ever tested where the photo detector
+// sends them to the lossless (non-photo) arm. Pin that, so a detector change
+// shows up here as a test change rather than as a silently idle fallback test.
+TEST_F(ImageAnalysisTest, PhotoMetricPinsLossyFallbackFixtures) {
+  for (const char* name : {"smooth_noisy_blobs", "chroma_text_over_noise"}) {
+    GoogleString image_string;
+    ASSERT_TRUE(ReadTestFile(kPngTestDir, name, "png", &image_string)) << name;
+
+    size_t width, height, bytes_per_line;
+    uint8_t* image;
+    PixelFormat pixel_format;
+    ASSERT_TRUE(ReadImage(IMAGE_PNG, image_string.data(), image_string.length(),
+                          reinterpret_cast<void**>(&image), &pixel_format,
+                          &width, &height, &bytes_per_line, &message_handler_))
+        << name;
+    EXPECT_EQ(400u, width) << name;
+    EXPECT_EQ(300u, height) << name;
+    // 0.01 is the histogram threshold the detector uses; 16 is its cut.
+    const float metric = PhotoMetric(image, width, height, bytes_per_line,
+                                     pixel_format, 0.01f, &message_handler_);
+    free(image);
+    EXPECT_LT(metric, 16.0f) << name;
+
+    bool is_photo = true;
+    EXPECT_TRUE(AnalyzeImage(IMAGE_PNG, image_string.data(),
+                             image_string.length(), nullptr, nullptr, nullptr,
+                             nullptr, nullptr, &is_photo, nullptr, nullptr,
+                             &message_handler_))
+        << name;
+    EXPECT_FALSE(is_photo) << name;
   }
 }
 

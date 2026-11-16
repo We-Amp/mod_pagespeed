@@ -104,8 +104,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
     if (num_urls() == 0) {
       combined_charset_ = this_charset;
     } else if (!StringCaseEqual(combined_charset_, this_charset)) {
+      // The charsets come from the page; the reason is logged, so escape
+      // them to keep it within one log message.
       *failure_reason = StrCat("Charset mismatch; combination thus far is ",
-                               combined_charset_, " file is ", this_charset);
+                               CEscape(combined_charset_), " file is ",
+                               CEscape(this_charset));
       return false;
     }
 
@@ -120,9 +123,11 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
       for (char ch : resource->ExtractUncompressedContents()) {
         const unsigned char c = static_cast<unsigned char>(ch);
         if (c == 0 || c == 0x1B || c >= 0x80) {
-          *failure_reason =
-              StrCat("Cannot combine non-ASCII ", this_charset,
-                     " file for a page in charset ", containing_charset_);
+          // The charsets come from the page; the reason is logged, so
+          // escape them to keep it within one log message.
+          *failure_reason = StrCat(
+              "Cannot combine non-ASCII ", CEscape(this_charset),
+              " file for a page in charset ", CEscape(containing_charset_));
           return false;
         }
       }
@@ -222,6 +227,10 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   }
   StringPiece containing_charset() const { return containing_charset_; }
 
+  // For a fetch, the input URLs as the fetched URL names them, by position;
+  // nullptr otherwise.  Not owned.
+  void set_requested_urls(const StringVector* urls) { requested_urls_ = urls; }
+
  private:
   using CodeBlockMap = std::map<const Resource*, JavascriptCodeBlock*>;
 
@@ -232,6 +241,15 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   bool WritePiece(int index, int num_pieces, const Resource* input,
                   OutputResource* combination, Writer* writer,
                   MessageHandler* handler) override;
+
+  bool WriteUnavailablePiece(int index, int num_pieces, const Resource* input,
+                             OutputResource* combination, Writer* writer,
+                             MessageHandler* handler) override;
+
+  // The URL that names input number index of the combination: during a
+  // fetch, the one the fetched URL names (see set_requested_urls()),
+  // otherwise the input's own URL.
+  GoogleString NameUrl(int index, const Resource* input) const;
 
   JavascriptCodeBlock* BlockForResource(const Resource* input);
 
@@ -248,6 +266,7 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   GoogleString containing_charset_;
   // The charset of the combination so far.
   StringPiece combined_charset_;
+  const StringVector* requested_urls_ = nullptr;
 
   std::unique_ptr<JavascriptRewriteConfig> config_;
   CodeBlockMap code_blocks_;
@@ -369,13 +388,22 @@ class JsCombineFilter::Context : public RewriteContext {
     RewriteResult result = kRewriteOk;
     if (!output->IsWritten()) {
       ResourceVector resources;
+      StringVector requested_urls;
       for (int i = 0, n = num_slots(); i < n; ++i) {
         ResourcePtr resource(slot(i)->resource());
         resources.push_back(resource);
+        if (IsFetchRewrite()) {
+          // A fetch's slots are all FetchResourceSlots (PrepareFetch).
+          requested_urls.push_back(
+              static_cast<FetchResourceSlot*>(slot(i).get())->requested_url());
+        }
       }
+      combiner_.set_requested_urls(IsFetchRewrite() ? &requested_urls
+                                                    : nullptr);
       if (!combiner_.Write(resources, output)) {
         result = kRewriteFailed;
       }
+      combiner_.set_requested_urls(nullptr);
     }
     RewriteDone(result, partition_index);
   }
@@ -439,6 +467,11 @@ class JsCombineFilter::Context : public RewriteContext {
   // combined, so a fetch's result must not become the entry that HTML
   // rewrites of the same inputs read.
   bool FetchWritesPartition() const override { return false; }
+
+  // A script that cannot be fetched is declared empty in the fetched
+  // combination (see JsCombiner::WriteUnavailablePiece), so the rest of the
+  // page's scripts still run.
+  bool FetchCombinesAvailableInputs() const override { return true; }
 
   // Which scripts may be combined depends on the page's charset and on each
   // <script> element's charset attribute, not only on the scripts, so pages
@@ -540,9 +573,11 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
     }
   }
 
-  // We write out code of each script into a variable.
+  // We write out code of each script into a variable, named after the URL the
+  // page evaluates (see NameUrl()).
   writer->Write(
-      StrCat("var ", JsCombineFilter::VarName(rewrite_driver_, input->url()),
+      StrCat("var ",
+             JsCombineFilter::VarName(rewrite_driver_, NameUrl(index, input)),
              " = "),
       handler);
 
@@ -552,6 +587,34 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
   writer->Write(escaped, handler);
   writer->Write(";\n", handler);
   return true;
+}
+
+// The page evaluates one variable per script, so a script left out of the
+// combination is declared as empty code: evaluating it does nothing, as when
+// the browser cannot load that script.
+bool JsCombineFilter::JsCombiner::WriteUnavailablePiece(
+    int index, int /*num_pieces*/, const Resource* input,
+    OutputResource* /*combination*/, Writer* writer, MessageHandler* handler) {
+  return writer->Write(
+      StrCat("var ",
+             JsCombineFilter::VarName(rewrite_driver_, NameUrl(index, input)),
+             " = \"\";\n"),
+      handler);
+}
+
+// The name comes from the input URL as the combined URL names it, the one the
+// page evaluates. An input that is itself a .pagespeed. resource is rebuilt
+// into a resource whose URL carries the hash of what was rebuilt; when the
+// rebuild falls back to the unoptimized original, or the input changed since
+// the page was rewritten, that is not the hash the page uses. When rewriting
+// HTML, the page evaluates the name of the slot's resource, which is the input.
+GoogleString JsCombineFilter::JsCombiner::NameUrl(int index,
+                                                  const Resource* input) const {
+  if (requested_urls_ != nullptr && index >= 0 &&
+      index < static_cast<int>(requested_urls_->size())) {
+    return (*requested_urls_)[index];
+  }
+  return input->url();
 }
 
 JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(

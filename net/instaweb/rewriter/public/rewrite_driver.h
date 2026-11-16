@@ -435,6 +435,13 @@ class RewriteDriver : public HtmlParse {
   OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
                                          RewriteFilter** filter) const;
 
+  // As above, and sets *invalid_signature to whether the URL decoded as a
+  // .pagespeed. resource but was refused because its URL signature did not
+  // verify (UrlSigningKey set, AcceptInvalidSignatures off).
+  OutputResourcePtr DecodeOutputResource(const GoogleUrl& url,
+                                         RewriteFilter** filter,
+                                         bool* invalid_signature) const;
+
   // As above, but does not actually create a resource object,
   // and instead outputs the decoded information into the various out
   // parameters. Returns whether decoding successful or not.
@@ -1215,6 +1222,17 @@ class RewriteDriver : public HtmlParse {
   // Determine whether this driver is nested inside another.
   bool is_nested() const { return is_nested_; }
 
+  // A nested driver that rebuilds one input of a combination fetched by a
+  // request may stop waiting for that rebuild and serve the unoptimized input
+  // (see RewriteContext::FetchContext::SetupDeadlineAlarm). The combination
+  // is then made from the original input; it is private and not stored.
+  bool nested_fetch_may_fall_back() const {
+    return nested_fetch_may_fall_back_;
+  }
+  void set_nested_fetch_may_fall_back(bool x) {
+    nested_fetch_may_fall_back_ = x;
+  }
+
   // Writes the specified contents into the output resource, and marks it
   // as optimized. 'inputs' described the input resources that were used
   // to construct the output, and is used to determine whether the
@@ -1857,6 +1875,7 @@ class RewriteDriver : public HtmlParse {
 
   bool can_rewrite_resources_;
   bool is_nested_;
+  bool nested_fetch_may_fall_back_ = false;
 
   // Additional request context that may outlive this RewriteDriver. (Thus,
   // the context is reference counted.)

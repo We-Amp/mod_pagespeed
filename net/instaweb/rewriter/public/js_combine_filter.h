@@ -49,6 +49,7 @@ struct JsTokenizerPatterns;
 
 namespace net_instaweb {
 
+class RewriteContextFetchQueueTest;
 class Statistics;
 
 // Implements combining of multiple external JS files into one via the
@@ -118,6 +119,7 @@ class JsCombineFilter : public RewriteFilter {
   class Context;
 
   friend class JsCombineFilterTest;
+  friend class RewriteContextFetchQueueTest;
 
   void ConsiderJsForCombination(HtmlElement* element,
                                 HtmlElement::Attribute* src);

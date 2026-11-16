@@ -872,19 +872,49 @@ class ImageCombineFilter::Context : public RewriteContext {
                         OutputResourcePtr output) {
     ImageCombineFilter::Combiner combiner(filter_, &library_);
 
+    // When any image could not be fetched (see FetchCombinesAvailableInputs())
+    // the sprite cannot be laid out as the page's CSS expects: the size of the
+    // missing image is not known, and a shorter strip would tile under the
+    // default background-repeat and show the wrong image.  Serve a
+    // transparent image instead; nothing is drawn until the image is back.
     ResourceVector resources;
-    bool ok = true;
-    for (int i = 0, n = num_slots(); (i < n) && ok; ++i) {
+    bool all_available = true;
+    for (int i = 0, n = num_slots(); i < n; ++i) {
       ResourcePtr resource(slot(i)->resource());
-      resources.push_back(resource);
-      RegisterResource(resource.get());
-      ok = EnsureLoaded(resource->url());
+      if (resource->loaded() && resource->HttpStatusOk()) {
+        resources.push_back(resource);
+      } else {
+        all_available = false;
+      }
     }
-    if (!ok || !combiner.Write(resources, output)) {
-      RewriteDone(kRewriteFailed, partition_index);
-      return;
+    bool ok = false;
+    if (!all_available) {
+      ok = !resources.empty() && WriteBlankSprite(resources, output);
+    } else {
+      ok = true;
+      for (size_t i = 0; ok && i < resources.size(); ++i) {
+        RegisterResource(resources[i].get());
+        ok = EnsureLoaded(resources[i]->url());
+      }
+      ok = ok && combiner.Write(resources, output);
     }
-    RewriteDone(kRewriteOk, partition_index);
+    RewriteDone(ok ? kRewriteOk : kRewriteFailed, partition_index);
+  }
+
+  // A fully transparent 1x1 PNG.
+  bool WriteBlankSprite(const ResourceVector& inputs,
+                        const OutputResourcePtr& output) {
+    static const unsigned char kBlankPng[] = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+        0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x00, 0x02, 0x00,
+        0x00, 0x05, 0x00, 0x01, 0xe9, 0xfa, 0xdc, 0xd8, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+    return Driver()->Write(inputs,
+                           StringPiece(reinterpret_cast<const char*>(kBlankPng),
+                                       sizeof(kBlankPng)),
+                           &kContentTypePng, StringPiece(), output.get());
   }
 
   void WriteCombinationCancel(
@@ -895,6 +925,10 @@ class ImageCombineFilter::Context : public RewriteContext {
       OutputResourcePtr output) {
     RewriteDone(kTooBusy, partition_index);
   }
+
+  // A sprite with an image that cannot be fetched now is answered with a
+  // transparent image, rather than 404.
+  bool FetchCombinesAvailableInputs() const override { return true; }
 
   bool PolicyPermitsRendering() const override {
     return AreOutputsAllowedByCsp(CspDirective::kImgSrc);
@@ -1134,6 +1168,12 @@ class ImageCombineFilter::Context : public RewriteContext {
       // or (perhaps in the future) image type.
       if (!added) {
         for (auto combo : combinations) {
+          // Skip a combination that has refused an image for size: it is
+          // full, and every refused add costs work proportional to its size.
+          // The image goes to a combination with room, or starts a new one.
+          if (combo->refused_for_size()) {
+            continue;
+          }
           if (combo->AddResourceNoFetch(resource, handler).value) {
             combo->AddResourceToPartition(resource.get(), i);
             urls_to_combos[resource_url] = combo;

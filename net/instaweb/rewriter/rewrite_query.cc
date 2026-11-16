@@ -22,6 +22,7 @@
 #include <algorithm>  // for std::binary_search
 #include <map>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/query_params.h"
@@ -70,6 +72,20 @@ StringPiece SanitizeValueAsQP(StringPiece untrusted_value, GoogleUrl* storage) {
   return StringPiece(sanitized_value.data() + STATIC_STRLEN(kUrlBase),
                      sanitized_value.size() - STATIC_STRLEN(kUrlBase));
 }
+
+// Removes the RequestOptionOverride token from the response headers when
+// RewriteQuery::Scan() returns, on every return path.
+class ScopedRemoveRequestOptionOverride {
+ public:
+  explicit ScopedRemoveRequestOptionOverride(ResponseHeaders* headers)
+      : headers_(headers) {}
+  ~ScopedRemoveRequestOptionOverride() {
+    RewriteQuery::RemoveRequestOptionOverride(headers_);
+  }
+
+ private:
+  ResponseHeaders* headers_;
+};
 
 }  // namespace
 
@@ -107,6 +123,11 @@ RewriteQuery::Status RewriteQuery::ScanHeader(
         break;
       }
     }
+  }
+  // The token is not an option, so the loop below would leave it in place.
+  // In a response it must not reach the client.
+  if constexpr (std::is_same_v<HeaderT, ResponseHeaders>) {
+    RemoveRequestOptionOverride(headers);
   }
 
   // Tracks the headers that need to be removed.
@@ -160,6 +181,8 @@ RewriteQuery::Status RewriteQuery::Scan(
     ServerContext* server_context, GoogleUrl* request_url,
     RequestHeaders* request_headers, ResponseHeaders* response_headers,
     MessageHandler* handler) {
+  // Several paths below return before the response headers are scanned.
+  ScopedRemoveRequestOptionOverride remove_token(response_headers);
   Status status = kNoneFound;
   query_params_.Clear();
   pagespeed_query_params_.Clear();
@@ -428,6 +451,23 @@ bool RewriteQuery::MightBeCustomOption(StringPiece name) {
          StringCaseEqual(name, HttpAttributes::kXPsaClientOptions);
 }
 
+bool RewriteQuery::IsRequestOptionOverrideName(StringPiece name) {
+  return StringCaseEqual(
+             name,
+             StrCat(kModPagespeed, RewriteOptions::kRequestOptionOverride)) ||
+         StringCaseEqual(
+             name, StrCat(kPageSpeed, RewriteOptions::kRequestOptionOverride));
+}
+
+void RewriteQuery::RemoveRequestOptionOverride(ResponseHeaders* headers) {
+  if (headers != nullptr) {
+    headers->RemoveAll(
+        StrCat(kModPagespeed, RewriteOptions::kRequestOptionOverride));
+    headers->RemoveAll(
+        StrCat(kPageSpeed, RewriteOptions::kRequestOptionOverride));
+  }
+}
+
 template <class HeaderT>
 bool RewriteQuery::HeadersMayHaveCustomOptions(const QueryParams& params,
                                                const HeaderT* headers) {
@@ -473,11 +513,11 @@ bool RewriteQuery::MayHaveCustomOptions(
   }
   if (req_headers != nullptr &&
       (req_headers->Has(HttpAttributes::kXPsaClientOptions) ||
-       req_headers->HasValue(HttpAttributes::kCacheControl, "no-transform"))) {
+       req_headers->HasCacheControlDirective("no-transform"))) {
     return true;
   }
   if ((resp_headers != nullptr) &&
-      resp_headers->HasValue(HttpAttributes::kCacheControl, "no-transform")) {
+      resp_headers->HasCacheControlDirective("no-transform")) {
     return true;
   }
   return false;
@@ -513,8 +553,7 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
       handler->Message(kWarning,
                        "Invalid value for %s: %s "
                        "(should be on, off, unplugged, or noscript)",
-                       name.as_string().c_str(),
-                       trimmed_value.as_string().c_str());
+                       CEscape(name).c_str(), CEscape(trimmed_value).c_str());
       status = kInvalid;
     }
   } else if (!allow_options) {
@@ -540,7 +579,7 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
                              true /* omit_empty_strings */);
     for (auto& pair : pairs) {
       TrimWhitespace(&pair);
-      if (pair == "no-transform") {
+      if (CachingHeaders::ElementHasDirective(pair, "no-transform")) {
         // TODO(jmarantz): A .pagespeed resource should return un-optimized
         // content with "Cache-Control: no-transform".
         options->set_enabled(RewriteOptions::kEnabledStandby);
@@ -680,7 +719,7 @@ RewriteQuery::Status RewriteQuery::ParseResourceOption(
             RewriteOptions::LookupOptionNameById(name_value[0]);
         if (!option_name.empty() && opts != nullptr &&
             std::binary_search(opts->begin(), opts->end(), option_name) &&
-            options->SetOptionFromName(option_name, name_value[1]) ==
+            options->SetOptionFromUrlSegment(option_name, name_value[1]) ==
                 RewriteOptions::kOptionOk) {
           status = kSuccess;
         } else {

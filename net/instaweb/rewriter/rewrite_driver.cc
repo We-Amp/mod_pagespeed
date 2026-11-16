@@ -466,6 +466,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   flush_early_info_.reset(nullptr);
   can_rewrite_resources_ = true;
   is_nested_ = false;
+  nested_fetch_may_fall_back_ = false;
   num_initiated_rewrites_ = 0;
   num_detached_rewrites_ = 0;
   if (request_context_.get() != nullptr) {
@@ -1232,6 +1233,14 @@ bool RewriteDriver::DecodeUrlGivenOptions(const GoogleUrl& url,
 
 OutputResourcePtr RewriteDriver::DecodeOutputResource(
     const GoogleUrl& gurl, RewriteFilter** filter) const {
+  bool invalid_signature = false;
+  return DecodeOutputResource(gurl, filter, &invalid_signature);
+}
+
+OutputResourcePtr RewriteDriver::DecodeOutputResource(
+    const GoogleUrl& gurl, RewriteFilter** filter,
+    bool* invalid_signature) const {
+  *invalid_signature = false;
   ResourceNamer namer;
   OutputResourceKind kind;
   if (!DecodeOutputResourceName(gurl, options(), server_context()->url_namer(),
@@ -1244,6 +1253,7 @@ OutputResourcePtr RewriteDriver::DecodeOutputResource(
       new OutputResource(this, base, base, base, namer, kind));
   if (!output_resource.get()->CheckSignature()) {
     output_resource.clear();
+    *invalid_signature = true;
   }
   return output_resource;
 }
@@ -1540,7 +1550,9 @@ bool RewriteDriver::FetchResource(const StringPiece& url,
   // actually fetch any data until we specifically ask it to.
   RewriteFilter* filter = nullptr;
   GoogleUrl gurl(url);
-  OutputResourcePtr output_resource(DecodeOutputResource(gurl, &filter));
+  bool invalid_signature = false;
+  OutputResourcePtr output_resource(
+      DecodeOutputResource(gurl, &filter, &invalid_signature));
 
   if (output_resource.get() != nullptr) {
     handled = true;
@@ -1550,9 +1562,23 @@ bool RewriteDriver::FetchResource(const StringPiece& url,
       filter->LogFilterModifiedContent();
     }
     FetchOutputResource(output_resource, filter, async_fetch);
+  } else if (invalid_signature) {
+    // A .pagespeed. URL whose signature does not verify is refused here
+    // with 403 Forbidden and is not passed on to any other handling.
+    handled = true;
+    ref_counts_.AddRef(kRefFetchUserFacing);
+    ResponseHeaders* response_headers = async_fetch->response_headers();
+    response_headers->Clear();
+    response_headers->SetStatusAndReason(HttpStatus::kForbidden);
+    response_headers->Add(HttpAttributes::kContentType,
+                          kContentTypeText.mime_type());
+    response_headers->Add(HttpAttributes::kCacheControl,
+                          HttpAttributes::kNoCacheMaxAge0);
+    response_headers->ComputeCaching();
+    async_fetch->Write("Forbidden", message_handler());
+    async_fetch->Done(true);
+    FetchComplete();
   } else if (options()->in_place_rewriting_enabled()) {
-    // TODO(jcrowell): Make URLs with signatures take this path so they will 403
-    // instead of 404.
     // This is an ajax resource.
     handled = true;
     // TODO(sligocki): Get rid of this fallback and make all callers call
@@ -1797,17 +1823,32 @@ ResourcePtr RewriteDriver::CreateInputResourceUnchecked(
     // Note: type may be NULL if url has an unexpected or malformed extension.
     const ContentType* type = NameExtensionToContentType(url.LeafSansQuery());
     GoogleString filename;
-    if (options()->file_load_policy()->ShouldLoadFromFile(url, &filename)) {
+    // A URL under a MapProxyDomain path lives on the proxied origin, not on
+    // local disk, so a LoadFromFile prefix covering the proxy path itself must
+    // not apply. A LoadFromFile rule written for the proxied origin does apply,
+    // matching what happens when the origin URL is the input during HTML
+    // rewriting.
+    GoogleString mapped_url;
+    GoogleString host_header;
+    bool is_proxy = false;
+    options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
+                                             &is_proxy);
+    bool load_from_file = false;
+    if (is_proxy) {
+      GoogleUrl mapped_origin_gurl(mapped_url);
+      load_from_file = mapped_origin_gurl.IsWebValid() &&
+                       options()->file_load_policy()->ShouldLoadFromFile(
+                           mapped_origin_gurl, &filename);
+    } else {
+      load_from_file =
+          options()->file_load_policy()->ShouldLoadFromFile(url, &filename);
+    }
+    if (load_from_file) {
       resource.reset(new FileInputResource(this, type, url_string, filename));
     } else {
-      // If the scheme is https and the fetcher doesn't support https, map
-      // the URL to what will ultimately be fetched to see if that will be
-      // http, in which case the fetcher will be able to handle it.
-      GoogleString mapped_url;
-      GoogleString host_header;
-      bool is_proxy = false;
-      options()->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
-                                               &is_proxy);
+      // If the scheme is https and the fetcher doesn't support https, check
+      // the mapped URL to see if that will be http, in which case the
+      // fetcher will be able to handle it.
       GoogleUrl mapped_gurl(mapped_url);
       if (mapped_gurl.SchemeIs("http") ||
           (mapped_gurl.SchemeIs("https") &&
@@ -2018,8 +2059,15 @@ void RewriteDriver::DeleteRewriteContext(RewriteContext* rewrite_context) {
 void RewriteDriver::PossiblyPurgeCachedResponseAndReleaseDriver() {
   DCHECK(!externally_managed_);
   // We might temporarily (due to purging) revive the object here, so
-  // better clear the "we were told it's dead!" bit.
-  release_driver_ = false;
+  // better clear the "we were told it's dead!" bit. release_driver_ is
+  // guarded by rewrite_mutex(), which LastRefRemoved() holds when it sets it,
+  // and which the caller (DropReference) has already dropped. Take it just
+  // for the write; the purge and the release below must run without it,
+  // since they can call back into this driver and into the server context.
+  {
+    ScopedMutex lock(rewrite_mutex());
+    release_driver_ = false;
+  }
   if (downstream_cache_purger_.MaybeIssuePurge(google_url())) {
     return;
   }
@@ -3188,7 +3236,7 @@ bool RewriteDriver::Write(const ResourceVector& inputs,
 
     HTTPCache* http_cache = server_context_->http_cache();
     if (output->kind() != kOnTheFlyResource &&
-        output->kind() != kInlineResource &&
+        output->kind() != kInlineResource && output->store_in_http_cache() &&
         (http_cache->force_caching() || meta_data->IsProxyCacheable())) {
       // This URL should already be mapped to the canonical rewrite domain,
       // But we should store its unsharded form in the cache.

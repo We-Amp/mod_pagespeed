@@ -1056,6 +1056,37 @@ apr_status_t instaweb_in_place_origin_caching_filter(ap_filter_t* filter,
   return ap_pass_brigade(filter->next, bb);
 }
 
+// An origin may send the RequestOptionOverride token in its response to have
+// its own option headers honoured.  The token is a credential.  The option
+// scan in the HTML output filter drops it from the responses it reads; this
+// filter drops it from every response, including the ones that filter never
+// sees (other content types and statuses, proxied and in-place resources).
+// It runs after that filter and before in-place recording.
+apr_status_t instaweb_strip_option_token_filter(ap_filter_t* filter,
+                                                apr_bucket_brigade* bb) {
+  request_rec* request = filter->r;
+  const GoogleString names[] = {
+      StrCat(RewriteQuery::kModPagespeed,
+             RewriteOptions::kRequestOptionOverride),
+      StrCat(RewriteQuery::kPageSpeed, RewriteOptions::kRequestOptionOverride),
+  };
+  for (const GoogleString& name : names) {
+    apr_table_unset(request->headers_out, name.c_str());
+    if (request->err_headers_out != nullptr) {
+      apr_table_unset(request->err_headers_out, name.c_str());
+    }
+  }
+  ap_remove_output_filter(filter);
+  return ap_pass_brigade(filter->next, bb);
+}
+
+void instaweb_insert_strip_option_token_filter(request_rec* request) {
+  if (request->main == nullptr) {
+    ap_add_output_filter(kModPagespeedStripOptionTokenName, nullptr, request,
+                         request->connection);
+  }
+}
+
 // Runs immediately after mod_headers and other filters which muck with the
 // headers, but before headers are finalized.
 //
@@ -1522,6 +1553,17 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
       instaweb_in_place_origin_caching_filter, nullptr,
       static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 3));
 
+  // After the HTML output filter (AP_FTYPE_RESOURCE + 1), which reads the
+  // token, and ahead of every in-place recording filter.  Added to every
+  // response, error responses included.
+  ap_register_output_filter(
+      kModPagespeedStripOptionTokenName, instaweb_strip_option_token_filter,
+      nullptr, static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 4));
+  ap_hook_insert_filter(instaweb_insert_strip_option_token_filter, nullptr,
+                        nullptr, APR_HOOK_MIDDLE);
+  ap_hook_insert_error_filter(instaweb_insert_strip_option_token_filter,
+                              nullptr, nullptr, APR_HOOK_MIDDLE);
+
   // DaemonHtmlCache report-only reads the late headers here: mod_expires,
   // mod_headers and mod_deflate have run, instaweb_fix_headers_filter has not.
   // Added per response, only in that mode.  Headers set by a filter that runs
@@ -1684,6 +1726,12 @@ static const char* CmdOptions(const cmd_parms* cmd, void* data,
              "context";
     }
   }
+  // Apache parses .htaccess files with cmd->pool == cmd->temp_pool, which
+  // ap_check_cmd_context(NOT_IN_HTACCESS) tests.
+  if (ap_check_cmd_context(const_cast<cmd_parms*>(cmd), NOT_IN_HTACCESS) !=
+      nullptr) {
+    config->mark_set_from_htaccess();
+  }
   *config_out = config;
   return nullptr;
 }
@@ -1815,8 +1863,15 @@ static const char* ParseDirective(cmd_parms* cmd, void* data, const char* arg) {
     }
 
     // See whether generic RewriteOptions name handling can figure this one out.
+    // An .htaccess file is a directory-level source: parse an ExperimentSpec
+    // there at directory scope, which refuses its fetch-steering components
+    // as the fetch directives themselves are refused.
     RewriteOptions::OptionSettingResult result =
-        config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
+        (StringCaseEqual(option, RewriteOptions::kExperimentSpec) &&
+         ap_check_cmd_context(cmd, NOT_IN_HTACCESS) != nullptr)
+            ? config->ParseAndSetOptionFromNameWithScope(
+                  option, arg, RewriteOptions::kDirectoryScope, &msg, handler)
+            : config->ParseAndSetOptionFromName1(option, arg, &msg, handler);
     if (result == RewriteOptions::kOptionNameUnknown) {
       // RewriteOptions didn't know; try the driver factory.
       // TODO(morlovich): It may be cleaner to not have process-scope options
@@ -2057,10 +2112,17 @@ static const char* ParseDirective3(cmd_parms* cmd, void* data, const char* arg1,
   AP_INIT_TAKE3(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
                 NULL, OR_ALL, help)
 
-// APACHE_CONFIG_OPTION for 2 or 3 arguments
-#define APACHE_CONFIG_DIR_OPTION23(name, help)                               \
+// Directives that steer the server's own fetches: where a resource is
+// fetched from and with which request headers.  They are accepted in the
+// configuration the operator writes (server, <VirtualHost>, <Directory>,
+// <Location>) but not in .htaccess, as a fetch made for one site fills a
+// cache that other sites on the same server read.
+#define APACHE_CONFIG_FETCH_OPTION2(name, help)                             \
+  AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
+                NULL, RSRC_CONF | ACCESS_CONF, help)
+#define APACHE_CONFIG_FETCH_OPTION23(name, help)                             \
   AP_INIT_TAKE23(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
-                 NULL, OR_ALL, help)
+                 NULL, RSRC_CONF | ACCESS_CONF, help)
 
 static const command_rec mod_pagespeed_filter_cmds[] = {
     // Special conditional op.
@@ -2166,13 +2228,13 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION2(
         kModPagespeedAddResourceHeader,
         "add_resource_header_name add_resource_header_value"),
-    APACHE_CONFIG_DIR_OPTION2(kModPagespeedCustomFetchHeader,
-                              "custom_header_name custom_header_value"),
-    APACHE_CONFIG_DIR_OPTION23(
+    APACHE_CONFIG_FETCH_OPTION2(kModPagespeedCustomFetchHeader,
+                                "custom_header_name custom_header_value"),
+    APACHE_CONFIG_FETCH_OPTION23(
         kModPagespeedMapOriginDomain,
         "to_domain from_domain[,from_domain]* [host_header]"),
-    APACHE_CONFIG_DIR_OPTION23(kModPagespeedMapProxyDomain,
-                               "proxy_domain origin_domain [to_domain]"),
+    APACHE_CONFIG_FETCH_OPTION23(kModPagespeedMapProxyDomain,
+                                 "proxy_domain origin_domain [to_domain]"),
     APACHE_CONFIG_DIR_OPTION2(kModPagespeedMapRewriteDomain,
                               "to_domain from_domain[,from_domain]*"),
     APACHE_CONFIG_DIR_OPTION2(kModPagespeedShardDomain,

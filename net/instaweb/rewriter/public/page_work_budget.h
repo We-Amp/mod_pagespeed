@@ -47,6 +47,10 @@ class PageWorkBudget {
     int64 contexts = 32768;
     // Partition entries the rewrites of one document may copy or report.
     int64 partition_entries = 256 * 1024;
+    // Bytes of inlined content (stylesheets, scripts, images) the rewrites of
+    // one document may copy for repeated references to one resource. A
+    // reference past it is left as written.
+    int64 repeated_inline_bytes = 16 * 1024 * 1024;
   };
 
   PageWorkBudget();
@@ -70,6 +74,10 @@ class PageWorkBudget {
   // and spends the rest of the budget when they do not fit, so that later
   // callers stop early.
   bool TakePartitionEntries(int64 num_entries);
+
+  // Takes num_bytes of repeated inline content and returns true, or returns
+  // false and spends the rest of that budget when they do not fit.
+  bool TakeRepeatedInlineBytes(int64 num_bytes);
 
   // True once the inputs loaded for the document reach the byte budget.
   bool InputBytesSpent() const;
@@ -97,6 +105,7 @@ class PageWorkBudget {
   int64 contexts_taken() const;
   int64 contexts_refused() const;
   int64 partition_entries_taken() const;
+  int64 repeated_inline_bytes_taken() const;
 
  private:
   Function* PopWaitingIfRoomLocked();
@@ -109,6 +118,7 @@ class PageWorkBudget {
   int64 contexts_taken_ = 0;
   int64 contexts_refused_ = 0;
   int64 partition_entries_taken_ = 0;
+  int64 repeated_inline_bytes_taken_ = 0;
   std::deque<Function*> waiting_;
 
   PageWorkBudget(const PageWorkBudget&) = delete;

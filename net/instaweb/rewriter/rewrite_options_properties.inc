@@ -140,8 +140,10 @@
     "Prevents the use of disabled filters", true) \
   X(kDefaultRewriteDeadlineMs, rewrite_deadline_ms_, "rdm", \
     kRewriteDeadlineMs, kDirectoryScope, \
-    "Time to wait for resource optimization (per flush window) before" \
-    "falling back to the original resource for the request.", true) \
+    "Time to wait for resource optimization (per flush window) before " \
+    "falling back to the original resource for the request. A negative " \
+    "value waits for a page without limit, and for a resource request up " \
+    "to NegativeDeadlineFetchWaitMs.", true) \
   X(kEnabledOn, enabled_, "e", kEnabled, kDirectoryScope, nullptr, true) \
   X(false, add_options_to_urls_, "aou", kAddOptionsToUrls, \
     kDirectoryScope, \
@@ -158,13 +160,19 @@
   X(false, in_place_wait_for_optimized_, "ipwo", \
     kInPlaceWaitForOptimized, kDirectoryScope, \
     "Wait for optimizations to complete", true) \
+  X(true, in_place_cors_guard_, "ipcg", \
+    kInPlaceCorsGuard, kDirectoryScope, \
+    "Serve an in-place resource to a cross-origin CORS request only when " \
+    "its Access-Control-Allow-Origin header allows that request's origin; " \
+    "otherwise let the server answer the request itself.", true) \
   X(10, in_place_s_maxage_sec_, "ipsm", \
     kInPlaceSMaxAgeSec, kServerScope, \
     "What to set s-maxage to on not-yet-optimized ipro resources", true) \
   X(kDefaultRewriteDeadlineMs, in_place_rewrite_deadline_ms_, "iprdm", \
     kInPlaceRewriteDeadlineMs, kDirectoryScope, \
-    "Time to wait for an in-place resource optimization before" \
-    "falling back to the original resource for the request.", true) \
+    "Time to wait for an in-place resource optimization before " \
+    "falling back to the original resource for the request. A negative " \
+    "value waits up to NegativeDeadlineFetchWaitMs.", true) \
   X(true, in_place_preemptive_rewrite_css_, "ipprc", \
     kInPlacePreemptiveRewriteCss, kDirectoryScope, \
     "If set, issue preemptive rewrites of CSS on the HTML path when " \
@@ -438,6 +446,22 @@
     "Maximum number of frames in an animated image that will be converted. " \
     "Animations with more frames are served unconverted. 0 or a negative " \
     "value disables the limit.", true) \
+  X(kDefaultPngLossyFallbackMaxSizePercent, \
+    png_lossy_fallback_max_size_percent_, "plfp", \
+    kPngLossyFallbackMaxSizePercent, kDirectoryScope, \
+    "A PNG that photographic-image detection does not recognise as a photo " \
+    "is normally stored as lossless WebP. When this is above 0, such a PNG " \
+    "is also tried as lossy WebP and served that way if the lossy file is " \
+    "at most this percentage of the lossless file's size and a local " \
+    "quality check (worst 32x32 tile) passes. Opaque PNGs only, never below " \
+    "WebpRecompressionQuality 50. 0 disables the fallback; 20 is " \
+    "recommended when enabling it.", true) \
+  X(kDefaultPngLossyFallbackMinBytesPerMegapixel, \
+    png_lossy_fallback_min_bytes_per_mp_, "plfb", \
+    kPngLossyFallbackMinBytesPerMegapixel, kDirectoryScope, \
+    "The lossy fallback (see PngLossyFallbackMaxSizePercent) is tried only " \
+    "when the lossless WebP is at least this many bytes per megapixel of " \
+    "the encoded image (250000 is 2 bits per pixel); 0 removes this gate.", true) \
   X(kDefaultImageAvifRecompressQuality, \
     image_avif_recompress_quality_, "iav", \
     kImageAvifRecompressionQuality, kQueryScope, \
@@ -679,6 +703,12 @@
     "it is disabled.", false) \
   X(kDefaultOptionCookiesDurationMs, option_cookies_duration_ms_, "ocd", \
     kOptionCookiesDurationMs, kDirectoryScope, \
-    "The max-age in ms of cookies that set PageSpeed options.", true)
+    "The max-age in ms of cookies that set PageSpeed options.", true) \
+  X(kDefaultNegativeDeadlineFetchWaitMs, negative_deadline_fetch_wait_ms_, \
+    "ndfw", kNegativeDeadlineFetchWaitMs, kServerScope, \
+    "How long a request for a rewritten resource waits for its optimization " \
+    "when the rewrite deadline is negative (default 1000 ms), before the " \
+    "original is served. At most FetcherTimeOutMs. Server or virtual host " \
+    "configuration only.", true)
 
 // clang-format on

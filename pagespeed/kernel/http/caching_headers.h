@@ -106,6 +106,33 @@ class CachingHeaders {
   // more conservative than the existing cache-control string.
   GoogleString GenerateDisabledCacheControl();
 
+  // Parses the value of a lifetime directive, in either form RFC 9111 5.2
+  // asks recipients to accept.  A value too large for an int is clamped to
+  // the largest int.  Returns false for anything else.
+  static bool ParseLifetimeSeconds(StringPiece value, int* seconds);
+
+  // What one element of a Cache-Control list (already split at commas) says
+  // about a lifetime.
+  struct LifetimeDirective {
+    enum Name { kNone, kMaxAge, kSMaxAge };
+    // kNone when the element mentions no lifetime at all.
+    Name name = kNone;
+    // True only for a well-formed lifetime directive.  A lifetime that is
+    // not readable makes the response stale (RFC 9111 4.2.1).
+    bool readable = false;
+    // The lifetime was found among other text in the same element.
+    bool embedded = false;
+    // The value, when readable.
+    int seconds = 0;
+  };
+  static LifetimeDirective ReadLifetimeDirective(StringPiece element);
+
+  // Does one element of a Cache-Control list carry the directive `name`
+  // (case-insensitively, with or without an argument)?  It is also found
+  // when joined to another directive in the same element.  Meant for
+  // restrictive directives only.
+  static bool ElementHasDirective(StringPiece element, StringPiece name);
+
  private:
   void ParseCacheControlIfNecessary();
 

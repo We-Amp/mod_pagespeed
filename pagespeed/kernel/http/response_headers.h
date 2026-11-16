@@ -131,6 +131,25 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
     return respect_vary ? kRespectVaryOnResources : kIgnoreVaryOnResources;
   }
 
+  // For a response the origin sent to a request that carried a Cookie or
+  // Cookie2 header (any value, an empty one included): may it be stored where
+  // other requests read it?  Call ComputeCaching() first.
+  //
+  // A stylesheet, script or image (classified from Content-Type,
+  // case-insensitively, parameters ignored) may when the origin stated a
+  // lifetime: a max-age or s-maxage above zero, or, with no Cache-Control,
+  // an Expires later than Date.  The implicit lifetime does not count.
+  // Anything else, an unknown or missing type included, may only when the
+  // origin marked it shareable: public, or a single s-maxage above zero.
+  //
+  // Only for a request whose headers are known: pass the request's own
+  // properties to MayShareForRequest().  Authorization is IsProxyCacheable's.
+  bool IsShareableForCookieRequest() const;
+  bool MayShareForRequest(RequestHeaders::Properties properties) const {
+    return !(properties.has_cookie || properties.has_cookie2) ||
+           IsShareableForCookieRequest();
+  }
+
   // The zero-arg version of IsProxyCacheable gives a pessimistic answer,
   // assuming the request has cookies, there is no validator, and we
   // respect Vary.

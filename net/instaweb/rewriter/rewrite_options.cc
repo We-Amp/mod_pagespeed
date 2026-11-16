@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_rw_lock.h"
 #include "pagespeed/kernel/base/stl_util.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/purge_set.h"
@@ -205,6 +206,7 @@ const char RewriteOptions::kInPlacePreemptiveRewriteImages[] =
     "InPlacePreemptiveRewriteImages";
 const char RewriteOptions::kInPlacePreemptiveRewriteJavascript[] =
     "InPlacePreemptiveRewriteJavascript";
+const char RewriteOptions::kInPlaceCorsGuard[] = "InPlaceCorsGuard";
 const char RewriteOptions::kInPlaceRewriteDeadlineMs[] =
     "InPlaceRewriteDeadlineMs";
 const char RewriteOptions::kIncreaseSpeedTracking[] = "IncreaseSpeedTracking";
@@ -258,6 +260,10 @@ const char RewriteOptions::kObliviousPagespeedUrls[] = "ObliviousPagespeedUrls";
 const char RewriteOptions::kOptionCookiesDurationMs[] =
     "OptionCookiesDurationMs";
 const char RewriteOptions::kOverrideCachingTtlMs[] = "OverrideCachingTtlMs";
+const char RewriteOptions::kPngLossyFallbackMaxSizePercent[] =
+    "PngLossyFallbackMaxSizePercent";
+const char RewriteOptions::kPngLossyFallbackMinBytesPerMegapixel[] =
+    "PngLossyFallbackMinBytesPerMegapixel";
 const char RewriteOptions::kPreserveImageProvenance[] =
     "PreserveImageProvenance";
 const char RewriteOptions::kPreserveSubresourceHints[] =
@@ -354,6 +360,8 @@ const char RewriteOptions::kCycloneRamCacheKb[] = "CycloneRamCacheKb";
 const char RewriteOptions::kAsyncMetadataL2Writes[] = "AsyncMetadataL2Writes";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
+const char RewriteOptions::kNegativeDeadlineFetchWaitMs[] =
+    "NegativeDeadlineFetchWaitMs";
 const char RewriteOptions::kFileCacheCleanSizeKb[] = "FileCacheSizeKb";
 const char RewriteOptions::kFileCachePath[] = "FileCachePath";
 const char RewriteOptions::kFileCacheSmallTierPercent[] =
@@ -526,6 +534,13 @@ const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
 // negative value disables the cap.
 const int64 RewriteOptions::kDefaultImageMaxAnimatedFrames = 200;
 
+// The PNG lossy fallback is off (0) by default. When enabled, the lossy WebP
+// trial runs for a lossless WebP of at least 250000 bytes per megapixel
+// (2 bits per pixel).
+const int64 RewriteOptions::kDefaultPngLossyFallbackMaxSizePercent = 0;
+const int64 RewriteOptions::kDefaultPngLossyFallbackMinBytesPerMegapixel =
+    250000;
+
 // AVIF quality defaults. -1 falls back to
 // ImageRecompressionQuality, mirroring the WebP defaults; the encode-side
 // default (~50-60 from the Stream 0 spike) is applied in image.cc when the
@@ -562,6 +577,9 @@ const int RewriteOptions::kDefaultRewriteDeadlineMs = 20;
 #endif
 [[maybe_unused]] const int kValgrindWaitForRewriteMs = 1000;
 const int RewriteOptions::kDefaultPropertyCacheHttpStatusStabilityThreshold = 5;
+// The one place that says how long a fetch waits when the rewrite deadline is
+// negative. See RewriteContext::NegativeDeadlineFetchWaitMs().
+const int RewriteOptions::kDefaultNegativeDeadlineFetchWaitMs = 1000;
 
 const int RewriteOptions::kDefaultMaxRewriteInfoLogSize = 150;
 
@@ -2208,8 +2226,10 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
       }
     } else {
       if (handler != nullptr) {
+        // The name may come from a request: escape it so that it stays
+        // within this one log message.
         handler->Message(kWarning, "Invalid filter name: %s",
-                         option.as_string().c_str());
+                         CEscape(option).c_str());
       }
       ret = false;
     }
@@ -2394,9 +2414,22 @@ bool RewriteOptions::SetOptionsFromName(const OptionSet& option_set,
                                         MessageHandler* handler) {
   bool ret = true;
   for (const auto& name_value : option_set) {
+    // The set is the options= component of an ExperimentSpec, a
+    // directory-scope directive (.htaccess, a location block, a remote
+    // configuration line), so it may set only what a directory-scope
+    // directive may set.
+    GoogleString error_detail;
+    OptionSettingResult result = SetOptionFromNameInternal(
+        name_value.first, name_value.second, kDirectoryScope /* max_scope */,
+        &error_detail);
     GoogleString msg;
-    OptionSettingResult result =
-        SetOptionFromName(name_value.first, name_value.second, &msg);
+    if (result == kOptionNameUnknown && !error_detail.empty()) {
+      // Known option, wider scope: say so rather than "not found".
+      msg = error_detail;
+    } else {
+      FormatSetOptionMessage(result, name_value.first, name_value.second,
+                             error_detail, &msg);
+    }
     if (result != kOptionOk) {
       handler->Message(kWarning, "Failed to set %s to %s (%s)",
                        name_value.first.c_str(), name_value.second.c_str(),
@@ -2432,6 +2465,13 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromQuery(
 }
 
 RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromRemoteConfig(
+    StringPiece name, StringPiece value) {
+  GoogleString error_detail;
+  return SetOptionFromNameInternal(name, value, RewriteOptions::kDirectoryScope,
+                                   &error_detail);
+}
+
+RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromUrlSegment(
     StringPiece name, StringPiece value) {
   GoogleString error_detail;
   return SetOptionFromNameInternal(name, value, RewriteOptions::kDirectoryScope,
@@ -2558,6 +2598,7 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
 
   // Assume all goes well; if not, set result accordingly.
   result = RewriteOptions::kOptionOk;
+  NullMessageHandler null_handler;
 
   // Avoid adding more options like this.  All new options should be set via
   // RewriteOptions::AddProperty.  If you have to add one here, also add it to
@@ -2609,6 +2650,15 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
             "effect. Remove the directive.");
       }
     }
+  } else if (StringCaseEqual(name, kExperimentSpec) &&
+             max_scope < kServerScope &&
+             ExperimentSpec(arg, this, &null_handler)
+                 .has_alternate_origin_domains()) {
+    // alternate_origin_domain= changes where resources are fetched from, like
+    // MapOriginDomain, so a directory-level source (an .htaccess file, a
+    // remote configuration line) may not set it.
+    *msg = "alternate_origin_domain is not allowed at directory scope";
+    result = RewriteOptions::kOptionValueInvalid;
   } else if (StringCaseEqual(name, kExperimentSpec)) {
     ExperimentSpec* spec = AddExperimentSpec(arg, handler);
     if (spec == nullptr) {
@@ -3155,6 +3205,28 @@ void RewriteOptions::LimitSizeThresholdsTo(const RewriteOptions& ceiling) {
   // A zero document budget inlines no image, so it only lowers the bound.
   limit(&document_image_inline_max_bytes_,
         ceiling.document_image_inline_max_bytes_, false);
+}
+
+void RewriteOptions::LimitWorkBound(Option<int64>* mine, int64 bound,
+                                    bool zero_or_less_is_unlimited) {
+  const int64 value = mine->value();
+  if (zero_or_less_is_unlimited) {
+    if (bound > 0 && (value <= 0 || value > bound)) {
+      mine->set(bound);
+    }
+  } else if (value > bound) {
+    mine->set(bound);
+  }
+}
+
+void RewriteOptions::LimitWorkBoundsTo(const RewriteOptions& ceiling) {
+  LimitWorkBound(&css_parse_max_bytes_, ceiling.css_parse_max_bytes(), true);
+  LimitWorkBound(&debug_output_max_bytes_, ceiling.debug_output_max_bytes(),
+                 true);
+  LimitWorkBound(&max_html_parse_bytes_, ceiling.max_html_parse_bytes(), true);
+  // Zero or less admits no image at all, so it only tightens.
+  LimitWorkBound(&image_resolution_limit_bytes_,
+                 ceiling.image_resolution_limit_bytes(), false);
 }
 
 void RewriteOptions::GetEnabledFiltersRequiringScriptExecution(
@@ -4380,9 +4452,22 @@ bool RewriteOptions::SetupExperimentRewriters() {
   // filters cannot enable a filter the configuration forbade.
   // We need these for the experiment to work properly.
   SetRequiredExperimentFilters();
-  // Options were already checked during config parsing.
+  // Options were already checked during config parsing.  A spec can come
+  // from a directory-level source (an .htaccess file, a remote
+  // configuration line), so its arm may tighten the work bounds of the
+  // configuration it runs under but not loosen them.
+  const int64 css_parse_max_bytes = css_parse_max_bytes_.value();
+  const int64 debug_output_max_bytes = debug_output_max_bytes_.value();
+  const int64 max_html_parse_bytes = max_html_parse_bytes_.value();
+  const int64 image_resolution_limit_bytes =
+      image_resolution_limit_bytes_.value();
   NullMessageHandler null_message_handler;
   SetOptionsFromName(spec->filter_options(), &null_message_handler);
+  LimitWorkBound(&css_parse_max_bytes_, css_parse_max_bytes, true);
+  LimitWorkBound(&debug_output_max_bytes_, debug_output_max_bytes, true);
+  LimitWorkBound(&max_html_parse_bytes_, max_html_parse_bytes, true);
+  LimitWorkBound(&image_resolution_limit_bytes_, image_resolution_limit_bytes,
+                 false);
   spec->ApplyAlternateOriginsToDomainLawyer(WriteableDomainLawyer(),
                                             &null_message_handler);
   return true;
@@ -4912,6 +4997,7 @@ HttpOptions RewriteOptions::ComputeHttpOptions() const {
   HttpOptions options;
   options.respect_vary = respect_vary();
   options.implicit_cache_ttl_ms = implicit_cache_ttl_ms();
+  options.ipro_cors_guard = in_place_cors_guard();
   return options;
 }
 

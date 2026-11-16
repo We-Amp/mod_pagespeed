@@ -111,22 +111,59 @@ TEST_F(NgxAdminPostPinTest, DeclinedAdminPostIsFinalizedNotYielded) {
   EXPECT_LT(mapped, finalized)
       << "the mapping must happen before the request is finished";
 
-  // The mapping must feed the finalize guard directly, with nothing in
-  // between that could turn rc back into a decline. On the pre-fix source
-  // the raw rc reached ngx_http_finalize_request, so this pin goes red
-  // there; the re-entry it caused re-armed the read from the content
-  // phase, not from here.
+  // The mapping must feed the finalize call directly, with nothing in
+  // between that could turn rc back into a decline. On the source before
+  // the decline mapping the raw rc reached ngx_http_finalize_request, so
+  // this pin goes red there; the re-entry it caused re-armed the read from
+  // the content phase, not from here.
   EXPECT_NE(GoogleString::npos,
             body.find("if(rc==NGX_DECLINED){rc=NGX_HTTP_NOT_FOUND;}"
-                      "if(rc!=NGX_DONE){"))
-      << "the decline mapping must be the last step before the finalize "
-         "guard";
+                      "ngx_http_finalize_request(r,rc);"))
+      << "the decline mapping must be the last step before the request is "
+         "finished";
 
   // The post handler never arms another body read. This is a guard against
   // a direct read call being added here; it cannot go red on the pre-fix
   // source, where the re-entry ran through the phase engine instead.
   EXPECT_EQ(GoogleString::npos, body.find("ngx_http_read_client_request_body"))
       << "ps_admin_body_handler must not start a second body read";
+}
+
+// Reading the body takes a reference on the request that only the post
+// handler's finalize call gives back. An answered admin page returns
+// NGX_DONE (it holds its own reference until its response is out), so a
+// finalize skipped for NGX_DONE leaves the request, and its connection,
+// allocated for the life of the worker; on a keep-alive connection the next
+// request is never answered. The handler must therefore finalize on every
+// result, with no condition on rc around the call.
+TEST_F(NgxAdminPostPinTest, AnsweredAdminPostIsFinalized) {
+  const GoogleString cc = ReadStrippedSource(kNgxPagespeedCc);
+  const size_t handler =
+      cc.find("voidps_admin_body_handler(ngx_http_request_t*r){");
+  ASSERT_NE(GoogleString::npos, handler)
+      << "ps_admin_body_handler was renamed; this pin needs updating";
+  const size_t open = cc.find('{', handler);
+  const size_t close = MatchingBrace(cc, open);
+  ASSERT_NE(GoogleString::npos, close);
+  const GoogleString body = cc.substr(open, close - open);
+
+  EXPECT_EQ(GoogleString::npos, body.find("rc!=NGX_DONE"))
+      << "ps_admin_body_handler skips the finalize call for NGX_DONE; it "
+         "must finalize on that result as well";
+  EXPECT_EQ(GoogleString::npos, body.find("rc==NGX_DONE"))
+      << "ps_admin_body_handler treats NGX_DONE specially; it must finalize "
+         "on that result as well";
+  const GoogleString finalize = "ngx_http_finalize_request(r,rc);";
+  const size_t finalized = body.find(finalize);
+  ASSERT_NE(GoogleString::npos, finalized)
+      << "ps_admin_body_handler no longer finishes the request through "
+         "ngx_http_finalize_request";
+  // The call is the handler's last statement, outside any block, so no
+  // result can skip it. (`body` ends just before the closing brace.)
+  EXPECT_EQ(body.size(), finalized + finalize.size())
+      << "the finalize call must be the last statement of the handler";
+  EXPECT_EQ(GoogleString::npos, body.find(finalize, finalized + 1))
+      << "the handler must finalize exactly once";
 }
 
 TEST_F(NgxAdminPostPinTest, ContentPhaseArmsTheAdminBodyReadAtMostOnce) {

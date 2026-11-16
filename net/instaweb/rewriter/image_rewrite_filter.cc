@@ -268,6 +268,12 @@ const char ImageRewriteFilter::kImageOngoingRewrites[] =
 const char ImageRewriteFilter::kImageResizedUsingRenderedDimensions[] =
     "image_resized_using_rendered_dimensions";
 const char ImageRewriteFilter::kImageWebpRewrites[] = "image_webp_rewrites";
+const char ImageRewriteFilter::kImagePngLossyFallbackAdopted[] =
+    "image_png_lossy_fallback_adopted";
+const char ImageRewriteFilter::kImagePngLossyFallbackAttempted[] =
+    "image_png_lossy_fallback_attempted";
+const char ImageRewriteFilter::kImagePngLossyFallbackRejectedQuality[] =
+    "image_png_lossy_fallback_rejected_quality";
 const char ImageRewriteFilter::kInlinableImageUrlsPropertyName[] =
     "ImageRewriter-inlinable-urls";
 const char ImageRewriteFilter::kImageRewriteLatencyOkMs[] =
@@ -865,6 +871,12 @@ ImageRewriteFilter::ImageRewriteFilter(RewriteDriver* driver)
   image_inline_count_ = stats->GetVariable(kImageInline);
   image_webp_rewrites_ = stats->GetVariable(kImageWebpRewrites);
   image_avif_rewrites_ = stats->GetVariable(kImageAvifRewrites);
+  image_png_lossy_fallback_attempted_ =
+      stats->GetVariable(kImagePngLossyFallbackAttempted);
+  image_png_lossy_fallback_adopted_ =
+      stats->GetVariable(kImagePngLossyFallbackAdopted);
+  image_png_lossy_fallback_rejected_quality_ =
+      stats->GetVariable(kImagePngLossyFallbackRejectedQuality);
   image_rewrite_latency_total_ms_ =
       stats->GetVariable(kImageRewriteLatencyTotalMs);
 
@@ -980,6 +992,9 @@ void ImageRewriteFilter::InitStats(Statistics* statistics) {
   statistics->AddVariable(kImageRewriteUses);
   statistics->AddVariable(kImageInline);
   statistics->AddVariable(kImageWebpRewrites);
+  statistics->AddVariable(kImagePngLossyFallbackAdopted);
+  statistics->AddVariable(kImagePngLossyFallbackAttempted);
+  statistics->AddVariable(kImagePngLossyFallbackRejectedQuality);
   statistics->AddVariable(kImageRewriteLatencyTotalMs);
   statistics->AddUpDownCounter(kImageOngoingRewrites);
   statistics->AddHistogram(kImageRewriteLatencyOkMs);
@@ -1166,6 +1181,18 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
   // avif_level, so gating the stats on it would silently lose exactly the
   // failures we want to see.
   image_options->avif_conversion_variables = &avif_conversion_variables_;
+  // The PNG lossy fallback (off unless PngLossyFallbackMaxSizePercent is set).
+  // Only here, not for the low-resolution preview images below, which are
+  // lossy by construction.
+  image_options->png_lossy_fallback_max_size_percent =
+      options->png_lossy_fallback_max_size_percent();
+  image_options->png_lossy_fallback_min_bytes_per_mp =
+      options->png_lossy_fallback_min_bytes_per_mp();
+  image_options->png_lossy_fallback_attempted =
+      image_png_lossy_fallback_attempted_;
+  image_options->png_lossy_fallback_adopted = image_png_lossy_fallback_adopted_;
+  image_options->png_lossy_fallback_rejected_quality =
+      image_png_lossy_fallback_rejected_quality_;
 
   return image_options;
 }

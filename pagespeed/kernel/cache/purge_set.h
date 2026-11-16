@@ -87,6 +87,12 @@ class PurgeSet {
   // time.
   bool Put(const GoogleString& key, int64 timestamp_ms);
 
+  // Like Put, but never evicts another record: an eviction moves the global
+  // invalidation timestamp, which invalidates every key.  Returns false,
+  // adding nothing, when a new record does not fit in the remaining room.
+  // Replacing the timestamp of a key already in the set always fits.
+  bool PutWithoutEviction(const GoogleString& key, int64 timestamp_ms);
+
   // Merge two invalidation records.
   void Merge(const PurgeSet& src);
 

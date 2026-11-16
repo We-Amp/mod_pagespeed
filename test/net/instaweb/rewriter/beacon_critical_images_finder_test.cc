@@ -19,6 +19,9 @@
 
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/logging.h"
 #include "net/instaweb/rewriter/critical_images.pb.h"
 #include "net/instaweb/rewriter/critical_keys.pb.h"
@@ -27,8 +30,12 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "pagespeed/kernel/base/string_hash.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "test/net/instaweb/rewriter/critical_images_finder_test_base.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
@@ -63,6 +70,7 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
     html_images_.insert("x.jpg");
     html_images_.insert("y.png");
     html_images_.insert("z.gif");
+    candidate_images_ = html_images_;
     css_images_.insert("a.jpg");
     css_images_.insert("b.png");
     css_images_.insert("c.gif");
@@ -97,6 +105,7 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
     factory()->mock_timer()->AdvanceMs(
         options()->beacon_reinstrument_time_sec() * Timer::kSecondMs);
     VerifyBeaconStatus(kBeaconWithNonce);
+    UpdateCandidateImages();
   }
 
   // Same as Beacon(), but advances time by the low frequency beacon interval.
@@ -108,6 +117,14 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
         options()->beacon_reinstrument_time_sec() * Timer::kSecondMs *
         kLowFreqBeaconMult);
     VerifyBeaconStatus(kBeaconWithNonce);
+    UpdateCandidateImages();
+  }
+
+  // Register the images on the page, as CriticalImagesBeaconFilter does at the
+  // end of an instrumented document.
+  void UpdateCandidateImages() {
+    finder_->UpdateCandidateImagesForBeaconing(
+        candidate_images_, rewrite_driver(), true /* beaconing */);
   }
 
   // Verify that no beacon injection occurs.
@@ -188,6 +205,8 @@ class BeaconCriticalImagesFinderTest : public CriticalImagesFinderTestBase {
   BeaconMetadata last_beacon_metadata_;
   StringSet html_images_;
   StringSet css_images_;
+  // The images on the page; beacon results for other html images are ignored.
+  StringSet candidate_images_;
 };
 
 TEST_F(BeaconCriticalImagesFinderTest, StoreRestore) {
@@ -248,6 +267,141 @@ TEST_F(BeaconCriticalImagesFinderTest, StoreMultiple) {
     EXPECT_TRUE(UpdateCriticalImagesCacheEntry(&html_images_, &css_images_));
   }
   EXPECT_STREQ("x.jpg;", CriticalImagesString());
+}
+
+// A beacon result only counts for the images the page was instrumented with;
+// it cannot add keys of its own to the page's stored state.
+TEST_F(BeaconCriticalImagesFinderTest, BeaconKeepsOnlyPageImages) {
+  Beacon();
+  html_images_.clear();
+  html_images_.insert("x.jpg");
+  html_images_.insert("other.jpg");
+  RenderedImages rendered_images;
+  RenderedImages::Image* image = rendered_images.add_image();
+  image->set_src("other.jpg");
+  image->set_rendered_width(1);
+  image->set_rendered_height(2);
+  image = rendered_images.add_image();
+  image->set_src("x.jpg");
+  image->set_rendered_width(3);
+  image->set_rendered_height(4);
+  EXPECT_TRUE(BeaconCriticalImagesFinder::UpdateCriticalImagesCacheEntry(
+      &html_images_, nullptr, &rendered_images, last_beacon_metadata_.nonce,
+      server_context()->beacon_cohort(), rewrite_driver()->property_page(),
+      server_context()->timer()));
+  EXPECT_STREQ("x.jpg;", CriticalImagesString());
+  const CriticalKeys& html_keys =
+      GetCriticalImages()->html_critical_image_support();
+  ASSERT_EQ(3, html_keys.key_evidence_size());
+  EXPECT_EQ("x.jpg", html_keys.key_evidence(0).key());
+  EXPECT_EQ("y.png", html_keys.key_evidence(1).key());
+  EXPECT_EQ("z.gif", html_keys.key_evidence(2).key());
+  std::unique_ptr<RenderedImages> stored_rendered_images(
+      finder_->ExtractRenderedImageDimensionsFromCache(rewrite_driver()));
+  ASSERT_TRUE(stored_rendered_images != nullptr);
+  ASSERT_EQ(1, stored_rendered_images->image_size());
+  EXPECT_EQ("x.jpg", stored_rendered_images->image(0).src());
+  EXPECT_EQ(3, stored_rendered_images->image(0).rendered_width());
+  EXPECT_EQ(4, stored_rendered_images->image(0).rendered_height());
+}
+
+// Sends one beacon result that reports only rendered sizes: url (when not
+// empty) rendered at width x height.
+bool SendRenderedSizeBeacon(BeaconCriticalImagesFinder* finder,
+                            const GoogleString& nonce, StringPiece key,
+                            int width, int height, RewriteDriver* driver,
+                            ServerContext* server_context) {
+  RenderedImages rendered_images;
+  if (!key.empty()) {
+    RenderedImages::Image* image = rendered_images.add_image();
+    image->set_src(key.as_string());
+    image->set_rendered_width(width);
+    image->set_rendered_height(height);
+  }
+  return BeaconCriticalImagesFinder::UpdateCriticalImagesCacheEntry(
+      nullptr, nullptr, &rendered_images, nonce,
+      server_context->beacon_cohort(), driver->property_page(),
+      server_context->timer());
+}
+
+class RenderedSizeBeaconTest : public BeaconCriticalImagesFinderTest {
+ protected:
+  void SetUp() override {
+    BeaconCriticalImagesFinderTest::SetUp();
+    options()->EnableFilter(RewriteOptions::kResizeToRenderedImageDimensions);
+    image_url_ = "http://test.com/x.jpg";
+    image_key_ = UintToString(HashString<CasePreserve, unsigned int>(
+        image_url_.data(), image_url_.size()));
+    candidate_images_.clear();
+    candidate_images_.insert(image_key_);
+  }
+
+  // A beacon result that reports the image at width x height, or (with
+  // width 0) one that does not report it.
+  bool Report(int width, int height) {
+    Beacon();
+    return SendRenderedSizeBeacon(finder_, last_beacon_metadata_.nonce,
+                                  width == 0 ? "" : image_key_, width, height,
+                                  rewrite_driver(), server_context());
+  }
+
+  // The size the image is served at, or (0, 0) if none.
+  std::pair<int32, int32> ServedSize() {
+    WriteBackAndResetDriver();
+    std::pair<int32, int32> dimensions(0, 0);
+    finder_->GetRenderedImageDimensions(rewrite_driver(), GoogleUrl(image_url_),
+                                        &dimensions);
+    return dimensions;
+  }
+
+  GoogleString image_url_;
+  GoogleString image_key_;
+};
+
+// One beacon result does not decide the size an image is served at.
+TEST_F(RenderedSizeBeaconTest, OneResultDoesNotSetServedSize) {
+  EXPECT_TRUE(Report(3, 4));
+  EXPECT_EQ(std::make_pair(0, 0), ServedSize());
+  for (int i = 1; i < CriticalImagesFinder::kMinBeaconsForRenderedDimensions;
+       ++i) {
+    EXPECT_TRUE(Report(3, 4));
+  }
+  EXPECT_EQ(std::make_pair(3, 4), ServedSize());
+}
+
+// A size is served only while most recent results agree on it; a result
+// that disagrees with them does not get its own size served.
+TEST_F(RenderedSizeBeaconTest, ServedSizeFollowsMostResults) {
+  for (int i = 0; i < CriticalImagesFinder::kMinBeaconsForRenderedDimensions;
+       ++i) {
+    EXPECT_TRUE(Report(30, 40));
+  }
+  EXPECT_EQ(std::make_pair(30, 40), ServedSize());
+  EXPECT_TRUE(Report(3, 4));
+  EXPECT_NE(std::make_pair(3, 4), ServedSize());
+  // Agreeing results restore the size.
+  EXPECT_TRUE(Report(30, 40));
+  EXPECT_TRUE(Report(30, 40));
+  EXPECT_EQ(std::make_pair(30, 40), ServedSize());
+  // Results that no longer report the image make it lose its size.
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_TRUE(Report(0, 0));
+  }
+  EXPECT_EQ(std::make_pair(0, 0), ServedSize());
+}
+
+// A result that reports only rendered sizes uses up its nonce like any other.
+TEST_F(RenderedSizeBeaconTest, RenderedSizeOnlyResultUsesItsNonce) {
+  Beacon();
+  const GoogleString nonce = last_beacon_metadata_.nonce;
+  EXPECT_TRUE(SendRenderedSizeBeacon(finder_, nonce, image_key_, 3, 4,
+                                     rewrite_driver(), server_context()));
+  WriteBackAndResetDriver();
+  EXPECT_FALSE(SendRenderedSizeBeacon(finder_, nonce, image_key_, 3, 4,
+                                      rewrite_driver(), server_context()));
+  StringSet critical;
+  critical.insert(image_key_);
+  EXPECT_FALSE(UpdateCriticalImagesCacheEntry(&critical, nullptr, nonce));
 }
 
 // Make sure beacon results can arrive out of order (so long as the nonce

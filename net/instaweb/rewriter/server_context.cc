@@ -437,8 +437,7 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
 
   bool browser_cacheable = headers->IsBrowserCacheable();
   // Cache-Control directive names are case-insensitive (RFC 7234 5.2).
-  bool no_store = headers->HasValueCaseInsensitive(
-      HttpAttributes::kCacheControl, "no-store");
+  bool no_store = headers->HasCacheControlDirective("no-store");
   bool is_public = true;  // Only used if we see a non-empty resource.
   bool saw_nonempty_resource = false;
   int64 max_age = headers->cache_ttl_ms();
@@ -454,8 +453,7 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
           ResponseHeaders::kHasValidator);
       proxy_cacheable &= resource_cacheable;
       browser_cacheable &= input_headers->IsBrowserCacheable();
-      no_store |= input_headers->HasValueCaseInsensitive(
-          HttpAttributes::kCacheControl, "no-store");
+      no_store |= input_headers->HasCacheControlDirective("no-store");
       is_public &= input_headers->HasValueCaseInsensitive(
           HttpAttributes::kCacheControl, "public");
       saw_nonempty_resource = true;
@@ -657,13 +655,15 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
     url_query_param.Reset(query_param_str);
 
     if (!url_query_param.IsWebValid()) {
+      // The value comes from the client, percent-decoded: escape it so that
+      // it stays within this one log message.
       message_handler_->Message(kWarning, "Invalid URL parameter in beacon: %s",
-                                query_param_str.c_str());
+                                CEscape(query_param_str).c_str());
       return false;
     }
   } else {
     message_handler_->Message(kWarning, "Missing URL parameter in beacon: %s",
-                              params.as_string().c_str());
+                              CEscape(params).c_str());
     return false;
   }
 
