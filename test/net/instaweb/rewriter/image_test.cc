@@ -918,6 +918,104 @@ TEST_F(ImageTest, PngLossyFallbackNeedsPngToJpeg) {
   EXPECT_EQ(0, stats.attempted());
 }
 
+// A still GIF: a 256-entry palette and one frame of smooth, noisy indices,
+// written as an uncompressed LZW stream (a clear code every 254 literals keeps
+// the code width at 9 bits), so the test needs no external image or encoder.
+// The result is large and noisy enough to clear the lossy trial's size floor
+// and bits-per-pixel gate once it is stored as lossless WebP.
+static GoogleString MakeNoisyStillGif(int width, int height) {
+  GoogleString gif("GIF89a");
+  auto le16 = [&gif](int v) {
+    gif.push_back(static_cast<char>(v & 0xff));
+    gif.push_back(static_cast<char>((v >> 8) & 0xff));
+  };
+  le16(width);
+  le16(height);
+  gif.push_back(static_cast<char>(0xF7));  // global palette, 256 entries
+  gif.push_back(0);                        // background colour index
+  gif.push_back(0);                        // pixel aspect ratio
+  for (int i = 0; i < 256; ++i) {
+    gif.push_back(static_cast<char>(i));
+    gif.push_back(static_cast<char>(255 - i));
+    gif.push_back(static_cast<char>(128));
+  }
+  gif.push_back(',');
+  le16(0);
+  le16(0);
+  le16(width);
+  le16(height);
+  gif.push_back(0);  // no local palette, not interlaced
+  gif.push_back(8);  // minimum LZW code size
+
+  GoogleString bits;
+  uint32_t accumulator = 0;
+  int bit_count = 0;
+  auto put_code = [&](int code) {
+    accumulator |= static_cast<uint32_t>(code) << bit_count;
+    bit_count += 9;
+    while (bit_count >= 8) {
+      bits.push_back(static_cast<char>(accumulator & 0xff));
+      accumulator >>= 8;
+      bit_count -= 8;
+    }
+  };
+  uint32_t state = 12345;
+  int since_clear = 0;
+  put_code(256);  // clear
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      state = state * 1664525u + 1013904223u;
+      const int noise = static_cast<int>((state >> 24) & 127);
+      put_code((x + y) * 127 / (width + height) + noise);  // at most 253
+      if (++since_clear == 254) {
+        put_code(256);
+        since_clear = 0;
+      }
+    }
+  }
+  put_code(257);  // end of information
+  if (bit_count > 0) {
+    bits.push_back(static_cast<char>(accumulator & 0xff));
+  }
+  for (size_t pos = 0; pos < bits.size(); pos += 255) {
+    const size_t n = std::min<size_t>(255, bits.size() - pos);
+    gif.push_back(static_cast<char>(n));
+    gif.append(bits, pos, n);
+  }
+  gif.push_back(0);
+  gif.push_back(';');
+  return gif;
+}
+
+// A GIF never takes the lossy trial, even resized (which makes it a PNG on the
+// way) with every option on and a lossless result that clears both size gates.
+TEST_F(ImageTest, PngLossyFallbackSkipsGif) {
+  const GoogleString gif = MakeNoisyStillGif(400, 300);
+  ImageDim resized_dim;
+  resized_dim.set_width(360);
+  resized_dim.set_height(270);
+
+  Image::CompressionOptions* options = LossyFallbackOptions(20);
+  options->png_lossy_fallback_min_bytes_per_mp = 250000;
+  PngLossyFallbackStats stats(options);
+  ImagePtr image(NewImage(gif, "gif", GTestTempDir(), options, &timer_,
+                          &message_handler_));
+  ASSERT_EQ(IMAGE_GIF, image->image_type());
+  ASSERT_TRUE(image->ResizeTo(resized_dim));
+  const size_t size = image->output_size();
+  // The lossless result is what a PNG would have to clear: at least 64 KiB and
+  // above the 2 bits per pixel gate, so only the GIF exclusion keeps it out.
+  EXPECT_EQ(IMAGE_WEBP_LOSSLESS_OR_ALPHA, image->image_type());
+  EXPECT_GE(size, 65536);
+  EXPECT_GT(size * 8.0 / (360.0 * 270.0), 2.0);
+  EXPECT_EQ("VP8L", WebpChunk(image->Contents()));
+  EXPECT_EQ(GoogleString::npos, image->debug_message().find("lossy trial"))
+      << image->debug_message();
+  EXPECT_EQ(0, stats.attempted());
+  EXPECT_EQ(0, stats.adopted());
+  EXPECT_EQ(0, stats.rejected_quality());
+}
+
 // The trial is not one of the kMaxConversionAttempts: with one already used,
 // the WebP encode takes the second and the AVIF candidate still gets the third.
 TEST_F(ImageTest, PngLossyFallbackKeepsConversionBudget) {
