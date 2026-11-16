@@ -1984,8 +1984,16 @@ bool ImageImpl::TryPngLossyFallback(const PngReaderInterface& png_reader,
 
   double worst_db = 0;
   if (!WorstTilePsnr(png_reader, image_data, lossy, kPngLossyFallbackTile,
-                     &worst_db, handler_.get()) ||
-      worst_db < kPngLossyFallbackMinTilePsnrDb) {
+                     &worst_db, handler_.get())) {
+    // The check could not run (a decode or format failure), so it measured no
+    // quality at all: it is not counted as a quality rejection.
+    absl::StrAppendFormat(&debug_message_,
+                          "%s lossy trial rejected: the local quality check"
+                          " could not decode or compare the images.",
+                          lossless_note);
+    return false;
+  }
+  if (worst_db < kPngLossyFallbackMinTilePsnrDb) {
     if (options_->png_lossy_fallback_rejected_quality != nullptr) {
       options_->png_lossy_fallback_rejected_quality->Add(1);
     }

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # Generates the two PNGs the PNG lossy fallback tests use. Deterministic (seeded)
-# and built from nothing but arithmetic and Pillow's bundled OFL font, so the
-# repository carries no third-party photograph.
+# and built from nothing but arithmetic and the font Pillow bundles, so the
+# repository carries no third-party photograph. That font is Aileron Regular
+# (Sora Sagano, dotcolon.net), which Pillow's ImageFont.load_default(size)
+# loads; it is dedicated to the public domain (CC0 1.0; the font's own
+# copyright field reads "No Rights Reserved"), not licensed under the SIL OFL.
 #
 #   python3 gen_lossy_fallback_fixtures.py OUTDIR
 #
