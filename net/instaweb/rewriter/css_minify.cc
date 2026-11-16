@@ -99,7 +99,8 @@ CssMinify::CssMinify(Writer* writer, MessageHandler* handler)
       handler_(handler),
       ok_(true),
       url_collector_(nullptr),
-      in_css_calc_function_(false) {}
+      in_css_calc_function_(false),
+      in_flex_declaration_(false) {}
 
 CssMinify::~CssMinify() {}
 
@@ -378,7 +379,11 @@ bool CssMinify::UnitsRequiredForValueZero(const GoogleString& unit) {
   //
   // https://github.com/apache/incubator-pagespeed-mod/issues/1538
   // retaining unit for zero value in calc function
-  return (unit == "%") || !IsLength(unit) || in_css_calc_function_;
+  //
+  // In the flex shorthand a unitless 0 after one flex factor is the shrink
+  // factor, not a zero flex-basis, so the unit has to stay.
+  return (unit == "%") || !IsLength(unit) || in_css_calc_function_ ||
+         in_flex_declaration_;
 }
 
 void CssMinify::MinifyFont(const Css::Values& font_values) {
@@ -457,7 +462,14 @@ void CssMinify::Minify(const Css::Declaration& declaration) {
           // space separator should not be there in unicode range value
           JoinMinify(*declaration.values(), "");
         } else {
+          const bool was_in_flex_declaration = in_flex_declaration_;
+          // -webkit-flex and -ms-flex are aliases with the same grammar.
+          in_flex_declaration_ =
+              StringCaseEqual(declaration.prop_text(), "flex") ||
+              StringCaseEqual(declaration.prop_text(), "-webkit-flex") ||
+              StringCaseEqual(declaration.prop_text(), "-ms-flex");
           JoinMinify(*declaration.values(), " ");
+          in_flex_declaration_ = was_in_flex_declaration;
         }
         break;
     }
