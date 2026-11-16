@@ -99,8 +99,10 @@ FreshnessResult EvaluateFreshness(const FreshnessInput& input,
   // 5. no-cache means "revalidate before each use" (RFC 9111 S5.2.2.4).
   bool is_no_cache = (cc & AM::kCCOriginNoCache) != 0;
 
-  // For no-cache: always stale (every request must revalidate).
-  bool is_stale = is_no_cache || (age > effective_max_age);
+  // For no-cache: always stale (every request must revalidate).  Otherwise a
+  // response is fresh only while its age is below its lifetime (RFC 9111
+  // S4.2).
+  bool is_stale = is_no_cache || (age >= effective_max_age);
 
   // 6. Client force-refresh (Ctrl+F5): treat as stale + must-revalidate.
   // NOT expired_by_age: the client demanded revalidation; the cached
@@ -130,7 +132,7 @@ FreshnessResult EvaluateFreshness(const FreshnessInput& input,
     // must NOT count as expiry, or no-cache pages (a very common CMS
     // default) would churn the worker's purge → re-optimize cycle on
     // every revalidation (issue #652 review).
-    const bool expired_by_age = !is_no_cache && (age > effective_max_age);
+    const bool expired_by_age = !is_no_cache && (age >= effective_max_age);
     return {FreshnessVerdict::kRevalidate,
             age,
             effective_max_age,

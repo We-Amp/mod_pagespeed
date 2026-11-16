@@ -1422,7 +1422,7 @@ typedef struct {
   uint32_t age_seconds;       /* how old the entry is now */
   uint32_t effective_max_age; /* lifetime actually applied, after caps */
   uint32_t remaining_ttl;     /* seconds of freshness left, 0 if stale */
-  int is_stale;               /* nonzero if past effective_max_age */
+  int is_stale;               /* nonzero if at or past effective_max_age */
   /* Nonzero ONLY when the entry is stale because it aged out. A forced client
    * reload and an origin `no-cache` both also yield REVALIDATE, and for both
    * this stays zero — neither means the cached bytes are outdated, and a

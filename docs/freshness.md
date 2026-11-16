@@ -129,7 +129,7 @@ bool revalidation_required =
     ComputeSharedRevalidationRequired(cc_flags, input.is_shared_cache);
 
 // For no-cache: always stale (every request must revalidate).
-bool is_stale = is_no_cache || (age > effective_max_age);
+bool is_stale = is_no_cache || (age >= effective_max_age);
 
 if (revalidation_required && is_stale) {
     if (conf->conditional_revalidation &&

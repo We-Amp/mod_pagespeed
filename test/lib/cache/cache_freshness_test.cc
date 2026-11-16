@@ -280,16 +280,54 @@ TEST_F(CacheFreshnessTest, ProxyRevalidateStaleGoesToOrigin) {
 
 // --- Boundary conditions ---
 
-TEST_F(CacheFreshnessTest, ExactlyAtMaxAgeIsFresh) {
-  auto input = MakeInput();
-  input.cache_inserted_at = kTestNow - 300;
-  input.origin_max_age = 300;
-  input.origin_cc_flags = AM::kCCOriginHeaderPresent;
-  auto result = EvaluateFreshness(input, config_);
-  // age > effective_max_age is the stale check (strict >), so age==max is fresh
-  EXPECT_EQ(result.verdict, FreshnessVerdict::kFresh);
-  EXPECT_FALSE(result.is_stale);
-  EXPECT_EQ(result.remaining_ttl, 0u);
+TEST_F(CacheFreshnessTest, FreshUntilLifetime) {
+  for (uint32_t n : {1u, 2u, 300u}) {
+    auto input = MakeInput();
+    input.origin_max_age = n;
+    input.origin_cc_flags = AM::kCCOriginHeaderPresent;
+
+    input.cache_inserted_at = kTestNow - (n - 1);
+    auto fresh = EvaluateFreshness(input, config_);
+    EXPECT_EQ(fresh.verdict, FreshnessVerdict::kFresh) << n;
+    EXPECT_FALSE(fresh.is_stale);
+    EXPECT_FALSE(fresh.expired_by_age);
+    EXPECT_EQ(fresh.remaining_ttl, 1u);
+
+    input.cache_inserted_at = kTestNow - n;
+    auto stale = EvaluateFreshness(input, config_);
+    EXPECT_EQ(stale.verdict, FreshnessVerdict::kRevalidate) << n;
+    EXPECT_TRUE(stale.is_stale);
+    EXPECT_TRUE(stale.expired_by_age);
+    EXPECT_EQ(stale.remaining_ttl, 0u);
+  }
+}
+
+TEST_F(CacheFreshnessTest, ZeroLifetimeIsNeverFresh) {
+  for (uint32_t age : {0u, 1u, 5u}) {
+    auto input = MakeInput();
+    input.cache_inserted_at = kTestNow - age;
+    input.origin_max_age = 0;
+    input.origin_cc_flags =
+        AM::kCCOriginHeaderPresent | AM::kCCOriginMustRevalidate;
+    auto result = EvaluateFreshness(input, config_);
+    EXPECT_EQ(result.verdict, FreshnessVerdict::kRevalidate) << age;
+    EXPECT_TRUE(result.is_stale);
+    EXPECT_EQ(result.remaining_ttl, 0u);
+  }
+}
+
+TEST_F(CacheFreshnessTest, SharedZeroLifetimeIsNeverFresh) {
+  for (uint32_t age : {0u, 1u}) {
+    auto input = MakeInput();
+    input.cache_inserted_at = kTestNow - age;
+    input.origin_max_age = 3600;
+    input.origin_s_maxage = 0;
+    input.origin_cc_flags =
+        AM::kCCOriginHeaderPresent | AM::kCCOriginSMaxagePresent;
+    auto result = EvaluateFreshness(input, config_);
+    EXPECT_EQ(result.verdict, FreshnessVerdict::kRevalidate) << age;
+    EXPECT_EQ(result.remaining_ttl, 0u);
+  }
 }
 
 // --- Immutable + caps ---
