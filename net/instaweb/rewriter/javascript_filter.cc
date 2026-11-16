@@ -63,6 +63,24 @@ const char kInlineCspMessage[] =
 const char kModuleCrossHostMessage[] =
     "Not rewriting module script: rewritten URL would be on another host";
 
+// Whether text has an end tag of an element whose content a browser reads as
+// text: a script inside one would end it there.
+bool HasTextElementEndTag(StringPiece text) {
+  static const char* const kEndTags[] = {
+      "</script", "</noscript", "</noembed", "</noframes", "</textarea",
+      "</title",  "</style",    "</iframe",  "</xmp",
+  };
+  if (text.find("</") == StringPiece::npos) {
+    return false;
+  }
+  for (const char* end_tag : kEndTags) {
+    if (FindIgnoreCase(text, end_tag) != StringPiece::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CleanupWhitespaceScriptBody(RewriteDriver* driver,
                                  HtmlCharactersNode* node) {
   // Note that an external script tag might contain body data.  We erase this
@@ -527,6 +545,18 @@ void JavascriptFilter::InitializeConfigIfNecessary() {
   }
 }
 
+bool JavascriptFilter::MinifiedScriptMayEndElement(StringPiece original,
+                                                   StringPiece minified) {
+  // Minification must not change where an HTML parser ends the element (see
+  // JsInlineFilter::RenderInline), or the element the script is in. Any such
+  // end tag in a changed script counts, wherever it is and whether or not the
+  // original had one there.
+  return minified != original &&
+         (HasTextElementEndTag(minified) ||
+          (minified.find("<!--") != StringPiece::npos &&
+           FindIgnoreCase(minified, "<script") != StringPiece::npos));
+}
+
 void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
   // A script inside a <noscript>, <noembed> or <noframes> never runs, and
   // browsers may read it as the text of that element, so minification must
@@ -553,15 +583,9 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     driver()->InfoHere("Script is inlined version of %s",
                        library_url.as_string().c_str());
   }
-  // Minification must not change where an HTML parser ends the element (see
-  // JsInlineFilter::RenderInline); keep the original script if it could.
   const bool moves_element_end =
       code_block.successfully_rewritten() &&
-      (FindIgnoreCase(code_block.rewritten_code(), "</script") !=
-           StringPiece::npos ||
-       (code_block.rewritten_code().find("<!--") != StringPiece::npos &&
-        FindIgnoreCase(code_block.rewritten_code(), "<script") !=
-            StringPiece::npos));
+      MinifiedScriptMayEndElement(*script, code_block.rewritten_code());
   if (!code_block.successfully_rewritten() || moves_element_end) {
     config_->did_not_shrink()->Add(1);
     return;

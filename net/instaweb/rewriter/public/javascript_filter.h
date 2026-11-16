@@ -31,6 +31,7 @@
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_filter.h"
 #include "pagespeed/kernel/html/html_node.h"
@@ -77,6 +78,12 @@ class JavascriptFilter : public RewriteFilter {
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
   static JavascriptRewriteConfig* InitializeConfig(RewriteDriver* driver);
+
+  // Whether minified, the minified form of the inline script original, could
+  // end the script element or an element the script is in. When it could,
+  // the original script is kept.
+  static bool MinifiedScriptMayEndElement(StringPiece original,
+                                          StringPiece minified);
 
  protected:
   RewriteContext* MakeNestedRewriteContext(
