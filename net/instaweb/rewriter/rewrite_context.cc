@@ -1848,10 +1848,22 @@ void RewriteContext::RepeatedSuccess(const RewriteContext* primary) {
   // repetition is left undone and uncached.
   int64 num_entries = primary->partitions_->partition_size() +
                       primary->partitions_->other_dependency_size();
+  // Inlined content is copied with the partitions, so a resource referenced
+  // many times also counts its inlined bytes once per copy.
+  int64 inline_bytes = 0;
   for (const CachedResult& partition : primary->partitions_->partition()) {
     num_entries += partition.input_size();
+    inline_bytes += partition.inlined_data().size() +
+                    partition.low_resolution_inlined_data().size();
   }
-  if (!ChargePagePartitionEntries(num_entries, PageBudgetNote::kNow)) {
+  bool within_budget =
+      ChargePagePartitionEntries(num_entries, PageBudgetNote::kNow);
+  if (within_budget && inline_bytes > 0 && ChargesPageBudget() &&
+      !Driver()->page_work_budget()->TakeRepeatedInlineBytes(inline_bytes)) {
+    NotePageBudgetHit(kRewriteBudgetPartitionEntriesHits);
+    within_budget = false;
+  }
+  if (!within_budget) {
     MarkTooBusy();
     RepeatedFailure();
     return;

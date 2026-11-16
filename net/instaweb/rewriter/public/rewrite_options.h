@@ -1532,6 +1532,12 @@ class RewriteOptions {
   OptionSettingResult SetOptionFromRemoteConfig(StringPiece name,
                                                 StringPiece value);
 
+  // Same as SetOptionFromName, but for the options segment of an optimized
+  // URL: returns kOptionNameUnknown for properties whose scope() is wider
+  // than kDirectoryScope, so a URL never sets a server or process setting.
+  OptionSettingResult SetOptionFromUrlSegment(StringPiece name,
+                                              StringPiece value);
+
   GoogleString ScopeEnumToString(OptionScope scope);
 
   // Advanced option parsing, that can understand non-scalar values

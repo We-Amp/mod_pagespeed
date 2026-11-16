@@ -761,6 +761,9 @@ TEST_F(ServerContextTest, RequestCannotChangePageWorkBudget) {
     EXPECT_EQ(4, limits.input_loads_in_flight);
     EXPECT_EQ(32768, limits.contexts);
     EXPECT_EQ(256 * 1024, limits.partition_entries);
+    EXPECT_EQ(defaults.repeated_inline_bytes, limits.repeated_inline_bytes)
+        << source;
+    EXPECT_EQ(16 * 1024 * 1024, limits.repeated_inline_bytes);
     driver->Cleanup();
   }
 }

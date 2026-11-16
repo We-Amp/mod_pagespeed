@@ -631,14 +631,31 @@ void ImageImpl::FindGifSize() {
   const StringPiece& buf = original_contents_;
   // Make sure that buf contains enough data that we'll be able to
   // decipher the image dimensions before we attempt to do so.
-  if (buf.size() >=
-      ImageHeaders::kGifDimStart + 2 * ImageHeaders::kGifIntSize) {
-    // Not truncated
-    dims_.set_width(GifIntAtPosition(buf, ImageHeaders::kGifDimStart));
-    dims_.set_height(GifIntAtPosition(
-        buf, ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize));
-  } else {
+  if (buf.size() < ImageHeaders::kGifDimStart + 2 * ImageHeaders::kGifIntSize) {
     PS_LOG_INFO(handler_, "Couldn't find gif dimensions (data truncated)");
+    return;
+  }
+  dims_.set_width(GifIntAtPosition(buf, ImageHeaders::kGifDimStart));
+  dims_.set_height(GifIntAtPosition(
+      buf, ImageHeaders::kGifDimStart + ImageHeaders::kGifIntSize));
+
+  // The header gives the logical screen only. Every GIF decode here uses the
+  // frame reader in Chrome quirks mode, which grows the canvas to the first
+  // frame when that frame is larger than the screen, so report the canvas
+  // that will be decoded: the resolution limit is checked against these
+  // dimensions. Setting up the reader walks the records without decoding
+  // pixels. When it fails, the decode fails the same way and the header
+  // dimensions stand.
+  pagespeed::image_compression::ScanlineStatus status;
+  std::unique_ptr<pagespeed::image_compression::MultipleFrameReader> reader(
+      pagespeed::image_compression::CreateImageFrameReader(
+          pagespeed::image_compression::IMAGE_GIF, buf.data(), buf.size(),
+          handler_.get(), &status));
+  pagespeed::image_compression::ImageSpec spec;
+  if (reader != nullptr && reader->GetImageSpec(&spec, &status) &&
+      spec.image_size_adjusted) {
+    dims_.set_width(spec.width);
+    dims_.set_height(spec.height);
   }
 }
 
