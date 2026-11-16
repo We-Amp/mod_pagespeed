@@ -52,16 +52,13 @@ ARG LLVM_APT_KEY_FPR=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
 # from https://nginx.org/en/linux_packages.html and the published
 # https://nginx.org/keys/nginx_signing.key.
 ARG NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
-RUN echo "apt refresh ${APT_REFRESH}" \
+RUN retry() { "$@" && return 0; for d in 10 30; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 3 attempts" >&2; return 1; } \
+    && echo "apt refresh ${APT_REFRESH}" \
     && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update && apt-get -y dist-upgrade \
     && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
     && keytmp="$(mktemp -d)" \
-    && for i in 1 2 3 4 5; do \
-         wget -qO "${keytmp}/key.asc" --timeout=20 --tries=1 https://apt.llvm.org/llvm-snapshot.gpg.key \
-           && [ -s "${keytmp}/key.asc" ] && break; \
-         echo "apt.llvm.org key fetch attempt ${i} failed" >&2; if [ "$i" -lt 5 ]; then sleep $((i * 5)); fi; \
-       done \
+    && retry wget -qO "${keytmp}/key.asc" --timeout=20 --tries=1 https://apt.llvm.org/llvm-snapshot.gpg.key \
     && { [ -s "${keytmp}/key.asc" ] \
          || { echo "ERROR: could not fetch https://apt.llvm.org/llvm-snapshot.gpg.key" >&2; exit 1; }; } \
     && { GNUPGHOME="${keytmp}" gpg --batch --quiet --import "${keytmp}/key.asc"; \
@@ -95,8 +92,8 @@ RUN echo "apt refresh ${APT_REFRESH}" \
        > /etc/apt/sources.list.d/nginx.list \
     && printf 'Package: *\nPin: origin nginx.org\nPin-Priority: 900\n' \
        > /etc/apt/preferences.d/99nginx \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && retry apt-get update \
+    && retry apt-get install -y --no-install-recommends \
        libc++1-20 \
        curl \
        ca-certificates \
