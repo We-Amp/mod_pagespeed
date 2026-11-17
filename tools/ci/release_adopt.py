@@ -92,6 +92,8 @@ NOT_SEALED_EXACT = (
     "asset-windows",
     "candidate-seal",
     "rehearsal-ea4-el10",
+    # chosen by validate in each run from the bound assets; never carried from a candidate
+    "attestation-subjects",
 )
 NOT_SEALED_GLOBS = (
     "nginx-x64-*",
@@ -1988,6 +1990,7 @@ def self_test():
              want_in_error="'rehearsal-ea4-el10' on a final version")
     run_case("refuse: a cPanel asset on a release candidate version", False, prerelease=True,
              extra=("asset-ea4-el9",), want_in_error="'asset-ea4-el9' on a pre-release version")
+    run_case("accept: the per-run attestation subjects are a working artifact", True, extra=("attestation-subjects",))
     run_case("refuse: unexpected artifact", False, extra=("surprise-output",),
              want_in_error="unexpected artifact 'surprise-output'")
     run_case("refuse: a signing artifact in a candidate", False, extra=("signed-windows",),
