@@ -12,6 +12,8 @@
 export interface UrlEntry {
   url: string;
   hostname: string;
+  /** Cache keyspace of the entry; absent for unsited entries. */
+  site?: string;
 }
 
 export interface UrlGroup {
@@ -120,7 +122,7 @@ export function renameUrlGroup(id: string, newName: string): UrlGroup[] {
 }
 
 /**
- * Add a URL to a group. Deduplicates by url+hostname.
+ * Add a URL to a group. Deduplicates by url+hostname+site.
  */
 export function addUrlToGroup(
   groupId: string,
@@ -130,7 +132,10 @@ export function addUrlToGroup(
   const group = groups.find((g) => g.id === groupId);
   if (group) {
     const exists = group.urls.some(
-      (u) => u.url === entry.url && u.hostname === entry.hostname,
+      (u) =>
+        u.url === entry.url &&
+        u.hostname === entry.hostname &&
+        (u.site ?? '') === (entry.site ?? ''),
     );
     if (!exists) {
       group.urls.push({ ...entry });
@@ -174,7 +179,10 @@ export function addUrlsToGroup(
     let modified = false;
     for (const entry of entries) {
       const exists = group.urls.some(
-        (u) => u.url === entry.url && u.hostname === entry.hostname,
+        (u) =>
+          u.url === entry.url &&
+          u.hostname === entry.hostname &&
+          (u.site ?? '') === (entry.site ?? ''),
       );
       if (!exists) {
         group.urls.push({ ...entry });

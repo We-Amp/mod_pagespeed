@@ -169,6 +169,7 @@ export class UrlTreeViewProvider
         url: entry.url,
         hostname: entry.hostname,
       });
+      if (entry.site) params.set('site', entry.site);
       const data = await fetchApi<CacheAlternatesResponse>(
         `/v1/cache/alternates?${params.toString()}`,
         this.apiUrl,

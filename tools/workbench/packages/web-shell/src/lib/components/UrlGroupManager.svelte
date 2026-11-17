@@ -142,6 +142,7 @@
         const resp: CacheAlternatesResponse = await cache.getAlternates({
           url: entry.url,
           hostname: entry.hostname,
+          ...(entry.site ? { site: entry.site } : {}),
         });
         const alternates = resp.alternates;
         const altCount = alternates.length;

@@ -20,6 +20,13 @@ import type {
   CaptureScreenshotResponse,
 } from './types.js';
 
+/** Drop an empty `site` so unsited requests stay byte-identical to before. */
+function withSite<T extends { site?: string }>(body: T): T {
+  if (body.site) return body;
+  const { site: _site, ...rest } = body;
+  return rest as T;
+}
+
 /**
  * Create a cache client that provides typed methods for every cache endpoint.
  *
@@ -54,12 +61,14 @@ export function createCacheClient(transport: ApiTransport) {
       url: string;
       hostname: string;
       scheme?: string;
+      site?: string;
     }): Promise<CacheAlternatesResponse> {
       const query: Record<string, string> = {
         url: params.url,
         hostname: params.hostname,
       };
       if (params.scheme) query.scheme = params.scheme;
+      if (params.site) query.site = params.site;
       return transport.get<CacheAlternatesResponse>('/v1/cache/alternates', query);
     },
 
@@ -71,6 +80,7 @@ export function createCacheClient(transport: ApiTransport) {
       hostname: string;
       mask: number;
       scheme?: string;
+      site?: string;
     }): Promise<CacheSelectResponse> {
       const query: Record<string, string> = {
         url: params.url,
@@ -78,6 +88,7 @@ export function createCacheClient(transport: ApiTransport) {
         mask: String(params.mask),
       };
       if (params.scheme) query.scheme = params.scheme;
+      if (params.site) query.site = params.site;
       return transport.get<CacheSelectResponse>('/v1/cache/select', query);
     },
 
@@ -88,8 +99,9 @@ export function createCacheClient(transport: ApiTransport) {
       url: string;
       hostname: string;
       scheme?: string;
+      site?: string;
     }): Promise<CachePurgeResponse> {
-      return transport.post<CachePurgeResponse>('/v1/cache/purge', body);
+      return transport.post<CachePurgeResponse>('/v1/cache/purge', withSite(body));
     },
 
     /**
@@ -109,10 +121,11 @@ export function createCacheClient(transport: ApiTransport) {
       url: string;
       hostname: string;
       scheme?: string;
+      site?: string;
     }): Promise<CacheReprocessResponse> {
       return transport.post<CacheReprocessResponse>(
         '/v1/cache/reprocess',
-        body,
+        withSite(body),
       );
     },
 
@@ -126,6 +139,7 @@ export function createCacheClient(transport: ApiTransport) {
       hostname: string;
       alternate_id: number;
       scheme?: string;
+      site?: string;
     }): Promise<Response> {
       if (!transport.getBlob) {
         return Promise.reject(
@@ -138,6 +152,7 @@ export function createCacheClient(transport: ApiTransport) {
         alternate_id: String(params.alternate_id),
       };
       if (params.scheme) query.scheme = params.scheme;
+      if (params.site) query.site = params.site;
       return transport.getBlob('/v1/cache/content', query);
     },
 

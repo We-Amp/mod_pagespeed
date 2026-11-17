@@ -489,3 +489,70 @@ describe('createCaptureClient', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// site (per server block keyspace)
+// ---------------------------------------------------------------------------
+
+describe('site parameter', () => {
+  const site = 'a'.repeat(64);
+
+  it('getAlternates, selectAlternate and getContent send site when set', async () => {
+    (transport.get as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    const getBlob = vi.fn().mockResolvedValue(new Response(''));
+    (transport as { getBlob?: unknown }).getBlob = getBlob;
+
+    await cache.getAlternates({ url: '/a', hostname: 'h', site });
+    expect(transport.get).toHaveBeenLastCalledWith('/v1/cache/alternates', {
+      url: '/a',
+      hostname: 'h',
+      site,
+    });
+
+    await cache.selectAlternate({ url: '/a', hostname: 'h', mask: 3, site });
+    expect(transport.get).toHaveBeenLastCalledWith('/v1/cache/select', {
+      url: '/a',
+      hostname: 'h',
+      mask: '3',
+      site,
+    });
+
+    await cache.getContent({ url: '/a', hostname: 'h', alternate_id: 7, site });
+    expect(getBlob).toHaveBeenLastCalledWith('/v1/cache/content', {
+      url: '/a',
+      hostname: 'h',
+      alternate_id: '7',
+      site,
+    });
+  });
+
+  it('omits site when empty or absent', async () => {
+    (transport.get as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    await cache.getAlternates({ url: '/a', hostname: 'h', site: '' });
+    expect(transport.get).toHaveBeenLastCalledWith('/v1/cache/alternates', {
+      url: '/a',
+      hostname: 'h',
+    });
+    await cache.selectAlternate({ url: '/a', hostname: 'h', mask: 1 });
+    expect(transport.get).toHaveBeenLastCalledWith('/v1/cache/select', {
+      url: '/a',
+      hostname: 'h',
+      mask: '1',
+    });
+  });
+
+  it('purgeUrl and reprocessUrl send site only when set', async () => {
+    (transport.post as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    await cache.purgeUrl({ url: '/a', hostname: 'h', site });
+    expect(transport.post).toHaveBeenLastCalledWith('/v1/cache/purge', {
+      url: '/a',
+      hostname: 'h',
+      site,
+    });
+    await cache.reprocessUrl({ url: '/a', hostname: 'h', site: '' });
+    expect(transport.post).toHaveBeenLastCalledWith('/v1/cache/reprocess', {
+      url: '/a',
+      hostname: 'h',
+    });
+  });
+});

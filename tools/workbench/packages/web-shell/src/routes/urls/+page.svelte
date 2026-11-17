@@ -73,6 +73,7 @@
   let selectedUrl = $state<string | null>(null);
   let selectedHostname = $state<string | null>(null);
   let selectedScheme = $state<string | null>(null);
+  let selectedSite = $state<string | null>(null);
   let alternates = $state<AlternateInfo[]>([]);
   let loadingAlternates = $state(false);
   let alternatesError = $state<string | null>(null);
@@ -347,6 +348,7 @@
         url: selectedUrl,
         hostname: selectedHostname,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
       alternates = resp.alternates;
       alternatesError = null;
@@ -407,6 +409,7 @@
         url: selectedUrl,
         hostname: selectedHostname,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
       alternates = resp.alternates;
       // Extract cooldown info from the alternates response.
@@ -439,6 +442,7 @@
     selectedUrl = entry.url;
     selectedHostname = entry.hostname;
     selectedScheme = entry.scheme ?? null;
+    selectedSite = entry.site || null;
     simulationResult = null;
     actionMessage = null;
     actionError = null;
@@ -452,6 +456,7 @@
     selectedUrl = null;
     selectedHostname = null;
     selectedScheme = null;
+    selectedSite = null;
     alternates = [];
     simulationResult = null;
     actionMessage = null;
@@ -508,6 +513,7 @@
         hostname: selectedHostname,
         mask: computedMask,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
     } catch (e) {
       simulationError = e instanceof Error ? e.message : String(e);
@@ -526,6 +532,7 @@
         url: selectedUrl,
         hostname: selectedHostname,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
       actionMessage = `Purged ${resp.deleted} variant(s).`;
       purgeConfirm = false;
@@ -545,6 +552,7 @@
         url: selectedUrl,
         hostname: selectedHostname,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
       actionMessage = resp.reprocess_enqueued ? 'Reprocess enqueued.' : 'Reprocess not available.';
       reprocessConfirm = false;
@@ -569,6 +577,7 @@
       selectedUrl = null;
       selectedHostname = null;
       selectedScheme = null;
+      selectedSite = null;
       alternates = [];
       urlStatuses = new Map();
       // Refresh.
@@ -588,6 +597,7 @@
     urlGroups = addUrlToGroup(groupId, {
       url: selectedUrl,
       hostname: selectedHostname,
+      ...(selectedSite ? { site: selectedSite } : {}),
     });
     addToGroupOpen = false;
     addToGroupMessage = `Added to group.`;
@@ -630,6 +640,7 @@
         hostname: selectedHostname,
         alternate_id: alt.alternate_id,
         ...(selectedScheme ? { scheme: selectedScheme } : {}),
+        ...(selectedSite ? { site: selectedSite } : {}),
       });
       if (seq !== detailRequestSeq) return; // superseded by a newer expand
       const ct = resp.headers.get('content-type') || '';

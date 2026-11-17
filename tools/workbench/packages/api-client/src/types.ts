@@ -313,6 +313,12 @@ export interface CacheUrlEntry {
   hostname: string;
   /** Request scheme ("http" or "https"). Optional for backward compat with older workers. */
   scheme?: string;
+  /**
+   * Cache keyspace (nginx server block) the entry belongs to. Absent or empty
+   * for unsited entries. Pass it back to the alternates, select, content,
+   * purge and reprocess calls so they address the same keyspace.
+   */
+  site?: string;
   alternate_count: number;
 }
 

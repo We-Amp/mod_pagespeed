@@ -92,12 +92,12 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'pagespeed.purgeUrlFromTree',
-      (item?: { urlEntry?: { url: string; hostname: string } }) =>
+      (item?: { urlEntry?: { url: string; hostname: string; site?: string } }) =>
         purgeUrlFromTreeCommand(context, item),
     ),
     vscode.commands.registerCommand(
       'pagespeed.reprocessUrlFromTree',
-      (item?: { urlEntry?: { url: string; hostname: string } }) =>
+      (item?: { urlEntry?: { url: string; hostname: string; site?: string } }) =>
         reprocessUrlFromTreeCommand(context, item),
     ),
   );
@@ -479,7 +479,7 @@ function showConfigCommand(context: vscode.ExtensionContext): void {
 
 async function purgeUrlFromTreeCommand(
   context: vscode.ExtensionContext,
-  item?: { urlEntry?: { url: string; hostname: string } },
+  item?: { urlEntry?: { url: string; hostname: string; site?: string } },
 ): Promise<void> {
   const entry = item?.urlEntry;
   if (!entry) return;
@@ -514,6 +514,7 @@ async function purgeUrlFromTreeCommand(
       body: JSON.stringify({
         url: entry.url,
         hostname: entry.hostname,
+        ...(entry.site ? { site: entry.site } : {}),
       }),
     });
 
@@ -538,7 +539,7 @@ async function purgeUrlFromTreeCommand(
 
 async function reprocessUrlFromTreeCommand(
   context: vscode.ExtensionContext,
-  item?: { urlEntry?: { url: string; hostname: string } },
+  item?: { urlEntry?: { url: string; hostname: string; site?: string } },
 ): Promise<void> {
   const entry = item?.urlEntry;
   if (!entry) return;
@@ -571,6 +572,7 @@ async function reprocessUrlFromTreeCommand(
       body: JSON.stringify({
         url: entry.url,
         hostname: entry.hostname,
+        ...(entry.site ? { site: entry.site } : {}),
       }),
     });
 
