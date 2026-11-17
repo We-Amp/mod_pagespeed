@@ -1707,14 +1707,10 @@ TEST_F(WorkerTest, JsAlreadyMinimalProducesCompressed) {
   notification.capability_mask = CapabilityMask().Encode();
   SendNotification(notification);
 
-  // Wait for processing (JS minification compiles RE2 patterns).
-  for (int i = 0; i < 60 * kSanitizerBudgetScale; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (worker.stats().notifications_received.load() >= 1) break;
-  }
-
-  // Give extra time for compressed variant writes.
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  // Wait until the notification is retired (not merely received), so the
+  // compressed variants are written before they are read.
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 1,
+                                                           kWorkerStallBudget));
 
   // Compressed variants should exist even though JS is already minimal.
   CapabilityMask gz_mask;
