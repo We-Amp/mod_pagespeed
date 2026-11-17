@@ -1,1 +1,0 @@
-- Resources the module fetches itself send the page's origin as the Referer instead of the visitor's Referer.

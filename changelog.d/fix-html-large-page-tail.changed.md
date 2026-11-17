@@ -1,3 +1,0 @@
-- **HTML past 64 MiB is served unoptimized.** On every port the first 64 MiB of an uncompressed page are optimized and the rest is passed through byte for byte. Compressed pages are still cut off where they inflate past 64 MiB.
-- **Apache: an HTML response larger than 1 MiB is sent as it is optimized**, about 1 MiB at a time, rather than in one piece at the end. Its headers go out with the first piece, so it is sent chunked rather than with a Content-Length. Responses of up to 1 MiB are unchanged.
-- **More than 64 KiB of whitespace before the root element ends the wait for AMP detection**, as comments and directives already do: the document is taken not to be AMP.

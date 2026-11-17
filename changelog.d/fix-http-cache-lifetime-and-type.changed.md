@@ -1,2 +1,0 @@
-- Responses whose caching headers state a lifetime the module cannot read now count as already expired. Readable lifetimes are honored as stated; when there are several, the shortest one applies.
-- Assets served with an unrecognised Content-Type are no longer optimized.
