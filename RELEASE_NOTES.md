@@ -1,3 +1,226 @@
+# mod_pagespeed 2.9.0 Release Notes
+
+**Release date:** 2026-11-17
+
+**Status:** Stable
+
+**Packages:** the same packages, platforms and channels as 2.8.2. The module packages
+for Apache, nginx and IIS, the cPanel package and `pagespeed-optimizer` are 2.9.0, and
+the module is paired with `pagespeed-optimizer` 2.9.0: the Apache deb and rpm packages
+depend on it, and the nginx module packages now recommend it (see Changed). Install the
+module and the optimizer of the same version together. The container images, the NuGet
+packages (including the ASP.NET Core sidecar packages) and the application version of
+the Helm chart (chart 0.3.16) ship with the pagespeed-optimizer 2.9.0 release and are
+2.9.0 as well.
+
+## Highlights
+
+- **Security fixes.** This release fixes several security issues; see Security below. Update recommended.
+- **`pagespeed-doctor` tells you whether mod_pagespeed works, and if not, why.** The
+  Apache and nginx packages now install a read-only check, run as
+  `sudo pagespeed-doctor`, with `--json` output for scripts.
+- **Combined stylesheets, combined scripts and image sprites no longer answer 404
+  when an input is briefly unavailable**, and combined scripts keep running when an
+  input is served unoptimized.
+- **A PNG photo that the photo check misses can now be served as lossy WebP** (new
+  option `PngLossyFallbackMaxSizePercent`, off by default).
+- **nginx now accepts deprecated option names with a warning, as Apache does**,
+  instead of failing `nginx -t` after an upgrade.
+- **nginx and Apache: idle CPU and thread count no longer grow with the number of
+  server blocks or virtual hosts that use the optimizer.**
+- **Sigstore signature and build provenance for every release**, next to the PGP
+  signature.
+
+## Security
+
+- **Fixed several cross-site scripting issues in how HTML, scripts and stylesheets are rewritten, including CSS inlining on HTML pages.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed shared-cache issues that could serve a response meant for one visitor to other visitors.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed issues that let one site's cached responses or restricted content be served on another site or to clients it was not meant for, in multi-site setups.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed memory-safety issues that page content could trigger while a page was being optimized.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed a response-framing issue that could affect proxies and caches in front of the server.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed a local privilege-escalation issue in cache file handling when the server is started as root.** Affected: 2.8.2 and earlier. Update recommended.
+- **Fixed disclosure of visitor credentials to mapped hosts (MapProxyDomain) and of the option-override token to clients.** Affected: 2.8.2 and earlier. Update recommended.
+- **Bounded the memory, CPU and connections that a single page or request can use, and hardened resource and beacon handling.** Affected: 2.8.2 and earlier. Update recommended.
+
+Discovered by Anthropic's OSS Scanner, as vulnerabilities ANT-2026-3GXZ2FJ4, ANT-2026-5VWO29MF, ANT-2026-93QF8A08, ANT-2026-BUV08RGL, ANT-2026-CE1K91NK, ANT-2026-E36DA7HW, ANT-2026-EVRV1GOT, ANT-2026-GA2NW51K, ANT-2026-GCMBO647, ANT-2026-H715O8QA, ANT-2026-J4OONKYD, ANT-2026-JJRHGNWJ, ANT-2026-KFGRNMLQ, ANT-2026-L2JPNWZK, ANT-2026-LKCRXG9W, ANT-2026-N0QLFDLF, ANT-2026-OJ2VYK4V, ANT-2026-QUU5BK5O, ANT-2026-RIRYHATG, ANT-2026-W5KWJX8Y, ANT-2026-WBIXUP2I, ANT-2026-WCV97OJ0, ANT-2026-Y0MQRQHL, ANT-2026-YBMNZDA9, ANT-2026-YS3L5B90, ANT-2026-YVZP8N68, ANT-2026-Z97AV5ZJ, and ANT-2026-ZWGW37QM. We thank the scanner team for the reports.
+
+We also thank Inanna Malick (@inanna-malick) for reporting an issue fixed in this release ([f778972](https://github.com/We-Amp/mod_pagespeed/commit/f7789722479614886b614791c53dc37dbaa97795)).
+
+## Action required when upgrading
+
+- **Install the module and `pagespeed-optimizer` 2.9.0 together.**
+- **One recompute after the upgrade.** Each stylesheet, script and image is optimized
+  again the first time it is requested, so expect extra CPU use, and some responses
+  served as the original, until that completes. Origin files still fresh in the HTTP
+  cache are not fetched again.
+- **Choose a new RequestOptionOverride token after upgrading** if you set one. On IIS,
+  do not send the token in a response header: IIS does not read it from responses, and
+  web.config customHeaders send it to every client.
+- **MapProxyDomain fetches no longer forward visitor cookies or credentials.** A site
+  whose mapped host relies on receiving them needs to change its setup.
+- **MapProxyDomain and LoadFromFile.** A resource under a proxied path is now fetched
+  from the proxied origin, or through a `LoadFromFile` rule written for that origin,
+  even when a `LoadFromFile` rule also covers the proxy path itself; a `LoadFromFile`
+  rule for the proxied origin now also takes effect when a rewritten resource is
+  rebuilt. If you mirrored proxied files under the document root to avoid origin
+  fetches, those files are no longer read, and you will see more origin fetches in
+  that setup unless you add a `LoadFromFile` rule for the origin. Rewritten URLs do
+  not change.
+- **Negative rewrite deadlines now mean "wait up to a bound, then serve the
+  original".** If you set `RewriteDeadlinePerFlushMs` or `InPlaceRewriteDeadlineMs`
+  below zero, requests for rewritten resources (`.pagespeed.` URLs and in-place
+  resources), and the inputs of a combined stylesheet or script request, now wait up to
+  `NegativeDeadlineFetchWaitMs` (new; 1000 ms by default, at most `FetcherTimeOutMs`,
+  server or virtual-host configuration only) and then serve the original, with
+  `Cache-Control: private` and a lifetime of at most 5 minutes. To wait longer, raise
+  `NegativeDeadlineFetchWaitMs`. Rewriting of HTML pages still waits as before.
+- **Configuration scope.** An ExperimentSpec in the main configuration that sets
+  options above directory scope now fails at load; set such options outside the
+  ExperimentSpec. An ExperimentSpec that sets an alternate origin domain is refused in
+  `.htaccess` files (500 error) and in remote configuration. Apache: `.htaccess` files
+  with MapOriginDomain, MapProxyDomain or CustomFetchHeader now give a 500 error; move
+  these directives to the server or virtual-host configuration.
+
+## Fixed
+
+_Module (all ports unless named)_
+
+- **Combined stylesheets and scripts no longer answer 404 when an input is briefly
+  unavailable.** The combined URL is now served with the inputs that can be fetched,
+  with a short private lifetime, and is complete again once the missing input is back.
+- **Image sprites no longer answer 404 when an image is briefly unavailable.** The
+  sprite URL is answered with a transparent image, with a short private lifetime, and
+  the full sprite is served again once the image is back.
+- **Combined scripts keep running when an input is served unoptimized.** Before, the
+  page's scripts could fail with a `ReferenceError`; the combined file now always uses
+  the name the page expects.
+- **Cache-extended stylesheets and scripts no longer wait for image optimization to
+  finish**, so a page with many images no longer holds back its render-blocking
+  stylesheets and scripts on the first visits.
+- **In-place optimization no longer serves a script, stylesheet, image or font without
+  the CORS headers a cross-origin request needs.** Responses whose
+  `Access-Control-Allow-Origin` names one origin, or that carry `Vary: Origin`, are no
+  longer optimized or recorded in place; origins that send
+  `Access-Control-Allow-Origin: *` keep full optimization. The new `InPlaceCorsGuard`
+  option (on by default) turns this off, and the `in_place_cors_declined` statistic
+  counts the requests it passed on.
+- **Proxied resources no longer answer 404 after cache loss when a `LoadFromFile`
+  prefix overlaps a `MapProxyDomain` path**, and a `LoadFromFile` rule written for a
+  `MapProxyDomain` origin now also applies when a proxied resource is rebuilt.
+- CSS minification no longer rewrites `flex: 1 0px` to `flex: 1 0`; zero units are kept
+  inside the `flex` shorthand.
+- Stylesheets served in place of an optimized version, when the optimization could not
+  be done, now always carry a Content-Encoding and Content-Length that match the body
+  sent.
+- A failed response-header serialization no longer stores a headerless value that
+  could read back as a valid response; the content is fetched again.
+- The message that explains why a script was not combined now always stays on one line.
+- An idle cache no longer wakes up about 20 times a second.
+
+_nginx and Apache_
+
+- **Idle CPU and thread count no longer grow with the number of server blocks or
+  virtual hosts that use the optimizer.** Those that name the same `DaemonSocketPath`
+  and `DaemonVolumePath` now share one connection to the optimizer's cache (#627).
+- A start or config test as root no longer leaves a cache file the workers cannot use:
+  nginx and Apache started as root create the cache files for the worker user (`user`
+  in nginx, `User`/`Group` in Apache), also after an earlier start as root. A cache path
+  that cannot be used as configured is reported.
+- **nginx accepts deprecated option names with a warning, as Apache does, instead of
+  refusing to start.** Names such as `pagespeed FileCacheInodeLimit` are ignored with one
+  warning each, only where the option itself was valid. Names that were never options
+  still fail the configuration test.
+
+_Envoy and IIS_
+
+- **A configured option name that is deprecated is now reported as deprecated**, with
+  the same message as nginx, instead of a generic "unknown option" warning.
+
+## Changed
+
+_Module (all ports unless named)_
+
+- **HTML past 64 MiB is served unoptimized.** The first 64 MiB of an uncompressed page
+  are optimized and the rest is passed through byte for byte. Compressed pages are still
+  cut off where they inflate past 64 MiB.
+- **Apache: an HTML response larger than 1 MiB is sent as it is optimized**, about 1 MiB
+  at a time, so it is sent chunked rather than with a Content-Length. Responses of up to
+  1 MiB are unchanged.
+- **More than 64 KiB of whitespace before the root element ends the wait for AMP
+  detection**: the document is taken not to be AMP.
+- **Caching.** Responses whose caching headers state a lifetime the module cannot read
+  now count as already expired; when there are several readable lifetimes, the shortest
+  one applies. Assets served with an unrecognised Content-Type are no longer optimized.
+- **In-place optimization and proxying of mapped domains** no longer cache the copy of a
+  stylesheet, script or image served to a visitor when its response has a `Vary` on
+  anything other than `Accept-Encoding`, whether or not `RespectVary` is on, and share a
+  response fetched for a visitor whose request carried a cookie only when the origin
+  marks it shareable. Such resources get fewer cache hits and may no longer be optimized
+  in place; entries stored by earlier versions on these paths are fetched again once.
+- **Resources proxied through MapProxyDomain are fetched from the mapped host with gzip
+  or no compression.** A visitor whose browser also offers brotli or zstd receives the
+  resource gzipped, or uncompressed when gzip is not offered.
+- **Script and markup handling.** Scripts that contain non-ASCII bytes are combined only
+  when the script and the page are UTF-8; pages served as `application/ce-html+xml` are
+  rewritten as XHTML; URLs inside CSS comments are no longer rewritten; and scripts
+  inside `<noscript>`, `<noembed>` and `<noframes>` are no longer inlined or minified.
+- **A negative rewrite deadline no longer makes a resource request wait for ever.** See
+  Action required when upgrading.
+- **Work limits set in `.htaccess` files, and in ExperimentSpec arms on all servers, are
+  capped at the configured values.** CssParseMaxBytes, DebugOutputMaxBytes,
+  MaxHtmlParseBytes and ImageResolutionLimitBytes can be lowered there but not raised.
+- **With `UrlSigningKey` set**, a request for an optimized (`.pagespeed.`) URL with an
+  invalid or missing signature is now answered with 403 Forbidden.
+  `AcceptInvalidSignatures` keeps its current behavior.
+- With `resize_rendered_image_dimensions` enabled, an image is resized to its rendered
+  size only once several recent beacon results agree on that size; resizing starts
+  after a few page views rather than the first one.
+- Resources the module fetches itself send the page's origin as the Referer instead of
+  the visitor's Referer.
+
+_Admin console_
+
+- **A per-host purge is refused when the purge set is full**; a purge from the global
+  admin console clears the set.
+- **The diagnostics bundle on the Support page redacts more** before you copy or
+  download it, including more credential forms, and with the configuration text added
+  it keeps only the values of options known to be safe to share.
+
+_Packages_
+
+- **The nginx module package now recommends the matching optimizer.** The deb and rpm
+  of `nginx-module-pagespeed` recommend `pagespeed-optimizer` at the same release, so a
+  normal `apt install` or `dnf install` pulls the worker in. It stays optional: with
+  `--no-install-recommends` or `--setopt=install_weak_deps=False` nginx runs with
+  classic in-place optimization.
+- **Stylesheets that contain a "<" are inlined on HTML pages only when the page's character set is known.** `inline_css`, `prioritize_critical_css` and `rewrite_css` handle such stylesheets (for example `@property` syntax descriptors from Tailwind CSS 4, or range media queries) on HTML pages that declare their charset as UTF-8, windows-125x or ISO-8859-x, in the response headers or in a meta tag near the start of the page, and only when the stylesheet is ASCII or valid UTF-8; other pages, and XHTML, keep such stylesheets as they are. A "<" in a CSS string or comment is written as the CSS escape `\3c `, which means the same; a script that reads such a string from a custom property sees the escape.
+
+## Added
+
+- **`pagespeed-doctor`**, a read-only health check installed by the Apache and nginx
+  packages (`sudo pagespeed-doctor`). It reports whether the module is loaded (and
+  loaded once), whether the config test passes (naming a removed, misspelled or
+  misplaced pagespeed option, with the closest valid name), whether the module answers
+  and optimizes the test page, whether the cache directory is writable by the web server
+  user with no root-owned files, and whether the optimizer worker is reachable. `--json`
+  gives the same result for scripts; the exit code is 0 for working, 1 for warnings, 2
+  for failures. It changes nothing and talks only to the local server.
+- **Lossy WebP for PNG photos the photo check misses (off by default).** Set
+  `PngLossyFallbackMaxSizePercent 20` (nginx: `pagespeed PngLossyFallbackMaxSizePercent 20;`)
+  to try lossy WebP for an opaque PNG stored as lossless WebP, and serve it when the
+  lossy file is at most that percentage of the lossless one and passes a per-tile
+  quality check. Text, screenshots, charts and UI stay lossless: the trial runs only for
+  large lossless results (`PngLossyFallbackMinBytesPerMegapixel`), and not when the WebP
+  quality is below 50, the image has transparency, or PNG-to-JPEG/WebP conversion is
+  off. The option has directory scope. The `image_png_lossy_fallback_*` statistics count
+  the trials.
+- **Sigstore signature and build provenance for every release.** `SHA256SUMS` now also
+  has a keyless Sigstore signature (`SHA256SUMS.sigstore.json`), every module file has a
+  build provenance attestation, and every module package has an SBOM attestation,
+  verifiable with `cosign verify-blob` and `gh attestation verify`. The PGP signature
+  and the existing `sha256sum` and `gpg` checks work as before. `SECURITY.md` lists the
+  commands.
+
 # mod_pagespeed 2.8.2 Release Notes
 
 **Release date:** 2026-11-13

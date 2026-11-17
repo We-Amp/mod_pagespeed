@@ -1,1 +1,0 @@
-- With `UrlSigningKey` set, a request for an optimized (`.pagespeed.`) URL with an invalid or missing signature is now refused with 403 Forbidden instead of being passed through to the normal or in-place handling (which usually ended in a 404). `AcceptInvalidSignatures` keeps its current behavior.

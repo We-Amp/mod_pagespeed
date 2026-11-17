@@ -1,1 +1,0 @@
-- Stylesheets served in place of an optimized version, when the optimization could not be done, now always carry a Content-Encoding and Content-Length that match the body sent.
