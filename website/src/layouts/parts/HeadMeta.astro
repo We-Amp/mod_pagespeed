@@ -247,13 +247,31 @@ const jsonLdScripts = [...jsonLdEntries, breadcrumbJsonLd].filter(
     <link rel="manifest" href="/manifest.json" />
     <!-- No generator meta tag — we don't advertise the Astro version to avoid
          framework-version disclosure. -->
-    <!-- Umami analytics (self-hosted, privacy-first, no cookies) -->
+    <!-- Umami analytics (self-hosted, privacy-first, no cookies). data-domains
+         restricts the tracker to the production hostnames, so previews, mirrors
+         and local builds send no events. -->
+    {/* Opt-out switch: ?umami-opt-out=1 sets the tracker's own umami.disabled
+        flag in localStorage, ?umami-opt-out=0 clears it. This classic inline
+        script runs while the head is parsed, before the deferred tracker below
+        starts (which reads the flag at start-up and again on every send), and
+        the whole body is in a try block, so unavailable storage is a no-op.
+        The flag silences umami.track() and the data-umami-event clicks too. */}
+    <script is:inline>
+      (function () {
+        try {
+          var v = new URLSearchParams(location.search).get('umami-opt-out');
+          if (v === '1') localStorage.setItem('umami.disabled', '1');
+          else if (v === '0') localStorage.removeItem('umami.disabled');
+        } catch (e) {}
+      })();
+    </script>
     <script
       is:inline
       defer
       src="https://umami.we-amp.com/script.js"
       data-website-id="d32585a5-6610-4a11-8e5b-ef093fabbd20"
       data-host-url="https://modpagespeed.com"
+      data-domains="modpagespeed.com,www.modpagespeed.com"
     ></script>
     <title>{title}</title>
     {jsonLdScripts.map((script) => (

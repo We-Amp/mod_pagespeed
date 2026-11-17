@@ -69,18 +69,19 @@ test.describe('AI crawler cost meter', () => {
     page,
     baseURL,
   }) => {
+    // The tracker only runs on the production hostnames, so it never posts from
+    // the local server. The in-page recorder stands in for it: the analysis
+    // must still report its one event, and that event must carry nothing.
+    await stubUmami(page);
     await page.goto('/ai-crawler-cost/');
     const seen: Array<{ url: string; body: string | null }> = [];
     page.on('request', (r) => seen.push({ url: r.url(), body: r.postData() }));
-    const sendPost = page.waitForRequest(
-      (r) =>
-        r.method() === 'POST' &&
-        /\/api\/send/.test(r.url()) &&
-        (r.postData() ?? '').includes('"name":"crawler-cost"'),
-    );
     await page.setInputFiles('#cc-file', fixture('cc-hostile.log'));
     await expect(page.locator('#cc-results')).toBeVisible();
-    await sendPost;
+    await expect
+      .poll(async () => (await trackedEvents(page)).filter((e) => e.name === 'crawler-cost'))
+      .toHaveLength(1);
+    expect(JSON.stringify(await trackedEvents(page))).not.toContain(SENTINEL);
     const own = new URL(baseURL ?? 'http://localhost').hostname;
     for (const r of seen) {
       expect(r.url).not.toContain(SENTINEL);
