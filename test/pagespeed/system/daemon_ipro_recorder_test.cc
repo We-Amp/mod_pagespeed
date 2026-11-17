@@ -729,8 +729,7 @@ TEST_F(DaemonIproRecorderOriginCachingTest,
   origin_caching_ = &origin;
   ResponseHeaders headers;
   MakeDirectiveHeaders(&headers);
-  const DaemonRecordOutcome outcome =
-      Run(&headers, kBody, true, nullptr, nullptr, "x-ext; max-age=60");
+  Run(&headers, kBody, true, nullptr, nullptr, "x-ext; max-age=60");
   origin_caching_ = nullptr;
   const GoogleString log = CallLog();
   EXPECT_EQ(GoogleString::npos, log.find("max_age=600 ")) << log;
