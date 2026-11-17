@@ -398,7 +398,7 @@ Source `AdminAuth.Token` from a secret store or environment variable — do not 
 
 The bundled nginx + module are glibc ELF binaries built for a glibc ≥ 2.31 floor. From 2.8.1 on,
 the bundled nginx carries PCRE2 statically linked and needs no PCRE library on the host, so it runs
-on Debian 11 to 13 and Ubuntu 20.04 to 26.04. Enterprise Linux (RHEL, AlmaLinux, Rocky) and Amazon
+on Debian 12 to 13 and Ubuntu 20.04 to 26.04. Enterprise Linux (RHEL, AlmaLinux, Rocky) and Amazon
 Linux are not supported. `libstdc++` is statically linked and the build has no OpenSSL dependency, so there is
 no libstdc++ or libssl/libcrypto host requirement. The binaries link a small set of host shared
 libraries:
