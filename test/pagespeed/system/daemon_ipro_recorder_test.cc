@@ -732,8 +732,9 @@ TEST_F(DaemonIproRecorderOriginCachingTest,
   const DaemonRecordOutcome outcome =
       Run(&headers, kBody, true, nullptr, nullptr, "x-ext; max-age=60");
   origin_caching_ = nullptr;
+  EXPECT_FALSE(outcome.stored);
   const GoogleString log = CallLog();
-  EXPECT_EQ(GoogleString::npos, log.find("max_age=600 ")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=")) << log;
 }
 
 TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {
