@@ -283,20 +283,31 @@ class TestContentNegotiation:
         assert hit.status_code == 200
 
     @pytest.mark.p2
-    def test_vary_user_agent_cached_via_capability_mask(self, client):
-        """Vary: User-Agent IS cacheable because the module normalizes UA into
-        finite capability dimensions (viewport class + pixel density)."""
+    def test_vary_user_agent_not_cached(self, client):
+        """Origin Vary: User-Agent response is not cached by the proxy.
+
+        Only a response that varies on nothing but Accept-Encoding is stored
+        (#796); any other field is passed through from the origin on every
+        request, with the origin's own Vary, and is never answered as a HIT.
+        """
         uid = uuid4().hex
         path = f"/vary/User-Agent?_={uid}"
 
         r = client.get(path)
         client.assert_miss(r)
         assert r.status_code == 200
+        assert len(r.content) > 0
+        assert "user-agent" in r.headers.get("Vary", "").lower()
 
-        hit = client.poll_for_hit(path)
-        assert hit.status_code == 200
-        # Vary header should still be present on the cached response.
-        assert "Vary" in hit.headers
+        # Stays MISS (or passthrough) across repeated requests.
+        client.assert_not_cached(path)
+
+        # Still served correctly, with the origin's Vary intact.
+        again = client.get(path)
+        client.assert_miss(again)
+        assert again.status_code == 200
+        assert again.content == r.content
+        assert "user-agent" in again.headers.get("Vary", "").lower()
 
     @pytest.mark.p2
     def test_accept_encoding_empty_string(self, client):
