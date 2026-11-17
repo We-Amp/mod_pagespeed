@@ -166,6 +166,7 @@ We also thank Inanna Malick (@inanna-malick) for reporting an issue fixed in thi
   the worker user (`user` in nginx, `User`/`Group` in Apache), also after an
   earlier start as root. A cache path that cannot be used as configured is
   reported.
+
 ### Upgrade Notes
 
 - After upgrading, optimized resources are recomputed once: each stylesheet,

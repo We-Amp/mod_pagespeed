@@ -177,6 +177,7 @@ _Module (all ports unless named)_
   after a few page views rather than the first one.
 - Resources the module fetches itself send the page's origin as the Referer instead of
   the visitor's Referer.
+- **Stylesheets that contain a "<" are inlined on HTML pages only when the page's character set is known.** `inline_css`, `prioritize_critical_css` and `rewrite_css` handle such stylesheets (for example `@property` syntax descriptors from Tailwind CSS 4, or range media queries) on HTML pages that declare their charset as UTF-8, windows-125x or ISO-8859-x, in the response headers or in a meta tag near the start of the page, and only when the stylesheet is ASCII or valid UTF-8; other pages, and XHTML, keep such stylesheets as they are. A "<" in a CSS string or comment is written as the CSS escape `\3c `, which means the same; a script that reads such a string from a custom property sees the escape.
 
 _Admin console_
 
@@ -193,7 +194,6 @@ _Packages_
   normal `apt install` or `dnf install` pulls the worker in. It stays optional: with
   `--no-install-recommends` or `--setopt=install_weak_deps=False` nginx runs with
   classic in-place optimization.
-- **Stylesheets that contain a "<" are inlined on HTML pages only when the page's character set is known.** `inline_css`, `prioritize_critical_css` and `rewrite_css` handle such stylesheets (for example `@property` syntax descriptors from Tailwind CSS 4, or range media queries) on HTML pages that declare their charset as UTF-8, windows-125x or ISO-8859-x, in the response headers or in a meta tag near the start of the page, and only when the stylesheet is ASCII or valid UTF-8; other pages, and XHTML, keep such stylesheets as they are. A "<" in a CSS string or comment is written as the CSS escape `\3c `, which means the same; a script that reads such a string from a custom property sees the escape.
 
 ## Added
 
