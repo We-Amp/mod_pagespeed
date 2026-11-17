@@ -28,7 +28,7 @@ export function expectOrWarn(
     if (!windowOn) throw err;
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(
-      `::warning::${what}: ${msg} -- warning only: this is a release window (the sync or release/* pull request); the same mismatch fails on main and on ordinary pull requests.`,
+      `::warning::${what}: ${msg} -- warning only: a release is in progress (a sync or release/* pull request, or a release cut in flight); outside a release the same mismatch fails.`,
     );
   }
 }

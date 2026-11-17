@@ -12,13 +12,16 @@ import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { MODULE_PACKAGE_VERSION, SIDECAR_VERSION } from '../src/data/product-facts.mjs';
 import { VERSION_MAP, versionMapMarkdown } from '../src/data/version-map.mjs';
+import { releaseCutInFlight } from './lib/release-cut';
 import { releaseManifest } from './lib/release-manifest';
-import { expectOrWarn } from './lib/release-window';
+import { expectOrWarn, inReleaseWindow } from './lib/release-window';
 import { artifactVersionProblems } from './lib/version-rules';
 
 const chart = parseYaml(
   readFileSync(new URL('../../deploy/helm/pagespeed/Chart.yaml', import.meta.url), 'utf8'),
 );
+
+const VERSION = readFileSync(new URL('../../VERSION.txt', import.meta.url), 'utf8').trim();
 
 describe('version map', () => {
   const current = VERSION_MAP[0];
@@ -33,12 +36,31 @@ describe('version map', () => {
     // (release/helm-*) before the site's version map follows, so in a release
     // window a mismatch here is a warning (test/lib/release-window.ts).
     // The appVersion stays on the release in a module-only release too.
-    expectOrWarn('version map row vs Helm chart', () => {
-      expect(current.helmChart).toBe(String(chart.version));
-      expect(
-        artifactVersionProblems({ ...current, chartAppVersion: String(chart.appVersion) }),
-      ).toEqual([]);
+    // A release cut in flight (chart appVersion = VERSION.txt, row still on
+    // the previous release) warns as well: the site's row follows with the
+    // release's site PR (test/lib/release-cut.ts). Committed files only.
+    const cutInFlight = releaseCutInFlight({
+      version: VERSION,
+      rowRelease: current.release,
+      rowHelmChart: current.helmChart,
+      chartVersion: String(chart.version),
+      chartAppVersion: String(chart.appVersion),
     });
+    if (cutInFlight) {
+      console.warn(
+        `::warning::release cut ${VERSION} in flight: the site's row follows with the release's site PR`,
+      );
+    }
+    expectOrWarn(
+      'version map row vs Helm chart',
+      () => {
+        expect(current.helmChart).toBe(String(chart.version));
+        expect(
+          artifactVersionProblems({ ...current, chartAppVersion: String(chart.appVersion) }),
+        ).toEqual([]);
+      },
+      inReleaseWindow() || cutInFlight,
+    );
     // Two committed files, not live state: strict in a window too.
     expect(current.packages).toBe(MODULE_PACKAGE_VERSION);
   });
