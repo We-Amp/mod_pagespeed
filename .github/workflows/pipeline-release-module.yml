@@ -1464,6 +1464,7 @@ jobs:
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &linux-x64-env
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
       ARCH: x64
       SO_ARCH: x86_64
       BAZEL_CI_CONFIG: ci
@@ -1505,7 +1506,7 @@ jobs:
           # Content-hashed tag and a per-host lock around the build
           # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds the
           # image cold every time.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest "$ARCH" docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" "$ARCH" docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # The remote cache is used only when the runner environment names it
@@ -1699,6 +1700,12 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
   linux-release-build-hosted:
     name: Linux Release Build (x64, hosted)
     needs: [event-guard, version, vendor-ready, adopt]
@@ -1733,6 +1740,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
       ARCH: arm64
       SO_ARCH: aarch64
       BAZEL_CI_CONFIG: ci-linux-arm64-release
@@ -2411,6 +2419,7 @@ jobs:
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 120
     env: &unit-env
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
       ARCH: x64
       BAZEL_CI_CONFIG: ci
     steps: &unit-steps
@@ -2535,6 +2544,12 @@ jobs:
           docker rm -f "${TSVC_REDIS_AUTH:-none}" "${TSVC_MEMCACHED_SOCK:-none}" 2>/dev/null || true
           docker volume rm "${TSVC_SOCK:-none}" 2>/dev/null || true
           docker network rm "${UNIT_NET:-}" 2>/dev/null || true
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
 
   unit-tests-hosted:
     name: Unit Tests (Release, hosted)
