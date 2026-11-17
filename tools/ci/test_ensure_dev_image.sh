@@ -143,6 +143,22 @@ else
   fail "--tag-latest did not tag"
 fi
 
+# --tag REF tags the image with a caller-chosen unique name, not :latest.
+: > "$T/docker.log"
+OUT3=$(bash "$ENSURE" --tag pagespeed2-dev:ci-1-1-job x64 "$T/a/docker" 2>/dev/null)
+if [ "$OUT3" = "$A" ] \
+   && grep -q "^tag $A pagespeed2-dev:ci-1-1-job$" "$T/docker.log" \
+   && ! grep -q ':latest' "$T/docker.log"; then
+  pass "--tag tags the given reference and not :latest"
+else
+  fail "--tag out='$OUT3' log: $(cat "$T/docker.log")"
+fi
+if bash "$ENSURE" --tag nocolon x64 "$T/a/docker" >/dev/null 2>&1; then
+  fail "--tag without a tag part was accepted"
+else
+  pass "--tag rejects a reference without a tag"
+fi
+
 if ! command -v flock >/dev/null 2>&1; then
   echo "SKIP: flock not installed (cases 5-6)"
 else

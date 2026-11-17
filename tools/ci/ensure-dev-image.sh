@@ -8,7 +8,11 @@
 #
 # Usage: tools/ci/ensure-dev-image.sh [options] <arch> <docker-dir>
 #   --name-only          compute and print the name; never build
-#   --tag-latest         also tag the image pagespeed2-dev:latest
+#   --tag-latest         also tag the image pagespeed2-dev:latest (local use; a
+#                        shared name that concurrent jobs on one host race on)
+#   --tag REF            also tag the image REF, e.g. a per-job name
+#                        pagespeed2-dev:ci-<run>-<attempt>-<job> that no other job
+#                        shares
 #   --lock-timeout SECS  bound on waiting for a concurrent build of the same
 #                        tag (default ${CI_IMAGE_LOCK_TIMEOUT:-1200})
 #   --derived REPO FILE  then ensure REPO:<arch>-<hash>, built from
@@ -52,17 +56,21 @@ set -euo pipefail
 
 NAME_ONLY=0
 TAG_LATEST=0
+TAG_AS=""
 LOCK_TIMEOUT="${CI_IMAGE_LOCK_TIMEOUT:-1200}"
 DERIVED_REPO=""
 DERIVED_FILE=""
 
-usage() { sed -n '5,17p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+usage() { sed -n '5,22p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 log() { echo "ensure-dev-image: $*" >&2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --name-only) NAME_ONLY=1; shift ;;
     --tag-latest) TAG_LATEST=1; shift ;;
+    --tag)
+      [ $# -ge 2 ] || { echo "--tag needs a REF" >&2; exit 2; }
+      TAG_AS="$2"; shift 2 ;;
     --lock-timeout) LOCK_TIMEOUT="${2:-}"; shift 2 ;;
     --derived)
       [ $# -ge 3 ] || { echo "--derived needs REPO and FILE" >&2; exit 2; }
@@ -79,6 +87,16 @@ DOCKER_DIR="$2"
 case "$LOCK_TIMEOUT" in
   ''|*[!0-9]*) echo "--lock-timeout needs whole seconds, got '${LOCK_TIMEOUT}'" >&2; exit 2 ;;
 esac
+if [ -n "$TAG_AS" ]; then
+  case "$TAG_AS" in
+    *:*) ;;
+    *) echo "--tag needs REPO:TAG, got '${TAG_AS}'" >&2; exit 2 ;;
+  esac
+  case "$TAG_AS" in
+    *[!A-Za-z0-9._:/-]*|[!a-z0-9]*|*:[-.]*)
+      echo "--tag needs a plain docker reference, got '${TAG_AS}'" >&2; exit 2 ;;
+  esac
+fi
 if [ -n "$DERIVED_REPO" ]; then
   case "$DERIVED_REPO" in
     pagespeed2-dev|*[!a-z0-9._-]*|[!a-z0-9]*)
@@ -223,6 +241,9 @@ sweep_old_lock_dirs
 ensure_image "$IMAGE" "$DOCKER_DIR"
 if [ "$TAG_LATEST" -eq 1 ]; then
   docker tag "$IMAGE" pagespeed2-dev:latest
+fi
+if [ -n "$TAG_AS" ]; then
+  docker tag "$IMAGE" "$TAG_AS"
 fi
 if [ -n "$DERIVED_IMAGE" ]; then
   ensure_image "$DERIVED_IMAGE" --build-arg BASE="$IMAGE" \

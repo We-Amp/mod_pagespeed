@@ -543,6 +543,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 60
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -579,7 +581,7 @@ jobs:
         run: |
           # Content-hashed tag and a per-host flock around the build
           # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       - name: Stamp GIT_COMMIT
@@ -666,12 +668,20 @@ jobs:
           retention-days: 3
           include-hidden-files: true
 
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
   periodic-build-arm64:
     permissions:
       contents: read
     name: Build (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -704,7 +714,7 @@ jobs:
 
       - name: Ensure the dev image
         run: |
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest arm64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" arm64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       - name: Build optimized test binaries
@@ -773,6 +783,12 @@ jobs:
           path: .ci-artifacts
           retention-days: 3
           include-hidden-files: true
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
 
   # ---------------------------------------------------------------------
   # arm64 legs (hosted arm64). Each runs on its own runner, so the compose
@@ -1933,6 +1949,8 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 30
+    env:
+      DEV_IMAGE: pagespeed2-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -1946,7 +1964,7 @@ jobs:
 
       - name: Ensure the dev image
         run: |
-          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
       # A per-job directory, never a shared runner path.
@@ -2007,6 +2025,12 @@ jobs:
             grep -E '^t/[^ ]+\.t \.+|^Files=|^Result:' "${LOG}" || true
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
 
   # The two .NET test projects (WeAmp.PageSpeed.Tests and
   # WeAmp.PageSpeed.AspNetCore.Tests) on net8.0 and net10.0 against the
