@@ -1,1 +1,0 @@
-Documentation: the install guide now says to add the nginx directives to an existing server block, describes the worker and module as separately versioned, and the admin console Apache sample uses `Require local`.

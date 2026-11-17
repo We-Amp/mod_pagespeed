@@ -4,9 +4,20 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+## 2.9.0 - 2026-11-17
+
+Security: fixed shared-cache issues that could serve a response meant for one visitor to other visitors. Affected: 2.8.1 and earlier. Update recommended.
+
+Security: fixed issues that let one site's cached responses or restricted content be served on another site or to clients it was not meant for, in multi-site setups and in the ASP.NET Core package. Affected: 2.8.1 and earlier. Update recommended.
+
+Security: fixed cross-site scripting issues in how HTML pages are rewritten. Affected: 2.8.1 and earlier. Update recommended.
+
+Changed: the Helm chart 0.3.16 is published with this release; its default
+image version is 2.9.0.
+
 Changed: in the ASP.NET Core middleware (WeAmp.PageSpeed.AspNetCore), on a cache miss, a response that would be cached is fetched once more as an anonymous request (no signed-in user, cookies or credentials, from the client address `224.0.0.0`); only that response is stored, and the visitor still gets its own. The app therefore handles each response that gets cached twice. Put rules that admit clients by address or identity after `UsePageSpeed()`, or list their paths in `ExcludePaths`. Call `UseRouting()` after `UsePageSpeed()`: an endpoint selected ahead of it is cached only when nothing about its selection can depend on the client. For an app whose GET handlers have side effects, set the new `RecordResponses` option to `false`: pages are still optimized, and nothing new is cached.
 
-Changed: a response whose `Vary` names a request header other than `Accept-Encoding`, such as `Accept`, `User-Agent`, `Save-Data` or `Origin`, is no longer cached or optimized. It is passed through from the origin on every request, so each client gets the origin's answer to its own request. Before, a response with `Vary: Accept`, `Vary: User-Agent` or `Vary: Save-Data` was cached once per URL and that copy was served to every client. The ASP.NET Core middleware (WeAmp.PageSpeed.AspNetCore) behaves the same way as the nginx module, and also counts a `Vary` set by middleware that runs before it. The native modules that store through the optimizer worker follow the same rule (`ps_vary_uncacheable` now refuses these values, and `ps_vary_varies_accept` returns 0). Entries cached by earlier versions are not used after the upgrade, so the cache starts empty.
+Changed: a response whose `Vary` names a request header other than `Accept-Encoding`, such as `Accept`, `User-Agent`, `Save-Data` or `Origin`, is no longer cached or optimized. It is passed through from the origin on every request, so each client gets the origin's answer to its own request. The ASP.NET Core middleware (WeAmp.PageSpeed.AspNetCore) behaves the same way as the nginx module, and also counts a `Vary` set by middleware that runs before it. The native modules that store through the optimizer worker follow the same rule (`ps_vary_uncacheable` now refuses these values, and `ps_vary_varies_accept` returns 0). Entries cached by earlier versions are not used after the upgrade, so the cache starts empty.
 
 Fixed: in the ASP.NET Core middleware (WeAmp.PageSpeed.AspNetCore), the cached Markdown copy of a page served to an agent (`Accept: text/markdown`) no longer carries `Content-Encoding: gzip`. The copy is sent uncompressed, and the header made clients that accept gzip fail to decode it. The nginx module was not affected.
 
@@ -15,6 +26,8 @@ Fixed: the Markdown copy served to agents no longer contains empty `[](#anchor)`
 Changed: in the nginx module, with agent optimization on, every HTML response names `Accept` in its `Vary` header (for example `Vary: Accept-Encoding, User-Agent, Accept`), including pages that have no Markdown copy yet, so a cache in front of nginx keeps the HTML and the Markdown copy of a URL apart. An origin that already sends `Vary: Accept` does not get it twice. With agent optimization off, `Vary` is unchanged. A CDN that keys on `Vary` stores a copy per distinct `Accept` value for these pages.
 
 Fixed: in the nginx module, a revalidated response whose 304 from the origin carries `Vary: Accept` no longer lists `Accept` twice in its `Vary` headers.
+
+Fixed: a cache volume path that cannot be used is reported and not used, and an idle cache no longer wakes up about 20 times a second (the Cyclone cache library was updated).
 
 Added: the Markdown copy for agents and `/llms.txt` carry an `x-markdown-tokens` header with an estimate of the number of tokens in the body (the body size in bytes divided by four, rounded down). The new nginx directive `pagespeed_agent_content_signal` sets a `content-signal` header for these responses, for example `pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";`. Without it no `content-signal` header is sent.
 
@@ -26,8 +39,6 @@ Added: in the ASP.NET Core middleware, the Markdown copy for agents carries an `
 
 Changed: the worker's `--help` output now lists the `--rsl-cap-*` options, which it already accepted.
 
-- Fixed a shared-cache issue that could serve a page personalised for one visitor to another visitor. Update recommended.
-
 Changed: in the nginx module, a response fetched for a visitor whose request carries cookies is shared with other visitors only when the origin marks it shareable. A page (any response that is not a stylesheet, script or image, including XHTML, JSON and plain text) needs `Cache-Control: public` or a single `s-maxage` above zero; `s-maxage=0`, a malformed value or a repeated `s-maxage` does not count. A cached page is served to a visitor with cookies only with the same mark; otherwise the request goes to the origin. The same applies to the page's Markdown copy, its Early Hints, and `/llms.txt`. A stylesheet, script or image fetched with cookies is cached only when the origin states its lifetime (`max-age`, `s-maxage` or `Expires`). Requests with an `Authorization` header are handled as before. The cache starts empty after the upgrade: entries stored by earlier versions are not used. See UPGRADING.md.
 
 Changed: the JPEG quality of a desktop (full-size) image variant no longer depends on the smaller mobile and tablet variants built before it. Desktop and other full-size JPEG variants can come out larger or smaller than before. A normal-client WebP or AVIF variant is now always compared against the full-size JPEG, so it is no longer refused because of an earlier viewport.
@@ -35,6 +46,12 @@ Changed: the JPEG quality of a desktop (full-size) image variant no longer depen
 Changed: in the nginx module, each server block keeps its own cache entries and optimized variants. Server blocks that share a cache path no longer share entries, also when they list the same host names, so each block fetches and optimizes its own copy of a URL. A block's entries belong to its server names and listen addresses: adding or removing either starts the block with an empty cache. The cache starts empty after the upgrade. See UPGRADING.md.
 
 Changed: `GET /v1/cache/select` takes the `site` listed by `GET /v1/cache/urls`, as `GET /v1/cache/alternates` does, so it finds entries stored per site.
+
+Documentation: the install guide now says to add the nginx directives to an existing server block, describes the worker and module as separately versioned, and the admin console Apache sample uses `Require local`.
+
+Documentation: the docs no longer say "the same release" for the module and the optimizer, which are versioned separately and upgraded or rolled back together, and they now say that AVIF is opt-in only for the module's rewritten image URLs, while direct requests for the original image URL are negotiated by the optimizer worker from the Accept header and can return AVIF with no filter enabled.
+
+Documentation: the image filter pages no longer say `convert_to_webp_lossless` converts "lossless instead of lossy". PNG and GIF images the image analysis classes as photographic take the lossy path; only those classed as graphics become lossless WebP, and a large, smooth photo can be classed as a graphic. The pages now say so and suggest serving photographs as JPEG or letting the optimizer worker negotiate the original URL.
 
 ## 2.8.1 - 2026-11-08
 
