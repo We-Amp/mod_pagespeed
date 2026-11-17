@@ -93,6 +93,7 @@ inline ps_error_t MapError(cyclone::CacheError err) {
     case cyclone::CacheError::AlternateNotFound:
       return PS_ERR_NOT_FOUND;
     case cyclone::CacheError::IoError:
+    case cyclone::CacheError::VolumeFileRefused:
       return PS_ERR_IO;
     case cyclone::CacheError::Corrupted:
     case cyclone::CacheError::ChainCorrupted:

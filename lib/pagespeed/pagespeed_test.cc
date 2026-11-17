@@ -4070,9 +4070,11 @@ TEST(PageSpeedCApi, CacheOpenFailureReportsReason) {
 }
 
 // A volume the cache refuses to use (here: a second hard link to the same
-// bytes) reports what was wrong with it, which the cache logs while opening.
+// bytes) reports what was wrong with it.  The cache library refuses it itself
+// and its status message carries the reason (it prints the path on stderr,
+// not through the message handler).
 #ifndef _WIN32
-TEST(PageSpeedCApi, CacheOpenRefusedVolumeReportsLoggedReason) {
+TEST(PageSpeedCApi, CacheOpenRefusedVolumeReportsReason) {
   const std::string dir = pagespeed::test::MakeTempDir();
   const std::string path = dir + "/cache.vol";
 
@@ -4097,9 +4099,10 @@ TEST(PageSpeedCApi, CacheOpenRefusedVolumeReportsLoggedReason) {
   }
 
   ps_cache_t* second = nullptr;
-  EXPECT_NE(ps_cache_open(&config, &second), PS_OK);
+  const ps_error_t err = ps_cache_open(&config, &second);
+  EXPECT_EQ(err, PS_ERR_IO);
   EXPECT_EQ(second, nullptr);
-  EXPECT_NE(std::string(ps_last_error_message()).find("lone regular file"),
+  EXPECT_NE(std::string(ps_last_error_message()).find("must be a plain file"),
             std::string::npos)
       << ps_last_error_message();
 
@@ -6579,6 +6582,10 @@ TEST(PageSpeedCApi, MapErrorAlternateNotFound) {
 
 TEST(PageSpeedCApi, MapErrorIoError) {
   EXPECT_EQ(MapError(cyclone::CacheError::IoError), PS_ERR_IO);
+}
+
+TEST(PageSpeedCApi, MapErrorVolumeFileRefused) {
+  EXPECT_EQ(MapError(cyclone::CacheError::VolumeFileRefused), PS_ERR_IO);
 }
 
 TEST(PageSpeedCApi, MapErrorCorrupted) {

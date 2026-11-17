@@ -1668,9 +1668,14 @@ bool Worker::Initialize() {
         // delete.
         LogError(
             "Cache open failed at %s (%s), not a damaged volume; skipping "
-            "the delete-and-recreate recovery. Starting in degraded mode.",
+            "the delete-and-recreate recovery. Starting in degraded mode.%s",
             config_.cache_path.c_str(),
-            make_error_code(open_error).message().c_str());
+            make_error_code(open_error).message().c_str(),
+            open_error == cyclone::CacheError::VolumeFileRefused
+                ? " Remove the volume file named in the preceding \"cyclone: "
+                  "not "
+                  "using volume\" line and let the daemon recreate it."
+                : "");
         cache_degraded_ = true;
         // cache_ stays nullptr, as above.
       }

@@ -1197,11 +1197,13 @@ class PageSpeedCache {
   // files in either case would split the two processes onto different
   // volumes with no reset signal, silently losing the peer's writes until
   // it restarts, so the caller logs the reason and degrades instead.
-  // IoError is excluded as a whole because the ownership, permission and
-  // symlink refusals share it with genuine I/O failures
-  // (CaptureVolumePathsAndChmod reports its refusals as IoError, and so does
-  // the storage layer's own open), so the code alone cannot tell them apart
-  // and a refusal must never be "fixed" by deleting the file it refuses.
+  // IoError is excluded as a whole because the ownership and permission
+  // refusals share it with genuine I/O failures (CaptureVolumePathsAndChmod
+  // reports its refusals as IoError, and so does the storage layer's own
+  // open), so the code alone cannot tell them apart.  VolumeFileRefused (the
+  // volume is not a plain file, e.g. a symlink or a second hard link) is
+  // excluded too.  A refusal must never be "fixed" by deleting the file it
+  // refuses.
   // The rest are configuration, geometry and contention errors.
   static bool OpenFailureIsDamagedVolume(cyclone::CacheError error);
 

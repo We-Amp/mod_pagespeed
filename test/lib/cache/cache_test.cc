@@ -1992,6 +1992,9 @@ TEST_F(PageSpeedCacheTest, OpenFailureIsDamagedVolumeClassification) {
   // treated as damage.
   EXPECT_FALSE(
       PageSpeedCache::OpenFailureIsDamagedVolume(cyclone::CacheError::IoError));
+  // A volume the cache library refuses (not a plain file) is not damage.
+  EXPECT_FALSE(PageSpeedCache::OpenFailureIsDamagedVolume(
+      cyclone::CacheError::VolumeFileRefused));
   // Configuration, geometry and environment failures a delete cannot fix.
   EXPECT_FALSE(PageSpeedCache::OpenFailureIsDamagedVolume(
       cyclone::CacheError::InvalidArgument));
@@ -3501,9 +3504,13 @@ TEST_F(PageSpeedCacheTest, RefusesVolumeThatHasASecondHardLink) {
   config.enable_checksum = true;
   config.handler = &handler;
   auto r = PageSpeedCache::Create(config);
-  EXPECT_FALSE(r.has_value())
+  ASSERT_FALSE(r.has_value())
       << "a volume a second name is hard-linked to must be refused";
-  EXPECT_NE(handler.last_message().find("lone regular file"), std::string::npos)
+  // Cyclone checks the opened volume itself and refuses first (and prints its
+  // reason on stderr, not through the handler), so the cache's own "lone
+  // regular file" check in CaptureVolumePathsAndChmod is no longer reached for
+  // a hard link.  The refusal is what Cyclone reports.
+  EXPECT_EQ(r.error(), cyclone::CacheError::VolumeFileRefused)
       << "the refusal must name the reason; handler said: "
       << handler.last_message();
 }

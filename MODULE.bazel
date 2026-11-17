@@ -585,12 +585,22 @@ new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl"
 # //third_party:cyclone.BUILD; no new source file, define or link flag.
 # POSIX builds are unaffected.
 #
+# Bumped to cyclone 2d4db30 (13 commits past 03c5e8a).  A volume path that
+# is not a plain file is reported (new, tail-appended
+# CacheError::VolumeFileRefused; MapError maps it to PS_ERR_IO) and not used.
+# New, unset by default: VolumeConfig::owner, for which a process running as
+# root creates the volume file.  An idle cache handle no longer wakes up every
+# 100 ms.  No on-disk format or shared-mapping change, no new source file,
+# define or link flag, so //third_party:cyclone.BUILD is unchanged.  The other
+# 11 commits are tests, CI and documentation only.  Windows builds are
+# unaffected.
+#
 # mod_pagespeed 1.1 vendors its own copy of Cyclone and must move to the
 # same commit in lockstep wherever it shares a cache with this build.
 new_git_repository(
     name = "cyclone",
     build_file = "//third_party:cyclone.BUILD",
-    commit = "03c5e8af8bec3f6b4c7088516829294f52864103",
+    commit = "2d4db3015c5de022cfd1bd7b40af7771b6d96664",
     remote = "https://github.com/We-Amp/cyclone-cache.git",
 )
 
