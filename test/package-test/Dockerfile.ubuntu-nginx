@@ -8,9 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Build stage: the compiler toolchain lives here only, so it (and its OS
 # package findings) never reaches the smoke image.
-# Build nginx 1.30.6 from source (must match the version the module was built
+# Build nginx 1.30.7 from source (must match the version the module was built
 # against — nginx ABI-pins modules to the exact version, so this MUST track the
-# dev nginx in docker/Dockerfile; CVE-2026-15176, CVE-2026-93479: 1.30.5 -> 1.30.6).
+# dev nginx in docker/Dockerfile; nginx 1.30.7 security release, 2026-11-18: 1.30.6 -> 1.30.7).
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -19,11 +19,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libssl-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL "https://nginx.org/download/nginx-1.30.6.tar.gz" -o /tmp/nginx.tar.gz \
-    && echo "3cf46f5ed7504d460125866b7bea99fb357f31d887e2e63b35503310e9b8b6c8  /tmp/nginx.tar.gz" | sha256sum -c - \
+RUN curl -fsSL "https://nginx.org/download/nginx-1.30.7.tar.gz" -o /tmp/nginx.tar.gz \
+    && echo "2565b5c837050e958f70fb0f73c48e2bca4542ad349fd356f46fb0c72610bc6e  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \
     && rm /tmp/nginx.tar.gz \
-    && cd /usr/local/src/nginx-1.30.6 \
+    && cd /usr/local/src/nginx-1.30.7 \
     && ./configure \
         --prefix=/usr/local/nginx \
         --with-http_v2_module \

@@ -98,7 +98,7 @@ bool NgxEventConnection::CreateNgxConnection(ngx_cycle_t* cycle,
   // A copy of nginx's ngx_add_channel_event(), which does not hand the
   // ngx_connection_t it creates back to its caller: Shutdown() needs that
   // connection to close the read side through nginx. It matches the vendored
-  // nginx 1.30.6 (see bazel/nginx.bzl) apart from the rc != NGX_OK test,
+  // nginx 1.30.7 (see bazel/nginx.bzl) apart from the rc != NGX_OK test,
   // which is stricter than upstream's rc == NGX_ERROR. c->recv stays unset
   // exactly as upstream leaves it: only the read event's handler is ever
   // called for a channel connection, and that handler is ours.

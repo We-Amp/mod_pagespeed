@@ -157,8 +157,8 @@ EOF
       [ "$arch" = x64 ] || { echo "release_nginx: no nginxorg legs for $arch" >&2; return 1; }
       # NGINXORG_VERSION and NGINXORG_SHA256 build another nginx.org version: a
       # rebuild, or the older build the upgrade test starts from.
-      local ngx="${NGINXORG_VERSION:-1.30.6}"
-      local ngxsha="${NGINXORG_SHA256:-3cf46f5ed7504d460125866b7bea99fb357f31d887e2e63b35503310e9b8b6c8}"
+      local ngx="${NGINXORG_VERSION:-1.30.7}"
+      local ngxsha="${NGINXORG_SHA256:-2565b5c837050e958f70fb0f73c48e2bca4542ad349fd356f46fb0c72610bc6e}"
       if [ -n "${NGINXORG_VERSION:-}" ] && [ -z "${NGINXORG_SHA256:-}" ]; then
         echo "release_nginx: NGINXORG_VERSION needs NGINXORG_SHA256" >&2; return 1
       fi

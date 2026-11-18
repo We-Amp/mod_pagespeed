@@ -23,12 +23,12 @@
 #
 # NOTE: the ASP.NET Core sidecar's matched-pair nginx is built by
 # install/nginx/build_module_in_container.sh (focal path), whose DEF_NGINX_VER pins
-# the SIDECAR's nginx — 1.30.6 (the 1.30 stable branch, same as this constant;
+# the SIDECAR's nginx — 1.30.7 (the 1.30 stable branch, same as this constant;
 # the exact patch may lead this docker-tracking constant). The CVE/SBOM alarm feed
 # (tools/dependency/cpe-map.yaml + tools/generate-sbom.py) sources the sidecar's
 # version from that build script's DEF_NGINX_VER (the load-bearing pin), NOT this
 # informational constant.
-NGINX_VERSION = "1.30.6"  # tracks docker/Dockerfile (CVE-2026-15176, CVE-2026-93479: 1.30.5 -> 1.30.6)
+NGINX_VERSION = "1.30.7"  # tracks docker/Dockerfile (nginx 1.30.7 security release, 2026-11-18: 1.30.6 -> 1.30.7)
 NGINX_SHA256 = ""  # Unused — http_archive path is not taken.
 
 def _nginx_repository_impl(repository_ctx):
