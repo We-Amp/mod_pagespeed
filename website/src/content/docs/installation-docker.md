@@ -88,7 +88,7 @@ services:
 
   # Factory Worker — optimizes cached content
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.8.1
+    image: ghcr.io/we-amp/pagespeed-worker:2.9.0
     pid: 'service:pidns'
     environment:
       # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
@@ -104,7 +104,7 @@ services:
 
   # Nginx with PageSpeed module
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:2.8.1
+    image: ghcr.io/we-amp/pagespeed-nginx:2.9.0
     pid: 'service:pidns'
     ports:
       - '8080:8080'

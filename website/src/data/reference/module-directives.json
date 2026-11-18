@@ -1,8 +1,8 @@
 {
   "source": {
     "repo": "https://github.com/We-Amp/mod_pagespeed",
-    "tag": "v2.8.1",
-    "commit": "36b84789366e33976a24bb6e3fbee8a42f804ce4"
+    "tag": "v2.9.0",
+    "commit": "115290782a9267a04ffb0733eea867af88074d66"
   },
   "generator": "website/scripts/generate-references.mjs",
   "areas": [
@@ -2055,50 +2055,6 @@
       "origin": "rewrite_options",
       "deprecated": false,
       "safeToPrint": true
-    },
-    {
-      "name": "CustomFetchHeader",
-      "kind": "directive",
-      "area": "Fetching and origins",
-      "platforms": [
-        "apache",
-        "iis",
-        "nginx"
-      ],
-      "syntax": {
-        "apache": "ModPagespeedCustomFetchHeader name value",
-        "nginx": "pagespeed CustomFetchHeader name value;",
-        "iis": "pagespeed CustomFetchHeader name value"
-      },
-      "default": null,
-      "context": {
-        "apache": [
-          "server config",
-          "virtual host",
-          "directory",
-          ".htaccess"
-        ],
-        "nginx": [
-          "http",
-          "server",
-          "location"
-        ],
-        "query": false,
-        "iis": [
-          "pagespeed.config",
-          "match rules"
-        ]
-      },
-      "since": null,
-      "description": "Adds a request header to every fetch the module makes to an origin.",
-      "descriptionSource": "docs",
-      "scope": "directory",
-      "scopeNginx": "directory",
-      "valueType": null,
-      "id": null,
-      "origin": "rewrite_options",
-      "deprecated": false,
-      "safeToPrint": null
     },
     {
       "name": "CycloneRamCacheKb",
@@ -6166,6 +6122,49 @@
       "safeToPrint": true
     },
     {
+      "name": "InPlaceCorsGuard",
+      "kind": "option",
+      "area": "In-place resource optimization",
+      "platforms": [
+        "apache",
+        "iis",
+        "nginx"
+      ],
+      "syntax": {
+        "apache": "ModPagespeedInPlaceCorsGuard on|off",
+        "nginx": "pagespeed InPlaceCorsGuard on|off;",
+        "iis": "pagespeed InPlaceCorsGuard on|off"
+      },
+      "default": "on",
+      "context": {
+        "apache": [
+          "server config",
+          "virtual host",
+          "directory",
+          ".htaccess"
+        ],
+        "nginx": [
+          "http",
+          "server",
+          "location"
+        ],
+        "query": false,
+        "iis": [
+          "pagespeed.config",
+          "match rules"
+        ]
+      },
+      "since": null,
+      "description": "Serve an in-place resource to a cross-origin CORS request only when its Access-Control-Allow-Origin header allows that request's origin; otherwise let the server answer the request itself.",
+      "descriptionSource": "source",
+      "scope": "directory",
+      "valueType": "bool",
+      "id": "ipcg",
+      "origin": "rewrite_options",
+      "deprecated": false,
+      "safeToPrint": true
+    },
+    {
       "name": "InPlacePreemptiveRewriteCss",
       "kind": "option",
       "area": "In-place resource optimization",
@@ -6414,7 +6413,7 @@
         ]
       },
       "since": null,
-      "description": "Time to wait for an in-place resource optimization beforefalling back to the original resource for the request.",
+      "description": "Time to wait for an in-place resource optimization before falling back to the original resource for the request. A negative value waits up to NegativeDeadlineFetchWaitMs.",
       "descriptionSource": "source",
       "scope": "directory",
       "valueType": "int",
@@ -7649,94 +7648,6 @@
       "safeToPrint": true
     },
     {
-      "name": "MapOriginDomain",
-      "kind": "directive",
-      "area": "Domains and URLs",
-      "platforms": [
-        "apache",
-        "iis",
-        "nginx"
-      ],
-      "syntax": {
-        "apache": "ModPagespeedMapOriginDomain to_domain from_domain[,from_domain...] [host_header]",
-        "nginx": "pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header];",
-        "iis": "pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header]"
-      },
-      "default": null,
-      "context": {
-        "apache": [
-          "server config",
-          "virtual host",
-          "directory",
-          ".htaccess"
-        ],
-        "nginx": [
-          "http",
-          "server",
-          "location"
-        ],
-        "query": false,
-        "iis": [
-          "pagespeed.config",
-          "match rules"
-        ]
-      },
-      "since": null,
-      "description": "Fetches resources for the public domain(s) from the origin domain instead, optionally sending a different Host header.",
-      "descriptionSource": "docs",
-      "scope": "directory",
-      "scopeNginx": "directory",
-      "valueType": null,
-      "id": null,
-      "origin": "rewrite_options",
-      "deprecated": false,
-      "safeToPrint": null
-    },
-    {
-      "name": "MapProxyDomain",
-      "kind": "directive",
-      "area": "Domains and URLs",
-      "platforms": [
-        "apache",
-        "iis",
-        "nginx"
-      ],
-      "syntax": {
-        "apache": "ModPagespeedMapProxyDomain proxy_domain origin_domain [to_domain]",
-        "nginx": "pagespeed MapProxyDomain proxy_domain origin_domain [to_domain];",
-        "iis": "pagespeed MapProxyDomain proxy_domain origin_domain [to_domain]"
-      },
-      "default": null,
-      "context": {
-        "apache": [
-          "server config",
-          "virtual host",
-          "directory",
-          ".htaccess"
-        ],
-        "nginx": [
-          "http",
-          "server",
-          "location"
-        ],
-        "query": false,
-        "iis": [
-          "pagespeed.config",
-          "match rules"
-        ]
-      },
-      "since": null,
-      "description": "Proxies and optimizes resources from a separate origin domain under a path of this site.",
-      "descriptionSource": "docs",
-      "scope": "directory",
-      "scopeNginx": "directory",
-      "valueType": null,
-      "id": null,
-      "origin": "rewrite_options",
-      "deprecated": false,
-      "safeToPrint": null
-    },
-    {
       "name": "MapRewriteDomain",
       "kind": "directive",
       "area": "Domains and URLs",
@@ -8753,6 +8664,45 @@
       "safeToPrint": null
     },
     {
+      "name": "NegativeDeadlineFetchWaitMs",
+      "kind": "option",
+      "area": "Fetching and origins",
+      "platforms": [
+        "apache",
+        "iis",
+        "nginx"
+      ],
+      "syntax": {
+        "apache": "ModPagespeedNegativeDeadlineFetchWaitMs number",
+        "nginx": "pagespeed NegativeDeadlineFetchWaitMs number;",
+        "iis": "pagespeed NegativeDeadlineFetchWaitMs number"
+      },
+      "default": "1000",
+      "context": {
+        "apache": [
+          "server config",
+          "virtual host"
+        ],
+        "nginx": [
+          "http",
+          "server"
+        ],
+        "query": false,
+        "iis": [
+          "pagespeed.config, outside match rules"
+        ]
+      },
+      "since": null,
+      "description": "How long a request for a rewritten resource waits for its optimization when the rewrite deadline is negative (default 1000 ms), before the original is served. At most FetcherTimeOutMs. Server or virtual host configuration only.",
+      "descriptionSource": "source",
+      "scope": "server",
+      "valueType": "int",
+      "id": "ndfw",
+      "origin": "rewrite_options",
+      "deprecated": false,
+      "safeToPrint": true
+    },
+    {
       "name": "NonCacheablesForCachePartialHtml",
       "kind": "option",
       "area": "Caching",
@@ -9131,6 +9081,92 @@
       "origin": "rewrite_options",
       "deprecated": false,
       "safeToPrint": null
+    },
+    {
+      "name": "PngLossyFallbackMaxSizePercent",
+      "kind": "option",
+      "area": "Images",
+      "platforms": [
+        "apache",
+        "iis",
+        "nginx"
+      ],
+      "syntax": {
+        "apache": "ModPagespeedPngLossyFallbackMaxSizePercent number",
+        "nginx": "pagespeed PngLossyFallbackMaxSizePercent number;",
+        "iis": "pagespeed PngLossyFallbackMaxSizePercent number"
+      },
+      "default": "0",
+      "context": {
+        "apache": [
+          "server config",
+          "virtual host",
+          "directory",
+          ".htaccess"
+        ],
+        "nginx": [
+          "http",
+          "server",
+          "location"
+        ],
+        "query": false,
+        "iis": [
+          "pagespeed.config",
+          "match rules"
+        ]
+      },
+      "since": null,
+      "description": "A PNG that photographic-image detection does not recognise as a photo is normally stored as lossless WebP. When this is above 0, such a PNG is also tried as lossy WebP and served that way if the lossy file is at most this percentage of the lossless file's size and a local quality check (worst 32x32 tile) passes. Opaque PNGs only, never below WebpRecompressionQuality 50. 0 disables the fallback; 20 is recommended when enabling it.",
+      "descriptionSource": "source",
+      "scope": "directory",
+      "valueType": "int",
+      "id": "plfp",
+      "origin": "rewrite_options",
+      "deprecated": false,
+      "safeToPrint": true
+    },
+    {
+      "name": "PngLossyFallbackMinBytesPerMegapixel",
+      "kind": "option",
+      "area": "Images",
+      "platforms": [
+        "apache",
+        "iis",
+        "nginx"
+      ],
+      "syntax": {
+        "apache": "ModPagespeedPngLossyFallbackMinBytesPerMegapixel number",
+        "nginx": "pagespeed PngLossyFallbackMinBytesPerMegapixel number;",
+        "iis": "pagespeed PngLossyFallbackMinBytesPerMegapixel number"
+      },
+      "default": "250000",
+      "context": {
+        "apache": [
+          "server config",
+          "virtual host",
+          "directory",
+          ".htaccess"
+        ],
+        "nginx": [
+          "http",
+          "server",
+          "location"
+        ],
+        "query": false,
+        "iis": [
+          "pagespeed.config",
+          "match rules"
+        ]
+      },
+      "since": null,
+      "description": "The lossy fallback (see PngLossyFallbackMaxSizePercent) is tried only when the lossless WebP is at least this many bytes per megapixel of the encoded image (250000 is 2 bits per pixel); 0 removes this gate.",
+      "descriptionSource": "source",
+      "scope": "directory",
+      "valueType": "int",
+      "id": "plfb",
+      "origin": "rewrite_options",
+      "deprecated": false,
+      "safeToPrint": true
     },
     {
       "name": "PreserveImageProvenance",
@@ -10438,7 +10474,7 @@
         ]
       },
       "since": null,
-      "description": "Time to wait for resource optimization (per flush window) beforefalling back to the original resource for the request.",
+      "description": "Time to wait for resource optimization (per flush window) before falling back to the original resource for the request. A negative value waits for a page without limit, and for a resource request up to NegativeDeadlineFetchWaitMs.",
       "descriptionSource": "source",
       "scope": "directory",
       "valueType": "int",

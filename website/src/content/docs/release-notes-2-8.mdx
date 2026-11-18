@@ -3,19 +3,19 @@ title: 'Release notes: 2.8'
 description: 'mod_pagespeed 2.8 release notes: 2.8.2, critical CSS and admin console fixes; 2.8.1, critical CSS, cache flush, IIS, sidecar fixes; 2.8.0, security fixes.'
 order: 74
 group: 'Release notes by line'
-lastUpdated: 2026-11-13
+lastUpdated: 2026-11-17
 ---
 
 import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
 
 <ReleaseNotesDeepLink />
 
-mod_pagespeed 2.8 was released as 2.8.0 on 2026-11-05 and 2.8.1 on 2026-11-09: the module and the optimizer worker together, installed as a matching pair. 2.8.1 is the current release. On 2026-11-13 the module packages for Apache, nginx and IIS and the cPanel package moved to 2.8.2, a [module-only update](#v2-8-2); the optimizer worker, the container images, the NuGet packages and the Helm chart stay at 2.8.1. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version. The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it.
+mod_pagespeed 2.8 was released as 2.8.0 on 2026-11-05 and 2.8.1 on 2026-11-09: the module and the optimizer worker together, installed as a matching pair. On 2026-11-13 the module packages for Apache, nginx and IIS and the cPanel package moved to 2.8.2, a [module-only update](#v2-8-2); the optimizer worker, the container images, the NuGet packages and the Helm chart stayed at 2.8.1. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version. The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it.
 
-<span id="v2-8-2" class="rn-alias" aria-hidden="true"></span>
-<div class="rn-entry rn-entry-current">
+## Releases
 
-<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.8.2</span> <span class="rn-date">2026-11-13</span> <span class="rn-badge rn-badge-mod">module</span></p>
+<details id="v2-8-2" class="rn-entry">
+<summary><span class="rn-ver">2.8.2</span> <span class="rn-date">2026-11-13</span> <span class="rn-badge rn-badge-mod">module</span> <span class="rn-lede">Module-only update: new module packages for Apache, nginx and IIS and a new signed IIS installer, on the <a href="https://github.com/We-Amp/mod_pagespeed/releases/tag/module-v2.8.2">module's GitHub release</a> (<a href="/docs/release-notes-2-8/#v2-8-2">release notes</a>). The optimizer worker, the container images, the NuGet packages and the Helm chart stay at 2.8.1; install the 2.8.2 module packages with <code>pagespeed-optimizer</code> 2.8.1.</span></summary>
 
 **Release date:** 2026-11-13
 
@@ -150,12 +150,10 @@ _Admin console_
 
 The same notes are on the [module's GitHub release](https://github.com/We-Amp/mod_pagespeed/releases/tag/module-v2.8.2).
 
-</div>
+</details>
 
-<span id="v2-8-1" class="rn-alias" aria-hidden="true"></span>
-<div class="rn-entry">
-
-<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.8.1</span> <span class="rn-date">2026-11-09</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span></p>
+<details id="v2-8-1" class="rn-entry">
+<summary><span class="rn-ver">2.8.1</span> <span class="rn-date">2026-11-09</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Maintenance release, released together with the optimizer worker: inlined critical CSS again for pages built with Tailwind CSS v4 and pages with stylesheets over 64 KiB, cache flushes that reach every server process, an ASP.NET Core sidecar that starts on Debian 13 and Ubuntu 26.04, and several IIS fixes.</span></summary>
 
 **Release date:** 2026-11-09
 
@@ -251,9 +249,7 @@ _ASP.NET Core package_
   package still reject Tailwind CSS v4 stylesheets, as in 2.8.0. The critical CSS fix
   above does not change them.
 
-</div>
-
-## Earlier releases
+</details>
 
 <details id="v2-8-0" class="rn-entry">
 <summary><span class="rn-ver">2.8.0</span> <span class="rn-date">2026-11-05</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update, released together with the optimizer worker: six classes of security fix, and new nginx module packages for Ubuntu 26.04 and for nginx.org's stable nginx. Update recommended.</span></summary>

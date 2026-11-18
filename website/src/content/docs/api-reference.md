@@ -820,12 +820,10 @@ nobody tests.
 | `ps_vary_varies_accept()`   | Whether the origin negotiates on `Accept` itself, so the stored entry must carry `PS_FLAG_ORIGIN_VARIES_ACCEPT` |
 | `ps_parse_cache_control()`  | Derive the `PS_CC_ORIGIN_*` flags from a `Cache-Control` header line         |
 
-:::next-release{after="2.8.2"}
 | Function                    | Description                                                                 |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `ps_vary_uncacheable()`     | Whether a response's `Vary` forbids storing it at all: anything but `Accept-Encoding` does |
 | `ps_vary_varies_accept()`   | Whether the origin negotiates on `Accept` itself, so the stored entry must carry `PS_FLAG_ORIGIN_VARIES_ACCEPT`; such a response is now refused, so this returns 0 |
-:::
 
 `ps_parse_cache_control()` accumulates: call it once per `Cache-Control` header
 line, in order, against the same output — a response may carry several, and

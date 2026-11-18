@@ -366,9 +366,9 @@ values corrected when upgrading.
 
 <!-- generated:begin module-directives -->
 
-Generated from the mod_pagespeed source at tag [`v2.8.1`](https://github.com/We-Amp/mod_pagespeed/tree/v2.8.1): 338 directives.
+Generated from the mod_pagespeed source at tag [`v2.9.0`](https://github.com/We-Amp/mod_pagespeed/tree/v2.9.0): 339 directives.
 
-Areas: [Enabling and filter selection](#area-enabling-and-filter-selection) (13) · [Request handling and policy](#area-request-handling-and-policy) (33) · [In-place resource optimization](#area-in-place-resource-optimization) (14) · [Domains and URLs](#area-domains-and-urls) (26) · [Optimizer worker](#area-optimizer-worker) (7) · [Rule packs](#area-rule-packs) (4) · [Bot authentication and licensing](#area-bot-authentication-and-licensing) (19) · [Statistics, console and logging](#area-statistics-console-and-logging) (33) · [Images](#area-images) (44) · [CSS](#area-css) (10) · [JavaScript](#area-javascript) (9) · [Caching](#area-caching) (49) · [Fetching and origins](#area-fetching-and-origins) (19) · [HTML rewriting and page hints](#area-html-rewriting-and-page-hints) (11) · [Threads and limits](#area-threads-and-limits) (4) · [Experiments and analytics](#area-experiments-and-analytics) (6) · [Other](#area-other) (2) · [Deprecated and ignored](#area-deprecated-and-ignored) (35).
+Areas: [Enabling and filter selection](#area-enabling-and-filter-selection) (13) · [Request handling and policy](#area-request-handling-and-policy) (33) · [In-place resource optimization](#area-in-place-resource-optimization) (15) · [Domains and URLs](#area-domains-and-urls) (24) · [Optimizer worker](#area-optimizer-worker) (7) · [Rule packs](#area-rule-packs) (4) · [Bot authentication and licensing](#area-bot-authentication-and-licensing) (19) · [Statistics, console and logging](#area-statistics-console-and-logging) (33) · [Images](#area-images) (46) · [CSS](#area-css) (10) · [JavaScript](#area-javascript) (9) · [Caching](#area-caching) (49) · [Fetching and origins](#area-fetching-and-origins) (19) · [HTML rewriting and page hints](#area-html-rewriting-and-page-hints) (11) · [Threads and limits](#area-threads-and-limits) (4) · [Experiments and analytics](#area-experiments-and-analytics) (6) · [Other](#area-other) (2) · [Deprecated and ignored](#area-deprecated-and-ignored) (35).
 
 ### Enabling and filter selection {#area-enabling-and-filter-selection}
 
@@ -469,7 +469,7 @@ The module switch. on optimizes; standby serves already-optimized .pagespeed. re
 - **Default:** `10`
 - **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
-Time to wait for resource optimization (per flush window) beforefalling back to the original resource for the request.
+Time to wait for resource optimization (per flush window) before falling back to the original resource for the request. A negative value waits for a page without limit, and for a resource request up to NegativeDeadlineFetchWaitMs.
 
 #### RewriteLevel {#rewritelevel}
 
@@ -816,7 +816,7 @@ restores the module version string.
 
 ### In-place resource optimization {#area-in-place-resource-optimization}
 
-[`CacheSmallImagesUnrewritten`](#cachesmallimagesunrewritten), [`InPlacePreemptiveRewriteCss`](#inplacepreemptiverewritecss), [`InPlacePreemptiveRewriteCssImages`](#inplacepreemptiverewritecssimages), [`InPlacePreemptiveRewriteImages`](#inplacepreemptiverewriteimages), [`InPlacePreemptiveRewriteJavascript`](#inplacepreemptiverewritejavascript), [`InPlaceResourceOptimization`](#inplaceresourceoptimization), [`InPlaceRewriteDeadlineMs`](#inplacerewritedeadlinems), [`InPlaceSMaxAgeSec`](#inplacesmaxagesec), [`InPlaceWaitForOptimized`](#inplacewaitforoptimized), [`IproMaxConcurrentRecordings`](#ipromaxconcurrentrecordings), [`IproMaxResponseBytes`](#ipromaxresponsebytes), [`NoTransformOptimizedImages`](#notransformoptimizedimages), [`ProactivelyFreshenUserFacingRequest`](#proactivelyfreshenuserfacingrequest), [`ProactiveResourceFreshening`](#proactiveresourcefreshening)
+[`CacheSmallImagesUnrewritten`](#cachesmallimagesunrewritten), [`InPlaceCorsGuard`](#inplacecorsguard), [`InPlacePreemptiveRewriteCss`](#inplacepreemptiverewritecss), [`InPlacePreemptiveRewriteCssImages`](#inplacepreemptiverewritecssimages), [`InPlacePreemptiveRewriteImages`](#inplacepreemptiverewriteimages), [`InPlacePreemptiveRewriteJavascript`](#inplacepreemptiverewritejavascript), [`InPlaceResourceOptimization`](#inplaceresourceoptimization), [`InPlaceRewriteDeadlineMs`](#inplacerewritedeadlinems), [`InPlaceSMaxAgeSec`](#inplacesmaxagesec), [`InPlaceWaitForOptimized`](#inplacewaitforoptimized), [`IproMaxConcurrentRecordings`](#ipromaxconcurrentrecordings), [`IproMaxResponseBytes`](#ipromaxresponsebytes), [`NoTransformOptimizedImages`](#notransformoptimizedimages), [`ProactivelyFreshenUserFacingRequest`](#proactivelyfreshenuserfacingrequest), [`ProactiveResourceFreshening`](#proactiveresourcefreshening)
 
 #### CacheSmallImagesUnrewritten {#cachesmallimagesunrewritten}
 
@@ -825,6 +825,14 @@ restores the module version string.
 - **Context:** nginx: http, server, location · IIS: pagespeed.config, match rules
 
 _The module source carries no help text for this option._
+
+#### InPlaceCorsGuard {#inplacecorsguard}
+
+- **Syntax:** `ModPagespeedInPlaceCorsGuard on|off` (Apache) · `pagespeed InPlaceCorsGuard on|off;` (nginx) · `pagespeed InPlaceCorsGuard on|off` (IIS)
+- **Default:** `on`
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
+
+Serve an in-place resource to a cross-origin CORS request only when its Access-Control-Allow-Origin header allows that request's origin; otherwise let the server answer the request itself.
 
 #### InPlacePreemptiveRewriteCss {#inplacepreemptiverewritecss}
 
@@ -872,7 +880,7 @@ Allow rewriting resources even when they are fetched over non-pagespeed URLs.
 - **Default:** `10`
 - **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
-Time to wait for an in-place resource optimization beforefalling back to the original resource for the request.
+Time to wait for an in-place resource optimization before falling back to the original resource for the request. A negative value waits up to NegativeDeadlineFetchWaitMs.
 
 #### InPlaceSMaxAgeSec {#inplacesmaxagesec}
 
@@ -932,7 +940,7 @@ If true, allows proactive freshening of inputs to the resource when they are clo
 
 ### Domains and URLs {#area-domains-and-urls}
 
-[`ClientDomainRewrite`](#clientdomainrewrite), [`CssPreserveURLs`](#csspreserveurls), [`Domain`](#domain), [`DomainRewriteCookies`](#domainrewritecookies), [`DomainRewriteHyperlinks`](#domainrewritehyperlinks), [`DomainShardCount`](#domainshardcount), [`ImagePreserveURLs`](#imagepreserveurls), [`JsPreserveURLs`](#jspreserveurls), [`LoadFromFile`](#loadfromfile), [`LoadFromFileCacheTtlMs`](#loadfromfilecachettlms), [`LoadFromFileMatch`](#loadfromfilematch), [`LoadFromFileRule`](#loadfromfilerule), [`LoadFromFileRuleMatch`](#loadfromfilerulematch), [`MapOriginDomain`](#maporigindomain), [`MapProxyDomain`](#mapproxydomain), [`MapRewriteDomain`](#maprewritedomain), [`MaxSegmentLength`](#maxsegmentlength), [`MaxUrlSize`](#maxurlsize), [`PreserveUrlRelativity`](#preserveurlrelativity), [`ProxySuffix`](#proxysuffix), [`RemoteConfigurationTimeoutMs`](#remoteconfigurationtimeoutms), [`RemoteConfigurationUrl`](#remoteconfigurationurl), [`ShardDomain`](#sharddomain), [`StaticAssetCDN`](#staticassetcdn), [`StaticAssetPrefix`](#staticassetprefix), [`UrlValuedAttribute`](#urlvaluedattribute)
+[`ClientDomainRewrite`](#clientdomainrewrite), [`CssPreserveURLs`](#csspreserveurls), [`Domain`](#domain), [`DomainRewriteCookies`](#domainrewritecookies), [`DomainRewriteHyperlinks`](#domainrewritehyperlinks), [`DomainShardCount`](#domainshardcount), [`ImagePreserveURLs`](#imagepreserveurls), [`JsPreserveURLs`](#jspreserveurls), [`LoadFromFile`](#loadfromfile), [`LoadFromFileCacheTtlMs`](#loadfromfilecachettlms), [`LoadFromFileMatch`](#loadfromfilematch), [`LoadFromFileRule`](#loadfromfilerule), [`LoadFromFileRuleMatch`](#loadfromfilerulematch), [`MapRewriteDomain`](#maprewritedomain), [`MaxSegmentLength`](#maxsegmentlength), [`MaxUrlSize`](#maxurlsize), [`PreserveUrlRelativity`](#preserveurlrelativity), [`ProxySuffix`](#proxysuffix), [`RemoteConfigurationTimeoutMs`](#remoteconfigurationtimeoutms), [`RemoteConfigurationUrl`](#remoteconfigurationurl), [`ShardDomain`](#sharddomain), [`StaticAssetCDN`](#staticassetcdn), [`StaticAssetPrefix`](#staticassetprefix), [`UrlValuedAttribute`](#urlvaluedattribute)
 
 #### ClientDomainRewrite {#clientdomainrewrite}
 
@@ -1037,22 +1045,6 @@ Allows or disallows loading from file for a filename prefix after a LoadFromFile
 - **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 LoadFromFileRule with a regular expression on the filename.
-
-#### MapOriginDomain {#maporigindomain}
-
-- **Syntax:** `ModPagespeedMapOriginDomain to_domain from_domain[,from_domain...] [host_header]` (Apache) · `pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header];` (nginx) · `pagespeed MapOriginDomain to_domain from_domain[,from_domain...] [host_header]` (IIS)
-- **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
-
-Fetches resources for the public domain(s) from the origin domain instead, optionally sending a different Host header.
-
-#### MapProxyDomain {#mapproxydomain}
-
-- **Syntax:** `ModPagespeedMapProxyDomain proxy_domain origin_domain [to_domain]` (Apache) · `pagespeed MapProxyDomain proxy_domain origin_domain [to_domain];` (nginx) · `pagespeed MapProxyDomain proxy_domain origin_domain [to_domain]` (IIS)
-- **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
-
-Proxies and optimizes resources from a separate origin domain under a path of this site.
 
 #### MapRewriteDomain {#maprewritedomain}
 
@@ -1736,7 +1728,7 @@ If true, keep track of statistics per VHost and not just globally
 
 ### Images {#area-images}
 
-[`AvifAnimatedRecompressionQuality`](#avifanimatedrecompressionquality), [`AvifQualityForSaveData`](#avifqualityforsavedata), [`AvifRecompressionQuality`](#avifrecompressionquality), [`AvifRecompressionQualityForSmallScreens`](#avifrecompressionqualityforsmallscreens), [`AvifTimeoutMs`](#aviftimeoutms), [`CriticalImagesBeaconEnabled`](#criticalimagesbeaconenabled), [`CssImageInlineMaxBytes`](#cssimageinlinemaxbytes), [`DocumentImageInlineMaxBytes`](#documentimageinlinemaxbytes), [`EnableLazyLoadHighResImages`](#enablelazyloadhighresimages), [`ImageInlineMaxBytes`](#imageinlinemaxbytes), [`ImageJpegNumProgressiveScans`](#imagejpegnumprogressivescans), [`ImageJpegNumProgressiveScansForSmallScreens`](#imagejpegnumprogressivescansforsmallscreens), [`ImageLimitOptimizedPercent`](#imagelimitoptimizedpercent), [`ImageLimitRenderedAreaPercent`](#imagelimitrenderedareapercent), [`ImageLimitResizeAreaPercent`](#imagelimitresizeareapercent), [`ImageMaxAnimatedFrames`](#imagemaxanimatedframes), [`ImageMaxRewritesAtOnce`](#imagemaxrewritesatonce), [`ImageProvenanceCarry`](#imageprovenancecarry), [`ImageRecompressionQuality`](#imagerecompressionquality), [`ImageResolutionLimitBytes`](#imageresolutionlimitbytes), [`InlineOnlyCriticalImages`](#inlineonlycriticalimages), [`JpegQualityForSaveData`](#jpegqualityforsavedata), [`JpegRecompressionQuality`](#jpegrecompressionquality), [`JpegRecompressionQualityForSmallScreens`](#jpegrecompressionqualityforsmallscreens), [`LazyloadImagesAfterOnload`](#lazyloadimagesafteronload), [`LazyloadImagesBlankUrl`](#lazyloadimagesblankurl), [`LazyloadImagesMode`](#lazyloadimagesmode), [`LazyloadImagesSkipFirst`](#lazyloadimagesskipfirst), [`MaxImageSizeLowResolutionBytes`](#maximagesizelowresolutionbytes), [`MaxInlinedPreviewImagesIndex`](#maxinlinedpreviewimagesindex), [`MaxLowResImageSizeBytes`](#maxlowresimagesizebytes), [`MaxLowResToHighResImageSizePercentage`](#maxlowrestohighresimagesizepercentage), [`MinImageSizeLowResolutionBytes`](#minimagesizelowresolutionbytes), [`PreserveImageProvenance`](#preserveimageprovenance), [`ProgressiveJpegMinBytes`](#progressivejpegminbytes), [`ResponsiveImageDensities`](#responsiveimagedensities), [`ServeRewrittenAvifUrlsToAnyAgent`](#serverewrittenavifurlstoanyagent), [`ServeRewrittenWebpUrlsToAnyAgent`](#serverewrittenwebpurlstoanyagent), [`UseBlankImageForInlinePreview`](#useblankimageforinlinepreview), [`WebpAnimatedRecompressionQuality`](#webpanimatedrecompressionquality), [`WebpQualityForSaveData`](#webpqualityforsavedata), [`WebpRecompressionQuality`](#webprecompressionquality), [`WebpRecompressionQualityForSmallScreens`](#webprecompressionqualityforsmallscreens), [`WebpTimeoutMs`](#webptimeoutms)
+[`AvifAnimatedRecompressionQuality`](#avifanimatedrecompressionquality), [`AvifQualityForSaveData`](#avifqualityforsavedata), [`AvifRecompressionQuality`](#avifrecompressionquality), [`AvifRecompressionQualityForSmallScreens`](#avifrecompressionqualityforsmallscreens), [`AvifTimeoutMs`](#aviftimeoutms), [`CriticalImagesBeaconEnabled`](#criticalimagesbeaconenabled), [`CssImageInlineMaxBytes`](#cssimageinlinemaxbytes), [`DocumentImageInlineMaxBytes`](#documentimageinlinemaxbytes), [`EnableLazyLoadHighResImages`](#enablelazyloadhighresimages), [`ImageInlineMaxBytes`](#imageinlinemaxbytes), [`ImageJpegNumProgressiveScans`](#imagejpegnumprogressivescans), [`ImageJpegNumProgressiveScansForSmallScreens`](#imagejpegnumprogressivescansforsmallscreens), [`ImageLimitOptimizedPercent`](#imagelimitoptimizedpercent), [`ImageLimitRenderedAreaPercent`](#imagelimitrenderedareapercent), [`ImageLimitResizeAreaPercent`](#imagelimitresizeareapercent), [`ImageMaxAnimatedFrames`](#imagemaxanimatedframes), [`ImageMaxRewritesAtOnce`](#imagemaxrewritesatonce), [`ImageProvenanceCarry`](#imageprovenancecarry), [`ImageRecompressionQuality`](#imagerecompressionquality), [`ImageResolutionLimitBytes`](#imageresolutionlimitbytes), [`InlineOnlyCriticalImages`](#inlineonlycriticalimages), [`JpegQualityForSaveData`](#jpegqualityforsavedata), [`JpegRecompressionQuality`](#jpegrecompressionquality), [`JpegRecompressionQualityForSmallScreens`](#jpegrecompressionqualityforsmallscreens), [`LazyloadImagesAfterOnload`](#lazyloadimagesafteronload), [`LazyloadImagesBlankUrl`](#lazyloadimagesblankurl), [`LazyloadImagesMode`](#lazyloadimagesmode), [`LazyloadImagesSkipFirst`](#lazyloadimagesskipfirst), [`MaxImageSizeLowResolutionBytes`](#maximagesizelowresolutionbytes), [`MaxInlinedPreviewImagesIndex`](#maxinlinedpreviewimagesindex), [`MaxLowResImageSizeBytes`](#maxlowresimagesizebytes), [`MaxLowResToHighResImageSizePercentage`](#maxlowrestohighresimagesizepercentage), [`MinImageSizeLowResolutionBytes`](#minimagesizelowresolutionbytes), [`PngLossyFallbackMaxSizePercent`](#pnglossyfallbackmaxsizepercent), [`PngLossyFallbackMinBytesPerMegapixel`](#pnglossyfallbackminbytespermegapixel), [`PreserveImageProvenance`](#preserveimageprovenance), [`ProgressiveJpegMinBytes`](#progressivejpegminbytes), [`ResponsiveImageDensities`](#responsiveimagedensities), [`ServeRewrittenAvifUrlsToAnyAgent`](#serverewrittenavifurlstoanyagent), [`ServeRewrittenWebpUrlsToAnyAgent`](#serverewrittenwebpurlstoanyagent), [`UseBlankImageForInlinePreview`](#useblankimageforinlinepreview), [`WebpAnimatedRecompressionQuality`](#webpanimatedrecompressionquality), [`WebpQualityForSaveData`](#webpqualityforsavedata), [`WebpRecompressionQuality`](#webprecompressionquality), [`WebpRecompressionQualityForSmallScreens`](#webprecompressionqualityforsmallscreens), [`WebpTimeoutMs`](#webptimeoutms)
 
 #### AvifAnimatedRecompressionQuality {#avifanimatedrecompressionquality}
 
@@ -2001,6 +1993,22 @@ _The module source carries no help text for this option._
 - **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
 
 Minimum image size above which low resolution image is generated.
+
+#### PngLossyFallbackMaxSizePercent {#pnglossyfallbackmaxsizepercent}
+
+- **Syntax:** `ModPagespeedPngLossyFallbackMaxSizePercent number` (Apache) · `pagespeed PngLossyFallbackMaxSizePercent number;` (nginx) · `pagespeed PngLossyFallbackMaxSizePercent number` (IIS)
+- **Default:** `0`
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
+
+A PNG that photographic-image detection does not recognise as a photo is normally stored as lossless WebP. When this is above 0, such a PNG is also tried as lossy WebP and served that way if the lossy file is at most this percentage of the lossless file's size and a local quality check (worst 32x32 tile) passes. Opaque PNGs only, never below WebpRecompressionQuality 50. 0 disables the fallback; 20 is recommended when enabling it.
+
+#### PngLossyFallbackMinBytesPerMegapixel {#pnglossyfallbackminbytespermegapixel}
+
+- **Syntax:** `ModPagespeedPngLossyFallbackMinBytesPerMegapixel number` (Apache) · `pagespeed PngLossyFallbackMinBytesPerMegapixel number;` (nginx) · `pagespeed PngLossyFallbackMinBytesPerMegapixel number` (IIS)
+- **Default:** `250000`
+- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
+
+The lossy fallback (see PngLossyFallbackMaxSizePercent) is tried only when the lossless WebP is at least this many bytes per megapixel of the encoded image (250000 is 2 bits per pixel); 0 removes this gate.
 
 #### PreserveImageProvenance {#preserveimageprovenance}
 
@@ -2664,7 +2672,7 @@ If this is set to true, fallback values will be used from property cache if actu
 
 ### Fetching and origins {#area-fetching-and-origins}
 
-[`BlockingRewriteKey`](#blockingrewritekey), [`BlockingRewriteRefererUrls`](#blockingrewriterefererurls), [`CustomFetchHeader`](#customfetchheader), [`DangerPermitFetchFromUnknownHosts`](#dangerpermitfetchfromunknownhosts), [`ExperimentalMeasurementProxy`](#experimentalmeasurementproxy), [`FetcherTimeOutMs`](#fetchertimeoutms), [`FetchHttps`](#fetchhttps), [`FetchProxy`](#fetchproxy), [`FetchWithGzip`](#fetchwithgzip), [`NativeFetcherMaxKeepaliveRequests`](#nativefetchermaxkeepaliverequests), [`RateLimitBackgroundFetches`](#ratelimitbackgroundfetches), [`SlurpDirectory`](#slurpdirectory), [`SlurpFlushLimit`](#slurpflushlimit), [`SlurpReadOnly`](#slurpreadonly), [`SslCertDirectory`](#sslcertdirectory), [`SslCertFile`](#sslcertfile), [`TestProxy`](#testproxy), [`TestProxySlurp`](#testproxyslurp), [`UseNativeFetcher`](#usenativefetcher)
+[`BlockingRewriteKey`](#blockingrewritekey), [`BlockingRewriteRefererUrls`](#blockingrewriterefererurls), [`DangerPermitFetchFromUnknownHosts`](#dangerpermitfetchfromunknownhosts), [`ExperimentalMeasurementProxy`](#experimentalmeasurementproxy), [`FetcherTimeOutMs`](#fetchertimeoutms), [`FetchHttps`](#fetchhttps), [`FetchProxy`](#fetchproxy), [`FetchWithGzip`](#fetchwithgzip), [`NativeFetcherMaxKeepaliveRequests`](#nativefetchermaxkeepaliverequests), [`NegativeDeadlineFetchWaitMs`](#negativedeadlinefetchwaitms), [`RateLimitBackgroundFetches`](#ratelimitbackgroundfetches), [`SlurpDirectory`](#slurpdirectory), [`SlurpFlushLimit`](#slurpflushlimit), [`SlurpReadOnly`](#slurpreadonly), [`SslCertDirectory`](#sslcertdirectory), [`SslCertFile`](#sslcertfile), [`TestProxy`](#testproxy), [`TestProxySlurp`](#testproxyslurp), [`UseNativeFetcher`](#usenativefetcher)
 
 #### BlockingRewriteKey {#blockingrewritekey}
 
@@ -2681,14 +2689,6 @@ If the X-PSA-Pagespeed-Blocking-Rewrite header is present, and its value matches
 - **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 wildcard_spec for referer urls which trigger blocking rewrites
-
-#### CustomFetchHeader {#customfetchheader}
-
-- **Syntax:** `ModPagespeedCustomFetchHeader name value` (Apache) · `pagespeed CustomFetchHeader name value;` (nginx) · `pagespeed CustomFetchHeader name value` (IIS)
-- **Default:** —
-- **Context:** Apache: server config, virtual host, directory, .htaccess · nginx: http, server, location · IIS: pagespeed.config, match rules
-
-Adds a request header to every fetch the module makes to an origin.
 
 #### DangerPermitFetchFromUnknownHosts {#dangerpermitfetchfromunknownhosts}
 
@@ -2747,6 +2747,14 @@ Request http content from origin servers using gzip
 - **Platform:** nginx only
 
 Maximum number of requests the native fetcher sends over one keep-alive connection before it opens a new one (a positive integer).
+
+#### NegativeDeadlineFetchWaitMs {#negativedeadlinefetchwaitms}
+
+- **Syntax:** `ModPagespeedNegativeDeadlineFetchWaitMs number` (Apache) · `pagespeed NegativeDeadlineFetchWaitMs number;` (nginx) · `pagespeed NegativeDeadlineFetchWaitMs number` (IIS)
+- **Default:** `1000`
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
+
+How long a request for a rewritten resource waits for its optimization when the rewrite deadline is negative (default 1000 ms), before the original is served. At most FetcherTimeOutMs. Server or virtual host configuration only.
 
 #### RateLimitBackgroundFetches {#ratelimitbackgroundfetches}
 

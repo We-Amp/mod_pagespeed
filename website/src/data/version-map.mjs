@@ -38,6 +38,15 @@ import { PKG_ASPNETCORE, PKG_SIDECAR, SIDECAR_VERSION } from './product-facts.mj
 /** @type {VersionRow[]} */
 export const VERSION_MAP = [
   {
+    release: '2.9.0',
+    date: '2026-11-17',
+    packages: '2.9.0',
+    images: '2.9.0',
+    helmChart: '0.3.16',
+    nuget: '2.9.0',
+    iisInstaller: true,
+  },
+  {
     release: '2.8.1',
     date: '2026-11-09',
     // Module-only update 2.8.2 (2026-11-13): the module packages and the IIS

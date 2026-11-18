@@ -48,7 +48,6 @@ The agent response is content-negotiated, with these guarantees:
 - The page **body and Content-Type for browsers are unchanged** — standard
   content negotiation on `Accept`, not cloaking.
 
-:::next-release{after="2.8.2"}
 In the nginx module, while agent optimization is on,
 the HTML responses of your pages name `Accept` in their `Vary` too (for example
 `Vary: Accept-Encoding, User-Agent, Accept`), whether or not a Markdown copy
@@ -61,7 +60,6 @@ scripts and images are not affected.
   the body size in bytes divided by four, rounded down; no tokenizer is run, so
   a model's own count differs. Treat it as an order of magnitude.
 - `content-signal` (nginx module) — only when you configure one (see below).
-:::
 
 The rendering runs in the optimizer worker process behind nginx, reusing
 the same headless-Chrome subsystem as [browser analysis](/docs/browser-analysis/).
@@ -78,7 +76,6 @@ While the flag is off, an agent request **transparently receives the normal
 HTML** of the same URL — never an error, never a half-rendered page. Turning the
 feature off is always safe.
 
-:::next-release{after="2.8.2"}
 ## State a content-use policy (`content-signal`)
 
 A Markdown response can tell agents how you allow your content to be used,
@@ -98,7 +95,6 @@ refuses to start with any other value. The module does not read a
 `content-signal` header from your origin's response: the directive is the only
 source. To state the same policy to crawlers that read `robots.txt`, add a
 `Content-Signal:` line there as well.
-:::
 
 ## Serve an `/llms.txt` site index
 
@@ -109,10 +105,8 @@ in the [llmstxt.org](https://llmstxt.org/) format. The worker builds it from you
 summary per page, and nginx serves it at `/llms.txt` with `X-Robots-Tag: noindex`,
 `Cache-Control: private`, and `Content-Type: text/markdown`.
 
-:::next-release{after="2.8.2"}
 `/llms.txt` carries the same `x-markdown-tokens` estimate and `content-signal`
 as the Markdown copy.
-:::
 
 It is off by default and enabled with its own flag (`--agent-optimize-llms-txt`,
 which requires `--agent-optimize`). Per-page summaries come for free: from a page's
@@ -188,14 +182,12 @@ other field, including `Vary: Cookie`, and `Vary: *`, means it is not stored. Fo
 a response that varies on `Accept`, `User-Agent` or `Save-Data`, those request
 headers take part in choosing which stored copy answers.
 
-:::next-release{after="2.8.2"}
 A response is stored only when its `Vary` names
 nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
 `Vary: User-Agent`, `Vary: Save-Data`, `Vary: Cookie` and `Vary: *`, means it is
 not stored, and each request is answered by your origin. This is the `Vary`
 your origin sends; the `Vary` mod_pagespeed adds to its own responses (such as
 `Accept` with agent optimization on) does not count.
-:::
 
 **Requests with a cookie.** A request that carries a `Cookie` header is treated
 by the kind of response:

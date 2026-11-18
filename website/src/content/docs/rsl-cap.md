@@ -73,7 +73,7 @@ releases after 2.0.35.
 ```yaml
 services:
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.8.1
+    image: ghcr.io/we-amp/pagespeed-worker:2.9.0
     environment:
       - PAGESPEED_RSL_CAP_ENFORCEMENT=true
       # Comma-separated HTTPS JWKS key-directory URLs for the token issuers (no spaces).

@@ -71,7 +71,7 @@ alike). Changing them requires a worker restart.
 ```yaml
 services:
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.8.1
+    image: ghcr.io/we-amp/pagespeed-worker:2.9.0
     environment:
       - PAGESPEED_WEB_BOT_AUTH=true
       # Comma-separated HTTPS JWKS key-directory URLs (no spaces).

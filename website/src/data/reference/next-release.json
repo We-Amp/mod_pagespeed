@@ -1,6 +1,4 @@
 {
   "_comment": "Generated reference entries that are merged but not in a release yet: region -> entry name -> the last released version when the entry was added (the `after` of a :::next-release marker). render-references.mjs wraps the entry's block in that marker; test/next-release-markers.test.ts fails once a newer version is released. Remove the entry in that release's site update, then run render-references.mjs. See website/CLAUDE.md, \"Unreleased behaviour\".",
-  "thin-module-directives": {
-    "pagespeed_agent_content_signal": "2.8.2"
-  }
+  "thin-module-directives": {}
 }

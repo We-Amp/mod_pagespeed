@@ -77,7 +77,7 @@ URL normalization, the cache mode when no directive sets it) from the
 
 <!-- generated:begin thin-module-directives -->
 
-[`pagespeed`](#pagespeed), [`pagespeed_cache_path`](#pagespeed_cache_path), [`pagespeed_disallow`](#pagespeed_disallow), [`pagespeed_hot_threshold`](#pagespeed_hot_threshold), [`pagespeed_max_age`](#pagespeed_max_age), [`pagespeed_immutable_max_age`](#pagespeed_immutable_max_age), [`pagespeed_synthesize_swr`](#pagespeed_synthesize_swr), [`pagespeed_conditional_revalidation`](#pagespeed_conditional_revalidation), [`pagespeed_stale_if_error_max_age`](#pagespeed_stale_if_error_max_age), [`pagespeed_html_max_age`](#pagespeed_html_max_age), [`pagespeed_css_max_age`](#pagespeed_css_max_age), [`pagespeed_image_max_age`](#pagespeed_image_max_age), [`pagespeed_force_refresh_html`](#pagespeed_force_refresh_html), [`pagespeed_force_refresh`](#pagespeed_force_refresh), [`pagespeed_trust_x_forwarded_proto`](#pagespeed_trust_x_forwarded_proto), [`pagespeed_cache_mode`](#pagespeed_cache_mode)
+[`pagespeed`](#pagespeed), [`pagespeed_cache_path`](#pagespeed_cache_path), [`pagespeed_disallow`](#pagespeed_disallow), [`pagespeed_hot_threshold`](#pagespeed_hot_threshold), [`pagespeed_max_age`](#pagespeed_max_age), [`pagespeed_immutable_max_age`](#pagespeed_immutable_max_age), [`pagespeed_synthesize_swr`](#pagespeed_synthesize_swr), [`pagespeed_conditional_revalidation`](#pagespeed_conditional_revalidation), [`pagespeed_stale_if_error_max_age`](#pagespeed_stale_if_error_max_age), [`pagespeed_html_max_age`](#pagespeed_html_max_age), [`pagespeed_css_max_age`](#pagespeed_css_max_age), [`pagespeed_image_max_age`](#pagespeed_image_max_age), [`pagespeed_force_refresh_html`](#pagespeed_force_refresh_html), [`pagespeed_force_refresh`](#pagespeed_force_refresh), [`pagespeed_trust_x_forwarded_proto`](#pagespeed_trust_x_forwarded_proto), [`pagespeed_cache_mode`](#pagespeed_cache_mode), [`pagespeed_agent_content_signal`](#pagespeed_agent_content_signal)
 
 #### pagespeed {#pagespeed}
 
@@ -305,7 +305,6 @@ defaults of [`pagespeed_css_max_age`](#pagespeed_css_max_age) and
 [`pagespeed_image_max_age`](#pagespeed_image_max_age) follow the mode. See
 [Cache modes](/docs/cache-modes/) for the full reference.
 
-:::next-release{after="2.8.2"}
 #### pagespeed_agent_content_signal {#pagespeed_agent_content_signal}
 
 - **Syntax:** `pagespeed_agent_content_signal value | off;`
@@ -324,7 +323,6 @@ pagespeed_agent_content_signal "search=yes, ai-input=yes, ai-train=no";
 The value must be printable ASCII on one line, up to 512 bytes; nginx refuses
 to start with any other value. See
 [Serve Markdown to AI agents](/docs/agent-optimize/).
-:::
 
 <!-- generated:end thin-module-directives -->
 

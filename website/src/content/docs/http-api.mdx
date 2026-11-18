@@ -712,11 +712,9 @@ curl "http://localhost:9880/v1/cache/select?url=/images/hero.jpg&hostname=exampl
 | `hostname` | string | No       | Hostname for cache key           |
 | `mask`     | int    | Yes      | 32-bit capability mask (decimal) |
 
-:::next-release{after="2.8.2"}
 | Parameter  | Type   | Required | Description                      |
 | ---------- | ------ | -------- | -------------------------------- |
 | `site`     | string | No       | Site id as listed by `GET /v1/cache/urls`; required to find an entry stored per site |
-:::
 
 The `mask` parameter is the decimal representation of the
 [capability bitmask](/docs/api-reference/#capability-mask-encoding). Common
@@ -821,12 +819,10 @@ curl -X POST http://localhost:9880/v1/cache/purge \
 When `deleted` is `0`, the response includes a note explaining the URL was not
 found in cache.
 
-:::next-release{after="2.8.2"}
 A purge without a `site` reaches the URL's entries for every site (nginx
 server block) the optimizer has received a request notification from; an
 entry stored by a server block it has not heard from stays until it expires
 or a full purge removes it.
-:::
 
 **Full cache purge:**
 
