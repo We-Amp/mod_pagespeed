@@ -1,0 +1,270 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Toolchain images (tools/ci/toolchain-images/): the Ubuntu 20.04 and 22.04
+# base images plus the compilers the nginx build recipe installs for those
+# suites (g++-13 from the Ubuntu toolchain PPA, clang 18 from apt.llvm.org),
+# built once and pushed to GHCR, so that a build can pull a pinned image
+# instead of fetching the compilers from third-party repositories each time.
+#
+# Dispatch only, from master. Nothing in the build uses these images yet; the
+# digests they get are printed in the job summary and kept in the
+# toolchain-images.lock artifact, to be pasted into install/nginx/toolchain-images.lock.
+#
+# Each suite is built natively on amd64 and arm64 hosted runners, pushed by
+# digest, and joined into one multi-arch image. Build provenance and an SBOM
+# are attested for each image; the multi-arch image gets a provenance
+# attestation. The only job with write access is on a hosted runner.
+#
+# Try it:  gh workflow run toolchain-images.yml
+
+name: Toolchain images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-images
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/we-amp/mod-pagespeed-toolchain
+
+jobs:
+  build-amd64:
+    name: Build ${{ matrix.suite }} amd64
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [focal, jammy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No tag: the image is pushed by digest and named only by the join job.
+      # Provenance and the SBOM are attested below, not stored in the image.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: tools/ci/toolchain-images/Dockerfile.${{ matrix.suite }}
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}-${{ matrix.suite }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Check the compilers in the pushed image
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked'
+
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.suite }}-amd64.spdx.json
+          upload-artifact: false
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom-${{ matrix.suite }}-amd64.spdx.json
+          push-to-registry: true
+
+      - name: Keep the digest for the join job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p digest
+          printf '%s\n' "${DIGEST}" > "digest/${{ matrix.suite }}-amd64"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: toolchain-digest-${{ matrix.suite }}-amd64
+          path: digest/${{ matrix.suite }}-amd64
+          if-no-files-found: error
+
+  build-arm64:
+    name: Build ${{ matrix.suite }} arm64
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [focal, jammy]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No tag: the image is pushed by digest and named only by the join job.
+      # Provenance and the SBOM are attested below, not stored in the image.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: tools/ci/toolchain-images/Dockerfile.${{ matrix.suite }}
+          platforms: linux/arm64
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}-${{ matrix.suite }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Check the compilers in the pushed image
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked'
+
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.suite }}-arm64.spdx.json
+          upload-artifact: false
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom-${{ matrix.suite }}-arm64.spdx.json
+          push-to-registry: true
+
+      - name: Keep the digest for the join job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p digest
+          printf '%s\n' "${DIGEST}" > "digest/${{ matrix.suite }}-arm64"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: toolchain-digest-${{ matrix.suite }}-arm64
+          path: digest/${{ matrix.suite }}-arm64
+          if-no-files-found: error
+
+  join:
+    name: Join ${{ matrix.suite }}
+    needs: [build-amd64, build-arm64]
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [focal, jammy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: toolchain-digest-${{ matrix.suite }}-*
+          path: digests
+          merge-multiple: true
+
+      - name: Create the multi-arch image
+        id: join
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+        run: |
+          set -euo pipefail
+          AMD64="$(cat "digests/${{ matrix.suite }}-amd64")"
+          ARM64="$(cat "digests/${{ matrix.suite }}-arm64")"
+          case "$AMD64$ARM64" in *sha256:*sha256:*) ;; *) echo "::error::a per-arch digest is missing"; exit 1 ;; esac
+          tag="run-${GITHUB_RUN_ID}"
+          docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          mkdir -p lock
+          echo "${{ matrix.suite }}=${IMAGE}@${digest}" > "lock/${{ matrix.suite }}.line"
+          {
+            echo "### ${{ matrix.suite }}"
+            echo '```'
+            cat "lock/${{ matrix.suite }}.line"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest build provenance of the multi-arch image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.suite }}
+          subject-digest: ${{ steps.join.outputs.digest }}
+          push-to-registry: true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: toolchain-images-lock-${{ matrix.suite }}
+          path: lock/${{ matrix.suite }}.line
+          if-no-files-found: error
