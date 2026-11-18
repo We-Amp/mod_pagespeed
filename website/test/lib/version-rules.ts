@@ -9,6 +9,16 @@
 // never move to another line. The container images, the NuGet packages, the
 // Sidecar package and the Helm chart's appVersion stay on the release.
 //
+// The mirror case is an optimizer-only release (for example a 2.9.1 whose
+// optimizer host packages move while the module, the images, the NuGet
+// packages and the chart stay at the paired release 2.9.0). The row's release
+// is then the paired release, and `optimizer` leads it by patch versions on the
+// same line. The rule applies only when the module packages, the images, the
+// NuGet packages, the Sidecar package and the chart's appVersion all equal that
+// paired release; any one of them moving as well is an error, never a way to
+// ship a different kind of release. A release can lead with the module or with
+// the optimizer, not both.
+//
 // Pure functions, so test/version-map.test.ts can prove both the accepted
 // module-only case and the rejected ones without editing the real data.
 
@@ -34,6 +44,11 @@ export interface ArtifactVersions {
   chartAppVersion?: string;
   /** The Sidecar NuGet package version, when the row is the current release. */
   sidecar?: string;
+  /**
+   * The optimizer host packages (apt, yum, the Windows zip), when they lead the
+   * release: an optimizer-only release. Left out when they carry the release.
+   */
+  optimizer?: string;
 }
 
 /** Every rule the versions break; empty when they agree. */
@@ -54,6 +69,22 @@ export function artifactVersionProblems(v: ArtifactVersions): string[] {
     problems.push(`${v.release}: packages ${v.packages} must stay on the ${line(v.release)} line`);
   } else if (compareVersions(v.packages, v.release) < 0) {
     problems.push(`${v.release}: packages ${v.packages} must not trail the release`);
+  }
+  if (v.optimizer !== undefined) {
+    if (!/^\d+\.\d+\.\d+$/.test(v.optimizer)) {
+      problems.push(`${v.release}: optimizer ${v.optimizer} is not x.y.z`);
+    } else if (line(v.optimizer) !== line(v.release)) {
+      problems.push(
+        `${v.release}: optimizer ${v.optimizer} must stay on the ${line(v.release)} line`,
+      );
+    } else if (compareVersions(v.optimizer, v.release) < 0) {
+      problems.push(`${v.release}: optimizer ${v.optimizer} must not trail the release`);
+    } else if (compareVersions(v.optimizer, v.release) > 0 && v.packages !== v.release) {
+      // Images, NuGet, the Sidecar and the chart are held to the release above.
+      problems.push(
+        `${v.release}: packages ${v.packages} must equal the release when the optimizer leads`,
+      );
+    }
   }
   return problems;
 }

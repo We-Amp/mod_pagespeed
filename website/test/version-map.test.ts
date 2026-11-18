@@ -143,3 +143,82 @@ describe('module-only release rules', () => {
     ]);
   });
 });
+
+describe('optimizer-only release rules', () => {
+  // A paired release 2.9.0 and an optimizer release 2.9.1 that moves only the
+  // optimizer host packages.
+  const paired = {
+    release: '2.9.0',
+    packages: '2.9.0',
+    images: '2.9.0',
+    nuget: '2.9.0',
+    chartAppVersion: '2.9.0',
+    sidecar: '2.9.0',
+  };
+  const optOnly = { ...paired, optimizer: '2.9.1' };
+
+  it('accepts an optimizer a patch or more ahead when everything else is on the paired release', () => {
+    expect(artifactVersionProblems(optOnly)).toEqual([]);
+    expect(artifactVersionProblems({ ...paired, optimizer: '2.9.4' })).toEqual([]);
+    expect(artifactVersionProblems({ ...paired, optimizer: '2.9.0' })).toEqual([]);
+  });
+
+  it('leaves rows without an optimizer to the existing rules', () => {
+    expect(artifactVersionProblems(paired)).toEqual([]);
+    expect(artifactVersionProblems({ ...paired, packages: '2.9.1' })).toEqual([]);
+  });
+
+  it('rejects an optimizer that trails the release', () => {
+    expect(artifactVersionProblems({ ...paired, optimizer: '2.8.9' })).toEqual([
+      '2.9.0: optimizer 2.8.9 must stay on the 2.9 line',
+    ]);
+    expect(
+      artifactVersionProblems({
+        ...paired,
+        release: '2.9.1',
+        packages: '2.9.1',
+        images: '2.9.1',
+        nuget: '2.9.1',
+        chartAppVersion: '2.9.1',
+        sidecar: '2.9.1',
+        optimizer: '2.9.0',
+      }),
+    ).toEqual(['2.9.1: optimizer 2.9.0 must not trail the release']);
+  });
+
+  it('rejects an optimizer on another line or not in x.y.z form', () => {
+    expect(artifactVersionProblems({ ...paired, optimizer: '2.10.0' })).toEqual([
+      '2.9.0: optimizer 2.10.0 must stay on the 2.9 line',
+    ]);
+    expect(artifactVersionProblems({ ...paired, optimizer: '3.9.1' })).toEqual([
+      '2.9.0: optimizer 3.9.1 must stay on the 2.9 line',
+    ]);
+    expect(artifactVersionProblems({ ...paired, optimizer: '2.9' })).toEqual([
+      '2.9.0: optimizer 2.9 is not x.y.z',
+    ]);
+  });
+
+  it('applies only while the module, images, NuGet, Sidecar and chart all equal the paired release', () => {
+    expect(artifactVersionProblems({ ...optOnly, packages: '2.9.1' })).toEqual([
+      '2.9.0: packages 2.9.1 must equal the release when the optimizer leads',
+    ]);
+    expect(artifactVersionProblems({ ...optOnly, images: '2.9.1' })).toEqual([
+      '2.9.0: images 2.9.1 must equal the release',
+    ]);
+    expect(artifactVersionProblems({ ...optOnly, nuget: '2.9.1' })).toEqual([
+      '2.9.0: nuget 2.9.1 must equal the release',
+    ]);
+    expect(artifactVersionProblems({ ...optOnly, sidecar: '2.9.1' })).toEqual([
+      '2.9.0: sidecar 2.9.1 must equal the release',
+    ]);
+    expect(artifactVersionProblems({ ...optOnly, chartAppVersion: '2.9.1' })).toEqual([
+      '2.9.0: chart appVersion 2.9.1 must equal the release',
+    ]);
+  });
+
+  it('does not let the module and the optimizer both lead', () => {
+    expect(artifactVersionProblems({ ...optOnly, packages: '2.9.2' })).toEqual([
+      '2.9.0: packages 2.9.2 must equal the release when the optimizer leads',
+    ]);
+  });
+});
