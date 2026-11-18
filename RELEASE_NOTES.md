@@ -1,3 +1,46 @@
+# mod_pagespeed 2.9.2 Release Notes
+
+**Release date:** 2026-11-18
+
+**Status:** Stable
+
+**Packages:** the same packages, platforms and channels as 2.9.0. The module packages
+for Apache, nginx and IIS, the cPanel package and `pagespeed-optimizer` are 2.9.2, and
+the module is paired with `pagespeed-optimizer` 2.9.2. The container images, the NuGet
+packages (including the ASP.NET Core sidecar packages) and the application version of
+the Helm chart (chart 0.3.17) ship with the pagespeed-optimizer 2.9.2 release and are
+2.9.2 as well. There is no module release 2.9.1.
+
+## Highlights
+
+- **Security: the nginx we bundle is updated to 1.30.7.** See Security below. Update
+  recommended.
+
+## Security
+
+- **The nginx we bundle is updated to 1.30.7, nginx's security release of 2026-11-18,
+  which fixes nine security issues in nginx: memory-safety issues (among them in HTTP/2,
+  HTTP/3, the resolver and the mail proxy), two TLS-verification and access-restriction
+  bypasses in the stream module, and a denial-of-service loop (CVE-2026-125283,
+  CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425,
+  CVE-2026-120967, CVE-2026-123640, CVE-2026-118899).** This covers the container images
+  and the ASP.NET Core sidecar native pair; the portable `ngx_pagespeed` module tarballs
+  are built against nginx 1.30.7. **Update recommended.** The per-distribution
+  `nginx-module-pagespeed` packages build against the distribution's own nginx, which
+  the distribution's security updates cover.
+
+## Action required when upgrading
+
+- None. Upgrade the module and `pagespeed-optimizer` together, as usual. If you build
+  nginx yourself to load a portable `ngx_pagespeed` module tarball, use nginx 1.30.7:
+  the tarball loads only into the nginx version it was built for.
+
+## Changed
+
+- **The container images and the ASP.NET Core package now include the console and
+  workbench fix of `pagespeed-optimizer` 2.9.1:** for nginx sites, the URL Inspector
+  shows a URL's optimized variants again.
+
 # mod_pagespeed 2.9.0 Release Notes
 
 **Release date:** 2026-11-17
