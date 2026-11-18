@@ -9,8 +9,8 @@ type: application
 # baked-in nginx.conf.template + env, and never read the mount), and default
 # podSecurityContext.fsGroup to 918 so the shared volume arrives group-owned
 # by the worker's gid before any container starts.
-version: 0.3.16
-appVersion: "2.9.0"
+version: 0.3.17
+appVersion: "2.9.2"
 keywords:
   - pagespeed
   - nginx

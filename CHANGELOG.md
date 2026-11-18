@@ -4,6 +4,14 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+## 2.9.2 - 2026-11-18
+
+Security: the nginx bundled in the container images (`pagespeed-nginx` and the combined image) is updated to 1.30.7, nginx's security release of 2026-11-18, which fixes nine security issues in nginx: memory-safety issues (among them in HTTP/2, HTTP/3, the resolver and the mail proxy), two TLS-verification and access-restriction bypasses in the stream module, and a denial-of-service loop (CVE-2026-125283, CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425, CVE-2026-120967, CVE-2026-123640, CVE-2026-118899). Update recommended.
+
+Fixed: the container images (`pagespeed-worker` and the combined image) and the ASP.NET Core package (WeAmp.PageSpeed.AspNetCore) now carry the console and workbench fix listed under 2.9.1: for nginx sites, the URL Inspector again shows a URL's optimized variants.
+
+Changed: the Helm chart 0.3.17 is published with this release; its default image version is 2.9.2.
+
 ## 2.9.1 - 2026-11-17
 
 Fixed: in the pagespeed-optimizer console and workbench (including the VS Code view), for nginx sites, where each server block keeps its own cache entries, the URL Inspector again shows a URL's optimized variants, and selection preview and content preview work again. Before, clicking a URL showed "No alternates found". Reprocess from the console also addresses the URL's own server block. Purge from a URL row now clears that server block's copy only; a purge through the API without a site still reaches every block. URLs saved in a URL group before this release show their variants again after they are added to the group again. The container images get this fix with the next image release; the mod_pagespeed admin console was not affected.
