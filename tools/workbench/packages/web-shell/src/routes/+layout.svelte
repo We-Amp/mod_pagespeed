@@ -9,14 +9,14 @@
   import '@pagespeed/ui/common/base.css';
   import { DirectTransport, ConnectionManager } from '@pagespeed/api-client';
   import type { ConnectionState } from '@pagespeed/api-client';
-  import { getStoredToken, storeToken, clearToken } from '$lib/auth';
-  import Topbar from '$lib/components/Topbar.svelte';
-  import Sidebar from '$lib/components/Sidebar.svelte';
-  import LoginForm from '$lib/components/LoginForm.svelte';
-  import ErrorBanner from '$lib/components/ErrorBanner.svelte';
-  import ReconnectOverlay from '$lib/components/ReconnectOverlay.svelte';
-  import KeyboardShortcutHelp from '$lib/components/KeyboardShortcutHelp.svelte';
-  import LogPanel from '$lib/components/LogPanel.svelte';
+  import { getStoredToken, storeToken, clearToken } from '#lib/auth.ts';
+  import Topbar from '#lib/components/Topbar.svelte';
+  import Sidebar from '#lib/components/Sidebar.svelte';
+  import LoginForm from '#lib/components/LoginForm.svelte';
+  import ErrorBanner from '#lib/components/ErrorBanner.svelte';
+  import ReconnectOverlay from '#lib/components/ReconnectOverlay.svelte';
+  import KeyboardShortcutHelp from '#lib/components/KeyboardShortcutHelp.svelte';
+  import LogPanel from '#lib/components/LogPanel.svelte';
 
   let { children }: { children: Snippet } = $props();
 

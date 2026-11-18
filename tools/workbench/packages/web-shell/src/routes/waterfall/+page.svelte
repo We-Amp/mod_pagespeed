@@ -11,12 +11,12 @@
     CaptureWaterfallResponse,
   } from '@pagespeed/api-client';
   import { createCaptureClient, formatBytes } from '@pagespeed/api-client';
-  import { base } from '$app/paths';
-  import WaterfallChart from '$lib/components/WaterfallChart.svelte';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
-  import type { WaterfallData } from '$lib/waterfall-types';
-  import { formatDuration, truncateUrl, waterfallEndTime } from '$lib/waterfall-types';
-  import { exportJson, timestampedFilename } from '$lib/export';
+  import { resolve } from '$app/paths';
+  import WaterfallChart from '#lib/components/WaterfallChart.svelte';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
+  import type { WaterfallData } from '#lib/waterfall-types.ts';
+  import { formatDuration, truncateUrl, waterfallEndTime } from '#lib/waterfall-types.ts';
+  import { exportJson, timestampedFilename } from '#lib/export.ts';
 
   // -- Context ---------------------------------------------------------------
 
@@ -337,7 +337,7 @@
           </button>
           <a
             class="ps-btn ps-btn-secondary"
-            href="{base}/diff"
+            href="{resolve('/diff')}"
             title="Compare screenshots in Visual Diff"
           >
             View Visual Diff

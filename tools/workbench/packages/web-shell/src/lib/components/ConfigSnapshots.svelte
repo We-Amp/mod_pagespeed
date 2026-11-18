@@ -8,8 +8,8 @@
     addSnapshot,
     deleteSnapshot,
     diffSnapshots,
-  } from '$lib/config-persistence';
-  import type { ConfigSnapshot, ConfigDiffEntry } from '$lib/config-persistence';
+  } from '#lib/config-persistence.ts';
+  import type { ConfigSnapshot, ConfigDiffEntry } from '#lib/config-persistence.ts';
 
   // -- Props ----------------------------------------------------------------
 

@@ -2,7 +2,7 @@
      Copyright (c) 2024-2026 We-Amp B.V. -->
 
 <script lang="ts">
-  import { qualityTier, qualityTierLabel } from '$lib/quality';
+  import { qualityTier, qualityTierLabel } from '#lib/quality.ts';
 
   let {
     score,

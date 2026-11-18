@@ -2,7 +2,7 @@
      Copyright (c) 2024-2026 We-Amp B.V. -->
 
 <script lang="ts">
-  import type { QualityDistribution as QDist } from '$lib/quality';
+  import type { QualityDistribution as QDist } from '#lib/quality.ts';
 
   let {
     distribution,

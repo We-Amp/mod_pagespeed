@@ -7,7 +7,7 @@
 // dev server intercepts all requests before Vite's server.proxy can
 // act, so we proxy here instead.
 
-import type { Handle } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit/hooks';
 
 const API_TARGET = 'http://127.0.0.1:9880';
 

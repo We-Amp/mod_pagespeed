@@ -3,7 +3,7 @@
 
 <script lang="ts">
   import { formatBytes } from '@pagespeed/api-client';
-  import { formatSavingsPercent, savingsPercent } from '$lib/quality';
+  import { formatSavingsPercent, savingsPercent } from '#lib/quality.ts';
 
   let {
     originalSize,

@@ -2,7 +2,7 @@
      Copyright (c) 2024-2026 We-Amp B.V. -->
 
 <script lang="ts">
-  import type { ActiveAlert } from '$lib/alerts';
+  import type { ActiveAlert } from '#lib/alerts.ts';
 
   let {
     alerts,

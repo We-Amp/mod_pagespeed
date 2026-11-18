@@ -11,15 +11,15 @@
     ConfigPatchResponse,
   } from '@pagespeed/api-client';
   import type { Readable } from 'svelte/store';
-  import ConfigPanel from '$lib/components/ConfigPanel.svelte';
-  import ConfigSnapshots from '$lib/components/ConfigSnapshots.svelte';
+  import ConfigPanel from '#lib/components/ConfigPanel.svelte';
+  import ConfigSnapshots from '#lib/components/ConfigSnapshots.svelte';
   import {
     exportConfigFile,
     generateCliFlags,
     copyToClipboard,
     readConfigFile,
-  } from '$lib/config-persistence';
-  import { DEFAULT_VALUES, changedFields } from '$lib/config-presets';
+  } from '#lib/config-persistence.ts';
+  import { DEFAULT_VALUES, changedFields } from '#lib/config-presets.ts';
 
   // -- Context ---------------------------------------------------------------
 

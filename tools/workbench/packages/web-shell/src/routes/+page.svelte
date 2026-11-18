@@ -13,14 +13,14 @@
     HealthResponse,
     WsStatsMessage,
   } from '@pagespeed/api-client';
-  import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
-  import AlertBanner from '$lib/components/AlertBanner.svelte';
-  import { AlertManager } from '$lib/alerts';
-  import type { ActiveAlert } from '$lib/alerts';
-  import { RingBuffer } from '$lib/ring-buffer';
-  import { exportJson, exportCsv, timestampedFilename } from '$lib/export';
-  import { summarizeServeSavings } from '$lib/savings';
+  import TimeSeriesChart from '#lib/components/TimeSeriesChart.svelte';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
+  import AlertBanner from '#lib/components/AlertBanner.svelte';
+  import { AlertManager } from '#lib/alerts.ts';
+  import type { ActiveAlert } from '#lib/alerts.ts';
+  import { RingBuffer } from '#lib/ring-buffer.ts';
+  import { exportJson, exportCsv, timestampedFilename } from '#lib/export.ts';
+  import { summarizeServeSavings } from '#lib/savings.ts';
 
   // -- Context ---------------------------------------------------------------
 

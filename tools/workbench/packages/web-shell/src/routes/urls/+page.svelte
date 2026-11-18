@@ -35,18 +35,18 @@
     formatEncoding,
   } from '@pagespeed/api-client';
   import type { Readable } from 'svelte/store';
-  import QualityBadge from '$lib/components/QualityBadge.svelte';
-  import SizeComparisonBar from '$lib/components/SizeComparisonBar.svelte';
-  import ContentClassBadge from '$lib/components/ContentClassBadge.svelte';
-  import FormatBadge from '$lib/components/FormatBadge.svelte';
-  import QualityDistributionBar from '$lib/components/QualityDistribution.svelte';
-  import { computeQualityDistribution, formatToMimeType, findMatchingOriginal } from '$lib/quality';
-  import UrlGroupManager from '$lib/components/UrlGroupManager.svelte';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
-  import Tooltip from '$lib/components/Tooltip.svelte';
-  import { loadUrlGroups, addUrlToGroup } from '$lib/url-groups';
-  import type { UrlGroup } from '$lib/url-groups';
-  import { computeUrlStatus } from '$lib/url-status';
+  import QualityBadge from '#lib/components/QualityBadge.svelte';
+  import SizeComparisonBar from '#lib/components/SizeComparisonBar.svelte';
+  import ContentClassBadge from '#lib/components/ContentClassBadge.svelte';
+  import FormatBadge from '#lib/components/FormatBadge.svelte';
+  import QualityDistributionBar from '#lib/components/QualityDistribution.svelte';
+  import { computeQualityDistribution, formatToMimeType, findMatchingOriginal } from '#lib/quality.ts';
+  import UrlGroupManager from '#lib/components/UrlGroupManager.svelte';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
+  import Tooltip from '#lib/components/Tooltip.svelte';
+  import { loadUrlGroups, addUrlToGroup } from '#lib/url-groups.ts';
+  import type { UrlGroup } from '#lib/url-groups.ts';
+  import { computeUrlStatus } from '#lib/url-status.ts';
 
   // -- Context ---------------------------------------------------------------
 
@@ -99,7 +99,7 @@
   let clearingCache = $state(false);
 
   // Per-URL optimization status (lazy-loaded from alternates).
-  import type { UrlStatus } from '$lib/url-status';
+  import type { UrlStatus } from '#lib/url-status.ts';
   let urlStatuses = $state<Map<string, UrlStatus>>(new Map());
 
   // Sort state for alternates table.

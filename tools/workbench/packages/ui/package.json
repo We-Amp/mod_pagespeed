@@ -18,12 +18,12 @@
   },
   "dependencies": {
     "@pagespeed/api-client": "workspace:*",
-    "svelte": "^5.55.9"
+    "svelte": "^5.57.1"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "svelte-check": "^4.0.0",
-    "typescript": "^5.7.0",
+    "typescript": "^6.0.0",
     "vitest": "^4.1.12"
   }
 }

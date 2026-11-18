@@ -11,11 +11,11 @@
   } from '@pagespeed/api-client';
   import { createCaptureClient } from '@pagespeed/api-client';
   import { ApiError } from '@pagespeed/api-client';
-  import { base } from '$app/paths';
+  import { resolve } from '$app/paths';
   import type { Readable } from 'svelte/store';
-  import ImageDiff from '$lib/components/ImageDiff.svelte';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
-  import type { DiffMode } from '$lib/components/ImageDiff.svelte';
+  import ImageDiff from '#lib/components/ImageDiff.svelte';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
+  import type { DiffMode } from '#lib/components/ImageDiff.svelte';
 
   // -- Context ---------------------------------------------------------------
 
@@ -374,7 +374,7 @@
             {/if}
             <a
               class="ps-btn ps-btn-ghost"
-              href="{base}/waterfall"
+              href="{resolve('/waterfall')}"
               title="View network waterfall"
             >
               View Waterfall

@@ -15,8 +15,8 @@
     deleteUrlGroup,
     renameUrlGroup,
     removeUrlFromGroup,
-  } from '$lib/url-groups';
-  import type { UrlGroup, UrlGroupSummaryEntry } from '$lib/url-groups';
+  } from '#lib/url-groups.ts';
+  import type { UrlGroup, UrlGroupSummaryEntry } from '#lib/url-groups.ts';
 
   // -- Context ---------------------------------------------------------------
 

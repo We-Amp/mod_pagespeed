@@ -12,12 +12,12 @@
     LogSource,
     WsLogMessage,
   } from '@pagespeed/api-client';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
   import {
     exportJson,
     triggerDownload,
     timestampedFilename,
-  } from '$lib/export';
+  } from '#lib/export.ts';
   import {
     ALL_SOURCES,
     ALL_LEVELS,
@@ -28,8 +28,8 @@
     formatLogLine,
     tagEntry,
     appendToBuffer,
-  } from '$lib/log-utils';
-  import type { ClientLogEntry } from '$lib/log-utils';
+  } from '#lib/log-utils.ts';
+  import type { ClientLogEntry } from '#lib/log-utils.ts';
 
   // -- Context ---------------------------------------------------------------
 

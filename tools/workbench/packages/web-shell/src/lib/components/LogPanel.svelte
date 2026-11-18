@@ -21,8 +21,8 @@
     formatLogTimestamp,
     tagEntry,
     appendToBuffer,
-  } from '$lib/log-utils';
-  import type { ClientLogEntry } from '$lib/log-utils';
+  } from '#lib/log-utils.ts';
+  import type { ClientLogEntry } from '#lib/log-utils.ts';
 
   // -- Context ---------------------------------------------------------------
 

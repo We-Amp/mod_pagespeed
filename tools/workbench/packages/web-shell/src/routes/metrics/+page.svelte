@@ -11,12 +11,12 @@
     ConnectionState,
     StatsResponse,
   } from '@pagespeed/api-client';
-  import { exportJson, timestampedFilename } from '$lib/export';
+  import { exportJson, timestampedFilename } from '#lib/export.ts';
   import {
     METRIC_DESCRIPTIONS,
     METRIC_CATEGORIES,
     metricCategory,
-  } from '$lib/metric-descriptions';
+  } from '#lib/metric-descriptions.ts';
 
   const transport = getContext<ApiTransport>('api');
   const connectionManager = getContext<ConnectionManager>('connection');

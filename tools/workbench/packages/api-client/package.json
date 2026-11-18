@@ -19,10 +19,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "svelte": "^5.55.9"
+    "svelte": "^5.57.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "typescript": "^6.0.0",
     "vitest": "^4.1.12"
   }
 }

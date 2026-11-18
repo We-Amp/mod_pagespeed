@@ -41,8 +41,8 @@
     changedFields,
     changedFieldCount,
     applyPreset,
-  } from '$lib/config-presets';
-  import type { ConfigPreset } from '$lib/config-presets';
+  } from '#lib/config-presets.ts';
+  import type { ConfigPreset } from '#lib/config-presets.ts';
 
   // -- Context ---------------------------------------------------------------
 

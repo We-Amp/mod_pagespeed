@@ -2,7 +2,7 @@
      Copyright (c) 2024-2026 We-Amp B.V. -->
 
 <script lang="ts">
-  import { SHORTCUTS, shortcutLabel } from '$lib/keyboard-shortcuts';
+  import { SHORTCUTS, shortcutLabel } from '#lib/keyboard-shortcuts.ts';
 
   let {
     visible = false,

@@ -15,8 +15,8 @@
     exportJson,
     exportCsv,
     timestampedFilename,
-  } from '$lib/export';
-  import HelpIcon from '$lib/components/HelpIcon.svelte';
+  } from '#lib/export.ts';
+  import HelpIcon from '#lib/components/HelpIcon.svelte';
 
   // -- Context ---------------------------------------------------------------
 

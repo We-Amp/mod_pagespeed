@@ -2,9 +2,12 @@
      Copyright (c) 2024-2026 We-Amp B.V. -->
 
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { base } from '$app/paths';
-  import { navItems } from '$lib/nav-items';
+  import { page } from '$app/state';
+  import { resolve } from '$app/paths';
+  import { navItems } from '#lib/nav-items.ts';
+
+  // The configured base path ('/console'), without a trailing slash.
+  const base = resolve('/').replace(/\/$/, '');
 
   function isActive(itemHref: string, pathname: string): boolean {
     const fullHref = base + itemHref;
@@ -23,8 +26,8 @@
         <a
           href="{base}{item.href}"
           class="nav-link"
-          class:nav-link-active={isActive(item.href, $page.url.pathname)}
-          aria-current={isActive(item.href, $page.url.pathname) ? 'page' : undefined}
+          class:nav-link-active={isActive(item.href, page.url.pathname)}
+          aria-current={isActive(item.href, page.url.pathname) ? 'page' : undefined}
         >
           {item.label}
         </a>
