@@ -4,6 +4,10 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+## 2.9.1 - 2026-11-17
+
+Fixed: in the pagespeed-optimizer console and workbench (including the VS Code view), for nginx sites, where each server block keeps its own cache entries, the URL Inspector again shows a URL's optimized variants, and selection preview and content preview work again. Before, clicking a URL showed "No alternates found". Reprocess from the console also addresses the URL's own server block. Purge from a URL row now clears that server block's copy only; a purge through the API without a site still reaches every block. URLs saved in a URL group before this release show their variants again after they are added to the group again. The container images get this fix with the next image release; the mod_pagespeed admin console was not affected.
+
 ## 2.9.0 - 2026-11-17
 
 Security: fixed shared-cache issues that could serve a response meant for one visitor to other visitors. Affected: 2.8.1 and earlier. Update recommended.
