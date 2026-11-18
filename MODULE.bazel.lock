@@ -832,7 +832,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "BOOQHyESsEzW7PqGfkiXUmUh/Da5zrms2UQpoSV2dCs=",
+        "bzlTransitiveDigest": "UUVR+xg8D1e7KZLu/YoZVPiCq3XVVlegScm7K0zb1OU=",
         "usagesDigest": "Ba3C/QSRWx/cj/SHNe4MyHopX+FuysaxdGMyG9CHa7E=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools"
