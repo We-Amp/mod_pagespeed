@@ -34,34 +34,6 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Expires: 2026-12-27. The advisory describes a heap overflow in zlib 1.3.1.2 through 1.3.2 in the gzip file API write path (gz_vacate, reached through gzwrite, gzprintf and gzvprintf after a stalled write). This product uses zlib only through the in-memory deflate and inflate API (src/worker/text_compressor.cc: deflateInit2, deflate, inflateInit2, inflate), crc32 (lib/image/png_optimizer.cc) and the libpng 1.6.58 and optipng 0.7.8 (opngreduc) sources it builds, none of which call any gz* function (gzopen, gzdopen, gzwrite, gzfwrite, gzprintf, gzvprintf, gzputs, gzputc, gzflush, gzread, gzgets, gzgetc, gzclose, gzbuffer, gzsetparams); a search of the first-party sources and of the libpng and optipng sources finds no use of the gzFile API. zlib is linked statically, and the shipped worker binary contains no gz* symbol, so the vulnerable code is not present in the executable. Re-evaluate on expiry, when zlib is bumped to a release that fixes the advisory (then drop this statement), or if any code starts using the gz* file API."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-3r8g-jcqq-3p5j"
-      },
-      "timestamp": "2026-11-18T09:00:00Z",
-      "products": [
-        {
-          "@id": "pkg:npm/%40sveltejs/kit@2.70.4"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Expires: 2026-12-18. The console is a statically built single-page app; no SvelteKit server runtime or remote functions ship. Surface: tools/workbench/pnpm-lock.yaml only. The image carries only the static build output, and the console uses the static adapter with server-side rendering disabled. Re-evaluate on expiry or when @sveltejs/kit is bumped to 3.1.1 or later (then drop this statement)."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-6cf5-gc4q-fm3x"
-      },
-      "timestamp": "2026-11-18T09:00:00Z",
-      "products": [
-        {
-          "@id": "pkg:npm/%40sveltejs/kit@2.70.4"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Expires: 2026-12-18. The console is a statically built single-page app; no SvelteKit server runtime or remote functions ship. Surface: tools/workbench/pnpm-lock.yaml only. The image carries only the static build output, and the console uses the static adapter with server-side rendering disabled. Re-evaluate on expiry or when @sveltejs/kit is bumped to 3.1.1 or later (then drop this statement)."
     }
   ]
 }
