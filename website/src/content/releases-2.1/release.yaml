@@ -97,7 +97,7 @@ compat:
     iis_versions: ["10"]
   docker:
     # Release images are ubuntu:24.04-based (digest-pinned); the bundled
-    # nginx is version-pinned in docker/nginx-version.txt (1.30.6).
+    # nginx is version-pinned in docker/nginx-version.txt (1.30.7).
     base_images: ["ubuntu:24.04"]
   kubernetes:
     versions: ["1.28+", "1.29+", "1.30+"]

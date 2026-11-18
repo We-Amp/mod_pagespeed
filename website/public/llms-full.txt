@@ -8005,7 +8005,7 @@ package rows from the signed repository's distribution matrix.
 
 | Shape                                                                               | nginx version                                                    | Configuration surface |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------- |
-| Docker / reverse proxy (`ghcr.io/we-amp/pagespeed-nginx`, the combined image, Helm) | nginx 1.30.6, bundled in the image                               | Thin module + worker  |
+| Docker / reverse proxy (`ghcr.io/we-amp/pagespeed-nginx`, the combined image, Helm) | nginx 1.30.7, bundled in the image                               | Thin module + worker  |
 | Native module package, Debian 12 bookworm                                           | nginx 1.22.1 (the distribution's stock nginx; exact-version pin) | Native module         |
 | Native module package, Debian 13 trixie                                             | nginx 1.26.3 (the distribution's stock nginx; exact-version pin) | Native module         |
 | Native module package, Ubuntu 22.04 jammy                                           | nginx 1.18.0 (the distribution's stock nginx; exact-version pin) | Native module         |

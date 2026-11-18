@@ -29,9 +29,10 @@ RUN rm -rf /nginx-src && apt-get update && apt-get install -y \
     wget \
     && mkdir -p /nginx-src \
     && cd /nginx-src \
-    && wget -q https://nginx.org/download/nginx-1.30.6.tar.gz \
-    && tar xzf nginx-1.30.6.tar.gz \
-    && rm nginx-1.30.6.tar.gz \
+    && wget -q https://nginx.org/download/nginx-1.30.7.tar.gz \
+    && echo "2565b5c837050e958f70fb0f73c48e2bca4542ad349fd356f46fb0c72610bc6e  nginx-1.30.7.tar.gz" | sha256sum -c - \
+    && tar xzf nginx-1.30.7.tar.gz \
+    && rm nginx-1.30.7.tar.gz \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone ngx_brotli with bundled brotli encoder/decoder source.
@@ -52,7 +53,7 @@ RUN git clone https://github.com/leev/ngx_http_geoip2_module.git /ngx_http_geoip
 
 # Configure nginx source and build dynamic modules (brotli + geoip2).
 # This also generates auto-config headers (objs/) needed by the pagespeed Bazel build.
-RUN cd /nginx-src/nginx-1.30.6 \
+RUN cd /nginx-src/nginx-1.30.7 \
     && ./configure --with-compat \
        --add-dynamic-module=/ngx_brotli \
        --add-dynamic-module=/ngx_http_geoip2_module \
@@ -62,7 +63,7 @@ RUN cd /nginx-src/nginx-1.30.6 \
 # Pre-populate known_hosts so Bazel git_repository can fetch via SSH
 RUN mkdir -p /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
 
-RUN --mount=type=ssh NGINX_PATH=/nginx-src/nginx-1.30.6 \
+RUN --mount=type=ssh NGINX_PATH=/nginx-src/nginx-1.30.7 \
     bazel build --config=docker --config=opt //src/nginx:ngx_pagespeed_module.so
 
 # --- Runtime stage ---
@@ -89,11 +90,11 @@ LABEL org.opencontainers.image.title="mod_pagespeed Nginx Module" \
 # Copy the built modules
 COPY --from=builder /workspace/bazel-bin/src/nginx/ngx_pagespeed_module.so \
      /usr/lib/nginx/modules/ngx_pagespeed_module.so
-COPY --from=builder /nginx-src/nginx-1.30.6/objs/ngx_http_brotli_filter_module.so \
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_brotli_filter_module.so \
      /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
-COPY --from=builder /nginx-src/nginx-1.30.6/objs/ngx_http_brotli_static_module.so \
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_brotli_static_module.so \
      /usr/lib/nginx/modules/ngx_http_brotli_static_module.so
-COPY --from=builder /nginx-src/nginx-1.30.6/objs/ngx_http_geoip2_module.so \
+COPY --from=builder /nginx-src/nginx-1.30.7/objs/ngx_http_geoip2_module.so \
      /usr/lib/nginx/modules/ngx_http_geoip2_module.so
 
 # Pin the runtime nginx to the exact version the modules were built against
@@ -112,7 +113,7 @@ COPY --from=builder /nginx-src/nginx-1.30.6/objs/ngx_http_geoip2_module.so \
 ARG APT_REFRESH=2026-07-23
 RUN echo "apt refresh ${APT_REFRESH}" && apt-get update \
     && apt-get install -y --allow-downgrades --no-install-recommends \
-       nginx=1.30.6-1~noble \
+       nginx=1.30.7-1~noble \
        gettext-base \
        libmaxminddb0 \
     && apt-mark hold nginx \
