@@ -2334,6 +2334,12 @@ jobs:
       - name: Build, gate and test the pair
         env:
           GH_TOKEN: ${{ github.token }}
+          # Hosted runners have a gh that verifies the toolchain image's
+          # attestation, so there a missing token or gh fails the step
+          # (required). The build runners have a gh without the attestation
+          # command: auto, which warns there (the lock is verified on every
+          # pull request by the hosted CI tooling job).
+          TOOLCHAIN_IMAGE_VERIFY: ${{ runner.environment == 'github-hosted' && 'required' || 'auto' }}
         run: |
           bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
             --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \

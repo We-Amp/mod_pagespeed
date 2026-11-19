@@ -726,7 +726,10 @@ build in such an image contacts neither repository.
   and merge group (`CI tooling self-tests`, hosted). The build legs check it
   again before the pull where the runner's gh has the attestation command
   (the hosted runners); `TOOLCHAIN_IMAGE_VERIFY=required|auto|off` sets the
-  policy (default `auto`).
+  policy (default `auto`). The build steps set `required` on hosted runners,
+  so a missing token or gh fails there, and `auto` on the build runners,
+  whose gh lacks the attestation command. The signer must be
+  `toolchain-images.yml` run from `refs/heads/master`.
 - The recipe checks it is in the image of its suite: every package the image's
   `/etc/pagespeed-toolchain-baked` records must be installed at exactly that
   version. Outside a toolchain image the focal and jammy recipes stop.

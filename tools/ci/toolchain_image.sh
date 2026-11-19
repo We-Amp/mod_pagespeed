@@ -30,7 +30,8 @@
 #
 # toolchain_image_verify IMAGE: check the build provenance attestation of
 #   IMAGE with `gh attestation verify`: it must come from
-#   .github/workflows/toolchain-images.yml of We-Amp/mod_pagespeed.
+#   .github/workflows/toolchain-images.yml of We-Amp/mod_pagespeed, run from
+#   refs/heads/master.
 #   TOOLCHAIN_IMAGE_VERIFY says what happens:
 #     required  verify; fail when gh cannot verify (no gh, a gh without the
 #               attestation command, no token) or the attestation does not
@@ -55,6 +56,7 @@
 
 TOOLCHAIN_IMAGE_REPO="We-Amp/mod_pagespeed"
 TOOLCHAIN_IMAGE_SIGNER="We-Amp/mod_pagespeed/.github/workflows/toolchain-images.yml"
+TOOLCHAIN_IMAGE_SOURCE_REF="refs/heads/master"
 TOOLCHAIN_IMAGE_LOCK_PATH="install/nginx/toolchain-images.lock"
 
 toolchain_image_ref() {
@@ -106,7 +108,7 @@ toolchain_image_verify() {
     return 0
   fi
   if ! out="$(gh attestation verify "oci://${image}" -R "${TOOLCHAIN_IMAGE_REPO}" \
-        --signer-workflow "${TOOLCHAIN_IMAGE_SIGNER}" 2>&1)"; then
+        --signer-workflow "${TOOLCHAIN_IMAGE_SIGNER}" --source-ref "${TOOLCHAIN_IMAGE_SOURCE_REF}" 2>&1)"; then
     printf '%s\n' "$out" >&2
     echo "::error::toolchain image: the attestation of ${image} does not verify against ${TOOLCHAIN_IMAGE_SIGNER}" >&2
     return 1
@@ -173,7 +175,7 @@ toolchain_image_self_test() {
   if PATH="$t/bin:$PATH" GH_TOKEN=x TOOLCHAIN_IMAGE_VERIFY=auto toolchain_image_verify "$img" 2>/dev/null; then echo "FAIL - auto, bad attestation: accepted"; fail=1; else echo "ok   - auto, bad attestation: refused"; fi
   printf '#!/bin/sh\ncase "$*" in *--help*) exit 0 ;; esac\necho "$*" > "%s/args"\nexit 0\n' "$t" > "$t/bin/gh"
   if PATH="$t/bin:$PATH" GH_TOKEN=x TOOLCHAIN_IMAGE_VERIFY=required toolchain_image_verify "$img" 2>/dev/null; then echo "ok   - required, good attestation: accepted"; else echo "FAIL - required, good attestation"; fail=1; fi
-  chk "gh arguments" "$(cat "$t/args" 2>/dev/null)" "attestation verify oci://$img -R We-Amp/mod_pagespeed --signer-workflow We-Amp/mod_pagespeed/.github/workflows/toolchain-images.yml"
+  chk "gh arguments" "$(cat "$t/args" 2>/dev/null)" "attestation verify oci://$img -R We-Amp/mod_pagespeed --signer-workflow We-Amp/mod_pagespeed/.github/workflows/toolchain-images.yml --source-ref refs/heads/master"
   if TOOLCHAIN_IMAGE_VERIFY=sometimes toolchain_image_verify "$img" 2>/dev/null; then echo "FAIL - unknown mode: accepted"; fail=1; else echo "ok   - unknown mode: refused"; fi
 
   rm -rf "$t"

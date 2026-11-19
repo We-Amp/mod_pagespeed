@@ -14,7 +14,9 @@
 # The packages are public: an anonymous pull by digest works, no token needed.
 # Each digest carries a build provenance attestation signed by
 # toolchain-images.yml on master; check it with
-#   gh attestation verify oci://<image>@sha256:<digest> -R We-Amp/mod_pagespeed
+#   gh attestation verify oci://<image>@sha256:<digest> -R We-Amp/mod_pagespeed \
+#     --signer-workflow We-Amp/mod_pagespeed/.github/workflows/toolchain-images.yml \
+#     --source-ref refs/heads/master
 #
 # Current: built by toolchain-images.yml on master a1589125, 2026-11-19.
 focal=ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:76ac0aeaf6d47d86cdb123c7e486438f22481dfeeb0f4fcaffc81d024b27c142
