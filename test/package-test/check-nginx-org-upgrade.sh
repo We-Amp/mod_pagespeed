@@ -14,11 +14,27 @@ source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:?image}"; OLDV="${2:?old nginx}"; OLDP="${3:?old package}"; NEWV="${4:?new nginx}"; NEWP="${5:?new package}"
 DIR="$(cd "$(dirname "$OLDP")" && pwd)"
 [ "$DIR" = "$(cd "$(dirname "$NEWP")" && pwd)" ] || { echo "both packages must share a directory"; exit 2; }
+# Ubuntu images fetch from this mirror instead of archive/security.ubuntu.com; set it empty to keep the stock sources.
+UBUNTU_MIRROR="${UBUNTU_MIRROR-http://nl.archive.ubuntu.com/ubuntu}"
 COMMON='
 fail() { echo "FAIL: $*"; exit 1; }
 if command -v apt-get >/dev/null; then
   FAMILY=deb; export DEBIAN_FRONTEND=noninteractive; . /etc/os-release
-  apt-get -qq update >/dev/null; apt-get -qq install -y curl ca-certificates gnupg >/dev/null 2>&1
+  # Ubuntu only: point archive/security.ubuntu.com at UBUNTU_MIRROR (both timed out on 2026-11-19); Debian keeps its sources.
+  if [ "$ID" = ubuntu ] && [ -n "${UBUNTU_MIRROR:-}" ]; then
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+      [ -f "$f" ] && sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#${UBUNTU_MIRROR%/}/#g" "$f"
+    done
+  fi
+  printf "Acquire::Retries \"3\";\nAcquire::http::Timeout \"30\";\nAcquire::https::Timeout \"30\";\n" > /etc/apt/apt.conf.d/80-upgrade-test-retries
+  # apt-get update exits 0 when an index fails to download; treat that as a failure and say which step it was.
+  apt_update() {
+    out="$(apt-get -qq update 2>&1)" && ! printf "%s\n" "$out" | grep -qE "^(W|E): (Failed to fetch|Some index files failed)" \
+      || { printf "%s\n" "$out" | tail -n 6; fail "apt-get update failed: $1"; }
+  }
+  apt_update "distribution archive"
+  out="$(apt-get -qq install -y curl ca-certificates gnupg 2>&1)" \
+    || { printf "%s\n" "$out" | tail -n 6; fail "could not install curl, ca-certificates and gnupg from the distribution archive"; }
   # Pinned set (https://nginx.org/en/linux_packages.html, https://nginx.org/keys/nginx_signing.key): only these keys are exported into the keyring; fail if none is in the file.
   NGINX_KEY_FPR="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
   nkey="$(mktemp -d)"
@@ -32,7 +48,7 @@ if command -v apt-get >/dev/null; then
   rm -rf "$nkey"
   echo "deb [signed-by=/usr/share/keyrings/nginx.gpg] https://nginx.org/packages/${ID} ${VERSION_CODENAME} nginx" > /etc/apt/sources.list.d/nginx.list
   printf "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" > /etc/apt/preferences.d/99nginx
-  apt-get -qq update >/dev/null
+  apt_update "with the nginx.org repository"
   ngx_ver() { dpkg-query -W -f="\${Version}" nginx; }
   have_mod() { dpkg-query -W -f="\${Status}" nginx-module-pagespeed-nginxorg 2>/dev/null | grep -q "install ok installed"; }
   inst_ngx() { apt-get -y --allow-downgrades install "nginx=$1-1~${VERSION_CODENAME}" 2>&1; }
@@ -96,7 +112,7 @@ run() { # name, script
   echo "--- $name"
   docker_pull_retry "$IMAGE" || return 1
   docker run --rm --name "pagespeed-nginxorg-upg-$$-$name" -v "$DIR":/pkgs:ro \
-    -e OLDV="$OLDV" -e NEWV="$NEWV" -e OLDP="$(basename "$OLDP")" -e NEWP="$(basename "$NEWP")" \
+    -e OLDV="$OLDV" -e NEWV="$NEWV" -e OLDP="$(basename "$OLDP")" -e NEWP="$(basename "$NEWP")" -e UBUNTU_MIRROR="$UBUNTU_MIRROR" \
     "$IMAGE" bash -uc "$COMMON
 $body" </dev/null
   local rc=$?
