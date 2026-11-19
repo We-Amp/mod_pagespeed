@@ -2128,7 +2128,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
-    env: &nginx-el10-env
+    env:
       ARCH: x64
       CORES_PER_LEG: "12"
       TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
@@ -3147,7 +3147,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 90
-    env: &loadcheck-x64-env
+    env:
       ARCH: x64
       TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &loadcheck-steps
@@ -3197,7 +3197,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
-    env: &packaged-env
+    env:
       ARCH: x64
       TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &packaged-steps
