@@ -2,6 +2,28 @@ apiVersion: v1
 entries:
   pagespeed:
   - apiVersion: v2
+    appVersion: 2.9.2
+    created: "2026-11-19T09:27:02.860788+01:00"
+    description: mod_pagespeed - Nginx image/CSS/JS/HTML optimization
+    digest: 731409b2848a40a89c379df5e5b11fb1f5e2e92edbe4a470ce7954c5304d58c1
+    home: https://modpagespeed.com
+    keywords:
+    - pagespeed
+    - nginx
+    - optimization
+    - webp
+    - avif
+    - cache
+    maintainers:
+    - name: we-amp
+    name: pagespeed
+    sources:
+    - https://github.com/We-Amp/pagespeed-optimizer
+    type: application
+    urls:
+    - https://modpagespeed.com/charts/pagespeed-0.3.17.tgz
+    version: 0.3.17
+  - apiVersion: v2
     appVersion: 2.9.0
     created: "2026-11-18T11:37:07.544083+01:00"
     description: mod_pagespeed - Nginx image/CSS/JS/HTML optimization
@@ -221,4 +243,4 @@ entries:
     urls:
     - https://modpagespeed.com/charts/pagespeed-0.3.6.tgz
     version: 0.3.6
-generated: "2026-11-18T11:37:07.542277+01:00"
+generated: "2026-11-19T09:27:02.859964+01:00"
