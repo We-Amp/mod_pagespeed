@@ -2283,8 +2283,13 @@ jobs:
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ needs.changes.outputs.sidecar_pair == 'true' }}
     timeout-minutes: 150
+    # TOOLCHAIN_IMAGE_VERIFY (tools/ci/toolchain_image.sh): auto only when
+    # runs-on picked the build-runner label (its gh cannot check attestations;
+    # the hosted CI tooling job checks the lock on every pull request), and
+    # required for every other selection.
     env:
       ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'required' || 'auto' }}
     steps: &sidecar-pair-steps
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -2334,12 +2339,6 @@ jobs:
       - name: Build, gate and test the pair
         env:
           GH_TOKEN: ${{ github.token }}
-          # Hosted runners have a gh that verifies the toolchain image's
-          # attestation, so there a missing token or gh fails the step
-          # (required). The build runners have a gh without the attestation
-          # command: auto, which warns there (the lock is verified on every
-          # pull request by the hosted CI tooling job).
-          TOOLCHAIN_IMAGE_VERIFY: ${{ runner.environment == 'github-hosted' && 'required' || 'auto' }}
         run: |
           bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
             --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
@@ -2382,6 +2381,9 @@ jobs:
     timeout-minutes: 180
     env:
       ARCH: arm64
+      # Hosted runner: its gh checks the toolchain image attestation, so a
+      # missing token or gh fails the build.
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *sidecar-pair-steps
 
   # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'

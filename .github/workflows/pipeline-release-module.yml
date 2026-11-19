@@ -1804,8 +1804,13 @@ jobs:
       max-parallel: 3
       matrix:
         distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
-    env: &nginx-x64-env
+    # TOOLCHAIN_IMAGE_VERIFY (tools/ci/toolchain_image.sh): auto only when
+    # runs-on picked the build-runner label (its gh cannot check attestations;
+    # the hosted CI tooling job checks the lock on every pull request), and
+    # required for every other selection.
+    env:
       ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &nginx-x64-steps
       - *clear-workspace
 
@@ -1836,12 +1841,6 @@ jobs:
         env:
           DISTRO: ${{ matrix.distro }}
           GH_TOKEN: ${{ github.token }}
-          # Hosted runners have a gh that verifies the toolchain image's
-          # attestation, so there a missing token or gh fails the step
-          # (required). The build runners have a gh without the attestation
-          # command: auto, which warns there (the lock is verified on every
-          # pull request by the hosted CI tooling job).
-          TOOLCHAIN_IMAGE_VERIFY: ${{ runner.environment == 'github-hosted' && 'required' || 'auto' }}
         run: |
           set -euo pipefail
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
@@ -1887,7 +1886,11 @@ jobs:
       fail-fast: false
       matrix:
         distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
-    env: *nginx-x64-env
+    env:
+      ARCH: x64
+      # Hosted runner: its gh checks the toolchain image attestation, so a
+      # missing token or gh fails the build.
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *nginx-x64-steps
 
   # The join: of the fleet matrix and its hosted twin exactly one ran; its
@@ -2006,6 +2009,9 @@ jobs:
         distro: ${{ fromJSON(needs.nginx-arm64-plan.outputs.distros || '["none"]') }}
     env:
       ARCH: arm64
+      # Hosted runner: its gh checks the toolchain image attestation, so a
+      # missing token or gh fails the build.
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps:
       - *clear-workspace
 
@@ -2036,12 +2042,6 @@ jobs:
         env:
           DISTRO: ${{ matrix.distro }}
           GH_TOKEN: ${{ github.token }}
-          # Hosted runners have a gh that verifies the toolchain image's
-          # attestation, so there a missing token or gh fails the step
-          # (required). The build runners have a gh without the attestation
-          # command: auto, which warns there (the lock is verified on every
-          # pull request by the hosted CI tooling job).
-          TOOLCHAIN_IMAGE_VERIFY: ${{ runner.environment == 'github-hosted' && 'required' || 'auto' }}
         run: |
           set -euo pipefail
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
@@ -2246,6 +2246,9 @@ jobs:
       ARCH: x64
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      # Hosted runner: its gh checks the toolchain image attestation, so a
+      # missing token or gh fails the build.
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: &sidecar-steps
       - name: Download the sidecar's release tree
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -2264,12 +2267,6 @@ jobs:
       - name: Build, gate and test the pair
         env:
           GH_TOKEN: ${{ github.token }}
-          # Hosted runners have a gh that verifies the toolchain image's
-          # attestation, so there a missing token or gh fails the step
-          # (required). The build runners have a gh without the attestation
-          # command: auto, which warns there (the lock is verified on every
-          # pull request by the hosted CI tooling job).
-          TOOLCHAIN_IMAGE_VERIFY: ${{ runner.environment == 'github-hosted' && 'required' || 'auto' }}
         run: |
           bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
             --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
@@ -2312,6 +2309,9 @@ jobs:
       ARCH: arm64
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      # Hosted runner: its gh checks the toolchain image attestation, so a
+      # missing token or gh fails the build.
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *sidecar-steps
 
   # ---------------------------------------------------------------------
