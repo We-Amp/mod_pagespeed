@@ -64,6 +64,8 @@ install_llvm_clang "${CLANG_VER}"
 g++-13 --version | head -n 1
 clang-"${CLANG_VER}" --version | head -n 1
 
+rt_base="$(dpkg-query -W -f='${Depends}' libstdc++6 | grep -o 'gcc-[0-9]*-base' | head -n 1)"
+
 {
   echo "# Written by tools/ci/toolchain-images/bake-toolchain.sh"
   # shellcheck disable=SC1091
@@ -72,7 +74,7 @@ clang-"${CLANG_VER}" --version | head -n 1
   echo "toolchain_ppa_key_fpr=${TOOLCHAIN_PPA_KEY_FPR}"
   echo "llvm_key_fpr=${LLVM_APT_KEY_FPR}"
   dpkg-query -W -f='${Package}=${Version}\n' \
-    g++-13 gcc-13 libstdc++-13-dev libstdc++6 libgcc-s1 libgomp1 gcc-16-base "clang-${CLANG_VER}" "lld-${CLANG_VER}" "llvm-${CLANG_VER}" \
+    g++-13 gcc-13 libstdc++-13-dev libstdc++6 libgcc-s1 libgomp1 "${rt_base:?libstdc++6 has no gcc-N-base dependency}" "clang-${CLANG_VER}" "lld-${CLANG_VER}" "llvm-${CLANG_VER}" \
     | sed 's/^/pkg:/'
 } > /etc/pagespeed-toolchain-baked
 
