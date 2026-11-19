@@ -67,7 +67,9 @@ selftest() {
   SELFTEST_CID=""
   local old="${p}old" busy="${p}busy" fresh="${p}fresh" other="keep-selftest-$$-old"
   PREFIX="$p"
-  MAX_AGE=5
+  # The old networks age past MAX_AGE (only more under load); the fresh one
+  # has MAX_AGE seconds of slack for the reaper to reach it.
+  MAX_AGE=15
   cleanup() {
     [ -n "${SELFTEST_CID:-}" ] && docker rm -f "$SELFTEST_CID" >/dev/null 2>&1
     docker network rm "${SELFTEST_NETS[@]}" >/dev/null 2>&1
@@ -82,7 +84,7 @@ selftest() {
     docker_pull_retry "$img" || return 1
     SELFTEST_CID=$(docker run -d --network "$busy" "$img" sleep 120) || return 1
   fi
-  sleep 7
+  sleep 20
   docker network create --label ci-net-selftest=1 "$fresh" >/dev/null || return 1
   reap_stale
   has() { docker network inspect "$1" >/dev/null 2>&1; }
