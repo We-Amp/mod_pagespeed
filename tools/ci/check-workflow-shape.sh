@@ -1576,6 +1576,127 @@ $(eg_unreached "${wf}" "$(on_triggers "${wf}" | grep -qx workflow_call && echo 1
 EOT
 done
 
+# --- (verify-parity) TOOLCHAIN_IMAGE_VERIFY mirrors the job's own runs-on ------
+# A job that sets TOOLCHAIN_IMAGE_VERIFY (job-level env) to an expression must
+# use the SAME condition as its runs-on: `required` when runs-on picks the
+# hosted label, `auto` only when it picks the build-runner label. The text is
+# repeated in two places, so a drift could turn `required` into `auto` on a
+# hosted run. A literal `required` is always fine; a literal `auto` is a
+# failure on a job whose runs-on can pick a hosted label.
+verify_records() { # file -> job, runs-on, verify, envform, stepver, toolchain, mixed (tab-separated)
+  awk -v tab="${TAB}" '
+    function endjob() {
+      if (job == "") return
+      n++; names[n] = job; RO[n] = ro; VER[n] = ver; EF[n] = envform; SV[n] = stepver
+      TC[n] = ((rnbuild && !el10) || sidecar) ? 1 : 0; AL[n] = alias; ANC[n] = anchor
+      job = ""
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { endjob(); injobs=0 }
+    injobs && /^  [^[:space:]]/ {
+      endjob(); job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job)
+      ro=""; ver=""; envform=""; stepver=0; inenv=0; rnbuild=0; el10=0; sidecar=0; alias=""; anchor=""; next
+    }
+    !injobs || job == "" { next }
+    /^    runs-on:/ { v=$0; sub(/^    runs-on:[[:space:]]*/, "", v); ro=v; inenv=0; next }
+    /^    env:/ {
+      v=$0; sub(/^    env:[[:space:]]*/, "", v)
+      envform = (v == "") ? "plain" : "other"; inenv=(v == ""); next
+    }
+    /^    steps:[[:space:]]*&/ { v=$0; sub(/^.*&/, "", v); sub(/[[:space:]].*$/, "", v); anchor=v }
+    /^    steps:[[:space:]]*\*/ { v=$0; sub(/^.*\*/, "", v); sub(/[[:space:]].*$/, "", v); alias=v }
+    /^    [^[:space:]]/ { inenv=0 }
+    /TOOLCHAIN_IMAGE_VERIFY/ {
+      if (inenv && $0 ~ /^      TOOLCHAIN_IMAGE_VERIFY:/) { v=$0; sub(/^      TOOLCHAIN_IMAGE_VERIFY:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); ver=v }
+      else stepver=1
+    }
+    /release_nginx\.sh"? build/ { rnbuild=1 }
+    /--set el10/ { el10=1 }
+    /release_sidecar\.sh"? (check|package|build)/ { sidecar=1 }
+    END {
+      endjob()
+      for (i = 1; i <= n; i++) if (ANC[i] != "" && TC[i]) anchortc[ANC[i]] = 1
+      for (i = 1; i <= n; i++) {
+        tc = TC[i] || (AL[i] != "" && (AL[i] in anchortc))
+        mixed = (RO[i] ~ /\047(ubuntu|windows|macos)-/ && RO[i] ~ /\047fleet-/) ? 1 : 0
+        printf "%s%s%s%s%s%s%s%s%s%s%s%s%d\n", names[i], tab, (RO[i] == "" ? "-" : RO[i]), tab, (VER[i] == "" ? "-" : VER[i]), tab, (EF[i] == "" ? "-" : EF[i]), tab, SV[i], tab, (tc ? 1 : 0), tab, mixed
+      }
+    }
+  ' "$1"
+}
+
+mixed_toolchain_jobs=0
+verify_wf_seen=""
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  wf_mixed=0
+  while IFS="${TAB}" read -r vj vro vver vef vsv vtc vmixed; do
+    [ -n "${vj}" ] || continue
+    # An empty field is "-" (tab is IFS whitespace, so empties would collapse).
+    [ "${vro}" != "-" ] || vro=""
+    [ "${vver}" != "-" ] || vver=""
+    if [ "${vtc}" = 1 ]; then
+      # Fail closed on forms this parser cannot follow, in a toolchain-build job.
+      if [ "${vef}" = other ]; then
+        err "${wf}: job '${vj}': unsupported form (an aliased or flow-style env), set TOOLCHAIN_IMAGE_VERIFY as a plain job-level env key (verify-parity)"
+        continue
+      fi
+      if [ "${vsv}" = 1 ]; then
+        err "${wf}: job '${vj}': unsupported form (TOOLCHAIN_IMAGE_VERIFY outside the job-level env block), set TOOLCHAIN_IMAGE_VERIFY as a plain job-level env key (verify-parity)"
+        continue
+      fi
+      if [ "${vmixed}" = 1 ]; then
+        wf_mixed=$((wf_mixed + 1))
+        if [ -z "${vver}" ]; then
+          err "${wf}: job '${vj}' can run on a hosted label or the build runner and builds with a toolchain image, but sets no TOOLCHAIN_IMAGE_VERIFY (it would default to auto on a hosted run) (verify-parity)"
+          continue
+        fi
+      fi
+    fi
+    [ -n "${vver}" ] || continue
+    vver="${vver%\"}"; vver="${vver#\"}"; vver="${vver%\'}"; vver="${vver#\'}"
+    case "${vver}" in
+      required) continue ;;
+      auto)
+        case "${vro}" in
+          *"'ubuntu-"*|*"'windows-"*|*"'macos-"*) err "${wf}: job '${vj}' sets TOOLCHAIN_IMAGE_VERIFY to a literal auto but its runs-on can pick a hosted label; use the runs-on condition ('required' on the hosted side) (verify-parity)" ;;
+          *'${{'*) ;;
+          *) if is_hosted_label "${vro}"; then err "${wf}: job '${vj}' sets TOOLCHAIN_IMAGE_VERIFY to a literal auto on a hosted runs-on (verify-parity)"; fi ;;
+        esac
+        continue ;;
+    esac
+    # An expression: ${{ <cond> && 'required' || 'auto' }} beside
+    # runs-on: ${{ <cond> && '<hosted>' || '<build-runner>' }}.
+    vcond="${vver#\$\{\{ }"; vcond="${vcond% \}\}}"
+    rcond="${vro#\$\{\{ }"; rcond="${rcond% \}\}}"
+    if [ "${vcond}" = "${vver}" ] || [ "${vcond%" && 'required' || 'auto'"}" = "${vcond}" ]; then
+      err "${wf}: job '${vj}': TOOLCHAIN_IMAGE_VERIFY must be a literal required, or \${{ <runs-on condition> && 'required' || 'auto' }} (verify-parity)"
+      continue
+    fi
+    vcond="${vcond%" && 'required' || 'auto'"}"
+    if [ "${rcond}" = "${vro}" ] || ! printf '%s' "${rcond}" | grep -qE " && '[^']+' \|\| '[^']+'$"; then
+      err "${wf}: job '${vj}': TOOLCHAIN_IMAGE_VERIFY is an expression but runs-on is not a '<cond> && <hosted> || <runner>' expression (verify-parity)"
+      continue
+    fi
+    rcond="$(printf '%s' "${rcond}" | sed -E "s/ && '[^']+' \|\| '[^']+'\$//")"
+    if [ "${vcond}" != "${rcond}" ]; then
+      err "${wf}: job '${vj}': the TOOLCHAIN_IMAGE_VERIFY condition drifted from the job's runs-on condition (verify-parity)
+  runs-on: ${rcond}
+  verify:  ${vcond}"
+    fi
+  done <<EOT
+$(verify_records "${wf}")
+EOT
+  # Sanity: the two real pipelines each carry a mixed toolchain-build job; a
+  # parse that finds none has lost them.
+  # Only the real tree (it has the release script); fixture trees reuse the names.
+  case "$([ -f tools/ci/release_nginx.sh ] && basename "${wf}")" in
+    pipeline-release-module.yml|pipeline-full.yml)
+      [ "${wf_mixed}" -ge 1 ] || err "${wf}: found no mixed toolchain-build job (parser lost them, or the job moved); the verify-parity rule needs at least one here (verify-parity)" ;;
+  esac
+done
+
 # --- (e) topology token scan --------------------------------------------------
 SCAN_DIRS=()
 [ -d .github ] && SCAN_DIRS+=(.github)
