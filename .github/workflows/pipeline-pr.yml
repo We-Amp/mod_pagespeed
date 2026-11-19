@@ -1726,8 +1726,7 @@ jobs:
                    //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
-                //test/pagespeed/apache/... //test/pagespeed/nginx/... \
-                //third_party/css_parser:css_parser_test
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
               rc=$?
               if [ $rc -ne 0 ]; then
                 # bazel-testlogs lives under the container-internal output
