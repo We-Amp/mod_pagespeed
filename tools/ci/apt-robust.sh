@@ -16,7 +16,9 @@
 #                        http://mirror.example.org/ubuntu). Empty by default:
 #                        the sources are left as they are. Applied only when
 #                        /etc/os-release says ID=ubuntu, and only to
-#                        archive.ubuntu.com and security.ubuntu.com entries in
+#                        archive.ubuntu.com, security.ubuntu.com and cloud-region archive
+#                        entries (azure.archive.ubuntu.com,
+#                        us-east-2.ec2.archive.ubuntu.com, and so on) in
 #                        /etc/apt/sources.list and the deb822
 #                        /etc/apt/sources.list.d/ubuntu.sources;
 #                        ports.ubuntu.com (arm64) and third-party sources are
@@ -48,7 +50,7 @@ apt_robust_setup() {
   local f
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
     [ -f "${f}" ] || continue
-    apt_robust_sudo sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|\$)#${mirror%/}/\\2#g" "${f}" || return 1
+    apt_robust_sudo sed -i -E "s#https?://(([A-Za-z0-9.-]+\.)?archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|\$)#${mirror%/}/\\3#g" "${f}" || return 1
   done
   echo "apt-robust: Ubuntu archive sources point at ${mirror%/}/"
 }
