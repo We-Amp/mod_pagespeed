@@ -66,3 +66,6 @@ tools/js/node_modules/
 # Apache RAT report written by tools/ci/rat.sh
 rat-report.txt
 tools/console-audit/workload/
+
+# Backup files left by BSD sed -i
+*-E
