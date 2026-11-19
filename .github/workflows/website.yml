@@ -318,7 +318,11 @@ jobs:
         run: npm ci
 
       - name: Install Chromium (with system dependencies)
-        run: npx playwright install --with-deps chromium
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
+        run: |
+          bash ../tools/ci/apt-robust.sh update
+          npx playwright install --with-deps chromium
 
       # CI=true switches the config to CI mode (one worker, one retry,
       # forbidOnly, always a fresh dev server). PRICING_ALLOW_STALE is set

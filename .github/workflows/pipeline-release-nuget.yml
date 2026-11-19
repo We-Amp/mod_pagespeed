@@ -1256,6 +1256,14 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
     steps:
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Checkout main (fetch script, published key)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1346,6 +1354,8 @@ jobs:
       # runtimes/<rid>/native/nginx, at least 8 per framework.
       - name: Test the sidecar (.NET 8 and .NET 10)
         working-directory: ${{ runner.temp }}/sidecar-work/aspnetcore
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
         run: |
           set -euo pipefail
           PROJ=WeAmp.PageSpeed.AspNetCore.Tests/WeAmp.PageSpeed.AspNetCore.Tests.csproj
@@ -1362,7 +1372,7 @@ jobs:
           # The bundled nginx links PCRE (libpcre.so.3), which a consumer
           # host provides; install it only when the runner lacks it.
           if ldd "$PAIR/nginx" | grep -q 'not found'; then
-            sudo apt-get update -qq
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
             sudo apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
           fi
           if ldd "$PAIR/nginx" | grep 'not found'; then

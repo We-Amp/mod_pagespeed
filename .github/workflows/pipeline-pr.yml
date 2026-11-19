@@ -64,6 +64,8 @@ jobs:
       # a `cc` on PATH (build-essential's gcc) + perl (RTCD headers) +
       # nasm (x86 SIMD).
       - name: Install clang-20 + libc++-20 toolchain
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
         run: |
           retry() { "$@" && return 0; for d in 30 90 180; do echo "WARN: '$*' failed; retrying in ${d}s" >&2; sleep "$d"; "$@" && return 0; done; echo "ERROR: '$*' failed after 4 attempts" >&2; return 1; }
           bash tools/ci/fetch_retry.sh https://apt.llvm.org/llvm-snapshot.gpg.key "${RUNNER_TEMP}/llvm-snapshot.gpg.key"
@@ -81,7 +83,7 @@ jobs:
           rm -rf "${gnupg_home}"
           echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
             | sudo tee /etc/apt/sources.list.d/llvm-toolchain-noble-20.list
-          retry sudo apt-get update
+          APT_RETRY_ATTEMPTS=4 APT_RETRY_DELAY='30 90 180' bash tools/ci/apt-robust.sh update
           retry sudo apt-get install -y --no-install-recommends \
             clang-20 libc++-20-dev libc++abi-20-dev \
             build-essential gperf cmake perl nasm

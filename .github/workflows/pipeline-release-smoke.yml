@@ -40,7 +40,8 @@ permissions: {}
 
 jobs:
   smoke-linux-x64:
-    permissions: {}
+    permissions:
+      contents: read
     name: smoke / ${{ matrix.rid }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
@@ -57,6 +58,15 @@ jobs:
       KESTREL_URL: http://127.0.0.1:5050
       WORKER_API_PORT: "9881"
     steps: &smoke-steps-unix
+      - name: Checkout the apt helper
+        if: matrix.os == 'linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       # ----------------------------------------------------------
       # Resolve the version under test
       # ----------------------------------------------------------
@@ -406,6 +416,8 @@ jobs:
       - name: Install Node + Playwright deps (Linux/macOS)
         if: matrix.os != 'windows'
         shell: bash
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
         run: |
           set -euo pipefail
           if [ "${{ matrix.os }}" = "macos" ]; then
@@ -431,6 +443,7 @@ jobs:
           # right deps for free. install-deps is a Linux/apt operation;
           # macOS browser libs ship with the bundle, so skip it there.
           if [ "${{ matrix.os }}" != "macos" ]; then
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
             npx playwright install-deps chromium
           fi
           npx playwright install chromium
@@ -514,7 +527,8 @@ jobs:
             ${{ env.SMOKE_ROOT }}/pw/test-results/
 
   smoke-linux-arm64:
-    permissions: {}
+    permissions:
+      contents: read
     name: smoke / ${{ matrix.rid }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
@@ -954,7 +968,8 @@ jobs:
   # publish. Linux only (the sidecar package is Linux-only). The version
   # logic and the indexing wait mirror the AspNetCore legs above.
   smoke-sidecar-linux-x64:
-    permissions: {}
+    permissions:
+      contents: read
     name: smoke / sidecar / ${{ matrix.rid }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -965,6 +980,14 @@ jobs:
     env: &sidecar-env
       SIDECAR_PORT: "5061"
     steps: &sidecar-steps
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Determine package version
         shell: bash
         run: |
@@ -1110,13 +1133,15 @@ jobs:
       # NuGet lane's test job).
       - name: Install the PCRE runtime the bundled nginx needs
         shell: bash
+        env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
         run: |
           set -euo pipefail
           PUB="$SMOKE_ROOT/publish"
           NGINX="$PUB/nginx"
           [ -f "$NGINX" ] || NGINX="$PUB/runtimes/${{ matrix.rid }}/native/nginx"
           if ldd "$NGINX" | grep -q 'not found'; then
-            sudo apt-get -o DPkg::Lock::Timeout=120 update -qq
+            bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
             sudo apt-get -o DPkg::Lock::Timeout=120 install -y -qq --no-install-recommends libpcre3 >/dev/null
           fi
           if ldd "$NGINX" | grep 'not found'; then
@@ -1217,7 +1242,8 @@ jobs:
             ${{ env.SMOKE_ROOT }}/response.html
 
   smoke-sidecar-linux-arm64:
-    permissions: {}
+    permissions:
+      contents: read
     name: smoke / sidecar / ${{ matrix.rid }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30

@@ -30,8 +30,22 @@ RUN dnf -y install --setopt=install_weak_deps=False systemd-rpm-macros \
 
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get -qq update \
+# apt retries each file and times out a stalled connection; apt-get update
+# exits 0 when an index fails to download, so a failed index is caught here
+# and the update is retried once instead of failing later with "Unable to
+# locate package". The retry config is removed again, so the image contents
+# do not change.
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80-ci-retries \
+    && for attempt in 1 2; do \
+         out="$(apt-get -qq update 2>&1)" \
+           && ! printf '%s\n' "$out" | grep -qE '^(W|E): (Failed to fetch|Some index files failed)' \
+           && break; \
+         printf '%s\n' "$out" | tail -n 12 >&2; \
+         [ "$attempt" -eq 2 ] && { echo "apt-get update failed twice" >&2; exit 1; }; \
+         sleep 20; \
+       done \
     && apt-get -qq -y install --no-install-recommends rpm binutils cpio python3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/80-ci-retries
 COPY --from=elmacros /usr/lib/rpm/macros.d/macros.sysusers /usr/lib/rpm/macros.d/macros.sysusers
 COPY --from=elmacros /usr/lib/rpm/sysusers.generate-pre.sh /usr/lib/rpm/sysusers.generate-pre.sh

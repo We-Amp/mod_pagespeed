@@ -860,6 +860,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Checkout the apt helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci-helpers
+          sparse-checkout: tools/ci/apt-robust.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Download packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -902,12 +910,13 @@ jobs:
       # say 2.38.
       - name: Fail-closed asset contract validation
         env:
+          UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
           UPSTREAM: ${{ needs.version.outputs.upstream }}
           PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
         run: |
           set -euo pipefail
           cd dist
-          sudo apt-get update -qq
+          bash "${GITHUB_WORKSPACE}/ci-helpers/tools/ci/apt-robust.sh" update
           sudo apt-get install -y -qq --no-install-recommends rpm >/dev/null
           EXPECTED=(
             "pagespeed-optimizer-${UPSTREAM}-1.x86_64.rpm"
