@@ -3,7 +3,7 @@ title: 'Choose a cache mode: safe vs aggressive'
 description: 'Safe or aggressive Cache-Control for optimized responses in mod_pagespeed, plus the module cache reference: Cyclone, memcached, Redis, purging, IPRO.'
 order: 23
 group: 'Configure'
-lastUpdated: 2026-11-15
+lastUpdated: 2026-11-19
 ---
 
 mod_pagespeed transforms your origin's content — optimizing images, minifying
@@ -667,7 +667,7 @@ Considerations when using IPRO:
 
 - Resources keep their original URLs, so they do not benefit from content-hash-based cache extension. Browser caches and CDNs follow the original `Cache-Control` headers.
 - IPRO cannot combine resources (CSS combining, JS combining) because each resource retains its own URL.
-- An origin that answers differently by `Referer` must send `Vary: Referer`; with `RespectVary on`, such responses are then not recorded.
+- In-place optimization does not record resources (stylesheets, scripts, images) whose responses carry `Vary: Referer` or any Vary beyond Accept-Encoding. An origin that answers differently by Referer must send `Vary: Referer`, so that such resources are not recorded.
 
 ### Fetch and performance
 

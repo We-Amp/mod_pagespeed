@@ -3,13 +3,13 @@ title: 'Migrate from the archived Google module'
 description: 'Move from the archived mod_pagespeed or ngx_pagespeed binaries to the current mod_pagespeed: package swap, what maps to what, cache, rollback.'
 order: 15
 group: 'Upgrade and migrate'
-lastUpdated: 2026-11-15
+lastUpdated: 2026-11-19
 datePublished: 2026-10-08
 faq:
   - q: 'Is the current mod_pagespeed a drop-in replacement for the archived module?'
-    a: 'Yes. It continues the same codebase, keeps the `pagespeed` and `ModPagespeed` directive surface and the classic filter names, and loads in process on Apache and nginx. Your configuration, `.htaccess` directives included, carries over, with seven removed option names to delete on nginx (see the next answer).'
+    a: 'Yes. It continues the same codebase, keeps the `pagespeed` and `ModPagespeed` directive surface and the classic filter names, and loads in process on Apache and nginx. Your configuration, `.htaccess` directives included, carries over; seven removed option names log a warning on nginx and are best deleted (see the next answer).'
   - q: 'What do I lose?'
-    a: 'No working feature. A handful of long-inert filters and experimental options are accepted and ignored with a warning, and the old file cache is left in place while the new Cyclone cache warms up. One exception: on nginx, seven removed option names (`FileCacheInodeLimit`, `FileCacheCleanIntervalMs`, `MaxPrefetchJsElements`, `DistributeFetches` and the three `DistributedRewrite*` names) stop nginx from starting until you delete them; Apache only warns.'
+    a: 'No working feature. A handful of long-inert filters and experimental options are accepted and ignored with a warning, and the old file cache is left in place while the new Cyclone cache warms up. The same goes for seven removed option names (`FileCacheInodeLimit`, `FileCacheCleanIntervalMs`, `MaxPrefetchJsElements`, `DistributeFetches` and the three `DistributedRewrite*` names): since mod_pagespeed 2.9.0, nginx logs a warning for each and keeps running, as Apache does. Releases before 2.9.0 fail `nginx -t` on them.'
 ---
 
 mod_pagespeed is an open-source project originally developed at Google. It was
@@ -191,7 +191,7 @@ sudo grep -Rns '^[[:space:]]*load_module.*pagespeed' /etc/nginx /usr/share/nginx
 sudo nginx -t && sudo systemctl restart nginx
 ```
 
-If `nginx -t` stops with `directive "..." not recognized` for one of `DistributeFetches`, `DistributedRewriteKey`, `DistributedRewriteServers`, `DistributedRewriteTimeoutMs`, `FileCacheCleanIntervalMs`, `FileCacheInodeLimit` and `MaxPrefetchJsElements`, delete that line: Apache warns about these names and carries on, but nginx refuses to start. None has a replacement.
+If `nginx -t` warns `pagespeed <Name> is deprecated and has no effect` for one of `DistributeFetches`, `DistributedRewriteKey`, `DistributedRewriteServers`, `DistributedRewriteTimeoutMs`, `FileCacheCleanIntervalMs`, `FileCacheInodeLimit` and `MaxPrefetchJsElements`, delete that line when convenient: since mod_pagespeed 2.9.0, nginx carries on with a warning, as Apache does. Releases before 2.9.0 stop with `not recognized` until the line is gone. None has a replacement.
 
 The package loads `ngx_pagespeed_module.so` itself, so the `sed` line removes
 the `load_module` line you added to `/etc/nginx/nginx.conf` for the old

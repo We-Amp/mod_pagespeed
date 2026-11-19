@@ -163,6 +163,122 @@ Without a version, `dotnet add package` pins the newest release in the project
 file. The middleware launches the worker from the same package, so the two
 stay matched by construction.
 
+## Options that load with a warning
+
+These options and filters from older configurations still load. The server
+logs a deprecation warning for each and starts normally, so a configuration
+that ran on 1.14 or on ngx_pagespeed keeps working while you clean it up. On
+Apache the directive names carry the `ModPagespeed` prefix, for example
+`ModPagespeedFileCacheInodeLimit`. A repeated directive is listed once:
+nginx has 33 such lines and Apache 44, which are 43 distinct names because
+`LogMobilizationSamples` appears twice on Apache. `sudo nginx -t` and
+`sudo apachectl configtest` print every warning, so run one before you restart.
+
+| Option | Server | What happens now |
+| --- | --- | --- |
+| `AllowVaryOn` | nginx, Apache | Warns, does nothing |
+| `AnalyticsID` | nginx, Apache | Warns, does nothing |
+| `CollectRefererStatistics` | Apache | Warns, does nothing |
+| `ContentExperimentID` | nginx, Apache | Warns, does nothing |
+| `ContentExperimentVariantID` | nginx, Apache | Warns, does nothing |
+| `DisableForBots` | Apache | Warns, does nothing |
+| `DistributedRewriteKey` | nginx, Apache | Warns, does nothing |
+| `DistributedRewriteServers` | nginx, Apache | Warns, does nothing |
+| `DistributedRewriteTimeoutMs` | nginx, Apache | Warns, does nothing |
+| `DistributeFetches` | nginx, Apache | Warns, does nothing |
+| `ExperimentalCentralControllerPort` | nginx, Apache | Warns, does nothing |
+| `ExperimentalPopularityContestMaxInFlight` | nginx, Apache | Warns, does nothing |
+| `ExperimentalPopularityContestMaxQueueSize` | nginx, Apache | Warns, does nothing |
+| `ExperimentVariable` | nginx, Apache | Warns, does nothing |
+| `FetchFromModSpdy` | Apache | Warns, does nothing |
+| `FileCacheCleanIntervalMs` | nginx, Apache | Warns, does nothing |
+| `FileCacheInodeLimit` | nginx, Apache | Warns, does nothing |
+| `GeneratedFilePrefix` | Apache | Warns, does nothing |
+| `HashRefererStatistics` | Apache | Warns, does nothing |
+| `IncreaseSpeedTracking` | nginx, Apache | Warns, does nothing |
+| `InheritVHostConfig` | Apache | Warns, does nothing |
+| `LogMobilizationSamples` | nginx, Apache | Warns, does nothing |
+| `MaxPrefetchJsElements` | nginx, Apache | Warns, does nothing |
+| `NumShards` | Apache | Warns, does nothing |
+| `PrivateNotVaryForIE` | nginx, Apache | Warns, does nothing |
+| `RefererStatisticsOutputLevel` | Apache | Warns, does nothing |
+| `ShardDomain` | nginx, Apache | Warns, still applies |
+| `StatisticsLoggingFile` | Apache | Warns, does nothing |
+| `UrlPrefix` | Apache | Warns, does nothing |
+| `UseAnalyticsJs` | nginx, Apache | Warns, does nothing |
+| `UseExperimentalJsMinifier` | nginx, Apache | Warns, does nothing |
+| `EnableFilters defer_iframe` | nginx, Apache | Warns, does nothing |
+| `EnableFilters div_structure` | nginx, Apache | Warns, does nothing |
+| `EnableFilters explicit_close_tags` | nginx, Apache | Warns, does nothing |
+| `EnableFilters flush_subresources` | nginx, Apache | Warns, does nothing |
+| `EnableFilters in_place_optimize_for_browser` | nginx, Apache | Warns, does nothing |
+| `EnableFilters insert_ga` | nginx, Apache | Warns, does nothing |
+| `EnableFilters local_storage_cache` | nginx, Apache | Warns, does nothing |
+| `EnableFilters make_google_analytics_async` | nginx, Apache | Warns, does nothing |
+| `EnableFilters mobilize` | nginx, Apache | Warns, does nothing |
+| `EnableFilters mobilize_precompute` | nginx, Apache | Warns, does nothing |
+| `EnableFilters split_html` | nginx, Apache | Warns, does nothing |
+| `EnableFilters split_html_helper` | nginx, Apache | Warns, does nothing |
+
+Inside a `<Directory>` block Apache refuses the server-scope rows
+(`GeneratedFilePrefix`, `InheritVHostConfig`, `FetchFromModSpdy`, `NumShards`
+and `UrlPrefix`); put them at server level or in a `<VirtualHost>`, or delete
+them.
+
+All but `ShardDomain` are accepted and then ignored. `ShardDomain` still
+shards, and its warning says why you should stop: sharding hurts with HTTP/2
+and HTTP/3. Remove the lines when you can; none needs a replacement.
+
+On nginx, seven of these names (`FileCacheCleanIntervalMs`,
+`FileCacheInodeLimit`, `DistributeFetches`, `DistributedRewriteKey`,
+`DistributedRewriteServers`, `DistributedRewriteTimeoutMs` and
+`MaxPrefetchJsElements`) are accepted with a warning from 2.9.0 on. Earlier
+releases do not recognize them, and `nginx -t` fails until you delete the
+lines.
+
+## Changed defaults
+
+Four defaults differ from 1.14. A configuration that sets the value explicitly
+is unaffected; check the ones you leave unset.
+
+- `NumRewriteThreads` and `NumExpensiveRewriteThreads`: were 4 when the server
+  is threaded and 1 otherwise; the unset default now follows the CPU budget and
+  the number of server processes.
+- `FileCacheSizeKb`: was 100 MB, now 1 GB.
+- `GoogleFontCssInlineMaxBytes`: was 3 KiB, now 48 KiB.
+
+## Settings to check after upgrading
+
+- **ExperimentSpec.** An ExperimentSpec in the main configuration that sets
+  options above directory scope now fails at load; set such options outside
+  the ExperimentSpec. `ExperimentSpec` `options=` accepts only options that can
+  be set per directory; an experiment that names any other option is refused.
+  An ExperimentSpec that sets an alternate origin domain is refused in
+  `.htaccess` files (500 error) and in remote configuration; set it in the
+  server or virtual-host configuration.
+- **Apache `.htaccess`.** Files with `MapOriginDomain`, `MapProxyDomain` or
+  `CustomFetchHeader` now give a 500 error. Move these directives to the
+  server or virtual-host configuration.
+- **`MapProxyDomain`** no longer forwards visitor cookies or credentials to
+  the mapped host. If the mapped host relies on receiving them, change that
+  setup before upgrading.
+- In-place optimization and `MapProxyDomain`: a response fetched for a visitor
+  whose request carried a cookie is shared only when the origin marks it
+  shareable: `Cache-Control: public` or `s-maxage` for pages, a stated lifetime
+  (`max-age`, `s-maxage` or `Expires`) for stylesheets, scripts and images.
+  Entries stored by earlier versions on these paths are fetched again once
+  after the upgrade.
+- **`RequestOptionOverride`.** If you set it, rotate the token after
+  upgrading.
+- **IIS `RequestOptionOverride`.** Do not send the token in a response header:
+  IIS does not read it from responses, and `web.config` `customHeaders` send it
+  to every client. If it was ever set there, choose a new token.
+- **ASP.NET Core.** On a cache miss, the page is re-fetched anonymously, so
+  each cached response is requested twice. Set `RecordResponses` to `false` if
+  your GET handlers have side effects; put rules that admit clients by address
+  or identity after `UsePageSpeed()`, or list their paths in `ExcludePaths`;
+  and call `UseRouting()` after `UsePageSpeed()`.
+
 ## Security updates
 
 Security fixes ship as regular releases through the channel you installed
