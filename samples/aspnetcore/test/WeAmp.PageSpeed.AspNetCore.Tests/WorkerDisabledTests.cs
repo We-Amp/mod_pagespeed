@@ -115,22 +115,26 @@ public class WorkerDisabledTests
 
             // Disabled: no worker, and nothing published yet, so the
             // notification service keeps waiting for the worker's socket.
+            // Wait for the host to report it is waiting rather than sleeping:
+            // on a loaded runner the host can take longer than a fixed delay.
+            await WaitFor(() => fx.Log.Entries.Any(e =>
+                    e.Level == LogLevel.Information
+                    && e.Message.Contains("PageSpeed is disabled")
+                    && e.Message.Contains("no restart needed")),
+                "the host to report it is waiting for Enabled");
+            // Short settle so a regression that launches right after the log line is still caught.
             await Task.Delay(300);
             Assert.False(fx.Endpoint.SocketPathReady.IsCompleted);
             Assert.False(File.Exists(fx.Sentinel));
-            Assert.Contains(fx.Log.Entries, e =>
-                e.Level == LogLevel.Information
-                && e.Message.Contains("PageSpeed is disabled")
-                && e.Message.Contains("no restart needed"));
 
             var enabled = fx.NewOptions(enabled: true);
             monitor.Set(enabled);
 
-            var socketPath = await fx.Endpoint.SocketPathReady.WaitAsync(TimeSpan.FromSeconds(10));
+            var socketPath = await fx.Endpoint.SocketPathReady.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.Equal(fx.SocketPath, socketPath);
             // The API port is published after the socket path, just before
             // the launch, so wait for it rather than read it.
-            Assert.True(await fx.Endpoint.Ready.WaitAsync(TimeSpan.FromSeconds(10)) > 0);
+            Assert.True(await fx.Endpoint.Ready.WaitAsync(TimeSpan.FromSeconds(30)) > 0);
             await WaitFor(() => File.Exists(fx.Sentinel), "the worker to launch");
             Assert.Contains(fx.Log.Entries, e => e.Message.Contains("Starting factory_worker"));
         }
