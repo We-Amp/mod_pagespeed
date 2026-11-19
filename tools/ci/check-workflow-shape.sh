@@ -1576,6 +1576,70 @@ $(eg_unreached "${wf}" "$(on_triggers "${wf}" | grep -qx workflow_call && echo 1
 EOT
 done
 
+# --- (verify-parity) TOOLCHAIN_IMAGE_VERIFY mirrors the job's own runs-on ------
+# A job that sets TOOLCHAIN_IMAGE_VERIFY (job-level env) to an expression must
+# use the SAME condition as its runs-on: `required` when runs-on picks the
+# hosted label, `auto` only when it picks the build-runner label. The text is
+# repeated in two places, so a drift could turn `required` into `auto` on a
+# hosted run. A literal `required` is always fine; a literal `auto` is a
+# failure on a job whose runs-on can pick a hosted label.
+verify_records() { # file -> "<job><tab><runs-on value><tab><verify value>"
+  awk -v tab="${TAB}" '
+    function flush() { if (job != "" && ver != "") printf "%s%s%s%s%s\n", job, tab, ro, tab, ver }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ {
+      flush(); job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job); ro=""; ver=""; inenv=0; next
+    }
+    injobs && /^    runs-on:/ { v=$0; sub(/^    runs-on:[[:space:]]*/, "", v); ro=v; inenv=0; next }
+    injobs && /^    env:/ { inenv=1; next }
+    injobs && /^    [^[:space:]]/ { inenv=0; next }
+    injobs && inenv && /^      TOOLCHAIN_IMAGE_VERIFY:/ { v=$0; sub(/^      TOOLCHAIN_IMAGE_VERIFY:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); ver=v }
+    END { flush() }
+  ' "$1"
+}
+
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  while IFS="${TAB}" read -r vj vro vver; do
+    [ -n "${vj}" ] || continue
+    vver="${vver%\"}"; vver="${vver#\"}"; vver="${vver%\'}"; vver="${vver#\'}"
+    case "${vver}" in
+      required) continue ;;
+      auto)
+        # shellcheck disable=SC2016
+        case "${vro}" in
+          *"'ubuntu-"*|*"'windows-"*|*"'macos-"*) err "${wf}: job '${vj}' sets TOOLCHAIN_IMAGE_VERIFY to a literal auto but its runs-on can pick a hosted label; use the runs-on condition ('required' on the hosted side) (verify-parity)" ;;
+          *'${{'*) ;;
+          *) if is_hosted_label "${vro}"; then err "${wf}: job '${vj}' sets TOOLCHAIN_IMAGE_VERIFY to a literal auto on a hosted runs-on (verify-parity)"; fi ;;
+        esac
+        continue ;;
+    esac
+    # An expression: ${{ <cond> && 'required' || 'auto' }} beside
+    # runs-on: ${{ <cond> && '<hosted>' || '<build-runner>' }}.
+    vcond="${vver#\$\{\{ }"; vcond="${vcond% \}\}}"
+    rcond="${vro#\$\{\{ }"; rcond="${rcond% \}\}}"
+    if [ "${vcond}" = "${vver}" ] || [ "${vcond%" && 'required' || 'auto'"}" = "${vcond}" ]; then
+      err "${wf}: job '${vj}': TOOLCHAIN_IMAGE_VERIFY must be a literal required, or \${{ <runs-on condition> && 'required' || 'auto' }} (verify-parity)"
+      continue
+    fi
+    vcond="${vcond%" && 'required' || 'auto'"}"
+    if [ "${rcond}" = "${vro}" ] || ! printf '%s' "${rcond}" | grep -qE " && '[^']+' \|\| '[^']+'$"; then
+      err "${wf}: job '${vj}': TOOLCHAIN_IMAGE_VERIFY is an expression but runs-on is not a '<cond> && <hosted> || <runner>' expression (verify-parity)"
+      continue
+    fi
+    rcond="$(printf '%s' "${rcond}" | sed -E "s/ && '[^']+' \|\| '[^']+'\$//")"
+    if [ "${vcond}" != "${rcond}" ]; then
+      err "${wf}: job '${vj}': the TOOLCHAIN_IMAGE_VERIFY condition drifted from the job's runs-on condition (verify-parity)
+  runs-on: ${rcond}
+  verify:  ${vcond}"
+    fi
+  done <<EOT
+$(verify_records "${wf}")
+EOT
+done
+
 # --- (e) topology token scan --------------------------------------------------
 SCAN_DIRS=()
 [ -d .github ] && SCAN_DIRS+=(.github)
