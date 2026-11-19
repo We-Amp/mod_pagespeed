@@ -7,14 +7,16 @@
 # built once and pushed to GHCR, so that a build can pull a pinned image
 # instead of fetching the compilers from third-party repositories each time.
 #
-# Dispatch only, from master. Nothing in the build uses these images yet; the
-# digests they get are printed in the job summary and kept in the
-# toolchain-images.lock artifact, to be pasted into install/nginx/toolchain-images.lock.
+# Dispatch (from master) and a monthly schedule (scheduled runs happen on the
+# default branch only). A scheduled run rebuilds and attests the images, nothing
+# more. Nothing in the build uses these images yet; the digests they get are
+# printed in the job summary and kept in the toolchain-images lock artifact, to
+# be pasted into install/nginx/toolchain-images.lock by hand.
 #
 # Each suite is built natively on amd64 and arm64 hosted runners, pushed by
 # digest, and joined into one multi-arch image. Build provenance and an SBOM
 # are attested for each image; the multi-arch image gets a provenance
-# attestation. The only job with write access is on a hosted runner.
+# attestation. Every job with write access runs on a hosted runner.
 #
 # Try it:  gh workflow run toolchain-images.yml
 
@@ -22,6 +24,8 @@ name: Toolchain images
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 4 3 * *'
 
 permissions:
   contents: read
@@ -35,9 +39,11 @@ env:
   IMAGE_PREFIX: ghcr.io/we-amp/mod-pagespeed-toolchain
 
 jobs:
+  # Keep in sync with build-arm64 below: the two jobs differ only in the runner,
+  # the platform and the artifact names.
   build-amd64:
     name: Build ${{ matrix.suite }} amd64
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: false
       matrix:
@@ -81,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$IMAGE"
-          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked'
+          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked' | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -120,9 +126,11 @@ jobs:
           path: digest/${{ matrix.suite }}-amd64
           if-no-files-found: error
 
+  # Keep in sync with build-amd64 above: the two jobs differ only in the runner,
+  # the platform and the artifact names.
   build-arm64:
     name: Build ${{ matrix.suite }} arm64
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: false
       matrix:
@@ -166,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$IMAGE"
-          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked'
+          docker run --rm "$IMAGE" bash -c 'g++-13 --version | head -n 1; clang-18 --version | head -n 1; cat /etc/pagespeed-toolchain-baked' | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3

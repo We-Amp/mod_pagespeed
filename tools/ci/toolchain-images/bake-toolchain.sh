@@ -50,8 +50,8 @@ retry() {
   local attempt
   for attempt in 1 2 3 4 5 6; do
     "$@" && return 0
-    echo "'$*' failed (attempt ${attempt} of 6); retrying in $((attempt * 30))s" >&2
-    sleep $((attempt * 30))
+    echo "'$*' failed (attempt ${attempt} of 6)" >&2
+    [ "$attempt" -lt 6 ] && sleep $((attempt * 30))
   done
   return 1
 }
@@ -72,7 +72,7 @@ clang-"${CLANG_VER}" --version | head -n 1
   echo "toolchain_ppa_key_fpr=${TOOLCHAIN_PPA_KEY_FPR}"
   echo "llvm_key_fpr=${LLVM_APT_KEY_FPR}"
   dpkg-query -W -f='${Package}=${Version}\n' \
-    g++-13 gcc-13 libstdc++-13-dev "clang-${CLANG_VER}" "lld-${CLANG_VER}" "llvm-${CLANG_VER}" \
+    g++-13 gcc-13 libstdc++-13-dev libstdc++6 libgcc-s1 libgomp1 gcc-16-base "clang-${CLANG_VER}" "lld-${CLANG_VER}" "llvm-${CLANG_VER}" \
     | sed 's/^/pkg:/'
 } > /etc/pagespeed-toolchain-baked
 
