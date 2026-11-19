@@ -3,12 +3,12 @@ title: 'Release notes'
 description: 'mod_pagespeed release notes: the current release, the notes of every line, every release in one list, security updates and what changed since upstream.'
 order: 70
 group: 'Reference'
-lastUpdated: 2026-11-17
+lastUpdated: 2026-11-19
 ---
 
 import VersionMap from '../../components/release/VersionMap.astro';
 
-mod_pagespeed is released as two parts: the module, which runs inside Apache or nginx and applies the classic rewriting filters in the request itself, and the optimizer worker, a separate process introduced by the 2.0 re-architecture that does the heavy optimization work off the request path. Since 2.1.0 the two are released together, and since 2.5.0 one version number covers both: the native packages, the container images, the NuGet packages and the Helm chart's application version of the current release all carry 2.9.0. This page lists the current release, the release notes of each line, and every release in one list, newest first, followed by the [security updates](#security-updates) we have published and [what has changed since the last upstream release](#115-history). We recommend running the latest release: it always carries the most recent performance and security work.
+mod_pagespeed is released as two parts: the module, which runs inside Apache or nginx and applies the classic rewriting filters in the request itself, and the optimizer worker, a separate process introduced by the 2.0 re-architecture that does the heavy optimization work off the request path. Since 2.1.0 the two are released together, and since 2.5.0 one version number covers both: the native packages, the container images, the NuGet packages and the Helm chart's application version of the current release all carry 2.9.2. This page lists the current release, the release notes of each line, and every release in one list, newest first, followed by the [security updates](#security-updates) we have published and [what has changed since the last upstream release](#115-history). We recommend running the latest release: it always carries the most recent performance and security work.
 
 <span id="whats-in-modpagespeed-20" class="rn-alias" aria-hidden="true"></span>
 <span id="optimization-pipeline" class="rn-alias" aria-hidden="true"></span>
@@ -19,23 +19,22 @@ mod_pagespeed is released as two parts: the module, which runs inside Apache or 
 <span id="the-module-and-the-optimizer-worker" class="rn-alias" aria-hidden="true"></span>
 ## The current release {#current-release}
 
-<span id="v2-9-0" class="rn-alias" aria-hidden="true"></span>
+<span id="v2-9-2" class="rn-alias" aria-hidden="true"></span>
 <div class="rn-entry rn-entry-current">
 
-<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.9.0</span> <span class="rn-date">2026-11-17</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span></p>
+<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.9.2</span> <span class="rn-date">2026-11-19</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span></p>
 
-**mod_pagespeed 2.9.0 is a security update, released together with the optimizer
+**mod_pagespeed 2.9.2 is a security update, released together with the optimizer
 worker and installed as a matching pair.** The packages in the signed apt and yum
 repositories, the container images, the NuGet packages (the ASP.NET Core sidecar
-packages among them) and the application version of the Helm chart (chart 0.3.16)
-all carry the version 2.9.0. It fixes several classes of security issue in the module,
-the optimizer worker and the ASP.NET Core package, adds `pagespeed-doctor`, a health
-check for Apache and nginx installs, and fixes combined stylesheets, combined scripts
-and image sprites that answered 404 while an input was briefly unavailable. **Update
-recommended.**
+packages among them) and the application version of the Helm chart (chart 0.3.17)
+all carry the version 2.9.2. It updates the nginx we bundle in the container images
+and the ASP.NET Core sidecar native pair to 1.30.7, nginx's security release of
+2026-11-18, and brings the console and workbench fix of `pagespeed-optimizer` 2.9.1
+to the container images and the ASP.NET Core package. **Update recommended.**
 
-[Read the full 2.9.0 release notes](/docs/release-notes-2-9/#v2-9-0): the security fixes,
-what to check when upgrading, what changed and the fixes on each server.
+[Read the full 2.9.2 release notes](/docs/release-notes-2-9/#v2-9-2): the security fix
+and what to check when upgrading.
 
 </div>
 
@@ -43,7 +42,7 @@ what to check when upgrading, what changed and the fixes on each server.
 
 Each line has its own page with the full entry for every release, collapsed and newest first.
 
-- [mod_pagespeed 2.9](/docs/release-notes-2-9/): 2.9.0, 2026-11-17. The current release: the module and the optimizer worker together, with security fixes.
+- [mod_pagespeed 2.9](/docs/release-notes-2-9/): 2.9.2, 2026-11-19, and 2.9.0, 2026-11-17. The current release: the module and the optimizer worker together, with security fixes.
 - [mod_pagespeed 2.8](/docs/release-notes-2-8/): 2.8.2, 2026-11-13, 2.8.1, 2026-11-09, and 2.8.0, 2026-11-05. The module and the optimizer worker together; 2.8.1 fixes critical CSS for Tailwind CSS v4 and large stylesheets, cache flushes and several IIS issues.
 - [mod_pagespeed 2.7](/docs/release-notes-2-7/): 2.7.0, 2026-11-01. The module and the optimizer worker together, with security fixes.
 - [mod_pagespeed 2.6](/docs/release-notes-2-6/): 2.6.0, 2026-10-28. The module and the optimizer worker together, with security fixes in the nginx and Apache modules.
@@ -70,7 +69,11 @@ Every release, grouped into four periods and newest first inside each. Each line
 
 ### One product since 2.1.0 (September to November 2026) {#era-converged}
 
-mod_pagespeed 2.1.0, 2.2.0, 2.3.0, 2.4.0, 2.5.0, 2.5.2, 2.6.0, 2.7.0, 2.8.0, 2.8.1 and 2.9.0 are the module and the optimizer worker released together; there is no module release 2.5.1. The [version map](#version-map) lists the version each artifact carries. See [the current release](#current-release) above and the [2.9](/docs/release-notes-2-9/), [2.8](/docs/release-notes-2-8/), [2.7](/docs/release-notes-2-7/), [2.6](/docs/release-notes-2-6/), [2.5](/docs/release-notes-2-5/), [2.4](/docs/release-notes-2-4/), [2.3](/docs/release-notes-2-3/), [2.2](/docs/release-notes-2-2/) and [2.1](/docs/release-notes-2-1/) pages for the full entries.
+mod_pagespeed 2.1.0, 2.2.0, 2.3.0, 2.4.0, 2.5.0, 2.5.2, 2.6.0, 2.7.0, 2.8.0, 2.8.1, 2.9.0 and 2.9.2 are the module and the optimizer worker released together; there is no module release 2.5.1 or 2.9.1. The [version map](#version-map) lists the version each artifact carries. See [the current release](#current-release) above and the [2.9](/docs/release-notes-2-9/), [2.8](/docs/release-notes-2-8/), [2.7](/docs/release-notes-2-7/), [2.6](/docs/release-notes-2-6/), [2.5](/docs/release-notes-2-5/), [2.4](/docs/release-notes-2-4/), [2.3](/docs/release-notes-2-3/), [2.2](/docs/release-notes-2-2/) and [2.1](/docs/release-notes-2-1/) pages for the full entries.
+
+<div class="rn-entry">
+<p class="rn-summary-line"><span class="rn-ver"><a href="/docs/release-notes-2-9/#v2-9-2">2.9.2</a></span> <span class="rn-date">2026-11-19</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update, released together with the optimizer worker: the nginx we bundle in the container images and the ASP.NET Core sidecar native pair is updated to 1.30.7. Update recommended.</span></p>
+</div>
 
 <div class="rn-entry" id="v2-9-0">
 <p class="rn-summary-line"><span class="rn-ver"><a href="/docs/release-notes-2-9/#v2-9-0">2.9.0</a></span> <span class="rn-date">2026-11-17</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update, released together with the optimizer worker: several classes of security fix in the module, the optimizer worker and the ASP.NET Core package, <code>pagespeed-doctor</code>, and combined resources that no longer answer 404 while an input is briefly unavailable. Update recommended.</span></p>
@@ -375,57 +378,58 @@ the release entry says so.
 
 | # | Advisory | Impact | Affected | Fixed in | Update |
 | --- | --- | --- | --- | --- | --- |
-| 1 | none | cross-site scripting in rewritten HTML, scripts and stylesheets | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 2 | none | a response meant for one visitor is no longer served to others, shared cache | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 3 | none | cached and restricted content stays with its site and is not served to other clients, multi-site setups | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 4 | none | memory safety while optimizing page content | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 5 | none | response framing, proxies and caches in front of the server | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 6 | none | local privilege escalation in cache file handling, when the server is started as root | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 7 | none | disclosure of visitor credentials to mapped hosts (MapProxyDomain) and of the option-override token to clients | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 8 | none | memory, CPU and connections one page or request can use are bounded, resource and beacon handling | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 9 | none | a response meant for one visitor is no longer served to others, shared cache | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 10 | none | cached and restricted content stays with its site and is not served to other clients, multi-site setups and the ASP.NET Core package | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 11 | none | cross-site scripting in rewritten HTML pages | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
-| 12 | none | restricted content no longer reaches other clients | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 13 | none | cached content stays with its site and URL | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 14 | none | optimizer requests stay on the site's own hosts | the nginx module and the ASP.NET Core package in releases up to and including 2.7.0, only where agent optimization is on | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 15 | none | optimized pages keep the page's structure | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 16 | none | requests can no longer exceed the server's configured limits | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 17 | none | server workers are protected from crafted content | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
-| 18 | none | access to admin pages, IIS module | the IIS module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 19 | none | access to admin pages behind a local reverse proxy, IIS module | the IIS module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 20 | none | cache actions and configuration output, admin console | all releases up to and including 2.6.0, on consoles reachable beyond localhost | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 21 | none | resource exhaustion, admin console | all releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 22 | none | cache integrity, response caching | all releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 23 | none | resource exhaustion, nginx module | the nginx module in releases from 1.15.0 up to and including 2.6.0, only where `CycloneZeroCopyServe` is on | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 24 | none | missing headers on cached responses, ASP.NET Core package | all package releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 25 | none | availability, optimized resource URLs | releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 26 | none | memory safety, nginx module | the nginx module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 27 | none | integrity of the optimization cache | releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 28 | none | integrity of in-place optimization, nginx module | the nginx module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 29 | none | cache disclosure, authenticated responses | releases up to and including 2.6.0, nginx and Apache sites behind a shared cache | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 30 | none | availability of cached stylesheets and scripts, in-place optimization | releases up to and including 2.6.0, where the origin compresses with brotli or zstd | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 31 | none | availability, nginx module | the nginx module in releases from 2.5.0 up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 32 | none | content integrity, inline scripts | releases from 2.5.0 up to and including 2.6.0, on sites with pages in more than one character set | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
-| 33 | none | denial of service, admin endpoints, nginx module | the nginx module in releases from 1.15.0 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
-| 34 | none | request handling, nginx module | the nginx module in releases from 1.5.27 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
-| 35 | none | exposure of origin data to browsers in some proxy configurations, Apache module | the Apache module in releases from 1.4.26 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
-| 36 | none | memory safety in some configurations, Apache module | the Apache module in releases from 1.3.25 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
-| 37 | CVE-2026-15176, CVE-2026-93479 | dependency update, bundled nginx (1.30.6) | the container images up to and including 2.5.0 (bundled nginx before 1.30.6); the per-distribution `nginx-module-pagespeed` packages use the distribution's own nginx | [mod_pagespeed 2.5.2](/docs/release-notes-2-5/#v2-5-2) | Recommended |
-| 38 | CVE-2026-33636, CVE-2026-33416, CVE-2026-34757 | dependency update, bundled libpng (1.6.58) | the optimizer worker (`pagespeed-optimizer`) up to and including 2.5.1 | [mod_pagespeed 2.5.2](/docs/release-notes-2-5/#v2-5-2) | Recommended |
-| 39 | none | denial of service and memory exposure, image optimization | the module in releases up to and including 1.19.0 with image optimization enabled, and the optimizer worker up to and including 2.4.0 for crafted images | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 40 | none | resource exhaustion, crafted scripts, stylesheets and fetched resources | the module in releases up to and including 1.19.0, and the optimizer worker up to and including 2.4.0 for JavaScript parsing | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 41 | none | memory safety under concurrent load, cache refresh, fetcher and cache shutdown | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 42 | none | out-of-bounds reads, crafted cache contents | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 43 | none | integrity, disk cache contents and damaged cache files | the module in releases up to and including 1.19.0, the optimizer worker and the `WeAmp.PageSpeed.NativeAssets.*` packages up to and including 2.4.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 44 | none | truncated responses cached as complete, nginx module | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 45 | none | cache lifetime longer than the origin allowed, including private responses | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 46 | none | signed resource URLs constructible from the server log | the module in releases up to and including 1.19.0 with URL signing enabled | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 47 | none | weak secrets, measurement proxy password and beacon nonces | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 48 | none | memory corruption, image spriting | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 49 | none | denial of service, statistics admin page | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 50 | none | crashes and truncated responses, IIS module and Windows shared memory | the IIS module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
-| 51 | none | local exposure and unauthenticated endpoint, ASP.NET Core sidecar | `WeAmp.PageSpeed.Sidecar` up to and including 1.17.0; the fixes are in this source release and an updated package follows, on the product version (2.5.x) | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 1 | CVE-2026-125283, CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425, CVE-2026-120967, CVE-2026-123640, CVE-2026-118899 | dependency update, bundled nginx (1.30.7) | the container images and the ASP.NET Core sidecar native pair up to and including 2.9.0 (bundled nginx before 1.30.7); the per-distribution `nginx-module-pagespeed` packages use the distribution's own nginx | [mod_pagespeed 2.9.2](/docs/release-notes-2-9/#v2-9-2) | Recommended |
+| 2 | none | cross-site scripting in rewritten HTML, scripts and stylesheets | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 3 | none | a response meant for one visitor is no longer served to others, shared cache | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 4 | none | cached and restricted content stays with its site and is not served to other clients, multi-site setups | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 5 | none | memory safety while optimizing page content | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 6 | none | response framing, proxies and caches in front of the server | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 7 | none | local privilege escalation in cache file handling, when the server is started as root | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 8 | none | disclosure of visitor credentials to mapped hosts (MapProxyDomain) and of the option-override token to clients | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 9 | none | memory, CPU and connections one page or request can use are bounded, resource and beacon handling | all releases up to and including 2.8.2 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 10 | none | a response meant for one visitor is no longer served to others, shared cache | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 11 | none | cached and restricted content stays with its site and is not served to other clients, multi-site setups and the ASP.NET Core package | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 12 | none | cross-site scripting in rewritten HTML pages | optimizer releases up to and including 2.8.1 | [mod_pagespeed 2.9.0](/docs/release-notes-2-9/#v2-9-0) | Recommended |
+| 13 | none | restricted content no longer reaches other clients | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 14 | none | cached content stays with its site and URL | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 15 | none | optimizer requests stay on the site's own hosts | the nginx module and the ASP.NET Core package in releases up to and including 2.7.0, only where agent optimization is on | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 16 | none | optimized pages keep the page's structure | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 17 | none | requests can no longer exceed the server's configured limits | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 18 | none | server workers are protected from crafted content | all releases up to and including 2.7.0 | [mod_pagespeed 2.8.0](/docs/release-notes-2-8/#v2-8-0) | Recommended |
+| 19 | none | access to admin pages, IIS module | the IIS module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 20 | none | access to admin pages behind a local reverse proxy, IIS module | the IIS module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 21 | none | cache actions and configuration output, admin console | all releases up to and including 2.6.0, on consoles reachable beyond localhost | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 22 | none | resource exhaustion, admin console | all releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 23 | none | cache integrity, response caching | all releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 24 | none | resource exhaustion, nginx module | the nginx module in releases from 1.15.0 up to and including 2.6.0, only where `CycloneZeroCopyServe` is on | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 25 | none | missing headers on cached responses, ASP.NET Core package | all package releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 26 | none | availability, optimized resource URLs | releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 27 | none | memory safety, nginx module | the nginx module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 28 | none | integrity of the optimization cache | releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 29 | none | integrity of in-place optimization, nginx module | the nginx module in releases up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 30 | none | cache disclosure, authenticated responses | releases up to and including 2.6.0, nginx and Apache sites behind a shared cache | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 31 | none | availability of cached stylesheets and scripts, in-place optimization | releases up to and including 2.6.0, where the origin compresses with brotli or zstd | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 32 | none | availability, nginx module | the nginx module in releases from 2.5.0 up to and including 2.6.0 | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 33 | none | content integrity, inline scripts | releases from 2.5.0 up to and including 2.6.0, on sites with pages in more than one character set | [mod_pagespeed 2.7.0](/docs/release-notes-2-7/#v2-7-0) | Recommended |
+| 34 | none | denial of service, admin endpoints, nginx module | the nginx module in releases from 1.15.0 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
+| 35 | none | request handling, nginx module | the nginx module in releases from 1.5.27 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
+| 36 | none | exposure of origin data to browsers in some proxy configurations, Apache module | the Apache module in releases from 1.4.26 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
+| 37 | none | memory safety in some configurations, Apache module | the Apache module in releases from 1.3.25 up to and including 2.5.2 | [mod_pagespeed 2.6.0](/docs/release-notes-2-6/#v2-6-0) | Recommended |
+| 38 | CVE-2026-15176, CVE-2026-93479 | dependency update, bundled nginx (1.30.6) | the container images up to and including 2.5.0 (bundled nginx before 1.30.6); the per-distribution `nginx-module-pagespeed` packages use the distribution's own nginx | [mod_pagespeed 2.5.2](/docs/release-notes-2-5/#v2-5-2) | Recommended |
+| 39 | CVE-2026-33636, CVE-2026-33416, CVE-2026-34757 | dependency update, bundled libpng (1.6.58) | the optimizer worker (`pagespeed-optimizer`) up to and including 2.5.1 | [mod_pagespeed 2.5.2](/docs/release-notes-2-5/#v2-5-2) | Recommended |
+| 40 | none | denial of service and memory exposure, image optimization | the module in releases up to and including 1.19.0 with image optimization enabled, and the optimizer worker up to and including 2.4.0 for crafted images | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 41 | none | resource exhaustion, crafted scripts, stylesheets and fetched resources | the module in releases up to and including 1.19.0, and the optimizer worker up to and including 2.4.0 for JavaScript parsing | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 42 | none | memory safety under concurrent load, cache refresh, fetcher and cache shutdown | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 43 | none | out-of-bounds reads, crafted cache contents | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 44 | none | integrity, disk cache contents and damaged cache files | the module in releases up to and including 1.19.0, the optimizer worker and the `WeAmp.PageSpeed.NativeAssets.*` packages up to and including 2.4.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 45 | none | truncated responses cached as complete, nginx module | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 46 | none | cache lifetime longer than the origin allowed, including private responses | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 47 | none | signed resource URLs constructible from the server log | the module in releases up to and including 1.19.0 with URL signing enabled | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 48 | none | weak secrets, measurement proxy password and beacon nonces | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 49 | none | memory corruption, image spriting | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 50 | none | denial of service, statistics admin page | the module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 51 | none | crashes and truncated responses, IIS module and Windows shared memory | the IIS module in releases up to and including 1.19.0 | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
+| 52 | none | local exposure and unauthenticated endpoint, ASP.NET Core sidecar | `WeAmp.PageSpeed.Sidecar` up to and including 1.17.0; the fixes are in this source release and an updated package follows, on the product version (2.5.x) | [mod_pagespeed 2.5.0](/docs/release-notes-2-5/#v2-5-0) | Recommended |
 | 41 | — | missing security headers — cached responses, nginx module | the nginx module in the container images and Helm chart, in releases up to and including 2.3.0 | [mod_pagespeed 2.4.0](/docs/release-notes-2-4/#v2-4-0) | Recommended; cached responses regain the headers as they expire, or purge the cache after upgrading to restore them at once |
 | 42 | — | resource exhaustion — image optimization | releases up to and including 1.17.0 with image conversion enabled | [mod_pagespeed 2.3.0](/docs/release-notes-2-3/#v2-3-0) | Recommended; animations above the new frame limit (default 200) are no longer converted |
 | 43 | — | dependency update — Envoy filter (Envoy 1.37.6, advisories of 2026-08-26) | the Envoy filter in releases up to and including 1.17.0, built against Envoy 1.37.5 or older | [mod_pagespeed 2.3.0](/docs/release-notes-2-3/#v2-3-0) | Recommended |

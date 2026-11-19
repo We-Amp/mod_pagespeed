@@ -248,8 +248,8 @@ that come from compiling the old module from source.
 The `nginx-module-pagespeed-nginxorg` package is the same native module, built
 for nginx.org's stable nginx on Debian 13 and Ubuntu 24.04 and on Enterprise
 Linux 9, amd64 (x86_64) only. Each build is pinned to one nginx version, which
-the package version names (`<version>+ngx1.30.6~trixie`; on Enterprise Linux
-the package requires `nginx = 2:1.30.6`), so it must match the nginx you run,
+the package version names (`<version>+ngx1.30.7~trixie`; on Enterprise Linux
+the package requires `nginx = 2:1.30.7`), so it must match the nginx you run,
 and it cannot be installed alongside `nginx-module-pagespeed`. There is no
 build for nginx.org's mainline, and none for Enterprise Linux 10.
 
@@ -295,7 +295,7 @@ rather than moving nginx when no package exists for that version yet.
 format, so neither works with this package.
 
 ```dockerfile
-FROM nginx:1.30.6
+FROM nginx:1.30.7
 RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
  && curl -fsSL https://packages.modpagespeed.com/install.sh | sh \
  && apt-get update \
@@ -332,8 +332,8 @@ proxy brings its own nginx inside the image.
 | Native module on Ubuntu 26.04 resolute                                         | 1.28.3                          | the distribution's stock nginx (amd64 + arm64)     |
 | Native module on AlmaLinux / RHEL / Rocky 9                                    | 1.20.1                          | the distribution's stock nginx (x86_64 + aarch64)  |
 | Native module on AlmaLinux / RHEL / Rocky 10                                   | the distribution's stock nginx  | the distribution's stock nginx (x86_64)            |
-| Native module for nginx.org's stable nginx (`nginx-module-pagespeed-nginxorg`) on Debian 13, Ubuntu 24.04 and AlmaLinux / RHEL / Rocky 9 | 1.30.6 (nginx.org's stable; one nginx version per build) | nginx.org's repository (amd64 / x86_64) or the nginx Docker image (amd64) |
-| Docker / nginx reverse proxy (`pagespeed-nginx` and `pagespeed-combined` images) | 1.30.6                        | bundled in the image                               |
+| Native module for nginx.org's stable nginx (`nginx-module-pagespeed-nginxorg`) on Debian 13, Ubuntu 24.04 and AlmaLinux / RHEL / Rocky 9 | 1.30.7 (nginx.org's stable; one nginx version per build) | nginx.org's repository (amd64 / x86_64) or the nginx Docker image (amd64) |
+| Docker / nginx reverse proxy (`pagespeed-nginx` and `pagespeed-combined` images) | 1.30.7                        | bundled in the image                               |
 
 nginx refuses to load a module built for a different version, and
 `--with-compat` does not relax that check, so the native module follows your

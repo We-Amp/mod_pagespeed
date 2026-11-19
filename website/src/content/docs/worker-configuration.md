@@ -57,7 +57,7 @@ package rows from the signed repository's distribution matrix.
 | Native module package, Ubuntu 24.04 noble                                           | nginx 1.24.0 (the distribution's stock nginx; exact-version pin) | Native module         |
 | Native module package, Ubuntu 26.04 resolute                                        | nginx 1.28.3 (the distribution's stock nginx; exact-version pin) | Native module         |
 | Native module package, AlmaLinux 9 (yum)                                            | nginx 1.20.1 (stock nginx; exact-version pin)                    | Native module         |
-| NuGet sidecar `WeAmp.PageSpeed.Sidecar`                                             | nginx 1.30.6, bundled in the package                             | Thin module + worker  |
+| NuGet sidecar `WeAmp.PageSpeed.Sidecar`                                             | nginx 1.30.7, bundled in the package                             | Thin module + worker  |
 
 <!-- generated:end nginx-compat -->
 

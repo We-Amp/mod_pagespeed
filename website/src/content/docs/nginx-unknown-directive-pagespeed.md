@@ -91,7 +91,7 @@ it as unverified and test on a staging domain first. We would like to hear how i
 [nginx module](/docs/installation-module/#native-nginx-module) loads into the
 nginx that your distribution ships. For nginx.org's stable nginx there is a
 separate package, `nginx-module-pagespeed-nginxorg`, built for one nginx
-version at a time (currently 1.30.6), for amd64 on Debian 13, Ubuntu 24.04 and
+version at a time (currently 1.30.7), for amd64 on Debian 13, Ubuntu 24.04 and
 Enterprise Linux 9. It cannot be installed together with the distribution
 package. The module does not load into a different nginx build, and we have
 not documented or tested it for the `sw-nginx` package. We make no claim that

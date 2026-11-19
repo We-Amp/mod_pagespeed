@@ -494,7 +494,7 @@ export const PKG_OPTIMIZER = 'pagespeed-optimizer'; // the optimizer worker
 // (X-Mod-Pagespeed on Apache, X-Page-Speed on nginx), which is what the
 // homepage quick-start shows. Bump it when new module packages are published;
 // test/sync/module-package-version.test.ts compares it with the live index.
-export const MODULE_PACKAGE_VERSION = '2.9.0';
+export const MODULE_PACKAGE_VERSION = '2.9.2';
 
 // --- NuGet packages ---------------------------------------------------------
 export const PKG_ASPNETCORE = 'WeAmp.PageSpeed.AspNetCore'; // the ASP.NET Core middleware
@@ -504,11 +504,11 @@ export const PKG_SIDECAR_NATIVE = 'WeAmp.PageSpeed.Sidecar.NativeAssets.Linux';
 // every full release (release-notes-2-6.mdx, release-notes-2-8.mdx), so the
 // package version is the release version in the release manifest.
 // Its own literal: a module-only release moves MODULE_PACKAGE_VERSION but not the NuGet packages.
-export const SIDECAR_VERSION = '2.9.0'; // WeAmp.PageSpeed.Sidecar package version on nuget.org
+export const SIDECAR_VERSION = '2.9.2'; // WeAmp.PageSpeed.Sidecar package version on nuget.org
 // nginx bundled in the sidecar native pair: the bundled nginx of the release,
-// docker/nginx-version.txt (release-notes-2-5.mdx: 1.30.6 covers the
+// docker/nginx-version.txt (release-notes-2-9.mdx: 1.30.7 covers the
 // container images and the sidecar native pair).
-export const SIDECAR_NGINX_VERSION = '1.30.6';
+export const SIDECAR_NGINX_VERSION = '1.30.7';
 export const SIDECAR_RIDS = ['linux-x64', 'linux-arm64'];
 export const ASPNETCORE_RIDS = ['linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64'];
 // Target frameworks the ASP.NET Core middleware ships for.

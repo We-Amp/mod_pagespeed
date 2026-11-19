@@ -96,7 +96,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.9.0}
+    image: ghcr.io/we-amp/pagespeed-worker:${PAGESPEED_VERSION:-2.9.2}
     pid: 'service:pidns'
     depends_on:
       pidns:
@@ -121,7 +121,7 @@ services:
         max-file: '3'
 
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.9.0}
+    image: ghcr.io/we-amp/pagespeed-nginx:${PAGESPEED_VERSION:-2.9.2}
     pid: 'service:pidns'
     ports:
       - '${NGINX_PORT:-80}:80'
@@ -279,7 +279,7 @@ spec:
     fsGroup: 918 # the volume arrives group-owned by group pagespeed
   containers:
     - name: worker
-      image: ghcr.io/we-amp/pagespeed-worker:2.9.0
+      image: ghcr.io/we-amp/pagespeed-worker:2.9.2
       env:
         # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
         - name: ACCEPT_EULA
@@ -299,7 +299,7 @@ spec:
         timeoutSeconds: 5
 
     - name: nginx
-      image: ghcr.io/we-amp/pagespeed-nginx:2.9.0
+      image: ghcr.io/we-amp/pagespeed-nginx:2.9.2
       env:
         # Your origin; the image renders its nginx config from these two
         - name: BACKEND_HOST

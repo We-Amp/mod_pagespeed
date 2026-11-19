@@ -36,7 +36,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.9.0
+    image: ghcr.io/we-amp/pagespeed-worker:2.9.2
     pid: 'service:pidns'
     depends_on:
       pidns:
@@ -55,7 +55,7 @@ services:
     #   - "9880:9880"  # Optional: worker HTTP API + web console
 
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:2.9.0
+    image: ghcr.io/we-amp/pagespeed-nginx:2.9.2
     pid: 'service:pidns'
     ports:
       - '80:80'
