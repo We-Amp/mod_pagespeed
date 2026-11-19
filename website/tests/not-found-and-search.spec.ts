@@ -238,7 +238,7 @@ test.describe('404 page', () => {
     await stubUmami(page);
     const response = await page.goto('/docs/image-filtres/');
     expect(response?.status()).toBe(404);
-    await expect(page.locator('h1')).toHaveText('Page not found');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Page not found');
     await expect(page.locator('main')).toContainText(
       'This page does not exist. Search the site, or start from one of these.',
     );

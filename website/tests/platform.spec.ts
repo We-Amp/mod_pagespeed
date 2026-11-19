@@ -23,7 +23,7 @@ const HUB_WEDGES = [
 test.describe('Transform packs interest forms', () => {
   test('/platform/ carries one form per direction and the status line', async ({ page }) => {
     await page.goto('/platform/');
-    await expect(page.locator('h1')).toHaveText('One interceptor, many packs');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('One interceptor, many packs');
     await expect(page.locator('main')).toContainText(
       'The edge-SEO pack is free and available now.',
     );
@@ -102,7 +102,9 @@ test.describe('Transform packs interest forms', () => {
     page,
   }) => {
     await page.goto('/platform/consent/');
-    await expect(page.locator('h1')).toHaveText('Does your site leak before consent?');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'Does your site leak before consent?',
+    );
     const forms = page.locator('form[data-platform-form]');
     await expect(forms).toHaveCount(1);
     await expect(forms.first()).toHaveAttribute('data-wedge', 'consent-enforcement');

@@ -55,7 +55,7 @@ apt_robust_setup() {
 
 # apt-get update exits 0 when an index fails to download and then the
 # install fails later with a misleading "Unable to locate package". Treat a
-# failed index as a failure here, retry once, and show what failed.
+# failed index as a failure here, retry per APT_RETRY_ATTEMPTS, and show what failed.
 apt_update() {
   local attempts="${APT_RETRY_ATTEMPTS:-2}" attempt out rc delay
   local -a delays

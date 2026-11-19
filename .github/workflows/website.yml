@@ -301,7 +301,7 @@ jobs:
     if: github.event_name != 'merge_group' && !(github.event_name == 'pull_request' && !inputs.called && vars.WEBSITE_GATE != 'off')
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 30 }}
+    timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 45 }}
     defaults:
       run:
         working-directory: website
@@ -321,7 +321,9 @@ jobs:
         env:
           UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
         run: |
-          bash ../tools/ci/apt-robust.sh update
+          # setup only configures apt retries and the mirror; --with-deps
+          # runs its own apt-get update.
+          bash ../tools/ci/apt-robust.sh setup
           npx playwright install --with-deps chromium
 
       # CI=true switches the config to CI mode (one worker, one retry,

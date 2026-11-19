@@ -18,7 +18,7 @@ test.describe('Support page', () => {
     expect(title).not.toMatch(/mod_pagespeed 2\.1(?!\.)/);
     const description = await page.locator('meta[name="description"]').getAttribute('content');
     expect(description!.length).toBeLessThanOrEqual(155);
-    await expect(page.locator('h1')).toHaveCount(1);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
   });
 
   test('renders every section', async ({ page }) => {
