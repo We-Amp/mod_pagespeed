@@ -8,7 +8,8 @@
 # Build from the repository root:
 #   docker build -f tools/ci/toolchain-images/Dockerfile.jammy .
 #
-# Nothing in the build consumes this image yet.
+# The jammy build leg builds in this image, by the digest in
+# install/nginx/toolchain-images.lock (tools/ci/toolchain_image.sh).
 
 # The base is pinned by digest (the index digest, so it is multi-arch).
 FROM ubuntu:22.04@sha256:9abcaffc92a5279fff3a6a41635c0800ea33e528425fb389658806476e7defde

@@ -157,8 +157,11 @@ built against exactly that nginx, and the `pagespeed-nginx-launch` shim.
 uses the same script for the pair it releases (`docs/ci/release.md`).
 
 - **Build base and compatibility floor.** The pair is built by the focal recipe
-  of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
-  pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
+  of `install/nginx/build_module_in_container.sh` in the focal toolchain image:
+  the Ubuntu 20.04 image pinned by digest (`FOCAL_IMAGE` in the script) with
+  GCC 13 and clang 18 installed once, named by digest in
+  `install/nginx/toolchain-images.lock` (see "Toolchain images" in
+  `docs/ci/release.md`). Its glibc 2.31 is the
   compatibility floor of the sidecar, with libstdc++ linked statically. The
   matched nginx is built against PCRE2 10.49 (`PCRE2_VERSION` in the recipe,
   compiled from the sha256-pinned upstream tarball, bumped with the nginx pin)

@@ -47,6 +47,11 @@
 #   BAZEL               bazel/bazelisk binary (default: bazel, else bazelisk)
 #   GCC13_PREFIX        el9 gcc-toolset-13 prefix (default /opt/rh/gcc-toolset-13/root/usr)
 #   SKIP_DEPS=1         skip the apt/dnf build-dep install (deps already present)
+#   TOOLCHAIN_PPA_FALLBACK=1  focal and jammy only: outside a toolchain image
+#                       (install/nginx/toolchain-images.lock), install g++-13
+#                       and clang 18 from the Ubuntu toolchain PPA and
+#                       apt.llvm.org instead of stopping (see
+#                       use_baked_toolchain). Off by default.
 #   BAZEL_CPUS          optional CPU cap for the Bazel build: adds
 #                       --local_cpu_resources=N --jobs=N so peak RSS stays
 #                       ~1.5 GB x N, letting several per-distro legs share one box
@@ -472,6 +477,63 @@ add_toolchain_ppa() {
   return 1
 }
 
+# The focal and jammy legs build in a toolchain image (tools/ci/toolchain-images/,
+# named by digest in install/nginx/toolchain-images.lock): the stock Ubuntu
+# image with g++-13, gcc-13 and libstdc++-13-dev from the toolchain PPA and
+# clang, lld and llvm 18 from apt.llvm.org already installed, and their
+# versions recorded in TOOLCHAIN_MARKER. In such an image the recipe installs
+# nothing from those two repositories.
+#
+# use_baked_toolchain SUITE: returns 0 when this container is the toolchain
+# image of SUITE and every package the marker records is installed at exactly
+# that version; returns 1 when there is no marker and TOOLCHAIN_PPA_FALLBACK=1
+# asks for the old path (the compilers from the PPA and apt.llvm.org, for a
+# local build in a stock image or an emergency); stops the build otherwise
+# (no marker and no fallback, a marker of another suite, a version that
+# differs from the marker, a compiler missing).
+TOOLCHAIN_MARKER="${TOOLCHAIN_MARKER:-/etc/pagespeed-toolchain-baked}"
+use_baked_toolchain() {
+  local suite="$1" line pkg want have tool
+  if [ ! -f "${TOOLCHAIN_MARKER}" ]; then
+    if [ "${TOOLCHAIN_PPA_FALLBACK:-}" = "1" ]; then
+      echo "==> TOOLCHAIN_PPA_FALLBACK=1: installing g++-13 and clang 18 from the Ubuntu toolchain PPA and apt.llvm.org" >&2
+      return 1
+    fi
+    echo "ERROR: the ${suite} leg builds in its toolchain image (install/nginx/toolchain-images.lock); this container has no ${TOOLCHAIN_MARKER}." >&2
+    echo "  Build in that image, or set TOOLCHAIN_PPA_FALLBACK=1 to install the compilers from the Ubuntu toolchain PPA and apt.llvm.org." >&2
+    exit 1
+  fi
+  if ! grep -qx "suite=${suite}" "${TOOLCHAIN_MARKER}"; then
+    echo "ERROR: ${TOOLCHAIN_MARKER} is not the toolchain image of ${suite} ($(grep '^suite=' "${TOOLCHAIN_MARKER}" || echo 'no suite line'))" >&2
+    exit 1
+  fi
+  for pkg in g++-13 gcc-13 libstdc++-13-dev clang-18 lld-18 llvm-18; do
+    if ! grep -q "^pkg:${pkg}=" "${TOOLCHAIN_MARKER}"; then
+      echo "ERROR: ${TOOLCHAIN_MARKER} records no ${pkg}" >&2
+      exit 1
+    fi
+  done
+  while IFS= read -r line; do
+    case "${line}" in pkg:*=*) ;; *) continue ;; esac
+    line="${line#pkg:}"
+    pkg="${line%%=*}"
+    want="${line#*=}"
+    have="$(dpkg-query -W -f='${Version}' "${pkg}" 2>/dev/null || true)"
+    if [ "${have}" != "${want}" ]; then
+      echo "ERROR: toolchain image: ${pkg} is ${have:-not installed}, ${TOOLCHAIN_MARKER} records ${want}" >&2
+      exit 1
+    fi
+  done < "${TOOLCHAIN_MARKER}"
+  for tool in gcc-13 g++-13 clang clang++ ld.lld; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+      echo "ERROR: toolchain image: ${tool} is not on PATH" >&2
+      exit 1
+    fi
+  done
+  echo "==> toolchain image (${suite}): $(gcc-13 --version | head -n 1); $(clang --version | head -n 1)"
+  return 0
+}
+
 install_deps_focal() {
   # Ubuntu 20.04 (glibc 2.31) build base for the PORTABLE sidecar pair.
   # Building here gives the module a glibc-2.31 floor — focal's glibc headers do
@@ -495,17 +557,20 @@ install_deps_focal() {
     zlib1g-dev libpcre2-dev libssl-dev \
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
-  # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
-  add_toolchain_ppa
-  apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
-  # clang/lld/llvm 18. focal's stock clang predates C++20/23 support. apt.llvm.org
-  # is added for it, but on focal the candidate apt picks is Ubuntu's own
-  # focal-updates/focal-security build (1:18.1.8-11~20.04.2, priority 500 like
-  # apt.llvm.org's, newer version); build-info.json records what was used.
   local CLANG_VER=18
-  add_llvm_apt_repo "${CLANG_VER}"
-  apt-get install -y --no-install-recommends \
-    clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
+  # The toolchain image has the compilers below already (use_baked_toolchain).
+  if ! use_baked_toolchain focal; then
+    # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
+    add_toolchain_ppa
+    apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
+    # clang/lld/llvm 18. focal's stock clang predates C++20/23 support. apt.llvm.org
+    # is added for it, but on focal the candidate apt picks is Ubuntu's own
+    # focal-updates/focal-security build (1:18.1.8-11~20.04.2, priority 500 like
+    # apt.llvm.org's, newer version); build-info.json records what was used.
+    add_llvm_apt_repo "${CLANG_VER}"
+    apt-get install -y --no-install-recommends \
+      clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
+  fi
   # The clang-libstdcxx13 bazel config + nginx make invoke clang/clang++/ld.lld by
   # bare name; apt.llvm.org installs versioned binaries only.
   update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${CLANG_VER}   100
@@ -806,9 +871,13 @@ install_deps_jammy() {
   # 2.35, not a newer libc), so install it natively (no trixie sideload needed).
   # Stock clang (14) is borderline for C++23, so use clang-18 from apt.llvm.org.
   install_deps_debian_common
-  add_toolchain_ppa
-  apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
-  install_llvm_clang 18
+  # The toolchain image has g++-13 and clang 18 already, with the bare
+  # clang/clang++/ld.lld names set up (use_baked_toolchain checks them).
+  if ! use_baked_toolchain jammy; then
+    add_toolchain_ppa
+    apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
+    install_llvm_clang 18
+  fi
   install_bazelisk
 }
 

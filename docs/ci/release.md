@@ -689,11 +689,8 @@ All of it is public and read only, and needs no credential:
   sidecar pair are the exception: the Ubuntu 20.04 build image, the Debian 11
   and 12 smoke images and the .NET 8 and .NET 10 SDK images (from
   mcr.microsoft.com) are pinned by digest in `tools/ci/release_sidecar.sh`;
-- for the sidecar pair, the focal recipe's toolchain inside the build image
-  (the Ubuntu toolchain PPA for GCC 13 and apt.llvm.org for clang 18, each
-  trusted only with its signing key pinned by fingerprint in
-  `install/nginx/build_module_in_container.sh`; the package versions they
-  served are recorded in `build-info.json`), the nginx source tarball
+- for the sidecar pair and the jammy deb, the toolchain image the leg builds
+  in (GHCR, see "Toolchain images" below), and the nginx source tarball
   (sha256-pinned in the same script), and the NuGet packages the sidecar's
   test suite restores from nuget.org (versions and content hashes locked by
   the test project's lock files);
@@ -709,6 +706,40 @@ All of it is public and read only, and needs no credential:
 The images and mirrors are not pinned by digest, so a release build depends on
 their state on the day; part of the verification is the checks inside the
 packages and the smokes.
+
+### Toolchain images
+
+The focal leg (the sidecar pair) and the jammy leg (the jammy deb) need GCC 13
+and clang 18, which Ubuntu 20.04 and 22.04 do not ship. They build in a
+toolchain image instead of installing the compilers at build time: the stock
+Ubuntu image, pinned by digest, with GCC 13 from the Ubuntu toolchain PPA and
+clang 18 from apt.llvm.org installed once (`tools/ci/toolchain-images/`, built
+and attested by `.github/workflows/toolchain-images.yml`, public on GHCR). A
+build in such an image contacts neither repository.
+
+- `install/nginx/toolchain-images.lock` names each image by digest. It is a
+  file of the tree, so a release (and a candidate) builds with the images of
+  its own commit, and a change of digest is a reviewed commit like any other.
+  `tools/ci/toolchain_image.sh` reads it; a missing or malformed line, or a
+  tag in place of a digest, stops the leg.
+- The attestation of every digest in the lock is checked on every pull request
+  and merge group (`CI tooling self-tests`, hosted). The build legs check it
+  again before the pull where the runner's gh has the attestation command
+  (the hosted runners); `TOOLCHAIN_IMAGE_VERIFY=required|auto|off` sets the
+  policy (default `auto`). Jobs that only run on hosted runners set
+  `required`, so a missing token or gh fails them. A job whose `runs-on`
+  chooses between a hosted runner and the build-runner label sets `auto` only
+  when it chose the build-runner label (whose gh lacks the attestation
+  command) and `required` otherwise. The signer must be
+  `toolchain-images.yml` run from `refs/heads/master`.
+- The recipe checks it is in the image of its suite: every package the image's
+  `/etc/pagespeed-toolchain-baked` records must be installed at exactly that
+  version. Outside a toolchain image the focal and jammy recipes stop.
+- `TOOLCHAIN_PPA_FALLBACK=1` (off by default, never set by the lane) builds in
+  the stock image and installs the compilers from the PPA and apt.llvm.org as
+  before, for a local build or an emergency when GHCR is unavailable.
+- A tree from before the lock (an older tag rebuilt with the tooling from
+  `master`) builds in the stock image, as it did then.
 
 ### The SBOM
 
@@ -960,7 +991,7 @@ tarball for exactly the three debug files:
   "source_sha": "<40 hex digits>",
   "nginx_version": "<the focal row of the recipe>",
   "glibc_floor": "2.31",
-  "build_image": "ubuntu:20.04@sha256:<64 hex digits>",
+  "build_image": "ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:<64 hex digits>",
   "rids": {
     "linux-x64": {
       "asset": "pagespeed-sidecar-native-2.5.1-linux-x64.tar.gz",

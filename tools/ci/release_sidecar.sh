@@ -23,9 +23,11 @@
 #   release_sidecar.sh --self-test
 #
 # `build` runs the focal recipe of install/nginx/build_module_in_container.sh
-# in the pinned Ubuntu 20.04 image (FOCAL_IMAGE below): glibc 2.31 is the
-# compatibility floor of the pair. The container runs as root (the recipe
-# installs its toolchain with apt) and is never privileged. The image
+# in the focal toolchain image, the pinned Ubuntu 20.04 image (FOCAL_IMAGE
+# below) with g++-13 and clang 18 installed, named by digest in
+# install/nginx/toolchain-images.lock: glibc 2.31 is the compatibility floor of
+# the pair. The container runs as root (the recipe installs the rest of its
+# build dependencies with apt) and is never privileged. The image
 # architecture must be the host's: the pair is built natively, never under
 # emulation.
 #
@@ -67,6 +69,8 @@
 set -euo pipefail
 # shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
+# shellcheck source=tools/ci/toolchain_image.sh
+source "$(dirname "${BASH_SOURCE[0]}")/toolchain_image.sh"
 
 # The build image of the pair, pinned by digest: Ubuntu 20.04 (glibc 2.31), the
 # compatibility floor of the sidecar. Ubuntu 20.04 is past its standard support
@@ -75,6 +79,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 # about which hosts the sidecar supports, not an image refresh: see
 # aspnetcore/README.md.
 FOCAL_IMAGE="ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214"
+# `build` runs in the focal toolchain image instead: FOCAL_IMAGE with g++-13
+# and clang 18 installed (tools/ci/toolchain-images/Dockerfile.focal, FROM the
+# same digest), named by digest in install/nginx/toolchain-images.lock of the
+# workspace (tools/ci/toolchain_image.sh). The gates and the packaging run in
+# FOCAL_IMAGE itself. TOOLCHAIN_PPA_FALLBACK=1 builds in FOCAL_IMAGE too, with
+# the compilers from the PPA and apt.llvm.org, as before the images.
 GLIBC_FLOOR="2.31"
 # The smoke hosts: the oldest Debian the pair supports, the current Debian
 # releases, and Ubuntu 26.04 (none of the newer ones ships libpcre3).
@@ -249,8 +259,9 @@ build() {
   WS="$(abs_dir "$WS")"
   mkdir -p "$OUT"; OUT="$(abs_dir "$OUT")"
   [ -d "$WS/vendor" ] || die "build: $WS has no vendor/ (tools/vendor-deps.sh vendor)"
-  local ngxver uid gid logs attempt rc mem_args=()
+  local ngxver uid gid logs attempt rc mem_args=() build_image
   ngxver="$(focal_nginx_version "$WS")"
+  build_image="$(toolchain_image_for focal "$WS" "$FOCAL_IMAGE")" || die "build: no usable focal toolchain image"
   # A build runner's slot budget (tools/ci/slot-budget.sh: CI_SLOT_CPUS,
   # CI_SLOT_MEM_GB) caps the build's parallelism and the container's memory;
   # unset (a hosted runner, a tree without the helper) leaves both uncapped.
@@ -263,7 +274,7 @@ build() {
   fi
   uid="$(id -u)"; gid="$(id -g)"
   logs="$(mktemp -d)"
-  echo "sidecar pair: linux-${ARCH}, nginx ${ngxver}, module $(tree_version "$WS"), image ${FOCAL_IMAGE}"
+  echo "sidecar pair: linux-${ARCH}, nginx ${ngxver}, module $(tree_version "$WS"), image ${build_image}"
 
   for attempt in 1 2 3; do
     rm -f "$OUT/nginx" "$OUT/ngx_pagespeed_module.so" "$OUT/pagespeed-nginx-launch"
@@ -272,13 +283,14 @@ build() {
     # nginx tree under the workspace is removed again, and the workspace (Bazel
     # adds to the repository cache under vendor/) and the outputs are handed
     # back to the runner user, so that a later checkout can clear them.
-    docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
+    docker_pull_retry "$build_image" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
     if docker run --rm --init --platform "$(platform_of "$ARCH")" ${mem_args[@]+"${mem_args[@]}"} \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
       -e BAZEL_CPUS="${BAZEL_CPUS:-}" -e MAKE_JOBS="${MAKE_JOBS:-}" \
+      -e TOOLCHAIN_PPA_FALLBACK="${TOOLCHAIN_PPA_FALLBACK:-}" -e BUILD_IMAGE="$build_image" \
       -v "$WS:/workspace" -v "$OUT:/out" -w /workspace \
-      "$FOCAL_IMAGE" bash -c '
+      "$build_image" bash -c '
         set -euo pipefail
         [ -n "$BAZEL_CPUS" ] || unset BAZEL_CPUS
         [ -n "$MAKE_JOBS" ] || unset MAKE_JOBS
@@ -302,6 +314,7 @@ build() {
         {
           echo "clang=$(clang --version | head -1)"
           echo "gcc=$(gcc-13 --version | head -1)"
+          echo "image=${BUILD_IMAGE}"
         } > /out/toolchain.txt
         cat /out/toolchain.txt
       ' 2>&1 | tee "$logs/build.log"; then
@@ -608,12 +621,16 @@ package() {
   need_src; need_pair
   printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || die "package: --source-sha is not a commit id"
   printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die "package: bad --version '$VERSION'"
-  local rid ngxver pcre2ver tree name stage clang gcc
+  local rid ngxver pcre2ver tree name stage clang gcc image
   rid="$(rid_of "$ARCH")"
   [ -s "$PAIR/toolchain.txt" ] || die "package: the pair has no toolchain.txt (built by an older build?)"
   clang="$(sed -n 's/^clang=//p' "$PAIR/toolchain.txt")"
   gcc="$(sed -n 's/^gcc=//p' "$PAIR/toolchain.txt")"
+  image="$(sed -n 's/^image=//p' "$PAIR/toolchain.txt")"
   [ -n "$clang" ] && [ -n "$gcc" ] || die "package: toolchain.txt names no clang or gcc"
+  # The image the pair was built in (a pair from before the toolchain images: FOCAL_IMAGE).
+  [ -n "$image" ] || image="$FOCAL_IMAGE"
+  printf '%s' "$image" | grep -Eq '^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$' || die "package: toolchain.txt names an image that is not pinned by digest: $image"
   case "$clang$gcc" in *\"*|*\\*) die "package: unexpected characters in toolchain.txt" ;; esac
   ngxver="$(focal_nginx_version "$SRC")"
   pcre2ver="$(focal_pcre2_version "$SRC")"
@@ -631,7 +648,7 @@ package() {
   docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" -e PCRE2VER="$pcre2ver" \
-    -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
+    -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$image" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
     -e CLANG="$clang" -e GCC="$gcc" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
     -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
