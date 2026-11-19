@@ -1588,7 +1588,7 @@ verify_records() { # file -> job, runs-on, verify, envform, stepver, toolchain, 
     function endjob() {
       if (job == "") return
       n++; names[n] = job; RO[n] = ro; VER[n] = ver; EF[n] = envform; SV[n] = stepver
-      TC[n] = ((rnbuild && !el10) || sidecar) ? 1 : 0; AL[n] = alias; ANC[n] = anchor
+      TC[n] = tcname ? 1 : 0; AL[n] = alias; ANC[n] = anchor
       job = ""
     }
     /^[[:space:]]*#/ { next }
@@ -1596,12 +1596,13 @@ verify_records() { # file -> job, runs-on, verify, envform, stepver, toolchain, 
     injobs && /^[^[:space:]#]/ { endjob(); injobs=0 }
     injobs && /^  [^[:space:]]/ {
       endjob(); job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job)
-      ro=""; ver=""; envform=""; stepver=0; inenv=0; rnbuild=0; el10=0; sidecar=0; alias=""; anchor=""; next
+      ro=""; ver=""; envform=""; stepver=0; inenv=0; tcname=0; alias=""; anchor=""; next
     }
     !injobs || job == "" { next }
     /^    runs-on:/ { v=$0; sub(/^    runs-on:[[:space:]]*/, "", v); ro=v; inenv=0; next }
     /^    env:/ {
       v=$0; sub(/^    env:[[:space:]]*/, "", v)
+      sub(/^&[^[:space:]]+[[:space:]]*/, "", v)   # an anchor on a plain block is still a plain block
       envform = (v == "") ? "plain" : "other"; inenv=(v == ""); next
     }
     /^    steps:[[:space:]]*&/ { v=$0; sub(/^.*&/, "", v); sub(/[[:space:]].*$/, "", v); anchor=v }
@@ -1611,9 +1612,8 @@ verify_records() { # file -> job, runs-on, verify, envform, stepver, toolchain, 
       if (inenv && $0 ~ /^      TOOLCHAIN_IMAGE_VERIFY:/) { v=$0; sub(/^      TOOLCHAIN_IMAGE_VERIFY:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); ver=v }
       else stepver=1
     }
-    /release_nginx\.sh"? build/ { rnbuild=1 }
-    /--set el10/ { el10=1 }
-    /release_sidecar\.sh"? (check|package|build)/ { sidecar=1 }
+    # Any mention of the toolchain-using scripts, in any formatting; over-matching fails closed.
+    /release_nginx|release_sidecar|toolchain_image/ { tcname=1 }
     END {
       endjob()
       for (i = 1; i <= n; i++) if (ANC[i] != "" && TC[i]) anchortc[ANC[i]] = 1
@@ -1678,6 +1678,13 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     if [ "${rcond}" = "${vro}" ] || ! printf '%s' "${rcond}" | grep -qE " && '[^']+' \|\| '[^']+'$"; then
       err "${wf}: job '${vj}': TOOLCHAIN_IMAGE_VERIFY is an expression but runs-on is not a '<cond> && <hosted> || <runner>' expression (verify-parity)"
       continue
+    fi
+    # Orientation: required is the TRUE branch of the verify expression, so the
+    # TRUE branch of runs-on must be the hosted label and the FALSE branch the
+    # build-runner (fleet) label; a swapped runs-on would give auto on hosted runs.
+    if [[ "${rcond}" =~ \ \&\&\ \'([^\']+)\'\ \|\|\ \'([^\']+)\'$ ]]; then
+      case "${BASH_REMATCH[1]}" in ubuntu-*|windows-*|macos-*) ;; *) err "${wf}: job '${vj}': the TRUE branch of runs-on ('${BASH_REMATCH[1]}') must be a hosted label to mirror TOOLCHAIN_IMAGE_VERIFY ('required' first) (verify-parity)"; continue ;; esac
+      case "${BASH_REMATCH[2]}" in fleet-*) ;; *) err "${wf}: job '${vj}': the FALSE branch of runs-on ('${BASH_REMATCH[2]}') must be the build-runner label to mirror TOOLCHAIN_IMAGE_VERIFY ('auto' last) (verify-parity)"; continue ;; esac
     fi
     rcond="$(printf '%s' "${rcond}" | sed -E "s/ && '[^']+' \|\| '[^']+'\$//")"
     if [ "${vcond}" != "${rcond}" ]; then

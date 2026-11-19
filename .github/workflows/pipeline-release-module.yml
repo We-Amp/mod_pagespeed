@@ -2131,6 +2131,7 @@ jobs:
     env: &nginx-el10-env
       ARCH: x64
       CORES_PER_LEG: "12"
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &nginx-el10-steps
       - *clear-workspace
       - *tree-download
@@ -2178,7 +2179,10 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
     timeout-minutes: 350
-    env: *nginx-el10-env
+    env:
+      ARCH: x64
+      CORES_PER_LEG: "12"
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *nginx-el10-steps
 
   # ---------------------------------------------------------------------
@@ -3145,6 +3149,7 @@ jobs:
     timeout-minutes: 90
     env: &loadcheck-x64-env
       ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &loadcheck-steps
       - *unlock-vendor
 
@@ -3168,7 +3173,9 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env: *loadcheck-x64-env
+    env:
+      ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *loadcheck-steps
 
   package-load-check-nginx-arm64:
@@ -3192,6 +3199,7 @@ jobs:
     timeout-minutes: 180
     env: &packaged-env
       ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
     steps: &packaged-steps
       - *unlock-vendor
 
@@ -3215,7 +3223,9 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
     timeout-minutes: 180
-    env: *packaged-env
+    env:
+      ARCH: x64
+      TOOLCHAIN_IMAGE_VERIFY: required
     steps: *packaged-steps
 
   # ---------------------------------------------------------------------

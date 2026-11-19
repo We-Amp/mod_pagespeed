@@ -831,6 +831,7 @@ jobs:
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 150
     env:
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
       # local: the check installs packages built from this tree and the pinned
       # optimizer release, not the public package repository's.
       LOCAL_PACKAGES: ${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}
@@ -1037,6 +1038,7 @@ jobs:
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 150
     env:
+      TOOLCHAIN_IMAGE_VERIFY: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'required' || 'auto' }}
       # local: the check installs packages built from this tree and the pinned
       # optimizer release, not the public package repository's.
       LOCAL_PACKAGES: ${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}
