@@ -12,7 +12,7 @@
 #   RAT_JAR=/path/to/jar ...        reuse an already-downloaded jar
 #   RAT_REPORT=/path/to/report ...  write the full report elsewhere
 #
-# The jar is pinned by version and SHA-1; the download fails closed on any
+# The jar is pinned by version, SHA-1 and SHA-256; the download fails closed on any
 # mismatch. RAT 0.16.1 honours either -e options or the -E excludes file,
 # never both, so every exclusion (including .git and the Bazel output trees)
 # lives in .rat-excludes and RAT is invoked with -E only. A pattern RAT cannot
@@ -22,6 +22,7 @@ set -euo pipefail
 
 RAT_VERSION="0.16.1"
 RAT_SHA1="7a35d6881c9430c51ecb346bae662ee9832fe59a"
+RAT_SHA256="7021c0da25bf92539428427eefbfa1194673b7e4eea7688a17813cb075731431"
 RAT_URL="https://repo1.maven.org/maven2/org/apache/rat/apache-rat/${RAT_VERSION}/apache-rat-${RAT_VERSION}.jar"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -45,9 +46,21 @@ sha1_of() {
   fi
 }
 
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+jar_ok() {
+  [ "$(sha1_of "$1")" = "$RAT_SHA1" ] && [ "$(sha256_of "$1")" = "$RAT_SHA256" ]
+}
+
 # Maven Central's edge has answered 404 for this jar for a few minutes at a time,
 # and curl's plain --retry does not retry a 404, so retry every error and fall
-# back to the second Maven Central host name. The SHA-1 check below decides
+# back to the second Maven Central host name. The SHA-1 and SHA-256 checks below decides
 # what is used, whichever host served it.
 RAT_URL_FALLBACK="https://repo.maven.apache.org/maven2/org/apache/rat/apache-rat/${RAT_VERSION}/apache-rat-${RAT_VERSION}.jar"
 
@@ -55,9 +68,9 @@ fetch() {
   local url
   for url in "$1" "${RAT_URL_FALLBACK}"; do
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL --retry 4 --retry-all-errors --retry-delay 10 --connect-timeout 20 -o "$2" "$url" && return 0
+      curl -fsSL --proto '=https' --retry 4 --retry-all-errors --retry-delay 10 --connect-timeout 20 -o "$2" "$url" && return 0
     else
-      wget -q --tries=5 --waitretry=10 -O "$2" "$url" && return 0
+      wget -q --https-only --tries=5 --waitretry=10 -O "$2" "$url" && return 0
     fi
     echo "apache-rat download from ${url} failed" >&2
   done
@@ -66,7 +79,7 @@ fetch() {
 
 SCRATCH="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 JAR="${RAT_JAR:-$SCRATCH/apache-rat-${RAT_VERSION}.jar}"
-if [ ! -f "$JAR" ] || [ "$(sha1_of "$JAR")" != "$RAT_SHA1" ]; then
+if [ ! -f "$JAR" ] || ! jar_ok "$JAR"; then
   echo "Downloading apache-rat ${RAT_VERSION}..."
   rm -f "$JAR" "$JAR.tmp"
   fetch "$RAT_URL" "$JAR.tmp"
@@ -76,9 +89,15 @@ if [ ! -f "$JAR" ] || [ "$(sha1_of "$JAR")" != "$RAT_SHA1" ]; then
     echo "::error::apache-rat jar SHA-1 mismatch: expected $RAT_SHA1, got $got" >&2
     exit 1
   fi
+  got="$(sha256_of "$JAR.tmp")"
+  if [ "$got" != "$RAT_SHA256" ]; then
+    rm -f "$JAR.tmp"
+    echo "::error::apache-rat jar SHA-256 mismatch: expected $RAT_SHA256, got $got" >&2
+    exit 1
+  fi
   mv "$JAR.tmp" "$JAR"
 fi
-echo "apache-rat ${RAT_VERSION} sha1 ${RAT_SHA1} OK"
+echo "apache-rat ${RAT_VERSION} sha1 ${RAT_SHA1} sha256 ${RAT_SHA256} OK"
 
 # The report is written outside the tree so RAT never audits its own output;
 # a copy lands in the repository root for the CI artifact upload.
