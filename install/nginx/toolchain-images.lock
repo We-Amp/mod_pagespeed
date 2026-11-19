@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Digests of the toolchain images that .github/workflows/toolchain-images.yml
+# builds (tools/ci/toolchain-images/). One line per Ubuntu suite:
+#   <suite>=<image>@sha256:<index digest>
+# The index digest covers the amd64 and arm64 images. UNSET means the images
+# have not been built yet. Nothing reads this file yet; the workflow prints the
+# lines to paste here in its job summary and in the toolchain-images.lock
+# artifact of the run.
+focal=ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:UNSET
+jammy=ghcr.io/we-amp/mod-pagespeed-toolchain-jammy@sha256:UNSET

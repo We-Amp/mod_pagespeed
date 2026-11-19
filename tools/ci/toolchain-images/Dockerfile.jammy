@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Toolchain image for Ubuntu 22.04 (jammy): the pinned base image plus the compilers
+# the nginx build recipe installs for this suite today (g++-13 from the Ubuntu
+# toolchain PPA, clang 18 from apt.llvm.org). See bake-toolchain.sh.
+#
+# Build from the repository root:
+#   docker build -f tools/ci/toolchain-images/Dockerfile.jammy .
+#
+# Nothing in the build consumes this image yet.
+
+# The base is pinned by digest (the index digest, so it is multi-arch).
+FROM ubuntu:22.04@sha256:9abcaffc92a5279fff3a6a41635c0800ea33e528425fb389658806476e7defde
+
+COPY install/nginx/build_module_in_container.sh /tmp/toolchain-recipe/build_module_in_container.sh
+COPY tools/ci/toolchain-images/bake-toolchain.sh /tmp/toolchain-recipe/bake-toolchain.sh
+
+RUN /tmp/toolchain-recipe/bake-toolchain.sh /tmp/toolchain-recipe/build_module_in_container.sh \
+    && rm -rf /tmp/toolchain-recipe
