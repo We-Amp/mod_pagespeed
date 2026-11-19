@@ -4,9 +4,15 @@
 # Digests of the toolchain images that .github/workflows/toolchain-images.yml
 # builds (tools/ci/toolchain-images/). One line per Ubuntu suite:
 #   <suite>=<image>@sha256:<index digest>
-# The index digest covers the amd64 and arm64 images. UNSET means the images
-# have not been built yet. Nothing reads this file yet; the workflow prints the
-# lines to paste here in its job summary and in the toolchain-images.lock
-# artifact of the run.
-focal=ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:UNSET
-jammy=ghcr.io/we-amp/mod-pagespeed-toolchain-jammy@sha256:UNSET
+# The index digest covers the amd64 and arm64 images. Nothing reads this file
+# yet; the workflow prints the lines to paste here in its job summary and in
+# the toolchain-images-lock artifacts of the run.
+#
+# The packages are public: an anonymous pull by digest works, no token needed.
+# Each digest carries a build provenance attestation signed by
+# toolchain-images.yml on master; check it with
+#   gh attestation verify oci://<image>@sha256:<digest> -R We-Amp/mod_pagespeed
+#
+# Current: built by toolchain-images.yml on master a1589125, 2026-11-19.
+focal=ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:76ac0aeaf6d47d86cdb123c7e486438f22481dfeeb0f4fcaffc81d024b27c142
+jammy=ghcr.io/we-amp/mod-pagespeed-toolchain-jammy@sha256:275954ca57a7feb96c0b2c13356889f7322c60e0f745dbbb71da9ddec96174ca
