@@ -45,12 +45,23 @@ sha1_of() {
   fi
 }
 
+# Maven Central's edge has answered 404 for this jar for a few minutes at a time,
+# and curl's plain --retry does not retry a 404, so retry every error and fall
+# back to the second Maven Central host name. The SHA-1 check below decides
+# what is used, whichever host served it.
+RAT_URL_FALLBACK="https://repo.maven.apache.org/maven2/org/apache/rat/apache-rat/${RAT_VERSION}/apache-rat-${RAT_VERSION}.jar"
+
 fetch() {
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 -o "$2" "$1"
-  else
-    wget -q -O "$2" "$1"
-  fi
+  local url
+  for url in "$1" "${RAT_URL_FALLBACK}"; do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --retry 4 --retry-all-errors --retry-delay 10 --connect-timeout 20 -o "$2" "$url" && return 0
+    else
+      wget -q --tries=5 --waitretry=10 -O "$2" "$url" && return 0
+    fi
+    echo "apache-rat download from ${url} failed" >&2
+  done
+  return 1
 }
 
 SCRATCH="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
