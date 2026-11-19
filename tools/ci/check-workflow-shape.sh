@@ -1583,32 +1583,82 @@ done
 # repeated in two places, so a drift could turn `required` into `auto` on a
 # hosted run. A literal `required` is always fine; a literal `auto` is a
 # failure on a job whose runs-on can pick a hosted label.
-verify_records() { # file -> "<job><tab><runs-on value><tab><verify value>"
+verify_records() { # file -> job, runs-on, verify, envform, stepver, toolchain, mixed (tab-separated)
   awk -v tab="${TAB}" '
-    function flush() { if (job != "" && ver != "") printf "%s%s%s%s%s\n", job, tab, ro, tab, ver }
+    function endjob() {
+      if (job == "") return
+      n++; names[n] = job; RO[n] = ro; VER[n] = ver; EF[n] = envform; SV[n] = stepver
+      TC[n] = ((rnbuild && !el10) || sidecar) ? 1 : 0; AL[n] = alias; ANC[n] = anchor
+      job = ""
+    }
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs=1; next }
-    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^[^[:space:]#]/ { endjob(); injobs=0 }
     injobs && /^  [^[:space:]]/ {
-      flush(); job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job); ro=""; ver=""; inenv=0; next
+      endjob(); job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job)
+      ro=""; ver=""; envform=""; stepver=0; inenv=0; rnbuild=0; el10=0; sidecar=0; alias=""; anchor=""; next
     }
-    injobs && /^    runs-on:/ { v=$0; sub(/^    runs-on:[[:space:]]*/, "", v); ro=v; inenv=0; next }
-    injobs && /^    env:/ { inenv=1; next }
-    injobs && /^    [^[:space:]]/ { inenv=0; next }
-    injobs && inenv && /^      TOOLCHAIN_IMAGE_VERIFY:/ { v=$0; sub(/^      TOOLCHAIN_IMAGE_VERIFY:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); ver=v }
-    END { flush() }
+    !injobs || job == "" { next }
+    /^    runs-on:/ { v=$0; sub(/^    runs-on:[[:space:]]*/, "", v); ro=v; inenv=0; next }
+    /^    env:/ {
+      v=$0; sub(/^    env:[[:space:]]*/, "", v)
+      envform = (v == "") ? "plain" : "other"; inenv=(v == ""); next
+    }
+    /^    steps:[[:space:]]*&/ { v=$0; sub(/^.*&/, "", v); sub(/[[:space:]].*$/, "", v); anchor=v }
+    /^    steps:[[:space:]]*\*/ { v=$0; sub(/^.*\*/, "", v); sub(/[[:space:]].*$/, "", v); alias=v }
+    /^    [^[:space:]]/ { inenv=0 }
+    /TOOLCHAIN_IMAGE_VERIFY/ {
+      if (inenv && $0 ~ /^      TOOLCHAIN_IMAGE_VERIFY:/) { v=$0; sub(/^      TOOLCHAIN_IMAGE_VERIFY:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); ver=v }
+      else stepver=1
+    }
+    /release_nginx\.sh"? build/ { rnbuild=1 }
+    /--set el10/ { el10=1 }
+    /release_sidecar\.sh"? (check|package|build)/ { sidecar=1 }
+    END {
+      endjob()
+      for (i = 1; i <= n; i++) if (ANC[i] != "" && TC[i]) anchortc[ANC[i]] = 1
+      for (i = 1; i <= n; i++) {
+        tc = TC[i] || (AL[i] != "" && (AL[i] in anchortc))
+        mixed = (RO[i] ~ /\047(ubuntu|windows|macos)-/ && RO[i] ~ /\047fleet-/) ? 1 : 0
+        printf "%s%s%s%s%s%s%s%s%s%s%s%s%d\n", names[i], tab, (RO[i] == "" ? "-" : RO[i]), tab, (VER[i] == "" ? "-" : VER[i]), tab, (EF[i] == "" ? "-" : EF[i]), tab, SV[i], tab, (tc ? 1 : 0), tab, mixed
+      }
+    }
   ' "$1"
 }
 
+mixed_toolchain_jobs=0
+verify_wf_seen=""
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
-  while IFS="${TAB}" read -r vj vro vver; do
+  wf_mixed=0
+  while IFS="${TAB}" read -r vj vro vver vef vsv vtc vmixed; do
     [ -n "${vj}" ] || continue
+    # An empty field is "-" (tab is IFS whitespace, so empties would collapse).
+    [ "${vro}" != "-" ] || vro=""
+    [ "${vver}" != "-" ] || vver=""
+    if [ "${vtc}" = 1 ]; then
+      # Fail closed on forms this parser cannot follow, in a toolchain-build job.
+      if [ "${vef}" = other ]; then
+        err "${wf}: job '${vj}': unsupported form (an aliased or flow-style env), set TOOLCHAIN_IMAGE_VERIFY as a plain job-level env key (verify-parity)"
+        continue
+      fi
+      if [ "${vsv}" = 1 ]; then
+        err "${wf}: job '${vj}': unsupported form (TOOLCHAIN_IMAGE_VERIFY outside the job-level env block), set TOOLCHAIN_IMAGE_VERIFY as a plain job-level env key (verify-parity)"
+        continue
+      fi
+      if [ "${vmixed}" = 1 ]; then
+        wf_mixed=$((wf_mixed + 1))
+        if [ -z "${vver}" ]; then
+          err "${wf}: job '${vj}' can run on a hosted label or the build runner and builds with a toolchain image, but sets no TOOLCHAIN_IMAGE_VERIFY (it would default to auto on a hosted run) (verify-parity)"
+          continue
+        fi
+      fi
+    fi
+    [ -n "${vver}" ] || continue
     vver="${vver%\"}"; vver="${vver#\"}"; vver="${vver%\'}"; vver="${vver#\'}"
     case "${vver}" in
       required) continue ;;
       auto)
-        # shellcheck disable=SC2016
         case "${vro}" in
           *"'ubuntu-"*|*"'windows-"*|*"'macos-"*) err "${wf}: job '${vj}' sets TOOLCHAIN_IMAGE_VERIFY to a literal auto but its runs-on can pick a hosted label; use the runs-on condition ('required' on the hosted side) (verify-parity)" ;;
           *'${{'*) ;;
@@ -1638,6 +1688,13 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   done <<EOT
 $(verify_records "${wf}")
 EOT
+  # Sanity: the two real pipelines each carry a mixed toolchain-build job; a
+  # parse that finds none has lost them.
+  # Only the real tree (it has the release script); fixture trees reuse the names.
+  case "$([ -f tools/ci/release_nginx.sh ] && basename "${wf}")" in
+    pipeline-release-module.yml|pipeline-full.yml)
+      [ "${wf_mixed}" -ge 1 ] || err "${wf}: found no mixed toolchain-build job (parser lost them, or the job moved); the verify-parity rule needs at least one here (verify-parity)" ;;
+  esac
 done
 
 # --- (e) topology token scan --------------------------------------------------

@@ -252,6 +252,10 @@ expect_good good-verify-match
 expect_good good-verify-literal-required
 expect_bad bad-verify-drift 'verify-parity'
 expect_bad bad-verify-literal-auto 'verify-parity'
+expect_bad bad-verify-missing 'sets no TOOLCHAIN_IMAGE_VERIFY'
+expect_bad bad-verify-flow-env 'unsupported form'
+expect_bad bad-verify-alias-env 'unsupported form'
+expect_bad bad-verify-step-level 'unsupported form'
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
