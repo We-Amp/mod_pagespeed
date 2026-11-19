@@ -177,6 +177,35 @@ LEGS
   esac
 }
 
+# leg_toolchain_image SUITE TREE STOCK: the image a focal or jammy leg builds
+# in. That is the suite's toolchain image (g++-13 and clang 18 installed once,
+# tools/ci/toolchain-images/), named by digest in
+# install/nginx/toolchain-images.lock of the tree being built and checked by
+# tools/ci/toolchain_image.sh, so the leg installs nothing from the Ubuntu
+# toolchain PPA or apt.llvm.org. TOOLCHAIN_PPA_FALLBACK=1 keeps STOCK, the
+# stock image, and the recipe installs the compilers from those repositories
+# (a local build, or an emergency). A tree from before the toolchain images has
+# no lock file and a recipe that always installs them: it keeps STOCK too. The
+# helper is next to this script, or else taken from the tree; a tree with a
+# lock but no helper anywhere fails.
+leg_toolchain_image() {
+  local suite="$1" tree="$2" stock="$3" helper
+  if [ "${TOOLCHAIN_PPA_FALLBACK:-}" != 1 ] && [ ! -e "${tree}/install/nginx/toolchain-images.lock" ]; then
+    echo "::warning::release_nginx: the tree has no install/nginx/toolchain-images.lock (it predates the toolchain images); the ${suite} leg builds in ${stock} and installs its compilers from the Ubuntu toolchain PPA" >&2
+    printf '%s\n' "$stock"
+    return 0
+  fi
+  for helper in "${_RN_DIR}/toolchain_image.sh" "${tree}/tools/ci/toolchain_image.sh"; do
+    if [ -r "$helper" ]; then
+      # shellcheck source=tools/ci/toolchain_image.sh
+      ( source "$helper" && toolchain_image_for "$suite" "$tree" "$stock" )
+      return $?
+    fi
+  done
+  echo "::error::release_nginx: toolchain_image.sh is neither next to this script nor in the tree" >&2
+  return 1
+}
+
 # Host memory in whole GB (Linux).
 host_mem_gb() {
   if [ -r /proc/meminfo ]; then
@@ -286,6 +315,19 @@ build() {
     return 2
   fi
 
+  # The focal and jammy legs build in their toolchain image (leg_toolchain_image),
+  # resolved and checked once, before any leg starts.
+  local i leg_name leg_img
+  for i in "${!legs[@]}"; do
+    leg_name="${legs[$i]%%|*}"
+    leg_name="${leg_name#nginxorg-}"
+    case "$leg_name" in focal|jammy) ;; *) continue ;; esac
+    IFS='|' read -r _ leg_img _ <<<"${legs[$i]}"
+    leg_img="$(leg_toolchain_image "$leg_name" "$ws" "$leg_img")" || { echo "::error::release_nginx build: no usable ${leg_name} toolchain image"; return 1; }
+    legs[i]="$(awk -F'|' -v OFS='|' -v img="$leg_img" '{ $2 = img; print }' <<<"${legs[$i]}")"
+    echo "leg ${legs[$i]%%|*}: image ${leg_img}"
+  done
+
   local default_cores=8
   [ "$arch" = arm64 ] && default_cores=6
   local nproc_n budget p cores leg_mem conc
@@ -385,6 +427,7 @@ build() {
       -e NGINX_SRC_VERSION="${ngxver}" \
       -e NGINX_SRC_SHA256="${ngxsha}" \
       -e NGINX_PKG_NAME="${pkg_name}" \
+      -e TOOLCHAIN_PPA_FALLBACK="${TOOLCHAIN_PPA_FALLBACK:-}" \
       ${pkg_name:+-e NGINX_UPSTREAM_VERSION="${ngxver}" -e NGX_SRC_MODE_OVERRIDE=vanilla -e NGINXORG_LANE_REVISION="${lane_rev}"} \
       ${pkg_epoch:+-e NGINX_EPOCH="${pkg_epoch}"} \
       -v "$wsdir":/workspace \
@@ -846,6 +889,20 @@ self_test() {
     (cd "$t/rp" && bash -c "$(pin_package_revision_cmd)") || { echo "FAIL: revision pin failed for '$v'"; fail=1; }
     chk "revision pin ('$v')" "$(grep -c '^LASTCHANGE=1$' "$t/rp/net/instaweb/public/VERSION")/$(grep -c '^LASTCHANGE=' "$t/rp/net/instaweb/public/VERSION")/$(grep -c '^BUILD=2$' "$t/rp/net/instaweb/public/VERSION")" "1/1/1"
   done
+  # The focal and jammy legs: the toolchain image of the tree's lock; the stock
+  # image for a tree without a lock or with TOOLCHAIN_PPA_FALLBACK=1; a
+  # malformed lock fails.
+  local d64 tree="$t/tc"
+  d64="$(printf 'b%.0s' $(seq 1 64))"
+  mkdir -p "$tree/install/nginx"
+  chk "no lock: stock image" "$(leg_toolchain_image jammy "$tree" ubuntu:22.04 2>/dev/null)" "ubuntu:22.04"
+  printf 'jammy=ghcr.io/we-amp/mod-pagespeed-toolchain-jammy@sha256:%s\n' "$d64" > "$tree/install/nginx/toolchain-images.lock"
+  chk "lock: toolchain image" "$(TOOLCHAIN_IMAGE_VERIFY=off leg_toolchain_image jammy "$tree" ubuntu:22.04 2>/dev/null)" "ghcr.io/we-amp/mod-pagespeed-toolchain-jammy@sha256:$d64"
+  chk "fallback: stock image" "$(TOOLCHAIN_PPA_FALLBACK=1 leg_toolchain_image jammy "$tree" ubuntu:22.04 2>/dev/null)" "ubuntu:22.04"
+  printf 'jammy=ghcr.io/we-amp/mod-pagespeed-toolchain-jammy:latest\n' > "$tree/install/nginx/toolchain-images.lock"
+  if TOOLCHAIN_IMAGE_VERIFY=off leg_toolchain_image jammy "$tree" ubuntu:22.04 >/dev/null 2>&1; then echo "FAIL: a lock with a tag accepted"; fail=1; fi
+  printf 'focal=ghcr.io/we-amp/mod-pagespeed-toolchain-focal@sha256:%s\n' "$d64" > "$tree/install/nginx/toolchain-images.lock"
+  if TOOLCHAIN_IMAGE_VERIFY=off leg_toolchain_image jammy "$tree" ubuntu:22.04 >/dev/null 2>&1; then echo "FAIL: a lock without a jammy line accepted"; fail=1; fi
   out=""
   [ "$fail" = 0 ] && echo "release_nginx self-test: ok"
   return "$fail"

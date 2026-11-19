@@ -257,6 +257,7 @@ jobs:
           tools/ci/release_nginx.sh --self-test
           tools/ci/nginx_org_lane.sh --self-test
           tools/ci/release_sidecar.sh --self-test
+          tools/ci/toolchain_image.sh --self-test
           python3 -I tools/ci/sidecar_pair_manifest.py --self-test
           python3 -I tools/ci/release_adopt.py --self-test
           python3 -I tools/ci/release_job_graph.py --self-test
@@ -268,6 +269,14 @@ jobs:
           tools/ci/test_pair_rehearsal_shape.sh
           tools/ci/test_cache_gen_for_version.sh
           bash tools/ci/test_assert_release_stamp.sh
+      # Every digest in install/nginx/toolchain-images.lock must carry the
+      # build provenance attestation of toolchain-images.yml on master. Checked
+      # here, on a hosted runner, because some build runners have a gh without
+      # the attestation command; the builds check it again where gh can.
+      - name: Toolchain image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/ci/toolchain_image.sh verify-lock
       - name: Release CI gate
         run: tools/ci/test_ci_release_gate.sh
       - name: IIS failure classifier

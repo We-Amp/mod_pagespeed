@@ -9,9 +9,10 @@
 #
 # Dispatch (from master) and a monthly schedule (scheduled runs happen on the
 # default branch only). A scheduled run rebuilds and attests the images, nothing
-# more. Nothing in the build uses these images yet; the digests they get are
-# printed in the job summary and kept in the toolchain-images lock artifact, to
-# be pasted into install/nginx/toolchain-images.lock by hand.
+# more. The focal and jammy build legs build in the images that
+# install/nginx/toolchain-images.lock names; the digests a run gets are printed
+# in the job summary and kept in the toolchain-images lock artifact, to be
+# pasted into that file by hand in a reviewed pull request.
 #
 # Each suite is built natively on amd64 and arm64 hosted runners, pushed by
 # digest, and joined into one multi-arch image. Build provenance and an SBOM

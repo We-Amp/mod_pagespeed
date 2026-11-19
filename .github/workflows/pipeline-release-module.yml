@@ -1824,15 +1824,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/lane-tools"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh lane-tools/tools/ci/remote-cache-docker-args.sh "${RUNNER_TEMP}/lane-tools/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh lane-tools/tools/ci/remote-cache-docker-args.sh lane-tools/tools/ci/toolchain_image.sh "${RUNNER_TEMP}/lane-tools/"
           rm -rf lane-tools
 
       - *tree-download
       - *tree-extract
 
+      # GH_TOKEN: the jammy leg checks the attestation of its toolchain
+      # image (tools/ci/toolchain_image.sh).
       - name: Build the distro package
         env:
           DISTRO: ${{ matrix.distro }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
@@ -2015,15 +2018,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/lane-tools"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh lane-tools/tools/ci/remote-cache-docker-args.sh "${RUNNER_TEMP}/lane-tools/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh lane-tools/tools/ci/remote-cache-docker-args.sh lane-tools/tools/ci/toolchain_image.sh "${RUNNER_TEMP}/lane-tools/"
           rm -rf lane-tools
 
       - *tree-download
       - *tree-extract
 
+      # GH_TOKEN: the jammy leg checks the attestation of its toolchain
+      # image (tools/ci/toolchain_image.sh).
       - name: Build the distro package
         env:
           DISTRO: ${{ matrix.distro }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
@@ -2241,7 +2247,11 @@ jobs:
       # and glibc gate, the Debian 11 and 12 smoke, strip, gate and smoke
       # again, and the test suite under .NET 8 and .NET 10 with the live nginx
       # tests against the stripped pair, the pair that ships.
+      # GH_TOKEN: the build checks the attestation of the focal toolchain
+      # image (tools/ci/toolchain_image.sh).
       - name: Build, gate and test the pair
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
             --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \

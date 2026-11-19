@@ -4,9 +4,12 @@
 # Digests of the toolchain images that .github/workflows/toolchain-images.yml
 # builds (tools/ci/toolchain-images/). One line per Ubuntu suite:
 #   <suite>=<image>@sha256:<index digest>
-# The index digest covers the amd64 and arm64 images. Nothing reads this file
-# yet; the workflow prints the lines to paste here in its job summary and in
-# the toolchain-images-lock artifacts of the run.
+# The index digest covers the amd64 and arm64 images. The focal and jammy
+# build legs (tools/ci/release_sidecar.sh, tools/ci/release_nginx.sh) read it
+# through tools/ci/toolchain_image.sh and build in these images; a missing or
+# malformed line stops them. The workflow prints the lines to paste here in its
+# job summary and in the toolchain-images-lock artifacts of the run; a change
+# goes through a reviewed pull request, whose CI checks the attestations.
 #
 # The packages are public: an anonymous pull by digest works, no token needed.
 # Each digest carries a build provenance attestation signed by

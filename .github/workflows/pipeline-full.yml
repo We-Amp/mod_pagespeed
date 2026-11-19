@@ -105,7 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sidecar_pair=true
-          paths='^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|tools/ci/docker_pull_retry\.sh|\.github/workflows/pipeline-full\.yml)'
+          paths='^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|tools/ci/docker_pull_retry\.sh|tools/ci/toolchain_image\.sh|install/nginx/toolchain-images\.lock|\.github/workflows/pipeline-full\.yml)'
           changed="${RUNNER_TEMP}/changed-files.txt"
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             git diff --name-only "${BASE}...HEAD" > "${changed}"
@@ -2329,7 +2329,11 @@ jobs:
       # symbol and glibc gate, the Debian 11 and 12 smoke, strip, gate and
       # smoke again, and the test suite under .NET 8 and .NET 10 with the
       # live nginx tests against the stripped pair, each in its own log group.
+      # GH_TOKEN: the build checks the attestation of the focal toolchain
+      # image (tools/ci/toolchain_image.sh).
       - name: Build, gate and test the pair
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
             --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \

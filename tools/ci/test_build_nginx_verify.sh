@@ -105,4 +105,50 @@ else
   check "the repository helpers are defined and gpg is available" 0 1
 fi
 
+# The toolchain image check (use_baked_toolchain): a marker of the right suite
+# whose package versions are installed passes; no marker stops the build unless
+# TOOLCHAIN_PPA_FALLBACK=1 asks for the PPA path; another suite, a version that
+# differs, a package the marker lacks and a missing compiler stop it. dpkg-query
+# and the compilers are mocks.
+eval "$(sed -n '/^use_baked_toolchain()/,/^}/p' "$CONTAINER")"
+if declare -F use_baked_toolchain >/dev/null; then
+  B="$T/baked"
+  mkdir -p "$B/bin"
+  for tool in gcc-13 g++-13 clang clang++ ld.lld; do
+    printf '#!/bin/sh\necho "%s (mock) 1.0"\n' "$tool" > "$B/bin/$tool"
+  done
+  # dpkg-query -W -f='${Version}' PKG: the version from $B/installed (PKG=VERSION lines).
+  # shellcheck disable=SC2016 # the mock's own script text
+  printf '#!/bin/sh\nfor a; do p="$a"; done\nv="$(sed -n "s/^$p=//p" "%s/installed")"\n[ -n "$v" ] || exit 1\nprintf "%%s" "$v"\n' "$B" > "$B/bin/dpkg-query"
+  chmod +x "$B/bin/"*
+  PKGS='g++-13=13.1.0-8 gcc-13=13.1.0-8 libstdc++-13-dev=13.1.0-8 clang-18=1:18.1.8 lld-18=1:18.1.8 llvm-18=1:18.1.8 libstdc++6=16-1'
+  printf '%s\n' $PKGS > "$B/installed"
+  { echo "# marker"; echo "suite=focal"; echo "toolchain_ppa_key_fpr=X"; printf 'pkg:%s\n' $PKGS; } > "$B/marker"
+  baked() { (PATH="$B/bin:$PATH" TOOLCHAIN_MARKER="$B/marker" use_baked_toolchain "$@") >/dev/null 2>&1; }
+  baked focal; check "toolchain image: a matching marker is used" 0 $?
+  baked jammy; check "toolchain image: the marker of another suite stops the build" 1 $?
+  (PATH="$B/bin:$PATH" TOOLCHAIN_MARKER="$B/none" use_baked_toolchain focal) >/dev/null 2>&1
+  check "toolchain image: no marker and no fallback stops the build" 1 $?
+  rc=0; (PATH="$B/bin:$PATH" TOOLCHAIN_MARKER="$B/none" TOOLCHAIN_PPA_FALLBACK=1 use_baked_toolchain focal) >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 1 ]; check "toolchain image: no marker with TOOLCHAIN_PPA_FALLBACK=1 takes the PPA path" 0 $?
+  sed 's/^g++-13=.*/g++-13=13.2.0-1/' "$B/installed" > "$B/i2" && mv "$B/i2" "$B/installed"
+  baked focal; check "toolchain image: a version that differs from the marker stops the build" 1 $?
+  printf '%s\n' $PKGS > "$B/installed"
+  grep -v '^pkg:lld-18=' "$B/marker" > "$B/m2" && mv "$B/m2" "$B/marker"
+  baked focal; check "toolchain image: a marker without lld-18 stops the build" 1 $?
+  { echo "suite=focal"; printf 'pkg:%s\n' $PKGS; } > "$B/marker"
+  rm "$B/bin/ld.lld"
+  baked focal; check "toolchain image: a missing compiler stops the build" 1 $?
+  # The focal and jammy recipes reach the PPA only through the fallback branch.
+  for d in focal jammy; do
+    body="$(sed -n "/^install_deps_${d}()/,/^}/p" "$CONTAINER" | grep -v '^[[:space:]]*#')"
+    printf '%s\n' "$body" | awk '/use_baked_toolchain/ { g = 1 } /add_toolchain_ppa|add_llvm_apt_repo|install_llvm_clang/ && !g { bad = 1 } END { exit bad }'
+    check "install_deps_${d}: the PPA and apt.llvm.org only after the toolchain image check" 0 $?
+    printf '%s\n' "$body" | grep -q "if ! use_baked_toolchain ${d}; then"
+    check "install_deps_${d}: checks for its own toolchain image" 0 $?
+  done
+else
+  check "use_baked_toolchain is defined" 0 1
+fi
+
 [ "$FAILS" = 0 ] && echo "all passed" || { echo "$FAILS failed"; exit 1; }
