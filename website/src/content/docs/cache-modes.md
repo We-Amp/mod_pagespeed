@@ -677,6 +677,7 @@ These directives control how mod_pagespeed fetches resources from your origin an
 | --------------------------- | -------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FetcherTimeOutMs`          |           5000 | Maximum time to wait for a resource fetch from origin                                                                                                                                                                             |
 | `RewriteDeadlinePerFlushMs` |             10 | Time budget per flush window for rewriting. If rewrites take longer, the original resource is served and the optimized variant is cached for subsequent requests                                                                  |
+| `NegativeDeadlineFetchWaitMs` |           1000 | How long a request for a rewritten resource waits for its optimization when `RewriteDeadlinePerFlushMs` or `InPlaceRewriteDeadlineMs` is negative, before the original is served. Never more than `FetcherTimeOutMs`. Server or virtual host configuration only |
 | `ImplicitCacheTtlMs`        | 300000 (5 min) | Cache TTL applied to resources that do not have explicit `Cache-Control` headers                                                                                                                                                  |
 | `FetchWithGzip`             |            off | Fetch resources from origin using gzip `Accept-Encoding`. Turn this on if your origin supports gzip and the network between mod_pagespeed and the origin is a bottleneck                                                          |
 | `HttpCacheCompressionLevel` |              9 | Compression level (-1 to 9; 0 = off) for storing resources in the cache. Level 9 maximizes disk space savings at the cost of slightly more CPU during cache writes; out-of-range values fail configuration load since v1.15.0+r18 |
@@ -735,6 +736,21 @@ rate-limits background fetches; `RedisReconnectionDelayMs` (default: 1000)
 sets the Redis reconnection delay. `InPlaceRewriteDeadlineMs` (default: 10)
 sets the IPRO rewrite deadline per flush, alongside `InPlaceSMaxAgeSec`
 above.
+
+A negative `RewriteDeadlinePerFlushMs` or `InPlaceRewriteDeadlineMs` means
+"wait for the optimization". For a page that is rewritten, it waits without
+limit. For a request for a rewritten resource (a `.pagespeed.` URL or an
+in-place resource) the wait is bounded by `NegativeDeadlineFetchWaitMs`
+(default: 1000, never more than `FetcherTimeOutMs`). When it runs out, the
+original resource is served with `Cache-Control: private` and a lifetime of at
+most 5 minutes, and the optimization finishes in the background. Each
+stylesheet inside a combined stylesheet request is handled the same way. A
+combined script request is handled the same way too: after the same wait it is
+answered with the combination of the original scripts, with
+`Cache-Control: private` for at most 5 minutes and not stored, and the next
+request is served the optimized file. `NegativeDeadlineFetchWaitMs` can be set in the
+server or virtual host configuration only, not in `.htaccess`, per request, in
+an `ExperimentSpec` or in remote configuration.
 
 See the [configuration reference](/docs/configuration/) for the full list of native
 module directives and their defaults.
