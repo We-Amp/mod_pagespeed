@@ -80,6 +80,9 @@ GRACEFUL_CYCLES = 25
 CHILD_EXIT_TIMEOUT_S = 20.0
 CHILD_EXIT_POLL_S = 0.25
 
+# Budget for the `apache2ctl graceful` command itself to return.
+GRACEFUL_CMD_TIMEOUT_S = 30
+
 
 def _apache_ctl() -> str:
     return os.environ.get("PAGESPEED_APACHE_CTL", "apache2ctl")
@@ -140,13 +143,24 @@ def _apache_child_pids() -> Set[int]:
 
 
 def _run_graceful() -> None:
-    subprocess.run(
+    # Popen + wait, not subprocess.run(timeout=...): run() SIGKILLs the child
+    # on timeout, and the child is `sudo`, a root-owned process this user may
+    # not signal (EPERM), which masked the real symptom (graceful hanging) as
+    # a PermissionError. We never signal a pid we cannot own; a hung graceful
+    # is reported as such instead.
+    proc = subprocess.Popen(
         ["sudo", "-n", _apache_ctl(), "graceful"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        timeout=30,
-        check=False,
     )
+    try:
+        proc.wait(timeout=GRACEFUL_CMD_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"`{_apache_ctl()} graceful` did not return within "
+            f"{GRACEFUL_CMD_TIMEOUT_S}s (pid {proc.pid} left running; not "
+            "signalled because it runs as root)"
+        )
 
 
 def _log_size() -> Optional[int]:
