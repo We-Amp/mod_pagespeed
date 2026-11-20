@@ -63,6 +63,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import List, Optional, Set
 
@@ -79,6 +80,12 @@ GRACEFUL_CYCLES = 25
 # snapshot. Post-fix old children exit in well under a second.
 CHILD_EXIT_TIMEOUT_S = 20.0
 CHILD_EXIT_POLL_S = 0.25
+
+# Budget for the `apache2ctl graceful` command itself to return.
+GRACEFUL_CMD_TIMEOUT_S = 30
+
+# Total time to keep waiting on a slow graceful before failing the test.
+GRACEFUL_TOTAL_WAIT_S = 120
 
 
 def _apache_ctl() -> str:
@@ -139,13 +146,91 @@ def _apache_child_pids() -> Set[int]:
     return children
 
 
+def _run_unsignalled(argv: List[str], timeout_s: float):
+    """Run argv, wait up to timeout_s, and NEVER signal it.
+
+    Returns (returncode or None when still running, combined output). The
+    commands here run under sudo, so they are root-owned and subprocess.run's
+    kill-on-timeout would fail with EPERM and hide the timeout. Output goes
+    to a temp file so a chatty child cannot block on a full pipe.
+    """
+    with tempfile.TemporaryFile() as out:
+        proc = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT)
+        try:
+            rc: Optional[int] = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            rc = None
+        out.seek(0)
+        return rc, out.read().decode("utf-8", errors="replace")
+
+
+def _graceful_hang_diagnostics(graceful_pid: int) -> str:
+    """Read-only snapshot taken when `graceful` has not returned in time.
+
+    `apache2ctl graceful` runs a config test before it signals, so this
+    records which phase is stuck: the process tree with wait channels, and a
+    timed `apache2ctl -t` on its own. Nothing here signals any process.
+    """
+    parts: List[str] = []
+    rc, ps = _run_unsignalled(
+        ["sudo", "-n", "ps", "-eo", "pid,ppid,etime,stat,wchan:30,args"], 15
+    )
+    if rc is None:
+        parts.append("ps did not return within 15s")
+    else:
+        keep = []
+        for line in ps.splitlines():
+            fields = line.split(None, 1)
+            if fields[:1] == ["PID"]:
+                keep.append(line)
+            elif re.search(r"apache2|httpd|apachectl|sudo", line):
+                marker = "  <== the graceful command" if (
+                    fields and fields[0] == str(graceful_pid)
+                ) else ""
+                keep.append(line + marker)
+        parts.append("ps (apache/sudo processes):\n" + "\n".join(keep))
+    started = time.monotonic()
+    rc, out = _run_unsignalled(["sudo", "-n", _apache_ctl(), "-t"], 30)
+    if rc is None:
+        parts.append(f"`{_apache_ctl()} -t` alone still running after 30s")
+    else:
+        parts.append(
+            f"`{_apache_ctl()} -t` rc={rc} in "
+            f"{time.monotonic() - started:.1f}s: {out[-500:]}"
+        )
+    return "\n".join(parts)
+
+
 def _run_graceful() -> None:
-    subprocess.run(
+    # Popen + wait, not subprocess.run(timeout=...): run() SIGKILLs the child
+    # on timeout, and the child is `sudo`, a root-owned process this user may
+    # not signal (EPERM), which masked the real symptom (graceful hanging) as
+    # a PermissionError. We never signal a pid we cannot own; a hung graceful
+    # is reported as such instead.
+    proc = subprocess.Popen(
         ["sudo", "-n", _apache_ctl(), "graceful"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        timeout=30,
-        check=False,
+    )
+    started = time.monotonic()
+    try:
+        proc.wait(timeout=GRACEFUL_CMD_TIMEOUT_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    diag = _graceful_hang_diagnostics(proc.pid)
+    # Keep waiting on the SAME command, unsignalled, so a late graceful
+    # cannot land in the next test.
+    remaining = GRACEFUL_TOTAL_WAIT_S - (time.monotonic() - started)
+    try:
+        rc = proc.wait(timeout=max(remaining, 0))
+        outcome = f"returned rc={rc} after {time.monotonic() - started:.0f}s"
+    except subprocess.TimeoutExpired:
+        outcome = f"still running after {GRACEFUL_TOTAL_WAIT_S}s"
+    pytest.fail(
+        f"`{_apache_ctl()} graceful` did not return within "
+        f"{GRACEFUL_CMD_TIMEOUT_S}s (pid {proc.pid}; not signalled because "
+        f"it runs as root); {outcome}\n{diag}"
     )
 
 
