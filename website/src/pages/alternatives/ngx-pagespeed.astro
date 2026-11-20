@@ -258,8 +258,6 @@ pagespeed RewriteLevel CoreFilters;`}</code></pre>
 services:
   worker:
     image: ${workerImage}:${dockerTag}
-    environment:
-      ACCEPT_EULA: "Y"
     volumes:
       - shared:/shared
   nginx:

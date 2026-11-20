@@ -39,7 +39,6 @@ const REPOSITORY_INSTALL_COMMAND =
 const DOCKER_QUICK_TRY_COMMAND = String.raw`docker run --rm -p 80:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest`;
 const installPlatforms = [
   {

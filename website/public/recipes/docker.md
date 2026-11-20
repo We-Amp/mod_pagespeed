@@ -31,13 +31,11 @@ the Docker bridge address), not only on `127.0.0.1`, for
 docker run -d --name pagespeed -p 8080:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=<origin-port> \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest
 ```
 
 `BACKEND_HOST` and `BACKEND_PORT` point at the origin; `host.docker.internal`
-is the Docker host. `ACCEPT_EULA=Y` acknowledges the terms of service at
-https://modpagespeed.com/terms/. For production, pin the image by digest
+is the Docker host. For production, pin the image by digest
 (`ghcr.io/we-amp/pagespeed-combined@sha256:<digest>`) instead of `:latest`.
 
 ## 3. Minimal configuration (production)

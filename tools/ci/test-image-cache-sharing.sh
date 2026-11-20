@@ -125,7 +125,6 @@ docker run -d --name "${RUN_ID}-worker" --shm-size=256m \
   -e PAGESPEED_API_PORT=9880 \
   -e PAGESPEED_API_NO_AUTH=true \
   -e PAGESPEED_ENABLE_BROWSER_ANALYSIS=true \
-  -e ACCEPT_EULA=Y \
   "$WORKER_IMAGE" >/dev/null
 
 if wait_for_worker "${RUN_ID}-worker"; then
@@ -275,7 +274,7 @@ docker run -d --name "${RUN_ID}-worker" --shm-size=256m \
   --security-opt seccomp=unconfined \
   -v "${RUN_ID}-sandbox:/data" \
   -e CACHE_SIZE=67108864 -e PAGESPEED_API_PORT=9880 -e PAGESPEED_API_NO_AUTH=true \
-  -e PAGESPEED_ENABLE_BROWSER_ANALYSIS=true -e ACCEPT_EULA=Y \
+  -e PAGESPEED_ENABLE_BROWSER_ANALYSIS=true \
   "$WORKER_IMAGE" >/dev/null
 if wait_for_worker "${RUN_ID}-worker"; then
   health="$(docker exec "${RUN_ID}-worker" curl -sf http://127.0.0.1:9880/v1/health 2>/dev/null)"
@@ -314,7 +313,7 @@ chrome_leg() {   # $1 = volume suffix, $2.. = extra docker run args
     -v "${RUN_ID}-${vol}:/data" \
     -e CACHE_SIZE=67108864 -e PAGESPEED_API_PORT=9880 -e PAGESPEED_API_NO_AUTH=true \
     -e PAGESPEED_ENABLE_BROWSER_ANALYSIS=true -e PAGESPEED_BROWSER_SANDBOX=off \
-    -e ACCEPT_EULA=Y "$@" \
+    "$@" \
     "$WORKER_IMAGE" >/dev/null
   if ! wait_for_worker "${RUN_ID}-worker"; then
     echo "worker-did-not-start"
@@ -396,7 +395,7 @@ docker run --rm -v "${RUN_ID}-migrate:/data" --entrypoint sh "$WORKER_IMAGE" -c 
   done' >/dev/null 2>&1
 
 docker run -d --name "${RUN_ID}-worker" --shm-size=256m \
-  -v "${RUN_ID}-migrate:/data" -e CACHE_SIZE=67108864 -e ACCEPT_EULA=Y \
+  -v "${RUN_ID}-migrate:/data" -e CACHE_SIZE=67108864 \
   "$WORKER_IMAGE" >/dev/null
 
 if wait_for_worker "${RUN_ID}-worker"; then
@@ -459,7 +458,7 @@ docker run --rm -v "${RUN_ID}-modes:/data" --entrypoint sh "$WORKER_IMAGE" -c '
     printf x > "/data/$f"; chown 0:0 "/data/$f"; chmod 666 "/data/$f"
   done
   printf 6 > /data/cache.vol.gen; chown 0:0 /data/cache.vol.gen; chmod 666 /data/cache.vol.gen' >/dev/null 2>&1
-docker run --rm -v "${RUN_ID}-modes:/data" -e ACCEPT_EULA=Y --entrypoint bash "$WORKER_IMAGE" \
+docker run --rm -v "${RUN_ID}-modes:/data" --entrypoint bash "$WORKER_IMAGE" \
   -c '. /docker/lib-cache-perms.sh; ps_prepare_data_dir /data /data/cache.vol' >/dev/null 2>&1
 modes="$(docker run --rm -v "${RUN_ID}-modes:/data" --entrypoint sh "$WORKER_IMAGE" -c 'ls -lan /data' 2>/dev/null)"
 info "modes the daemon would inherit from the migration:"
@@ -505,7 +504,7 @@ docker rm -f "${RUN_ID}-worker" >/dev/null 2>&1 || true
 head_ "6. Fail-fast: adoption disabled refuses BEFORE the health dependency"
 
 out="$(docker run --rm -v "${RUN_ID}-migrate:/data" \
-  -e PAGESPEED_ADOPT_VOLUME=off -e ACCEPT_EULA=Y \
+  -e PAGESPEED_ADOPT_VOLUME=off \
   --entrypoint sh "$WORKER_IMAGE" -c '
     chown 0:0 /data/cache-*.vol
     exec /entrypoint-worker.sh' 2>&1)"
@@ -780,7 +779,7 @@ docker run --rm -v "${RUN_ID}-peervol:/data" --entrypoint sh "$WORKER_IMAGE" -c 
   dd if=/dev/zero of=/data/cache-6-deadbeefdeadbeef.vol bs=1M count=1 status=none
   chown 999:999 /data/cache-6-deadbeefdeadbeef.vol; chmod 666 /data/cache-6-deadbeefdeadbeef.vol' >/dev/null 2>&1
 
-out="$(docker run --rm -v "${RUN_ID}-peervol:/data" -e ACCEPT_EULA=Y "$WORKER_IMAGE" 2>&1)"
+out="$(docker run --rm -v "${RUN_ID}-peervol:/data" "$WORKER_IMAGE" 2>&1)"
 rc=$?
 if [ "$rc" = "78" ] && echo "$out" | grep -q "owned by a non-root uid is never adopted"; then
   pass "a peer-owned cache volume is refused (exit 78), not adopted"
@@ -814,7 +813,7 @@ docker run --rm -v "${RUN_ID}-peerjson:/data" --entrypoint sh "$WORKER_IMAGE" -c
   chmod 777 /data
   printf "{\"rsl_cap_key_directories\":[\"https://attacker.invalid/jwks\"]}" > /data/pagespeed.json
   chown 999:999 /data/pagespeed.json; chmod 666 /data/pagespeed.json' >/dev/null 2>&1
-out="$(docker run --rm -v "${RUN_ID}-peerjson:/data" -e ACCEPT_EULA=Y "$WORKER_IMAGE" 2>&1)"
+out="$(docker run --rm -v "${RUN_ID}-peerjson:/data" "$WORKER_IMAGE" 2>&1)"
 rc=$?
 if [ "$rc" = "78" ] && echo "$out" | grep -q "daemon-read state owned by a non-root uid"; then
   pass "a peer-owned pagespeed.json is refused (exit 78), never adopted"
@@ -836,7 +835,7 @@ docker volume create "${RUN_ID}-peersib" >/dev/null
 docker run --rm -v "${RUN_ID}-peersib:/data" --entrypoint sh "$WORKER_IMAGE" -c '
   chmod 777 /data; printf hostile > /data/cachefoo
   chown 999:999 /data/cachefoo; chmod 666 /data/cachefoo' >/dev/null 2>&1
-out="$(docker run --rm -v "${RUN_ID}-peersib:/data" -e ACCEPT_EULA=Y "$WORKER_IMAGE" 2>&1)"
+out="$(docker run --rm -v "${RUN_ID}-peersib:/data" "$WORKER_IMAGE" 2>&1)"
 rc=$?
 if [ "$rc" = "78" ]; then
   pass "a peer-owned stray file sharing the cache stem prefix is refused, not adopted"
@@ -853,7 +852,7 @@ docker volume create "${RUN_ID}-peergen" >/dev/null
 docker run --rm -v "${RUN_ID}-peergen:/data" --entrypoint sh "$WORKER_IMAGE" -c '
   chmod 777 /data; printf "../../etc/passwd" > /data/cache.vol.gen
   chown 999:999 /data/cache.vol.gen; chmod 666 /data/cache.vol.gen' >/dev/null 2>&1
-out="$(docker run --rm -v "${RUN_ID}-peergen:/data" -e ACCEPT_EULA=Y "$WORKER_IMAGE" 2>&1)"
+out="$(docker run --rm -v "${RUN_ID}-peergen:/data" "$WORKER_IMAGE" 2>&1)"
 rc=$?
 if [ "$rc" = "78" ] && echo "$out" | grep -q "not a plain generation counter"; then
   pass "a non-numeric generation counter is refused even though .gen adopts from any uid"
@@ -871,7 +870,7 @@ for payload in '\n../../etc/passwd' 'https://attacker.invalid/jwks\n\n' 'HOSTILE
     chmod 777 /data; rm -f /data/cache.vol.gen
     printf '%b' '$payload' > /data/cache.vol.gen
     chown 999:999 /data/cache.vol.gen; chmod 666 /data/cache.vol.gen" >/dev/null 2>&1
-  out="$(docker run --rm -v "${RUN_ID}-peergen:/data" -e ACCEPT_EULA=Y "$WORKER_IMAGE" 2>&1)"
+  out="$(docker run --rm -v "${RUN_ID}-peergen:/data" "$WORKER_IMAGE" 2>&1)"
   rc=$?
   if [ "$rc" = "78" ] && echo "$out" | grep -q "not a plain generation counter"; then
     pass "a peer-owned .gen containing $(printf '%s' "$payload" | head -c 34) is refused"
@@ -890,7 +889,7 @@ docker run --rm -v "${RUN_ID}-emptygen:/data" --entrypoint sh "$WORKER_IMAGE" -c
   chmod 777 /data; : > /data/cache.vol.gen
   chown 999:999 /data/cache.vol.gen; chmod 666 /data/cache.vol.gen' >/dev/null 2>&1
 docker run -d --name "${RUN_ID}-worker" --shm-size=256m -v "${RUN_ID}-emptygen:/data" \
-  -e CACHE_SIZE=67108864 -e ACCEPT_EULA=Y "$WORKER_IMAGE" >/dev/null
+  -e CACHE_SIZE=67108864 "$WORKER_IMAGE" >/dev/null
 if wait_for_worker "${RUN_ID}-worker"; then
   pass "an empty (truncated) generation counter is adopted, not refused"
 else
@@ -908,7 +907,7 @@ docker volume create "${RUN_ID}-genmode" >/dev/null
 docker run --rm -v "${RUN_ID}-genmode:/data" --entrypoint sh "$WORKER_IMAGE" -c '
   chmod 777 /data; printf 6 > /data/cache.vol.gen
   chown 0:0 /data/cache.vol.gen; chmod 666 /data/cache.vol.gen' >/dev/null 2>&1
-docker run --rm -v "${RUN_ID}-genmode:/data" -e ACCEPT_EULA=Y --entrypoint bash "$WORKER_IMAGE" \
+docker run --rm -v "${RUN_ID}-genmode:/data" --entrypoint bash "$WORKER_IMAGE" \
   -c '. /docker/lib-cache-perms.sh; ps_prepare_data_dir /data /data/cache.vol' >/dev/null 2>&1
 gen="$(docker run --rm --user nginx -v "${RUN_ID}-genmode:/data" --entrypoint sh "$NGINX_IMAGE" -c '
   if (head -c1 /data/cache.vol.gen) >/dev/null 2>&1; then echo "GEN: readable"; else echo "GEN: NOT-READABLE"; fi
@@ -926,7 +925,7 @@ head_ "9. Explicit non-root start (compose \`user:\`)"
 
 docker volume create "${RUN_ID}-asuser" >/dev/null
 docker run -d --name "${RUN_ID}-worker" --user "${PS_UID}:${PS_GID}" \
-  -v "${RUN_ID}-asuser:/data" -e CACHE_SIZE=67108864 -e ACCEPT_EULA=Y \
+  -v "${RUN_ID}-asuser:/data" -e CACHE_SIZE=67108864 \
   "$WORKER_IMAGE" >/dev/null
 if wait_for_worker "${RUN_ID}-worker"; then
   pass "starts with --user ${PS_UID}:${PS_GID} on a fresh volume (image /data ownership is inherited)"
@@ -947,7 +946,7 @@ docker rm -f "${RUN_ID}-worker" >/dev/null 2>&1 || true
 # entrypoint cannot fix it without root, so it has to be loud).
 docker run --rm -v "${RUN_ID}-asuser:/data" --entrypoint sh "$WORKER_IMAGE" -c 'chmod 777 /data' >/dev/null 2>&1
 out="$(docker run --rm --user "${PS_UID}:${PS_GID}" -v "${RUN_ID}-asuser:/data" \
-  -e ACCEPT_EULA=Y --entrypoint bash "$WORKER_IMAGE" -c \
+  --entrypoint bash "$WORKER_IMAGE" -c \
   '. /docker/lib-cache-perms.sh; ps_prepare_data_dir /data /data/cache.vol' 2>&1)"
 if echo "$out" | grep -q "WORLD-WRITABLE" && echo "$out" | grep -q "fsGroup"; then
   pass "a world-writable mount under --user warns loudly and names fsGroup: ${PS_GID}"
@@ -959,7 +958,7 @@ fi
 # A uid without the shared gid runs perfectly well and shares nothing — the
 # silent no-sharing case the whole contract exists to make impossible.
 out="$(docker run --rm --user "${PS_UID}:0" -v "${RUN_ID}-asuser:/data" \
-  -e ACCEPT_EULA=Y --entrypoint bash "$WORKER_IMAGE" -c \
+  --entrypoint bash "$WORKER_IMAGE" -c \
   '. /docker/lib-cache-perms.sh; ps_prepare_data_dir /data /data/cache.vol' 2>&1)"
 if echo "$out" | grep -q "effective gid is 0, not ${PS_GID}" && echo "$out" | grep -q "share NOTHING"; then
   pass "a non-root start with the wrong gid warns that nothing will be shared"
@@ -991,7 +990,7 @@ DOCKERFILE
 if docker build -q -t "${RUN_ID}-harness" "$harness_ctx" >/dev/null 2>&1; then
   docker volume create "${RUN_ID}-harness" >/dev/null
   docker run -d --name "${RUN_ID}-worker" -v "${RUN_ID}-harness:/data" \
-    -e CACHE_SIZE=67108864 -e ACCEPT_EULA=Y "${RUN_ID}-harness" >/dev/null
+    -e CACHE_SIZE=67108864 "${RUN_ID}-harness" >/dev/null
   if wait_for_worker "${RUN_ID}-worker"; then
     st="$(docker exec "${RUN_ID}-worker" sh -c 'stat -c %a /data; stat -c %a /data/cache.vol' 2>/dev/null | tr '\n' ' ')"
     uid="$(docker exec "${RUN_ID}-worker" sh -c 'ps -o uid= -C factory_worker | head -1' 2>/dev/null | tr -d ' ')"
@@ -1017,7 +1016,7 @@ if [ -n "$COMBINED_IMAGE" ]; then
   head_ "11. Combined image (one container, both processes)"
   docker volume create "${RUN_ID}-comb" >/dev/null
   docker run -d --name "${RUN_ID}-worker" --shm-size=256m -v "${RUN_ID}-comb:/data" \
-    -e BACKEND_HOST=127.0.0.1 -e BACKEND_PORT=1 -e CACHE_SIZE=67108864 -e ACCEPT_EULA=Y \
+    -e BACKEND_HOST=127.0.0.1 -e BACKEND_PORT=1 -e CACHE_SIZE=67108864 \
     "$COMBINED_IMAGE" >/dev/null
   if wait_for_worker "${RUN_ID}-worker"; then
     pass "combined image starts and publishes its socket"

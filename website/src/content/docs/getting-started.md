@@ -113,13 +113,11 @@ that the worker is in use.
 docker run --rm -p 80:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest
 ```
 
 Point `BACKEND_HOST` and `BACKEND_PORT` at your origin (`host.docker.internal`
-is the Docker host; the `--add-host` line defines it on Linux); `ACCEPT_EULA=Y`
-acknowledges the [Terms of Service](/terms/). The combined image runs nginx with
+is the Docker host; the `--add-host` line defines it on Linux). The combined image runs nginx with
 the module and the worker in one container, for evaluation and small single-host
 deployments. Then [verify](#verify-it-works) on port 80. For production, run the
 worker and nginx as separate services from the

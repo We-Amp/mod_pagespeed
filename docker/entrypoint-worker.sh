@@ -112,13 +112,6 @@ mkdir -p "$DATA_DIR"
 ps_prepare_data_dir "$DATA_DIR" "$DATA_DIR/cache.vol"
 ps_check_api_port "${PAGESPEED_API_PORT:-}"
 
-# --- EULA: non-fatal acknowledgement (continued use = acceptance).
-# NEVER hard-exit here — a bare `docker run` must still start and serve, and a
-# hard gate on this shared entrypoint would brick We-Amp's own production.
-if [ "${ACCEPT_EULA:-}" != "Y" ] && [ "${ACCEPT_EULA:-}" != "y" ]; then
-  echo "NOTE: Using this image accepts the terms at https://modpagespeed.com/terms/ (set ACCEPT_EULA=Y to acknowledge)."
-fi
-
 # Build command line arguments.
 ARGS=(
     --socket "$DATA_DIR/pagespeed.sock"

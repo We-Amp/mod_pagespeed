@@ -400,13 +400,11 @@ that the worker is in use.
 docker run --rm -p 80:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest
 ```
 
 Point `BACKEND_HOST` and `BACKEND_PORT` at your origin (`host.docker.internal`
-is the Docker host; the `--add-host` line defines it on Linux); `ACCEPT_EULA=Y`
-acknowledges the [Terms of Service](https://modpagespeed.com/terms/). The combined image runs nginx with
+is the Docker host; the `--add-host` line defines it on Linux). The combined image runs nginx with
 the module and the worker in one container, for evaluation and small single-host
 deployments. Then [verify](https://modpagespeed.com/docs/getting-started/#verify-it-works) on port 80. For production, run the
 worker and nginx as separate services from the
@@ -1232,7 +1230,6 @@ at your origin and publish port 80:
 docker run --rm -p 80:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest
 ```
 
@@ -1244,10 +1241,6 @@ nginx as separate services (below) so you can scale and update them
 independently — see [Run in production](https://modpagespeed.com/docs/deployment/) for the hardened
 setup. `:latest` is published only on the combined image — the worker
 and nginx images ship immutable version tags (for example `:X.Y.Z`).
-
-`ACCEPT_EULA=Y` acknowledges the
-[Terms of Service](https://modpagespeed.com/terms/), which govern your use of the
-image. The container prints the terms URL on startup if you omit the flag.
 
 To confirm the image is optimizing, follow [Verify It Works](https://modpagespeed.com/docs/installation-docker/#verify-it-works)
 below — use port 80 in those commands, since the single container publishes on 80.
@@ -1296,8 +1289,6 @@ services:
     image: ghcr.io/we-amp/pagespeed-worker:2.9.2
     pid: 'service:pidns'
     environment:
-      # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
-      ACCEPT_EULA: 'Y'
       # The image's entrypoint prepares this directory, then starts the
       # optimizer unprivileged (default /data)
       DATA_DIR: /shared
@@ -16659,9 +16650,6 @@ spec:
     - name: worker
       image: ghcr.io/we-amp/pagespeed-worker:2.9.2
       env:
-        # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
-        - name: ACCEPT_EULA
-          value: 'Y'
         - name: CACHE_SIZE
           value: '536870912' # 512 MB; keep it inside the emptyDir sizeLimit
       volumeMounts:

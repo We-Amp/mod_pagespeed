@@ -281,9 +281,6 @@ spec:
     - name: worker
       image: ghcr.io/we-amp/pagespeed-worker:2.9.2
       env:
-        # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
-        - name: ACCEPT_EULA
-          value: 'Y'
         - name: CACHE_SIZE
           value: '536870912' # 512 MB; keep it inside the emptyDir sizeLimit
       volumeMounts:

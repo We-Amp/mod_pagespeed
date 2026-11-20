@@ -27,7 +27,6 @@ at your origin and publish port 80:
 docker run --rm -p 80:80 \
   --add-host=host.docker.internal:host-gateway \
   -e BACKEND_HOST=host.docker.internal -e BACKEND_PORT=8081 \
-  -e ACCEPT_EULA=Y \
   ghcr.io/we-amp/pagespeed-combined:latest
 ```
 
@@ -39,10 +38,6 @@ nginx as separate services (below) so you can scale and update them
 independently — see [Run in production](/docs/deployment/) for the hardened
 setup. `:latest` is published only on the combined image — the worker
 and nginx images ship immutable version tags (for example `:X.Y.Z`).
-
-`ACCEPT_EULA=Y` acknowledges the
-[Terms of Service](https://modpagespeed.com/terms/), which govern your use of the
-image. The container prints the terms URL on startup if you omit the flag.
 
 To confirm the image is optimizing, follow [Verify It Works](#verify-it-works)
 below — use port 80 in those commands, since the single container publishes on 80.
@@ -91,8 +86,6 @@ services:
     image: ghcr.io/we-amp/pagespeed-worker:2.9.2
     pid: 'service:pidns'
     environment:
-      # Acknowledges the Terms of Service: https://modpagespeed.com/terms/
-      ACCEPT_EULA: 'Y'
       # The image's entrypoint prepares this directory, then starts the
       # optimizer unprivileged (default /data)
       DATA_DIR: /shared
