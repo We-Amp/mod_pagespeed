@@ -142,6 +142,52 @@ def _apache_child_pids() -> Set[int]:
     return children
 
 
+def _graceful_hang_diagnostics(graceful_pid: int) -> str:
+    """Read-only snapshot taken when `graceful` has not returned in time.
+
+    `apache2ctl graceful` runs a config test before it signals, so this
+    records which phase is stuck: the process tree with wait channels, and a
+    timed `apache2ctl -t` on its own. Nothing here signals any process.
+    """
+    parts: List[str] = []
+    try:
+        ps = subprocess.run(
+            ["sudo", "-n", "ps", "-eo", "pid,ppid,etime,stat,wchan:30,args"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=15,
+        ).stdout.decode("utf-8", errors="replace")
+        keep = [
+            line
+            for line in ps.splitlines()
+            if line.split(None, 1)[:1] == ["PID"]
+            or re.search(r"apache2|httpd|apachectl|apache2ctl|sudo", line)
+        ]
+        parts.append("ps (apache/sudo processes):\n" + "\n".join(keep))
+    except (subprocess.SubprocessError, OSError) as exc:
+        parts.append(f"ps failed: {exc!r}")
+    started = time.monotonic()
+    try:
+        res = subprocess.run(
+            ["sudo", "-n", _apache_ctl(), "-t"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=60,
+        )
+        parts.append(
+            f"`{_apache_ctl()} -t` rc={res.returncode} in "
+            f"{time.monotonic() - started:.1f}s: "
+            + res.stdout.decode("utf-8", errors="replace")[-500:]
+        )
+    except subprocess.TimeoutExpired:
+        parts.append(
+            f"`{_apache_ctl()} -t` alone did not return within 60s"
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        parts.append(f"`{_apache_ctl()} -t` failed to run: {exc!r}")
+    return "\n".join(parts)
+
+
 def _run_graceful() -> None:
     # Popen + wait, not subprocess.run(timeout=...): run() SIGKILLs the child
     # on timeout, and the child is `sudo`, a root-owned process this user may
@@ -156,10 +202,11 @@ def _run_graceful() -> None:
     try:
         proc.wait(timeout=GRACEFUL_CMD_TIMEOUT_S)
     except subprocess.TimeoutExpired:
+        diag = _graceful_hang_diagnostics(proc.pid)
         pytest.fail(
             f"`{_apache_ctl()} graceful` did not return within "
             f"{GRACEFUL_CMD_TIMEOUT_S}s (pid {proc.pid} left running; not "
-            "signalled because it runs as root)"
+            f"signalled because it runs as root)\n{diag}"
         )
 
 
