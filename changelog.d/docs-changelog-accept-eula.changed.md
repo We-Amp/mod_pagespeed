@@ -1,0 +1,1 @@
+Changed: the container images no longer print a terms notice at startup, and `ACCEPT_EULA` is no longer needed. The software is licensed under the Apache License 2.0; see https://modpagespeed.com/terms/ for the terms of the website, the package repository and support.
