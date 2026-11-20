@@ -63,6 +63,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import List, Optional, Set
 
@@ -82,6 +83,9 @@ CHILD_EXIT_POLL_S = 0.25
 
 # Budget for the `apache2ctl graceful` command itself to return.
 GRACEFUL_CMD_TIMEOUT_S = 30
+
+# Total time to keep waiting on a slow graceful before failing the test.
+GRACEFUL_TOTAL_WAIT_S = 120
 
 
 def _apache_ctl() -> str:
@@ -142,6 +146,24 @@ def _apache_child_pids() -> Set[int]:
     return children
 
 
+def _run_unsignalled(argv: List[str], timeout_s: float):
+    """Run argv, wait up to timeout_s, and NEVER signal it.
+
+    Returns (returncode or None when still running, combined output). The
+    commands here run under sudo, so they are root-owned and subprocess.run's
+    kill-on-timeout would fail with EPERM and hide the timeout. Output goes
+    to a temp file so a chatty child cannot block on a full pipe.
+    """
+    with tempfile.TemporaryFile() as out:
+        proc = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT)
+        try:
+            rc: Optional[int] = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            rc = None
+        out.seek(0)
+        return rc, out.read().decode("utf-8", errors="replace")
+
+
 def _graceful_hang_diagnostics(graceful_pid: int) -> str:
     """Read-only snapshot taken when `graceful` has not returned in time.
 
@@ -150,41 +172,32 @@ def _graceful_hang_diagnostics(graceful_pid: int) -> str:
     timed `apache2ctl -t` on its own. Nothing here signals any process.
     """
     parts: List[str] = []
-    try:
-        ps = subprocess.run(
-            ["sudo", "-n", "ps", "-eo", "pid,ppid,etime,stat,wchan:30,args"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=15,
-        ).stdout.decode("utf-8", errors="replace")
-        keep = [
-            line
-            for line in ps.splitlines()
-            if line.split(None, 1)[:1] == ["PID"]
-            or re.search(r"apache2|httpd|apachectl|apache2ctl|sudo", line)
-        ]
+    rc, ps = _run_unsignalled(
+        ["sudo", "-n", "ps", "-eo", "pid,ppid,etime,stat,wchan:30,args"], 15
+    )
+    if rc is None:
+        parts.append("ps did not return within 15s")
+    else:
+        keep = []
+        for line in ps.splitlines():
+            fields = line.split(None, 1)
+            if fields[:1] == ["PID"]:
+                keep.append(line)
+            elif re.search(r"apache2|httpd|apachectl|sudo", line):
+                marker = "  <== the graceful command" if (
+                    fields and fields[0] == str(graceful_pid)
+                ) else ""
+                keep.append(line + marker)
         parts.append("ps (apache/sudo processes):\n" + "\n".join(keep))
-    except (subprocess.SubprocessError, OSError) as exc:
-        parts.append(f"ps failed: {exc!r}")
     started = time.monotonic()
-    try:
-        res = subprocess.run(
-            ["sudo", "-n", _apache_ctl(), "-t"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=60,
-        )
+    rc, out = _run_unsignalled(["sudo", "-n", _apache_ctl(), "-t"], 30)
+    if rc is None:
+        parts.append(f"`{_apache_ctl()} -t` alone still running after 30s")
+    else:
         parts.append(
-            f"`{_apache_ctl()} -t` rc={res.returncode} in "
-            f"{time.monotonic() - started:.1f}s: "
-            + res.stdout.decode("utf-8", errors="replace")[-500:]
+            f"`{_apache_ctl()} -t` rc={rc} in "
+            f"{time.monotonic() - started:.1f}s: {out[-500:]}"
         )
-    except subprocess.TimeoutExpired:
-        parts.append(
-            f"`{_apache_ctl()} -t` alone did not return within 60s"
-        )
-    except (subprocess.SubprocessError, OSError) as exc:
-        parts.append(f"`{_apache_ctl()} -t` failed to run: {exc!r}")
     return "\n".join(parts)
 
 
@@ -199,15 +212,26 @@ def _run_graceful() -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    started = time.monotonic()
     try:
         proc.wait(timeout=GRACEFUL_CMD_TIMEOUT_S)
+        return
     except subprocess.TimeoutExpired:
-        diag = _graceful_hang_diagnostics(proc.pid)
-        pytest.fail(
-            f"`{_apache_ctl()} graceful` did not return within "
-            f"{GRACEFUL_CMD_TIMEOUT_S}s (pid {proc.pid} left running; not "
-            f"signalled because it runs as root)\n{diag}"
-        )
+        pass
+    diag = _graceful_hang_diagnostics(proc.pid)
+    # Keep waiting on the SAME command, unsignalled, so a late graceful
+    # cannot land in the next test.
+    remaining = GRACEFUL_TOTAL_WAIT_S - (time.monotonic() - started)
+    try:
+        rc = proc.wait(timeout=max(remaining, 0))
+        outcome = f"returned rc={rc} after {time.monotonic() - started:.0f}s"
+    except subprocess.TimeoutExpired:
+        outcome = f"still running after {GRACEFUL_TOTAL_WAIT_S}s"
+    pytest.fail(
+        f"`{_apache_ctl()} graceful` did not return within "
+        f"{GRACEFUL_CMD_TIMEOUT_S}s (pid {proc.pid}; not signalled because "
+        f"it runs as root); {outcome}\n{diag}"
+    )
 
 
 def _log_size() -> Optional[int]:
