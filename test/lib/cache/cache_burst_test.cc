@@ -107,6 +107,27 @@ bool WriteVariant(PageSpeedCache* cache, std::string_view url,
   return wh->close_sync().has_value();
 }
 
+// Read the best alternate, retrying a Busy result. Busy means a writer held
+// the key's directory bucket for the cache's whole wait budget, which
+// happens when that writer is descheduled mid-update on an oversubscribed
+// machine (a sanitizer lane running many tests at once). Busy says the
+// key's presence is unknown, not that it is absent, and the cache's
+// contract is to retry. A miss or corruption is returned at once, so the
+// tests still fail on the condition they guard against.
+auto ReadBestRetryingBusy(PageSpeedCache* cache, std::string_view url,
+                          std::string_view hostname,
+                          const CapabilityMask& mask) {
+  constexpr int kMaxBusyRetries = 20;
+  for (int attempt = 0;; ++attempt) {
+    auto result = cache->ReadBestAlternate(url, hostname, "https", mask);
+    if (result.has_value() || result.error() != cyclone::CacheError::Busy ||
+        attempt == kMaxBusyRetries) {
+      return result;
+    }
+    std::this_thread::yield();
+  }
+}
+
 class CacheBurstTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -164,7 +185,7 @@ class CacheBurstTest : public ::testing::Test {
   bool ReadOriginal(std::string_view url, std::string_view hostname) {
     CapabilityMask default_mask;
     auto result =
-        cache_->ReadBestAlternate(url, hostname, "https", default_mask);
+        ReadBestRetryingBusy(cache_.get(), url, hostname, default_mask);
     return result.has_value() && result->is_valid();
   }
 
@@ -491,7 +512,7 @@ TEST_F(CacheBurstTest, CrossInstanceOriginalVisibility) {
     CapabilityMask default_mask;
     while (!writers_done.load(std::memory_order_acquire)) {
       total_reads.fetch_add(1, std::memory_order_relaxed);
-      auto r = cache2->ReadBestAlternate(url, hostname, "https", default_mask);
+      auto r = ReadBestRetryingBusy(cache2.get(), url, hostname, default_mask);
       if (!r.has_value()) {
         read_failures_inst2.fetch_add(1, std::memory_order_relaxed);
       }
@@ -592,7 +613,7 @@ TEST_F(CacheBurstTest, CrossInstanceConcurrentOriginalAndVariantWrites) {
       for (int i = 0; i < kNumUrls; ++i) {
         total_reads.fetch_add(1, std::memory_order_relaxed);
         auto r =
-            cache2->ReadBestAlternate(urls[i], hostname, "https", default_mask);
+            ReadBestRetryingBusy(cache2.get(), urls[i], hostname, default_mask);
         if (!r.has_value()) {
           read_failures.fetch_add(1, std::memory_order_relaxed);
         }
