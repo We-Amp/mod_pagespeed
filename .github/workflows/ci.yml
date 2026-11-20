@@ -139,6 +139,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # The verified jar rides actions/cache so most runs never contact Maven
+      # Central. The key carries the RAT version and the pinned SHA-256 prefix;
+      # rat.sh re-checks both hashes of a reused jar, so a bad cache entry is
+      # discarded and re-downloaded, never used.
+      - name: Cache the RAT jar
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apache-rat-0.16.1.jar
+          key: rat-0.16.1-7021c0da25bf9253
       # tools/ci/rat.sh fetches the SHA-1-pinned RAT jar itself (fails
       # closed) and audits against .rat-excludes; the report is written
       # outside the checkout so RAT never audits its own output.
