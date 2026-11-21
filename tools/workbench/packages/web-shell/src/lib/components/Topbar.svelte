@@ -39,8 +39,7 @@
           <animate attributeName="opacity" values="0.9;0;0.9" dur="1.2s" repeatCount="indefinite"/>
         </rect>
         <circle cx="5" cy="49" r="3" fill="#059669"/>
-        <text x="14" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="700" font-size="14" fill="#1d4ed8">v2.0</text>
-        <text x="56" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="600" font-size="14" fill="#78716c"> · running · we-amp.com</text>
+        <text x="14" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="600" font-size="14" fill="#78716c">running · we-amp.com</text>
       </svg>
       Console
     </span>
