@@ -1122,6 +1122,54 @@ TEST_F(DaemonServeArmTest, TheMarkedOriginalIsDeclinedToo) {
                decision.reason);
 }
 
+// ---------------------------------------------------------------------------
+// A cross-origin CORS request: nothing served from here carries the
+// Access-Control-Allow-Origin it needs.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, ACorsRequestFallsThroughPastACleanEntry) {
+  // The origin sends Access-Control-Allow-Origin only to a request carrying
+  // Origin, so the durable original, recorded from one without it, is clean
+  // and its optimized variant is servable.  A web font or a crossorigin
+  // script asks with Origin, and serving it this copy would hand the
+  // browser a response without the header it needs.
+  SetAlternates("09:00:1,0a:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp,*/*");
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, Serve(request).verdict);
+
+  request.origin = "https://www.example.com";
+  const DaemonServeDecision decision = Serve(request);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kCorsRequest, decision.reason);
+  EXPECT_EQ(kPsServeClassOriginalDeclined, decision.serve_class);
+  EXPECT_TRUE(decision.body.empty());
+  EXPECT_FALSE(decision.selected);
+}
+
+TEST_F(DaemonServeArmTest, ACorsRequestIsNotGivenTheDurableOriginalEither) {
+  SetAlternates("0c:00:0");
+  DaemonServeRequest request = Request("image/webp");
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, Serve(request).verdict);
+
+  request.origin = "null";
+  const DaemonServeDecision decision = Serve(request);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kCorsRequest, decision.reason);
+  EXPECT_TRUE(decision.body.empty());
+}
+
+TEST_F(DaemonServeArmTest, ACorsRequestIsServedWithTheGuardOff) {
+  // InPlaceCorsGuard off: the arm serves as it did before the guard.
+  SetAlternates("09:00:1,0a:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp,*/*");
+  request.origin = "https://www.example.com";
+  DaemonServeReader reader(abi_.get(), cache_);
+  reader.set_cors_guard(false);
+  const DaemonServeDecision decision = reader.Serve(request, 1100);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kOptimizedVariant, decision.reason);
+}
+
 TEST_F(DaemonServeArmTest, TheFlagIsReadOffTheByIdOriginalAndNowhereElse) {
   // THE STRUCTURAL FALSE ALL-CLEAR THIS PINS.  The bit lives only on the entry
   // the writer stamped; the optimizer builds its variants with a clear flags

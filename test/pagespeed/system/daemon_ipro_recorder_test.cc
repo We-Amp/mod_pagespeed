@@ -1084,6 +1084,48 @@ TEST_F(DaemonIproRecorderTest, TheWriteAndTheNotificationAreInTheSite) {
   EXPECT_EQ(0, recording.notifies()[0].agent_request);
 }
 
+// --- a cross-origin CORS request is not recorded ----------------------------
+
+TEST_F(DaemonIproRecorderTest, AResponseToACorsRequestIsNotRecorded) {
+  // The server's answer to a request carrying Origin is made for that
+  // origin: an echoed Access-Control-Allow-Origin, or a "*" the origin sends
+  // only to such requests, would replace the clean durable original with one
+  // marked not reproducible, and every other request for the URL would then
+  // be declined.  The serve arm never answers such a request, so it is not
+  // recorded either, whatever its CORS headers say.
+  request_.has_origin = true;
+  for (const char* allow : {"", "*", "https://www.example.com"}) {
+    SCOPED_TRACE(allow);
+    remove(log_path_.c_str());
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    if (*allow != '\0') {
+      headers.Add(HttpAttributes::kAccessControlAllowOrigin, allow);
+      headers.ComputeCaching();
+    }
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    EXPECT_TRUE(outcome.done);
+    EXPECT_FALSE(outcome.gate_ran);
+    EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+    EXPECT_STREQ(daemon_record_reason::kCorsRequest, outcome.reason);
+    EXPECT_FALSE(outcome.stored);
+    EXPECT_FALSE(outcome.notified);
+    EXPECT_EQ(GoogleString(), CallLog());
+  }
+}
+
+TEST_F(DaemonIproRecorderTest, AResponseToACorsRequestIsRecordedWithGuardOff) {
+  request_.has_origin = true;
+  HttpOptions guard_off = kDefaultHttpOptionsForTests;
+  guard_off.ipro_cors_guard = false;
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, &guard_off);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

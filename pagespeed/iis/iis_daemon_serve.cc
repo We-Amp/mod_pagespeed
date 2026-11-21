@@ -177,6 +177,12 @@ void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
                                                 &length);
   request->pragma =
       StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
+  // A request carrying Origin is a CORS request, which the arm leaves to the
+  // plain path (daemon_serve_reason::kCorsRequest).
+  value =
+      http_context->GetRequest()->GetHeader(HttpAttributes::kOrigin, &length);
+  request->origin =
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
 }
 
 #endif  // _WIN32

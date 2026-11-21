@@ -2978,6 +2978,7 @@ struct PsDaemonServeRequestStrings {
   GoogleString if_modified_since;
   GoogleString cache_control;
   GoogleString pragma;
+  GoogleString origin;
 };
 
 // Fills the daemon serve request the way the record arm fills its own: the
@@ -3043,6 +3044,11 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
   strings->pragma = request_headers.LookupJoined(HttpAttributes::kPragma);
   out->cache_control = strings->cache_control;
   out->pragma = strings->pragma;
+
+  // A request carrying Origin is a CORS request, which the arm leaves to the
+  // plain path (daemon_serve_reason::kCorsRequest).
+  strings->origin = request_headers.LookupJoined(HttpAttributes::kOrigin);
+  out->origin = strings->origin;
 }
 
 // The names this request's server{} block is configured with, as copied
@@ -3106,6 +3112,8 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
   // default.
   reader->set_honor_request_freshness(
       config != nullptr && config->daemon_serve_honor_request_freshness());
+  // InPlaceCorsGuard: a CORS request is not answered from the volume.
+  reader->set_cors_guard(config == nullptr || config->in_place_cors_guard());
   // Lets the arm notice, while it serves a stored original, that the URL's
   // optimized copy has gone missing.  This worker process's own limiter:
   // one look per URL per window.  The look is one more read of the mapped
@@ -4478,6 +4486,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
       props.has_authorization =
           props.has_authorization || r->headers_in.user.len > 0;
       record_request.request_properties = props;
+      record_request.has_origin = request_headers.Has(HttpAttributes::kOrigin);
 
       // LookupJoined, not Lookup1: the capability headers are routinely
       // multi-token ("image/avif,image/webp,*/*", "gzip, deflate, br"), and

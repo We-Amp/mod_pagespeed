@@ -562,6 +562,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   reader->set_honor_request_freshness(
       iis_options != nullptr &&
       iis_options->daemon_serve_honor_request_freshness());
+  // InPlaceCorsGuard: a CORS request is not answered from the volume.
+  reader->set_cors_guard(iis_options == nullptr ||
+                         iis_options->in_place_cors_guard());
 
   // The site of the IIS site that admitted the request, from its server
   // context's fragment (set per IIS site in GetServerContext); "" when the

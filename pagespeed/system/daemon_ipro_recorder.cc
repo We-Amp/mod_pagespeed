@@ -300,6 +300,14 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
       }
       break;
     }
+    // ---- a cross-origin CORS request ----------------------------------
+    // The serve arm never answers one, and the server's answer to it is
+    // made for that origin (daemon_record_reason::kCorsRequest).
+    if (request_.has_origin && http_options_.ipro_cors_guard) {
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kCorsRequest;
+      break;
+    }
     if (failure_ || over_cap_ || !entire_response_received) {
       // A truncated response is not the origin's answer, and storing it as the
       // durable original would replace a good one with a partial one -- the

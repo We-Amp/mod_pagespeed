@@ -97,6 +97,11 @@ inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
 // asked for, because an entry of the optimizer worker may be written only
 // under the site that admitted the request.
 inline constexpr char kNoSiteId[] = "no-site-id";
+// The request carried `Origin`.  The serve arm never answers such a request
+// (daemon_serve_reason::kCorsRequest), and the server's answer to it is made
+// for that one origin: its CORS headers would mark the durable original and
+// decline every other request for the URL.  Nothing is stored or asked for.
+inline constexpr char kCorsRequest[] = "cors-request";
 }  // namespace daemon_record_reason
 
 // One origin response header, name and value, exactly as the origin sent it.

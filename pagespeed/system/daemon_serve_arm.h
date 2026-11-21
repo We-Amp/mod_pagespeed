@@ -131,6 +131,13 @@ inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
 // the optimizer worker may be served only under the site that admitted the
 // request, and without one there is no keyspace to read.
 inline constexpr char kNoSiteId[] = "no-site-id";
+// The request carries `Origin`: a cross-origin CORS request (a web font, a
+// `crossorigin` or module script, a fetch()).  Nothing this arm serves carries
+// the `Access-Control-Allow-Origin` such a request needs -- an origin that
+// sends one has its durable original marked (kOriginHeadersNotReproducible)
+// -- so the request goes out by the plain path, where the server answers it
+// with its own CORS headers.  See DaemonServeReader::set_cors_guard.
+inline constexpr char kCorsRequest[] = "cors-request";
 }  // namespace daemon_serve_reason
 
 // Everything the arm reads about the request.  Every StringPiece is borrowed
@@ -192,6 +199,12 @@ struct DaemonServeRequest {
   // drift apart.  Empty when the request carries no such field.
   StringPiece cache_control;
   StringPiece pragma;
+
+  // The request's `Origin` field value, verbatim; empty when the request
+  // carries none.  Not a capability field: it selects nothing, it only
+  // decides whether the arm may answer at all (daemon_serve_reason::
+  // kCorsRequest).
+  StringPiece origin;
 };
 
 // The arm's answer, plus the response state a serving seam has to emit.
@@ -1158,6 +1171,13 @@ class DaemonServeReader {
   // optimizer's own front end treats a resource by default.
   void set_honor_request_freshness(bool on) { honor_request_freshness_ = on; }
 
+  // Whether a request carrying `Origin` falls through rather than being
+  // answered with a copy that has no `Access-Control-Allow-Origin`
+  // (daemon_serve_reason::kCorsRequest).  On unless a seam turns it off from
+  // InPlaceCorsGuard, the switch the classic in-place path obeys for the same
+  // decision.
+  void set_cors_guard(bool on) { cors_guard_ = on; }
+
   // Lets this reader recognise a lost optimized copy while it serves the
   // durable original (DaemonServeDecision::lost_optimized_copy).  Borrowed;
   // must outlive the reader.  Unset -- the default, and every port that has
@@ -1255,6 +1275,7 @@ class DaemonServeReader {
   void* result_ = nullptr;
   bool serve_stored_encodings_ = false;
   bool honor_request_freshness_ = false;
+  bool cors_guard_ = true;
   DaemonHealNotifyLimiter* heal_limiter_ = nullptr;
 };
 

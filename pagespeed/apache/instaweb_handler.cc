@@ -582,6 +582,8 @@ void InstawebHandler::BuildDaemonRecordRequest(
     const RequestHeaders::Properties& request_properties,
     DaemonRecordRequest* request) {
   request->request_properties = request_properties;
+  request->has_origin =
+      apr_table_get(request_->headers_in, HttpAttributes::kOrigin) != nullptr;
   stripped_gurl_.PathAndLeaf().CopyToString(&request->url);
   stripped_gurl_.HostAndPort().CopyToString(&request->hostname);
   stripped_gurl_.Scheme().CopyToString(&request->scheme);
@@ -639,6 +641,9 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   // drift.
   request->cache_control = RequestHeader(HttpAttributes::kCacheControl);
   request->pragma = RequestHeader(HttpAttributes::kPragma);
+  // A request carrying Origin is a CORS request, which the arm leaves to the
+  // plain path (daemon_serve_reason::kCorsRequest).
+  request->origin = RequestHeader(HttpAttributes::kOrigin);
 }
 
 GoogleString InstawebHandler::DaemonSiteId() const {
@@ -732,6 +737,9 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
   // (ModPagespeedDaemonServeHonorRequestFreshness), off by default.
   reader->set_honor_request_freshness(
       options_ != nullptr && options_->daemon_serve_honor_request_freshness());
+  // InPlaceCorsGuard: a CORS request is not answered from the volume.
+  reader->set_cors_guard(options_ == nullptr ||
+                         options_->in_place_cors_guard());
 
   // Lets the arm notice, while it serves a stored original, that the URL's
   // optimized copy has gone missing (DaemonServeDecision::lost_optimized_copy).

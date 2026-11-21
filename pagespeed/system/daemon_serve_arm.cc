@@ -1152,6 +1152,22 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
     return decision;
   }
 
+  // ---- a cross-origin CORS request ----------------------------------------
+  //
+  // Whatever this arm would serve carries no Access-Control-Allow-Origin: an
+  // origin that sent one has its durable original marked above.  An origin
+  // that sends it only to requests carrying Origin leaves the entry clean,
+  // and a web font or crossorigin script answered from it would be blocked
+  // by the browser.  So such a request goes out by the plain path, where
+  // the server answers it with its own CORS headers.
+  if (cors_guard_ && !request.origin.empty()) {
+    decision.reason = daemon_serve_reason::kCorsRequest;
+    if (original_status == kPsOk) {
+      decision.serve_class = kPsServeClassOriginalDeclined;
+    }
+    return decision;
+  }
+
   // THE CAPABILITY MASK IS THE PEER'S ANSWER OVER THIS REQUEST'S HEADERS.
   // Five request fields in (the fifth, the density hint, applied by the
   // peer's rule on top of its classifier), one mask out, and nothing else reaches it -- no
