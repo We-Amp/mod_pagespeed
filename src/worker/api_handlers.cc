@@ -1258,6 +1258,14 @@ std::string BuildPrometheusMetricsText(const PrometheusMetricsInputs& in) {
     counter("pagespeed_headers_sidecar_stored_total",
             "Origin header blocks stored with a cache entry.",
             load(ss->headers_sidecar_stored));
+    // Busy cache reads (shared mmap, busy-read block).
+    counter("pagespeed_cache_busy_reads_total",
+            "Cache reads that found the entry locked by a concurrent write "
+            "and were retried once.",
+            load(ss->cache_busy_reads));
+    counter("pagespeed_cache_busy_retry_hits_total",
+            "Retried busy cache reads that then found the entry.",
+            load(ss->cache_busy_retry_hits));
   }
 
   return m;

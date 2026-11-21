@@ -1267,6 +1267,24 @@ TEST_F(ApiHandlersIntegrationTest, MetricsExposesZerocopyAndSwrCounters) {
             std::string::npos);
 }
 
+// The busy-read counters are exported on /v1/metrics.
+TEST_F(ApiHandlersIntegrationTest, MetricsExposesCacheBusyReadCounters) {
+  ServeStats ss{};
+  ss.magic = ServeStats::kMagic;
+  ss.version = ServeStats::kVersion;
+  ss.cache_busy_reads = 9;
+  ss.cache_busy_retry_hits = 8;
+  ctx_->serve_stats = &ss;
+
+  std::string resp =
+      SendRequest("GET /v1/metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(resp.find("# TYPE pagespeed_cache_busy_reads_total counter"),
+            std::string::npos);
+  EXPECT_NE(resp.find("pagespeed_cache_busy_reads_total 9"), std::string::npos);
+  EXPECT_NE(resp.find("pagespeed_cache_busy_retry_hits_total 8"),
+            std::string::npos);
+}
+
 // The v11 response-header sidecar counters are exported on /v1/metrics.
 TEST_F(ApiHandlersIntegrationTest, MetricsExposesHeadersSidecarCounters) {
   ServeStats ss{};

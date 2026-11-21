@@ -483,12 +483,26 @@ struct ServeStats {
   SplitCounters split_js;
   SplitCounters split_image;
   // ---- end split block (96 bytes) ----
+
+  // ---- busy-read block ----
+  // Appended after the split block the same way: no version bump, no field
+  // moves, and a file created by a peer built before it has the block zero.
+  // WRITER: the front end and the worker, through RecordCacheBusyRead(), from
+  // the cache's Busy-read observer (PageSpeedCache::SetBusyReadObserver).
+  //   cache_busy_reads      — cache reads that found the entry locked by a
+  //                           concurrent write for the whole read budget, and
+  //                           so were retried once;
+  //   cache_busy_retry_hits — those retries that then found the entry (the
+  //                           rest were served as a miss, as before).
+  uint64_t cache_busy_reads;
+  uint64_t cache_busy_retry_hits;
+  // ---- end busy-read block (16 bytes) ----
 };
 static_assert(sizeof(ServeStats) <= ServeStats::kFileSize);
-// Pin the EXACT size (v11 plus the split block).  The <= assert above only catches an overflow; it
+// Pin the EXACT size (v11 plus the split and busy-read blocks).  The <= assert above only catches an overflow; it
 // would happily accept a field silently dropped or re-typed.  Anything that
 // changes the layout must change this number and the version together.
-static_assert(sizeof(ServeStats) == 11592,
+static_assert(sizeof(ServeStats) == 11608,
               "ServeStats layout changed: bump kVersion and update this pin");
 static_assert(alignof(ServeStats) == 8);
 // The v8 block must stay 8-byte aligned so every u64 in it can be updated with
@@ -507,6 +521,10 @@ static_assert(offsetof(ServeStats, counting_since_unix_day) <
 static_assert(offsetof(ServeStats, split_html) >=
               offsetof(ServeStats, boot_id) + sizeof(ServeStats::boot_id));
 static_assert(offsetof(ServeStats, split_html) % 8 == 0);
+static_assert(offsetof(ServeStats, cache_busy_reads) >=
+              offsetof(ServeStats, split_image) +
+                  sizeof(ServeStats::SplitCounters));
+static_assert(offsetof(ServeStats, cache_busy_reads) % 8 == 0);
 static_assert(offsetof(ServeStats, serve_hits_by_encoding) % 8 == 0);
 static_assert(offsetof(ServeStats, serve_bytes_by_encoding) % 8 == 0);
 static_assert(offsetof(ServeStats, serve_bytes_by_encoding) <
@@ -729,6 +747,11 @@ void RecordHeadersSidecarReplayed(ServeStats* stats);
 void RecordHeadersSidecarMissing(ServeStats* stats);
 void RecordHeadersSidecarWriteFailed(ServeStats* stats);
 void RecordHeadersSidecarStored(ServeStats* stats);
+
+// Atomically record one cache read that came back Busy and was retried once
+// (the busy-read block): cache_busy_reads always, cache_busy_retry_hits too
+// when `retry_hit`.  Same discipline; stats == nullptr is a no-op.
+void RecordCacheBusyRead(ServeStats* stats, bool retry_hit);
 
 // Atomically record ONE classified serve: exactly one serve-class counter is
 // incremented, plus notify_suppressed_total when `flags` carries

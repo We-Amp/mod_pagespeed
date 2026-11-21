@@ -252,6 +252,32 @@ TEST_F(ServeStatsTest, HeadersSidecarCountersRecordAndPersist) {
   RecordHeadersSidecarStored(nullptr);
 }
 
+// The busy-read counters: RecordCacheBusyRead always counts the read, counts
+// the retry hit only when told, persists across a reopen, is zeroed on
+// same-version reuse, and is a no-op on nullptr.
+TEST_F(ServeStatsTest, CacheBusyReadCountersRecordPersistAndReset) {
+  ServeStats* stats = CreateServeStats(path_);
+  ASSERT_NE(stats, nullptr);
+  RecordCacheBusyRead(stats, /*retry_hit=*/true);
+  RecordCacheBusyRead(stats, /*retry_hit=*/true);
+  RecordCacheBusyRead(stats, /*retry_hit=*/false);
+  CloseServeStats(stats);
+
+  ServeStats* reopened = OpenServeStats(path_);
+  ASSERT_NE(reopened, nullptr);
+  EXPECT_EQ(reopened->cache_busy_reads, 3u);
+  EXPECT_EQ(reopened->cache_busy_retry_hits, 2u);
+  CloseServeStats(reopened);
+
+  stats = CreateServeStats(path_);
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->cache_busy_reads, 0u);
+  EXPECT_EQ(stats->cache_busy_retry_hits, 0u);
+  CloseServeStats(stats);
+
+  RecordCacheBusyRead(nullptr, true);
+}
+
 // The v11 block sits after the v10 block and before the identity/epoch pair.
 TEST_F(ServeStatsTest, V11LayoutOrdering) {
   EXPECT_LT(offsetof(ServeStats, serve_hosts_other_optimized_bytes),
@@ -265,7 +291,9 @@ TEST_F(ServeStatsTest, SplitBlockFollowsTheIdentityPairAndMovesNothing) {
   // The offsets a peer built before the split block knows.
   EXPECT_EQ(offsetof(ServeStats, boot_id), 11480u);
   EXPECT_EQ(offsetof(ServeStats, split_html), 11496u);
-  EXPECT_EQ(sizeof(ServeStats), 11592u);
+  // The busy-read block follows the split block, moving nothing either.
+  EXPECT_EQ(offsetof(ServeStats, cache_busy_reads), 11592u);
+  EXPECT_EQ(sizeof(ServeStats), 11608u);
   EXPECT_LE(sizeof(ServeStats), ServeStats::kFileSize);
 }
 
@@ -531,10 +559,10 @@ TEST_F(ServeStatsTest, StructSize) {
   // The exact size is pinned in the header too; asserted here so the failure
   // names the surface rather than a translation unit.
   // 11496 through v11, plus the 96-byte split block appended after boot_id
-  // without a version bump.
-  EXPECT_EQ(sizeof(ServeStats), 11592u);
+  // and the 16-byte busy-read block after it, both without a version bump.
+  EXPECT_EQ(sizeof(ServeStats), 11608u);
   EXPECT_EQ(sizeof(ServeStats::HostSlot), 168u);
-  EXPECT_EQ(ServeStats::kFileSize - sizeof(ServeStats), 4792u)
+  EXPECT_EQ(ServeStats::kFileSize - sizeof(ServeStats), 4776u)
       << "headroom shrank: the next append may need a kFileSize bump";
 }
 

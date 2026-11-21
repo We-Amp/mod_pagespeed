@@ -22,6 +22,9 @@
 #ifndef PAGESPEED_TEST_TEST_UTIL_CACHE_TEST_PEER_H_
 #define PAGESPEED_TEST_TEST_UTIL_CACHE_TEST_PEER_H_
 
+#include <atomic>
+#include <string>
+
 #include "cyclone/cache.hpp"
 #include "lib/cache/cache.h"
 
@@ -37,6 +40,13 @@ class PageSpeedCacheTestPeer {
   // replace it), to stage a purge over more than one file.
   static void AddLivePath(PageSpeedCache& cache, const std::string& path) {
     cache.volume_file_paths_.push_back(path);
+  }
+
+  // Makes the next `count` substrate content reads return CacheError::Busy
+  // without reaching the substrate, to drive the Busy retry deterministically.
+  static void ForceBusyReads(PageSpeedCache& cache, int count) {
+    cache.forced_busy_reads_for_testing_.store(count,
+                                               std::memory_order_relaxed);
   }
 };
 

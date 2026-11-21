@@ -338,6 +338,43 @@ PageSpeedCache::ReadBestAlternateAgent(std::string_view url,
                                      mask, agent_request_entitled);
 }
 
+std::expected<cyclone::ReadHandle, cyclone::CacheError>
+PageSpeedCache::ReadAlternateSyncRetryingBusy(
+    const cyclone::CacheKey& key,
+    const cyclone::StorageAlternateSelector& selector,
+    const cyclone::AlternateSelectionContext& ctx) {
+  auto read_once =
+      [&]() -> std::expected<cyclone::ReadHandle, cyclone::CacheError> {
+    if (forced_busy_reads_for_testing_.load(std::memory_order_relaxed) > 0 &&
+        forced_busy_reads_for_testing_.fetch_sub(1, std::memory_order_relaxed) >
+            0) {
+      return std::unexpected(cyclone::CacheError::Busy);
+    }
+    return cache_->read_alternate_sync(key, selector, ctx);
+  };
+
+  auto result = read_once();
+  if (result || result.error() != cyclone::CacheError::Busy) {
+    return result;
+  }
+  // Busy means the reader gave up on a bucket a writer held for the whole
+  // read budget: the entry's presence is unknown, not absent.  One retry
+  // after a short pause usually finds the writer done.  Exactly one: a second
+  // Busy falls through to the caller, which treats it as a miss, so a stuck
+  // bucket costs a reader at most two read budgets and this pause.
+  busy_reads_.fetch_add(1, std::memory_order_relaxed);
+  std::this_thread::sleep_for(kBusyReadRetryPause);
+  result = read_once();
+  const bool retry_hit = result.has_value();
+  if (retry_hit) {
+    busy_retry_hits_.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (busy_read_observer_) {
+    busy_read_observer_(retry_hit);
+  }
+  return result;
+}
+
 std::expected<ReadResult, cyclone::CacheError>
 PageSpeedCache::ReadBestAlternateByKey(const cyclone::CacheKey& key,
                                        const CapabilityMask& mask,
@@ -360,7 +397,7 @@ PageSpeedCache::ReadBestAlternateByKey(const cyclone::CacheKey& key,
   cyclone::AlternateSelectionContext ctx;
   ctx.request_metadata = mask_bytes;
 
-  auto result = cache_->read_alternate_sync(key, selector_, ctx);
+  auto result = ReadAlternateSyncRetryingBusy(key, selector_, ctx);
   if (!result) {
     return std::unexpected(result.error());
   }
@@ -435,7 +472,7 @@ PageSpeedCache::ReadAlternateByKey(const cyclone::CacheKey& key,
   ExactIdSelector selector(static_cast<cyclone::AlternateId>(id));
   cyclone::AlternateSelectionContext ctx;
 
-  auto result = cache_->read_alternate_sync(key, selector, ctx);
+  auto result = ReadAlternateSyncRetryingBusy(key, selector, ctx);
   if (!result) {
     return std::unexpected(result.error());
   }

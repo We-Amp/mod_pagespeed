@@ -440,6 +440,104 @@ TEST_F(PageSpeedCacheTest, ReadMissReturnsNotFound) {
   EXPECT_FALSE(result.has_value());
 }
 
+// A read the substrate answers with Busy (the entry's bucket held by a
+// concurrent write for the whole read budget) is retried once.  One Busy, then
+// a clean read: the caller sees the hit and both counters move.
+TEST_F(PageSpeedCacheTest, BusyReadIsRetriedOnceAndTurnsIntoAHit) {
+  CreateCache();
+  CapabilityMask mask = MakeTestMask(CapabilityMask::ImageFormat::kWebP,
+                                     CapabilityMask::Viewport::kMobile);
+  WriteContent("/img/busy.jpg", "example.com", mask, "busy retry data");
+
+  int observed = 0;
+  int observed_hits = 0;
+  cache_->SetBusyReadObserver([&](bool retry_hit) {
+    ++observed;
+    if (retry_hit) ++observed_hits;
+  });
+
+  PageSpeedCacheTestPeer::ForceBusyReads(*cache_, 1);
+  auto result =
+      cache_->ReadBestAlternate("/img/busy.jpg", "example.com", "https", mask);
+  ASSERT_TRUE(result.has_value())
+      << "error: " << static_cast<int>(result.error());
+  auto content = result->content();
+  EXPECT_EQ(std::string_view(reinterpret_cast<const char*>(content.data()),
+                             content.size()),
+            "busy retry data");
+  EXPECT_EQ(cache_->BusyReads(), 1u);
+  EXPECT_EQ(cache_->BusyRetryHits(), 1u);
+  EXPECT_EQ(observed, 1);
+  EXPECT_EQ(observed_hits, 1);
+
+  // The exact-id read path goes through the same retry.
+  const AlternateId id =
+      MaskToAlternateId(static_cast<uint8_t>(mask.Encode() & 0xFF));
+  PageSpeedCacheTestPeer::ForceBusyReads(*cache_, 1);
+  EXPECT_TRUE(cache_->ReadAlternate("/img/busy.jpg", "example.com", "https", id)
+                  .has_value());
+  EXPECT_EQ(cache_->BusyReads(), 2u);
+  EXPECT_EQ(cache_->BusyRetryHits(), 2u);
+
+  // A read that is not Busy is not counted.
+  EXPECT_TRUE(
+      cache_->ReadBestAlternate("/img/busy.jpg", "example.com", "https", mask)
+          .has_value());
+  EXPECT_EQ(cache_->BusyReads(), 2u);
+  EXPECT_EQ(observed, 2);
+}
+
+// Busy twice: the one retry is spent, and the caller gets today's answer —
+// Busy, which every caller treats as a miss.  Never a third attempt.
+TEST_F(PageSpeedCacheTest, BusyTwiceFallsBackToAMissWithoutASecondRetry) {
+  CreateCache();
+  CapabilityMask mask = MakeTestMask(CapabilityMask::ImageFormat::kWebP,
+                                     CapabilityMask::Viewport::kMobile);
+  WriteContent("/img/busy.jpg", "example.com", mask, "busy retry data");
+
+  int observed = 0;
+  int observed_hits = 0;
+  cache_->SetBusyReadObserver([&](bool retry_hit) {
+    ++observed;
+    if (retry_hit) ++observed_hits;
+  });
+
+  // Three forced: a third attempt would consume the last one and fail too,
+  // so the leftover count proves exactly two attempts were made.
+  PageSpeedCacheTestPeer::ForceBusyReads(*cache_, 3);
+  const auto start = std::chrono::steady_clock::now();
+  auto result =
+      cache_->ReadBestAlternate("/img/busy.jpg", "example.com", "https", mask);
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), cyclone::CacheError::Busy);
+  EXPECT_GE(elapsed, PageSpeedCache::kBusyReadRetryPause);
+  EXPECT_EQ(cache_->BusyReads(), 1u);
+  EXPECT_EQ(cache_->BusyRetryHits(), 0u);
+  EXPECT_EQ(observed, 1);
+  EXPECT_EQ(observed_hits, 0);
+
+  // One forced Busy was left over: this read uses it, retries, and hits.
+  auto next =
+      cache_->ReadBestAlternate("/img/busy.jpg", "example.com", "https", mask);
+  EXPECT_TRUE(next.has_value());
+  EXPECT_EQ(cache_->BusyReads(), 2u);
+  EXPECT_EQ(cache_->BusyRetryHits(), 1u);
+}
+
+// A Busy read of an entry that is not there: retried once, then the ordinary
+// miss — counted as a busy read, not as a retry hit.
+TEST_F(PageSpeedCacheTest, BusyReadOfAnAbsentEntryEndsInAMiss) {
+  CreateCache();
+  PageSpeedCacheTestPeer::ForceBusyReads(*cache_, 1);
+  auto result = cache_->ReadBestAlternate("/nonexistent", "example.com",
+                                          "https", CapabilityMask());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error(), cyclone::CacheError::Busy);
+  EXPECT_EQ(cache_->BusyReads(), 1u);
+  EXPECT_EQ(cache_->BusyRetryHits(), 0u);
+}
+
 TEST_F(PageSpeedCacheTest, SentinelWriteAndRead) {
   CreateCache();
 

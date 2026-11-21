@@ -855,6 +855,16 @@ static PageSpeedCacheConfig MakeNginxCacheConfig(std::string_view cache_path) {
 // handler) can anchor the instance to the request's lifetime, keeping the
 // mmap-backed ReadHandles valid across deferred (slow-client) writes even
 // if a later generation change replaces g_cache.
+// Carry the cache's Busy-read counts into the shared serve statistics, where
+// the worker's /v1/metrics reports them.  Installed on every instance before
+// it is published to g_cache; g_serve_stats is read at call time, so reads
+// before the worker has created the file simply go uncounted there.
+static void InstallBusyReadObserver(PageSpeedCache& cache) {
+  cache.SetBusyReadObserver([](bool retry_hit) {
+    pagespeed::RecordCacheBusyRead(g_serve_stats, retry_hit);
+  });
+}
+
 static std::shared_ptr<PageSpeedCache> GetCache(std::string_view cache_path,
                                                 ngx_log_t* log) {
   std::lock_guard<std::mutex> lock(g_cache_mutex);
@@ -905,6 +915,7 @@ static std::shared_ptr<PageSpeedCache> GetCache(std::string_view cache_path,
     }
   }
   if (result.has_value()) {
+    InstallBusyReadObserver(**result);
     g_cache = std::move(*result);
     g_cache_gen_path = std::string(cache_path) + ".gen";
     g_cache_generation = PageSpeedCache::ReadGenerationFile(g_cache_gen_path);
@@ -979,6 +990,7 @@ static std::shared_ptr<PageSpeedCache> CheckGenerationAndGetCache(
     // (and its mmap mapped) as long as any in-flight request's ctx holds a
     // shared_ptr to it; the instance is destroyed when the last such
     // request completes.
+    InstallBusyReadObserver(**result);
     g_cache = std::move(*result);
     g_shared_config = ReadSharedConfig(cache_path, log);
     RebuildUrlNormConfig(cache_path, g_shared_config);

@@ -982,6 +982,38 @@ class PageSpeedCache {
     return agent_markdown_unlink_failed_.load(std::memory_order_relaxed);
   }
 
+  // Reads that found the entry's directory bucket held by a concurrent write
+  // for the whole of the substrate's read budget (CacheError::Busy: "unknown",
+  // never "absent").  Every content read through this class retries such a
+  // read exactly once, after kBusyReadRetryPause; BusyReads() counts the first
+  // Busy of each read, BusyRetryHits() the retries that then found the entry.
+  // A retry that is Busy again, or finds nothing, is returned as before and
+  // the caller treats it as a miss.  Counted since this cache was opened.
+  //
+  // OBSERVABILITY ONLY, like the counters above: nothing reads them to make a
+  // decision.  Monotonic; a non-zero value is an observation, not an error.
+  uint64_t BusyReads() const {
+    return busy_reads_.load(std::memory_order_relaxed);
+  }
+  uint64_t BusyRetryHits() const {
+    return busy_retry_hits_.load(std::memory_order_relaxed);
+  }
+
+  // The pause before the one retry of a Busy read.  Short on purpose: the
+  // nginx front stage reads inline on its event loop, so a Busy read costs at
+  // most one read budget, this pause, and a second read budget.
+  static constexpr std::chrono::milliseconds kBusyReadRetryPause{1};
+
+  // Called once per Busy read, after its retry, with whether the retry found
+  // the entry.  Lets an embedder carry the two counts above into a counting
+  // surface that outlives this instance (the front stage's and the worker's
+  // shared serve statistics).  Set it before the cache is shared between
+  // threads; it is not synchronized against concurrent reads.  The callee
+  // runs on the reading thread and must not block.
+  void SetBusyReadObserver(std::function<void(bool retry_hit)> observer) {
+    busy_read_observer_ = std::move(observer);
+  }
+
   // Remove all alternates for a URL.
   [[nodiscard]] std::expected<void, cyclone::CacheError> Remove(
       std::string_view url, std::string_view hostname, std::string_view scheme,
@@ -1242,6 +1274,16 @@ class PageSpeedCache {
   friend class PageSpeedCacheTestPeer;
   cyclone::Cache& RawCycloneCacheForTesting() { return *cache_; }
 
+  // The one substrate content read behind every read method: a read that
+  // returns CacheError::Busy is retried once after kBusyReadRetryPause and
+  // counted (see BusyReads()).  The caller holds reset_mutex_ (shared) and
+  // has checked cache_.
+  std::expected<cyclone::ReadHandle, cyclone::CacheError>
+  ReadAlternateSyncRetryingBusy(
+      const cyclone::CacheKey& key,
+      const cyclone::StorageAlternateSelector& selector,
+      const cyclone::AlternateSelectionContext& ctx);
+
   // Shared removal passes for RemoveAlternatesExcept and
   // RemoveDerivedAlternates.  The caller holds reset_mutex_ (shared) and has
   // validated its own preserve rules; `is_preserved` decides per alternate id.
@@ -1369,6 +1411,13 @@ class PageSpeedCache {
   std::atomic<uint64_t> sentinels_unlink_failed_{0};
   std::atomic<uint64_t> agent_markdown_superseded_observed_{0};
   std::atomic<uint64_t> agent_markdown_unlink_failed_{0};
+  // Bumped by ReadAlternateSyncRetryingBusy; see BusyReads().
+  std::atomic<uint64_t> busy_reads_{0};
+  std::atomic<uint64_t> busy_retry_hits_{0};
+  std::function<void(bool retry_hit)> busy_read_observer_;
+  // Test-only: the next N substrate reads return CacheError::Busy without
+  // reaching the substrate.  Set through PageSpeedCacheTestPeer only.
+  std::atomic<int> forced_busy_reads_for_testing_{0};
 };
 
 }  // namespace pagespeed

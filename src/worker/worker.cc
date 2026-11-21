@@ -1723,6 +1723,11 @@ bool Worker::Initialize() {
       // Create shared mmap for serve-time bandwidth counters.
       std::string stats_path = ServeStatsPath(config_.cache_path);
       serve_stats_ = CreateServeStats(stats_path, handler_);
+      // The worker's own Busy cache reads, counted on the same shared surface
+      // as the front end's.  Installed before any worker thread reads.
+      cache_->SetBusyReadObserver([this](bool retry_hit) {
+        RecordCacheBusyRead(serve_stats_, retry_hit);
+      });
       if (serve_stats_ != nullptr) {
         // Configuration, not a counter: re-stamped on every create-or-reuse so
         // it tracks a pool-width change across a restart, and non-zero while

@@ -129,6 +129,10 @@ static void ZeroCounters(ServeStats* s) {
       std::atomic_ref<uint64_t>(*field).store(0, std::memory_order_relaxed);
     }
   }
+  // Busy-read block: counters, zeroed with the rest.
+  for (uint64_t* field : {&s->cache_busy_reads, &s->cache_busy_retry_hits}) {
+    std::atomic_ref<uint64_t>(*field).store(0, std::memory_order_relaxed);
+  }
 }
 
 // Read the version word of an existing serve-stats file without mapping it.
@@ -794,6 +798,12 @@ void RecordStaleIfErrorServe(ServeStats* stats) {
 void RecordHeadersSidecarFallThrough(ServeStats* stats) {
   if (stats == nullptr) return;
   RelaxedAdd(stats->headers_sidecar_fall_through, 1);
+}
+
+void RecordCacheBusyRead(ServeStats* stats, bool retry_hit) {
+  if (stats == nullptr) return;
+  RelaxedAdd(stats->cache_busy_reads, 1);
+  if (retry_hit) RelaxedAdd(stats->cache_busy_retry_hits, 1);
 }
 
 void RecordHeadersSidecarNeverOptimized(ServeStats* stats) {
