@@ -120,6 +120,11 @@ const PAGE_CARDS = [
     eyebrow: 'AI readability checker · a free tool',
     title: 'Can AI crawlers read your page?',
   },
+  {
+    slug: 'ai-readability-hosted-builders',
+    eyebrow: 'AI readability · a guide',
+    title: 'AI readability on Wix, Squarespace and Shopify: what you can change',
+  },
 ];
 
 // Minimal YAML frontmatter parser. The blog frontmatter shape is

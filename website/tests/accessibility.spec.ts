@@ -24,6 +24,7 @@ const PAGES_FOR_AXE_SCAN = [
   '/security/',
   '/terms/',
   '/ai-readability/',
+  '/ai-readability/hosted-builders/',
   // /privacy/ points at the notice on we-amp.com; it is covered by its own
   // suite in terms-privacy.spec.ts
 ];

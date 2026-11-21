@@ -166,6 +166,7 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 - [Optimization examples](https://modpagespeed.com/examples/): Every optimization the module performs, shown live and before/after per filter.
 - [Analyze a page](https://modpagespeed.com/analyze/): Score any URL with PageSpeed Insights and see which findings the product addresses.
 - [RenderPeek, the free AI-readability checker](https://modpagespeed.com/ai-readability/): Paste a URL and see what an AI agent reads on your page: the readable content with and without JavaScript, markup bloat, and how well the page is described for machines. No signup.
+- [AI readability on Wix, Squarespace and Shopify](https://modpagespeed.com/ai-readability/hosted-builders/): What the owner of a site on a hosted builder can and cannot change so that AI crawlers can read its pages, with links to each vendor’s documentation. mod_pagespeed cannot be installed on a hosted builder.
 - [AI crawler cost meter](https://modpagespeed.com/ai-crawler-cost/): Drop an access log and see requests, bytes and an estimated cost per AI crawler, and the visits AI assistants send back. Runs in your browser; nothing from the log is uploaded.
 - [Savings calculator](https://modpagespeed.com/calculator/): Estimate bandwidth and cost savings from automatic image optimization, CSS/JS minification, and variant-aware caching.
 - [How it works](https://modpagespeed.com/how-it-works/): How the module works inside: asynchronous rewriting, CSS parsing and the metadata cache.

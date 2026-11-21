@@ -94,6 +94,12 @@ export const SURFACES = [
           'Paste a URL and see what an AI agent reads on your page: the readable content with and without JavaScript, markup bloat, and how well the page is described for machines. No signup.',
       },
       {
+        path: '/ai-readability/hosted-builders/',
+        title: 'AI readability on Wix, Squarespace and Shopify',
+        description:
+          'What the owner of a site on a hosted builder can and cannot change so that AI crawlers can read its pages, with links to each vendor’s documentation. mod_pagespeed cannot be installed on a hosted builder.',
+      },
+      {
         path: '/ai-crawler-cost/',
         title: 'AI crawler cost meter',
         description:

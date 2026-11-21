@@ -245,6 +245,7 @@ test.describe('No sideways scroll at 320px', () => {
     '/blog/fix-cls-nginx-2026/',
     '/alternatives/',
     '/alternatives/cloudflare-apo/',
+    '/ai-readability/hosted-builders/',
     // A static file under public/; the dev server only serves it by file name.
     '/data/web-bot-auth-2026-10-19/index.html',
   ];
