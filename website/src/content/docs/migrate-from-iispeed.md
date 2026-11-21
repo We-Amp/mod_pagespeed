@@ -7,7 +7,7 @@ lastUpdated: 2026-10-22
 datePublished: 2026-10-08
 faq:
   - q: 'What happens to my IISpeed subscription?'
-    a: 'Request the license transfer through the form at https://modpagespeed.com/contact/?topic=iispeed-transfer. The transfer is at no cost: paid terms are honored to expiry, and you keep your current rate when you move to a support subscription. The software itself is free to install and run, in development and in production. Other questions go to info@we-amp.com.'
+    a: 'Request the license transfer through the form at https://modpagespeed.com/contact/?topic=iispeed-transfer. A running IISpeed subscription counts as Standard support for mod_pagespeed, at no extra cost, for as long as it runs. Standard is a ticket and email channel with a first-response target (within 2 business days, on CET business days), for one organization and one person at your organization who can open tickets. The software itself is free to install and run, in development and in production, and needs no subscription or licence. Other questions go to info@we-amp.com.'
   - q: 'Do I have to rewrite my IISpeed configuration?'
     a: 'No. The module reads your `iiswebspeed.config` files where no `pagespeed.config` exists, accepts the `iispeed` directive prefix, and reads the server-level file under `%ProgramData%\We-Amp\IISWebSpeed\`. Rename the files to `pagespeed.config` when convenient; the content stays the same.'
 ---
