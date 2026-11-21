@@ -75,6 +75,11 @@ struct DaemonRecordRequest {
   // permissive answer on the one axis where being wrong means putting an
   // authenticated user's response where another user's request can reach it.
   RequestHeaders::Properties request_properties;
+
+  // Whether the request carried `Origin` (a cross-origin CORS request).  Such
+  // a response is not recorded while InPlaceCorsGuard is on; see
+  // daemon_record_reason::kCorsRequest.
+  bool has_origin = false;
 };
 
 // What one recorder did, copied out before it deletes itself.

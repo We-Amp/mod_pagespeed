@@ -158,6 +158,7 @@ void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
       HasHeader(http_context, HttpAttributes::kCookie),
       HasHeader(http_context, HttpAttributes::kCookie2),
       HasHeader(http_context, HttpAttributes::kAuthorization));
+  request->has_origin = HasHeader(http_context, HttpAttributes::kOrigin);
   url.PathAndLeaf().CopyToString(&request->url);
   url.HostAndPort().CopyToString(&request->hostname);
   url.Scheme().CopyToString(&request->scheme);
