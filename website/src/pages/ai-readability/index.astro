@@ -12,7 +12,7 @@ import NoscriptLead from '../../components/scan/NoscriptLead.astro';
 // Local dev (page served from localhost): append ?api=http://localhost:8787 to point at a local render service.
 const title = 'AI readability checker: what AI crawlers read on your page';
 const description =
-  'Free scanner: see what AI crawlers read on your page. Most skip JavaScript, so client-rendered content is invisible to them. Fix it in the HTML you serve.';
+  'Free check for one page: how much of it an AI crawler can read without running JavaScript. It does not measure whether AI answers mention you.';
 const webApp = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
@@ -106,16 +106,26 @@ const jsonLd = [webApp, faqPage];
       Most AI crawlers read your raw HTML and never run your JavaScript, so anything your scripts
       render is invisible to them. Paste a URL to see the gap. The same self-hosted mod_pagespeed
       worker that powers this site then optimizes and cleans that HTML inline, on your own servers
-      rather than behind a CDN. The optimizer worker can also serve AI agents a clean, rendered copy
-      of the page at the same URL &mdash; an
+      rather than behind a CDN. The optimizer worker can also serve AI agents a Markdown version of
+      a page at the same URL. That is an
       <a
         href="/blog/serve-markdown-to-ai-agents/"
         class="text-interactive underline underline-offset-2"
       >
         experimental feature
       </a>
-      , off by default, that we dogfood here.
+      and is off by default. This site's docs and blog posts are also served as Markdown at a
+      <code>.md</code> address.
     </SectionHeader>
+
+    <p class="mt-4 max-w-2xl text-sm text-text-muted leading-relaxed" data-airead-audience>
+      This tool checks one page: how much of its text an AI crawler can read without running
+      JavaScript, and how clearly the page describes itself to machines. It does not measure whether
+      ChatGPT, Perplexity or Google mention your site in their answers. The check works for any
+      site, whatever it runs on. Most of the fixes we offer need a web server you run yourself (such
+      as Apache, nginx or IIS); on a hosted builder such as Wix, Squarespace or Shopify, what you
+      can change is in the builder's settings.
+    </p>
 
     <ScanUiBoot />
     <div data-scan-variant="v1">
@@ -167,8 +177,8 @@ const jsonLd = [webApp, faqPage];
 
     <!-- prettier-ignore -->
     <p class="mt-4 text-sm text-text-annotation">
-      From <a href="/about/" class="text-interactive underline underline-offset-2">We-Amp</a>
-      &mdash; the team behind ngx_pagespeed.
+      From <a href="/about/" class="text-interactive underline underline-offset-2">We-Amp</a>,
+      who helped build ngx_pagespeed.
     </p>
   </section>
 

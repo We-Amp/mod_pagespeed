@@ -207,27 +207,26 @@ const STATES: State[] = [
   },
   {
     n: 8,
-    slug: 'form-preselected',
-    title: 'form with pre-selected chips',
-    mock: 'As state 4; scroll to the form; gated chips are pre-selected from the full report.',
+    slug: 'form-topics',
+    title: 'form with the topic chips',
+    mock: 'As state 4; scroll to the form; the chips from the full report are marked as found and none is selected.',
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
       await toForm(page);
-      await expect(page.locator('[data-scan-chip] input:checked')).toHaveCount(4);
-      await shot('form-preselected', { fullPage: true });
+      await expect(page.locator('[data-scan-chip] input:checked')).toHaveCount(0);
+      await shot('form-topics', { fullPage: true });
     },
   },
   {
     n: 9,
     slug: 'form-sites-field',
     title: 'form with the sites field',
-    mock: 'As state 8, then deselect one pre-selected chip and select SEO fixes or Legacy sites (only four are pre-selected) so the sites field shows.',
+    mock: 'As state 8, then select SEO fixes or Legacy sites so the sites field shows.',
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
       await toForm(page);
-      await chipInput(page, 'tollbooth').uncheck();
       await chipInput(page, 'edge-seo').check();
       await expect(page.locator('[data-scan-sites]')).toBeVisible();
       await shot('form-sites-field', { fullPage: true });

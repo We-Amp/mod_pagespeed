@@ -60,7 +60,7 @@ const GOLDENS: Golden[] = [
     route: '/ai-readability/',
     title: 'AI readability checker: what AI crawlers read on your page',
     description:
-      'Free scanner: see what AI crawlers read on your page. Most skip JavaScript, so client-rendered content is invisible to them. Fix it in the HTML you serve.',
+      'Free check for one page: how much of it an AI crawler can read without running JavaScript. It does not measure whether AI answers mention you.',
     canonical: 'https://modpagespeed.com/ai-readability/',
     h1: 'See what AI crawlers miss. Optimize the HTML you serve, on your own servers.',
     types: [

@@ -94,7 +94,7 @@ const ALL = [
 ];
 
 test.describe('the one lead form', () => {
-  test('shows every gated chip on the full report, pre-selecting the first four', async ({
+  test('shows every gated chip on the full report, marked as found and none selected', async ({
     page,
   }) => {
     await mock(page);
@@ -102,8 +102,29 @@ test.describe('the one lead form', () => {
     await expect(form(page)).toBeVisible();
     await expect(form(page).locator('fieldset legend')).toHaveText('Topics');
     expect(await chipIds(page)).toEqual(ALL);
-    expect(await checkedIds(page)).toEqual(ALL.slice(0, 4));
-    await expect(chip(page, 'markdown-origin')).not.toBeChecked();
+    expect(await checkedIds(page)).toEqual([]);
+    // The nine chips whose check fired come first and say so; the marker is
+    // part of the checkbox's accessible name.
+    for (const id of ALL.slice(0, 9)) {
+      await expect(page.locator(`[data-scan-chip="${id}"]`)).toContainText(
+        '(flagged by your scan)',
+      );
+    }
+    for (const id of ALL.slice(9)) {
+      await expect(page.locator(`[data-scan-chip="${id}"]`)).not.toContainText(
+        'flagged by your scan',
+      );
+    }
+    await expect(
+      form(page).getByRole('checkbox', {
+        name: 'Accessibility remediation (flagged by your scan)',
+        exact: true,
+      }),
+    ).toHaveCount(1);
+    await expect(form(page)).toContainText(
+      'Pick what you want to talk about, or leave the topics empty for a general question.',
+    );
+    await expect(form(page)).not.toContainText('pre-selected');
     await expect(form(page).locator('input[type="checkbox"]')).toHaveCount(12);
     await expect(page.locator('[data-scan-live]')).toHaveCount(1);
     await expect(
@@ -146,72 +167,32 @@ test.describe('the one lead form', () => {
     await expect(page.locator('[data-scan-audit]')).toBeVisible({ timeout: 15000 });
   });
 
-  test('says which sentence applies: pre-selected topics, or the neutral question', async ({
-    page,
-  }) => {
-    await mock(page);
-    await scanV2(page);
-    await expect(page.locator('[data-scan-preselected]')).toBeVisible();
-    await expect(page.locator('[data-scan-fallback]')).toBeHidden();
-    await mock(page, { report: 'clean' });
-    await scanV2(page);
-    await expect(page.locator('[data-scan-preselected]')).toBeHidden();
-    await expect(page.locator('[data-scan-fallback]')).toHaveText(
-      'Questions about how AI agents read your site? Tell us.',
-    );
-  });
-
-  test('hides the neutral question as soon as a topic is checked', async ({ page }) => {
-    await mock(page, { report: 'clean' });
-    await scanV2(page);
-    await expect(page.locator('[data-scan-fallback]')).toBeVisible();
-    await chip(page, 'agents').check();
-    await expect(page.locator('[data-scan-fallback]')).toBeHidden();
-  });
-
-  test('shows exactly one intro sentence after every pre-selected topic is unchecked', async ({
-    page,
-  }) => {
-    await mock(page);
-    await scanV2(page);
-    for (const id of await checkedIds(page)) await chip(page, id).uncheck();
-    expect(await checkedIds(page)).toEqual([]);
-    const shown = await Promise.all(
-      ['[data-scan-preselected]', '[data-scan-fallback]'].map((s) => page.locator(s).isVisible()),
-    );
-    expect(shown.filter(Boolean)).toHaveLength(1);
-  });
-
   test('pre-selects the speed-help chip only when Speed is Poor', async ({ page }) => {
     await mock(page, { report: 'clean', psi: 0.3 });
     await scanV2(page);
     expect(await checkedIds(page)).toEqual(['consulting']);
   });
 
-  test('on /analyze/ a Poor speed result takes a pre-selection slot from the gated chips', async ({
+  test('a Poor speed result selects the speed-help chip and no gated chip, on both pages', async ({
     page,
   }) => {
     await mock(page, { psi: 0.3 });
     await scanV2(page, '/analyze/?ui=v2');
-    expect(await checkedIds(page)).toEqual([...ALL.slice(0, 3), 'consulting']);
-    // On /ai-readability/ display order stands.
+    expect(await chipIds(page)).toEqual(ALL);
+    expect(await checkedIds(page)).toEqual(['consulting']);
     await mock(page, { psi: 0.3 });
     await scanV2(page);
-    expect(await checkedIds(page)).toEqual(ALL.slice(0, 4));
+    expect(await checkedIds(page)).toEqual(['consulting']);
+    // A good speed result selects nothing at all.
+    await mock(page);
+    await scanV2(page, '/analyze/?ui=v2');
+    expect(await checkedIds(page)).toEqual([]);
   });
 
-  test('says topics were pre-selected only when one is, and hides the report button until a result', async ({
-    page,
-  }) => {
+  test('shows the report button once a result is in', async ({ page }) => {
     await mock(page, { report: 'clean' });
     await scanV2(page);
-    await expect(form(page).locator('[data-scan-preselected]')).toBeHidden();
     await expect(page.getByRole('button', { name: 'Download this report' })).toBeVisible();
-
-    await mock(page);
-    await scanV2(page);
-    await expect(form(page).locator('[data-scan-preselected]')).toBeVisible();
-    await expect(form(page)).toContainText('We pre-selected topics from your results.');
   });
 
   test('the report button stays hidden while nothing has arrived', async ({ page }) => {
@@ -238,15 +219,106 @@ test.describe('the one lead form', () => {
     await expect(page.locator('[data-scan-audit]')).toBeHidden();
   });
 
-  test('asks for a topic, and for at most four', async ({ page }) => {
-    await mock(page, { report: 'clean' });
-    await scanV2(page);
-    await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick at least one topic.');
-
+  test('an untouched form sends one general question', async ({ page }) => {
     const { posted } = await mock(page);
     await scanV2(page);
+    expect(await checkedIds(page)).toEqual([]);
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByLabel('Anything we should know? (optional)').fill('Where do I start?');
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(
+      page.getByText(
+        'Thanks, your message is in. An engineer replies within one business day (CET).',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    // The visitor ticked nothing, so the confirmation names no topic.
+    await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Topics sent/)).toHaveCount(0);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      topic: 'agents',
+      wedge: '',
+      name: '',
+      email: 'ops@example.com',
+      url: 'https://shop.example.com/',
+    });
+    expect(String(posted[0].message)).toContain('[agents] request from the scan result');
+    expect(String(posted[0].message)).toContain('Note: Where do I start?');
+    expect(posted[0].lensSignal).toBeUndefined();
+
+    const events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'lead_submit').map((e) => e.data)).toEqual([
+      { channel: 'scan', topic: 'agents', wedge: '', source_path: '/ai-readability/' },
+    ]);
+    expect(events.filter((e) => e.name.startsWith('airead-next-'))).toHaveLength(0);
+  });
+
+  test('an untouched form still asks for an email address first', async ({ page }) => {
+    const { posted } = await mock(page, { report: 'clean' });
+    await scanV2(page);
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
+    await expect(form(page)).toBeVisible();
+    expect(posted).toHaveLength(0);
+  });
+
+  test('a general question that fails names no topic, and can be sent again', async ({ page }) => {
+    const mocked = await mock(page, { failTopics: ['agents'] });
+    await scanV2(page, '/analyze/?ui=v2');
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
+      'We could not send your question. Try again.',
+    );
+    await expect(form(page)).toBeVisible();
+    expect(await checkedIds(page)).toEqual([]);
+    mocked.failTopics.length = 0;
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
+    expect(mocked.posted.map((p) => p.topic)).toEqual(['agents', 'agents']);
+  });
+
+  test('a ticked general topic is confirmed by name', async ({ page }) => {
+    const { posted } = await mock(page, { report: 'clean' });
+    await scanV2(page);
+    await chip(page, 'agents').check();
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.getByText(/^Topics sent: /)).toHaveText(
+      'Topics sent: AI agents and crawlers.',
+    );
+    expect(posted.map((p) => p.topic)).toEqual(['agents']);
+  });
+
+  test('clears the failure line once the failed topic is unticked', async ({ page }) => {
+    const mocked = await mock(page, { failTopics: ['agentpass'] });
+    await scanV2(page);
+    await chip(page, 'tollbooth').check();
+    await chip(page, 'agentpass').check();
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    const msg = page.locator('[data-scan-lead-msg]');
+    await expect(msg).toContainText('We could not send: Signed-agent verification');
+    // Another topic changing leaves the line alone while the failed one is ticked.
+    await chip(page, 'edge-seo').check();
+    await expect(msg).toContainText('We could not send: Signed-agent verification');
+    await chip(page, 'agentpass').uncheck();
+    await expect(msg).toHaveText('');
+    await chip(page, 'edge-seo').uncheck();
+    // Nothing is left to send: the confirmation lists what went through.
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.getByText(/^Topics sent: /)).toHaveText(
+      'Topics sent: Origin controls (who reads / verifies).',
+    );
+    expect(mocked.posted.map((p) => p.topic)).toEqual(['tollbooth', 'agentpass']);
+  });
+
+  test('asks for at most four topics', async ({ page }) => {
+    const { posted } = await mock(page);
+    await scanV2(page);
+    for (const id of ALL.slice(0, 4)) await chip(page, id).check();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
     await chip(page, 'edge-seo').check();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick up to four topics.');
     await page.fill('input[name="email"]', 'ops@example.com');
@@ -262,7 +334,6 @@ test.describe('the one lead form', () => {
     await scanV2(page);
     const sites = page.getByLabel('Sites you run (optional)');
     await expect(sites).toBeHidden();
-    await chip(page, 'tollbooth').uncheck();
     await chip(page, 'edge-seo').check();
     await expect(sites).toBeVisible();
     await chip(page, 'edge-seo').uncheck();
@@ -276,9 +347,7 @@ test.describe('the one lead form', () => {
   }) => {
     const { posted } = await mock(page);
     await scanV2(page);
-    await chip(page, 'tollbooth').uncheck();
-    await chip(page, 'compliancefix').uncheck();
-    await chip(page, 'consent-enforcement').uncheck();
+    await chip(page, 'agentpass').check();
     await chip(page, 'edge-seo').check();
     await chip(page, 'markdown-origin').check();
     await chip(page, 'consulting').check();
@@ -346,6 +415,7 @@ test.describe('the one lead form', () => {
   test('retries only the topics that failed, without counting twice', async ({ page }) => {
     const mocked = await mock(page, { failTopics: ['agentpass'] });
     await scanV2(page);
+    for (const id of ALL.slice(0, 4)) await chip(page, id).check();
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByRole('button', { name: 'Talk to us' }).click();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
@@ -376,10 +446,8 @@ test.describe('the one lead form', () => {
     expect(events.filter((e) => e.name === 'airead-next-agentpass')).toHaveLength(1);
   });
 
-  test('adds the speed-help chip when the speed result arrives, keeping the visitor’s choices', async ({
-    page,
-  }) => {
-    await mock(page, { report: 'clean' });
+  // The speed result is held back until the test releases it.
+  async function scanWithLateSpeed(page: Page, score: number): Promise<() => void> {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     await page.route('**/psi/v5/runPagespeed**', async (route) => {
@@ -387,7 +455,7 @@ test.describe('the one lead form', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ lighthouseResult: { categories: { performance: { score: 0.2 } } } }),
+        body: JSON.stringify({ lighthouseResult: { categories: { performance: { score } } } }),
       });
     });
     await stubUmami(page);
@@ -397,11 +465,47 @@ test.describe('the one lead form', () => {
     await page.click('#scan-submit');
     await expect(form(page)).toBeVisible({ timeout: 15000 });
     await expect.poll(() => chipIds(page)).toEqual(['agents', 'audit']);
-    await chip(page, 'agents').check();
+    return release;
+  }
+
+  test('a late Poor speed result adds the speed-help chip ticked while the topics are untouched', async ({
+    page,
+  }) => {
+    await mock(page, { report: 'clean' });
+    const release = await scanWithLateSpeed(page, 0.2);
     release();
     await expect(chip(page, 'consulting')).toBeChecked();
     expect(await chipIds(page)).toEqual(['consulting', 'agents', 'audit']);
+  });
+
+  test('a late Poor speed result adds the speed-help chip unticked once the visitor chose topics', async ({
+    page,
+  }) => {
+    await mock(page, { report: 'clean' });
+    const release = await scanWithLateSpeed(page, 0.2);
+    await chip(page, 'agents').check();
+    release();
+    await expect.poll(() => chipIds(page)).toEqual(['consulting', 'agents', 'audit']);
+    await expect(chip(page, 'consulting')).not.toBeChecked();
     await expect(chip(page, 'agents')).toBeChecked();
+  });
+
+  test('ticking and unticking everything still sends the general question after a late Poor speed result', async ({
+    page,
+  }) => {
+    const { posted } = await mock(page, { report: 'clean' });
+    const release = await scanWithLateSpeed(page, 0.2);
+    await chip(page, 'agents').check();
+    await chip(page, 'audit').check();
+    await chip(page, 'agents').uncheck();
+    await chip(page, 'audit').uncheck();
+    release();
+    await expect.poll(() => chipIds(page)).toEqual(['consulting', 'agents', 'audit']);
+    expect(await checkedIds(page)).toEqual([]);
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
+    expect(posted.map((p) => p.topic)).toEqual(['agents']);
   });
 });
 
@@ -421,7 +525,7 @@ test.describe('next steps and share', () => {
     const audit = page.locator('[data-scan-audit]');
     await expect(audit).toBeVisible();
     await expect(audit).toContainText(
-      'Want a full check of this site? Agent-readiness audit, €950 per site, excl. VAT',
+      'Agent-readiness audit, €950 per site, excl. VAT: a written report and one review call. It lists the configuration change for each finding; applying the changes is not included. It does not measure visibility in AI answers.',
     );
     const auditLink = audit.getByRole('link', { name: 'Ask for an audit' });
     await expect(auditLink).toHaveAttribute('href', '/contact/?topic=audit');
@@ -516,7 +620,7 @@ test.describe('v1 and v2 send the same lead', () => {
       const p2 = await page.context().newPage();
       const v2 = await mock(p2);
       await scanV2(p2);
-      for (const id of await checkedIds(p2)) await chip(p2, id).uncheck();
+      expect(await checkedIds(p2)).toEqual([]);
       await chip(p2, c.wedge).check();
       await p2.fill('input[name="email"]', email);
       if (c.sites) await p2.getByLabel('Sites you run (optional)').fill(c.sites);

@@ -49,9 +49,9 @@ const pillars = [
     <p class="mt-1 min-h-5 text-sm text-text-muted" data-scan-hint></p>
     <p class="mt-2 text-sm text-text-muted">
       <span class="invisible" data-scan-audit>
-        Want a full check of this site? Agent-readiness audit, {formatEur(AUDIT_PRICE_EUR)} per
-        site, excl. VAT: one written report, one review call, the configuration change for each
-        finding.
+        Agent-readiness audit, {formatEur(AUDIT_PRICE_EUR)} per site, excl. VAT: a written report
+        and one review call. It lists the configuration change for each finding; applying the
+        changes is not included. It does not measure visibility in AI answers.
         <a
           href="/contact/?topic=audit"
           class="ml-1 font-medium text-interactive underline"
@@ -120,11 +120,7 @@ const pillars = [
       Talk to us
     </h3>
     <p class="mt-1 text-sm text-text-muted">
-      Pick what you want to talk about.<span data-scan-preselected hidden>
-        We pre-selected topics from your results.</span
-      ><span data-scan-fallback hidden>
-        Questions about how AI agents read your site? Tell us.</span
-      >
+      Pick what you want to talk about, or leave the topics empty for a general question.
     </p>
     <fieldset class="mt-4" data-scan-topics aria-describedby={`${idPrefix}-lead-msg`}>
       <legend class="text-sm font-medium text-text-body">Topics</legend>

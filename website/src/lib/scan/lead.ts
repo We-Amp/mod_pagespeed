@@ -5,6 +5,8 @@
 // becomes lead POSTs. Pure: no DOM, no network (the caller passes `post`).
 // The endpoint takes one wedge per POST, so a selection of N chips is N
 // sequential POSTs; gated chips use the shared payload builder unchanged.
+// Topics are opt-in: a chip whose check fired is offered and marked, never
+// ticked for the visitor.
 
 import {
   agentPassCtaApplies,
@@ -40,8 +42,6 @@ interface ChipDef {
   id: string;
   label: string;
   fires: (r: Report) => boolean;
-  /** False: offered when the gate fires, but never pre-selected. */
-  preselect?: boolean;
 }
 
 // Display order follows the panels: AI readability, Risk & SEO, then Speed.
@@ -90,7 +90,6 @@ const GATED: ChipDef[] = [
     id: 'markdown-origin',
     label: 'Serving AI agents a Markdown copy at the origin',
     fires: (r) => markdownOriginCtaApplies(r.agentSignals),
-    preselect: false,
   },
 ];
 
@@ -104,19 +103,20 @@ export const AUDIT = {
 /** Wedges whose lead carries the optional "sites you run" count. */
 export const SITES_WEDGES = ['edge-seo', 'response-firewall'];
 
+/** Shown on a chip whose check fired on the scanned page; part of its accessible name. */
+export const FOUND_MARKER = '(flagged by your scan)';
+
 /**
  * The chips for a result, in display order. Gated chips appear only when
- * their gate fires and are pre-selected up to the cap; the speed-help chip
- * appears once the speed result has settled (`speed` is null while it is still
- * checking) and is pre-selected only when Speed is Poor; the agents and audit chips
- * are always offered, unselected. With no report only the ungated chips remain.
- * On the /analyze/ surface a Poor speed result takes pre-selection priority
- * over the gated chips when the cap bites; display order is unchanged.
+ * their gate fires; they come first and are never pre-selected, on either
+ * page. The speed-help chip appears once the speed result has settled (`speed`
+ * is null while it is still checking) and is pre-selected only when Speed is
+ * Poor; the agents and audit chips are always offered, unselected. With no
+ * report only the ungated chips remain.
  */
 export function chipsFor(
   report: Report | null | undefined,
   speed: TileState | null | undefined,
-  surface: 'analyze' | 'airead' = 'airead',
 ): Chip[] {
   const chips: Chip[] = [];
   if (report) {
@@ -127,7 +127,7 @@ export function chipsFor(
           label: def.label,
           wedge: def.id,
           gated: true,
-          selected: def.preselect !== false,
+          selected: false,
         });
       }
     }
@@ -137,15 +137,15 @@ export function chipsFor(
   }
   chips.push({ ...AGENTS, wedge: '', gated: false, selected: false });
   if (report) chips.push({ ...AUDIT, wedge: '', gated: false, selected: false });
-  let left = MAX_TOPICS;
-  const priority = surface === 'analyze' ? chips.filter((c) => c.id === CONSULTING.id) : [];
-  for (const chip of [...priority, ...chips.filter((c) => !priority.includes(c))]) {
-    if (chip.selected) {
-      if (left > 0) left -= 1;
-      else chip.selected = false;
-    }
-  }
   return chips;
+}
+
+/**
+ * What a submit sends: the ticked chips, or, when none is ticked, one request
+ * for the general topic. An untouched form is a general question, never an error.
+ */
+export function selectionFor(picked: Chip[]): Chip[] {
+  return picked.length > 0 ? picked : [{ ...AGENTS, wedge: '', gated: false, selected: false }];
 }
 
 export interface LeadForm {

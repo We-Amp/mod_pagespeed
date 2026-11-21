@@ -5,10 +5,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildLeadPayload } from './demand.mjs';
 import {
-  MAX_TOPICS,
+  FOUND_MARKER,
   chipsFor,
   noteFor,
   payloadFor,
+  selectionFor,
   submitLeads,
   type Chip,
   type LeadPayload,
@@ -86,29 +87,19 @@ describe('chipsFor', () => {
     expect(ids).not.toContain('third-party-freeze');
   });
 
-  it('pre-selects at most four, in display order', () => {
-    const chips = chipsFor(full, 'poor');
-    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual(
-      GATED_ORDER.slice(0, MAX_TOPICS),
-    );
-    expect(chips.find((c) => c.id === 'consulting')!.selected).toBe(false);
+  it('no gated chip is pre-selected', () => {
+    for (const speed of ['good', 'needs-work', 'none', null] as const) {
+      const chips = chipsFor(full, speed);
+      expect(chips.filter((c) => c.gated).map((c) => c.id)).toEqual(GATED_ORDER);
+      expect(chips.filter((c) => c.selected)).toEqual([]);
+    }
+    // A Poor speed result ticks the speed-help chip and nothing else.
+    const poor = chipsFor(full, 'poor');
+    expect(poor.filter((c) => c.selected).map((c) => c.id)).toEqual(['consulting']);
+    expect(poor.filter((c) => c.gated).some((c) => c.selected)).toBe(false);
   });
 
-  it('gives the speed-help chip pre-selection priority on /analyze/ when Speed is Poor', () => {
-    const chips = chipsFor(full, 'poor', 'analyze');
-    expect(chips.map((c) => c.id)).toEqual([...GATED_ORDER, 'consulting', 'agents', 'audit']);
-    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual([
-      ...GATED_ORDER.slice(0, MAX_TOPICS - 1),
-      'consulting',
-    ]);
-    expect(
-      chipsFor(full, 'needs-work', 'analyze')
-        .filter((c) => c.selected)
-        .map((c) => c.id),
-    ).toEqual(GATED_ORDER.slice(0, MAX_TOPICS));
-  });
-
-  it('pre-selects every gated chip when four or fewer fire', () => {
+  it('lists the chips whose check fired first, whatever is selected', () => {
     const report = structuredClone(full);
     for (const id of [
       'tollbooth',
@@ -122,7 +113,7 @@ describe('chipsFor', () => {
     report.scriptInventory.verdict = 'clean';
     report.scriptInventory.totals.thirdPartyWithIntegrity =
       report.scriptInventory.totals.thirdPartyExternal;
-    const chips = chipsFor(report, 'needs-work');
+    const chips = chipsFor(report, 'poor');
     expect(chips.map((c) => c.id)).toEqual([
       'edge-seo',
       'response-firewall',
@@ -130,35 +121,19 @@ describe('chipsFor', () => {
       'agents',
       'audit',
     ]);
-    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual([
-      'edge-seo',
-      'response-firewall',
-    ]);
+    expect(chips.map((c) => c.gated)).toEqual([true, true, false, false, false]);
+    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual(['consulting']);
   });
 
-  it('pre-selects the speed-help chip only when Speed is Poor, and counts it against the cap', () => {
+  it('pre-selects the speed-help chip only when Speed is Poor', () => {
     for (const state of ['good', 'needs-work', 'none'] as const) {
       expect(chipsFor(clean, state).find((c) => c.id === 'consulting')!.selected).toBe(false);
     }
     expect(chipsFor(clean, 'poor').find((c) => c.id === 'consulting')!.selected).toBe(true);
-    const report = structuredClone(full);
-    for (const id of [
-      'tollbooth',
-      'agentpass',
-      'markdown-origin',
-      'compliancefix',
-      'consent-enforcement',
-      'edge-seo',
-    ]) {
-      if (without[id]) without[id](report);
-    }
-    const chips = chipsFor(report, 'poor');
-    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual([
-      'page-integrity',
-      'third-party-freeze',
-      'response-firewall',
-      'consulting',
-    ]);
+  });
+
+  it('names the marker for a chip whose check fired', () => {
+    expect(FOUND_MARKER).toBe('(flagged by your scan)');
   });
 
   it('adds the speed-help chip only once Speed has settled; the agents chip is always there', () => {
@@ -199,7 +174,6 @@ describe('chipsFor', () => {
       expect(chip.label).toBe('Serving AI agents a Markdown copy at the origin');
       expect(chip.gated).toBe(true);
       expect(chip.selected).toBe(false);
-      expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual(GATED_ORDER.slice(0, 4));
     });
     it('posts the scanner’s object shape with no page text', () => {
       const p = buildLeadPayload({
@@ -238,6 +212,39 @@ describe('noteFor', () => {
       expect(noteFor('edge-seo', { sites: bad, note: 'x' })).toBe('x');
     }
     expect(noteFor('edge-seo', { sites: '1.5', note: '' })).toBe('sites: 1');
+  });
+});
+
+describe('selectionFor', () => {
+  it('sends the ticked chips as they are', () => {
+    const picked = [chipOf('edge-seo'), consulting];
+    expect(selectionFor(picked)).toBe(picked);
+  });
+
+  it('an untouched form sends one general question', async () => {
+    const posted: LeadPayload[] = [];
+    const out = await submitLeads(
+      selectionFor([]),
+      { email: 'a@b.example', note: 'How do I start?', url: 'https://typed.example/' },
+      full,
+      async (p) => {
+        posted.push(p);
+        return true;
+      },
+    );
+    expect(out.map((o) => [o.chip.id, o.chip.gated, o.ok])).toEqual([['agents', false, true]]);
+    expect(posted).toEqual([
+      {
+        topic: 'agents',
+        email: 'a@b.example',
+        name: '',
+        url: 'https://shop.example.com/',
+        wedge: '',
+        message:
+          '[agents] request from the scan result\nScanned: https://shop.example.com/\n' +
+          'Grade: C (64/100)\nNote: How do I start?',
+      },
+    ]);
   });
 });
 
