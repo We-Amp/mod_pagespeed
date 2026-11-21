@@ -58,17 +58,18 @@ const GOLDENS: Golden[] = [
   },
   {
     route: '/ai-readability/',
-    title: 'AI readability checker: what AI crawlers read on your page',
+    title: 'AI readability checker: can ChatGPT read your page? (free)',
     description:
       'Free check for one page: how much of it an AI crawler can read without running JavaScript. It does not measure whether AI answers mention you.',
     canonical: 'https://modpagespeed.com/ai-readability/',
-    h1: 'See what AI crawlers miss. Optimize the HTML you serve, on your own servers.',
+    h1: 'Can AI crawlers read your page?',
     types: [
       'Answer',
       'BreadcrumbList',
       'FAQPage',
       'ListItem',
       'Offer',
+      'Organization',
       'Question',
       'WebApplication',
     ],

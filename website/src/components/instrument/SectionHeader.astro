@@ -5,7 +5,8 @@
 // SectionHeader — the labelled channel opener of a section: mono eyebrow with
 // an optional two-digit index, heading, optional lede. The caller owns the
 // wrapping <section aria-labelledby={id}>; the eyebrow stays a <p> so heading
-// order is untouched.
+// order is untouched. `titleClass` replaces the heading's size class, for a
+// page whose h1 should not carry the section-heading class.
 
 interface Props {
   id: string;
@@ -13,10 +14,19 @@ interface Props {
   eyebrow: string;
   title: string;
   as?: 'h1' | 'h2';
+  titleClass?: string;
   align?: 'left' | 'center';
 }
 
-const { id, index, eyebrow, title, as: Tag = 'h2', align = 'left' } = Astro.props;
+const {
+  id,
+  index,
+  eyebrow,
+  title,
+  as: Tag = 'h2',
+  titleClass = 'h2-section',
+  align = 'left',
+} = Astro.props;
 
 // Render the lede slot only when it is non-empty (whitespace-only children
 // still count as a passed slot with slots.has, so check the rendered output).
@@ -32,7 +42,7 @@ const hasLead = lead.trim().length > 0;
     {index && <span class="eyebrow-index">{index}</span>}
     {eyebrow}
   </p>
-  <Tag id={id} class="h2-section text-text-body mt-3">
+  <Tag id={id} class:list={[titleClass, 'text-text-body mt-3']}>
     {title}
   </Tag>
   {hasLead && (

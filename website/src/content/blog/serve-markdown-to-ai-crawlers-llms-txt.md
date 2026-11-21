@@ -89,7 +89,7 @@ Token matching is case-insensitive and comma/space/semicolon delimited, so `noin
 - [/blog/remove-unused-javascript-chrome-coverage/](/blog/remove-unused-javascript-chrome-coverage/) — another use of the rendered-DOM pipeline this feature shares.
 - [/how-it-works/metadata-cache/](/how-it-works/metadata-cache/) — how variants and sentinels are keyed and stored.
 
-If you run a docs site or a content property and you want crawlers to read it as markdown instead of guessing at your DOM, the extractor, the `/llms.txt` builder, and the opt-out handling are all in the shipped 2.0 worker. See [/docs/agent-optimize/](/docs/agent-optimize/) for the flags and the `--agent-optimize-paths` allow-list.
+If you run a docs site or a content property and you want crawlers to read it as markdown instead of guessing at your DOM, the extractor, the `/llms.txt` builder, and the opt-out handling are all in the shipped 2.0 worker. See [/docs/agent-optimize/](/docs/agent-optimize/) for the flags and the `--agent-optimize-paths` allow-list. To see what a crawler reads on one of your pages today, and whether the scan finds an `/llms.txt` on your site, use the free [AI readability check](/ai-readability/).
 
 ---
 

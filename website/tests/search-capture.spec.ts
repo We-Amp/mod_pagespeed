@@ -21,7 +21,7 @@ const titles: Array<[string, string]> = [
   ],
   ['/core-web-vitals/cls/', 'How to fix Cumulative Layout Shift (CLS) in 2026'],
   ['/core-web-vitals/lcp/', 'How to fix Largest Contentful Paint (LCP) in 2026'],
-  ['/ai-readability/', 'AI readability checker: what AI crawlers read on your page'],
+  ['/ai-readability/', 'AI readability checker: can ChatGPT read your page? (free)'],
   [
     '/blog/economics-of-image-optimization/',
     'Image CDN cost comparison: Cloudflare, Cloudinary, imgix',

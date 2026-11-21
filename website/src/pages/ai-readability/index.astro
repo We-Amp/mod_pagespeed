@@ -6,82 +6,99 @@ import ScanBox from '../../components/scan/ScanBox.astro';
 import ScanUiBoot from '../../components/scan/ScanUiBoot.astro';
 import ResultsView from '../../components/scan/ResultsView.astro';
 import NoscriptLead from '../../components/scan/NoscriptLead.astro';
+import { ORGANIZATION_REF } from '../../data/organization';
+import { LICENSE_CLAUSE } from '../../data/product-facts.mjs';
 
 // Public front end for the AI-readability scanner (D10). The render backend
 // runs on a separate box; nginx proxies /ai-readability/api/* to it.
 // Local dev (page served from localhost): append ?api=http://localhost:8787 to point at a local render service.
-const title = 'AI readability checker: what AI crawlers read on your page';
+const title = 'AI readability checker: can ChatGPT read your page? (free)';
 const description =
   'Free check for one page: how much of it an AI crawler can read without running JavaScript. It does not measure whether AI answers mention you.';
 const webApp = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
-  name: 'RenderPeek',
-  alternateName: 'AI Readability Checker',
-  applicationCategory: 'DeveloperApplication',
+  name: 'AI Readability Checker',
+  alternateName: ['RenderPeek', 'AI crawler checker'],
+  applicationCategory: 'UtilitiesApplication',
   operatingSystem: 'Any',
   url: 'https://modpagespeed.com/ai-readability/',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR' },
   description,
-};
-
-// FAQPage answering the "can AI read my website" / "do AI crawlers render
-// JavaScript" queries already earning impressions in GSC. Rendered visibly
-// below from this same mainEntity array (single source of truth) so the
-// structured data and on-page content can never drift, per Google's FAQ policy.
-const faqPage = {
-  '@context': 'https://schema.org',
-  '@type': 'FAQPage',
-  mainEntity: [
-    {
-      '@type': 'Question',
-      name: 'Can AI crawlers read JavaScript-rendered content?',
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: 'Most cannot. GPTBot (ChatGPT), ClaudeBot, and PerplexityBot fetch raw HTML and do not execute JavaScript, so content that only appears after your scripts run is invisible to them. Google’s Gemini is the exception — it reuses Googlebot’s rendering.',
-      },
-    },
-    {
-      '@type': 'Question',
-      name: 'Which AI crawlers render JavaScript?',
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: 'As a rule, only Google’s stack (Gemini via Googlebot) renders JavaScript. GPTBot, ChatGPT-User, ClaudeBot, and PerplexityBot read static HTML only. If your content is client-rendered, those agents see a near-empty page.',
-      },
-    },
-    {
-      '@type': 'Question',
-      name: 'How do I check what an AI crawler sees on my page?',
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: 'Disable JavaScript and reload — what remains is roughly what a non-rendering crawler reads. Or paste your URL into the scanner above: it shows the raw-HTML vs rendered token counts side by side.',
-      },
-    },
-    {
-      '@type': 'Question',
-      name: 'How do I make my site readable to AI agents?',
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: 'Serve the meaningful content in the initial HTML response (server-side rendering or pre-rendering). A self-hosted optimizer like mod_pagespeed reduces page weight and cleans markup, which helps both browsers and machine readers.',
-      },
-    },
-    {
-      '@type': 'Question',
-      name: 'Does llms.txt make my site AI-readable?',
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: 'No. llms.txt is an optional hint file; it does not fix content that is invisible because it requires JavaScript to render. Readability still depends on the content existing in the HTML the agent fetches.',
-      },
-    },
+  publisher: ORGANIZATION_REF,
+  featureList: [
+    'Share of the page text that is in the HTML without running JavaScript',
+    'Tokens of readable text in the raw HTML and after rendering',
+    'Structured data found on the page, such as JSON-LD and Open Graph',
+    'robots.txt rules for AI crawlers',
+    'llms.txt detection',
+    'A grade from A to F with a score out of 100',
   ],
 };
 
-// Per-bot rendering matrix mirrored in the visible table and the FAQ above.
+// One array feeds both the visible FAQ below and the FAQPage JSON-LD, so the
+// structured data and the on-page text cannot drift. Order: the questions
+// people ask most come first.
+const faqEntries = [
+  {
+    q: 'Can AI crawlers read JavaScript-rendered content?',
+    a: 'Most do not, as far as published measurements show. A 2024 study of crawler traffic found that the crawlers of OpenAI, Anthropic and Perplexity fetch the HTML and do not run JavaScript, so content that appears only after your scripts run is invisible to them. Google is different: Gemini draws on pages that Googlebot fetches, and Googlebot does run JavaScript.',
+  },
+  {
+    q: 'How do I check what an AI crawler sees on my page?',
+    a: 'Turn off JavaScript in your browser and reload the page. What remains is roughly what a crawler that does not run scripts reads. Or paste your URL into the checker on this page: it shows how many tokens of readable text are in the raw HTML and how many appear after JavaScript runs.',
+  },
+  {
+    q: 'How do I make my page readable to AI crawlers?',
+    a: 'Put the content that matters in the HTML the server sends, through server-side rendering or pre-rendering, so it does not depend on JavaScript. Then run the check again.',
+  },
+  {
+    q: 'Does this show whether ChatGPT mentions or cites my site?',
+    a: 'No. It checks one page: how much of its text is in the HTML a crawler receives without running JavaScript, and how clearly the page describes itself to machines through structured data, robots.txt rules for AI crawlers and llms.txt. It does not ask ChatGPT or any other assistant a question, so it cannot tell you whether they mention you.',
+  },
+  {
+    q: 'What are AEO and GEO, and where does this check fit?',
+    a: 'AEO (answer engine optimization) and GEO (generative engine optimization) are names for the work of getting a site cited in AI answers. This check covers the technical precondition: that an AI crawler can read the page at all. The rest depends on things this check does not measure, such as what the page says.',
+  },
+  {
+    q: 'Will a better grade get me into AI answers?',
+    a: 'Not by itself. A crawler has to be able to read a page before an assistant can use it, so readable HTML is necessary. It is not sufficient: the assistant decides which pages it cites, and this tool does not measure that.',
+  },
+  {
+    q: 'How do I see whether AI crawlers are blocked on my site?',
+    a: 'Your robots.txt file can allow or block each crawler by name. The scan reads it and lists the AI crawlers it blocks by name, such as GPTBot or ClaudeBot. Some crawlers collect pages to train models and others fetch a page when a person asks an assistant a question. They use different names, and some of the second kind state that they may not follow robots.txt.',
+  },
+  {
+    q: 'Does llms.txt make my site AI-readable?',
+    a: 'No. llms.txt is an optional hint file. It does not fix content that is invisible because it needs JavaScript to render: readability still depends on the content being in the HTML the crawler fetches. The scan reports when a site has one.',
+  },
+  {
+    q: 'Does it work for Wix, Squarespace or Shopify sites?',
+    a: 'Yes. The check works for any public page, whatever it runs on. On a hosted builder you make the fixes in the builder’s settings and in your content. Server software such as mod_pagespeed cannot be installed there.',
+  },
+  {
+    q: 'Who is mod_pagespeed for?',
+    a: `For sites that run their own web server, such as Apache, nginx or IIS. mod_pagespeed is free software, ${LICENSE_CLAUSE}, that optimizes the pages and images the server sends. A site on a hosted builder cannot install it.`,
+  },
+];
+const faqPage = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqEntries.map((entry) => ({
+    '@type': 'Question',
+    name: entry.q,
+    acceptedAnswer: { '@type': 'Answer', text: entry.a },
+  })),
+};
+
+// Per-bot rendering matrix shown in the visible table. The three non-Google
+// rows rest on a 2024 study of crawler traffic, not on vendor documentation;
+// Google documents that Googlebot renders JavaScript.
 const botRendering = [
-  { bot: 'GPTBot', agent: 'ChatGPT', rendersJs: false },
-  { bot: 'ClaudeBot', agent: 'Claude', rendersJs: false },
+  { bot: 'GPTBot', agent: 'OpenAI', rendersJs: false },
+  { bot: 'ClaudeBot', agent: 'Anthropic', rendersJs: false },
   { bot: 'PerplexityBot', agent: 'Perplexity', rendersJs: false },
-  { bot: 'Googlebot', agent: 'Google / Gemini', rendersJs: true },
+  { bot: 'Googlebot', agent: 'Google', rendersJs: true },
 ];
 
 const jsonLd = [webApp, faqPage];
@@ -92,6 +109,7 @@ const jsonLd = [webApp, faqPage];
   description={description}
   jsonLd={jsonLd}
   breadcrumbLeafName="AI readability checker"
+  ogImage="/og-cards/ai-readability.png"
 >
   <section
     class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20"
@@ -99,33 +117,14 @@ const jsonLd = [webApp, faqPage];
   >
     <SectionHeader
       id="airead-title"
-      eyebrow="RenderPeek · a free tool from mod_pagespeed"
-      title="See what AI crawlers miss. Optimize the HTML you serve, on your own servers."
+      eyebrow="AI readability checker · a free tool"
+      title="Can AI crawlers read your page?"
       as="h1"
+      titleClass="text-3xl sm:text-4xl font-bold tracking-tight text-balance"
     >
-      Most AI crawlers read your raw HTML and never run your JavaScript, so anything your scripts
-      render is invisible to them. Paste a URL to see the gap. The same self-hosted mod_pagespeed
-      worker that powers this site then optimizes and cleans that HTML inline, on your own servers
-      rather than behind a CDN. The optimizer worker can also serve AI agents a Markdown version of
-      a page at the same URL. That is an
-      <a
-        href="/blog/serve-markdown-to-ai-agents/"
-        class="text-interactive underline underline-offset-2"
-      >
-        experimental feature
-      </a>
-      and is off by default. This site's docs and blog posts are also served as Markdown at a
-      <code>.md</code> address.
+      A free technical check for AEO and GEO: what ChatGPT, Claude and Perplexity get from your
+      HTML.
     </SectionHeader>
-
-    <p class="mt-4 max-w-2xl text-sm text-text-muted leading-relaxed" data-airead-audience>
-      This tool checks one page: how much of its text an AI crawler can read without running
-      JavaScript, and how clearly the page describes itself to machines. It does not measure whether
-      ChatGPT, Perplexity or Google mention your site in their answers. The check works for any
-      site, whatever it runs on. Most of the fixes we offer need a web server you run yourself (such
-      as Apache, nginx or IIS); on a hosted builder such as Wix, Squarespace or Shopify, what you
-      can change is in the builder's settings.
-    </p>
 
     <ScanUiBoot />
     <div data-scan-variant="v1">
@@ -175,6 +174,31 @@ const jsonLd = [webApp, faqPage];
       <ScanBox surface="airead" />
     </div>
 
+    <p class="mt-10 max-w-2xl text-sm text-text-muted leading-relaxed" data-airead-audience>
+      This tool checks one page: how much of its text an AI crawler can read without running
+      JavaScript, and how clearly the page describes itself to machines. It does not measure whether
+      ChatGPT, Perplexity or Google mention your site in their answers. The check works for any
+      site, whatever it runs on. Most of the fixes we offer need a web server you run yourself (such
+      as Apache, nginx or IIS); on a hosted builder such as Wix, Squarespace or Shopify, what you
+      can change is in the builder's settings.
+    </p>
+
+    <p class="mt-4 max-w-2xl text-sm text-text-muted leading-relaxed">
+      As far as published measurements show, most AI crawlers read your raw HTML and do not run your
+      JavaScript, so anything your scripts render is invisible to them. Paste a URL above to see the
+      gap. The same self-hosted mod_pagespeed worker that powers this site then optimizes and cleans
+      that HTML inline, on your own servers rather than behind a CDN. The optimizer worker can also
+      serve AI agents a Markdown version of a page at the same URL. That is an
+      <a
+        href="/blog/serve-markdown-to-ai-agents/"
+        class="text-interactive underline underline-offset-2"
+      >
+        experimental feature
+      </a>
+      and is off by default. This site's docs and blog posts are also served as Markdown at a
+      <code>.md</code> address.
+    </p>
+
     <!-- prettier-ignore -->
     <p class="mt-4 text-sm text-text-annotation">
       From <a href="/about/" class="text-interactive underline underline-offset-2">We-Amp</a>,
@@ -202,15 +226,15 @@ const jsonLd = [webApp, faqPage];
       <div class="mt-6 rounded-2xl border border-border bg-bg-elevated p-6">
         <p class="text-sm font-semibold text-text-body">Live scanning needs JavaScript</p>
         <p class="mt-1 text-sm text-text-annotation leading-relaxed">
-          Enable JavaScript to scan a URL. Here is an example of the kind of result RenderPeek
-          produces &mdash; an illustrative sample, not a live measurement:
+          Enable JavaScript to scan a URL. Here is an example of the kind of result the check
+          produces. It is an illustrative sample, not a live measurement:
         </p>
         <div class="mt-5 flex items-center gap-4">
           <div class="flex h-16 w-16 items-center justify-center rounded-xl border-2 border-accent text-3xl font-bold text-accent">
             C
           </div>
           <div>
-            <div class="text-xl font-bold text-text-body">68/100</div>
+            <div class="text-xl font-bold text-text-body">58/100</div>
             <div class="text-xs text-text-annotation">example.com</div>
           </div>
         </div>
@@ -220,29 +244,37 @@ const jsonLd = [webApp, faqPage];
               Content fidelity
               <span class="ml-1 badge-accent">invisible without JS</span>
             </dt>
-            <dd class="tabular-nums">12/40</dd>
+            <dd class="tabular-nums">2/30</dd>
           </div>
           <div class="flex justify-between font-medium text-text-body">
-            <dt>Markup efficiency</dt>
-            <dd class="tabular-nums">22/30</dd>
+            <dt>Token efficiency</dt>
+            <dd class="tabular-nums">12/20</dd>
           </div>
           <div class="flex justify-between font-medium text-text-body">
-            <dt>Machine description</dt>
-            <dd class="tabular-nums">24/30</dd>
+            <dt>Structured data</dt>
+            <dd class="tabular-nums">18/20</dd>
+          </div>
+          <div class="flex justify-between font-medium text-text-body">
+            <dt>Crawler access</dt>
+            <dd class="tabular-nums">18/20</dd>
+          </div>
+          <div class="flex justify-between font-medium text-text-body">
+            <dt>Citation readiness</dt>
+            <dd class="tabular-nums">8/10</dd>
           </div>
         </dl>
         <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div class="rounded-lg border border-border bg-bg-secondary p-3">
-            <h2 class="text-xs font-semibold text-text-body">Raw HTML &mdash; most AI crawlers</h2>
+            <p class="text-xs font-semibold text-text-body">Raw HTML: what most AI crawlers read</p>
             <p class="mt-1 text-xs text-text-annotation">
-              ~80 tokens an agent can read &mdash; almost nothing survives before JavaScript runs.
+              ~80 tokens an agent can read. Almost nothing is there before JavaScript runs.
             </p>
           </div>
           <div class="rounded-lg border border-border bg-bg-secondary p-3">
-            <h2 class="text-xs font-semibold text-text-body">After rendering JavaScript</h2>
+            <p class="text-xs font-semibold text-text-body">After rendering JavaScript</p>
             <p class="mt-1 text-xs text-text-annotation">
-              ~1,400 tokens an agent can read &mdash; the real content only appears once the browser
-              runs your scripts.
+              ~1,400 tokens an agent can read. The real content appears only once the browser runs
+              your scripts.
             </p>
           </div>
         </div>
@@ -255,11 +287,13 @@ const jsonLd = [webApp, faqPage];
     <div class="mt-14 max-w-2xl">
       <h2 class="text-xl font-semibold text-text-body">Can AI crawlers execute JavaScript?</h2>
       <p class="mt-2 text-sm text-text-annotation leading-relaxed">
-        Most do not. GPTBot, ClaudeBot and PerplexityBot fetch your raw HTML and do not run your
-        scripts; Google’s stack, which renders pages for Gemini through Googlebot, is the exception.
-        When we rendered the top 1,000 sites on 28 May 2026, 403 of the 711 we could read at all
-        (57%) showed a non-rendering agent a nearly empty page: their content appeared only after
-        JavaScript ran. Read
+        Most do not, as far as published measurements show. A 2024 study of crawler traffic found
+        that the crawlers of OpenAI, Anthropic and Perplexity fetched HTML without running the
+        scripts in it. Googlebot does run JavaScript, and Gemini draws on the pages it fetches. When
+        we rendered the top 1,000 sites on 28 May 2026, 403 of them showed a non-rendering agent a
+        nearly empty page, with content that appeared only after JavaScript ran: that is 40% of all
+        1,000 sites, and 57% of the 711 we could read at all, because the other 289 returned little
+        even after rendering. Read
         <a
           href="/blog/can-ai-read-your-website/"
           class="text-interactive underline underline-offset-2"
@@ -270,16 +304,16 @@ const jsonLd = [webApp, faqPage];
       </p>
     </div>
 
-    <!-- Per-bot rendering matrix. Factual: as of 2026 only Google's stack renders
-         JavaScript; the major AI crawlers read static HTML only. Mirrored in the
-         FAQ below and in the FAQPage JSON-LD. -->
+    <!-- Per-bot rendering matrix: the measured behavior of three AI crawlers and
+         the documented behavior of Googlebot. -->
     <div class="mt-14 max-w-2xl">
       <h2 class="text-xl font-semibold text-text-body">Which AI crawlers render JavaScript?</h2>
       <p class="mt-2 text-sm text-text-annotation leading-relaxed">
-        The major AI crawlers fetch your raw HTML and do not run your scripts. Only Google’s stack
-        renders JavaScript today. This reflects crawler behavior in 2026 and can change, so re-scan
-        to confirm what an agent sees now. We measured the same rendering gap across the top 1,000
-        sites &mdash; see
+        The table lists what is known for four crawlers. For the first three it rests on a 2024
+        study of crawler traffic, because their operators do not document whether they run
+        JavaScript. Google documents that Googlebot does. Crawler behavior can change, so scan your
+        page again to see what a crawler that does not run scripts reads now. We measured the same
+        rendering gap across the top 1,000 sites: see
         <a
           href="/blog/can-ai-read-your-website/"
           class="text-interactive underline underline-offset-2"
@@ -296,7 +330,7 @@ const jsonLd = [webApp, faqPage];
                 Crawler
               </th>
               <th scope="col" class="px-4 py-3 font-semibold text-text-body">
-                Used by
+                Operated by
               </th>
               <th scope="col" class="px-4 py-3 font-semibold text-text-body">
                 Renders JavaScript?
@@ -310,9 +344,9 @@ const jsonLd = [webApp, faqPage];
                 <td class="px-4 py-3 text-text-muted">{row.agent}</td>
                 <td class="px-4 py-3">
                   {row.rendersJs ? (
-                    <span class="font-medium text-success">Renders JS</span>
+                    <span class="font-medium text-success">Yes, documented by Google</span>
                   ) : (
-                    <span class="font-medium text-text-annotation">No — static HTML only</span>
+                    <span class="font-medium text-text-annotation">No, in the 2024 study</span>
                   )}
                 </td>
               </tr>
@@ -328,21 +362,31 @@ const jsonLd = [webApp, faqPage];
     <div class="mt-14 max-w-2xl">
       <h2 class="text-xl font-semibold text-text-body">Frequently asked questions</h2>
       <div class="mt-6 space-y-3">
-        {faqPage.mainEntity.map((item) => (
+        {faqEntries.map((item) => (
           <details class="group rounded-2xl border border-border bg-bg-elevated">
             <summary class="flex cursor-pointer items-center justify-between gap-4 px-5 py-4 text-sm font-semibold text-text-body">
-              {item.name}
+              {item.q}
               <Icon
                 name="chevron-down"
                 class="h-5 w-5 shrink-0 text-text-annotation group-open:rotate-180"
               />
             </summary>
-            <p class="px-5 pb-5 text-sm text-text-annotation leading-relaxed">
-              {item.acceptedAnswer.text}
-            </p>
+            <p class="px-5 pb-5 text-sm text-text-annotation leading-relaxed">{item.a}</p>
           </details>
         ))}
       </div>
+      <p class="mt-6 text-sm text-text-muted leading-relaxed">
+        Two related free tools: the
+        <a href="/ai-crawler-cost/" class="text-interactive underline underline-offset-2">
+          AI crawler cost meter
+        </a>
+        reads your access log and reports what each AI crawler requested, and the
+        <a href="/analyze/" class="text-interactive underline underline-offset-2">
+          PageSpeed Insights test
+        </a>
+        maps each failing audit to the mod_pagespeed filter that fixes it, or labels it when none
+        can.
+      </p>
       <p class="mt-3 text-sm text-text-muted">
         Docs:{' '}
         <a href="/docs/agent-optimize/" class="text-interactive underline">

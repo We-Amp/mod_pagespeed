@@ -87,6 +87,6 @@ Those three cases are not aspirational. The repo ships an nginx smoke test that 
 
 Verification is the first step, not the whole answer. Once you can tell a real agent from an impostor, you can decide what each one is allowed to do, and whether access to your content should carry a price. That is the agentic-web problem in full, and it is the subject of the pillar piece: [the agentic web at the origin](/blog/agentic-web-at-the-origin/).
 
-The Web Bot Auth verifier gives you the identity primitive, available to enable in both parts of mod_pagespeed, off by default, observe-only. Enable it and read the verdict instead of trusting the user-agent string.
+The Web Bot Auth verifier gives you the identity primitive, available to enable in both parts of mod_pagespeed, off by default, observe-only. Enable it and read the verdict instead of trusting the user-agent string. The free [AI readability check](/ai-readability/) lists AI crawlers that your robots.txt blocks by name.
 
 Next: enable the verifier with the snippet above, then see how identity becomes access control — allow, or a 401/402 status, and nothing more — in [pay-per-crawl at the origin](/blog/pay-per-crawl-at-the-origin/).

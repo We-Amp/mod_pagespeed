@@ -39,7 +39,7 @@ Be clear-eyed about its status. RSL-CAP is experimental and off by default — a
 
 ### 3. What to serve: agents waste tokens on your markup
 
-An AI agent does not want your navigation or your nested `<div>` wrappers. It wants the content. Serve a retrieval bot a full HTML page and it spends tokens parsing markup it will throw away, and it parses HTML poorly enough that it sometimes throws away the content too.
+An AI agent does not want your navigation or your nested `<div>` wrappers. It wants the content. Serve a retrieval bot a full HTML page and it spends tokens parsing markup it will throw away, and it parses HTML poorly enough that it sometimes throws away the content too. The free [AI readability check](/ai-readability/) shows how much more HTML than content one of your pages has.
 
 The fix is to serve agents something they can read: clean markdown, plus an `/llms.txt` index that points them at it. The mod_pagespeed optimizer worker's `agent_optimize` does this through content negotiation. When a client signals it wants the agent-friendly variant, the origin serves markdown synthesized from your existing pages. There is no separate content pipeline to maintain.
 

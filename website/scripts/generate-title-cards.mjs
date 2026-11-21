@@ -115,6 +115,11 @@ const PAGE_CARDS = [
     eyebrow: 'edge SEO at the origin',
     title: 'Technical SEO fixes at serve time, for sites that are not on a CDN',
   },
+  {
+    slug: 'ai-readability',
+    eyebrow: 'AI readability checker · a free tool',
+    title: 'Can AI crawlers read your page?',
+  },
 ];
 
 // Minimal YAML frontmatter parser. The blog frontmatter shape is

@@ -248,7 +248,14 @@ test.describe('AI crawler cost meter', () => {
     page,
   }) => {
     await page.goto('/ai-crawler-cost/');
-    for (const t of ['recipes', 'markdown', 'signed-agents', 'pay-per-crawl', 'consulting']) {
+    for (const t of [
+      'recipes',
+      'markdown',
+      'signed-agents',
+      'pay-per-crawl',
+      'readability',
+      'consulting',
+    ]) {
       await expect(page.locator(`a[data-umami-event="crawler-cost-next-${t}"]`)).toHaveCount(1);
     }
     await page.setInputFiles('#cc-file', fixture('cc-nginx-combined.log'));

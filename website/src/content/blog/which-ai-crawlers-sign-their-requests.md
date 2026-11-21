@@ -88,7 +88,7 @@ Use the signals as a ladder, strongest first:
 2. **The operator's published IP ranges or reverse-DNS names.** Every operator in the table without a directory documents one of these.
 3. **A user-agent with neither.** That is a claim. Log it as one.
 
-Then decide what each verified identity may do: allow it, rate-limit it, or ask for a license. [Pay-per-crawl at the origin](/blog/pay-per-crawl-at-the-origin/) covers the 401 and 402 side.
+Then decide what each verified identity may do: allow it, rate-limit it, or ask for a license. [Pay-per-crawl at the origin](/blog/pay-per-crawl-at-the-origin/) covers the 401 and 402 side. The free [AI readability check](/ai-readability/) lists AI crawlers that your robots.txt blocks by name.
 
 If you run mod_pagespeed, its verifier takes this kind of list directly; it has shipped in every build since 2.0.34. `PAGESPEED_WEB_BOT_AUTH_KEY_DIRECTORIES` is a comma-separated set of HTTPS directory URLs, fetched in the background. The verdict lands in an `x-verified-bot` response header. It is experimental, off by default and observe-only; the [docs page](/docs/web-bot-auth/) has the setup.
 
