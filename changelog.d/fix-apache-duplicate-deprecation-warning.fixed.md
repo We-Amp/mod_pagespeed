@@ -1,0 +1,1 @@
+- **Apache no longer prints the deprecation warning for `ModPagespeedIncreaseSpeedTracking` twice.** The directive was registered twice; it is still accepted and ignored.

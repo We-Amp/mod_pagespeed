@@ -133,7 +133,6 @@ const char kModPagespeedDomain[] = "ModPagespeedDomain";
 const char kModPagespeedDownstreamCachePurgeLocationPrefix[] =
     "ModPagespeedDownstreamCachePurgeLocationPrefix";
 const char kModPagespeedEnableFilters[] = "ModPagespeedEnableFilters";
-const char kModPagespeedFetchProxy[] = "ModPagespeedFetchProxy";
 const char kModPagespeedFetcherTimeoutMs[] = "ModPagespeedFetcherTimeOutMs";
 const char kModPagespeedFileCachePath[] = "ModPagespeedFileCachePath";
 const char kModPagespeedForbidFilters[] = "ModPagespeedForbidFilters";
@@ -168,14 +167,11 @@ const char kModPagespeedNumExpensiveRewriteThreads[] =
 const char kModPagespeedNumRewriteThreads[] = "ModPagespeedNumRewriteThreads";
 const char kModPagespeedPermitIdsForCssCombining[] =
     "ModPagespeedPermitIdsForCssCombining";
-const char kModPagespeedPreserveSubresourceHints[] =
-    "ModPagespeedPreserveSubresourceHints";
 const char kModPagespeedProxySuffix[] = "ModPagespeedProxySuffix";
 const char kModPagespeedRetainComment[] = "ModPagespeedRetainComment";
 const char kModPagespeedRulePackTrustKey[] = "ModPagespeedRulePackTrustKey";
 const char kModPagespeedRunExperiment[] = "ModPagespeedRunExperiment";
 const char kModPagespeedShardDomain[] = "ModPagespeedShardDomain";
-const char kModPagespeedSpeedTracking[] = "ModPagespeedIncreaseSpeedTracking";
 const char kModPagespeedStaticAssetPrefix[] = "ModPagespeedStaticAssetPrefix";
 const char kModPagespeedStatisticsDomains[] = "ModPagespeedStatisticsDomains";
 const char kModPagespeedTrackOriginalContentLength[] =
@@ -2208,8 +2204,6 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedPermitIdsForCssCombining,
         "Allow combining CSS files with IDs matching wildcard"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedPreserveSubresourceHints,
-                             "Keep all original subresource hints."),
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedProxySuffix,
         "Sets up a proxy suffix to be used when slurping."),
@@ -2220,9 +2214,6 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedRunExperiment,
         "Run an experiment to test the effectiveness of rewriters."),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedSpeedTracking,
-                             "Deprecated and ignored (configured the "
-                             "insert_ga filter)."),
 
     // All one parameter deprecated options.
     APACHE_CONFIG_DIR_OPTION(
@@ -2239,7 +2230,6 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     // (Not in <Directory> blocks.)
     APACHE_CONFIG_OPTION(kModPagespeedFetcherTimeoutMs,
                          "Set internal fetcher timeout in milliseconds"),
-    APACHE_CONFIG_OPTION(kModPagespeedFetchProxy, "Set the fetch proxy"),
     APACHE_CONFIG_OPTION(kModPagespeedForceCaching,
                          "Ignore HTTP cache headers and TTLs"),
     APACHE_CONFIG_OPTION(kModPagespeedImgMaxRewritesAtOnce,
