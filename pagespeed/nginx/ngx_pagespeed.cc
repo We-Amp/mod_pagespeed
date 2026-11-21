@@ -5952,8 +5952,10 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     // a non-off counter mode (no file is created when the feature is unused).
     // The path is PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE if set (read from the
     // master's launch environment), else derived from the first configured
-    // FileCachePath (a guaranteed nginx-writable directory).
-    {
+    // FileCachePath (a guaranteed nginx-writable directory).  A
+    // configuration test creates no counter file, and a master running as
+    // root gives the file to the worker user, as it does the cache volumes.
+    if (!ngx_test_config) {
       bool want_counter = false;
       GoogleString cache_dir;
       for (s = 0; s < cmcf->servers.nelts; s++) {
@@ -5985,6 +5987,20 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
         }
         if (!counter_path.empty()) {
           ps_webbotauth_counter_map(counter_path);
+          if (geteuid() == 0 &&
+              ccf->user != static_cast<ngx_uid_t>(NGX_CONF_UNSET_UINT) &&
+              ccf->user != 0) {
+            GoogleString why;
+            if (net_instaweb::SetOwnerThroughDescriptor(
+                    counter_path, ccf->user, ccf->group,
+                    net_instaweb::OwnerMatch::kUserOnly,
+                    &why) != net_instaweb::SetOwnerResult::kDone) {
+              ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
+                            "pagespeed: web-bot-auth counter file %s not "
+                            "given to the worker user: %s",
+                            counter_path.c_str(), why.c_str());
+            }
+          }
         } else {
           // The feature is enabled but no path resolved (no FileCachePath on any
           // server AND PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE unset): the endpoint

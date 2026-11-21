@@ -8,7 +8,9 @@ nginx started as root with a non-root `user` must leave the cache
 directory and every cache volume file in it owned by that user, also when a
 root-owned volume from an earlier run is already there, and `nginx -t` must
 leave no cache file and no directory the workers cannot use, wherever the
-`user` directive stands. Needs root; skipped otherwise.
+`user` directive stands. With the Web Bot Auth counter on, its file in the
+cache directory is the worker user's too, and `nginx -t` does not create it.
+Needs root; skipped otherwise.
 """
 
 import grp
@@ -51,8 +53,17 @@ def _owners(path):
     return out
 
 
-@pytest.fixture(params=["user-first", "user-last"])
+@pytest.fixture(
+    params=[
+        ("user-first", False),
+        ("user-last", False),
+        ("user-first", True),
+        ("user-last", True),
+    ],
+    ids=["user-first", "user-last", "user-first-counter", "user-last-counter"],
+)
 def root_nginx(tmp_path, request):
+    user_position, counter = request.param
     binary = os.environ.get("PAGESPEED_NGINX_BINARY", "")
     conf = os.environ.get("PAGESPEED_NGINX_CONFIG_FILE", "")
     if not binary or not os.path.exists(conf):
@@ -74,8 +85,9 @@ def root_nginx(tmp_path, request):
     test_conf = base / "nginx.conf"
     pid_file = base / "nginx.pid"
     user_line = f"user {WORKER} {group};"
-    first = user_line if request.param == "user-first" else ""
-    last = user_line if request.param == "user-last" else ""
+    first = user_line if user_position == "user-first" else ""
+    last = user_line if user_position == "user-last" else ""
+    counter_line = "pagespeed WebBotAuthPublicCounter public;" if counter else ""
     test_conf.write_text(
         "\n".join(load_module)
         + f"""
@@ -93,6 +105,7 @@ http {{
   scgi_temp_path {base}/scgi;
   pagespeed on;
   pagespeed FileCachePath {cache};
+  {counter_line}
   server {{ listen 127.0.0.1:{_free_port()}; location / {{ return 200; }} }}
 }}
 {last}
@@ -118,11 +131,11 @@ http {{
         os.kill(pid, signal.SIGQUIT)
         assert _wait_gone(pid), "nginx did not stop"
 
-    return run, start_and_stop, cache, worker.pw_uid
+    return run, start_and_stop, cache, worker.pw_uid, counter
 
 
 def test_root_start_creates_cache_for_worker_user(root_nginx):
-    run, start_and_stop, cache, worker_uid = root_nginx
+    run, start_and_stop, cache, worker_uid, counter = root_nginx
 
     r = run("-t")
     assert r.returncode == 0, r.stderr
@@ -135,16 +148,19 @@ def test_root_start_creates_cache_for_worker_user(root_nginx):
     volumes = [p for p in owners if os.path.basename(p).startswith("cyclone")]
     assert volumes, f"no cache volume created: {sorted(owners)}"
     assert os.stat(cache).st_uid == worker_uid
-    assert {p: u for p, u in owners.items() if p in volumes} == {
-        p: worker_uid for p in volumes
-    }
+    if counter:
+        assert ".pagespeed-webbotauth-counter" in owners, sorted(owners)
+    # Every file the start created in the cache directory is the worker's.
+    assert owners == {p: worker_uid for p in owners}
 
-    # A root-owned volume left by an earlier run is given to the worker user.
-    for p in volumes:
+    # A root-owned volume (or counter file) left by an earlier run is given
+    # to the worker user.
+    left = volumes + ([".pagespeed-webbotauth-counter"] if counter else [])
+    for p in left:
         os.chown(cache / p, 0, 0)
     start_and_stop()
-    assert {p: os.stat(cache / p).st_uid for p in volumes} == {
-        p: worker_uid for p in volumes
+    assert {p: os.stat(cache / p).st_uid for p in left} == {
+        p: worker_uid for p in left
     }
 
 
