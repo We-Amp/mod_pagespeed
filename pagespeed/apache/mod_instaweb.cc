@@ -133,7 +133,6 @@ const char kModPagespeedDomain[] = "ModPagespeedDomain";
 const char kModPagespeedDownstreamCachePurgeLocationPrefix[] =
     "ModPagespeedDownstreamCachePurgeLocationPrefix";
 const char kModPagespeedEnableFilters[] = "ModPagespeedEnableFilters";
-const char kModPagespeedFetchProxy[] = "ModPagespeedFetchProxy";
 const char kModPagespeedFetcherTimeoutMs[] = "ModPagespeedFetcherTimeOutMs";
 const char kModPagespeedFileCachePath[] = "ModPagespeedFileCachePath";
 const char kModPagespeedForbidFilters[] = "ModPagespeedForbidFilters";
@@ -2231,7 +2230,6 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     // (Not in <Directory> blocks.)
     APACHE_CONFIG_OPTION(kModPagespeedFetcherTimeoutMs,
                          "Set internal fetcher timeout in milliseconds"),
-    APACHE_CONFIG_OPTION(kModPagespeedFetchProxy, "Set the fetch proxy"),
     APACHE_CONFIG_OPTION(kModPagespeedForceCaching,
                          "Ignore HTTP cache headers and TTLs"),
     APACHE_CONFIG_OPTION(kModPagespeedImgMaxRewritesAtOnce,

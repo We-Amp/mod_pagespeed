@@ -1179,7 +1179,7 @@ TEST_F(DaemonSeamTest, NoDirectiveIsRegisteredByBothCommandTables) {
 
   std::map<std::string, std::string> constants;
   const std::regex constant_re(
-      R"(const char (kModPagespeed\w+)\[\]\s*=\s*"(\w+)";)");
+      R"re(const char (kModPagespeed\w+)\[\]\s*=\s*"(<?\w+)";)re");
   for (std::sregex_iterator it(source.begin(), source.end(), constant_re), end;
        it != end; ++it) {
     constants[(*it)[1]] = (*it)[2];
@@ -1194,27 +1194,47 @@ TEST_F(DaemonSeamTest, NoDirectiveIsRegisteredByBothCommandTables) {
   const std::string table = source.substr(start, finish - start);
 
   std::set<std::string> hand_written;
-  const std::regex name_re(R"(APACHE_\w+\(\s*(kModPagespeed\w+|"\w+"))");
+  const std::regex name_re(R"re(APACHE_\w+\(\s*(kModPagespeed\w+|"\w+"))re");
   for (std::sregex_iterator it(table.begin(), table.end(), name_re), end;
        it != end; ++it) {
-    std::string name = (*it)[1];
-    auto found = constants.find(name);
-    hand_written.insert(found != constants.end()
-                            ? found->second
-                            : name.substr(1, name.size() - 2));
+    const std::string token = (*it)[1];
+    if (token[0] == '"') {
+      hand_written.insert(token.substr(1, token.size() - 2));
+      continue;
+    }
+    auto found = constants.find(token);
+    ASSERT_TRUE(found != constants.end())
+        << token << " is used in the hand-written table but its definition "
+        << "was not found; the scan in this test needs updating";
+    hand_written.insert(found->second);
   }
   ASSERT_GT(hand_written.size(), 10u) << "the table scan found too little";
 
-  ApacheConfig config("seam_duplicate_check", nullptr);
-  for (const RewriteOptions::OptionBase* option : config.all_options()) {
-    if (option->help_text() == nullptr) {
-      continue;
+  // Refcounted, so safe next to other tests in this binary that do the same.
+  ApacheConfig::Initialize();
+  {
+    ApacheConfig config("seam_duplicate_check", nullptr);
+    for (const RewriteOptions::OptionBase* option : config.all_options()) {
+      if (option->help_text() == nullptr) {
+        continue;
+      }
+      const std::string name = StrCat("ModPagespeed", option->option_name());
+      EXPECT_EQ(0u, hand_written.count(name))
+          << name << " is in the hand-written table and also registered from "
+          << "the option's help text; Apache would register it twice";
     }
-    const std::string name = StrCat("ModPagespeed", option->option_name());
-    EXPECT_EQ(0u, hand_written.count(name))
-        << name << " is in the hand-written table and also registered from "
-        << "the option's help text; Apache would register it twice";
+    const RewriteOptions::Properties* deprecated =
+        RewriteOptions::deprecated_properties();
+    ASSERT_NE(nullptr, deprecated);
+    for (int i = 0, n = deprecated->size(); i < n; ++i) {
+      const std::string name =
+          StrCat("ModPagespeed", deprecated->property(i)->option_name());
+      EXPECT_EQ(0u, hand_written.count(name))
+          << name << " is in the hand-written table and also a deprecated "
+          << "property; Apache would register it twice";
+    }
   }
+  ApacheConfig::Terminate();
 }
 
 }  // namespace
