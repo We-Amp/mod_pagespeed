@@ -118,6 +118,24 @@ enable IIS output caching for rewritten pages, use the user-mode `policy` with
 `kernelCachePolicy` off for them: kernel-mode caching cannot vary by request
 header.
 
+### IIS output and kernel caching
+
+The module keeps the responses it can optimize in place (stylesheets, scripts
+and images), and HTML pages it leaves unoptimized for one request (an AJAX
+request, for example), out of the HTTP.sys kernel cache and the IIS output
+cache, also under an output-cache profile in `system.webServer/caching`. A
+copy held there would answer later requests without the module. Other files
+(documents, fonts, media) keep the caching IIS or the profile gives them, and
+nothing needs configuring for this.
+
+An output-cache profile also sets the `Cache-Control` header IIS sends. Without
+a `location`, and with `location` set to `Server`, `None`, `Client` or
+`ServerAndClient`, that header is `no-cache` or `private`, and a resource the
+origin marks that way is not optimized in place: the module honours it, as on
+the other servers. To have stylesheets, scripts or images under a profile
+optimized in place, give the profile `location="Any"` or
+`location="Downstream"`, or leave those extensions out of the profile.
+
 ### Optimization threads
 
 `NumRewriteThreads` and `NumExpensiveRewriteThreads` set the sizes of the two
