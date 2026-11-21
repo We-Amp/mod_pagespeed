@@ -23,6 +23,14 @@
 #   pages/ajax.html, pages/v6.html,    HTML pages
 #   pages/if-range.html, pages/unit.html,
 #   pages/scheme.html
+#   oc/p.css, oc/doc.pdf, oc/ajax.html under output-cache profiles
+#                                      (user-mode and kernel caching for
+#                                      .css with location="Any" and for
+#                                      .html, user-mode for .pdf, kept
+#                                      until the file changes)
+#   ocn/p.css                          under a .css profile without a
+#                                      location (IIS then answers with
+#                                      Cache-Control: no-cache)
 # Checks (PASS/FAIL; INFO rows report without judging):
 #   defaults   kernel caching is on for the server (precondition)
 #   plain      assets/site.css without a query, polled: optimized in place
@@ -38,6 +46,17 @@
 #              served an in-place answer for it, the host (refused) is still
 #              refused and never gets the file's content
 #   script     assets/app.js polled: optimized in place
+#   outputcache oc/p.css under the output-cache profile, polled: optimized
+#              in place, and still optimized after 10 more requests (IIS's
+#              output cache does not keep the plain original the module
+#              serves while it optimizes); oc/ajax.html requested as an
+#              AJAX request four times, then by a browser: every browser
+#              answer went through the module; oc/doc.pdf, a type the
+#              module does not optimize, requested 5 times: IIS keeps it
+#              (output cache hits, or HTTP.sys holds it), so it keeps the
+#              profile's caching; INFO: the Cache-Control IIS sends for
+#              ocn/p.css and whether it was optimized (a no-cache original
+#              is not optimized in place, by design)
 #   ajax       pages/ajax.html requested as an AJAX request (left plain by the
 #              module) four times within a few seconds, then by a browser:
 #              every browser answer went through the module, and HTTP.sys does
@@ -153,7 +172,7 @@ try {
         if (Test-Path "IIS:\Sites\$SiteName") { Remove-Website -Name $SiteName }
         if (Test-Path "IIS:\AppPools\$SiteName") { Remove-WebAppPool -Name $SiteName }
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Force "$root\assets", "$root\secure", "$root\pages" | Out-Null
+        New-Item -ItemType Directory -Force "$root\assets", "$root\secure", "$root\pages", "$root\oc", "$root\ocn" | Out-Null
         foreach ($f in "ajax.html", "v6.html", "if-range.html", "unit.html", "scheme.html") {
             [IO.File]::WriteAllText("$root\pages\$f", "<html><head><title>cpt</title></head><body>`r`n<p>cpt-page</p>`r`n</body></html>`r`n")
         }
@@ -164,6 +183,24 @@ try {
         [IO.File]::WriteAllText("$root\assets\app.js", "/* a script */`r`nfunction  cptHello ( name )  {`r`n    var  greeting  =  'hello '  +  name ;`r`n    return  greeting ;`r`n}`r`n")
         [IO.File]::WriteAllText("$root\assets\doc.pdf", "%PDF-1.4`r`n% a document the module does not optimize`r`n%%EOF`r`n")
         [IO.File]::WriteAllText("$root\assets\font.woff", "wOFF a font the module does not optimize")
+        [IO.File]::WriteAllText("$root\oc\p.css", $css)
+        [IO.File]::WriteAllText("$root\ocn\p.css", $css)
+        [IO.File]::WriteAllText("$root\oc\ajax.html", "<html><head><title>cpt</title></head><body>`r`n<p>cpt-page</p>`r`n</body></html>`r`n")
+        [IO.File]::WriteAllText("$root\oc\doc.pdf", "%PDF-1.4`r`n% a document under the output-cache profile`r`n%%EOF`r`n")
+        [IO.File]::WriteAllText("$root\oc\web.config", (@(
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<configuration><system.webServer><caching enabled="true" enableKernelCache="true"><profiles>',
+            '<add extension=".css" policy="CacheUntilChange" kernelCachePolicy="CacheUntilChange" location="Any" />',
+            '<add extension=".html" policy="CacheUntilChange" kernelCachePolicy="CacheUntilChange" />',
+            '<add extension=".pdf" policy="CacheUntilChange" kernelCachePolicy="DontCache" />',
+            '</profiles></caching></system.webServer></configuration>'
+        ) -join "`r`n") + "`r`n")
+        [IO.File]::WriteAllText("$root\ocn\web.config", (@(
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<configuration><system.webServer><caching enabled="true" enableKernelCache="true"><profiles>',
+            '<add extension=".css" policy="CacheUntilChange" kernelCachePolicy="DontCache" />',
+            '</profiles></caching></system.webServer></configuration>'
+        ) -join "`r`n") + "`r`n")
         foreach ($f in "ip-a.css", "ip-b.css", "auth-a.css", "auth-b.css") {
             [IO.File]::WriteAllText("$root\secure\$f", "/* held */`r`n.cpt-held   {   color :  #0000ff ;   }`r`n")
         }
@@ -286,11 +323,49 @@ try {
     }
     Check "script" ($js -ne $null) ("/assets/app.js optimized in place: {0}" -f ($js -ne $null))
 
+    # --- outputcache: a stylesheet under an output-cache profile --------------
+    # IIS's output cache stores a response before the send stage; a plain
+    # original kept there answers every later request for the URL.
+    $first = 0; $n = 0
+    $deadline = (Get-Date).AddSeconds($PollSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $n++
+        if (CssOptimized (Invoke-Raw $GuestIp $Port "/oc/p.css" "GET" $Browser)) { $first = $n; break }
+        Start-Sleep -Milliseconds 500
+    }
+    Check "outputcache" ($first -gt 0) ("/oc/p.css under an output-cache profile optimized in place at request {0} of {1}" -f $first, $n)
+    $plainAfter = 0
+    for ($i = 0; $i -lt 10; $i++) {
+        if (-not (CssOptimized (Invoke-Raw $GuestIp $Port "/oc/p.css" "GET" $Browser))) { $plainAfter++ }
+        Start-Sleep -Milliseconds 300
+    }
+    Check "outputcache" ($first -gt 0 -and $plainAfter -eq 0) ("/oc/p.css, 10 more requests, plain answers {0}" -f $plainAfter)
+    $Ajax = @{ "User-Agent" = $BrowserUa; "X-Requested-With" = "XMLHttpRequest" }
+    $Page = @{ "User-Agent" = $BrowserUa; "Accept" = "text/html" }
+    for ($i = 0; $i -lt 4; $i++) { $null = Invoke-Raw $GuestIp $Port "/oc/ajax.html" "GET" $Ajax; Start-Sleep -Milliseconds 300 }
+    $plainPages = 0
+    for ($i = 0; $i -lt 6; $i++) {
+        $x = Invoke-Raw $GuestIp $Port "/oc/ajax.html" "GET" $Page
+        if ($x.Status -ne 200 -or $x.Head -notmatch '(?im)^X-Page-Speed:') { $plainPages++ }
+        Start-Sleep -Milliseconds 300
+    }
+    Check "outputcache" ($plainPages -eq 0) ("/oc/ajax.html under an output-cache profile after 4 AJAX requests, 6 browser requests, answers without the module: {0}" -f $plainPages)
+    $ocn = $null
+    for ($i = 0; $i -lt 6; $i++) { $ocn = Invoke-Raw $GuestIp $Port "/ocn/p.css" "GET" $Browser; Start-Sleep -Milliseconds 500 }
+    Say ("INFO outputcache | /ocn/p.css (profile without a location): Cache-Control [{0}], optimized {1}" -f ([regex]::Match($ocn.Head, '(?im)^Cache-Control:\s*(.+)$')).Groups[1].Value.Trim(), (CssOptimized $ocn))
+    $OcHits = { Invoke-Command -Session $session -ScriptBlock {
+        [int64](Get-Counter '\Web Service Cache\Output Cache Total Hits').CounterSamples[0].CookedValue } }
+    $h0 = & $OcHits
+    for ($i = 0; $i -lt 5; $i++) { $null = Invoke-Raw $GuestIp $Port "/oc/doc.pdf" "GET" $Browser; Start-Sleep -Milliseconds 300 }
+    $h1 = & $OcHits
+    $pdfKernel = @(Invoke-Command -Session $session -ScriptBlock {
+        (& netsh http show cachestate) | Where-Object { $_ -match "URL:" } | ForEach-Object { ($_ -replace '^\s*URL:\s*', '').Trim() }
+    }) | Where-Object { $_ -like ("*:{0}/oc/doc.pdf" -f $Port) }
+    Check "outputcache" (($h1 -gt $h0) -or (@($pdfKernel).Count -gt 0)) ("/oc/doc.pdf requested 5 times, kept by IIS: output cache hits {0}, held by HTTP.sys {1}" -f ($h1 - $h0), (@($pdfKernel).Count -gt 0))
+
     # --- ajax: a page the module leaves plain for one request -----------------
     # The module answers an HTML page with X-Page-Speed; a copy IIS kept from
     # the plain AJAX answer has none.
-    $Ajax = @{ "User-Agent" = $BrowserUa; "X-Requested-With" = "XMLHttpRequest" }
-    $Page = @{ "User-Agent" = $BrowserUa; "Accept" = "text/html" }
     for ($i = 0; $i -lt 4; $i++) { $null = Invoke-Raw $GuestIp $Port "/pages/ajax.html" "GET" $Ajax; Start-Sleep -Milliseconds 300 }
     $plainPages = 0
     for ($i = 0; $i -lt 6; $i++) {
@@ -424,7 +499,7 @@ try {
         (& netsh http show cachestate) | Where-Object { $_ -match "URL:" } | ForEach-Object { ($_ -replace '^\s*URL:\s*', '').Trim() }
     })
     Say ("INFO cache | HTTP.sys holds [{0}]" -f ($held -join " "))
-    $ours = @($held | Where-Object { $_ -match (":{0}/(assets|secure)/" -f $Port) -and $_ -notmatch "\.(pdf|woff)$" })
+    $ours = @($held | Where-Object { $_ -match (":{0}/(assets|secure|oc|ocn)/" -f $Port) -and $_ -notmatch "\.(pdf|woff)$" })
     Check "cache" ($ours.Count -eq 0) ("in-place URLs of the site held by HTTP.sys: {0} [{1}]" -f $ours.Count, ($ours -join " "))
 
     if ($script:Failures -gt 0) { $exitCode = 1 }
