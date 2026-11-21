@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
-// Grading parity: the v2 panel's formatter must produce the same grade, score,
-// word and category rows as the original result page. The original is an
-// inline script, so its grading block is sliced out of the page source and
-// run in a sandbox, the same way the gate sync test does it.
+// The AI readability panel's formatter: grade, score, word and category rows
+// for the fixture reports, and the lines it adds below them.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { crawlerRulesLine, crawlersBlocked, formatAiread } from './airead';
 
-const PAGE = fileURLToPath(new URL('../../pages/ai-readability/index.astro', import.meta.url));
 const fixture = (name: string) =>
   JSON.parse(
     readFileSync(
@@ -21,80 +17,146 @@ const fixture = (name: string) =>
     ),
   ).report;
 
-function v1Html(r: unknown): { grade: string; cats: string } {
-  const src = readFileSync(PAGE, 'utf8');
-  const escStart = src.indexOf('const esc = (s) =>');
-  const gradeStart = src.indexOf('const grade =\n', src.indexOf('function render(data)'));
-  const gradeEnd = src.indexOf('// SECTION 2', gradeStart);
-  if (escStart < 0 || gradeStart < 0 || gradeEnd < 0) throw new Error('v1 anchors moved');
-  const escSrc = extractStatement(src, escStart);
-  const code = `${escSrc}\n${src.slice(gradeStart, gradeEnd)}\nglobalThis.__out__ = { grade, cats };`;
-  const ctx = vm.createContext({ r });
-  vm.runInContext(code, ctx);
-  return (ctx as { __out__: { grade: string; cats: string } }).__out__;
-}
+// The grade, score, word and five category rows the panel shows for the two
+// fixture reports.
+const GRADING = {
+  full: {
+    grade: 'C',
+    score: 64,
+    word: 'mixed',
+    categories: [
+      {
+        name: 'Content fidelity',
+        score: 12,
+        max: 30,
+        pct: 40,
+        flag: 'invisible without JS',
+        note: '',
+        fromRules: false,
+        verdict:
+          "Only ~38% of your content exists without JavaScript — AI tools that don't render (and free CDN markdown features) see an almost-empty page. THIS is the big one.",
+      },
+      {
+        name: 'Token efficiency',
+        score: 8,
+        max: 20,
+        pct: 40,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'Bloated: the page is ~98× more HTML than actual content (52,300 tokens raw vs ~534 clean). Agents pay for — and choke on — the difference.',
+      },
+      {
+        name: 'Structured data',
+        score: 20,
+        max: 20,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'Strong machine-readable metadata (JSON-LD (Organization, WebSite, Product), Open Graph, canonical, meta description).',
+      },
+      {
+        name: 'Crawler access',
+        score: 18,
+        max: 20,
+        pct: 90,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict: 'AI crawlers are allowed to fetch the page. robots.txt allows AI crawlers.',
+      },
+      {
+        name: 'Citation readiness',
+        score: 6,
+        max: 10,
+        pct: 60,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'Thin attribution metadata (canonical URL, title, date) — an LLM citing you may get the source/author/date wrong.',
+      },
+    ],
+  },
+  clean: {
+    grade: 'A',
+    score: 100,
+    word: 'strong',
+    categories: [
+      {
+        name: 'Content fidelity',
+        score: 30,
+        max: 30,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'Content is fully present in the server HTML — readable by every AI tool, no rendering required.',
+      },
+      {
+        name: 'Token efficiency',
+        score: 20,
+        max: 20,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict: 'Lean: ~14× HTML-to-content ratio — cheap for an agent to ingest.',
+      },
+      {
+        name: 'Structured data',
+        score: 20,
+        max: 20,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'Strong machine-readable metadata (JSON-LD (Organization, WebSite, Article), Open Graph, canonical, meta description).',
+      },
+      {
+        name: 'Crawler access',
+        score: 20,
+        max: 20,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict:
+          'AI crawlers are allowed to fetch the page. robots.txt allows AI crawlers; llms.txt present.',
+      },
+      {
+        name: 'Citation readiness',
+        score: 10,
+        max: 10,
+        pct: 100,
+        flag: '',
+        note: '',
+        fromRules: false,
+        verdict: 'Attributable: canonical URL, title, author, date.',
+      },
+    ],
+  },
+} as const;
 
-// Take a `const x = ...;` statement by balancing brackets up to the closing semicolon.
-function extractStatement(src: string, start: number): string {
-  let depth = 0;
-  for (let i = start; i < src.length; i++) {
-    const ch = src[i];
-    if ('([{'.includes(ch)) depth++;
-    else if (')]}'.includes(ch)) depth--;
-    else if (ch === ';' && depth === 0) return src.slice(start, i + 1);
-  }
-  throw new Error('unterminated statement');
-}
+describe.each(['full', 'clean'] as const)('grading (%s report)', (name) => {
+  const m = formatAiread(fixture(name));
+  const want = GRADING[name];
 
-const decode = (s: string) =>
-  s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
-// Drop everything between a '<' and the next '>' by walking the string, so no
-// tag pattern is matched with a regular expression.
-function stripTags(html: string): string {
-  let out = '';
-  let inTag = false;
-  for (const ch of html) {
-    if (ch === '<') inTag = true;
-    else if (ch === '>' && inTag) inTag = false;
-    else if (!inTag) out += ch;
-  }
-  return out;
-}
-const text = (html: string) => decode(stripTags(html));
-
-describe.each(['full', 'clean'])('grading parity (%s report)', (name) => {
-  const report = fixture(name);
-  const m = formatAiread(report);
-  const v1 = v1Html(report);
-
-  it('grade, score and word match', () => {
-    expect(v1.grade).toContain(`>${m.grade}</div>`);
-    expect(v1.grade).toContain(`<div class="ar-score">${m.score}/100</div>`);
-    expect(text(v1.grade)).toContain(`Grade ${m.grade} — ${m.word}`);
-    expect(m.word).not.toBe('');
+  it('grade, score and word', () => {
+    expect({ grade: m.grade, score: m.score, word: m.word }).toEqual({
+      grade: want.grade,
+      score: want.score,
+      word: want.word,
+    });
   });
 
-  it('the five category rows match', () => {
-    const rows = v1.cats.split('<div class="ar-cat">').slice(1);
-    expect(rows).toHaveLength(5);
-    expect(m.categories).toHaveLength(5);
-    rows.forEach((row, i) => {
-      const c = m.categories[i];
-      const flag = /<span class="ar-flag">([^<]*)<\/span>/.exec(row)?.[1] ?? '';
-      const nameSpan =
-        /<div class="ar-top"><span>(.*?)(?:<span class="ar-flag">|<\/span><span>)/.exec(row)![1];
-      expect(decode(nameSpan)).toBe(c.name);
-      expect(flag).toBe(c.flag);
-      expect(row).toContain(`<span>${c.score}/${c.max}</span>`);
-      expect(row).toContain(`<i style="width:${c.pct}%">`);
-      expect(decode(/<div class="ar-v">(.*?)<\/div>/.exec(row)![1])).toBe(c.verdict);
-      expect(text(row)).toContain(c.verdict);
-    });
+  it('the five category rows', () => {
+    expect(m.categories).toEqual(want.categories);
   });
 });
 

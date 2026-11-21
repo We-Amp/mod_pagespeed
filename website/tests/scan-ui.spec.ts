@@ -4,9 +4,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { stubUmami, trackedEvents } from './helpers/umami';
 
-// The shared scan interface ships behind a flag: v2 is the default, `?ui=v1`
-// opts out (and sticks), `?ui=v2` opts back in. These specs pin the flag, the
-// double-execution guard and the tile states of the v2 shell.
+// The scan interface of /analyze/ and /ai-readability/: the one scan box, the
+// deep link that runs each request once, and the tile states of the results.
+// There is one interface; an old `?ui=` choice selects nothing.
 
 const PSI_BODY = (score: number) => ({
   lighthouseResult: {
@@ -99,87 +99,63 @@ async function warm(page: Page, path: string) {
   await page.waitForLoadState('networkidle');
 }
 
-const PAGES = [
-  { path: '/analyze/', v1Form: '#psi-form' },
-  { path: '/ai-readability/', v1Form: '#ar-form' },
-];
+const PAGES = ['/analyze/', '/ai-readability/'];
 
-test.describe('scan interface flag', () => {
-  for (const { path, v1Form } of PAGES) {
-    test(`${path}: v2 is the default`, async ({ page }) => {
-      await page.goto(path);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v2');
-      await expect(page.locator('form[data-scan-box]')).toBeVisible();
-      await expect(page.locator(v1Form)).toBeHidden();
-    });
-
-    test(`${path}: ?ui=v1 shows v1, sticks after a reload, and ?ui=v2 returns to v2`, async ({
+test.describe('one scan interface', () => {
+  for (const path of PAGES) {
+    test(`${path}: the scan box shows and nothing of the old form is in the page`, async ({
       page,
     }) => {
-      await page.goto(`${path}?ui=v1`);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v1');
-      await expect(page.locator(v1Form)).toBeVisible();
-      await expect(page.locator('form[data-scan-box]')).toBeHidden();
-      await expect(page.locator('[data-scan-results]')).toBeHidden();
-
       await page.goto(path);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v1');
-      await expect(page.locator(v1Form)).toBeVisible();
-
-      await page.goto(`${path}?ui=v2`);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v2');
       await expect(page.locator('form[data-scan-box]')).toBeVisible();
-      await expect(page.locator(v1Form)).toBeHidden();
+      await expect(page.locator('form[data-scan-box]')).toHaveCount(1);
+      await expect(page.locator('#psi-form, #ar-form, #ar-out, #psi-results')).toHaveCount(0);
+      await expect(page.locator('html')).not.toHaveAttribute('data-scan-ui');
+    });
 
+    test(`${path}: ?ui=v1 and a stored choice select nothing, and the stored choice is removed`, async ({
+      page,
+    }) => {
       await page.goto(path);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v2');
-      await expect(page.locator('form[data-scan-box]')).toBeVisible();
-      await expect(page.locator(v1Form)).toBeHidden();
-
+      await page.evaluate(() => window.localStorage.setItem('scan-ui', 'v1'));
       await page.goto(`${path}?ui=v1`);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v1');
-      await expect(page.locator(v1Form)).toBeVisible();
-      await expect(page.locator('form[data-scan-box]')).toBeHidden();
-
-      await page.goto(path);
-      await expect(page.locator('html')).toHaveAttribute('data-scan-ui', 'v1');
+      await expect(page.locator('form[data-scan-box]')).toBeVisible();
+      await expect(page.locator('form[data-scan-box]')).toHaveCount(1);
+      await expect(page.locator('#psi-form, #ar-form')).toHaveCount(0);
+      await expect
+        .poll(() => page.evaluate(() => window.localStorage.getItem('scan-ui')))
+        .toBeNull();
+      // The address is left as it was: nothing rewrites or reloads it.
+      expect(new URL(page.url()).search).toBe('?ui=v1');
     });
   }
 
-  test('the v2 hero keeps one disclaimer and one privacy note', async ({ page }) => {
-    await page.goto('/analyze/?ui=v2');
+  test('the hero keeps one disclaimer and one privacy note', async ({ page }) => {
+    await page.goto('/analyze/');
     await expect(page.locator('p:visible', { hasText: 'This tool calls Google' })).toHaveCount(1);
     await expect(page.getByRole('link', { name: 'Privacy policy' }).first()).toBeVisible();
   });
 });
 
 test.describe('deep link runs each request once', () => {
-  for (const ui of ['v1', 'v2']) {
-    test(`/analyze/?url= under ${ui} calls PSI once per strategy`, async ({ page }) => {
-      const calls = await mockBackends(page);
-      await warm(page, `/analyze/?ui=${ui}`);
-      calls.mobile = calls.desktop = calls.scan = 0;
-      await page.goto(`/analyze/?ui=${ui}&url=https://example.com`);
-      if (ui === 'v1') {
-        await expect(page.locator('#psi-results')).toBeVisible({ timeout: 15000 });
-      } else {
-        await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).not.toHaveText(
-          'Checking…',
-          { timeout: 15000 },
-        );
-      }
-      await page.waitForTimeout(500);
-      expect(calls.mobile).toBe(1);
-      expect(calls.desktop).toBe(1);
-      expect(calls.scan).toBe(ui === 'v2' ? 1 : 0);
-    });
-  }
-
-  test('/ai-readability/?url= under v2 runs all three requests once', async ({ page }) => {
+  test('/analyze/?url= runs all three requests once', async ({ page }) => {
     const calls = await mockBackends(page);
-    await warm(page, '/ai-readability/?ui=v2');
+    await warm(page, '/analyze/');
     calls.mobile = calls.desktop = calls.scan = 0;
-    await page.goto('/ai-readability/?ui=v2&url=https://example.com');
+    await page.goto('/analyze/?url=https://example.com');
+    await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).not.toHaveText(
+      'Checking…',
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(500);
+    expect(calls).toEqual({ mobile: 1, desktop: 1, scan: 1 });
+  });
+
+  test('/ai-readability/?url= runs all three requests once', async ({ page }) => {
+    const calls = await mockBackends(page);
+    await warm(page, '/ai-readability/');
+    calls.mobile = calls.desktop = calls.scan = 0;
+    await page.goto('/ai-readability/?url=https://example.com');
     await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).not.toHaveText(
       'Checking…',
       { timeout: 15000 },
@@ -189,10 +165,10 @@ test.describe('deep link runs each request once', () => {
   });
 });
 
-test.describe('v2 shell tile states', () => {
+test.describe('shell tile states', () => {
   test('tiles start as Checking and settle independently', async ({ page }) => {
     await mockBackends(page, { mobile: 0.4, desktop: 0.95 });
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'example.com');
     await page.click('#scan-submit');
 
@@ -216,7 +192,7 @@ test.describe('v2 shell tile states', () => {
     page,
   }) => {
     await mockBackends(page, { scanStatus: 503 });
-    await warm(page, '/ai-readability/?ui=v2');
+    await warm(page, '/ai-readability/');
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     for (const p of ['airead', 'risk']) {
@@ -239,7 +215,7 @@ test.describe('v2 shell tile states', () => {
 
   test('a not-measured tile is exactly as tall as a measured one', async ({ page }) => {
     await mockBackends(page, { scanStatus: 503 });
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).toHaveText(
@@ -260,7 +236,7 @@ test.describe('v2 shell tile states', () => {
     page,
   }) => {
     await mockBackends(page);
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     const speed = page.locator('[data-scan-tile="speed"]');
@@ -279,7 +255,7 @@ test.describe('v2 shell tile states', () => {
 
   test('Try again re-runs only the source behind that tile', async ({ page }) => {
     const calls = await mockBackends(page, { scanStatus: 503 });
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).toHaveText(
@@ -301,7 +277,7 @@ test.describe('v2 shell tile states', () => {
 
   test('an invalid URL is rejected before any request', async ({ page }) => {
     const calls = await mockBackends(page);
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'ftp://example.com');
     await page.click('#scan-submit');
     await expect(page.locator('#scan-form-error')).toHaveText(
@@ -313,7 +289,7 @@ test.describe('v2 shell tile states', () => {
 
   test('tiles are disclosure buttons and only one panel is open', async ({ page }) => {
     await mockBackends(page);
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     const speed = page.locator('[data-scan-tile="speed"]');
@@ -334,8 +310,8 @@ test.describe('v2 shell tile states', () => {
   });
 
   test('the fixture hook paints every tile without a network', async ({ page }) => {
-    await warm(page, '/ai-readability/?ui=v2');
-    await page.goto('/ai-readability/?ui=v2&fixture=full');
+    await warm(page, '/ai-readability/');
+    await page.goto('/ai-readability/?fixture=full');
     await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).toHaveText(
       'Needs work',
     );
@@ -345,10 +321,10 @@ test.describe('v2 shell tile states', () => {
   });
 });
 
-test.describe('v2 shell details', () => {
+test.describe('shell details', () => {
   test('tiles open and close with Enter and Space', async ({ page }) => {
-    await warm(page, '/analyze/?ui=v2');
-    await page.goto('/analyze/?ui=v2&fixture=full');
+    await warm(page, '/analyze/');
+    await page.goto('/analyze/?fixture=full');
     const speed = page.locator('[data-scan-tile="speed"]');
     await expect(speed).toBeVisible();
     await speed.focus();
@@ -361,59 +337,49 @@ test.describe('v2 shell details', () => {
   });
 
   test('the panel region is named by the tile name', async ({ page }) => {
-    await warm(page, '/analyze/?ui=v2');
-    await page.goto('/analyze/?ui=v2&fixture=full');
+    await warm(page, '/analyze/');
+    await page.goto('/analyze/?fixture=full');
     await page.locator('[data-scan-tile="speed"]').click();
     await expect(page.getByRole('region', { name: 'Speed', exact: true })).toBeVisible();
   });
 
   test('the request form note starts empty', async ({ page }) => {
-    await page.goto('/analyze/?ui=v2');
+    await page.goto('/analyze/');
     await expect(page.locator('#scan-lead-note')).toHaveValue('');
   });
 
-  for (const path of ['/analyze/', '/ai-readability/']) {
-    for (const ui of ['v1', 'v2']) {
-      test(`${path}?ui=${ui} has no duplicate ids`, async ({ page }) => {
-        await page.goto(`${path}?ui=${ui}`);
-        const dupes = await page.evaluate(() => {
-          const seen = new Map<string, number>();
-          for (const el of document.querySelectorAll('[id]')) {
-            seen.set(el.id, (seen.get(el.id) ?? 0) + 1);
-          }
-          return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
-        });
-        expect(dupes).toEqual([]);
+  for (const path of PAGES) {
+    test(`${path} has no duplicate ids`, async ({ page }) => {
+      await page.goto(path);
+      const dupes = await page.evaluate(() => {
+        const seen = new Map<string, number>();
+        for (const el of document.querySelectorAll('[id]')) {
+          seen.set(el.id, (seen.get(el.id) ?? 0) + 1);
+        }
+        return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
       });
+      expect(dupes).toEqual([]);
+    });
 
-      test(`${path}?ui=${ui} counts one scan-ui page view`, async ({ page }) => {
-        await stubUmami(page);
-        await page.goto(`${path}?ui=${ui}`);
-        await page.waitForLoadState('networkidle');
-        const events = (await trackedEvents(page)).filter((e) => e.name === 'scan-ui');
-        expect(events).toEqual([{ name: 'scan-ui', data: { variant: ui } }]);
-      });
-    }
+    test(`${path} sends no scan-ui event`, async ({ page }) => {
+      await stubUmami(page);
+      await page.goto(path);
+      await page.waitForLoadState('networkidle');
+      const events = (await trackedEvents(page)).filter((e) => e.name === 'scan-ui');
+      expect(events).toEqual([]);
+    });
   }
-
-  test('/ai-readability/?url= under v1 makes no request of its own', async ({ page }) => {
-    const calls = await mockBackends(page);
-    await warm(page, '/ai-readability/?ui=v1');
-    await page.goto('/ai-readability/?ui=v1&url=https://example.com');
-    await page.waitForTimeout(800);
-    expect(calls).toEqual({ mobile: 0, desktop: 0, scan: 0 });
-  });
 });
 
-test.describe('v2 layout', () => {
+test.describe('layout', () => {
   test('one tile column on a phone, three on a desktop, no horizontal scroll', async ({ page }) => {
-    await warm(page, '/analyze/?ui=v2');
+    await warm(page, '/analyze/');
     for (const [width, columns] of [
       [390, 1],
       [1280, 3],
     ] as const) {
       await page.setViewportSize({ width, height: 844 });
-      await page.goto('/analyze/?ui=v2&fixture=full');
+      await page.goto('/analyze/?fixture=full');
       await expect(page.locator('[data-scan-results]')).toBeVisible();
       const lefts = await page
         .locator('[data-scan-tile]')
@@ -443,8 +409,8 @@ test.describe('v2 layout', () => {
         }).observe({ type: 'layout-shift', buffered: true });
       });
       await mockBackends(page, { delayMs: 1500 });
-      await warm(page, `${path}?ui=v2`);
-      await page.goto(`${path}?ui=v2`);
+      await warm(page, `${path}`);
+      await page.goto(`${path}`);
       await page.fill('#scan-url', 'https://example.com');
       await page.click('#scan-submit');
       await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).toHaveText('Poor', {
@@ -462,14 +428,14 @@ test.describe('v2 layout', () => {
   test('/ai-readability/ results use the full tool width with a 16 px gutter on a phone', async ({
     page,
   }) => {
-    await warm(page, '/ai-readability/?ui=v2');
+    await warm(page, '/ai-readability/');
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/ai-readability/?ui=v2&fixture=full');
+    await page.goto('/ai-readability/?fixture=full');
     await expect(page.locator('[data-scan-results]')).toBeVisible();
     const tile = await page.locator('[data-scan-tile="speed"]').boundingBox();
     expect(Math.round(tile!.x)).toBe(16);
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('/ai-readability/?ui=v2&fixture=full');
+    await page.goto('/ai-readability/?fixture=full');
     await expect(page.locator('[data-scan-results]')).toBeVisible();
     const grid = await page.locator('[data-scan-tiles]').boundingBox();
     expect(grid!.width).toBeGreaterThan(900);
@@ -491,8 +457,8 @@ test.describe('v2 layout', () => {
       });
       await page.setViewportSize({ width: 390, height: 844 });
       await mockBackends(page, { psiStatus: 429, scanAbort: true, delayMs: 1500 });
-      await warm(page, `${path}?ui=v2`);
-      await page.goto(`${path}?ui=v2`);
+      await warm(page, `${path}`);
+      await page.goto(`${path}`);
       await page.fill('#scan-url', 'https://example.com');
       await page.click('#scan-submit');
       for (const p of ['speed', 'airead', 'risk']) {

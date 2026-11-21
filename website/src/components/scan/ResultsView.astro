@@ -228,20 +228,14 @@ const pillars = [
 </section>
 
 <script>
-  // Count one page view per variant so the two interfaces can be compared,
-  // then load the scan controller only when v2 is active: the default
-  // interface pays for nothing but this check.
-  const ui = document.documentElement.dataset.scanUi === 'v2' ? 'v2' : 'v1';
+  // An earlier version of these pages remembered an interface choice under
+  // this key. Nothing reads it any more; remove a value a visitor still has.
   try {
-    (
-      window as unknown as { umami?: { track: (name: string, data?: unknown) => void } }
-    ).umami?.track('scan-ui', { variant: ui });
+    window.localStorage.removeItem('scan-ui');
   } catch {
-    /* analytics must never break the page */
+    /* storage can be blocked; there is nothing to clean up then */
   }
-  if (ui === 'v2') {
-    void import('../../scripts/scan/app').then((m) => m.init());
-  }
+  void import('../../scripts/scan/app').then((m) => m.init());
 </script>
 
 <style is:global>

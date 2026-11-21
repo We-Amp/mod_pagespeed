@@ -4,8 +4,8 @@
 //
 // The shared scan box: one URL field, one submit button, one combined note.
 // Identical on /analyze/ and /ai-readability/; `surface` only selects which
-// page it sits on (for event names), never any copy. Rendered inside the
-// variant-v2 wrapper of each page.
+// page it sits on (for event names), never any copy. Each page wraps it in a
+// data-scan-needs-js element, which the layout hides when scripts are off.
 
 interface Props {
   idPrefix?: string;

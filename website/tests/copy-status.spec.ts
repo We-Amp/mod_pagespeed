@@ -203,28 +203,4 @@ test.describe('visible copy feedback keeps the accessible name', () => {
     await expect.poll(() => calls(page)).toEqual(['Copied to clipboard']);
     await expect(button).toHaveText('(copy)', { timeout: 4000 });
   });
-
-  test('analyzer configuration: "Copied" shows, the name stays', async ({ page }) => {
-    // The analyzer's own result view (the first scan interface).
-    await gotoSettled(page, '/analyze/?ui=v1');
-    // Reveal the configuration card a finished analysis shows; it carries its
-    // default snippet, which is enough to copy.
-    await page.evaluate(() => {
-      for (const id of ['psi-results', 'psi-config-card']) {
-        document.getElementById(id)?.classList.remove('hidden');
-      }
-    });
-    await expect(page.locator('#psi-config-copy')).toBeVisible();
-    await spyAnnouncer(page);
-    const button = page.locator('#psi-config-copy');
-    await button.focus();
-    const name = async () => (await axQuery(page, '#psi-config-copy', 'button')).map((b) => b.name);
-    expect(await name()).toEqual(['Copy']);
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#psi-config-copy-label')).toHaveText('Copied');
-    expect(await name()).toEqual(['Copy']);
-    await expect(button).toBeFocused();
-    await expect.poll(() => calls(page)).toEqual(['Copied to clipboard']);
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('pagespeed');
-  });
 });

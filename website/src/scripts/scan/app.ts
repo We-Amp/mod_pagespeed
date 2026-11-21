@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
-// Scan controller for the v2 interface. Loaded lazily, only when v2 is
-// active. For now it starts the three requests at once (scanner, PageSpeed
-// Insights mobile, PageSpeed Insights desktop) and sets each tile's state;
-// the drill-down panels stay empty.
+// Scan controller for the scan pages. Loaded lazily by the results view. It
+// starts the three requests at once (scanner, PageSpeed Insights mobile,
+// PageSpeed Insights desktop), sets each tile's state as its source settles
+// and hands the results to the drill-down panels and the lead form.
 
 import {
   CHECKING,

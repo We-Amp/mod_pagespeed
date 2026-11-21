@@ -4,8 +4,9 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { stubUmami, trackedEvents } from './helpers/umami';
+import { lensSignalFor } from '../src/lib/scan/demand.mjs';
 
-// The v2 lead form. The scanner, PageSpeed Insights and the contact endpoint
+// The lead form. The scanner, PageSpeed Insights and the contact endpoint
 // are mocked; the real services are never called. The form sends one request
 // per submission, whatever the number of topics.
 
@@ -52,7 +53,7 @@ async function mock(
   return { posted, failTopics };
 }
 
-async function scanV2(page: Page, path = '/ai-readability/?ui=v2') {
+async function runScan(page: Page, path = '/ai-readability/') {
   await stubUmami(page);
   await page.goto(path);
   await page.waitForLoadState('networkidle');
@@ -106,7 +107,7 @@ test.describe('the one lead form', () => {
     page,
   }) => {
     await mock(page);
-    await scanV2(page);
+    await runScan(page);
     await expect(form(page)).toBeVisible();
     await expect(form(page).locator('fieldset legend')).toHaveText('Topics');
     expect(await chipIds(page)).toEqual(ALL);
@@ -142,7 +143,7 @@ test.describe('the one lead form', () => {
 
   test('shows only the ungated chips on a clean report, none selected', async ({ page }) => {
     await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     expect(await chipIds(page)).toEqual(['consulting', 'agents', 'audit']);
     expect(await checkedIds(page)).toEqual([]);
   });
@@ -160,7 +161,7 @@ test.describe('the one lead form', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: fixture('full') });
     });
     await stubUmami(page);
-    await page.goto('/ai-readability/?ui=v2');
+    await page.goto('/ai-readability/');
     await page.waitForLoadState('networkidle');
     await page.fill('#scan-url', 'shop.example.com');
     await page.click('#scan-submit');
@@ -177,7 +178,7 @@ test.describe('the one lead form', () => {
 
   test('pre-selects the speed-help chip only when Speed is Poor', async ({ page }) => {
     await mock(page, { report: 'clean', psi: 0.3 });
-    await scanV2(page);
+    await runScan(page);
     expect(await checkedIds(page)).toEqual(['consulting']);
   });
 
@@ -185,21 +186,21 @@ test.describe('the one lead form', () => {
     page,
   }) => {
     await mock(page, { psi: 0.3 });
-    await scanV2(page, '/analyze/?ui=v2');
+    await runScan(page, '/analyze/');
     expect(await chipIds(page)).toEqual(ALL);
     expect(await checkedIds(page)).toEqual(['consulting']);
     await mock(page, { psi: 0.3 });
-    await scanV2(page);
+    await runScan(page);
     expect(await checkedIds(page)).toEqual(['consulting']);
     // A good speed result selects nothing at all.
     await mock(page);
-    await scanV2(page, '/analyze/?ui=v2');
+    await runScan(page, '/analyze/');
     expect(await checkedIds(page)).toEqual([]);
   });
 
   test('shows the report button once a result is in', async ({ page }) => {
     await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     await expect(page.getByRole('button', { name: 'Download this report' })).toBeVisible();
   });
 
@@ -208,7 +209,7 @@ test.describe('the one lead form', () => {
     await page.route('**/ai-readability/api/scan**', () => {});
     await page.route('**/psi/v5/runPagespeed**', () => {});
     await stubUmami(page);
-    await page.goto('/ai-readability/?ui=v2');
+    await page.goto('/ai-readability/');
     await page.waitForLoadState('networkidle');
     await page.fill('#scan-url', 'shop.example.com');
     await page.click('#scan-submit');
@@ -221,7 +222,7 @@ test.describe('the one lead form', () => {
   test('still renders with the ungated chips when the scan fails', async ({ page }) => {
     await mock(page);
     await page.route('**/ai-readability/api/scan**', (route) => route.abort());
-    await scanV2(page);
+    await runScan(page);
     await expect(form(page)).toBeVisible();
     expect(await chipIds(page)).toEqual(['consulting', 'agents']);
     await expect(page.locator('[data-scan-audit]')).toBeHidden();
@@ -229,7 +230,7 @@ test.describe('the one lead form', () => {
 
   test('an untouched form sends one general question', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     expect(await checkedIds(page)).toEqual([]);
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByLabel('Anything we should know? (optional)').fill('Where do I start?');
@@ -271,7 +272,7 @@ test.describe('the one lead form', () => {
 
   test('an invalid email shows an inline error tied to the field', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     const email = page.locator('form[data-scan-lead] input[name="email"]');
     const error = page.locator('[data-scan-lead-email-error]');
     const topics = page.locator('[data-scan-topics]');
@@ -315,7 +316,7 @@ test.describe('the one lead form', () => {
 
   test('a topic message does not mark the email field', async ({ page }) => {
     await mock(page);
-    await scanV2(page);
+    await runScan(page);
     for (const id of ALL.slice(0, 5)) await chip(page, id).check();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick up to four topics.');
     await expect(page.locator('form[data-scan-lead] [aria-invalid="true"]')).toHaveCount(0);
@@ -325,7 +326,7 @@ test.describe('the one lead form', () => {
     page,
   }) => {
     const mocked = await mock(page, { failTopics: ['agentpass'] });
-    await scanV2(page);
+    await runScan(page);
     await chip(page, 'agentpass').check();
     await chip(page, 'edge-seo').check();
     await chip(page, 'audit').check();
@@ -372,7 +373,7 @@ test.describe('the one lead form', () => {
 
   test('a request that cannot reach the server can be sent again', async ({ page }) => {
     const { posted } = await mock(page, { report: 'clean' });
-    await scanV2(page, '/analyze/?ui=v2');
+    await runScan(page, '/analyze/');
     let offline = true;
     await page.route('**/ai-readability/api/contact', (route) =>
       offline ? route.abort() : route.fallback(),
@@ -391,7 +392,7 @@ test.describe('the one lead form', () => {
 
   test('a new submission after a sent one gets a new submission id', async ({ page }) => {
     const { posted } = await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByRole('button', { name: 'Send request' }).click();
     await expect(sentLine(page)).toBeVisible();
@@ -407,7 +408,7 @@ test.describe('the one lead form', () => {
 
   test('a ticked general topic is confirmed by name', async ({ page }) => {
     const { posted } = await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     await chip(page, 'agents').check();
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByRole('button', { name: 'Send request' }).click();
@@ -420,7 +421,7 @@ test.describe('the one lead form', () => {
 
   test('asks for at most four topics', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     for (const id of ALL.slice(0, 4)) await chip(page, id).check();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
     await chip(page, 'edge-seo').check();
@@ -435,7 +436,7 @@ test.describe('the one lead form', () => {
 
   test('always shows the optional sites field', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     const sites = page.getByLabel('Sites you run (optional)');
     await expect(sites).toBeVisible();
     await chip(page, 'edge-seo').check();
@@ -452,7 +453,7 @@ test.describe('the one lead form', () => {
 
   test('one submit is one request and one lead_submit event', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     // Ticked out of display order: the request lists them in display order.
     await chip(page, 'consulting').check();
     await chip(page, 'markdown-origin').check();
@@ -541,7 +542,7 @@ test.describe('the one lead form', () => {
 
   test('a pre-ticked speed-help chip left ticked counts as chosen', async ({ page }) => {
     const { posted } = await mock(page, { report: 'clean', psi: 0.3 });
-    await scanV2(page);
+    await runScan(page);
     expect(await checkedIds(page)).toEqual(['consulting']);
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByRole('button', { name: 'Send request' }).click();
@@ -565,7 +566,7 @@ test.describe('the one lead form', () => {
 
   test('a double click sends one request', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     await page.route('**/ai-readability/api/contact', async (route) => {
@@ -594,7 +595,7 @@ test.describe('the one lead form', () => {
 
   test('a failed send from the keyboard leaves focus on the button', async ({ page }) => {
     const mocked = await mock(page, { failTopics: ['general'] });
-    await scanV2(page);
+    await runScan(page);
     await page.fill('form[data-scan-lead] input[name="email"]', 'ops@example.com');
     const button = page.getByRole('button', { name: 'Send request' });
     await button.focus();
@@ -614,7 +615,7 @@ test.describe('the one lead form', () => {
 
   test('Enter in the email field announces the email error', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     const email = page.locator('form[data-scan-lead] input[name="email"]');
     const live = page.locator('[data-scan-live]');
     await email.fill('not-an-email');
@@ -633,7 +634,7 @@ test.describe('the one lead form', () => {
 
   test('an address the service would refuse is caught before sending', async ({ page }) => {
     const { posted } = await mock(page);
-    await scanV2(page);
+    await runScan(page);
     const email = page.locator('form[data-scan-lead] input[name="email"]');
     const error = page.locator('[data-scan-lead-email-error]');
     // The browser's own check accepts an address without a dot after the @.
@@ -657,7 +658,7 @@ test.describe('the one lead form', () => {
   ] as const) {
     test(`an answer of ${status} gets its own line and keeps the form`, async ({ page }) => {
       await mock(page);
-      await scanV2(page);
+      await runScan(page);
       await page.route('**/ai-readability/api/contact', (route) =>
         route.fulfill({ status, contentType: 'application/json', body: '{"error":"x"}' }),
       );
@@ -685,7 +686,7 @@ test.describe('the one lead form', () => {
       evidence: [{ signal: 'header', id: 'server-pepyaka' }],
     };
     const { posted } = await mock(page, { report });
-    await scanV2(page);
+    await runScan(page);
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByRole('button', { name: 'Send request' }).click();
     await expect(sentLine(page)).toBeVisible();
@@ -710,7 +711,7 @@ test.describe('the one lead form', () => {
       });
     });
     await stubUmami(page);
-    await page.goto('/ai-readability/?ui=v2');
+    await page.goto('/ai-readability/');
     await page.waitForLoadState('networkidle');
     await page.fill('#scan-url', 'shop.example.com');
     await page.click('#scan-submit');
@@ -765,7 +766,7 @@ test.describe('the one lead form', () => {
 test.describe('next steps and share', () => {
   test('carry the surface’s events, the permalink and the extended report', async ({ page }) => {
     await mock(page, { report: JSON.parse(fixture('full')) });
-    await scanV2(page);
+    await runScan(page);
     const next = page.locator('[data-scan-next]');
     await expect(next.getByRole('link', { name: /Download & run/ })).toHaveAttribute(
       'data-umami-event',
@@ -806,9 +807,53 @@ test.describe('next steps and share', () => {
     expect(events.filter((e) => e.name === 'analyze_report_download')).toHaveLength(1);
   });
 
+  test('Copy link to this result copies the permalink, says so and keeps focus', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await mock(page);
+    await runScan(page);
+    const link = page.locator('[data-scan-permalink]');
+    await expect(link).toHaveText('https://modpagespeed.com/ai-readability/api/r/a1b2c3d4e5f6');
+    const copy = page.getByRole('button', { name: 'Copy link to this result' });
+    await copy.click();
+    await expect(page.locator('[data-scan-live]')).toHaveText('Link copied');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      'https://modpagespeed.com/ai-readability/api/r/a1b2c3d4e5f6',
+    );
+    await expect(copy).toBeFocused();
+    const events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'airead-copy-link')).toHaveLength(1);
+  });
+
+  test('when the clipboard refuses, the permalink text is selected and no event is sent', async ({
+    page,
+  }) => {
+    await mock(page);
+    await runScan(page);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error('refused')) },
+      });
+    });
+    const link = page.locator('[data-scan-permalink]');
+    await expect(link).toHaveText('https://modpagespeed.com/ai-readability/api/r/a1b2c3d4e5f6');
+    await page.getByRole('button', { name: 'Copy link to this result' }).click();
+    await expect(page.locator('[data-scan-live]')).toHaveText(
+      'Link selected — press Ctrl/Cmd+C to copy it',
+    );
+    expect(await page.evaluate(() => String(window.getSelection()))).toBe(
+      'https://modpagespeed.com/ai-readability/api/r/a1b2c3d4e5f6',
+    );
+    const events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'airead-copy-link')).toHaveLength(0);
+  });
+
   test('use the analyzer’s events on the analyzer page', async ({ page }) => {
     await mock(page);
-    await scanV2(page, '/analyze/?ui=v2');
+    await runScan(page, '/analyze/');
     const next = page.locator('[data-scan-next]');
     await expect(next.getByRole('link', { name: /Download & run/ })).toHaveAttribute(
       'data-umami-event',
@@ -827,12 +872,10 @@ test.describe('next steps and share', () => {
   });
 });
 
-test.describe('v1 and v2 send the same signal for a topic', () => {
-  // Every wedge the original page offers, on the full report. Each case fills
-  // the original form, then the new one with only that topic ticked. The
-  // original form sends one body per topic; the new form sends one body per
-  // submission. The topic, the address, the scanned page and the signal for
-  // the topic must be the same in both.
+test.describe('one ticked topic sends its topic and signal', () => {
+  // Every topic a scan result can offer, on the full report, with only that
+  // topic ticked. The body names the topic, the address, the scanned page and
+  // the signal of the lens behind the topic.
   const cases: Array<{ wedge: string; sites?: string; note?: string }> = [
     { wedge: 'tollbooth' },
     { wedge: 'agentpass' },
@@ -844,59 +887,36 @@ test.describe('v1 and v2 send the same signal for a topic', () => {
     { wedge: 'edge-seo', sites: '12', note: 'WordPress' },
     { wedge: 'edge-seo', note: 'WordPress' },
   ];
+  const report = JSON.parse(fixture('full')).report;
 
   for (const c of cases) {
     const name = `${c.wedge}${c.sites ? ' with sites' : ''}${c.note ? ' with a note' : ' and an empty note'}`;
-    test(`${name}: the same topic and signal in both`, async ({ page }) => {
-      const v1 = await mock(page);
-      await stubUmami(page);
-      await page.goto('/ai-readability/?ui=v1');
-      await page.fill('#ar-url', 'shop.example.com');
-      await page.click('#ar-go');
+    test(`${name}: the topic and its signal`, async ({ page }) => {
+      const sent = await mock(page);
+      await runScan(page);
       const email = 'operator@example.com';
-      if (c.wedge === 'edge-seo') {
-        await page.fill('#ar-seo-email', email);
-        if (c.sites) await page.fill('#ar-seo-sites', c.sites);
-        if (c.note) await page.fill('#ar-seo-note', c.note);
-        await page.click('#ar-seo-form button[type="submit"]');
-      } else if (c.wedge === 'consent-enforcement') {
-        await page.fill('#ar-consent-email', email);
-        await page.click('#ar-consent-form button[type="submit"]');
-      } else if (c.wedge === 'page-integrity' || c.wedge === 'third-party-freeze') {
-        await page.fill('#ar-scripts-email', email);
-        await page.click(`#ar-scripts-form button[data-wedge="${c.wedge}"]`);
-      } else {
-        await page.fill('#ar-next-email', email);
-        await page.check(`input[name="ar-topic"][value="${c.wedge}"]`);
-        await page.click('#ar-next-form button[type="submit"]');
-      }
-      await expect.poll(() => v1.posted.length, { timeout: 15000 }).toBe(1);
-
-      const p2 = await page.context().newPage();
-      const v2 = await mock(p2);
-      await scanV2(p2);
-      expect(await checkedIds(p2)).toEqual([]);
-      await chip(p2, c.wedge).check();
-      await p2.fill('input[name="email"]', email);
-      if (c.sites) await p2.getByLabel('Sites you run (optional)').fill(c.sites);
-      if (c.note) await p2.getByLabel('Anything we should know? (optional)').fill(c.note);
-      await p2.getByRole('button', { name: 'Send request' }).click();
-      await expect(sentLine(p2, email)).toBeVisible();
-      expect(v2.posted).toHaveLength(1);
-      const [body1] = v1.posted;
-      const [body2] = v2.posted;
-      expect(typeof body1.t).toBe('number');
-      expect(typeof body2.t).toBe('number');
-      expect(body1.topic).toBe(c.wedge);
-      for (const key of ['topic', 'wedge', 'email', 'name', 'url']) {
-        expect(body2[key], key).toEqual(body1[key]);
-      }
-      expect(body1.lensSignal).toBeTruthy();
-      expect(body2.lensSignals).toEqual({ [c.wedge]: body1.lensSignal });
-      expect(topicsOf(body2)[0]).toEqual({ id: c.wedge, wedge: c.wedge, chosen: true });
-      // The new form sends the note as typed and the site count as a fact.
-      expect(body2.message).toBe(c.note ?? '');
-      expect((body2.facts as Record<string, unknown>).sites).toBe(
+      expect(await checkedIds(page)).toEqual([]);
+      await chip(page, c.wedge).check();
+      await page.fill('input[name="email"]', email);
+      if (c.sites) await page.getByLabel('Sites you run (optional)').fill(c.sites);
+      if (c.note) await page.getByLabel('Anything we should know? (optional)').fill(c.note);
+      await page.getByRole('button', { name: 'Send request' }).click();
+      await expect(sentLine(page, email)).toBeVisible();
+      expect(sent.posted).toHaveLength(1);
+      const [body] = sent.posted;
+      expect(typeof body.t).toBe('number');
+      expect(body.topic).toBe(c.wedge);
+      expect(body.wedge).toBe(c.wedge);
+      expect(body.email).toBe(email);
+      expect(body.name).toBe('');
+      expect(body.url).toBe(report.url);
+      const signal = lensSignalFor(c.wedge, report);
+      expect(signal).toBeTruthy();
+      expect(body.lensSignals).toEqual({ [c.wedge]: signal });
+      expect(topicsOf(body)[0]).toEqual({ id: c.wedge, wedge: c.wedge, chosen: true });
+      // The form sends the note as typed and the site count as a fact.
+      expect(body.message).toBe(c.note ?? '');
+      expect((body.facts as Record<string, unknown>).sites).toBe(
         c.sites ? Number(c.sites) : undefined,
       );
     });

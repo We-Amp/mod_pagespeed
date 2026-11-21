@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { stubUmami } from './helpers/umami';
 
-// The v2 Risk & SEO panel: four rows, a state chip each, one verdict sentence,
+// The Risk & SEO panel: four rows, a state chip each, one verdict sentence,
 // and the "what is planned" sentence and link only when the lens's gate
 // fires. The scanner and PageSpeed Insights are mocked.
 
@@ -50,7 +50,7 @@ async function mock(page: Page, report: Report | null, error?: { status: number 
 }
 
 async function scan(page: Page) {
-  await page.goto('/ai-readability/?ui=v2');
+  await page.goto('/ai-readability/');
   await page.waitForLoadState('networkidle');
   await page.fill('#scan-url', 'example.com');
   await page.click('#scan-submit');

@@ -4,8 +4,8 @@
 //
 // The no-JavaScript way to send an inquiry from a scan page: a plain form post
 // to the contact endpoint, which answers with a redirect to the thanks page.
-// Rendered once per page, outside both interface variants, so it shows exactly
-// once whichever variant a visitor would get. Field names match the JS lead
+// Rendered once per page, next to the scan box, which the layout hides when
+// scripts are off (data-scan-needs-js). Field names match the JS lead
 // form's payload; `company` is the honeypot, hidden off-screen the same way
 // the site's quick-message form hides it.
 interface Props {

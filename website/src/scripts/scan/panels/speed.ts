@@ -81,16 +81,7 @@ function plate(label: string, score: number | null, err: RequestError | null): H
   num.textContent = score === null ? '—' : String(score);
   value.appendChild(num);
   box.appendChild(value);
-  const gauge = el('div', 'readout-gauge');
-  gauge.setAttribute('aria-hidden', 'true');
-  const bar = el('i', 'after');
   const bucket = score === null ? null : scoreBucket(score);
-  bar.classList.add(
-    bucket === 'good' ? 'after-improved' : bucket === 'poor' ? 'after-accent' : 'after-neutral',
-  );
-  bar.style.inlineSize = `${score ?? 0}%`;
-  gauge.append(el('i', 'track'), bar);
-  box.appendChild(gauge);
   const chip = el(
     'p',
     `mt-2 ${bucket ? (bucket === 'needs-work' ? 'badge-accent' : BUCKET_BADGE_CLASS[bucket]) : 'badge-neutral'}`,

@@ -35,7 +35,7 @@ async function start(page: Page): Promise<Gates> {
     await route.fulfill({ status: 200, contentType: 'application/json', body: report });
   });
   await stubUmami(page);
-  await page.goto('/ai-readability/?ui=v2');
+  await page.goto('/ai-readability/');
   await page.waitForLoadState('networkidle');
   await page.fill('#scan-url', 'shop.example.com');
   await page.click('#scan-submit');

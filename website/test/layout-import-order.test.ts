@@ -41,7 +41,7 @@ const EXPECTED: Record<string, string> = {
   'pricing/': 'S S S L:BaseLayout',
   'alternatives/': 'S S S L:BaseLayout',
   'alternatives/shortpixel/': 'S S S L:BaseLayout S',
-  'ai-readability/': 'S S S L:BaseLayout S L:index',
+  'ai-readability/': 'S S S L:BaseLayout S',
 };
 
 function headStyleSignature(html: string): string {

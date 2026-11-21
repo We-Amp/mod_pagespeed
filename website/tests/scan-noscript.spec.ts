@@ -62,3 +62,23 @@ for (const route of ['/analyze/', '/ai-readability/']) {
     await expect(page.locator('form[data-ui="noscript-lead"]')).toHaveCount(0);
   });
 }
+
+// The scan box and its results need JavaScript. Without it they are hidden, so
+// the only form a visitor sees is the one that works: the noscript inquiry form.
+for (const route of ['/analyze/', '/ai-readability/']) {
+  test(`${route} shows no scan form without JavaScript, only the inquiry form`, async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    await page.goto(route);
+    await expect(page.locator('form[data-scan-box]')).toHaveCount(1);
+    await expect(page.locator('form[data-scan-box]')).toBeHidden();
+    await expect(page.locator('form[data-scan-lead]')).toBeHidden();
+    await expect(page.locator('main form:visible')).toHaveCount(1);
+    await expect(page.locator('form[data-ui="noscript-lead"]')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The scan needs JavaScript' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await context.close();
+  });
+}

@@ -66,9 +66,9 @@ async function mock(
   return posted;
 }
 
-async function scanV2(page: Page) {
+async function runScan(page: Page) {
   await stubUmami(page);
-  await page.goto('/ai-readability/?ui=v2');
+  await page.goto('/ai-readability/');
   await page.waitForLoadState('networkidle');
   await page.fill('#scan-url', 'studio.example.org');
   await page.click('#scan-submit');
@@ -96,7 +96,7 @@ async function open(page: Page, pillar: 'speed' | 'airead' | 'risk') {
 test.describe('scan result on a hosted platform', () => {
   test('shows the note under the heading and reads it out once', async ({ page }) => {
     await mock(page, 'hosted');
-    await scanV2(page);
+    await runScan(page);
     const notice = page.locator('[data-scan-fit-notice]');
     await expect(notice).toBeVisible();
     await expect(notice.locator('[data-scan-fit-text]')).toHaveText(NOTICE);
@@ -149,7 +149,7 @@ test.describe('scan result on a hosted platform', () => {
           }).observe(live, { childList: true, characterData: true, subtree: true });
         });
       });
-      await scanV2(page);
+      await runScan(page);
       // It is the last thing said, so no later result replaced it unread.
       await expect(page.locator('[data-scan-live]')).toContainText(SPOKEN);
       const said = await page.evaluate(() => (window as unknown as { __said: string[] }).__said);
@@ -161,7 +161,7 @@ test.describe('scan result on a hosted platform', () => {
   test('shows no server offer while the scan is on its way', async ({ page }) => {
     await mock(page, 'hosted', { scan: 1500 });
     await stubUmami(page);
-    await page.goto('/ai-readability/?ui=v2');
+    await page.goto('/ai-readability/');
     await page.waitForLoadState('networkidle');
     await page.fill('#scan-url', 'studio.example.org');
     await page.click('#scan-submit');
@@ -189,7 +189,7 @@ test.describe('scan result on a hosted platform', () => {
 
   test('offers nothing that needs a server the visitor runs', async ({ page }) => {
     await mock(page, 'hosted');
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-audit]')).toBeHidden();
     await expect(page.locator('[data-scan-cta="audit"]')).toBeHidden();
     await expect(page.locator('[data-scan-next]')).toBeHidden();
@@ -203,7 +203,7 @@ test.describe('scan result on a hosted platform', () => {
 
   test('keeps the findings in the panels without the server sentences', async ({ page }) => {
     await mock(page, 'hosted');
-    await scanV2(page);
+    await runScan(page);
 
     const risk = await open(page, 'risk');
     await expect(risk.locator('[data-risk-row]')).toHaveCount(4);
@@ -253,7 +253,7 @@ test.describe('scan result on a hosted platform', () => {
 
   test('a general question can still be sent, with no flagged topics', async ({ page }) => {
     const posted = await mock(page, 'hosted');
-    await scanV2(page);
+    await runScan(page);
     await page.fill('form[data-scan-lead] input[name="email"]', 'owner@example.org');
     await page.click('form[data-scan-lead] button[type="submit"]');
     await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
@@ -272,7 +272,7 @@ test.describe('scan result on a hosted platform', () => {
 
   test('a new scan of another site brings the offers back', async ({ page }) => {
     await mock(page, 'hosted');
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-fit-notice]')).toBeVisible();
     await page.unroute('**/ai-readability/api/scan**');
     await page.route('**/ai-readability/api/scan**', (route) =>
@@ -297,7 +297,7 @@ test.describe('scan result on a hosted platform', () => {
     test(`axe-core WCAG 2.2 AA scan of the hosted result at ${label}`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       await mock(page, 'hosted');
-      await scanV2(page);
+      await runScan(page);
       await open(page, 'airead');
       // No horizontal scrolling at this width.
       expect(
@@ -333,7 +333,7 @@ test.describe('scan result without a hosted platform', () => {
         body: JSON.stringify({ error: 'scanner unavailable' }),
       }),
     );
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-fit-line]')).toHaveText('');
     await expect(page.locator('[data-scan-fit-notice]')).toBeHidden();
     await expect(page.locator('[data-scan-audit]')).toBeHidden();
@@ -346,7 +346,7 @@ test.describe('scan result without a hosted platform', () => {
   ] as const) {
     test(`${label}: the muted line and the usual offers`, async ({ page }) => {
       await mock(page, report);
-      await scanV2(page);
+      await runScan(page);
       await expect(page.locator('[data-scan-fit-line]')).toHaveText(LINE);
       await expect(page.locator('[data-scan-fit-notice]')).toBeHidden();
       await expect(page.locator('[data-scan-audit]')).toBeVisible();
@@ -397,7 +397,7 @@ test.describe('scan result without a hosted platform', () => {
       await page.setViewportSize({ width, height: 900 });
       await mock(page, 'unknown', { scan: 1200 });
       await stubUmami(page);
-      await page.goto('/ai-readability/?ui=v2');
+      await page.goto('/ai-readability/');
       await page.waitForLoadState('networkidle');
       await page.fill('#scan-url', 'shop.example.com');
       await page.click('#scan-submit');
@@ -425,7 +425,7 @@ test.describe('scan result without a hosted platform', () => {
     const data = JSON.parse(read('report-full'));
     data.report.platform = { status: 'error' };
     await mock(page, data);
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-fit-line]')).toHaveText(LINE);
     expect(await chipIds(page)).toEqual([...GATED, 'consulting', 'agents', 'audit']);
   });

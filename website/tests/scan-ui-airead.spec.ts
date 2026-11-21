@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 
-// The v2 AI readability panel. The scanner and PageSpeed Insights are mocked;
+// The AI readability panel. The scanner and PageSpeed Insights are mocked;
 // the real services are never called.
 
 const fixture = (name: string) =>
@@ -59,8 +59,8 @@ async function warm(page: Page, path: string) {
   await page.waitForLoadState('networkidle');
 }
 
-async function scanV2(page: Page) {
-  await warm(page, '/ai-readability/?ui=v2');
+async function runScan(page: Page) {
+  await warm(page, '/ai-readability/');
   await page.fill('#scan-url', 'shop.example.com');
   await page.click('#scan-submit');
   await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).not.toHaveText(
@@ -77,48 +77,58 @@ async function openAiread(page: Page) {
 }
 
 test.describe('AI readability panel', () => {
-  test('the grade row and category rows match the original page', async ({ page }) => {
-    await mock(page);
-    await warm(page, '/ai-readability/?ui=v1');
-    await page.fill('#ar-url', 'shop.example.com');
-    await page.click('#ar-go');
-    await expect(page.locator('.ar-cat').first()).toBeVisible({ timeout: 15000 });
-    const v1 = {
-      grade: (await page.locator('.ar-badge').innerText()).trim(),
-      score: (await page.locator('.ar-score').innerText()).trim(),
-      cats: await page.locator('.ar-cat').evaluateAll((els) =>
-        els.map((e) => ({
-          name: e.querySelector('.ar-top span')!.firstChild!.textContent,
-          flag: e.querySelector('.ar-flag')?.textContent ?? '',
-          score:
-            e.querySelectorAll('.ar-top span')[e.querySelector('.ar-flag') ? 2 : 1].textContent,
-          verdict: e.querySelector('.ar-v')!.textContent,
-        })),
-      ),
+  test('the grade row and the five category rows show the report', async ({ page }) => {
+    // What the full fixture report grades to.
+    const want = {
+      grade: 'C',
+      score: '64/100',
+      cats: [
+        {
+          name: 'Content fidelity',
+          score: '12/30',
+          flag: 'invisible without JS',
+          verdict: 'Only ~38% of your content exists without JavaScript',
+        },
+        { name: 'Token efficiency', score: '8/20', flag: '', verdict: 'Bloated: the page is ~98×' },
+        {
+          name: 'Structured data',
+          score: '20/20',
+          flag: '',
+          verdict: 'Strong machine-readable metadata',
+        },
+        {
+          name: 'Crawler access',
+          score: '18/20',
+          flag: '',
+          verdict: 'AI crawlers are allowed to fetch the page.',
+        },
+        {
+          name: 'Citation readiness',
+          score: '6/10',
+          flag: '',
+          verdict: 'Thin attribution metadata',
+        },
+      ],
     };
-
-    const p2 = await page.context().newPage();
-    await mock(p2);
-    await scanV2(p2);
-    await openAiread(p2);
-    const cats = p2.locator('.scan-airead-cat');
+    await mock(page);
+    await runScan(page);
+    await openAiread(page);
+    const cats = page.locator('.scan-airead-cat');
     await expect(cats).toHaveCount(5);
-    expect(v1.cats).toHaveLength(5);
-    await expect(p2.locator('[role="img"][aria-label^="Grade"]')).toHaveText(v1.grade);
-    await expect(panel(p2)).toContainText(v1.score);
+    await expect(page.locator('[role="img"][aria-label^="Grade"]')).toHaveText(want.grade);
+    await expect(panel(page)).toContainText(want.score);
     for (let i = 0; i < 5; i++) {
-      const row = cats.nth(i);
-      const text = await row.innerText();
-      expect(text).toContain(v1.cats[i].name!);
-      expect(text).toContain(v1.cats[i].score!);
-      expect(text).toContain(v1.cats[i].verdict!);
-      if (v1.cats[i].flag) expect(text).toContain(v1.cats[i].flag);
+      const text = await cats.nth(i).innerText();
+      expect(text).toContain(want.cats[i].name);
+      expect(text).toContain(want.cats[i].score);
+      expect(text).toContain(want.cats[i].verdict);
+      if (want.cats[i].flag) expect(text).toContain(want.cats[i].flag);
     }
   });
 
   test('shows the content-gap flag, the word and the token line', async ({ page }) => {
     await mock(page);
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     await expect(panel(page)).toContainText('Grade C — mixed');
     await expect(panel(page)).toContainText('64/100');
@@ -130,7 +140,7 @@ test.describe('AI readability panel', () => {
 
   test('the crawler text sits behind a disclosure and scrolls inside its box', async ({ page }) => {
     await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     const pre = panel(page).locator('pre');
     await expect(pre).toBeHidden();
@@ -152,7 +162,7 @@ test.describe('AI readability panel', () => {
 
   test('the cut blocks are absent', async ({ page }) => {
     await mock(page);
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     const body = (await panel(page).innerText()).toLowerCase();
     for (const gone of [
@@ -174,7 +184,7 @@ test.describe('AI readability panel', () => {
 
   test('"Also found" lines appear only when their gate fires', async ({ page }) => {
     await mock(page, { report: 'full' });
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     const found = panel(page).locator('[data-scan-also-found] li');
     await expect(found).toHaveCount(4);
@@ -190,7 +200,7 @@ test.describe('AI readability panel', () => {
 
   test('a clean report has only the Markdown row in "Also found"', async ({ page }) => {
     await mock(page, { report: 'clean' });
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     const found = panel(page).locator('[data-scan-also-found] li');
     await expect(found).toHaveCount(1);
@@ -204,7 +214,7 @@ test.describe('AI readability panel', () => {
 test.describe('scanner failures', () => {
   test('an error answer marks both tiles Not measured and shows the message', async ({ page }) => {
     await mock(page, { scanStatus: 503, scanError: 'busy — try again in a moment' });
-    await scanV2(page);
+    await runScan(page);
     for (const t of ['airead', 'risk']) {
       await expect(page.locator(`[data-scan-tile="${t}"] [data-scan-status]`)).toHaveText(
         'Not measured',
@@ -223,7 +233,7 @@ test.describe('scanner failures', () => {
 
   test('an unreachable scanner says so', async ({ page }) => {
     await mock(page, { abort: true });
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-tile="risk"] [data-scan-status]')).toHaveText(
       'Not measured',
     );
@@ -244,7 +254,7 @@ test.describe('scanner failures', () => {
         body: '<h1>429 Too Many Requests</h1>',
       }),
     );
-    await scanV2(page);
+    await runScan(page);
     await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).toHaveText(
       'Not measured',
     );
@@ -262,7 +272,7 @@ test.describe('scanner failures', () => {
     await page.route('**/ai-readability/api/scan**', (route) =>
       route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad gateway</h1>' }),
     );
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     await expect(panel(page)).toContainText('The scanner is busy. Try again in a moment.');
     await expect(panel(page)).not.toContainText('HTTP 502');
@@ -272,7 +282,7 @@ test.describe('scanner failures', () => {
   test('a scanner that never answers times out', async ({ page }) => {
     await page.clock.install();
     await mock(page, { hang: true });
-    await warm(page, '/ai-readability/?ui=v2');
+    await warm(page, '/ai-readability/');
     await page.fill('#scan-url', 'shop.example.com');
     await page.click('#scan-submit');
     await expect(page.locator('[data-scan-tile="airead"] [data-scan-status]')).toHaveText(
@@ -311,7 +321,7 @@ test.describe('scanner failures', () => {
       }
       return route.fulfill({ status: 200, contentType: 'application/json', body: fixture('full') });
     });
-    await scanV2(page);
+    await runScan(page);
     await openAiread(page);
     const psiBefore = calls.psi;
     expect(calls.scan).toBe(1);

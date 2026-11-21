@@ -5,8 +5,8 @@
 // state chip, the one verdict sentence, and (only when the lens's gate fires)
 // the "what is planned" sentences with the link and its event name. On a
 // hosted platform no gate fires, so a row keeps its finding and offers nothing.
-// The verdict and card sentences of the first three lenses are the approved
-// wording of the v1 results page. The gate predicates come from demand.mjs.
+// The verdict and card sentences of the first three lenses are approved
+// wording; change them only on purpose. The gate predicates come from demand.mjs.
 
 import {
   consentEnforcementCtaApplies,
@@ -25,7 +25,7 @@ export type RowState = 'attention' | 'clean' | 'none';
 export interface RiskLink {
   href: string;
   label: string;
-  /** The umami event the link carries (names unchanged from v1). */
+  /** The umami event the link carries (the names are long-standing; do not rename them). */
   event: string;
 }
 
@@ -58,7 +58,7 @@ const NAMES: Record<RiskRow['key'], string> = {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Lens = Record<string, any>;
 
-// ---- Pre-consent leak (v1 wording) -------------------------------------
+// ---- Pre-consent leak (approved wording) -------------------------------
 
 function pclVerdict(pcl: Lens): string {
   if (pcl.verdict === 'unknown') {
@@ -80,7 +80,7 @@ function pclVerdict(pcl: Lens): string {
   );
 }
 
-// ---- Script inventory (v1 wording) -------------------------------------
+// ---- Script inventory (approved wording) -------------------------------
 
 function siReasonText(si: Lens): string {
   const reasons: string[] = Array.isArray(si.reasons) ? si.reasons : [];
@@ -137,7 +137,7 @@ function siVerdict(si: Lens, report?: Record<string, unknown>): string {
   );
 }
 
-// ---- SEO defects (v1 wording) ------------------------------------------
+// ---- SEO defects (approved wording) ------------------------------------
 
 const SD_GROUPS: [string, string][] = [
   ['canonical', 'canonical'],

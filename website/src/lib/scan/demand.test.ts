@@ -7,6 +7,7 @@ import {
   complianceFixCtaApplies,
   consentEnforcementCtaApplies,
   edgeSeoCtaApplies,
+  lensSignalFor,
   markdownOriginCtaApplies,
   originTopicsApply,
   pageIntegrityCtaApplies,
@@ -36,7 +37,9 @@ describe('tollboothCtaApplies', () => {
 
   const breaks: Array<[string, Record<string, unknown>]> = [
     ['the page renders but is verifiable', { verifiable: true }],
+    ['verifiable is falsy but not false', { verifiable: 0 }],
     ['the page does not render', { renderOk: false }],
+    ['renderOk is truthy but not true', { renderOk: 1 }],
     ['no AI crawler is allowed', { aiCrawlersAllowed: [] }],
     ['the allowed-crawler list is not a list', { aiCrawlersAllowed: 'chatgpt-user' }],
     ['the allowed-crawler list is missing', { aiCrawlersAllowed: undefined }],
@@ -177,6 +180,366 @@ describe('responseFirewallCtaApplies', () => {
       responseFirewallCtaApplies({ status: 'ok', verdict: 'clean', reasons: ['debug-output'] }),
     ).toBe(false);
     expect(responseFirewallCtaApplies(undefined)).toBe(false);
+  });
+});
+
+// The signal one topic carries: ids, counts and booleans from the lens behind
+// the wedge. The shapes follow the scanner's contract.
+describe('lensSignalFor', () => {
+  it('tollbooth: the six verifiability fields', () => {
+    const detail = {
+      verifiable: false,
+      exposurePct: 87,
+      aiCrawlersAllowed: ['GPTBot', 'CCBot'],
+      aiCrawlersBlocked: ['ClaudeBot'],
+      botAuthHeaders: false,
+      renderOk: true,
+    };
+    const report = { url: 'https://example.com/', agentVerifiability: { detail } };
+    expect(lensSignalFor('tollbooth', report)).toEqual(detail);
+  });
+
+  it('agentpass: classification, evidence and probes, without the status', () => {
+    const probes = {
+      signed: { status: 403, headers: {}, bodyLength: 120 },
+      broken: { status: 403, headers: {}, bodyLength: 120 },
+      unsigned: { status: 200, headers: {}, bodyLength: 5120 },
+    };
+    const evidence = ['broken-signature vs unsigned: status 403 vs 200'];
+    const report = {
+      url: 'https://origin.example/',
+      signedAgentVerification: {
+        status: 'ok',
+        classification: 'signature-aware',
+        probes,
+        evidence,
+      },
+    };
+    expect(lensSignalFor('agentpass', report)).toEqual({
+      classification: 'signature-aware',
+      evidence,
+      probes,
+    });
+  });
+
+  it('compliancefix: the totals and the top rules', () => {
+    const detail = {
+      total: 12,
+      fixableInline: 7,
+      byImpact: { critical: 2, serious: 5 },
+      topRules: ['image-alt', 'color-contrast'],
+    };
+    const report = { url: 'https://shop.example.org/checkout', accessibility: { detail } };
+    expect(lensSignalFor('compliancefix', report)).toEqual(detail);
+  });
+
+  it('consent-enforcement: the top three hosts, without the tracker mark', () => {
+    const report = {
+      url: 'https://shop.example.com/',
+      preConsentLeak: {
+        status: 'ok',
+        verdict: 'leaks',
+        trackerCount: 4,
+        thirdPartyCount: 7,
+        thirdPartyHosts: [
+          { host: 'www.google-analytics.com', requests: 3, category: 'analytics', tracker: true },
+          { host: 'www.googletagmanager.com', requests: 1, category: 'tag-manager', tracker: true },
+          { host: 'connect.facebook.net', requests: 1, category: 'social', tracker: true },
+          { host: 'static.hotjar.com', requests: 1, category: 'session-replay', tracker: true },
+          { host: 'consent.cookiebot.com', requests: 1, category: 'cmp', tracker: false },
+        ],
+        cmpDetected: { detected: true, vendor: 'Cookiebot' },
+        firstParty: ['shop.example.com'],
+        requestsObserved: 22,
+      },
+    };
+    expect(lensSignalFor('consent-enforcement', report)).toEqual({
+      verdict: 'leaks',
+      trackerCount: 4,
+      thirdPartyCount: 7,
+      topHosts: [
+        { host: 'www.google-analytics.com', requests: 3, category: 'analytics' },
+        { host: 'www.googletagmanager.com', requests: 1, category: 'tag-manager' },
+        { host: 'connect.facebook.net', requests: 1, category: 'social' },
+      ],
+      cmpDetected: { detected: true, vendor: 'Cookiebot' },
+    });
+    // A lens-free wedge has no signal, whatever the report holds.
+    expect(lensSignalFor('pricing', report)).toBeNull();
+  });
+
+  it('consent-enforcement: an empty host list when the report has none', () => {
+    const report = {
+      url: 'https://shop.example.com/',
+      preConsentLeak: {
+        status: 'ok',
+        verdict: 'leaks',
+        trackerCount: 2,
+        thirdPartyCount: 2,
+        cmpDetected: { detected: false, vendor: null },
+      },
+    };
+    expect(lensSignalFor('consent-enforcement', report)).toEqual({
+      verdict: 'leaks',
+      trackerCount: 2,
+      thirdPartyCount: 2,
+      topHosts: [],
+      cmpDetected: { detected: false, vendor: null },
+    });
+  });
+
+  // A 30-host, 5-duplicate inventory with script paths present: the signal
+  // keeps the first three third-party hosts and three duplicates, and never a
+  // path.
+  it.each(['page-integrity', 'third-party-freeze'])(
+    '%s: the shared script-inventory signal, hosts only',
+    (wedge) => {
+      const scriptHosts = [
+        {
+          host: 'shop.example.com',
+          party: 'first',
+          scripts: 9,
+          withIntegrity: 0,
+          category: 'first-party',
+          listed: true,
+        },
+        ...Array.from({ length: 29 }, (_, i) => ({
+          host: `cdn${i}.example.net`,
+          party: 'third',
+          scripts: 30 - i,
+          withIntegrity: 0,
+          category: i === 0 ? 'cdn' : 'other',
+          listed: i === 0,
+        })),
+      ];
+      const csp = { enforced: false, reportOnly: true, scriptSrc: ["'self'"], reporting: false };
+      const report = {
+        url: 'https://shop.example.com/checkout',
+        scriptInventory: {
+          status: 'ok',
+          verdict: 'attention',
+          reasons: ['sri-missing', 'duplicate-library'],
+          blockedBy: [],
+          totals: {
+            scripts: 40,
+            inline: 4,
+            external: 36,
+            firstPartyExternal: 9,
+            thirdPartyExternal: 27,
+            thirdPartyHosts: 29,
+            thirdPartyWithIntegrity: 1,
+            nonExecutable: 0,
+          },
+          scriptHosts,
+          sriMissing: [{ host: 'cdn0.example.net', path: '/secret/path/lib.js' }],
+          floating: [],
+          duplicates: Array.from({ length: 5 }, (_, i) => ({
+            library: `lib${i}`,
+            versions: ['1.0.0', '2.0.0'],
+          })),
+          csp,
+          note: 'x',
+        },
+      };
+      const signal = lensSignalFor(wedge, report);
+      expect(signal).toEqual({
+        verdict: 'attention',
+        reasons: ['sri-missing', 'duplicate-library'],
+        totals: {
+          scripts: 40,
+          inline: 4,
+          thirdPartyExternal: 27,
+          thirdPartyHosts: 29,
+          thirdPartyWithIntegrity: 1,
+        },
+        topHosts: [
+          { host: 'cdn0.example.net', scripts: 30, category: 'cdn' },
+          { host: 'cdn1.example.net', scripts: 29, category: 'other' },
+          { host: 'cdn2.example.net', scripts: 28, category: 'other' },
+        ],
+        duplicates: [0, 1, 2].map((i) => ({ library: `lib${i}`, versions: ['1.0.0', '2.0.0'] })),
+        csp,
+      });
+      expect(JSON.stringify(signal)).not.toContain('/secret/path');
+      expect(JSON.stringify(signal).length).toBeLessThan(2000);
+    },
+  );
+
+  it('edge-seo: ids, counts, booleans and two tokens, never page text or URLs', () => {
+    const counts = { total: 20, canonical: 5, hreflang: 5, title: 4, description: 3, jsonld: 3 };
+    const defects = Array.from({ length: 20 }, (_, i) => `defect-${i}`);
+    const notMeasured = ['canonical-js', 'hreflang-js', 'title-js', 'description-js', 'jsonld-js'];
+    const report = {
+      url: 'https://news.example.com/story',
+      seoDefects: {
+        status: 'ok',
+        verdict: 'attention',
+        defects,
+        counts,
+        blockedBy: [],
+        staticCompared: false,
+        notMeasured,
+        canonical: {
+          static: { count: 0, href: 'https://news.example.com/secret-canonical' },
+          rendered: { count: 1, href: 'https://news.example.com/secret-canonical' },
+          header: null,
+        },
+        title: {
+          static: { count: 1, text: 'Secret Title Text' },
+          rendered: { count: 1, text: 'Secret Title Text' },
+        },
+        description: {
+          static: { count: 1, text: 'Secret description text' },
+          rendered: { count: 1, text: 'Secret description text' },
+        },
+        jsonLd: {
+          static: { blocks: 0, invalid: 0, types: [] },
+          rendered: { blocks: 2, invalid: 0, types: ['SecretType'] },
+          renderOnlyTypes: ['SecretType'],
+        },
+        robots: { mismatch: true },
+        delivery: { cdn: 'cloudflare', server: 'nginx' },
+        note: 'x',
+      },
+    };
+    const signal = lensSignalFor('edge-seo', report);
+    expect(signal).toEqual({
+      verdict: 'attention',
+      defects,
+      counts,
+      staticCompared: false,
+      notMeasured,
+      robotsMismatch: true,
+      jsonLdPresent: true,
+      delivery: { cdn: 'cloudflare', server: 'nginx' },
+    });
+    const json = JSON.stringify(signal);
+    for (const leak of ['secret-canonical', 'Secret Title', 'Secret description', 'SecretType']) {
+      expect(json).not.toContain(leak);
+    }
+    expect(json.length).toBeLessThan(2000);
+  });
+
+  it('edge-seo: no robots mismatch, no JSON-LD and null delivery tokens when absent', () => {
+    const report = {
+      url: 'https://x.example/',
+      seoDefects: {
+        verdict: 'attention',
+        defects: ['canonical-missing'],
+        counts: { total: 1, canonical: 1, hreflang: 0, title: 0, description: 0, jsonld: 0 },
+        staticCompared: true,
+        notMeasured: [],
+        jsonLd: { static: { blocks: 0 }, rendered: { blocks: 0 } },
+      },
+    };
+    expect(lensSignalFor('edge-seo', report)).toMatchObject({
+      robotsMismatch: false,
+      jsonLdPresent: false,
+      delivery: { cdn: null, server: null },
+    });
+  });
+
+  it('markdown-origin: the verdict and the negotiation facts, no page text', () => {
+    const report = {
+      url: 'https://docs.example/guide',
+      agentSignals: {
+        status: 'ok',
+        verdict: 'attention',
+        markdown: {
+          negotiated: false,
+          httpStatus: 200,
+          contentType: 'text/html; charset=utf-8',
+          varyAccept: false,
+          sample: 'Secret page text',
+        },
+      },
+    };
+    const signal = lensSignalFor('markdown-origin', report);
+    expect(signal).toEqual({
+      verdict: 'attention',
+      negotiated: false,
+      httpStatus: 200,
+      contentType: 'text/html; charset=utf-8',
+      varyAccept: false,
+    });
+    expect(JSON.stringify(signal)).not.toContain('Secret');
+  });
+
+  it('markdown-origin: null status and type and no Vary when the lens is absent', () => {
+    expect(lensSignalFor('markdown-origin', { url: 'https://docs.example/' })).toEqual({
+      verdict: undefined,
+      negotiated: undefined,
+      httpStatus: null,
+      contentType: null,
+      varyAccept: false,
+    });
+  });
+
+  it('response-firewall: ids, counts, product and line tokens and no versions', () => {
+    const responseExposure = {
+      status: 'ok',
+      verdict: 'attention',
+      reasons: ['debug-output', 'version-tell', 'missing-headers'],
+      leaks: [{ id: 'php-error', count: 2, where: 'both' }],
+      tells: [
+        { product: 'apache', source: 'server', version: '2.4.29' },
+        { product: 'php', source: 'x-powered-by', version: '7.4.33' },
+      ],
+      endOfLife: [{ product: 'php', line: '7.4', basis: 'eol-date', date: '2022-11-28' }],
+      pagespeed: { header: 'x-mod-pagespeed', bucket: 'google-era' },
+      headers: { https: true, present: ['hsts'], missing: ['nosniff', 'framing'] },
+      delivery: { cdn: 'cloudflare', server: 'apache' },
+    };
+    const signal = lensSignalFor('response-firewall', {
+      url: 'https://shop.example/',
+      responseExposure,
+    });
+    expect(signal).toEqual({
+      verdict: 'attention',
+      reasons: ['debug-output', 'version-tell', 'missing-headers'],
+      leaks: [{ id: 'php-error', count: 2 }],
+      endOfLife: [{ product: 'php', line: '7.4', basis: 'eol-date' }],
+      tells: ['apache', 'php'],
+      missingHeaders: ['nosniff', 'framing'],
+      https: true,
+      pagespeedBucket: 'google-era',
+      delivery: { cdn: 'cloudflare', server: 'apache' },
+    });
+    const json = JSON.stringify(signal);
+    expect(json).not.toContain('://');
+    expect(json).not.toContain('7.4.33');
+    expect(json).not.toContain('2.4.29');
+  });
+
+  it('response-firewall: null for a blocked, disabled, failed or missing lens', () => {
+    for (const responseExposure of [
+      { status: 'blocked' },
+      { status: 'disabled' },
+      { status: 'error' },
+      undefined,
+    ]) {
+      expect(
+        lensSignalFor('response-firewall', { url: 'https://shop.example/', responseExposure }),
+      ).toBeNull();
+    }
+  });
+
+  it('response-firewall: tolerates missing headers, pagespeed and delivery', () => {
+    const report = {
+      url: 'https://x.example/',
+      responseExposure: { status: 'ok', verdict: 'attention', reasons: ['end-of-life'] },
+    };
+    expect(lensSignalFor('response-firewall', report)).toEqual({
+      verdict: 'attention',
+      reasons: ['end-of-life'],
+      leaks: [],
+      endOfLife: [],
+      tells: [],
+      missingHeaders: [],
+      https: false,
+      pagespeedBucket: null,
+      delivery: { cdn: null, server: null },
+    });
   });
 });
 

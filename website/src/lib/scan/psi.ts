@@ -397,7 +397,7 @@ export function buildConfigSnippet11(items: AggregatedAudit[]): string {
   if (filterTokens.size === 0) return '';
   // Bucket the tokens by category. One EnableFilters line per non-empty
   // bucket so the snippet reads vertically on a 360px viewport instead
-  // of horizontally-scrolling as one giant line (the v1 problem).
+  // of horizontally-scrolling as one giant line.
   const byCategory: Record<FilterCategory, string[]> = {
     image: [],
     css: [],

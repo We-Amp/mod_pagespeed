@@ -34,8 +34,6 @@ interface Ctx {
   shot: (state: string, options?: { fullPage?: boolean }) => Promise<void>;
 }
 
-// v2 is the default; ?ui=v2 pins it explicitly.
-const V2 = '?ui=v2';
 const URL_TO_SCAN = 'shop.example.com';
 
 const fixtureText = (name: string) =>
@@ -405,9 +403,9 @@ test.describe('scan UI visual states', () => {
           const mocks = await installMocks(page, state.opts);
           // Warm-up visit: the dev server re-optimises its module graph on the
           // first hit of a page and reloads once; do that outside the capture.
-          await page.goto(target.path + V2);
+          await page.goto(target.path);
           await page.waitForLoadState('networkidle');
-          await page.goto(target.path + V2);
+          await page.goto(target.path);
           await page.waitForLoadState('networkidle');
           await settle(page);
           await run({

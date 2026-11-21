@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildLeadPayload, lensSignalFor } from './demand.mjs';
+import { lensSignalFor } from './demand.mjs';
 import {
   FOUND_MARKER,
   MAX_BODY_BYTES,
@@ -214,22 +214,13 @@ describe('chipsFor', () => {
       expect(chip.selected).toBe(false);
     });
     it('posts the scanner’s object shape with no page text', () => {
-      const p = buildLeadPayload({
-        wedge: 'markdown-origin',
-        email: 'a@b.example',
-        name: '',
-        note: '',
-        report: full,
-      });
-      expect(p.lensSignal).toEqual({
+      expect(lensSignalFor('markdown-origin', full)).toEqual({
         verdict: 'attention',
         negotiated: false,
         httpStatus: 200,
         contentType: 'text/html; charset=utf-8',
         varyAccept: false,
       });
-      expect(p.topic).toBe('markdown-origin');
-      expect(p.wedge).toBe('markdown-origin');
     });
   });
 });
@@ -568,22 +559,13 @@ describe('payloadForSubmission', () => {
   });
 });
 
-// The signal a topic carries in the one request is the signal the shared
-// builder puts in a single-topic body, for every wedge.
-describe('signal parity with the single-topic builder', () => {
+// The signal a topic carries in the one request is the signal the lens behind
+// its wedge gives, for every wedge.
+describe('the signal of a single chosen topic', () => {
   for (const wedge of GATED_ORDER) {
     it(`${wedge} on the full report`, () => {
-      const single = buildLeadPayload({
-        wedge,
-        email: 'a@b.example',
-        name: '',
-        note: 'n',
-        report: full,
-      });
-      expect(single).toMatchObject({ topic: wedge, wedge, url: 'https://shop.example.com/' });
-      expect(single.message).toContain(`[${wedge}] lead from RenderPeek result`);
       const p = payloadForSubmission(chips, [wedge], form, full);
-      expect(p.lensSignals).toEqual({ [wedge]: single.lensSignal });
+      expect(p.lensSignals).toEqual({ [wedge]: lensSignalFor(wedge, full) });
     });
   }
 });

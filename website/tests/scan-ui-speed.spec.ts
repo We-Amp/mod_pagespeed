@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { stubUmami } from './helpers/umami';
 
-// The Speed pillar of the v2 scan interface. PageSpeed Insights and the
+// The Speed pillar of the scan interface. PageSpeed Insights and the
 // scanner are always mocked; nothing here reaches a real service.
 
 const fixture = (name: string) =>
@@ -62,12 +62,12 @@ async function mock(page: Page, mocks: Mocks, scanDelayMs = 0): Promise<Calls> {
 }
 
 async function warm(page: Page) {
-  await page.goto('/analyze/?ui=v2');
+  await page.goto('/analyze/');
   await page.waitForLoadState('networkidle');
 }
 
 async function scan(page: Page) {
-  await page.goto('/analyze/?ui=v2');
+  await page.goto('/analyze/');
   await page.locator('form[data-scan-box] input[name="url"]').fill('https://example.com');
   await page.locator('form[data-scan-box] button[type="submit"]').click();
 }
@@ -80,7 +80,7 @@ async function openSpeed(page: Page) {
   await expect(panel(page)).toBeVisible();
 }
 
-test.describe('v2 Speed panel', () => {
+test.describe('Speed panel', () => {
   test.beforeEach(async ({ page }) => {
     await stubUmami(page);
   });
@@ -206,17 +206,23 @@ test.describe('v2 Speed panel', () => {
       };
     });
     await expect(copy).toHaveAccessibleName('Copy');
-    await copy.click();
+    // From the keyboard: focus the button and press Enter.
+    await copy.focus();
+    await page.keyboard.press('Enter');
     // Spoken once by the page's status message; the visible text says
     // "Copied" while the accessible name stays "Copy".
     await expect(copy).toHaveText('Copied');
     await expect(copy).toHaveAccessibleName('Copy');
+    await expect(copy).toBeFocused();
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __calls: string[] }).__calls))
       .toEqual(['Copied to clipboard']);
     await expect(page.locator('#copy-status')).toHaveText('Copied to clipboard');
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     expect(clip).toContain('pagespeed EnableFilters');
+    // Focus stays on the button after the label goes back to "Copy".
+    await expect(copy).toHaveText('Copy', { timeout: 4000 });
+    await expect(copy).toBeFocused();
 
     await panel(page).getByRole('button', { name: 'Hide the configuration' }).click();
     await expect(panel(page).locator('[data-speed-snippet]')).toHaveCount(0);

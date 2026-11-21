@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
 // Pure formatting for the AI readability panel: the grade, the five category
-// rows (same arithmetic and wording as the original result page), the token
+// rows (the arithmetic and wording are approved; change them on purpose), the token
 // line, the raw-HTML Markdown, the robots.txt line and the "Also found"
 // sentences. No DOM here.
 
@@ -156,7 +156,7 @@ export function crawlersBlocked(r: Report): boolean | null {
 }
 
 /**
- * The reason sentences for the gated topics, worded as on the original page.
+ * The reason sentences for the gated topics, in their approved wording.
  * On a hosted platform each sentence keeps its finding and drops the part
  * about a server the owner runs.
  */

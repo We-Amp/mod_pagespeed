@@ -43,7 +43,7 @@ predicates in `src/lib/scan/demand.mjs`. The PSI files are trimmed real response
 - status never colour-only
 - focus ring visible on tiles/chips (separate keyboard screenshots of states 4 and 8)
 - copy on screen equals the table
-- no leftover v1 fragment
+- no leftover fragment of the retired inline scan forms
 
 Output of a review: a written review with findings marked blocking /
 non-blocking. Acceptance: no blocking findings.

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
-// Gate predicates and lead-payload builder for the scanner results. Pure
-// functions: data in, value out. This is a copy of the scanner's own
-// demand module with the comments removed; keep it in sync with the scanner
-// and with the inline copy in src/pages/ai-readability/index.astro.
+// Gate predicates and the per-topic signal for the scanner results. Pure
+// functions: data in, value out. The gates and the signal shapes follow the
+// scanner's own demand module; keep them in sync with the scanner.
 
 // Every gated topic needs a web server the visitor runs. When the scan says
 // the owner has no control of the origin (a hosted site builder), no such
@@ -229,18 +228,4 @@ export function lensSignalFor(wedge, report) {
     lensSignal = null;
   }
   return lensSignal;
-}
-
-export function buildLeadPayload({ wedge, email, name, note, report }) {
-  const url = (report && report.url) || '';
-  const lensSignal = lensSignalFor(wedge, report);
-  const message = [
-    `[${wedge}] lead from RenderPeek result`,
-    `Scanned: ${url}`,
-    note ? `Operator note / crawl volume: ${note}` : null,
-    lensSignal ? `Signal: ${JSON.stringify(lensSignal)}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-  return { topic: wedge, email, name: name || '', url, wedge, lensSignal, message };
 }

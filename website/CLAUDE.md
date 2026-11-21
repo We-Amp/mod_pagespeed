@@ -220,6 +220,17 @@ every marker whose `after` is older than the released version, the newer of
 `src/data/product-facts.mjs`. So it fires on the release's own site update, which
 removes the markers (keep the content, drop the `:::` lines and the JSON entries).
 
+## Scan pages
+
+`/analyze/` and `/ai-readability/` share one scan interface: `src/components/scan/`
+(`ScanBox.astro`, `ResultsView.astro`, `NoscriptLead.astro`), the controller in
+`src/scripts/scan/` and the pure logic with its unit tests in `src/lib/scan/` (the gate
+predicates and the per-topic signal are in `demand.mjs`, tested in `demand.test.ts`).
+Each page wraps the scan box and the results in a `data-scan-needs-js` element; the
+layout's `<noscript>` style hides those, so a visitor without JavaScript sees the
+`NoscriptLead` form and the static content, never a form that cannot work. The browser
+specs are `tests/scan-ui*.spec.ts` and `tests/scan-noscript.spec.ts`.
+
 ## Gates in `test/`
 
 `npx vitest run` runs them all; the two build-output gates skip themselves when
@@ -234,8 +245,6 @@ removes the markers (keep the content, drop the `:::` lines and the JSON entries
   source, so it needs no build and always runs.
 - `release-notes-ids-gate.test.ts` — after a build: every id in
   `test/fixtures/release-notes-ids.txt` exists on the built `/docs/release-notes/` page.
-- `sync/airead-gate-sync.test.ts` — the gate predicates inlined into
-  `/ai-readability/` still match their golden contract.
 - `sync/console-facts-sync.test.ts` — the repo-root `shared/product-facts.mjs` (also
   consumed by the management console) and `src/data/product-facts.mjs` stay in lockstep.
 - `reference/source-parity.test.ts` — `worker-flags.json` and

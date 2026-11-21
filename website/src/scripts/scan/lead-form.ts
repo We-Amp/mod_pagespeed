@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
-// The one lead form of the v2 interface, plus the next-steps row and the
+// The one lead form of the scan interface, plus the next-steps row and the
 // share row under it. The shell renders the static form; this module fills
 // the topic chips once the scan result is in, adds the speed-help chip when
 // the speed result settles, and sends the whole form as one request (a general
