@@ -11,6 +11,7 @@ import {
   describePsiError,
   collectFlaggedAuditIds,
   coverageSentence,
+  flaggedAudits,
   savingsSentence,
   type PsiResult,
 } from './psi';
@@ -179,5 +180,30 @@ describe('sentences and errors', () => {
     expect(t(404)).toBe('PageSpeed Insights could not analyze that URL.');
     expect(t(503)).toBe('PageSpeed Insights returned an error. Try again later.');
     expect(t()).toBe('PageSpeed Insights did not answer.');
+  });
+});
+
+describe('flaggedAudits', () => {
+  const all = flaggedAudits(mobile, desktop);
+  it('lists every flagged audit once, mapped or not, with its PageSpeed Insights title', () => {
+    const ids = collectFlaggedAuditIds(mobile, desktop);
+    expect(all.map((a) => a.id).sort()).toEqual([...ids].sort());
+    expect(all.length).toBeGreaterThan(aggregate(mobile, desktop, PSI_MPS_MAPPING).length - 1);
+    for (const a of all) {
+      const audit =
+        mobile.lighthouseResult?.audits?.[a.id] ?? desktop.lighthouseResult?.audits?.[a.id];
+      expect(a.title).toBe(audit?.title ?? a.id);
+      expect(a.title).not.toBe('');
+    }
+  });
+  it('orders by the estimated time saving and falls back to the id for a missing title', () => {
+    const ms = all.map((a) => a.overallSavingsMs);
+    expect(ms).toEqual([...ms].sort((x, y) => y - x));
+    const bare: PsiResult = {
+      lighthouseResult: { audits: { 'some-audit': { id: 'some-audit', score: 0.2 } } },
+    };
+    expect(flaggedAudits(bare, {})).toEqual([
+      { id: 'some-audit', title: 'some-audit', overallSavingsMs: 0, overallSavingsBytes: 0 },
+    ]);
   });
 });

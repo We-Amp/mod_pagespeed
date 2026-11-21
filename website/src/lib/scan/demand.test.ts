@@ -8,6 +8,7 @@ import {
   consentEnforcementCtaApplies,
   edgeSeoCtaApplies,
   markdownOriginCtaApplies,
+  originTopicsApply,
   pageIntegrityCtaApplies,
   responseFirewallCtaApplies,
   thirdPartyFreezeCtaApplies,
@@ -193,5 +194,98 @@ describe('markdownOriginCtaApplies', () => {
       false,
     );
     expect(markdownOriginCtaApplies(undefined)).toBe(false);
+  });
+});
+
+describe('the platform argument', () => {
+  const hosted = { originControl: 'none' };
+  // One input per gate that fires without a platform.
+  const firing: Array<[string, (platform?: unknown) => boolean]> = [
+    [
+      'tollbooth',
+      (p) =>
+        tollboothCtaApplies(
+          {
+            detail: {
+              verifiable: false,
+              renderOk: true,
+              aiCrawlersAllowed: ['GPTBot'],
+              exposurePct: 30,
+            },
+          },
+          p,
+        ),
+    ],
+    ['agentpass', (p) => agentPassCtaApplies({ status: 'ok', classification: 'verifying' }, p)],
+    [
+      'compliancefix',
+      (p) => complianceFixCtaApplies({ available: true, detail: { fixableInline: 1 } }, p),
+    ],
+    [
+      'consent-enforcement',
+      (p) => consentEnforcementCtaApplies({ status: 'ok', verdict: 'leaks', trackerCount: 1 }, p),
+    ],
+    ['page-integrity', (p) => pageIntegrityCtaApplies({ status: 'ok', verdict: 'attention' }, p)],
+    [
+      'third-party-freeze',
+      (p) =>
+        thirdPartyFreezeCtaApplies(
+          {
+            status: 'ok',
+            verdict: 'clean',
+            totals: { thirdPartyExternal: 2, thirdPartyWithIntegrity: 0 },
+          },
+          p,
+        ),
+    ],
+    [
+      'edge-seo',
+      (p) => edgeSeoCtaApplies({ status: 'ok', verdict: 'attention', defects: ['title-js'] }, p),
+    ],
+    [
+      'response-firewall',
+      (p) =>
+        responseFirewallCtaApplies(
+          { status: 'ok', verdict: 'attention', reasons: ['end-of-life'] },
+          p,
+        ),
+    ],
+    [
+      'markdown-origin',
+      (p) => markdownOriginCtaApplies({ status: 'ok', markdown: { negotiated: false } }, p),
+    ],
+  ];
+
+  it('originTopicsApply is false only for origin control "none"', () => {
+    expect(originTopicsApply(hosted)).toBe(false);
+    expect(originTopicsApply({ originControl: 'none', confidence: 'low' })).toBe(false);
+    for (const p of [
+      undefined,
+      null,
+      {},
+      { originControl: 'limited' },
+      { originControl: 'full' },
+      { originControl: 'unknown' },
+      { status: 'disabled' },
+    ]) {
+      expect(originTopicsApply(p)).toBe(true);
+    }
+  });
+
+  it.each(firing)('%s does not fire on a hosted platform', (_id, gate) => {
+    expect(gate()).toBe(true);
+    expect(gate(hosted)).toBe(false);
+  });
+
+  it.each(firing)('%s is unchanged by any other platform reading', (_id, gate) => {
+    for (const p of [
+      null,
+      {},
+      { originControl: 'limited' },
+      { originControl: 'unknown' },
+      { status: 'error' },
+    ]) {
+      expect(gate(p)).toBe(true);
+    }
   });
 });

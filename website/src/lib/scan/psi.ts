@@ -298,6 +298,45 @@ export function collectFlaggedAuditIds(mobile: PsiResult, desktop: PsiResult): S
   }
   return ids;
 }
+/** One flagged audit as PageSpeed Insights reported it: no product mapping. */
+export interface FlaggedAudit {
+  id: string;
+  title: string;
+  overallSavingsMs: number;
+  overallSavingsBytes: number;
+}
+
+/**
+ * Every flagged audit of the two runs, largest estimated time saving first,
+ * with the title PageSpeed Insights gave it and the larger of the two savings
+ * estimates.
+ */
+export function flaggedAudits(mobile: PsiResult, desktop: PsiResult): FlaggedAudit[] {
+  const mAudits = mobile.lighthouseResult?.audits ?? {};
+  const dAudits = desktop.lighthouseResult?.audits ?? {};
+  return [...collectFlaggedAuditIds(mobile, desktop)]
+    .map((id) => {
+      const m = mAudits[id];
+      const d = dAudits[id];
+      return {
+        id,
+        title: m?.title ?? d?.title ?? id,
+        overallSavingsMs: Math.max(
+          m?.details?.overallSavingsMs ?? 0,
+          d?.details?.overallSavingsMs ?? 0,
+        ),
+        overallSavingsBytes: Math.max(
+          m?.details?.overallSavingsBytes ?? 0,
+          d?.details?.overallSavingsBytes ?? 0,
+        ),
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.overallSavingsMs - a.overallSavingsMs || b.overallSavingsBytes - a.overallSavingsBytes,
+    );
+}
+
 /**
  * Filters fall into four buckets derived from token-name prefixes. The
  * grouping mirrors the human-friendly chip categorisation in the 1.1

@@ -3,7 +3,8 @@
 //
 // Pure row model for the Risk & SEO panel: for each of the four lenses, the
 // state chip, the one verdict sentence, and (only when the lens's gate fires)
-// the "what is planned" sentences with the link and its event name.
+// the "what is planned" sentences with the link and its event name. On a
+// hosted platform no gate fires, so a row keeps its finding and offers nothing.
 // The verdict and card sentences of the first three lenses are the approved
 // wording of the v1 results page. The gate predicates come from demand.mjs.
 
@@ -14,6 +15,7 @@ import {
   responseFirewallCtaApplies,
   thirdPartyFreezeCtaApplies,
 } from './demand.mjs';
+import { platformName } from './fit';
 import { lifecycleSentence, parseVersion } from './lifecycle';
 import { plural } from './plural';
 import { RISK_LENSES, lensMeasured } from './status';
@@ -92,7 +94,34 @@ function siReasonText(si: Lens): string {
   return bits.length ? 'Flagged: ' + bits.join('; ') + '.' : '';
 }
 
-function siVerdict(si: Lens): string {
+/**
+ * The external scripts with the platform's own apart from third parties, or an
+ * empty string when the scan counted no platform scripts.
+ */
+export function siPlatformSplit(si: Lens, platformName: string): string {
+  const t = si.totals || {};
+  const platform = Number(t.platformExternal) || 0;
+  if (platform <= 0) return '';
+  const third = Number(t.thirdPartyExternal) || 0;
+  const first = Number(t.firstPartyExternal) || 0;
+  // The head is the sum of the parts it lists, so the sentence always adds up.
+  const external = platform + third + first;
+  const owner = platformName ? platformName + '’s' : 'the platform’s';
+  return (
+    plural(external, 'external script') +
+    ': ' +
+    platform +
+    ' from ' +
+    owner +
+    ' own hosts, ' +
+    third +
+    ' from third parties' +
+    (first > 0 ? ', ' + first + ' from this site’s own host' : '') +
+    '.'
+  );
+}
+
+function siVerdict(si: Lens, report?: Record<string, unknown>): string {
   if (si.verdict === 'unknown') {
     return 'We could not render this page, so we could not inventory its scripts.';
   }
@@ -100,7 +129,12 @@ function siVerdict(si: Lens): string {
     si.verdict === 'attention'
       ? 'Some scripts on this page need attention.'
       : 'No script issues flagged on this page.';
-  return head + ' Heuristic host list; not an assessment against any standard.';
+  const split = siPlatformSplit(si, platformName(report));
+  return (
+    head +
+    (split ? ' ' + split : '') +
+    ' Heuristic host list; not an assessment against any standard.'
+  );
 }
 
 // ---- SEO defects (v1 wording) ------------------------------------------
@@ -278,10 +312,11 @@ function notMeasuredRow(key: RiskRow['key'], lens: Lens): RiskRow {
 function buildingFor(
   key: RiskRow['key'],
   lens: Lens,
+  platform: unknown,
 ): { building: string[]; link: RiskLink | null } {
   switch (key) {
     case 'preConsentLeak':
-      return consentEnforcementCtaApplies(lens)
+      return consentEnforcementCtaApplies(lens, platform)
         ? {
             building: [
               'Consent enforcement at the origin is planned: third-party tags would stay inert at the server until the consent cookie grants them.',
@@ -295,12 +330,12 @@ function buildingFor(
         : { building: [], link: null };
     case 'scriptInventory': {
       const building: string[] = [];
-      if (pageIntegrityCtaApplies(lens)) {
+      if (pageIntegrityCtaApplies(lens, platform)) {
         building.push(
           'Payment-page script integrity, a pack that would enforce an allowlist of approved scripts at your origin, is planned.',
         );
       }
-      if (thirdPartyFreezeCtaApplies(lens)) {
+      if (thirdPartyFreezeCtaApplies(lens, platform)) {
         const unpinned = lens.totals.thirdPartyExternal - lens.totals.thirdPartyWithIntegrity;
         building.push(
           plural(unpinned, 'third-party script') +
@@ -324,7 +359,7 @@ function buildingFor(
         : { building: [], link: null };
     }
     case 'seoDefects':
-      return edgeSeoCtaApplies(lens)
+      return edgeSeoCtaApplies(lens, platform)
         ? {
             building: [
               'Issues like these are the kind a rule on the server can correct in the HTML it serves, without a CMS release. The free edge-SEO pack for mod_pagespeed is a template for writing those rules, starting in report mode.',
@@ -337,7 +372,7 @@ function buildingFor(
           }
         : { building: [], link: null };
     case 'responseExposure':
-      return responseFirewallCtaApplies(lens)
+      return responseFirewallCtaApplies(lens, platform)
         ? {
             building: [RX_BUILDING],
             link: {
@@ -350,7 +385,7 @@ function buildingFor(
   }
 }
 
-const VERDICT: Record<RiskRow['key'], (lens: Lens) => string> = {
+const VERDICT: Record<RiskRow['key'], (lens: Lens, report?: Record<string, unknown>) => string> = {
   preConsentLeak: pclVerdict,
   scriptInventory: siVerdict,
   seoDefects: sdVerdict,
@@ -387,13 +422,13 @@ export function riskRows(report: Record<string, unknown> | null | undefined): Ri
       continue;
     }
     const attention = lens.verdict === flagged;
-    const { building, link } = buildingFor(key, lens);
+    const { building, link } = buildingFor(key, lens, report.platform);
     rows.push({
       key,
       name: NAMES[key],
       state: attention ? 'attention' : 'clean',
       chip: attention ? 'Attention' : 'Nothing flagged',
-      sentence: VERDICT[key](lens),
+      sentence: VERDICT[key](lens, report),
       detail: attention && key === 'scriptInventory' ? siReasonText(lens) : '',
       building,
       link,

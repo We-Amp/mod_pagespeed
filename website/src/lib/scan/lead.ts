@@ -19,6 +19,7 @@ import {
   tollboothCtaApplies,
 } from './demand.mjs';
 import { AUDIT_PRICE_EUR, formatEur } from '../../data/product-facts.mjs';
+import { serverOffersApply } from './fit';
 import type { TileState } from './status';
 
 /** The most topics a visitor may tick in one submission. */
@@ -53,7 +54,7 @@ export type Report = Record<string, unknown> & { url?: string; grade?: string; s
 interface ChipDef {
   id: string;
   label: string;
-  fires: (r: Report) => boolean;
+  fires: (r: Report, platform: unknown) => boolean;
 }
 
 // Display order follows the panels: AI readability, Risk & SEO, then Speed.
@@ -61,47 +62,47 @@ const GATED: ChipDef[] = [
   {
     id: 'tollbooth',
     label: 'Origin controls (who reads / verifies)',
-    fires: (r) => tollboothCtaApplies(r.agentVerifiability),
+    fires: (r, p) => tollboothCtaApplies(r.agentVerifiability, p),
   },
   {
     id: 'agentpass',
     label: 'Signed-agent verification (prove which agent is which)',
-    fires: (r) => agentPassCtaApplies(r.signedAgentVerification),
+    fires: (r, p) => agentPassCtaApplies(r.signedAgentVerification, p),
   },
   {
     id: 'compliancefix',
     label: 'Accessibility remediation',
-    fires: (r) => complianceFixCtaApplies(r.accessibility),
+    fires: (r, p) => complianceFixCtaApplies(r.accessibility, p),
   },
   {
     id: 'consent-enforcement',
     label: 'Consent enforcement',
-    fires: (r) => consentEnforcementCtaApplies(r.preConsentLeak),
+    fires: (r, p) => consentEnforcementCtaApplies(r.preConsentLeak, p),
   },
   {
     id: 'page-integrity',
     label: 'Script control',
-    fires: (r) => pageIntegrityCtaApplies(r.scriptInventory),
+    fires: (r, p) => pageIntegrityCtaApplies(r.scriptInventory, p),
   },
   {
     id: 'third-party-freeze',
     label: 'Pinning third-party scripts',
-    fires: (r) => thirdPartyFreezeCtaApplies(r.scriptInventory),
+    fires: (r, p) => thirdPartyFreezeCtaApplies(r.scriptInventory, p),
   },
   {
     id: 'edge-seo',
     label: 'SEO fixes at the server',
-    fires: (r) => edgeSeoCtaApplies(r.seoDefects),
+    fires: (r, p) => edgeSeoCtaApplies(r.seoDefects, p),
   },
   {
     id: 'response-firewall',
     label: 'Leaked errors and outdated software',
-    fires: (r) => responseFirewallCtaApplies(r.responseExposure),
+    fires: (r, p) => responseFirewallCtaApplies(r.responseExposure, p),
   },
   {
     id: 'markdown-origin',
     label: 'Serving AI agents a Markdown copy at the origin',
-    fires: (r) => markdownOriginCtaApplies(r.agentSignals),
+    fires: (r, p) => markdownOriginCtaApplies(r.agentSignals, p),
   },
 ];
 
@@ -122,17 +123,22 @@ export const FOUND_MARKER = '(flagged by your scan)';
  * their gate fires; they come first and are never pre-selected, on either
  * page. The speed-help chip appears once the speed result has settled (`speed`
  * is null while it is still checking) and is pre-selected only when Speed is
- * Poor; the agents and audit chips are always offered, unselected. With no
- * report only the ungated chips remain.
+ * Poor; the agents chip is always offered and the audit chip with every
+ * report, unselected. With no report only the ungated chips remain. A report
+ * for a hosted platform (the owner has no control of the server) offers only
+ * the agents chip: the speed fixes, the gated topics and the audit all need a
+ * server the visitor runs.
  */
 export function chipsFor(
   report: Report | null | undefined,
   speed: TileState | null | undefined,
 ): Chip[] {
   const chips: Chip[] = [];
+  // On a hosted platform nothing that needs the visitor's own server is offered.
+  const offers = serverOffersApply(report);
   if (report) {
     for (const def of GATED) {
-      if (def.fires(report)) {
+      if (def.fires(report, report.platform)) {
         chips.push({
           id: def.id,
           label: def.label,
@@ -143,11 +149,11 @@ export function chipsFor(
       }
     }
   }
-  if (speed) {
+  if (speed && offers) {
     chips.push({ ...CONSULTING, wedge: '', gated: false, selected: speed === 'poor' });
   }
   chips.push({ ...AGENTS, wedge: '', gated: false, selected: false });
-  if (report) chips.push({ ...AUDIT, wedge: '', gated: false, selected: false });
+  if (report && offers) chips.push({ ...AUDIT, wedge: '', gated: false, selected: false });
   return chips;
 }
 

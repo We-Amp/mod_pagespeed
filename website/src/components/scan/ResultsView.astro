@@ -3,7 +3,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
 // The shared results skeleton: a summary strip (one health line, three
-// tiles), one drill-down panel per tile, the "Ask an engineer" form shell, the
+// tiles, the line that says whether the mod_pagespeed fixes apply), one drill-down
+// panel per tile, the "Ask an engineer" form shell, the
 // next-steps row and the share row. Everything rendered here at build time is
 // a label; every result string is written by the scan controller at run time
 // with textContent. The section is hidden until a scan starts and is kept out
@@ -26,6 +27,7 @@ const pillars = [
 <section
   id={`${idPrefix}-results`}
   class="scan-results mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-16"
+  data-server-offers="pending"
   aria-labelledby={`${idPrefix}-summary-heading`}
   data-scan-results
   data-pagefind-ignore
@@ -47,7 +49,21 @@ const pillars = [
       Checking 3 of 3 areas…
     </p>
     <p class="mt-1 min-h-5 text-sm text-text-muted" data-scan-hint></p>
-    <p class="mt-2 text-sm text-text-muted">
+    <p
+      class="mt-2 min-h-[3.75rem] text-sm text-text-muted sm:min-h-10 md:min-h-5"
+      data-scan-fit-line
+      data-server-offer
+    >
+    </p>
+    <div
+      class="mt-2 rounded-lg border border-border p-3 text-sm text-text-body"
+      data-scan-fit-notice
+      data-hosted-only
+    >
+      <p data-scan-fit-text></p>
+      <ul class="mt-2 list-disc space-y-1 pl-5" data-scan-fit-actions hidden></ul>
+    </div>
+    <p class="mt-2 text-sm text-text-muted" data-server-offer>
       <span class="invisible" data-scan-audit>
         Agent-readiness audit, {formatEur(AUDIT_PRICE_EUR)} per site, excl. VAT: a written report
         and one review call. It lists the configuration change for each finding; applying the
@@ -185,7 +201,7 @@ const pillars = [
     <p id={`${idPrefix}-lead-msg`} class="mt-2 text-sm text-accent" data-scan-lead-msg></p>
   </form>
 
-  <div class="mt-8 flex flex-col items-center gap-3" data-scan-next hidden>
+  <div class="mt-8 flex flex-col items-center gap-3" data-scan-next data-server-offer hidden>
     <div class="flex flex-wrap items-center justify-center gap-4">
       <a href="/download/#install" class="btn-primary min-h-11" data-scan-cta="download">Download &amp; run &rarr;</a>
       <a href="/pricing/" class="btn-secondary min-h-11" data-scan-cta="support">Support pricing &rarr;</a>
@@ -236,6 +252,22 @@ const pillars = [
     color: var(--color-text-body);
     border: 1px solid var(--color-control-border);
     cursor: wait;
+  }
+  /* What needs a server the visitor runs is marked data-server-offer, and
+     what a hosted platform gets in its place data-hosted-only. The scan
+     controller sets data-server-offers on the section from one test on the
+     result: "on" shows the offers, "off" (a hosted platform) the other set.
+     While a scan is on its way ("pending") no offer is shown: the lines of the
+     summary and the next-steps row keep their space, so nothing moves when the
+     result lands, and a panel shows its plain version. */
+  .scan-results[data-server-offers='off'] [data-server-offer],
+  .scan-results[data-server-offers='on'] [data-hosted-only],
+  .scan-results[data-server-offers='pending'] .scan-panel [data-server-offer],
+  .scan-results[data-server-offers='pending'] [data-scan-fit-notice] {
+    display: none;
+  }
+  .scan-results[data-server-offers='pending'] [data-server-offer] {
+    visibility: hidden;
   }
   .scan-tiles {
     display: grid;

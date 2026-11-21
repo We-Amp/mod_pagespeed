@@ -6,7 +6,19 @@
 // demand module with the comments removed; keep it in sync with the scanner
 // and with the inline copy in src/pages/ai-readability/index.astro.
 
-export function tollboothCtaApplies(agentVerifiability) {
+// Every gated topic needs a web server the visitor runs. When the scan says
+// the owner has no control of the origin (a hosted site builder), no such
+// topic applies. Any other reading, and no platform at all, changes nothing.
+export function originTopicsApply(platform) {
+  return !(platform && platform.originControl === 'none');
+}
+
+// Each gate takes the platform as an optional second argument and returns
+// false when originTopicsApply(platform) is false. Called with one argument a
+// gate behaves as it did before the platform was read.
+
+export function tollboothCtaApplies(agentVerifiability, platform) {
+  if (!originTopicsApply(platform)) return false;
   const d = agentVerifiability && agentVerifiability.detail;
   if (!d) return false;
   return (
@@ -18,67 +30,87 @@ export function tollboothCtaApplies(agentVerifiability) {
   );
 }
 
-export function agentPassCtaApplies(signedAgentVerification) {
+export function agentPassCtaApplies(signedAgentVerification, platform) {
   const s = signedAgentVerification;
-  return !!(
-    s &&
-    s.status === 'ok' &&
-    (s.classification === 'verifying' || s.classification === 'signature-aware')
+  return (
+    originTopicsApply(platform) &&
+    !!(
+      s &&
+      s.status === 'ok' &&
+      (s.classification === 'verifying' || s.classification === 'signature-aware')
+    )
   );
 }
 
-export function complianceFixCtaApplies(accessibility) {
+export function complianceFixCtaApplies(accessibility, platform) {
   const a = accessibility;
-  return !!(a && a.available && a.detail && a.detail.fixableInline > 0);
+  return (
+    originTopicsApply(platform) && !!(a && a.available && a.detail && a.detail.fixableInline > 0)
+  );
 }
 
-export function consentEnforcementCtaApplies(preConsentLeak) {
+export function consentEnforcementCtaApplies(preConsentLeak, platform) {
   const p = preConsentLeak;
-  return !!(p && p.status === 'ok' && p.verdict === 'leaks' && p.trackerCount > 0);
+  return (
+    originTopicsApply(platform) &&
+    !!(p && p.status === 'ok' && p.verdict === 'leaks' && p.trackerCount > 0)
+  );
 }
 
-export function pageIntegrityCtaApplies(scriptInventory) {
+export function pageIntegrityCtaApplies(scriptInventory, platform) {
   const si = scriptInventory;
-  return !!(si && si.status === 'ok' && si.verdict === 'attention');
+  return originTopicsApply(platform) && !!(si && si.status === 'ok' && si.verdict === 'attention');
 }
 
-export function thirdPartyFreezeCtaApplies(scriptInventory) {
+export function thirdPartyFreezeCtaApplies(scriptInventory, platform) {
   const si = scriptInventory;
-  return !!(
-    si &&
-    si.status === 'ok' &&
-    si.verdict !== 'unknown' &&
-    si.totals &&
-    si.totals.thirdPartyExternal > si.totals.thirdPartyWithIntegrity
+  return (
+    originTopicsApply(platform) &&
+    !!(
+      si &&
+      si.status === 'ok' &&
+      si.verdict !== 'unknown' &&
+      si.totals &&
+      si.totals.thirdPartyExternal > si.totals.thirdPartyWithIntegrity
+    )
   );
 }
 
-export function edgeSeoCtaApplies(sd) {
-  return !!(
-    sd &&
-    sd.status === 'ok' &&
-    sd.verdict === 'attention' &&
-    Array.isArray(sd.defects) &&
-    sd.defects.length > 0
+export function edgeSeoCtaApplies(sd, platform) {
+  return (
+    originTopicsApply(platform) &&
+    !!(
+      sd &&
+      sd.status === 'ok' &&
+      sd.verdict === 'attention' &&
+      Array.isArray(sd.defects) &&
+      sd.defects.length > 0
+    )
   );
 }
 
-export function responseFirewallCtaApplies(rx) {
-  return !!(
-    rx &&
-    rx.status === 'ok' &&
-    rx.verdict === 'attention' &&
-    Array.isArray(rx.reasons) &&
-    (rx.reasons.includes('debug-output') || rx.reasons.includes('end-of-life'))
+export function responseFirewallCtaApplies(rx, platform) {
+  return (
+    originTopicsApply(platform) &&
+    !!(
+      rx &&
+      rx.status === 'ok' &&
+      rx.verdict === 'attention' &&
+      Array.isArray(rx.reasons) &&
+      (rx.reasons.includes('debug-output') || rx.reasons.includes('end-of-life'))
+    )
   );
 }
 
-export function markdownOriginCtaApplies(agentSignals) {
-  return !!(
-    agentSignals &&
-    agentSignals.status === 'ok' &&
-    agentSignals.markdown &&
-    agentSignals.markdown.negotiated === false
+export function markdownOriginCtaApplies(agentSignals, platform) {
+  return (
+    originTopicsApply(platform) &&
+    !!(
+      agentSignals &&
+      agentSignals.status === 'ok' &&
+      agentSignals.markdown &&
+      agentSignals.markdown.negotiated === false
+    )
   );
 }
 

@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { RX_BUILDING, riskRows } from './risk-rows';
+import { RX_BUILDING, riskRows, siPlatformSplit } from './risk-rows';
 
 const load = (name: string) =>
   JSON.parse(readFileSync(`tests/fixtures/scan/report-${name}.json`, 'utf8')).report;
@@ -313,5 +313,69 @@ describe('riskRows unpinned script wording', () => {
     );
     expect(text).toContain('it would serve that script at a version you approved');
     expect(text).not.toContain('it would serve those scripts');
+  });
+});
+
+describe('riskRows on a hosted platform', () => {
+  const rows = riskRows(load('hosted'));
+  const m = byKey(rows);
+  it('keeps every finding and offers nothing that needs a server', () => {
+    expect(rows.map((r) => r.state)).toEqual(riskRows(load('full')).map((r) => r.state));
+    for (const row of rows) {
+      expect(row.building).toEqual([]);
+      expect(row.link).toBeNull();
+      expect(row.sentence).not.toBe('');
+    }
+  });
+  it('shows the platform scripts apart from third-party scripts', () => {
+    expect(m.scriptInventory.sentence).toBe(
+      'Some scripts on this page need attention. 29 external scripts: 27 from Wix’s own hosts, 2 from third parties. Heuristic host list; not an assessment against any standard.',
+    );
+  });
+});
+
+describe('riskRows without a hosted platform', () => {
+  it('keeps the offers and the script sentence for an unknown platform and for none', () => {
+    const full = riskRows(load('full'));
+    const unknown = riskRows(load('unknown'));
+    expect(unknown).toEqual(full);
+    expect(byKey(full).scriptInventory.sentence).toBe(
+      'Some scripts on this page need attention. Heuristic host list; not an assessment against any standard.',
+    );
+  });
+});
+
+describe('siPlatformSplit', () => {
+  it('is empty without platform scripts', () => {
+    expect(siPlatformSplit({}, 'Wix')).toBe('');
+    expect(siPlatformSplit({ totals: { external: 4, thirdPartyExternal: 4 } }, 'Wix')).toBe('');
+    expect(siPlatformSplit({ totals: { external: 4, platformExternal: 0 } }, 'Wix')).toBe('');
+  });
+  it('falls back to "the platform" and counts the site\'s own scripts when there are any', () => {
+    expect(
+      siPlatformSplit(
+        {
+          totals: {
+            external: 6,
+            platformExternal: 1,
+            thirdPartyExternal: 3,
+            firstPartyExternal: 2,
+          },
+        },
+        '',
+      ),
+    ).toBe(
+      '6 external scripts: 1 from the platform’s own hosts, 3 from third parties, 2 from this site’s own host.',
+    );
+    // The head is the sum of the listed parts, whatever the scan's own total says.
+    expect(
+      siPlatformSplit(
+        { totals: { external: 9, platformExternal: 5, thirdPartyExternal: 1 } },
+        'Shop',
+      ),
+    ).toBe('6 external scripts: 5 from Shop’s own hosts, 1 from third parties.');
+    expect(siPlatformSplit({ totals: { platformExternal: 1 } }, 'Shop')).toBe(
+      '1 external script: 1 from Shop’s own hosts, 0 from third parties.',
+    );
   });
 });

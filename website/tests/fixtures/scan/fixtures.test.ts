@@ -78,6 +78,26 @@ describe('scan fixtures', () => {
     expect(Object.values(gates(r)).some((v) => v === true)).toBe(false);
   });
 
+  it('hosted report: a named hosted platform, the full report otherwise', () => {
+    const r = load('report-hosted').report;
+    expect(r.platform).toMatchObject({ id: 'wix', name: 'Wix', originControl: 'none' });
+    const t = r.scriptInventory.totals;
+    expect(t.platformExternal + t.thirdPartyExternal + t.firstPartyExternal).toBe(t.external);
+    expect(r.access.crawlerRules.training.allowed).toHaveLength(8);
+    expect(r.access.crawlerRules.answer.allowed).toHaveLength(13);
+    // The findings are those of the full report: every gate fires without the platform.
+    expect(Object.values(gates(r)).every((v) => v === true)).toBe(true);
+    // No real site is named.
+    expect(new URL(r.url).hostname.endsWith('.example.org')).toBe(true);
+  });
+
+  it('unknown report: no platform named, the full report otherwise', () => {
+    const r = load('report-unknown').report;
+    expect(r.platform).toMatchObject({ id: null, kind: 'unknown', originControl: 'unknown' });
+    expect(r.scriptInventory.totals.platformExternal).toBeUndefined();
+    expect(Object.values(gates(r)).every((v) => v === true)).toBe(true);
+  });
+
   it('PSI fixtures carry the fields the analyzer reads', () => {
     for (const name of ['psi-mobile', 'psi-desktop']) {
       const lr = load(name).lighthouseResult;

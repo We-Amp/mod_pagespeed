@@ -1,0 +1,647 @@
+{
+  "cached": false,
+  "id": "a1b2c3d4e5f6",
+  "permalink": "https://modpagespeed.com/ai-readability/api/r/b2c3d4e5f6a1",
+  "badge": "https://modpagespeed.com/ai-readability/api/badge/a1b2c3d4e5f6.svg",
+  "report": {
+    "url": "https://studio.example.org/",
+    "scannedAt": "2026-10-10T12:00:00.000Z",
+    "grade": "C",
+    "score": 64,
+    "categories": {
+      "Content fidelity": {
+        "score": 12,
+        "max": 30,
+        "verdict": "Only ~38% of your content exists without JavaScript — AI tools that don't render (and free CDN markdown features) see an almost-empty page. THIS is the big one.",
+        "flag": "csr-gap",
+        "detail": {
+          "staticTextLen": 5100,
+          "renderedTextLen": 13400,
+          "fidelity": 0.38
+        }
+      },
+      "Token efficiency": {
+        "score": 8,
+        "max": 20,
+        "verdict": "Bloated: the page is ~98× more HTML than actual content (52,300 tokens raw vs ~534 clean). Agents pay for — and choke on — the difference.",
+        "detail": {
+          "bloatX": 98,
+          "rawHtmlTokens": 52300,
+          "cleanTokens": 534
+        }
+      },
+      "Structured data": {
+        "score": 20,
+        "max": 20,
+        "verdict": "Strong machine-readable metadata (JSON-LD (Organization, WebSite, Product), Open Graph, canonical, meta description).",
+        "detail": {
+          "jsonLdTypes": ["Organization", "WebSite", "Product"]
+        }
+      },
+      "Crawler access": {
+        "score": 18,
+        "max": 20,
+        "verdict": "AI crawlers are allowed to fetch the page. robots.txt allows AI crawlers.",
+        "detail": {
+          "aiBotsBlocked": [],
+          "llmsTxt": false
+        }
+      },
+      "Citation readiness": {
+        "score": 6,
+        "max": 10,
+        "verdict": "Thin attribution metadata (canonical URL, title, date) — an LLM citing you may get the source/author/date wrong."
+      }
+    },
+    "agentActionability": {
+      "detected": false,
+      "label": "none detected",
+      "verdict": "No WebMCP tools detected. Agents can read this page but can't act on it via WebMCP, the emerging agent-tool interface now surfacing in Chrome and Lighthouse's \"agentic browsing\" audit. Early days, so optional today — but it's where agent traffic is heading.",
+      "detail": {
+        "imperative": 0,
+        "declarative": 0,
+        "manifest": false
+      }
+    },
+    "agentVerifiability": {
+      "verifiable": false,
+      "verdict": "Your origin cannot cryptographically verify signed AI agents, and allows 9 AI crawler(s) unrestricted access to ~38% of your content for free.",
+      "detail": {
+        "verifiable": false,
+        "aiCrawlersAllowed": [
+          "GPTBot",
+          "ClaudeBot",
+          "Claude-Web",
+          "PerplexityBot",
+          "Google-Extended",
+          "CCBot",
+          "Applebot-Extended",
+          "Bytespider",
+          "Amazonbot"
+        ],
+        "aiCrawlersBlocked": [],
+        "exposurePct": 38,
+        "botAuthHeaders": [],
+        "renderOk": true
+      }
+    },
+    "accessibility": {
+      "available": true,
+      "verdict": "7 accessibility issues found by automated checks; 3 look addressable inline, server-side, with no app changes.",
+      "detail": {
+        "total": 7,
+        "nodeTotal": 31,
+        "byImpact": {
+          "critical": 1,
+          "serious": 3,
+          "moderate": 2,
+          "minor": 1
+        },
+        "fixableInline": 3,
+        "topRules": [
+          {
+            "id": "image-alt",
+            "impact": "critical",
+            "nodes": 12,
+            "help": "Images must have alternative text"
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "nodes": 9,
+            "help": "Elements must meet minimum color contrast ratio thresholds"
+          },
+          {
+            "id": "html-has-lang",
+            "impact": "serious",
+            "nodes": 1,
+            "help": "<html> element must have a lang attribute"
+          }
+        ]
+      }
+    },
+    "agentVerificationPosture": {
+      "status": "ok",
+      "posture": "none",
+      "emitsSignatureHeaders": false,
+      "signatureHeaders": {
+        "signatureInput": null,
+        "signature": null,
+        "signatureAgent": null
+      },
+      "parsedSignatureInput": null,
+      "botUaProbe": {
+        "performed": true,
+        "status": 200,
+        "wwwAuthenticate": null,
+        "returns402": false
+      },
+      "note": "Posture observed from the scanner’s own HTTP exchange only; not a measure of how many inbound agents the origin verifies (invisible from outside). No signature is cryptographically verified."
+    },
+    "signedAgentVerification": {
+      "status": "ok",
+      "classification": "signature-aware",
+      "probes": {
+        "signed": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 182400
+        },
+        "broken": {
+          "status": 401,
+          "headers": {},
+          "bodyLength": 312
+        },
+        "unsigned": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 182400
+        }
+      },
+      "evidence": ["valid-signed vs broken-signature: status differs (200 vs 401)"],
+      "keyid": "GBxqWscB-GOkwNXEhmWQA4SY2gWRH2Hz4dAvzRcK1gw",
+      "signatureAgent": "https://modpagespeed.com/.well-known/http-message-signatures-directory",
+      "note": "Classification derived solely from the scanner’s own three probe exchanges (valid signature, corrupted signature, unsigned). “no-signal” does NOT mean the origin runs no verifier: observe-only verifiers are externally invisible, and an origin can only fully verify our probe if it trusts our key directory. The corrupted-signature probe is the strongest discriminator. We only report what our own three exchanges showed."
+    },
+    "provenanceSurvival": {
+      "status": "ok",
+      "imagesScanned": 2,
+      "withManifestServed": 0,
+      "strippedOnServe": 0,
+      "images": [
+        {
+          "url": "https://modpagespeed.com/logo.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        },
+        {
+          "url": "https://modpagespeed.com/logo-dark.svg",
+          "format": "other",
+          "servedHasManifest": false,
+          "servedMarkers": [],
+          "sourceFetched": false,
+          "sourceHasManifest": null,
+          "survival": "served-only"
+        }
+      ],
+      "note": "Detection only (JUMBF/XMP byte-scan); no manifest is validated, re-signed, or authored."
+    },
+    "sovereigntyExposure": {
+      "status": "ok",
+      "exposedFeatureCount": 0,
+      "findings": [],
+      "classifierVersion": "ws4-1",
+      "note": "Heuristic, passive observation of features that phone home to US-jurisdiction endpoints. Not legal advice or a compliance certificate."
+    },
+    "preConsentLeak": {
+      "status": "ok",
+      "verdict": "leaks",
+      "blockedBy": [],
+      "thirdPartyHosts": [
+        {
+          "host": "www.googletagmanager.com",
+          "requests": 2,
+          "category": "tag-manager",
+          "tracker": true
+        },
+        {
+          "host": "www.google-analytics.com",
+          "requests": 3,
+          "category": "analytics",
+          "tracker": true
+        },
+        {
+          "host": "connect.facebook.net",
+          "requests": 2,
+          "category": "social",
+          "tracker": true
+        },
+        {
+          "host": "static.hotjar.com",
+          "requests": 1,
+          "category": "session-replay",
+          "tracker": true
+        },
+        {
+          "host": "cdn.example-assets.net",
+          "requests": 4,
+          "category": "cdn",
+          "tracker": false
+        }
+      ],
+      "thirdPartyCount": 5,
+      "trackerCount": 4,
+      "cmpDetected": {
+        "detected": false,
+        "vendor": null
+      },
+      "firstParty": ["example.com"],
+      "requestsObserved": 41,
+      "httpStatus": 200,
+      "trackerListVersion": "pcl-2",
+      "note": "Passive observation of the requests this page issued in a fresh browser (no cookies, no storage, no interaction) up to network idle. Host categories come from a maintained heuristic list; not legal advice or a compliance certificate."
+    },
+    "scriptInventory": {
+      "status": "ok",
+      "verdict": "attention",
+      "reasons": ["sri-missing", "floating-version", "duplicate-library", "unlisted-origin"],
+      "blockedBy": [],
+      "totals": {
+        "scripts": 38,
+        "inline": 9,
+        "inlineBytes": 48210,
+        "external": 29,
+        "firstPartyExternal": 0,
+        "thirdPartyExternal": 2,
+        "thirdPartyHosts": 2,
+        "thirdPartyWithIntegrity": 0,
+        "nonExecutable": 3,
+        "platformExternal": 27
+      },
+      "scriptHosts": [
+        {
+          "host": "static.parastorage.com",
+          "party": "platform",
+          "scripts": 27,
+          "withIntegrity": 0,
+          "category": "platform",
+          "listed": true
+        },
+        {
+          "host": "www.googletagmanager.com",
+          "party": "third",
+          "scripts": 1,
+          "withIntegrity": 0,
+          "category": "tag-manager",
+          "listed": true
+        },
+        {
+          "host": "cdn.example-assets.net",
+          "party": "third",
+          "scripts": 1,
+          "withIntegrity": 0,
+          "category": "other",
+          "listed": false
+        }
+      ],
+      "sriMissing": [
+        {
+          "host": "cdn.example-assets.net",
+          "path": "/widgets/carousel.js"
+        },
+        {
+          "host": "cdn.jsdelivr.net",
+          "path": "/npm/swiper/swiper-bundle.min.js"
+        }
+      ],
+      "floating": [
+        {
+          "host": "cdn.jsdelivr.net",
+          "path": "/npm/swiper/swiper-bundle.min.js"
+        }
+      ],
+      "duplicates": [
+        {
+          "library": "jquery",
+          "versions": ["1.12.4", "3.6.0"]
+        }
+      ],
+      "integrityWithoutCors": 0,
+      "csp": {
+        "enforced": false,
+        "reportOnly": false,
+        "scriptSrc": false,
+        "reporting": false
+      },
+      "firstParty": ["example.com"],
+      "requestsObserved": 41,
+      "httpStatus": 200,
+      "scriptListVersion": "si-1",
+      "note": "Inventory of the script elements in this page's rendered HTML, from one fresh browser load. Scripts inside cross-origin frames and scripts that leave no element behind are not seen. Host categories come from a maintained heuristic list; not an assessment against any standard."
+    },
+    "seoDefects": {
+      "status": "ok",
+      "verdict": "attention",
+      "defects": ["canonical-js-only", "title-js-changed", "jsonld-js-only"],
+      "counts": {
+        "total": 3,
+        "canonical": 1,
+        "hreflang": 0,
+        "title": 1,
+        "description": 0,
+        "jsonld": 1
+      },
+      "blockedBy": [],
+      "staticCompared": true,
+      "notMeasured": [],
+      "canonical": {
+        "static": {
+          "count": 0,
+          "href": null
+        },
+        "rendered": {
+          "count": 1,
+          "href": "https://shop.example.com/"
+        },
+        "header": null
+      },
+      "hreflang": {
+        "static": 0,
+        "rendered": 0,
+        "header": 0,
+        "selfReference": null,
+        "invalid": 0,
+        "xDefault": false
+      },
+      "title": {
+        "static": {
+          "count": 1,
+          "text": "Loading…"
+        },
+        "rendered": {
+          "count": 1,
+          "text": "Northwind Outfitters: trail gear"
+        }
+      },
+      "description": {
+        "static": {
+          "count": 1,
+          "text": "The PageSpeed module, maintained again and open source under the Apache License 2.0. Install mod_pagespeed on nginx or Apache with apt or yum."
+        },
+        "rendered": {
+          "count": 1,
+          "text": "The PageSpeed module, maintained again and open source under the Apache License 2.0. Install mod_pagespeed on nginx or Apache with apt or yum."
+        }
+      },
+      "jsonLd": {
+        "static": {
+          "blocks": 0,
+          "invalid": 0,
+          "types": []
+        },
+        "rendered": {
+          "blocks": 2,
+          "invalid": 0,
+          "types": ["Organization", "Product"]
+        },
+        "renderOnlyTypes": ["Organization", "Product"]
+      },
+      "robots": {
+        "static": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "rendered": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "header": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "mismatch": false
+      },
+      "delivery": {
+        "cdn": "cloudflare",
+        "server": "cloudflare"
+      },
+      "firstParty": ["example.com"],
+      "requestsObserved": 41,
+      "httpStatus": 200,
+      "seoRulesVersion": "seo-1",
+      "note": "Compares the head of this page as served without JavaScript with the same page after one fresh browser load. One page only: links, other language versions and titles on other pages are not checked. Not a ranking assessment."
+    },
+    "responseExposure": {
+      "status": "ok",
+      "verdict": "attention",
+      "reasons": ["debug-output", "end-of-life", "version-tell", "missing-headers"],
+      "blockedBy": [],
+      "staticScanned": true,
+      "notMeasured": [],
+      "leaks": [
+        {
+          "id": "php-error",
+          "count": 3,
+          "where": "static"
+        }
+      ],
+      "tells": [
+        {
+          "product": "apache",
+          "source": "server",
+          "version": "2.4.41"
+        },
+        {
+          "product": "php",
+          "source": "x-powered-by",
+          "version": "7.4.33"
+        }
+      ],
+      "endOfLife": [
+        {
+          "product": "php",
+          "line": "7.4",
+          "basis": "eol-date",
+          "date": "2022-11-28"
+        }
+      ],
+      "pagespeed": null,
+      "headers": {
+        "https": true,
+        "present": ["hsts"],
+        "missing": ["nosniff", "framing"],
+        "csp": "absent",
+        "referrerPolicy": false,
+        "permissionsPolicy": false
+      },
+      "delivery": {
+        "cdn": null,
+        "server": "apache"
+      },
+      "firstParty": ["example.com"],
+      "requestsObserved": 41,
+      "httpStatus": 200,
+      "responseRulesVersion": "rx-1",
+      "note": "Reads the response headers and the HTML of this page as served, without and with JavaScript, from one fresh load. One page only. Error output is matched by fixed patterns and not shown. End-of-life dates are the upstream projects' published dates; a distribution or host may still patch older versions. Not a security assessment."
+    },
+    "ghostLayer": {
+      "detected": true,
+      "count": 2,
+      "byTechnique": {
+        "clipped": 1,
+        "off-viewport": 1
+      },
+      "verdict": "Found 5 elements that a person effectively cannot see but an AI agent still reads (clipped to nothing, pushed off-screen). On your own site this is usually leftover, mis-styled, or third-party-injected content worth reviewing — agents weight it the same as visible copy.",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpr": 1
+      },
+      "truncated": false,
+      "nodes": [
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "html#html-root > body.min-h-screen.flex > a.sr-only.focus:not-sr-only",
+          "rect": {
+            "x": -1,
+            "y": -1,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "Skip to main content",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        },
+        {
+          "technique": "clipped",
+          "label": "Clipped to nothing",
+          "gloss": "A clip / clip-path / zero-size overflow crops the text out of view while it stays in the DOM for agents.",
+          "selector": "div.readout > div.readout-row > p.readout-value.display-num > span.sr-only",
+          "rect": {
+            "x": 808.8,
+            "y": 213,
+            "width": 1,
+            "height": 1
+          },
+          "textSample": "to",
+          "computed": {
+            "reason": "clip-path collapses painted area to ~0"
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "staticTextLen": 5100,
+      "renderedTextLen": 13400,
+      "rawHtmlTokens": 52300,
+      "cleanTokens": 534,
+      "httpOk": true
+    },
+    "signals": {
+      "jsonLdTypes": ["Organization", "WebSite", "Product"],
+      "hasJsonLd": true,
+      "hasOG": true,
+      "canonical": true,
+      "title": "Northwind Outfitters: trail gear",
+      "metaDescription": true,
+      "author": false,
+      "published": true,
+      "modified": false
+    },
+    "access": {
+      "robotsFound": true,
+      "llmsTxt": false,
+      "aiBotsBlocked": [],
+      "webmcpManifest": false,
+      "webmcpManifestTools": 0,
+      "crawlerRules": {
+        "parsed": true,
+        "reason": null,
+        "truncated": false,
+        "training": {
+          "allowed": [
+            "GPTBot",
+            "ClaudeBot",
+            "Google-Extended",
+            "Applebot-Extended",
+            "CCBot",
+            "meta-externalagent",
+            "Amazonbot",
+            "MistralAI-Training"
+          ],
+          "blocked": []
+        },
+        "answer": {
+          "allowed": [
+            "OAI-SearchBot",
+            "ChatGPT-User",
+            "Claude-SearchBot",
+            "Claude-User",
+            "PerplexityBot",
+            "Perplexity-User",
+            "meta-webindexer",
+            "meta-externalfetcher",
+            "Amzn-SearchBot",
+            "Amzn-User",
+            "DuckAssistBot",
+            "MistralAI-Index",
+            "MistralAI-User"
+          ],
+          "blocked": []
+        },
+        "wildcardBlocksAll": false,
+        "sitemaps": ["https://studio.example.org/sitemap.xml"]
+      }
+    },
+    "webmcp": {
+      "imperative": [],
+      "declarative": 0,
+      "declarativeNames": [],
+      "manifest": false,
+      "manifestTools": 0
+    },
+    "diff": {
+      "staticMarkdown": "# Northwind Outfitters\n\nGear for the trail.\n\n[Skip to content](#main)",
+      "renderedMarkdown": "# Northwind Outfitters\n\nGear for the trail.\n\n## Featured\n\n- Trail pack 40L\n- Merino base layer\n- Ultralight shelter\n\n## Why Northwind\n\nRepair and resale programme, free returns for 60 days.",
+      "staticCleanTokens": 190,
+      "renderedCleanTokens": 540
+    },
+    "renderError": null,
+    "staticError": null,
+    "agentSignals": {
+      "status": "ok",
+      "rulesVersion": "as-1",
+      "verdict": "attention",
+      "markdown": {
+        "probed": true,
+        "httpStatus": 200,
+        "contentType": "text/html; charset=utf-8",
+        "negotiated": false,
+        "vary": null,
+        "varyAccept": false,
+        "xMarkdownTokens": null
+      },
+      "contentSignals": {
+        "robotsFetched": true,
+        "present": false,
+        "lines": [],
+        "signals": {},
+        "unknown": []
+      },
+      "link": {
+        "present": false,
+        "rels": [],
+        "markdownAlternate": false
+      },
+      "note": null
+    },
+    "platform": {
+      "status": "ok",
+      "id": "wix",
+      "name": "Wix",
+      "kind": "hosted-builder",
+      "originControl": "none",
+      "confidence": "high",
+      "evidence": [
+        {
+          "signal": "header",
+          "id": "x-wix-request-id"
+        },
+        {
+          "signal": "asset-host",
+          "id": "static.parastorage.com"
+        }
+      ],
+      "firstPartyHosts": ["studio.example.org"],
+      "siteAssetHosts": ["static.wixstatic.com"],
+      "platformListVersion": "pl-1"
+    }
+  }
+}

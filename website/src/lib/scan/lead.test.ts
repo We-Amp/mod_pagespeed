@@ -65,6 +65,40 @@ describe('chipsFor', () => {
     expect(chips.filter((c) => !c.gated).every((c) => c.wedge === '')).toBe(true);
   });
 
+  it('offers only the agents chip on a hosted platform', () => {
+    const hosted = fixture('hosted');
+    // Not the speed-help chip either: the speed fixes are server fixes.
+    for (const speed of ['poor', 'needs-work', 'good', 'none'] as const) {
+      expect(chipsFor(hosted, speed).map((c) => c.id)).toEqual(['agents']);
+    }
+    expect(chipsFor(hosted, null).map((c) => c.id)).toEqual(['agents']);
+    // The same result without the platform reading offers all of them.
+    delete hosted.platform;
+    expect(chipsFor(hosted, null).map((c) => c.id)).toEqual([...GATED_ORDER, 'agents', 'audit']);
+  });
+
+  it('offers the same chips for an unknown platform as for no platform reading', () => {
+    expect(chipsFor(fixture('unknown'), 'good')).toEqual(chipsFor(full, 'good'));
+    for (const originControl of ['limited', 'unknown']) {
+      const report = { ...structuredClone(full), platform: { originControl } };
+      expect(chipsFor(report, 'good')).toEqual(chipsFor(full, 'good'));
+    }
+  });
+
+  it('a hosted result sends no flagged topics and still sends the platform facts', () => {
+    const hosted = fixture('hosted');
+    const chips = chipsFor(hosted, 'good');
+    const p = payloadForSubmission(
+      chips,
+      [],
+      { email: 'a@example.com', url: hosted.url, submissionId: 'a'.repeat(32) },
+      hosted,
+    );
+    expect(p.topics).toEqual([{ id: 'general', wedge: null, chosen: true }]);
+    expect(p.lensSignals).toEqual({});
+    expect(p.facts).toMatchObject({ platform: 'wix', platformName: 'Wix', originControl: 'none' });
+  });
+
   it('offers only the ungated chips on a clean report', () => {
     const chips = chipsFor(clean, 'good');
     expect(chips.map((c) => c.id)).toEqual(['consulting', 'agents', 'audit']);
