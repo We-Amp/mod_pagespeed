@@ -257,7 +257,11 @@ function directiveBlock(d) {
   if (d.syntax.nginx) syn.push(`\`${d.syntax.nginx}\` (nginx)`);
   if (d.syntax.iis) syn.push(`\`${d.syntax.iis}\` (IIS)`);
   lines.push(`- **Syntax:** ${syn.join(' · ')}`);
-  lines.push(`- **Default:** ${fmtDefault(d.default)}`);
+  lines.push(
+    `- **Default:** ${fmtDefault(d.default)}${
+      d.defaultIis !== undefined ? `; IIS: ${fmtDefault(d.defaultIis)}` : ''
+    }`,
+  );
   const ctx = [];
   if (d.context.apache) ctx.push(`Apache: ${d.context.apache.join(', ')}`);
   if (d.context.nginx) ctx.push(`nginx: ${d.context.nginx.join(', ')}`);

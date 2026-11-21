@@ -5405,9 +5405,9 @@ Largest HTML body DaemonHtmlCache considers storable, in bytes. Values above 16 
 
 #### DaemonServeHonorRequestFreshness
 
-- **Syntax:** `ModPagespeedDaemonServeHonorRequestFreshness on|off` (Apache) · `pagespeed DaemonServeHonorRequestFreshness on|off;` (nginx)
+- **Syntax:** `ModPagespeedDaemonServeHonorRequestFreshness on|off` (Apache) · `pagespeed DaemonServeHonorRequestFreshness on|off;` (nginx) · `pagespeed DaemonServeHonorRequestFreshness on|off` (IIS)
 - **Default:** `off`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Let a client's reload headers (Cache-Control: no-cache or max-age=0, or Pragma: no-cache without a Cache-Control) bypass the optimizer worker's cached copy of a resource, so the origin's own bytes are sent. Default off: a reload is served from the cache.
 
@@ -5421,9 +5421,9 @@ Serve the optimizer worker's stored gzip and brotli copies of stylesheets, scrip
 
 #### DaemonSocketPath
 
-- **Syntax:** `ModPagespeedDaemonSocketPath value` (Apache) · `pagespeed DaemonSocketPath value;` (nginx)
+- **Syntax:** `ModPagespeedDaemonSocketPath value` (Apache) · `pagespeed DaemonSocketPath value;` (nginx) · `pagespeed DaemonSocketPath value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Path of the optimizer worker's notification socket. Set this together with DaemonVolumePath to hand in-place optimization to the worker; leave both unset to keep the classic in-place path.
 
@@ -5435,9 +5435,9 @@ optimizer worker installed beside the module. The worker's own flags are on
 
 #### DaemonVolumePath
 
-- **Syntax:** `ModPagespeedDaemonVolumePath value` (Apache) · `pagespeed DaemonVolumePath value;` (nginx)
+- **Syntax:** `ModPagespeedDaemonVolumePath value` (Apache) · `pagespeed DaemonVolumePath value;` (nginx) · `pagespeed DaemonVolumePath value` (IIS)
 - **Default:** `(empty)`
-- **Context:** Apache: server config, virtual host · nginx: http, server
+- **Context:** Apache: server config, virtual host · nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Path of the optimizer worker's shared cache volume. Keep this on a DIFFERENT path from FileCachePath. Set this together with DaemonSocketPath; leave both unset to keep the classic in-place path.
 
@@ -5685,10 +5685,9 @@ Access control for the per-host admin pages: Allow or Disallow a domain wildcard
 
 #### AdminPath
 
-- **Syntax:** `pagespeed AdminPath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Syntax:** `pagespeed AdminPath value;` (nginx) · `pagespeed AdminPath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_admin`
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the admin path. Ex: /pagespeed_admin
 
@@ -5711,10 +5710,9 @@ Access control for the console page: Allow or Disallow a domain wildcard. Defaul
 
 #### ConsolePath
 
-- **Syntax:** `pagespeed ConsolePath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Syntax:** `pagespeed ConsolePath value;` (nginx) · `pagespeed ConsolePath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_console`
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the console path. Ex: /pagespeed_console
 
@@ -5728,10 +5726,9 @@ Access control for the global admin pages: Allow or Disallow a domain wildcard. 
 
 #### GlobalAdminPath
 
-- **Syntax:** `pagespeed GlobalAdminPath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http
-- **Platform:** nginx only
+- **Syntax:** `pagespeed GlobalAdminPath value;` (nginx) · `pagespeed GlobalAdminPath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_global_admin`
+- **Context:** nginx: http · IIS: pagespeed.config, outside match rules
 
 Set the global admin path. Ex: /pagespeed_global_admin
 
@@ -5745,10 +5742,9 @@ Access control for the global statistics page: Allow or Disallow a domain wildca
 
 #### GlobalStatisticsPath
 
-- **Syntax:** `pagespeed GlobalStatisticsPath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http
-- **Platform:** nginx only
+- **Syntax:** `pagespeed GlobalStatisticsPath value;` (nginx) · `pagespeed GlobalStatisticsPath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_global_statistics`
+- **Context:** nginx: http · IIS: pagespeed.config, outside match rules
 
 Set the global statistics path. Ex: /ngx_pagespeed_global_statistics
 
@@ -5841,10 +5837,9 @@ Access control for the message history page: Allow or Disallow a domain wildcard
 
 #### MessagesPath
 
-- **Syntax:** `pagespeed MessagesPath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Syntax:** `pagespeed MessagesPath value;` (nginx) · `pagespeed MessagesPath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_message`
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the messages path. Ex: /ngx_pagespeed_message
 
@@ -5922,10 +5917,9 @@ Max size for statistics logging file.
 
 #### StatisticsPath
 
-- **Syntax:** `pagespeed StatisticsPath value;` (nginx)
-- **Default:** `(empty)`
-- **Context:** nginx: http, server
-- **Platform:** nginx only
+- **Syntax:** `pagespeed StatisticsPath value;` (nginx) · `pagespeed StatisticsPath value` (IIS)
+- **Default:** `(empty)`; IIS: `/pagespeed_statistics`
+- **Context:** nginx: http, server · IIS: pagespeed.config, outside match rules
 
 Set the statistics path. Ex: /ngx_pagespeed_statistics
 
