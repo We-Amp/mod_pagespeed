@@ -54,6 +54,7 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 - [Migrate from IISpeed](https://modpagespeed.com/docs/migrate-from-iispeed/): Move an IISpeed install to the mod_pagespeed IIS module: save the configuration, uninstall IISpeed, run the MSI, keep the cache, verify, roll back.
 - [Migrate from the archived Google module](https://modpagespeed.com/docs/migrate-from-google-mod-pagespeed/): Move from the archived mod_pagespeed or ngx_pagespeed binaries to the current mod_pagespeed: package swap, what maps to what, cache, rollback.
 - [Long-standing upstream issues resolved](https://modpagespeed.com/docs/upstream-issues-resolved/): Open issues in the archived mod_pagespeed and ngx_pagespeed trackers that current mod_pagespeed resolves, with each fix and the release that shipped it.
+- [End-of-life releases: 1.14.36.1 and earlier](https://modpagespeed.com/docs/end-of-life-releases/): Advisory for the archived mod_pagespeed and ngx_pagespeed releases, 1.14.36.1 and earlier: what is known, how to check a server, what to do.
 
 ## Configure
 
