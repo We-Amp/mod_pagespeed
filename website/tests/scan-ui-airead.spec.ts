@@ -190,7 +190,9 @@ test.describe('AI readability panel', () => {
     await expect(found).toHaveCount(4);
     await expect(found.nth(0)).toContainText('can’t tell a real signed agent from an impostor');
     await expect(found.nth(1)).toContainText('signed-agent requests differently');
-    await expect(found.nth(2)).toContainText('self-hosted optimizer can fix on your own servers');
+    await expect(found.nth(2)).toContainText(
+      'like the kind of issue a rule on the server could correct, which is not offered yet',
+    );
     await expect(found.nth(3)).toContainText(
       'This page did not return Markdown when asked for it (Accept: text/markdown).',
     );

@@ -6,7 +6,7 @@
 // or it names nothing: it never says a site runs on its own server. Pure.
 
 import { originTopicsApply } from './demand.mjs';
-import { guidanceFor, type PlatformAction } from '../../data/platform-guidance';
+import { guidanceFor } from '../../data/platform-guidance';
 
 interface Platform {
   id?: unknown;
@@ -42,27 +42,21 @@ export function platformName(report: Report): string {
 export const FIT_LINE =
   'The fixes and offers below that use mod_pagespeed apply only if you run the web server yourself.';
 
-const GENERIC_ACTIONS =
-  'put your services, location and contact details in page text, not in images; fill in the title and description of each page where the platform has those fields; if the platform has a robots.txt or crawler setting, check that it does not block AI crawlers.';
-
-/** The first action on every hosted platform; it needs no platform setting. */
-export const PAGE_TEXT_ACTION =
-  'Put your services, location and contact details in page text, not in images.';
-/** How many of a platform's own actions follow it. */
-const MAX_PLATFORM_ACTIONS = 2;
-
-const COUNT_WORD = ['', 'One thing', 'Two things', 'Three things'];
-
-/** One listed action; a platform's own action links the help page it was checked against. */
-export type FitAction = Pick<PlatformAction, 'text'> & Partial<PlatformAction>;
+/** One help page of the platform, checked against the vendor's own documentation. */
+export interface FitLink {
+  label: string;
+  href: string;
+}
 
 export interface Fit {
   /** False for a hosted platform: nothing server-side is offered. */
   offers: boolean;
   /** The notice paragraph (hosted) or the muted line; empty when there is nothing to say. */
   text: string;
-  /** The actions listed under the notice; empty when the notice names them itself. */
-  actions: FitAction[];
+  /** What introduces the help links; empty when there are none. */
+  linksLead: string;
+  /** The platform's own help pages for the settings the findings are about. */
+  links: FitLink[];
   /** One short sentence for the live region; empty when nothing is read out. */
   spoken: string;
 }
@@ -73,29 +67,24 @@ export interface Fit {
  * topics are the server offers it is about.
  */
 export function fitFor(report: Report): Fit {
-  if (!report) return { offers: true, text: '', actions: [], spoken: '' };
-  if (serverOffersApply(report)) return { offers: true, text: FIT_LINE, actions: [], spoken: '' };
+  const none = { linksLead: '', links: [], spoken: '' };
+  if (!report) return { offers: true, text: '', ...none };
+  if (serverOffersApply(report)) return { offers: true, text: FIT_LINE, ...none };
   const name = platformName(report);
   const runsOn = name
     ? `This site runs on ${name}, a hosted platform`
     : 'This site runs on a hosted platform';
-  const head = `${runsOn}. mod_pagespeed installs on a web server you run yourself, so it cannot be used for this site. The findings below still apply.`;
-  const spoken = `${runsOn}; mod_pagespeed cannot be used here. A note under the heading says what you can do.`;
-  const where = name ? `in ${name}` : 'on the platform';
-  const own = (guidanceFor(platformOf(report)?.id)?.actions ?? []).slice(0, MAX_PLATFORM_ACTIONS);
-  if (own.length) {
-    const actions: FitAction[] = [{ text: PAGE_TEXT_ACTION }, ...own];
-    return {
-      offers: false,
-      text: `${head} ${COUNT_WORD[actions.length]} you can do ${where}:`,
-      actions,
-      spoken,
-    };
-  }
+  const text = `${runsOn}. mod_pagespeed installs on a web server you run yourself, so it cannot be used for this site. The findings below still apply.`;
+  const spoken = `${runsOn}; mod_pagespeed cannot be used here. The findings still apply.`;
+  const links = (guidanceFor(platformOf(report)?.id)?.actions ?? []).map((a) => ({
+    label: a.sourceLabel,
+    href: a.source,
+  }));
   return {
     offers: false,
-    text: `${head} Three things to check ${where}: ${GENERIC_ACTIONS}`,
-    actions: [],
+    text,
+    linksLead: links.length ? `${name || 'Platform'} help pages:` : '',
+    links,
     spoken,
   };
 }

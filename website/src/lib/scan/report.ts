@@ -9,10 +9,10 @@ import { RISK_LENSES, lensMeasured } from './status';
 type Report = Record<string, unknown> & { grade?: string; score?: number };
 
 const LENS_NAME: Record<string, string> = {
-  preConsentLeak: 'Pre-consent leak',
-  scriptInventory: 'Script inventory',
+  preConsentLeak: 'Trackers before consent',
+  scriptInventory: 'Scripts on the page',
   seoDefects: 'SEO defects',
-  responseExposure: 'Response exposure',
+  responseExposure: 'Errors and versions the server reveals',
 };
 
 /** The four Risk & SEO states, in panel order; a lens that is off or missing has no row. */

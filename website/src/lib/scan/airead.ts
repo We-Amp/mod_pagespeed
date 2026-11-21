@@ -62,6 +62,8 @@ export interface AireadModel {
   categories: CategoryRow[];
   tokenLine: string;
   rawMarkdown: string;
+  /** The accessibility findings, or null when there are none to list. */
+  accessibility: AccessibilityFindings | null;
   alsoFound: {
     wedge: 'tollbooth' | 'agentpass' | 'compliancefix' | 'markdown-origin';
     text: string;
@@ -155,6 +157,59 @@ export function crawlersBlocked(r: Report): boolean | null {
   );
 }
 
+export interface AccessibilityRule {
+  /** The rule's description, cut to MAX_RULE_TEXT. */
+  help: string;
+  /** How many elements the rule flagged; 0 when the scan gave no count. */
+  nodes: number;
+}
+export interface AccessibilityFindings {
+  total: number;
+  /** The rules the scan names, most severe first, at most MAX_RULES. */
+  rules: AccessibilityRule[];
+}
+
+/** The longest rule description shown; a longer one is cut. */
+export const MAX_RULE_TEXT = 80;
+/** The most rules listed in the panel. */
+export const MAX_RULES = 5;
+const IMPACT = ['critical', 'serious', 'moderate', 'minor'];
+
+function cutText(text: string, max: number): string {
+  const t = text.trim().replace(/\s+/g, ' ').replace(/\.$/, '');
+  return t.length <= max ? t : t.slice(0, max - 1).trimEnd() + '…';
+}
+
+/**
+ * What the automated accessibility checks found, or null when they found
+ * nothing or did not run. The rules are ordered by impact (critical first)
+ * and then by how many elements they flagged; every text from the scan is cut
+ * to a fixed length.
+ */
+export function accessibilityFindings(r: Report): AccessibilityFindings | null {
+  const ax = r.accessibility;
+  const total = Math.floor(Number(ax?.detail?.total)) || 0;
+  if (!ax || ax.available !== true || total <= 0) return null;
+  const rank = (impact: unknown) => {
+    const at = IMPACT.indexOf(String(impact));
+    return at === -1 ? IMPACT.length : at;
+  };
+  const rules = (Array.isArray(ax.detail.topRules) ? ax.detail.topRules : [])
+    .filter((t: any) => t && typeof t.help === 'string' && t.help.trim() !== '') // eslint-disable-line @typescript-eslint/no-explicit-any
+    .map((t: any) => ({
+      help: cutText(t.help, MAX_RULE_TEXT),
+      nodes: Math.max(0, Math.floor(Number(t.nodes)) || 0),
+      rank: rank(t.impact),
+    })) // eslint-disable-line @typescript-eslint/no-explicit-any
+    .sort(
+      (a: { rank: number; nodes: number }, b: { rank: number; nodes: number }) =>
+        a.rank - b.rank || b.nodes - a.nodes,
+    )
+    .slice(0, MAX_RULES)
+    .map(({ help, nodes }: AccessibilityRule) => ({ help, nodes }));
+  return { total, rules };
+}
+
 /**
  * The reason sentences for the gated topics, in their approved wording.
  * On a hosted platform each sentence keeps its finding and drops the part
@@ -181,7 +236,7 @@ export function alsoFoundSentences(r: Report): AireadModel['alsoFound'] {
         : blocked
           ? ''
           : ', and robots.txt lets AI crawlers fetch it') +
-      (offers ? ', but your origin can’t tell a real signed agent from an impostor.' : '.');
+      (offers ? ', but your server can’t tell a real signed agent from an impostor.' : '.');
     out.push({ wedge: 'tollbooth', text });
   }
   if (agentPassCtaApplies(sa)) {
@@ -189,8 +244,8 @@ export function alsoFoundSentences(r: Report): AireadModel['alsoFound'] {
       wedge: 'agentpass',
       text:
         sa.classification === 'verifying'
-          ? 'Your origin answered our signed test request differently from one with a corrupted signature, which is consistent with checking agent signatures.'
-          : 'Your origin already treats signed-agent requests differently from unsigned ones.',
+          ? 'Your server answered our signed test request differently from one with a corrupted signature, which is consistent with checking agent signatures.'
+          : 'Your server already treats signed-agent requests differently from unsigned ones.',
     });
   }
   if (complianceFixCtaApplies(ax)) {
@@ -206,7 +261,7 @@ export function alsoFoundSentences(r: Report): AireadModel['alsoFound'] {
         ? flagged +
           '; ' +
           (ax.detail.fixableInline === 1 ? '1 looks' : ax.detail.fixableInline + ' look') +
-          ' like the kind a self-hosted optimizer can fix on your own servers, with no app changes. We don’t issue compliance certificates.'
+          ' like the kind of issue a rule on the server could correct, which is not offered yet. We don’t issue compliance certificates.'
         : flagged + '. We don’t issue compliance certificates.',
     });
   }
@@ -269,6 +324,7 @@ export function formatAiread(r: Report): AireadModel {
     categories,
     tokenLine: `Readable text in raw HTML: ${tokens(d.staticCleanTokens)} tokens · after JavaScript: ${tokens(d.renderedCleanTokens)} tokens`,
     rawMarkdown: d.staticMarkdown && d.staticMarkdown.trim() ? d.staticMarkdown : '',
+    accessibility: accessibilityFindings(r),
     alsoFound: alsoFoundSentences(r),
   };
 }

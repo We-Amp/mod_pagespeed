@@ -48,10 +48,10 @@ const DEFAULT_NOTE = 'Not measured: the site blocked the scanner.';
 const ERROR_NOTE = 'Not measured: the scanner could not complete this check.';
 
 const NAMES: Record<RiskRow['key'], string> = {
-  preConsentLeak: 'Pre-consent leak',
-  scriptInventory: 'Script inventory',
+  preConsentLeak: 'Trackers before consent',
+  scriptInventory: 'Scripts on the page',
   seoDefects: 'SEO defects',
-  responseExposure: 'Response exposure',
+  responseExposure: 'Errors and versions the server reveals',
 };
 
 // The lens objects are scanner output; every field is read defensively.
@@ -208,7 +208,7 @@ const EOL_PRODUCT: Record<string, string> = {
 const MISSING_HEADER: Record<string, string> = {
   hsts: 'HSTS',
   nosniff: 'nosniff',
-  framing: 'framing',
+  framing: 'framing protection',
 };
 
 const MPS_PRODUCT = /^(mod[_-]?pagespeed|modpagespeed)$/i;
@@ -275,12 +275,13 @@ function rxVerdict(rx: Lens): string {
     .map((m: string) => MISSING_HEADER[m] || m)
     .join(', ');
   return (
-    plural(leaks, 'error-output pattern') +
-    ' · ' +
-    plural(tells, 'version tell') +
-    ' · end of life: ' +
+    'The scan found ' +
+    plural(leaks, 'kind') +
+    ' of error output in the page and ' +
+    plural(tells, 'software version') +
+    ' the server reveals. Software past its end of life: ' +
     (eol.length ? eol.join(', ') : 'none seen') +
-    ' · missing: ' +
+    '. Missing security headers: ' +
     (missing || 'none') +
     '.' +
     notChecked +
@@ -290,7 +291,7 @@ function rxVerdict(rx: Lens): string {
 }
 
 export const RX_BUILDING =
-  'A response-firewall pack for mod_pagespeed is planned. It would mask leaked stack traces, strip version tells and add missing security headers in the response, on your own server. No pack ships today.';
+  'A response-firewall add-on for mod_pagespeed is planned. It would hide leaked error messages, remove software version numbers and add missing security headers in the response, on your own server. It is not available today.';
 
 // ---- Rows ----------------------------------------------------------------
 
@@ -319,11 +320,11 @@ function buildingFor(
       return consentEnforcementCtaApplies(lens, platform)
         ? {
             building: [
-              'Consent enforcement at the origin is planned: third-party tags would stay inert at the server until the consent cookie grants them.',
+              'Consent enforcement on your server is planned as an add-on for mod_pagespeed: third-party tags would stay inactive at the server until the consent cookie grants them.',
             ],
             link: {
               href: '/platform/consent/',
-              label: 'Consent enforcement at the origin →',
+              label: 'Consent enforcement on your server (planned) →',
               event: 'airead-cta-consent',
             },
           }
@@ -332,7 +333,7 @@ function buildingFor(
       const building: string[] = [];
       if (pageIntegrityCtaApplies(lens, platform)) {
         building.push(
-          'Payment-page script integrity, a pack that would enforce an allowlist of approved scripts at your origin, is planned.',
+          'Payment-page script integrity is planned as an add-on for mod_pagespeed: it would let only the scripts you approved run, enforced on your server.',
         );
       }
       if (thirdPartyFreezeCtaApplies(lens, platform)) {
@@ -343,8 +344,8 @@ function buildingFor(
               ? ' on this page loads without an integrity hash, so its content can change upstream without notice.'
               : ' on this page load without an integrity hash, so their content can change upstream without notice.') +
             (unpinned === 1
-              ? ' A third-party freeze pack is planned: it would serve that script at a version you approved until you accept the update.'
-              : ' A third-party freeze pack is planned: it would serve those scripts at a version you approved until you accept the update.'),
+              ? ' A third-party freeze add-on for mod_pagespeed is planned: it would serve that script at a version you approved until you accept the update.'
+              : ' A third-party freeze add-on for mod_pagespeed is planned: it would serve those scripts at a version you approved until you accept the update.'),
         );
       }
       return building.length
@@ -352,7 +353,7 @@ function buildingFor(
             building,
             link: {
               href: '/platform/',
-              label: 'Transform packs →',
+              label: 'Transform packs (add-ons for mod_pagespeed) →',
               event: 'airead-cta-page-integrity',
             },
           }
@@ -362,11 +363,11 @@ function buildingFor(
       return edgeSeoCtaApplies(lens, platform)
         ? {
             building: [
-              'Issues like these are the kind a rule on the server can correct in the HTML it serves, without a CMS release. The free edge-SEO pack for mod_pagespeed is a template for writing those rules, starting in report mode.',
+              'Issues like these are the kind a rule on the server can correct in the HTML it serves, without a CMS release. The free edge-SEO add-on for mod_pagespeed is a template for writing those rules, starting in report mode.',
             ],
             link: {
               href: '/platform/edge-seo/',
-              label: 'Edge SEO at the origin →',
+              label: 'Edge SEO on your server →',
               event: 'airead-cta-edge-seo',
             },
           }
@@ -377,7 +378,7 @@ function buildingFor(
             building: [RX_BUILDING],
             link: {
               href: '/platform/#pack-response-firewall',
-              label: 'Transform packs: tell me when it ships →',
+              label: 'Transform packs (add-ons for mod_pagespeed): tell me when it ships →',
               event: 'airead-cta-response-firewall',
             },
           }

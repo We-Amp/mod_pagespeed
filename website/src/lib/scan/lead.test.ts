@@ -8,6 +8,7 @@ import {
   FOUND_MARKER,
   MAX_BODY_BYTES,
   MAX_SIGNAL_CHARS,
+  STATUS_NOTE,
   bodyBytes,
   boundSignal,
   chipsFor,
@@ -15,6 +16,7 @@ import {
   factsFor,
   newSubmissionId,
   payloadForSubmission,
+  statusNoteApplies,
   topicsFor,
   type LeadForm,
 } from './lead';
@@ -209,7 +211,7 @@ describe('chipsFor', () => {
       const at = chips.map((c) => c.id);
       expect(at.indexOf('markdown-origin')).toBe(at.indexOf('response-firewall') + 1);
       const chip = chips[at.indexOf('markdown-origin')];
-      expect(chip.label).toBe('Serving AI agents a Markdown copy at the origin');
+      expect(chip.label).toBe('Serving AI agents a Markdown version of the page (experimental)');
       expect(chip.gated).toBe(true);
       expect(chip.selected).toBe(false);
     });
@@ -573,10 +575,10 @@ describe('the signal of a single chosen topic', () => {
 describe('report markdown', () => {
   it('lists the AI readability grade and the four risk states', () => {
     expect(riskStates(full).map((r) => r.name)).toEqual([
-      'Pre-consent leak',
-      'Script inventory',
+      'Trackers before consent',
+      'Scripts on the page',
       'SEO defects',
-      'Response exposure',
+      'Errors and versions the server reveals',
     ]);
     const md = buildReportMarkdown({
       url: 'https://shop.example.com/',
@@ -587,7 +589,7 @@ describe('report markdown', () => {
     });
     expect(md).toContain('Speed (PageSpeed Insights): mobile 58/100, desktop n/a');
     expect(md).toContain('AI readability: grade C (64/100)');
-    expect(md).toContain('- Pre-consent leak: Attention');
+    expect(md).toContain('- Trackers before consent: Attention');
   });
 
   it('says not measured without a report', () => {
@@ -620,7 +622,41 @@ describe('report risk states match the panel', () => {
 
   it('does not report a lens with no verdict as nothing flagged', () => {
     expect(riskStates({ scriptInventory: { status: 'ok' } })).toEqual([
-      { name: 'Script inventory', state: 'Not measured' },
+      { name: 'Scripts on the page', state: 'Not measured' },
     ]);
+  });
+});
+
+describe('topic labels', () => {
+  it('are plain, carry the status of what they name, and keep their ids', () => {
+    expect(chipsFor(full, 'poor').map((c) => [c.id, c.label])).toEqual([
+      ['tollbooth', 'Requiring a license token from AI crawlers (experimental)'],
+      ['agentpass', 'Checking that a crawler is who it says it is (experimental)'],
+      ['compliancefix', 'Accessibility issues found (not offered yet)'],
+      ['consent-enforcement', 'Trackers that load before consent (planned)'],
+      ['page-integrity', 'Allowing only approved scripts (planned)'],
+      ['third-party-freeze', 'Locking third-party scripts to an approved version (planned)'],
+      ['edge-seo', 'Fixing the flagged SEO tags on the server'],
+      ['response-firewall', 'Leaked errors and outdated software (planned)'],
+      ['markdown-origin', 'Serving AI agents a Markdown version of the page (experimental)'],
+      ['consulting', 'Help applying the speed fixes'],
+      ['agents', 'AI agents and crawlers'],
+      ['audit', 'Agent-readiness audit (\u20ac950 per site, excl. VAT)'],
+    ]);
+    // The wedge of a gated chip is still its id.
+    for (const c of chipsFor(full, 'poor')) if (c.gated) expect(c.wedge).toBe(c.id);
+  });
+
+  it('shows the status note only when a shown label carries a status mark', () => {
+    expect(STATUS_NOTE).toBe(
+      'Experimental features are off by default and may change. Planned and not offered yet mean not available today. We will tell you where each one stands.',
+    );
+    expect(statusNoteApplies(chipsFor(full, 'poor'))).toBe(true);
+    expect(statusNoteApplies(chipsFor(null, 'poor'))).toBe(false);
+    expect(statusNoteApplies([{ label: 'Fixing the flagged SEO tags on the server' }])).toBe(false);
+    expect(statusNoteApplies([{ label: 'Allowing only approved scripts (planned)' }])).toBe(true);
+    expect(statusNoteApplies([{ label: 'Accessibility issues found (not offered yet)' }])).toBe(
+      true,
+    );
   });
 });

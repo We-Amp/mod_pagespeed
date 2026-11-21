@@ -14,10 +14,12 @@ import {
   CONSULTING,
   FOUND_MARKER,
   MAX_TOPICS,
+  STATUS_NOTE,
   chipsFor,
   emailOk,
   newSubmissionId,
   payloadForSubmission,
+  statusNoteApplies,
   type Chip,
   type LeadPayload,
 } from '../../lib/scan/lead';
@@ -60,6 +62,7 @@ export function initLeadForm(state: ScanState) {
   const surface = box?.dataset.scanSurface === 'airead' ? 'airead' : 'analyze';
   const live = root.querySelector<HTMLElement>('[data-scan-live]')!;
   const chipsEl = form.querySelector<HTMLElement>('[data-scan-chips]')!;
+  const topicsNote = form.querySelector<HTMLElement>('[data-scan-topics-note]');
   const emailEl = form.querySelector<HTMLInputElement>('input[name="email"]')!;
   const emailErr = form.querySelector<HTMLElement>('[data-scan-lead-email-error]')!;
   const sitesEl = form.querySelector<HTMLInputElement>('[data-scan-sites]')!;
@@ -166,6 +169,11 @@ export function initLeadForm(state: ScanState) {
   }
 
   function onTopicsChange() {
+    if (topicsNote) {
+      const show = statusNoteApplies(chips);
+      topicsNote.textContent = show ? STATUS_NOTE : '';
+      topicsNote.hidden = !show;
+    }
     if (selected().length > MAX_TOPICS) message('Pick up to four topics.');
     else if (msgEl.textContent === 'Pick up to four topics.') message('', false);
   }
@@ -200,6 +208,7 @@ export function initLeadForm(state: ScanState) {
     bar.className = 'scan-skeleton';
     bar.setAttribute('aria-hidden', 'true');
     chipsEl.replaceChildren(bar);
+    if (topicsNote) topicsNote.hidden = true;
     form.hidden = false;
     nextRow.hidden = false;
     shareRow.hidden = false;

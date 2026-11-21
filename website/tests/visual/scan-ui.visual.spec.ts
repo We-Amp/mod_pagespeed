@@ -154,7 +154,7 @@ const STATES: State[] = [
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
-      await expect(health(page)).toContainText('areas checked need attention');
+      await expect(health(page)).toContainText('things to improve');
       for (const id of ['speed', 'airead', 'risk'] as const) {
         await expect(tile(page, id)).toHaveAttribute('aria-expanded', 'false');
       }

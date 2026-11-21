@@ -118,8 +118,8 @@ function filterCode(name: string, edition: Edition): HTMLButtonElement {
   chip.setAttribute(
     'aria-label',
     toWorker
-      ? `Open ${anchor.replace(/-/g, ' ')} transform documentation in a new tab`
-      : `Open ${name} filter documentation in a new tab`,
+      ? `${name}: ${anchor.replace(/-/g, ' ')} transform documentation, opens in a new tab`
+      : `${name}: filter documentation, opens in a new tab`,
   );
   chip.addEventListener('click', () => {
     window.open(

@@ -16,28 +16,28 @@ const fixture = (name: string) =>
 describe('riskStates', () => {
   it('marks every lens Attention on the full report, in panel order', () => {
     expect(riskStates(fixture('full'))).toEqual([
-      { name: 'Pre-consent leak', state: 'Attention' },
-      { name: 'Script inventory', state: 'Attention' },
+      { name: 'Trackers before consent', state: 'Attention' },
+      { name: 'Scripts on the page', state: 'Attention' },
       { name: 'SEO defects', state: 'Attention' },
-      { name: 'Response exposure', state: 'Attention' },
+      { name: 'Errors and versions the server reveals', state: 'Attention' },
     ]);
   });
 
   it('marks every lens Nothing flagged on the clean report', () => {
     expect(riskStates(fixture('clean'))).toEqual([
-      { name: 'Pre-consent leak', state: 'Nothing flagged' },
-      { name: 'Script inventory', state: 'Nothing flagged' },
+      { name: 'Trackers before consent', state: 'Nothing flagged' },
+      { name: 'Scripts on the page', state: 'Nothing flagged' },
       { name: 'SEO defects', state: 'Nothing flagged' },
-      { name: 'Response exposure', state: 'Nothing flagged' },
+      { name: 'Errors and versions the server reveals', state: 'Nothing flagged' },
     ]);
   });
 
   it('marks every lens Not measured on the blocked report, whose lenses did not run', () => {
     expect(riskStates(fixture('blocked'))).toEqual([
-      { name: 'Pre-consent leak', state: 'Not measured' },
-      { name: 'Script inventory', state: 'Not measured' },
+      { name: 'Trackers before consent', state: 'Not measured' },
+      { name: 'Scripts on the page', state: 'Not measured' },
       { name: 'SEO defects', state: 'Not measured' },
-      { name: 'Response exposure', state: 'Not measured' },
+      { name: 'Errors and versions the server reveals', state: 'Not measured' },
     ]);
   });
 
@@ -52,14 +52,14 @@ describe('riskStates', () => {
       responseExposure: { status: 'ok', verdict: 'attention' },
     });
     expect(rows).toEqual([
-      { name: 'Script inventory', state: 'Nothing flagged' },
-      { name: 'Response exposure', state: 'Attention' },
+      { name: 'Scripts on the page', state: 'Nothing flagged' },
+      { name: 'Errors and versions the server reveals', state: 'Attention' },
     ]);
   });
 
   it('marks a lens that ran but reached no verdict as Not measured', () => {
     expect(riskStates({ scriptInventory: { status: 'ok', verdict: 'unknown' } })).toEqual([
-      { name: 'Script inventory', state: 'Not measured' },
+      { name: 'Scripts on the page', state: 'Not measured' },
     ]);
   });
 
@@ -91,10 +91,10 @@ describe('buildReportMarkdown', () => {
         '',
         '## Risk and SEO',
         '',
-        '- Pre-consent leak: Attention',
-        '- Script inventory: Attention',
+        '- Trackers before consent: Attention',
+        '- Scripts on the page: Attention',
         '- SEO defects: Attention',
-        '- Response exposure: Attention',
+        '- Errors and versions the server reveals: Attention',
         '',
         '## Failing audits',
         '',
@@ -159,6 +159,6 @@ describe('buildReportMarkdown', () => {
       report: { scriptInventory: { status: 'ok', verdict: 'attention' } },
     });
     expect(md).toContain('AI readability: not measured');
-    expect(md).toContain('- Script inventory: Attention');
+    expect(md).toContain('- Scripts on the page: Attention');
   });
 });

@@ -126,7 +126,7 @@ test.describe('the one lead form', () => {
     }
     await expect(
       form(page).getByRole('checkbox', {
-        name: 'Accessibility remediation (flagged by your scan)',
+        name: 'Accessibility issues found (not offered yet) (flagged by your scan)',
         exact: true,
       }),
     ).toHaveCount(1);
@@ -466,7 +466,7 @@ test.describe('the one lead form', () => {
 
     await expect(sentLine(page)).toBeVisible();
     await expect(page.getByText(/^Topics sent: /)).toHaveText(
-      'Topics sent: Signed-agent verification (prove which agent is which), SEO fixes at the server, Serving AI agents a Markdown copy at the origin, Help applying the speed fixes.',
+      'Topics sent: Checking that a crawler is who it says it is (experimental), Fixing the flagged SEO tags on the server, Serving AI agents a Markdown version of the page (experimental), Help applying the speed fixes.',
     );
     await expect(form(page)).toBeHidden();
 
@@ -802,7 +802,7 @@ test.describe('next steps and share', () => {
     expect(download.suggestedFilename()).toBe('pagespeed-report-shop.example.com.md');
     const body = readFileSync((await download.path())!, 'utf8');
     expect(body).toContain('AI readability: grade C (64/100)');
-    expect(body).toContain('- Pre-consent leak: Attention');
+    expect(body).toContain('- Trackers before consent: Attention');
     const events = await trackedEvents(page);
     expect(events.filter((e) => e.name === 'analyze_report_download')).toHaveLength(1);
   });

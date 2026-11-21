@@ -17,9 +17,8 @@ const fixture = (name: string) =>
 const HEAD = (on: string) =>
   `This site runs on ${on}. mod_pagespeed installs on a web server you run yourself, so it cannot be used for this site. The findings below still apply.`;
 const SPOKEN = (on: string) =>
-  `This site runs on ${on}; mod_pagespeed cannot be used here. A note under the heading says what you can do.`;
-const GENERIC =
-  'put your services, location and contact details in page text, not in images; fill in the title and description of each page where the platform has those fields; if the platform has a robots.txt or crawler setting, check that it does not block AI crawlers.';
+  `This site runs on ${on}; mod_pagespeed cannot be used here. The findings still apply.`;
+const NONE = { linksLead: '', links: [], spoken: '' };
 
 describe('serverOffersApply', () => {
   it('is false only when the scan says the owner has no control of the server', () => {
@@ -51,7 +50,7 @@ describe('serverOffersApply', () => {
 describe('fitFor', () => {
   it('gives the muted line when the server offers may apply', () => {
     for (const report of [fixture('unknown'), fixture('full'), { platform: null }]) {
-      expect(fitFor(report)).toEqual({ offers: true, text: FIT_LINE, actions: [], spoken: '' });
+      expect(fitFor(report)).toEqual({ offers: true, text: FIT_LINE, ...NONE });
     }
     expect(FIT_LINE).toBe(
       'The fixes and offers below that use mod_pagespeed apply only if you run the web server yourself.',
@@ -60,35 +59,32 @@ describe('fitFor', () => {
 
   it('says nothing without a result', () => {
     for (const report of [null, undefined]) {
-      expect(fitFor(report)).toEqual({ offers: true, text: '', actions: [], spoken: '' });
+      expect(fitFor(report)).toEqual({ offers: true, text: '', ...NONE });
     }
   });
 
-  it('lists the page-text action first, then two of the platform’s own', () => {
+  it('keeps the notice to the fit sentences and links the platform’s help pages', () => {
     const fit = fitFor(fixture('hosted'));
     expect(fit.offers).toBe(false);
-    expect(fit.text).toBe(`${HEAD('Wix, a hosted platform')} Three things you can do in Wix:`);
-    expect(fit.actions).toHaveLength(3);
-    expect(fit.actions[0]).toEqual({
-      text: 'Put your services, location and contact details in page text, not in images.',
-    });
-    expect(fit.actions.slice(1)).toEqual(PLATFORM_GUIDANCE.wix.actions.slice(0, 2));
-    expect(fit.actions.slice(1).every((a) => a.source?.startsWith('https://'))).toBe(true);
-    expect(fit.actions[2].text).toBe(
-      'Open the robots.txt editor in the SEO section of your Wix dashboard and check that the file does not block AI crawlers.',
+    expect(fit.text).toBe(HEAD('Wix, a hosted platform'));
+    expect(fit.linksLead).toBe('Wix help pages:');
+    expect(fit.links).toEqual(
+      PLATFORM_GUIDANCE.wix.actions.map((a) => ({ label: a.sourceLabel, href: a.source })),
     );
+    expect(fit.links.every((l) => l.href.startsWith('https://'))).toBe(true);
     // The live region gets one short sentence, not the whole note.
     expect(fit.spoken).toBe(SPOKEN('Wix, a hosted platform'));
   });
 
-  it('gives the general advice for a platform without guidance', () => {
+  it('lists no links for a platform without guidance', () => {
     const fit = fitFor({
       platform: { id: 'some-builder', name: 'Some Builder', originControl: 'none' },
     });
     expect(fit).toEqual({
       offers: false,
-      text: `${HEAD('Some Builder, a hosted platform')} Three things to check in Some Builder: ${GENERIC}`,
-      actions: [],
+      text: HEAD('Some Builder, a hosted platform'),
+      linksLead: '',
+      links: [],
       spoken: SPOKEN('Some Builder, a hosted platform'),
     });
   });
@@ -96,9 +92,7 @@ describe('fitFor', () => {
   it('leaves the name out when the scan gave none', () => {
     for (const name of [undefined, null, '', '  ', 7]) {
       const fit = fitFor({ platform: { id: null, name, originControl: 'none' } });
-      expect(fit.text).toBe(
-        `${HEAD('a hosted platform')} Three things to check on the platform: ${GENERIC}`,
-      );
+      expect(fit.text).toBe(HEAD('a hosted platform'));
       expect(fit.spoken).toBe(SPOKEN('a hosted platform'));
     }
   });

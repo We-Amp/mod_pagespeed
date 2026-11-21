@@ -1,0 +1,445 @@
+{
+  "cached": false,
+  "id": "0123456789ab",
+  "permalink": "https://www.example.com/ai-readability/api/r/0123456789ab",
+  "badge": "https://www.example.com/ai-readability/api/badge/0123456789ab.svg",
+  "report": {
+    "url": "https://www.example.com/",
+    "scannedAt": "2026-01-15T12:00:00.000Z",
+    "grade": "A",
+    "score": 92,
+    "categories": {
+      "Content fidelity": {
+        "score": 30,
+        "max": 30,
+        "verdict": "Content is fully present in the server HTML — readable by every AI tool, no rendering required.",
+        "flag": null,
+        "detail": {
+          "staticTextLen": 15600,
+          "renderedTextLen": 12400,
+          "fidelity": 1
+        }
+      },
+      "Token efficiency": {
+        "score": 19,
+        "max": 20,
+        "verdict": "Lean: ~17× HTML-to-content ratio — cheap for an agent to ingest.",
+        "detail": {
+          "bloatX": 17,
+          "rawHtmlTokens": 52000,
+          "cleanTokens": 3100
+        }
+      },
+      "Structured data": {
+        "score": 20,
+        "max": 20,
+        "verdict": "Strong machine-readable metadata (JSON-LD (Organization, WebSite, Product, SoftwareApplication), Open Graph, canonical, meta description).",
+        "detail": {
+          "jsonLdTypes": ["Organization", "WebSite", "Product", "SoftwareApplication", "FAQPage"]
+        }
+      },
+      "Crawler access": {
+        "score": 18,
+        "max": 20,
+        "verdict": "AI crawlers are allowed to fetch the page. robots.txt allows AI crawlers; llms.txt present.",
+        "detail": {
+          "aiBotsBlocked": [],
+          "llmsTxt": true
+        }
+      },
+      "Citation readiness": {
+        "score": 5,
+        "max": 10,
+        "verdict": "Thin attribution metadata (canonical URL, title) — an LLM citing you may get the source/author/date wrong."
+      }
+    },
+    "agentVerifiability": {
+      "verifiable": false,
+      "verdict": "Your origin cannot cryptographically verify signed AI agents, and allows 9 AI crawler(s) unrestricted access — 100% of your rendered content is already exposed in raw HTML, for free.",
+      "detail": {
+        "verifiable": false,
+        "aiCrawlersAllowed": [
+          "GPTBot",
+          "ClaudeBot",
+          "Claude-Web",
+          "anthropic-ai",
+          "PerplexityBot",
+          "Google-Extended",
+          "CCBot",
+          "Bytespider",
+          "Applebot-Extended"
+        ],
+        "aiCrawlersBlocked": [],
+        "exposurePct": 100,
+        "botAuthHeaders": [],
+        "renderOk": true
+      }
+    },
+    "accessibility": {
+      "available": true,
+      "verdict": "No WCAG violations detected by automated checks.",
+      "detail": {
+        "total": 0,
+        "nodeTotal": 0,
+        "byImpact": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "fixableInline": 0,
+        "topRules": []
+      }
+    },
+    "signedAgentVerification": {
+      "status": "ok",
+      "classification": "no-signal",
+      "probes": {
+        "signed": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 206000
+        },
+        "broken": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 206000
+        },
+        "unsigned": {
+          "status": 200,
+          "headers": {},
+          "bodyLength": 206000
+        }
+      },
+      "evidence": [],
+      "keyid": "GBxqWscB-GOkwNXEhmWQA4SY2gWRH2Hz4dAvzRcK1gw",
+      "signatureAgent": "https://www.example.com/.well-known/http-message-signatures-directory",
+      "note": "Classification derived solely from the scanner’s own three probe exchanges (valid signature, corrupted signature, unsigned). “no-signal” does NOT mean the origin runs no verifier: observe-only verifiers are externally invisible, and an origin can only fully verify our probe if it trusts our key directory. The corrupted-signature probe is the strongest discriminator. We only report what our own three exchanges showed."
+    },
+    "platform": {
+      "status": "ok",
+      "id": null,
+      "name": null,
+      "kind": "unknown",
+      "originControl": "unknown",
+      "confidence": "low",
+      "evidence": [
+        {
+          "signal": "header",
+          "id": "server-nginx"
+        }
+      ],
+      "firstPartyHosts": [],
+      "siteAssetHosts": [],
+      "platformListVersion": "pl-1"
+    },
+    "preConsentLeak": {
+      "status": "ok",
+      "verdict": "clean",
+      "blockedBy": [],
+      "thirdPartyHosts": [
+        {
+          "host": "stats.example.com",
+          "requests": 1,
+          "category": "other",
+          "tracker": false
+        }
+      ],
+      "thirdPartyCount": 1,
+      "trackerCount": 0,
+      "cmpDetected": {
+        "detected": false,
+        "vendor": null
+      },
+      "firstParty": ["www.example.com"],
+      "requestsObserved": 10,
+      "httpStatus": 200,
+      "trackerListVersion": "pcl-2",
+      "note": "Passive observation of the requests this page issued in a fresh browser (no cookies, no storage, no interaction) up to network idle. Host categories come from a maintained heuristic list; not legal advice or a compliance certificate."
+    },
+    "scriptInventory": {
+      "status": "ok",
+      "verdict": "clean",
+      "reasons": [],
+      "blockedBy": [],
+      "totals": {
+        "scripts": 15,
+        "inline": 13,
+        "inlineBytes": 18000,
+        "external": 2,
+        "firstPartyExternal": 1,
+        "thirdPartyExternal": 1,
+        "thirdPartyHosts": 1,
+        "thirdPartyWithIntegrity": 0,
+        "nonExecutable": 5
+      },
+      "scriptHosts": [
+        {
+          "host": "stats.example.com",
+          "party": "third",
+          "scripts": 1,
+          "withIntegrity": 0,
+          "category": "other",
+          "listed": false
+        },
+        {
+          "host": "www.example.com",
+          "party": "first",
+          "scripts": 1,
+          "withIntegrity": 0,
+          "category": "first-party",
+          "listed": true
+        }
+      ],
+      "sriMissing": [],
+      "floating": [],
+      "duplicates": [],
+      "integrityWithoutCors": 0,
+      "csp": {
+        "enforced": true,
+        "reportOnly": false,
+        "scriptSrc": true,
+        "reporting": false
+      },
+      "firstParty": ["www.example.com"],
+      "requestsObserved": 10,
+      "httpStatus": 200,
+      "scriptListVersion": "si-1",
+      "note": "Inventory of the script elements in this page's rendered HTML, from one fresh browser load. Scripts inside cross-origin frames and scripts that leave no element behind are not seen. Host categories come from a maintained heuristic list; not an assessment against any standard."
+    },
+    "seoDefects": {
+      "status": "ok",
+      "verdict": "clean",
+      "defects": [],
+      "counts": {
+        "total": 0,
+        "canonical": 0,
+        "hreflang": 0,
+        "title": 0,
+        "description": 0,
+        "jsonld": 0
+      },
+      "blockedBy": [],
+      "staticCompared": true,
+      "notMeasured": [],
+      "canonical": {
+        "static": {
+          "count": 1,
+          "href": "https://www.example.com/"
+        },
+        "rendered": {
+          "count": 1,
+          "href": "https://www.example.com/"
+        },
+        "header": null
+      },
+      "hreflang": {
+        "static": 0,
+        "rendered": 0,
+        "header": 0,
+        "selfReference": null,
+        "invalid": 0,
+        "xDefault": false
+      },
+      "title": {
+        "static": {
+          "count": 1,
+          "text": "Example product"
+        },
+        "rendered": {
+          "count": 1,
+          "text": "Example product"
+        }
+      },
+      "description": {
+        "static": {
+          "count": 1,
+          "text": "A sample description of this page."
+        },
+        "rendered": {
+          "count": 1,
+          "text": "A sample description of this page."
+        }
+      },
+      "jsonLd": {
+        "static": {
+          "blocks": 4,
+          "invalid": 0,
+          "types": ["Organization", "WebSite", "Product", "SoftwareApplication", "FAQPage"]
+        },
+        "rendered": {
+          "blocks": 4,
+          "invalid": 0,
+          "types": ["Organization", "WebSite", "Product", "SoftwareApplication", "FAQPage"]
+        },
+        "renderOnlyTypes": []
+      },
+      "robots": {
+        "static": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "rendered": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "header": {
+          "noindex": false,
+          "nofollow": false
+        },
+        "mismatch": false
+      },
+      "delivery": {
+        "cdn": null,
+        "server": "nginx"
+      },
+      "firstParty": ["www.example.com"],
+      "requestsObserved": 10,
+      "httpStatus": 200,
+      "seoRulesVersion": "seo-1",
+      "note": "Compares the head of this page as served without JavaScript with the same page after one fresh browser load. One page only: links, other language versions and titles on other pages are not checked. Not a ranking assessment."
+    },
+    "responseExposure": {
+      "status": "ok",
+      "verdict": "clean",
+      "reasons": ["version-tell"],
+      "blockedBy": [],
+      "staticScanned": true,
+      "notMeasured": [],
+      "leaks": [],
+      "tells": [
+        {
+          "product": "nginx",
+          "source": "server",
+          "version": null
+        },
+        {
+          "product": "mod_pagespeed",
+          "source": "x-mod-pagespeed",
+          "version": "2.9.2"
+        }
+      ],
+      "endOfLife": [],
+      "pagespeed": {
+        "header": "x-mod-pagespeed",
+        "bucket": "current"
+      },
+      "headers": {
+        "https": true,
+        "present": ["hsts", "nosniff", "framing"],
+        "missing": [],
+        "csp": "enforced",
+        "referrerPolicy": true,
+        "permissionsPolicy": true
+      },
+      "delivery": {
+        "cdn": null,
+        "server": "nginx"
+      },
+      "firstParty": ["www.example.com"],
+      "requestsObserved": 10,
+      "httpStatus": 200,
+      "responseRulesVersion": "rx-1",
+      "note": "Reads the response headers and the HTML of this page as served, without and with JavaScript, from one fresh load. One page only. Error output is matched by fixed patterns and not shown. End-of-life dates are the upstream projects' published dates; a distribution or host may still patch older versions. Not a security assessment."
+    },
+    "agentSignals": {
+      "status": "ok",
+      "rulesVersion": "as-1",
+      "verdict": "attention",
+      "markdown": {
+        "probed": true,
+        "httpStatus": 200,
+        "contentType": "text/html",
+        "negotiated": false,
+        "vary": "user-agent,accept-encoding,save-data",
+        "varyAccept": false,
+        "xMarkdownTokens": null
+      },
+      "contentSignals": {
+        "robotsFetched": true,
+        "present": true,
+        "lines": 20,
+        "signals": {
+          "search": "yes",
+          "ai-input": "yes",
+          "ai-train": "yes"
+        },
+        "unknown": 0
+      },
+      "link": {
+        "present": true,
+        "rels": ["describedby", "sitemap"],
+        "markdownAlternate": false
+      },
+      "note": "Asks this page once for Markdown (Accept: text/markdown) and reads only the response headers, reads the Content-Signal lines in robots.txt and the Link response header of the page. One page only; nothing is scored. Not an assessment of how AI agents treat your site."
+    },
+    "metrics": {
+      "staticTextLen": 15600,
+      "renderedTextLen": 12400,
+      "rawHtmlTokens": 52000,
+      "cleanTokens": 3100,
+      "httpOk": true
+    },
+    "signals": {
+      "jsonLdTypes": ["Organization", "WebSite", "Product", "SoftwareApplication", "FAQPage"],
+      "hasJsonLd": true,
+      "hasOG": true,
+      "canonical": true,
+      "title": "Example product",
+      "metaDescription": true,
+      "author": false,
+      "published": false,
+      "modified": false
+    },
+    "access": {
+      "robotsFound": true,
+      "llmsTxt": true,
+      "aiBotsBlocked": [],
+      "webmcpManifest": false,
+      "webmcpManifestTools": 0,
+      "crawlerRules": {
+        "parsed": true,
+        "reason": null,
+        "truncated": false,
+        "training": {
+          "allowed": [
+            "GPTBot",
+            "ClaudeBot",
+            "Google-Extended",
+            "Applebot-Extended",
+            "CCBot",
+            "meta-externalagent",
+            "Amazonbot",
+            "MistralAI-Training"
+          ],
+          "blocked": []
+        },
+        "answer": {
+          "allowed": [
+            "OAI-SearchBot",
+            "ChatGPT-User",
+            "Claude-SearchBot",
+            "Claude-User",
+            "PerplexityBot",
+            "Perplexity-User",
+            "meta-webindexer",
+            "meta-externalfetcher",
+            "Amzn-SearchBot",
+            "Amzn-User",
+            "DuckAssistBot",
+            "MistralAI-Index",
+            "MistralAI-User"
+          ],
+          "blocked": []
+        },
+        "wildcardBlocksAll": false,
+        "sitemaps": ["https://www.example.com/sitemap-index.xml"]
+      }
+    },
+    "diff": {
+      "staticMarkdown": "# Example product\n\nA short page of sample text.\n\n## Services\n\n- First item\n- Second item\n\n[Contact](https://www.example.com/contact)\n",
+      "staticCleanTokens": 3100,
+      "renderedCleanTokens": 3100
+    }
+  }
+}

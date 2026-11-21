@@ -28,9 +28,9 @@ const GATED = [
 ];
 
 const NOTICE =
-  'This site runs on Wix, a hosted platform. mod_pagespeed installs on a web server you run yourself, so it cannot be used for this site. The findings below still apply. Three things you can do in Wix:';
+  'This site runs on Wix, a hosted platform. mod_pagespeed installs on a web server you run yourself, so it cannot be used for this site. The findings below still apply.';
 const SPOKEN =
-  'This site runs on Wix, a hosted platform; mod_pagespeed cannot be used here. A note under the heading says what you can do.';
+  'This site runs on Wix, a hosted platform; mod_pagespeed cannot be used here. The findings still apply.';
 const LINE =
   'The fixes and offers below that use mod_pagespeed apply only if you run the web server yourself.';
 
@@ -100,16 +100,13 @@ test.describe('scan result on a hosted platform', () => {
     const notice = page.locator('[data-scan-fit-notice]');
     await expect(notice).toBeVisible();
     await expect(notice.locator('[data-scan-fit-text]')).toHaveText(NOTICE);
-    const actions = notice.locator('[data-scan-fit-actions] li');
-    await expect(actions).toHaveCount(3);
-    await expect(actions.first()).toHaveText(
-      'Put your services, location and contact details in page text, not in images.',
+    // The general advice moved to the next steps; the note keeps the help links.
+    await expect(notice.locator('[data-scan-fit-links]')).toHaveText(
+      'Wix help pages: Wix help: page SEO settings, Wix help: robots.txt.',
     );
-    await expect(actions.nth(2)).toContainText(
-      'Open the robots.txt editor in the SEO section of your Wix dashboard and check that the file does not block AI crawlers.',
-    );
+    await expect(notice).not.toContainText('Three things');
     // The vendor help opens in a new tab and says so.
-    const links = notice.locator('a');
+    const links = notice.locator('[data-scan-fit-links] a');
     await expect(links).toHaveCount(2);
     for (const link of await links.all()) {
       expect(await link.getAttribute('href')).toMatch(/^https:\/\/support\.wix\.com\//);
@@ -310,13 +307,9 @@ test.describe('scan result on a hosted platform', () => {
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
         .analyze();
       // The same bar as the site-wide scan: critical and serious findings fail.
-      // The three tile buttons are left out of one rule: their accessible name
-      // ("Show Speed details") differs from their visible text by design of the
-      // tiles, which this scan is not about.
       const findings = results.violations
         .filter((v) => v.impact === 'critical' || v.impact === 'serious')
-        .flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')}`))
-        .filter((f) => !/^label-content-name-mismatch: #scan-tile-(speed|airead|risk)$/.test(f));
+        .flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')}`));
       expect(findings).toEqual([]);
     });
   }
@@ -372,14 +365,14 @@ test.describe('scan result without a hosted platform', () => {
         );
         await expect(access).not.toContainText('robots.txt allows AI crawlers');
         await expect(first).toHaveText(
-          'About 38% of this page’s content is in the raw HTML, but your origin can’t tell a real signed agent from an impostor.',
+          'About 38% of this page’s content is in the raw HTML, but your server can’t tell a real signed agent from an impostor.',
         );
         await expect(airead).not.toContainText(/crawlers? (is|are) allowed/);
       } else {
         // No robots.txt reading in the result: the row is the scanner's own.
         await expect(airead.locator('[data-scan-crawler-rules]')).toHaveCount(0);
         await expect(first).toHaveText(
-          'About 38% of this page’s content is in the raw HTML, and AI crawlers are allowed to read it, but your origin can’t tell a real signed agent from an impostor.',
+          'About 38% of this page’s content is in the raw HTML, and AI crawlers are allowed to read it, but your server can’t tell a real signed agent from an impostor.',
         );
       }
 

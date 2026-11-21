@@ -50,7 +50,7 @@ describe('riskStatus', () => {
     expect(r).toMatchObject({
       state: 'flagged',
       word: '1 flagged',
-      value: '1 need attention',
+      value: '1 check needs attention',
     });
   });
   it('is clean when nothing is flagged and not measured when nothing is measured', () => {
@@ -67,7 +67,7 @@ describe('riskStatus: k and n', () => {
       scriptInventory: { status: 'disabled', verdict: 'unknown' },
       seoDefects: ok('attention'),
     });
-    expect(r.value).toBe('1 need attention');
+    expect(r.value).toBe('1 check needs attention');
   });
   it('excludes a verdict of unknown, a missing verdict and non-ok statuses from k', () => {
     const r = riskStatus({
@@ -79,7 +79,7 @@ describe('riskStatus: k and n', () => {
     expect(r).toMatchObject({
       state: 'flagged',
       word: '1 flagged',
-      value: '1 need attention',
+      value: '1 check needs attention',
     });
   });
   it('is not measured when every lens is blocked, errored, disabled or unknown', () => {
@@ -100,7 +100,7 @@ describe('riskStatus: k and n', () => {
       seoDefects: ok('attention'),
       responseExposure: ok('clean'),
     });
-    expect(r).toMatchObject({ word: '3 flagged', value: '3 need attention' });
+    expect(r).toMatchObject({ word: '3 flagged', value: '3 checks need attention' });
   });
   it('treats a leaks verdict only as flagged for the pre-consent lens', () => {
     expect(riskStatus({ scriptInventory: ok('leaks') }).state).toBe('clean');
@@ -126,6 +126,38 @@ describe('healthLine', () => {
     expect(healthLine([NOT_MEASURED, NOT_MEASURED, NOT_MEASURED])).toBe(
       'We could not check this page.',
     );
+  });
+
+  it('counts the next steps instead when the result has any', () => {
+    expect(healthLine([good, good, good], 1)).toBe(
+      '1 thing to improve. Start with the step below.',
+    );
+    expect(healthLine([poor, good, good], 3)).toBe(
+      '3 things to improve. Start with the steps below.',
+    );
+    expect(healthLine([poor, poor, NOT_MEASURED], 5)).toBe(
+      '5 things to improve. Start with the steps below.',
+    );
+    // More qualify than are listed: the line says which ones are shown.
+    expect(healthLine([poor, good, good], 4, { shown: 3 })).toBe(
+      '4 things to improve. The first three are below.',
+    );
+    expect(healthLine([poor, good, good], 3, { shown: 3 })).toBe(
+      '3 things to improve. Start with the steps below.',
+    );
+    // A page the scan could read next to nothing of gets no count.
+    expect(healthLine([poor, poor, NOT_MEASURED], 2, { shown: 2, unreadable: true })).toBe(
+      'We could read almost nothing on this page.',
+    );
+    expect(healthLine([CHECKING, poor, poor], 2, { unreadable: true })).toBe(
+      'Checking 1 of 3 areas…',
+    );
+    // Never "nothing needs attention" above a list of steps.
+    expect(healthLine([good, good, good], 2)).not.toMatch(/needs attention|need attention/);
+    // Without steps the sentence about the areas stays.
+    expect(healthLine([good, good, good], 0)).toBe('None of the 3 areas checked needs attention.');
+    // While a result is on its way the line still says so.
+    expect(healthLine([CHECKING, good, good], 2)).toBe('Checking 1 of 3 areas…');
   });
 });
 

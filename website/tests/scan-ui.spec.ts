@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { test, expect, type Page } from '@playwright/test';
+import { mockScan } from './helpers/scan-mock';
 import { stubUmami, trackedEvents } from './helpers/umami';
 
 // The scan interface of /analyze/ and /ai-readability/: the one scan box, the
@@ -181,9 +182,10 @@ test.describe('shell tile states', () => {
     await expect(airead.locator('[data-scan-status]')).toHaveText('Needs work');
     await expect(airead.locator('[data-scan-value]')).toHaveText('Grade C · 64/100');
     await expect(risk.locator('[data-scan-status]')).toHaveText('1 flagged');
-    await expect(risk.locator('[data-scan-value]')).toHaveText('1 need attention');
+    await expect(risk.locator('[data-scan-value]')).toHaveText('1 check needs attention');
+    // The result has a step (Speed is poor), so the line counts the steps.
     await expect(page.locator('[data-scan-health]')).toHaveText(
-      '3 of 3 areas checked need attention.',
+      '1 thing to improve. Start with the step below.',
     );
     await expect(page.locator('[data-scan-live]')).not.toBeEmpty();
   });
@@ -232,7 +234,7 @@ test.describe('shell tile states', () => {
     expect(new Set(values).size).toBe(1);
   });
 
-  test('each tile shows a visible Details / Hide control that follows aria-expanded', async ({
+  test('each tile shows a visible Show details / Hide details control that follows aria-expanded', async ({
     page,
   }) => {
     await mockBackends(page);
@@ -240,17 +242,20 @@ test.describe('shell tile states', () => {
     await page.fill('#scan-url', 'https://example.com');
     await page.click('#scan-submit');
     const speed = page.locator('[data-scan-tile="speed"]');
-    await expect(speed.getByText('Details ▾')).toBeVisible();
-    await expect(speed.getByText('Hide ▴')).toBeHidden();
+    await expect(speed.locator('.scan-toggle-closed')).toHaveText('Show details ▾');
+    await expect(speed.locator('.scan-toggle-closed')).toBeVisible();
+    await expect(speed.locator('.scan-toggle-open')).toBeHidden();
     const closed = await speed.boundingBox();
     await speed.click();
-    await expect(speed.getByText('Hide ▴')).toBeVisible();
-    await expect(speed.getByText('Details ▾')).toBeHidden();
+    await expect(speed.locator('.scan-toggle-open')).toHaveText('Hide details ▴');
+    await expect(speed.locator('.scan-toggle-open')).toBeVisible();
+    await expect(speed.locator('.scan-toggle-closed')).toBeHidden();
     // A non-colour cue: the open tile carries an inset ring on top of its border.
     expect(await speed.evaluate((e) => getComputedStyle(e).boxShadow)).not.toBe('none');
     expect((await speed.boundingBox())!.height).toBe(closed!.height);
-    // The accessible name stays on the button, not on the visible control.
-    await expect(speed).toHaveAttribute('aria-label', 'Hide Speed details');
+    // The accessible name is the visible text: label, status, value, control.
+    await expect(speed).not.toHaveAttribute('aria-label', /.*/);
+    await expect(speed).toHaveAccessibleName('Speed Poor Mobile 40 · Desktop 95 Hide details');
   });
 
   test('Try again re-runs only the source behind that tile', async ({ page }) => {
@@ -298,7 +303,8 @@ test.describe('shell tile states', () => {
     await expect(speed).toHaveAttribute('aria-controls', 'scan-panel-speed');
     await speed.click();
     await expect(speed).toHaveAttribute('aria-expanded', 'true');
-    await expect(speed).toHaveAttribute('aria-label', 'Hide Speed details');
+    await expect(speed).toHaveAccessibleName(/^Speed Poor .* Hide details$/);
+    await expect(airead).toHaveAccessibleName(/^AI readability Needs work .* Show details$/);
     await expect(page.locator('#scan-panel-speed')).toBeVisible();
     await airead.click();
     await expect(speed).toHaveAttribute('aria-expanded', 'false');
@@ -424,6 +430,72 @@ test.describe('layout', () => {
       expect(cls).toBeLessThanOrEqual(0.02);
     });
   }
+
+  // Three steps are the tallest list: it must fit the room kept for it between
+  // 640 and 1023 px as well, where the sentences wrap more.
+  for (const fixture of ['full', 'sample-static'] as const) {
+    test(`/ai-readability/: three steps shift the layout by at most 0.02 at 768 px (${fixture})`, async ({
+      page,
+    }) => {
+      await page.addInitScript(() => {
+        const w = window as unknown as { __cls: number };
+        w.__cls = 0;
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            const shift = entry as PerformanceEntry & { hadRecentInput?: boolean; value?: number };
+            if (!shift.hadRecentInput) w.__cls += shift.value ?? 0;
+          }
+        }).observe({ type: 'layout-shift', buffered: true });
+      });
+      // 800 px high: the steps and the top of the form are on screen. A taller
+      // screen also shows the form's topic list filling in, which this test is
+      // not about.
+      await page.setViewportSize({ width: 768, height: 800 });
+      await mockScan(page, fixture, { scanDelay: 1500, psiDelay: 1500 });
+      await warm(page, '/ai-readability/?ui=v2');
+      await page.goto('/ai-readability/?ui=v2');
+      await page.fill('#scan-url', 'https://example.com');
+      await page.click('#scan-submit');
+      const block = page.locator('[data-scan-steps]');
+      await expect(block).toBeVisible();
+      const reserved = (await block.boundingBox())!.height;
+      await expect(page.locator('[data-scan-step]')).toHaveCount(3, { timeout: 15000 });
+      await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).toHaveText('Poor');
+      // The list fits the room kept for it: the block did not grow.
+      expect((await block.boundingBox())!.height).toBeLessThanOrEqual(reserved + 1);
+      await page.waitForTimeout(500);
+      const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+      expect(cls).toBeLessThanOrEqual(0.02);
+    });
+  }
+
+  // A hosted result shows its notice only once the scan says so, which moves
+  // the page once; it has its own ceiling.
+  test('/ai-readability/: a hosted result shifts the layout by at most 0.1', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __cls: number };
+      w.__cls = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const shift = entry as PerformanceEntry & { hadRecentInput?: boolean; value?: number };
+          if (!shift.hadRecentInput) w.__cls += shift.value ?? 0;
+        }
+      }).observe({ type: 'layout-shift', buffered: true });
+    });
+    await mockScan(page, 'hosted', { scanDelay: 1500, psiDelay: 1500 });
+    await warm(page, '/ai-readability/?ui=v2');
+    await page.goto('/ai-readability/?ui=v2');
+    await page.fill('#scan-url', 'https://studio.example.org');
+    await page.click('#scan-submit');
+    await expect(page.locator('[data-scan-tile="speed"] [data-scan-status]')).toHaveText('Poor', {
+      timeout: 15000,
+    });
+    await expect(page.locator('[data-scan-fit-notice]')).toBeVisible();
+    await expect(page.locator('[data-scan-step]')).toHaveCount(3);
+    await page.waitForTimeout(500);
+    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+    expect(cls).toBeLessThanOrEqual(0.1);
+  });
 
   test('/ai-readability/ results use the full tool width with a 16 px gutter on a phone', async ({
     page,

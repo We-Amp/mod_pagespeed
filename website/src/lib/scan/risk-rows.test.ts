@@ -22,10 +22,10 @@ describe('riskRows over the full report', () => {
       'responseExposure',
     ]);
     expect(rows.map((r) => r.name)).toEqual([
-      'Pre-consent leak',
-      'Script inventory',
+      'Trackers before consent',
+      'Scripts on the page',
       'SEO defects',
-      'Response exposure',
+      'Errors and versions the server reveals',
     ]);
   });
   it('flags every lens and carries the gate-fired link with its event', () => {
@@ -66,7 +66,7 @@ describe('riskRows over the full report', () => {
     );
     expect(m.seoDefects.sentence).not.toMatch(/Server header|CDN headers/);
     expect(m.responseExposure.sentence).toBe(
-      '1 error-output pattern · 2 version tells · end of life: PHP 7.4 · missing: nosniff, framing. One page only; not a security assessment.',
+      'The scan found 1 kind of error output in the page and 2 software versions the server reveals. Software past its end of life: PHP 7.4. Missing security headers: nosniff, framing protection. One page only; not a security assessment.',
     );
   });
   it('names no library, version or host in the script row', () => {
@@ -76,7 +76,7 @@ describe('riskRows over the full report', () => {
   it('gives the script row both building sentences when both gates fire', () => {
     expect(m.scriptInventory.building).toHaveLength(2);
     expect(m.scriptInventory.building[0]).toBe(
-      'Payment-page script integrity, a pack that would enforce an allowlist of approved scripts at your origin, is planned.',
+      'Payment-page script integrity is planned as an add-on for mod_pagespeed: it would let only the scripts you approved run, enforced on your server.',
     );
   });
 });
@@ -163,7 +163,7 @@ describe('riskRows edge cases', () => {
       rx({ verdict: 'clean', leaks: [], tells: [], endOfLife: [], headers: { missing: [] } }),
     )[0];
     expect(clean.sentence).toBe(
-      '0 error-output patterns · 0 version tells · end of life: none seen · missing: none. One page only; not a security assessment.',
+      'The scan found 0 kinds of error output in the page and 0 software versions the server reveals. Software past its end of life: none seen. Missing security headers: none. One page only; not a security assessment.',
     );
     const unknown = riskRows(
       rx({ verdict: 'unknown', notMeasured: ['static-html', 'headers'] }),
@@ -233,7 +233,7 @@ describe('riskRows edge cases', () => {
       ' ModPageSpeed 2.0.3: Migrate from ModPageSpeed 2.0 explains how your setup moves to the current release. One page only',
     );
     expect(sentence('2.1.0')).toBe(
-      '0 error-output patterns · 1 version tell · end of life: none seen · missing: none. One page only; not a security assessment.',
+      'The scan found 0 kinds of error output in the page and 1 software version the server reveals. Software past its end of life: none seen. Missing security headers: none. One page only; not a security assessment.',
     );
     expect(sentence('unknown')).not.toContain('mod_pagespeed ');
   });
@@ -247,7 +247,7 @@ describe('riskRows edge cases', () => {
         headers: { missing: [] },
       }),
     )[0];
-    expect(row.sentence).toContain('1 version tell');
+    expect(row.sentence).toContain('1 software version the server reveals');
   });
   it('treats the generic header value "on" as active with no version disclosed', () => {
     for (const version of ['on', null]) {
@@ -261,7 +261,7 @@ describe('riskRows edge cases', () => {
         }),
       )[0];
       expect(row.sentence).toBe(
-        '0 error-output patterns · 0 version tells · end of life: none seen · missing: none. One page only; not a security assessment.',
+        'The scan found 0 kinds of error output in the page and 0 software versions the server reveals. Software past its end of life: none seen. Missing security headers: none. One page only; not a security assessment.',
       );
     }
   });

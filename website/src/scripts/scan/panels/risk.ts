@@ -56,7 +56,9 @@ function rowNode(row: RiskRow): HTMLElement {
   }
   // On a phone the secondary text sits behind one disclosure per row, closed by
   // default; the panel is hidden when this runs, so it cannot shift the page.
-  const narrow = row.building.length > 0 && matchMedia('(max-width: 639px)').matches;
+  // The SEO add-on is available today, so its sentence is never under "What is planned".
+  const narrow =
+    row.building.length > 0 && row.key !== 'seoDefects' && matchMedia('(max-width: 639px)').matches;
   const holder = narrow ? el('details', 'scan-risk-more') : li;
   if (narrow) {
     const summary = el(

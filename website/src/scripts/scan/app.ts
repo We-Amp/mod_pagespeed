@@ -28,6 +28,13 @@ import {
 } from '../../lib/scan/psi';
 import { resolveApiBase } from '../../lib/scan/api-base';
 import { fitFor, type Fit } from '../../lib/scan/fit';
+import {
+  emptyLine,
+  nextSteps,
+  showLabel,
+  type Step,
+  type StepPillar,
+} from '../../lib/scan/next-steps';
 import { proxyErrorText, scanErrorCopy } from '../../lib/scan/scan-errors';
 import { renderSpeedPanel } from './panels/speed';
 
@@ -262,7 +269,15 @@ export function init() {
   const hintEl = root.querySelector<HTMLElement>('[data-scan-hint]');
   const fitLine = root.querySelector<HTMLElement>('[data-scan-fit-line]');
   const fitText = root.querySelector<HTMLElement>('[data-scan-fit-text]');
-  const fitActions = root.querySelector<HTMLElement>('[data-scan-fit-actions]');
+  const fitLinks = root.querySelector<HTMLElement>('[data-scan-fit-links]');
+  const elapsedEl = root.querySelector<HTMLElement>('[data-scan-elapsed]');
+  const stepsEl = root.querySelector<HTMLElement>('[data-scan-steps]');
+  const stepsList = root.querySelector<HTMLElement>('[data-scan-steps-list]');
+  const stepsNone = root.querySelector<HTMLElement>('[data-scan-steps-none]');
+  const readableEl = root.querySelector<HTMLElement>('[data-scan-readable]');
+  const readableText = root.querySelector<HTMLElement>('[data-scan-readable-text]');
+  const readableGuide = root.querySelector<HTMLElement>('[data-scan-readable-guide-slot]');
+  const fitGuide = root.querySelector<HTMLElement>('[data-scan-fit-guide-row]');
   const tiles = new Map<Pillar, HTMLButtonElement>();
   const panels = new Map<Pillar, HTMLElement>();
   for (const p of PILLARS) {
@@ -278,6 +293,7 @@ export function init() {
   let runId = 0;
   let running = false;
   let announcedFirst = false;
+  let elapsedTimer = 0;
 
   function announce(text: string) {
     live.textContent = text;
@@ -293,26 +309,136 @@ export function init() {
     root!.dataset.serverOffers = !fit ? 'pending' : fit.offers ? 'on' : 'off';
     if (fitLine) fitLine.textContent = fit && fit.offers ? fit.text : '';
     if (fitText) fitText.textContent = fit && !fit.offers ? fit.text : '';
-    if (fitActions) {
-      fitActions.replaceChildren();
-      for (const action of fit && !fit.offers ? fit.actions : []) {
-        const li = document.createElement('li');
-        li.textContent = action.text;
-        if (action.source && action.sourceLabel) {
-          const a = document.createElement('a');
-          a.className = 'font-medium text-interactive underline';
-          a.href = action.source;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          a.textContent = action.sourceLabel;
-          a.setAttribute('aria-label', `${action.sourceLabel} (opens in new tab)`);
-          a.title = `${action.sourceLabel} (opens in new tab)`;
-          li.append(' ', a);
-        }
-        fitActions.append(li);
-      }
-      fitActions.hidden = fitActions.childElementCount === 0;
+    if (fitLinks) {
+      fitLinks.replaceChildren();
+      const links = fit && !fit.offers ? fit.links : [];
+      if (links.length) fitLinks.append(fit!.linksLead);
+      links.forEach((link, i) => {
+        const a = document.createElement('a');
+        a.className = 'font-medium text-interactive underline';
+        a.href = link.href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = link.label;
+        a.setAttribute('aria-label', `${link.label} (opens in new tab)`);
+        a.title = `${link.label} (opens in new tab)`;
+        fitLinks.append(i === 0 ? ' ' : ', ', a);
+      });
+      if (links.length) fitLinks.append('.');
+      fitLinks.hidden = links.length === 0;
     }
+    if (fitGuide) {
+      fitGuide.replaceChildren();
+      const hosted = !!fit && !fit.offers;
+      if (hosted && guideHref) fitGuide.append(guideLink('scanFitGuide'));
+      fitGuide.hidden = fitGuide.childElementCount === 0;
+    }
+  }
+
+  // The link to the guide for sites on a hosted builder, when this build has that page.
+  const guideHref = root.dataset.hostedGuide ?? '';
+  function guideLink(marker: 'scanFitGuide' | 'scanReadableGuide'): HTMLAnchorElement {
+    const a = document.createElement('a');
+    a.className = 'font-medium text-interactive underline';
+    a.href = guideHref;
+    a.dataset[marker] = '';
+    a.textContent = 'What you can change on a hosted builder';
+    return a;
+  }
+
+  function speedScores() {
+    const psi = state.lastPsi;
+    if (!psi || statuses.speed.state === 'checking') return null;
+    return {
+      mobile: psi.mobile ? perfScore(psi.mobile) : null,
+      desktop: psi.desktop ? perfScore(psi.desktop) : null,
+    };
+  }
+
+  // Open a step's panel and put focus on the row the step is about (the panel
+  // itself when the row is not there).
+  function showStep(step: Step) {
+    // One event per action: a step that opens its panel counts as a step, not
+    // as a tile opened by hand, and a panel that is already open stays as it is.
+    const panel = panels.get(step.pillar)!;
+    if (panel.hidden) setOpen(step.pillar, false);
+    const row = (step.target && panel.querySelector<HTMLElement>(step.target)) || panel;
+    row.tabIndex = -1;
+    row.focus({ preventScroll: true });
+    // A row is centred; a whole panel is shown from its top.
+    row.scrollIntoView({
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: row === panel ? 'start' : 'center',
+    });
+    track('scan-step-open', { step: step.id });
+  }
+
+  // The steps list follows the results as they land: it is rewritten in place
+  // and never takes focus or speaks.
+  let paintedSteps = '';
+  let lastSteps = { total: 0, shown: 0, unreadable: false };
+  function paintSteps(): typeof lastSteps {
+    const scanPending = statuses.airead.state === 'checking';
+    const anyPending = PILLARS.some((p) => statuses[p].state === 'checking');
+    const { steps, total, unreadable, readable, readableLine } = nextSteps(
+      scanPending ? null : state.lastReport,
+      speedScores(),
+    );
+    lastSteps = { total, shown: steps.length, unreadable };
+    if (!stepsEl || !stepsList || !stepsNone) return lastSteps;
+    const attention = PILLARS.filter((p) =>
+      ['needs-work', 'poor', 'flagged'].includes(statuses[p].state),
+    ) as StepPillar[];
+    const none =
+      steps.length > 0
+        ? ''
+        : anyPending
+          ? 'pending'
+          : emptyLine(attention, PILLARS.filter((p) => statuses[p].state !== 'none').length);
+    const key = JSON.stringify([steps, none, readableLine, anyPending]);
+    if (key === paintedSteps) return lastSteps;
+    paintedSteps = key;
+    stepsEl.dataset.state = anyPending ? 'pending' : steps.length ? 'steps' : 'none';
+    root!.dataset.readable = String(readable);
+    if (readableEl && readableText) {
+      readableText.textContent = readableLine;
+      readableEl.hidden = !readable;
+      // On a hosted result the guide follows the statement.
+      readableGuide?.replaceChildren();
+      if (readable && guideHref && root!.dataset.serverOffers === 'off') {
+        readableGuide?.append(' ', guideLink('scanReadableGuide'));
+      }
+    }
+    stepsList.replaceChildren();
+    for (const step of steps) {
+      const li = document.createElement('li');
+      li.dataset.scanStep = step.id;
+      const text = document.createElement('span');
+      text.textContent = step.text;
+      const tag = document.createElement('span');
+      tag.className = 'scan-step-tag';
+      tag.dataset.scanStepTag = '';
+      tag.textContent = step.tag;
+      const show = document.createElement('button');
+      show.type = 'button';
+      show.className = 'scan-step-show';
+      show.dataset.scanStepShow = step.pillar;
+      show.textContent = showLabel(step.pillar);
+      show.addEventListener('click', () => showStep(step));
+      li.append(text, ' ', tag, ' ', show);
+      stepsList.append(li);
+    }
+    stepsList.hidden = steps.length === 0;
+    stepsNone.hidden = steps.length > 0;
+    if (none === 'pending') {
+      const bar = document.createElement('span');
+      bar.className = 'scan-skeleton';
+      bar.setAttribute('aria-hidden', 'true');
+      stepsNone.replaceChildren(bar);
+    } else {
+      stepsNone.textContent = none;
+    }
+    return lastSteps;
   }
 
   // The hosted-platform sentence is read out once, with the last of the two
@@ -351,7 +477,15 @@ export function init() {
       value.textContent = status.value || '—';
       value.removeAttribute('title');
     }
-    healthEl.textContent = healthLine(PILLARS.map((p) => statuses[p]));
+    const painted = paintSteps();
+    healthEl.textContent = healthLine(
+      PILLARS.map((p) => statuses[p]),
+      painted.total,
+      {
+        shown: painted.shown,
+        unreadable: painted.unreadable,
+      },
+    );
   }
 
   // Paint the tile, then hand the panel to the pillar's renderer.
@@ -374,15 +508,14 @@ export function init() {
     });
   }
 
-  function setOpen(open: Pillar | null) {
+  function setOpen(open: Pillar | null, tracked = true) {
     for (const p of PILLARS) {
       const isOpen = p === open;
       const tile = tiles.get(p)!;
       tile.setAttribute('aria-expanded', String(isOpen));
-      tile.setAttribute('aria-label', `${isOpen ? 'Hide' : 'Show'} ${PILLAR_NAME[p]} details`);
       panels.get(p)!.hidden = !isOpen;
     }
-    if (open) track('scan-tile-open', { pillar: open });
+    if (open && tracked) track('scan-tile-open', { pillar: open });
   }
 
   for (const p of PILLARS) {
@@ -560,6 +693,17 @@ export function init() {
     // never moves what is below it.
     if (hintEl) {
       hintEl.textContent = busy ? WAIT_HINT : '';
+    }
+    // A plain count of the seconds waited, next to the "Checking" line. It is
+    // text, so it also shows with reduced motion, and it sits outside the live
+    // region, so it is not read out each second.
+    clearInterval(elapsedTimer);
+    if (elapsedEl) elapsedEl.textContent = busy ? '0 s' : '';
+    if (busy && elapsedEl) {
+      const since = Date.now();
+      elapsedTimer = window.setInterval(() => {
+        elapsedEl.textContent = `${Math.round((Date.now() - since) / 1000)} s`;
+      }, 1000);
     }
   }
 

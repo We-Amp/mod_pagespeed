@@ -7,7 +7,14 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { crawlerRulesLine, crawlersBlocked, formatAiread } from './airead';
+import {
+  MAX_RULES,
+  MAX_RULE_TEXT,
+  accessibilityFindings,
+  crawlerRulesLine,
+  crawlersBlocked,
+  formatAiread,
+} from './airead';
 
 const fixture = (name: string) =>
   JSON.parse(
@@ -197,7 +204,7 @@ describe('formatAiread extras', () => {
     unknown.agentSignals.markdown.negotiated = null;
     expect(formatAiread(unknown).alsoFound.map((f) => f.wedge)).not.toContain('markdown-origin');
   });
-  const IMPOSTOR = ', but your origin can’t tell a real signed agent from an impostor.';
+  const IMPOSTOR = ', but your server can’t tell a real signed agent from an impostor.';
   const first = (r: Parameters<typeof formatAiread>[0]) => formatAiread(r).alsoFound[0].text;
 
   it('names no count of allowed crawlers when the result has no robots.txt reading', () => {
@@ -273,7 +280,7 @@ describe('formatAiread extras', () => {
         (f) => f.text,
       ),
     );
-    expect(formatAiread(plain).alsoFound[0].text).toContain('your origin can’t tell');
+    expect(formatAiread(plain).alsoFound[0].text).toContain('your server can’t tell');
   });
   it('builds the token line from the report', () => {
     expect(formatAiread(fixture('full')).tokenLine).toBe(
@@ -419,5 +426,44 @@ describe('crawlerRulesLine', () => {
       expect(row.verdict).toBe(line);
       expect(row.note).toBe('');
     }
+  });
+});
+
+describe('accessibilityFindings', () => {
+  it('orders the rules by impact and then by elements, and bounds what it returns', () => {
+    const found = accessibilityFindings({
+      accessibility: {
+        available: true,
+        detail: {
+          total: 9,
+          topRules: [
+            { impact: 'moderate', nodes: 3, help: 'Heading levels should only increase by one' },
+            { impact: 'serious', nodes: 2, help: 'Elements must meet minimum color contrast.' },
+            { impact: 'serious', nodes: 7.9, help: `  ${'word '.repeat(60)}` },
+            { impact: 'odd', nodes: 'x', help: 'Unknown impact' },
+            { impact: 'minor', nodes: 1, help: '' },
+            { impact: 'critical', nodes: 1, help: 'One' },
+            { impact: 'minor', nodes: 1, help: 'Two' },
+            { impact: 'minor', nodes: 1, help: 'Three' },
+          ],
+        },
+      },
+    })!;
+    expect(found.total).toBe(9);
+    expect(found.rules).toHaveLength(MAX_RULES);
+    expect(found.rules.map((r) => r.nodes)).toEqual([1, 7, 2, 3, 1]);
+    expect(found.rules[0].help).toBe('One');
+    expect(found.rules[2].help).toBe('Elements must meet minimum color contrast');
+    expect(found.rules[1].help.length).toBeLessThanOrEqual(MAX_RULE_TEXT);
+    expect(found.rules[1].help.endsWith('…')).toBe(true);
+  });
+  it('is null when the checks found nothing or did not run', () => {
+    expect(accessibilityFindings({})).toBeNull();
+    expect(
+      accessibilityFindings({ accessibility: { available: false, detail: { total: 3 } } }),
+    ).toBeNull();
+    expect(
+      accessibilityFindings({ accessibility: { available: true, detail: { total: 0 } } }),
+    ).toBeNull();
   });
 });
