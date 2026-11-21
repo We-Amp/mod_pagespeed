@@ -4,9 +4,9 @@
 // The one lead form of the v2 interface, plus the next-steps row and the
 // share row under it. The shell renders the static form; this module fills
 // the topic chips once the scan result is in, adds the speed-help chip when
-// the speed result settles, and sends one lead per selected chip (or one
-// general question when none is selected). Messages go through the shell's
-// single live region.
+// the speed result settles, and sends the whole form as one request (a general
+// question when no topic is ticked). Messages go through the shell's single
+// live region.
 
 import { resolveApiBase } from '../../lib/scan/api-base';
 import { speedStatus, type TileState } from '../../lib/scan/status';
@@ -14,10 +14,10 @@ import {
   CONSULTING,
   FOUND_MARKER,
   MAX_TOPICS,
-  SITES_WEDGES,
   chipsFor,
-  selectionFor,
-  submitLeads,
+  emailOk,
+  newSubmissionId,
+  payloadForSubmission,
   type Chip,
   type LeadPayload,
 } from '../../lib/scan/lead';
@@ -59,11 +59,10 @@ export function initLeadForm(state: ScanState) {
   const form: HTMLFormElement = found;
   const surface = box?.dataset.scanSurface === 'airead' ? 'airead' : 'analyze';
   const live = root.querySelector<HTMLElement>('[data-scan-live]')!;
-  const topicsEl = form.querySelector<HTMLElement>('[data-scan-topics]')!;
   const chipsEl = form.querySelector<HTMLElement>('[data-scan-chips]')!;
   const emailEl = form.querySelector<HTMLInputElement>('input[name="email"]')!;
+  const emailErr = form.querySelector<HTMLElement>('[data-scan-lead-email-error]')!;
   const sitesEl = form.querySelector<HTMLInputElement>('[data-scan-sites]')!;
-  const sitesLabel = form.querySelector<HTMLElement>(`label[for="${sitesEl.id}"]`)!;
   const noteEl = form.querySelector<HTMLTextAreaElement>('textarea[name="note"]')!;
   const submitBtn = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   const msgEl = form.querySelector<HTMLElement>('[data-scan-lead-msg]')!;
@@ -85,14 +84,10 @@ export function initLeadForm(state: ScanState) {
   let pending = false;
   let permalink = '';
   let thanks: HTMLElement | null = null;
-  const sent = new Map<string, string>();
-  const fired = new Set<string>();
   // True once the visitor has changed a topic by hand: their choices are then left alone.
   let touched = false;
-  // True once a request with nothing ticked (a general question) went through.
-  let generalSent = false;
-  // The topics named in the "We could not send" line, while it is showing.
-  let failedIds: string[] = [];
+  // The id of the submit attempt in progress; a retry after a failure reuses it.
+  let submissionId = '';
 
   function announce(text: string) {
     live.textContent = '';
@@ -100,11 +95,17 @@ export function initLeadForm(state: ScanState) {
   }
   function message(text: string, spoken = true) {
     msgEl.textContent = text;
-    const invalid = text ? 'true' : 'false';
-    emailEl.setAttribute('aria-invalid', invalid);
-    topicsEl.setAttribute('aria-invalid', invalid);
     if (spoken && text) announce(text);
   }
+  // The email error stays under the field until the address is valid.
+  function emailError(text: string) {
+    emailErr.textContent = text;
+    emailErr.hidden = !text;
+    emailEl.setAttribute('aria-invalid', text ? 'true' : 'false');
+  }
+  emailEl.addEventListener('input', () => {
+    if (!emailErr.hidden && emailOk(emailEl.value)) emailError('');
+  });
 
   function setPermalink(value: string) {
     let url: URL;
@@ -161,20 +162,11 @@ export function initLeadForm(state: ScanState) {
   }
 
   function selected(): Chip[] {
-    return chips.filter((c) => inputOf(c.id)?.checked && !sent.has(c.id));
+    return chips.filter((c) => inputOf(c.id)?.checked);
   }
 
   function onTopicsChange() {
-    const picked = selected();
-    const wantsSites = picked.some((c) => SITES_WEDGES.includes(c.wedge));
-    sitesEl.hidden = !wantsSites;
-    sitesLabel.hidden = !wantsSites;
-    // The failure line is stale once none of the topics it names is still ticked.
-    if (failedIds.length > 0 && !failedIds.some((id) => picked.some((c) => c.id === id))) {
-      failedIds = [];
-      message('', false);
-    }
-    if (picked.length > MAX_TOPICS) message('Pick up to four topics.');
+    if (selected().length > MAX_TOPICS) message('Pick up to four topics.');
     else if (msgEl.textContent === 'Pick up to four topics.') message('', false);
   }
 
@@ -198,12 +190,9 @@ export function initLeadForm(state: ScanState) {
     rendered = null;
     renderedSpeed = null;
     chips = [];
-    sent.clear();
-    fired.clear();
     permalink = '';
     touched = false;
-    generalSent = false;
-    failedIds = [];
+    submissionId = '';
     pending = true;
     auditEl.classList.add('invisible');
     downloadBtn.hidden = true;
@@ -211,8 +200,6 @@ export function initLeadForm(state: ScanState) {
     bar.className = 'scan-skeleton';
     bar.setAttribute('aria-hidden', 'true');
     chipsEl.replaceChildren(bar);
-    sitesEl.hidden = true;
-    sitesLabel.hidden = true;
     form.hidden = false;
     nextRow.hidden = false;
     shareRow.hidden = false;
@@ -222,7 +209,7 @@ export function initLeadForm(state: ScanState) {
     thanks = null;
     message('', false);
     submitBtn.disabled = true;
-    busy = false;
+    setBusy(false);
   }
 
   function sync() {
@@ -241,11 +228,9 @@ export function initLeadForm(state: ScanState) {
       pending = false;
       thanks?.remove();
       thanks = null;
-      sent.clear();
-      fired.clear();
       touched = false;
-      generalSent = false;
-      failedIds = [];
+      submissionId = '';
+      message('', false);
       chipsEl.replaceChildren();
       chips = chipsFor(scan.report, speed);
       chips.forEach(addChip);
@@ -287,118 +272,118 @@ export function initLeadForm(state: ScanState) {
   });
 
   const apiBase = () => resolveApiBase(location.search, location.hostname);
-  async function post(payload: LeadPayload): Promise<boolean> {
+  // The HTTP status of the answer; 0 when the request did not get one.
+  async function post(payload: LeadPayload): Promise<number> {
     try {
       const res = await fetch(`${apiBase()}/contact`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return res.ok;
+      return res.status;
     } catch {
-      return false;
+      return 0;
+    }
+  }
+
+  // While a request is on its way the button says so but stays focusable, so
+  // focus is still on it when the answer comes back.
+  function setBusy(on: boolean) {
+    busy = on;
+    if (on) {
+      submitBtn.setAttribute('aria-disabled', 'true');
+      submitBtn.setAttribute('aria-busy', 'true');
+    } else {
+      submitBtn.removeAttribute('aria-disabled');
+      submitBtn.removeAttribute('aria-busy');
     }
   }
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
+    // A second click while the request is on its way sends nothing.
     if (busy) return;
     const ticked = selected();
-    // Nothing left to send: every topic of an earlier attempt went through
-    // and the visitor unticked the rest.
-    if (ticked.length === 0 && sent.size > 0) {
-      message('', false);
-      showThanks();
-      return;
-    }
-    // With nothing ticked the form is a general question.
-    const general = ticked.length === 0;
-    const picked = selectionFor(ticked).map((c) => chips.find((o) => o.id === c.id) ?? c);
-    if (picked.length > MAX_TOPICS) {
+    if (ticked.length > MAX_TOPICS) {
       message('Pick up to four topics.');
       return;
     }
-    if (!emailEl.reportValidity()) return;
-    failedIds = [];
-    message('', false);
-    busy = true;
-    submitBtn.disabled = true;
-    submitBtn.setAttribute('aria-busy', 'true');
-    for (const chip of picked) {
-      if (chip.gated && !fired.has(chip.wedge)) {
-        fired.add(chip.wedge);
-        track(`airead-next-${chip.wedge}`);
-      }
+    const email = emailEl.value.trim();
+    if (!emailOk(email)) {
+      const text = email
+        ? 'Enter a valid email address, like name@example.com.'
+        : 'Enter your email address.';
+      emailError(text);
+      // Moving focus to the field reads its error out. When focus is already
+      // there (Enter in the field) nothing moves, so the error is announced.
+      if (document.activeElement === emailEl) announce(text);
+      else emailEl.focus();
+      return;
     }
+    emailError('');
+    message('', false);
+    setBusy(true);
+    submissionId ||= newSubmissionId();
     const { mobile, desktop } = psiNumbers();
-    const outcomes = await submitLeads(
-      picked,
+    const payload = payloadForSubmission(
+      chips,
+      ticked.map((c) => c.id),
       {
-        email: emailEl.value.trim(),
-        sites: sitesEl.hidden ? '' : sitesEl.value.trim(),
+        email,
+        sites: sitesEl.value.trim(),
         note: noteEl.value,
         url: state.url,
         mobile,
         desktop,
         t: loadedAt,
+        submissionId,
       },
       (state.lastScan?.report as ScanReport | null) ?? null,
-      post,
     );
-    busy = false;
-    submitBtn.disabled = false;
-    submitBtn.removeAttribute('aria-busy');
-    for (const { chip, ok } of outcomes) {
-      if (!ok) continue;
-      track('lead_submit', {
-        channel: 'scan',
-        topic: chip.id,
-        wedge: chip.wedge,
-        source_path: location.pathname,
-      });
-      sent.set(chip.id, chip.label);
-      const input = inputOf(chip.id);
-      if (input) {
-        input.checked = false;
-        input.disabled = true;
-      }
-    }
-    const failed = outcomes.filter((o) => !o.ok).map((o) => o.chip);
-    if (failed.length) {
-      if (general) {
-        // The visitor ticked nothing, so the line names no topic.
-        message('We could not send your question. Try again.');
-        return;
-      }
-      const done = [...sent.values()];
+    const status = await post(payload);
+    setBusy(false);
+    if (status < 200 || status > 299) {
+      // Everything the visitor filled in stays as it is, ready to send again.
       message(
-        (done.length ? `Sent: ${done.join(', ')}. ` : '') +
-          `We could not send: ${failed.map((c) => c.label).join(', ')}. Try again.`,
+        status === 400
+          ? 'We could not send your request. Check the email address and try again.'
+          : status === 429
+            ? 'Too many requests from this connection. Try again in a minute.'
+            : 'We could not send your request. Try again.',
       );
-      failedIds = failed.map((c) => c.id);
-      onTopicsChange();
       return;
     }
-    if (general) generalSent = true;
-    showThanks();
+    submissionId = '';
+    const chosen = payload.topics.filter((t) => t.chosen);
+    track('lead_submit', {
+      channel: 'scan',
+      topic: payload.topic,
+      wedge: payload.wedge,
+      source_path: location.pathname,
+      topics_n: chosen.length,
+    });
+    for (const topic of chosen) {
+      if (topic.wedge) track(`airead-next-${topic.wedge}`);
+    }
+    showThanks(
+      email,
+      ticked.map((c) => c.label),
+    );
   });
 
-  function showThanks() {
+  function showThanks(email: string, labels: string[]) {
     form.hidden = true;
     thanks = document.createElement('div');
     thanks.className = 'mt-8 rounded-2xl border border-border bg-bg-elevated p-5 sm:p-6';
     thanks.tabIndex = -1;
     const line = document.createElement('p');
-    line.className = 'text-text-body';
-    line.textContent =
-      'Thanks, your message is in. An engineer replies within one business day (CET).';
+    line.className = 'text-text-body [overflow-wrap:anywhere]';
+    line.textContent = `Sent. An engineer at We-Amp replies to ${email} within one business day.`;
     const topics = document.createElement('p');
     topics.className = 'mt-1 text-sm text-text-muted';
     // A general question names no topic: the visitor ticked none.
     topics.textContent =
-      generalSent && sent.size === 1
-        ? 'Your question was sent.'
-        : `Topics sent: ${[...sent.values()].join(', ')}.`;
+      labels.length === 0 ? 'Your question was sent.' : `Topics sent: ${labels.join(', ')}.`;
     thanks.append(line, topics);
     form.after(thanks);
     announce(`${line.textContent} ${topics.textContent}`);

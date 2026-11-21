@@ -367,7 +367,7 @@ test.describe('v2 shell details', () => {
     await expect(page.getByRole('region', { name: 'Speed', exact: true })).toBeVisible();
   });
 
-  test('the Talk to us note starts empty', async ({ page }) => {
+  test('the request form note starts empty', async ({ page }) => {
     await page.goto('/analyze/?ui=v2');
     await expect(page.locator('#scan-lead-note')).toHaveValue('');
   });

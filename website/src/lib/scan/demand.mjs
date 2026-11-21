@@ -82,8 +82,9 @@ export function markdownOriginCtaApplies(agentSignals) {
   );
 }
 
-export function buildLeadPayload({ wedge, email, name, note, report }) {
-  const url = (report && report.url) || '';
+// The signal one topic carries: ids, counts and booleans from the lens behind
+// the wedge, or null when the wedge has no lens. Pure.
+export function lensSignalFor(wedge, report) {
   let lensSignal;
   if (wedge === 'tollbooth') {
     const d = report.agentVerifiability.detail;
@@ -132,6 +133,10 @@ export function buildLeadPayload({ wedge, email, name, note, report }) {
         thirdPartyExternal: s.totals.thirdPartyExternal,
         thirdPartyHosts: s.totals.thirdPartyHosts,
         thirdPartyWithIntegrity: s.totals.thirdPartyWithIntegrity,
+        // Present only when the scan named a hosted platform.
+        ...(typeof s.totals.platformExternal === 'number'
+          ? { platformExternal: s.totals.platformExternal }
+          : {}),
       },
       topHosts: (s.scriptHosts || [])
         .filter((h) => h.party === 'third')
@@ -191,6 +196,12 @@ export function buildLeadPayload({ wedge, email, name, note, report }) {
   } else {
     lensSignal = null;
   }
+  return lensSignal;
+}
+
+export function buildLeadPayload({ wedge, email, name, note, report }) {
+  const url = (report && report.url) || '';
+  const lensSignal = lensSignalFor(wedge, report);
   const message = [
     `[${wedge}] lead from RenderPeek result`,
     `Scanned: ${url}`,

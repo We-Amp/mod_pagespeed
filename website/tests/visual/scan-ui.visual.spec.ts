@@ -259,31 +259,29 @@ const STATES: State[] = [
       await page.click('form[data-scan-lead] button[type="submit"]');
       await expect(
         page.getByText(
-          'Thanks, your message is in. An engineer replies within one business day (CET).',
+          'Sent. An engineer at We-Amp replies to reviewer@example.com within one business day.',
           { exact: true },
         ),
       ).toBeVisible();
-      expect(mocks.calls.contact).toBe(4);
+      expect(mocks.calls.contact).toBe(1);
       await shot('submitted', { fullPage: true });
     },
   },
   {
     n: 12,
-    slug: 'form-partial-failure',
-    title: 'form partial failure, one topic not sent',
-    mock: 'As state 8 with two or more chips selected; contact status [200, 500] (first POST ok, second fails); capture the "We could not send" message.',
-    opts: { contact: { status: [200, 500] } },
+    slug: 'form-send-failure',
+    title: 'form send failure, the request was not sent',
+    mock: 'As state 8; contact status 500; capture the "We could not send your request" message with the form still filled in.',
+    opts: { contact: { status: 500 } },
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
       await toForm(page);
-      await chipInput(page, 'agentpass').uncheck();
-      await chipInput(page, 'compliancefix').uncheck();
       await page.fill('input[name="email"]', 'reviewer@example.com');
       await page.click('form[data-scan-lead] button[type="submit"]');
-      await expect(leadMsg(page)).toContainText('We could not send:');
-      expect(mocks.calls.contact).toBe(2);
-      await shot('form-partial-failure', { fullPage: true });
+      await expect(leadMsg(page)).toHaveText('We could not send your request. Try again.');
+      expect(mocks.calls.contact).toBe(1);
+      await shot('form-send-failure', { fullPage: true });
     },
   },
   {

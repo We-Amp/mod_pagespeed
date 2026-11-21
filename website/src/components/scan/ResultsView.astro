@@ -3,7 +3,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
 // The shared results skeleton: a summary strip (one health line, three
-// tiles), one drill-down panel per tile, the "Talk to us" form shell, the
+// tiles), one drill-down panel per tile, the "Ask an engineer" form shell, the
 // next-steps row and the share row. Everything rendered here at build time is
 // a label; every result string is written by the scan controller at run time
 // with textContent. The section is hidden until a scan starts and is kept out
@@ -117,12 +117,16 @@ const pillars = [
     hidden
   >
     <h3 id={`${idPrefix}-lead-heading`} class="text-lg font-semibold text-text-body">
-      Talk to us
+      Ask an engineer
     </h3>
-    <p class="mt-1 text-sm text-text-muted">
+    <p id={`${idPrefix}-lead-hint`} class="mt-1 text-sm text-text-muted">
       Pick what you want to talk about, or leave the topics empty for a general question.
     </p>
-    <fieldset class="mt-4" data-scan-topics aria-describedby={`${idPrefix}-lead-msg`}>
+    <fieldset
+      class="mt-4"
+      data-scan-topics
+      aria-describedby={`${idPrefix}-lead-hint ${idPrefix}-lead-msg`}
+    >
       <legend class="text-sm font-medium text-text-body">Topics</legend>
       <div class="mt-2 flex flex-wrap gap-2" data-scan-chips></div>
     </fieldset>
@@ -132,10 +136,18 @@ const pillars = [
     <input
       id={`${idPrefix}-lead-email`}
       name="email"
-      aria-describedby={`${idPrefix}-lead-msg`}
+      aria-describedby={`${idPrefix}-lead-email-error`}
+      aria-invalid="false"
       type="email"
       autocomplete="email"
-      class="mt-1 w-full min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
+      class="mt-1 w-full min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive aria-[invalid=true]:border-accent aria-[invalid=true]:ring-1 aria-[invalid=true]:ring-accent sm:text-sm"
+    />
+    <p
+      id={`${idPrefix}-lead-email-error`}
+      class="mt-1 text-sm text-accent"
+      data-scan-lead-email-error
+      hidden
+      set:text=""
     />
     <label for={`${idPrefix}-lead-sites`} class="mt-4 block text-sm font-medium text-text-body">
       Sites you run (optional)
@@ -150,7 +162,6 @@ const pillars = [
       inputmode="numeric"
       class="mt-1 w-full min-h-11 rounded-md border border-control-border px-4 py-3 text-text-body bg-bg-elevated focus:border-interactive focus:ring-2 focus:ring-interactive sm:text-sm"
       data-scan-sites
-      hidden
     />
     <label for={`${idPrefix}-lead-note`} class="mt-4 block text-sm font-medium text-text-body">
       Anything we should know? (optional)
@@ -165,10 +176,12 @@ const pillars = [
     />
 
     <p class="mt-4 text-xs text-text-annotation">
-      Submitting this sends us your email and a summary of this scan’s findings. We use them only for
-      this request; see our <a href="https://we-amp.com/privacy/" class="underline">privacy policy</a>.
+      Sending this gives We-Amp your email address, your note, the page you scanned and its scan
+      result. An engineer replies by email within one business day. We keep your request to answer
+      it and to see what visitors ask for; the
+      <a href="https://we-amp.com/privacy/" class="underline">privacy policy</a> says for how long.
     </p>
-    <button type="submit" class="btn-primary mt-4 min-h-11">Talk to us</button>
+    <button type="submit" class="btn-primary scan-lead-submit mt-4 min-h-11">Send request</button>
     <p id={`${idPrefix}-lead-msg`} class="mt-2 text-sm text-accent" data-scan-lead-msg></p>
   </form>
 
@@ -216,6 +229,14 @@ const pillars = [
 </script>
 
 <style is:global>
+  /* Sending: the button stays focusable and keeps its label at full contrast. */
+  .scan-lead-submit[aria-disabled='true'],
+  .scan-lead-submit[aria-disabled='true']:hover {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-body);
+    border: 1px solid var(--color-control-border);
+    cursor: wait;
+  }
   .scan-tiles {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

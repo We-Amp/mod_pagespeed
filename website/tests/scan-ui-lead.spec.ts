@@ -6,7 +6,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { stubUmami, trackedEvents } from './helpers/umami';
 
 // The v2 lead form. The scanner, PageSpeed Insights and the contact endpoint
-// are mocked; the real services are never called.
+// are mocked; the real services are never called. The form sends one request
+// per submission, whatever the number of topics.
 
 const fixture = (name: string) =>
   readFileSync(new URL(`./fixtures/scan/report-${name}.json`, import.meta.url), 'utf8');
@@ -77,6 +78,13 @@ const checkedIds = (page: Page) =>
   page
     .locator('[data-scan-chip] input:checked')
     .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+
+const sentLine = (page: Page, email = 'ops@example.com') =>
+  page.getByText(`Sent. An engineer at We-Amp replies to ${email} within one business day.`, {
+    exact: true,
+  });
+const topicsOf = (body: Record<string, unknown>) =>
+  body.topics as Array<{ id: string; wedge: string | null; chosen: boolean }>;
 
 const ALL = [
   'tollbooth',
@@ -225,58 +233,176 @@ test.describe('the one lead form', () => {
     expect(await checkedIds(page)).toEqual([]);
     await page.fill('input[name="email"]', 'ops@example.com');
     await page.getByLabel('Anything we should know? (optional)').fill('Where do I start?');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    await expect(
-      page.getByText(
-        'Thanks, your message is in. An engineer replies within one business day (CET).',
-        { exact: true },
-      ),
-    ).toBeVisible();
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
     // The visitor ticked nothing, so the confirmation names no topic.
     await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
     await expect(page.getByText(/Topics sent/)).toHaveCount(0);
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({
-      topic: 'agents',
+      topic: 'general',
       wedge: '',
       name: '',
       email: 'ops@example.com',
       url: 'https://shop.example.com/',
+      origin: 'scan-result',
+      message: 'Where do I start?',
+      lensSignals: {},
     });
-    expect(String(posted[0].message)).toContain('[agents] request from the scan result');
-    expect(String(posted[0].message)).toContain('Note: Where do I start?');
+    // The general question is the one chosen topic; what the scan flagged follows.
+    expect(topicsOf(posted[0])).toEqual([
+      { id: 'general', wedge: null, chosen: true },
+      ...ALL.slice(0, 5).map((id) => ({ id, wedge: id, chosen: false })),
+    ]);
     expect(posted[0].lensSignal).toBeUndefined();
 
     const events = await trackedEvents(page);
     expect(events.filter((e) => e.name === 'lead_submit').map((e) => e.data)).toEqual([
-      { channel: 'scan', topic: 'agents', wedge: '', source_path: '/ai-readability/' },
+      {
+        channel: 'scan',
+        topic: 'general',
+        wedge: '',
+        source_path: '/ai-readability/',
+        topics_n: 1,
+      },
     ]);
     expect(events.filter((e) => e.name.startsWith('airead-next-'))).toHaveLength(0);
   });
 
-  test('an untouched form still asks for an email address first', async ({ page }) => {
-    const { posted } = await mock(page, { report: 'clean' });
+  test('an invalid email shows an inline error tied to the field', async ({ page }) => {
+    const { posted } = await mock(page);
     await scanV2(page);
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    const email = page.locator('form[data-scan-lead] input[name="email"]');
+    const error = page.locator('[data-scan-lead-email-error]');
+    const topics = page.locator('[data-scan-topics]');
+    await expect(error).toBeHidden();
+    await expect(email).toHaveAttribute('aria-invalid', 'false');
+    await expect(email).toHaveAttribute('aria-describedby', (await error.getAttribute('id'))!);
+    // The topics group is described by the hint and the form's message line.
+    await expect(topics).toHaveAttribute('aria-describedby', 'scan-lead-hint scan-lead-msg');
+    await expect(page.locator('#scan-lead-hint')).toContainText('Pick what you want to talk about');
+
+    // A missing address.
+    await chip(page, 'edge-seo').check();
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(error).toHaveText('Enter your email address.');
+    await expect(email).toHaveAttribute('aria-invalid', 'true');
+    await expect(email).toBeFocused();
+    await expect(email).toHaveAccessibleDescription('Enter your email address.');
+    // Only the field that is wrong is marked.
+    await expect(page.locator('form[data-scan-lead] [aria-invalid="true"]')).toHaveCount(1);
+    await expect(topics).not.toHaveAttribute('aria-invalid');
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
-    await expect(form(page)).toBeVisible();
+
+    // A malformed address: the error stays while the visitor types.
+    await email.fill('ops@');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(error).toHaveText('Enter a valid email address, like name@example.com.');
+    await email.fill('ops');
+    await expect(error).toBeVisible();
+    await expect(email).toHaveAttribute('aria-invalid', 'true');
     expect(posted).toHaveLength(0);
+    expect(await checkedIds(page)).toEqual(['edge-seo']);
+
+    // A valid address clears it.
+    await email.fill('ops@example.com');
+    await expect(error).toBeHidden();
+    await expect(email).toHaveAttribute('aria-invalid', 'false');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    expect(posted).toHaveLength(1);
   });
 
-  test('a general question that fails names no topic, and can be sent again', async ({ page }) => {
-    const mocked = await mock(page, { failTopics: ['agents'] });
-    await scanV2(page, '/analyze/?ui=v2');
+  test('a topic message does not mark the email field', async ({ page }) => {
+    await mock(page);
+    await scanV2(page);
+    for (const id of ALL.slice(0, 5)) await chip(page, id).check();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick up to four topics.');
+    await expect(page.locator('form[data-scan-lead] [aria-invalid="true"]')).toHaveCount(0);
+  });
+
+  test('a failed request leaves the whole form retryable and a retry sends one request with the same submission id', async ({
+    page,
+  }) => {
+    const mocked = await mock(page, { failTopics: ['agentpass'] });
+    await scanV2(page);
+    await chip(page, 'agentpass').check();
+    await chip(page, 'edge-seo').check();
+    await chip(page, 'audit').check();
     await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await page.getByLabel('Sites you run (optional)').fill('3');
+    await page.getByLabel('Anything we should know? (optional)').fill('Two shops');
+    await page.getByRole('button', { name: 'Send request' }).click();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
-      'We could not send your question. Try again.',
+      'We could not send your request. Try again.',
+    );
+    await expect(page.locator('[data-scan-live]')).toHaveText(
+      'We could not send your request. Try again.',
+    );
+    // Nothing is cleared, disabled or marked as sent.
+    await expect(form(page)).toBeVisible();
+    expect(await checkedIds(page)).toEqual(['agentpass', 'edge-seo', 'audit']);
+    await expect(form(page).locator('input:disabled')).toHaveCount(0);
+    await expect(form(page).locator('input[name="email"]')).toHaveValue('ops@example.com');
+    await expect(page.getByLabel('Sites you run (optional)')).toHaveValue('3');
+    await expect(page.getByLabel('Anything we should know? (optional)')).toHaveValue('Two shops');
+    await expect(page.getByRole('button', { name: 'Send request' })).toBeEnabled();
+    expect(mocked.posted).toHaveLength(1);
+    // A failed request counts nothing.
+    let events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'lead_submit')).toHaveLength(0);
+    expect(events.filter((e) => e.name.startsWith('airead-next-'))).toHaveLength(0);
+
+    mocked.failTopics.length = 0;
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
+    expect(mocked.posted).toHaveLength(2);
+    const [first, retry] = mocked.posted;
+    expect(String(first.submissionId)).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(retry.submissionId).toBe(first.submissionId);
+    expect(retry).toEqual(first);
+    events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'lead_submit')).toHaveLength(1);
+    expect(events.filter((e) => e.name.startsWith('airead-next-')).map((e) => e.name)).toEqual([
+      'airead-next-agentpass',
+      'airead-next-edge-seo',
+    ]);
+  });
+
+  test('a request that cannot reach the server can be sent again', async ({ page }) => {
+    const { posted } = await mock(page, { report: 'clean' });
+    await scanV2(page, '/analyze/?ui=v2');
+    let offline = true;
+    await page.route('**/ai-readability/api/contact', (route) =>
+      offline ? route.abort() : route.fallback(),
+    );
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
+      'We could not send your request. Try again.',
     );
     await expect(form(page)).toBeVisible();
-    expect(await checkedIds(page)).toEqual([]);
-    mocked.failTopics.length = 0;
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    offline = false;
+    await page.getByRole('button', { name: 'Send request' }).click();
     await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
-    expect(mocked.posted.map((p) => p.topic)).toEqual(['agents', 'agents']);
+    expect(posted.map((p) => p.topic)).toEqual(['general']);
+  });
+
+  test('a new submission after a sent one gets a new submission id', async ({ page }) => {
+    const { posted } = await mock(page, { report: 'clean' });
+    await scanV2(page);
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    await page.fill('#scan-url', 'other.example.com');
+    await page.click('#scan-submit');
+    await expect(form(page)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Send request' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    expect(posted).toHaveLength(2);
+    expect(posted[1].submissionId).not.toBe(posted[0].submissionId);
   });
 
   test('a ticked general topic is confirmed by name', async ({ page }) => {
@@ -284,34 +410,12 @@ test.describe('the one lead form', () => {
     await scanV2(page);
     await chip(page, 'agents').check();
     await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await page.getByRole('button', { name: 'Send request' }).click();
     await expect(page.getByText(/^Topics sent: /)).toHaveText(
       'Topics sent: AI agents and crawlers.',
     );
     expect(posted.map((p) => p.topic)).toEqual(['agents']);
-  });
-
-  test('clears the failure line once the failed topic is unticked', async ({ page }) => {
-    const mocked = await mock(page, { failTopics: ['agentpass'] });
-    await scanV2(page);
-    await chip(page, 'tollbooth').check();
-    await chip(page, 'agentpass').check();
-    await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    const msg = page.locator('[data-scan-lead-msg]');
-    await expect(msg).toContainText('We could not send: Signed-agent verification');
-    // Another topic changing leaves the line alone while the failed one is ticked.
-    await chip(page, 'edge-seo').check();
-    await expect(msg).toContainText('We could not send: Signed-agent verification');
-    await chip(page, 'agentpass').uncheck();
-    await expect(msg).toHaveText('');
-    await chip(page, 'edge-seo').uncheck();
-    // Nothing is left to send: the confirmation lists what went through.
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    await expect(page.getByText(/^Topics sent: /)).toHaveText(
-      'Topics sent: Origin controls (who reads / verifies).',
-    );
-    expect(mocked.posted.map((p) => p.topic)).toEqual(['tollbooth', 'agentpass']);
+    expect(topicsOf(posted[0])).toEqual([{ id: 'agents', wedge: null, chosen: true }]);
   });
 
   test('asks for at most four topics', async ({ page }) => {
@@ -322,88 +426,111 @@ test.describe('the one lead form', () => {
     await chip(page, 'edge-seo').check();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick up to four topics.');
     await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await page.getByRole('button', { name: 'Send request' }).click();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('Pick up to four topics.');
     expect(posted).toHaveLength(0);
     await chip(page, 'tollbooth').uncheck();
     await expect(page.locator('[data-scan-lead-msg]')).toHaveText('');
   });
 
-  test('shows the sites field only for the SEO and legacy-site topics', async ({ page }) => {
-    await mock(page);
+  test('always shows the optional sites field', async ({ page }) => {
+    const { posted } = await mock(page);
     await scanV2(page);
     const sites = page.getByLabel('Sites you run (optional)');
-    await expect(sites).toBeHidden();
+    await expect(sites).toBeVisible();
     await chip(page, 'edge-seo').check();
     await expect(sites).toBeVisible();
     await chip(page, 'edge-seo').uncheck();
-    await expect(sites).toBeHidden();
-    await chip(page, 'response-firewall').check();
     await expect(sites).toBeVisible();
+    await sites.fill('12');
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    expect((posted[0].facts as Record<string, unknown>).sites).toBe(12);
+    expect(posted[0].message).toBe('');
   });
 
-  test('sends one lead per topic, in order, with the right wedge, note and events', async ({
-    page,
-  }) => {
+  test('one submit is one request and one lead_submit event', async ({ page }) => {
     const { posted } = await mock(page);
     await scanV2(page);
+    // Ticked out of display order: the request lists them in display order.
+    await chip(page, 'consulting').check();
+    await chip(page, 'markdown-origin').check();
     await chip(page, 'agentpass').check();
     await chip(page, 'edge-seo').check();
-    await chip(page, 'markdown-origin').check();
-    await chip(page, 'consulting').check();
-    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.fill('input[name="email"]', ' ops@example.com ');
     await page.getByLabel('Sites you run (optional)').fill('12');
-    await page.getByLabel('Anything we should know? (optional)').fill('WordPress');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await page.getByLabel('Anything we should know? (optional)').fill('  WordPress, two shops ');
+    await page.getByRole('button', { name: 'Send request' }).click();
 
-    await expect(
-      page.getByText(
-        'Thanks, your message is in. An engineer replies within one business day (CET).',
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(page.getByText(/^Topics sent: /)).toContainText('SEO fixes at the server');
+    await expect(sentLine(page)).toBeVisible();
+    await expect(page.getByText(/^Topics sent: /)).toHaveText(
+      'Topics sent: Signed-agent verification (prove which agent is which), SEO fixes at the server, Serving AI agents a Markdown copy at the origin, Help applying the speed fixes.',
+    );
     await expect(form(page)).toBeHidden();
-    expect(posted.map((p) => p.topic)).toEqual([
-      'agentpass',
-      'edge-seo',
-      'markdown-origin',
-      'consulting',
+
+    expect(posted).toHaveLength(1);
+    const body = posted[0];
+    expect(Object.keys(body).sort()).toEqual(
+      [
+        'email',
+        'facts',
+        'lensSignals',
+        'message',
+        'name',
+        'origin',
+        'submissionId',
+        't',
+        'topic',
+        'topics',
+        'url',
+        'wedge',
+      ].sort(),
+    );
+    expect(body).toMatchObject({
+      email: 'ops@example.com',
+      name: '',
+      url: 'https://shop.example.com/',
+      origin: 'scan-result',
+      topic: 'agentpass',
+      wedge: 'agentpass',
+      // The visitor's note and nothing else.
+      message: 'WordPress, two shops',
+      facts: { grade: 'C', score: 64, speedMobile: 90, speedDesktop: 90, sites: 12 },
+    });
+    expect(typeof body.t).toBe('number');
+    expect(String(body.submissionId)).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(topicsOf(body)).toEqual([
+      { id: 'agentpass', wedge: 'agentpass', chosen: true },
+      { id: 'edge-seo', wedge: 'edge-seo', chosen: true },
+      { id: 'markdown-origin', wedge: 'markdown-origin', chosen: true },
+      { id: 'consulting', wedge: null, chosen: true },
+      { id: 'tollbooth', wedge: 'tollbooth', chosen: false },
+      { id: 'compliancefix', wedge: 'compliancefix', chosen: false },
     ]);
-    expect(posted.map((p) => p.wedge)).toEqual(['agentpass', 'edge-seo', 'markdown-origin', '']);
-    expect(posted[2].lensSignal).toEqual({
+    // Signals for the ticked topics that have one, and for no other.
+    const signals = body.lensSignals as Record<string, unknown>;
+    expect(Object.keys(signals)).toEqual(['agentpass', 'edge-seo', 'markdown-origin']);
+    expect(signals['markdown-origin']).toEqual({
       verdict: 'attention',
       negotiated: false,
       httpStatus: 200,
       contentType: 'text/html; charset=utf-8',
       varyAccept: false,
     });
-    for (const p of posted) expect(typeof p.t).toBe('number');
-    expect(String(posted[1].message)).toContain(
-      'Operator note / crawl volume: sites: 12; WordPress',
-    );
-    expect(String(posted[0].message)).toContain('Operator note / crawl volume: WordPress');
-    expect(String(posted[2].message)).toContain('[markdown-origin] lead from RenderPeek result');
-    expect(String(posted[0].message)).not.toContain('sites: 12');
-    expect(posted[3]).toMatchObject({
-      topic: 'consulting',
-      wedge: '',
-      name: '',
-      email: 'ops@example.com',
-      url: 'https://shop.example.com/',
-    });
-    expect(String(posted[3].message)).toContain('[consulting] request from the scan result');
+    expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeLessThan(8192);
 
     const events = await trackedEvents(page);
-    const leads = events.filter((e) => e.name === 'lead_submit');
-    expect(leads.map((e) => e.data)).toEqual(
-      ['agentpass', 'edge-seo', 'markdown-origin', 'consulting'].map((t) => ({
+    expect(events.filter((e) => e.name === 'lead_submit').map((e) => e.data)).toEqual([
+      {
         channel: 'scan',
-        topic: t,
-        wedge: t === 'consulting' ? '' : t,
+        topic: 'agentpass',
+        wedge: 'agentpass',
         source_path: '/ai-readability/',
-      })),
-    );
+        topics_n: 4,
+      },
+    ]);
+    // One event per ticked topic whose check fired, none for the unticked ones.
     const next = events.filter((e) => e.name.startsWith('airead-next-')).map((e) => e.name);
     expect(next).toEqual([
       'airead-next-agentpass',
@@ -412,38 +539,162 @@ test.describe('the one lead form', () => {
     ]);
   });
 
-  test('retries only the topics that failed, without counting twice', async ({ page }) => {
-    const mocked = await mock(page, { failTopics: ['agentpass'] });
+  test('a pre-ticked speed-help chip left ticked counts as chosen', async ({ page }) => {
+    const { posted } = await mock(page, { report: 'clean', psi: 0.3 });
     await scanV2(page);
-    for (const id of ALL.slice(0, 4)) await chip(page, id).check();
+    expect(await checkedIds(page)).toEqual(['consulting']);
     await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
-      'Sent: Origin controls (who reads / verifies), Accessibility remediation, Consent enforcement. We could not send: Signed-agent verification (prove which agent is which). Try again.',
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(page.getByText(/^Topics sent: /)).toHaveText(
+      'Topics sent: Help applying the speed fixes.',
     );
-    await expect(form(page)).toBeVisible();
-    expect(await checkedIds(page)).toEqual(['agentpass']);
-    expect(mocked.posted.map((p) => p.topic)).toEqual([
-      'tollbooth',
-      'agentpass',
-      'compliancefix',
-      'consent-enforcement',
-    ]);
-
-    mocked.failTopics.length = 0;
-    mocked.posted.length = 0;
-    await page.getByRole('button', { name: 'Talk to us' }).click();
-    await expect(
-      page.getByText(
-        'Thanks, your message is in. An engineer replies within one business day (CET).',
-        { exact: true },
-      ),
-    ).toBeVisible();
-    expect(mocked.posted.map((p) => p.topic)).toEqual(['agentpass']);
-    await expect(page.getByText(/^Topics sent: /)).toContainText('Origin controls');
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ topic: 'consulting', wedge: '' });
+    expect(topicsOf(posted[0])).toEqual([{ id: 'consulting', wedge: null, chosen: true }]);
     const events = await trackedEvents(page);
-    expect(events.filter((e) => e.name === 'lead_submit')).toHaveLength(4);
-    expect(events.filter((e) => e.name === 'airead-next-agentpass')).toHaveLength(1);
+    expect(events.filter((e) => e.name === 'lead_submit').map((e) => e.data)).toEqual([
+      {
+        channel: 'scan',
+        topic: 'consulting',
+        wedge: '',
+        source_path: '/ai-readability/',
+        topics_n: 1,
+      },
+    ]);
+  });
+
+  test('a double click sends one request', async ({ page }) => {
+    const { posted } = await mock(page);
+    await scanV2(page);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await page.route('**/ai-readability/api/contact', async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    await chip(page, 'tollbooth').check();
+    await page.fill('input[name="email"]', 'ops@example.com');
+    const button = page.getByRole('button', { name: 'Send request' });
+    await button.dblclick();
+    // The button says it is busy but stays focusable.
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button).not.toHaveAttribute('disabled');
+    await button.click({ force: true });
+    await button.press('Enter');
+    // A submit that does not come from the button is ignored as well.
+    await form(page).evaluate((f) => (f as HTMLFormElement).requestSubmit());
+    release();
+    await expect(sentLine(page)).toBeVisible();
+    expect(posted).toHaveLength(1);
+    const events = await trackedEvents(page);
+    expect(events.filter((e) => e.name === 'lead_submit')).toHaveLength(1);
+    expect(events.filter((e) => e.name === 'airead-next-tollbooth')).toHaveLength(1);
+  });
+
+  test('a failed send from the keyboard leaves focus on the button', async ({ page }) => {
+    const mocked = await mock(page, { failTopics: ['general'] });
+    await scanV2(page);
+    await page.fill('form[data-scan-lead] input[name="email"]', 'ops@example.com');
+    const button = page.getByRole('button', { name: 'Send request' });
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-scan-lead-msg]')).toHaveText(
+      'We could not send your request. Try again.',
+    );
+    await expect(button).toBeFocused();
+    await expect(button).not.toHaveAttribute('aria-disabled');
+    await expect(button).not.toHaveAttribute('aria-busy');
+    // The retry needs no tabbing back.
+    mocked.failTopics.length = 0;
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
+    expect(mocked.posted).toHaveLength(2);
+  });
+
+  test('Enter in the email field announces the email error', async ({ page }) => {
+    const { posted } = await mock(page);
+    await scanV2(page);
+    const email = page.locator('form[data-scan-lead] input[name="email"]');
+    const live = page.locator('[data-scan-live]');
+    await email.fill('not-an-email');
+    await email.press('Enter');
+    // Focus was already in the field, so the error goes through the live region.
+    await expect(page.locator('[data-scan-lead-email-error]')).toHaveText(
+      'Enter a valid email address, like name@example.com.',
+    );
+    await expect(live).toHaveText('Enter a valid email address, like name@example.com.');
+    await expect(email).toBeFocused();
+    await email.fill('');
+    await email.press('Enter');
+    await expect(live).toHaveText('Enter your email address.');
+    expect(posted).toHaveLength(0);
+  });
+
+  test('an address the service would refuse is caught before sending', async ({ page }) => {
+    const { posted } = await mock(page);
+    await scanV2(page);
+    const email = page.locator('form[data-scan-lead] input[name="email"]');
+    const error = page.locator('[data-scan-lead-email-error]');
+    // The browser's own check accepts an address without a dot after the @.
+    await email.fill('name@gmail');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(error).toHaveText('Enter a valid email address, like name@example.com.');
+    await expect(email).toHaveAttribute('aria-invalid', 'true');
+    await expect(email).toBeFocused();
+    expect(posted).toHaveLength(0);
+    await email.fill('name@gmail.com');
+    await expect(error).toBeHidden();
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page, 'name@gmail.com')).toBeVisible();
+    expect(posted).toHaveLength(1);
+  });
+
+  for (const [status, line] of [
+    [400, 'We could not send your request. Check the email address and try again.'],
+    [429, 'Too many requests from this connection. Try again in a minute.'],
+    [503, 'We could not send your request. Try again.'],
+  ] as const) {
+    test(`an answer of ${status} gets its own line and keeps the form`, async ({ page }) => {
+      await mock(page);
+      await scanV2(page);
+      await page.route('**/ai-readability/api/contact', (route) =>
+        route.fulfill({ status, contentType: 'application/json', body: '{"error":"x"}' }),
+      );
+      await chip(page, 'edge-seo').check();
+      await page.fill('form[data-scan-lead] input[name="email"]', 'ops@example.com');
+      await page.getByRole('button', { name: 'Send request' }).click();
+      await expect(page.locator('[data-scan-lead-msg]')).toHaveText(line);
+      await expect(page.locator('[data-scan-live]')).toHaveText(line);
+      await expect(form(page)).toBeVisible();
+      expect(await checkedIds(page)).toEqual(['edge-seo']);
+      const events = await trackedEvents(page);
+      expect(events.filter((e) => e.name === 'lead_submit')).toHaveLength(0);
+    });
+  }
+
+  test('carries the platform the scan named in the facts', async ({ page }) => {
+    const report = JSON.parse(fixture('full'));
+    report.report.platform = {
+      status: 'ok',
+      id: 'wix',
+      name: 'Wix',
+      kind: 'hosted-builder',
+      originControl: 'none',
+      confidence: 'high',
+      evidence: [{ signal: 'header', id: 'server-pepyaka' }],
+    };
+    const { posted } = await mock(page, { report });
+    await scanV2(page);
+    await page.fill('input[name="email"]', 'ops@example.com');
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(sentLine(page)).toBeVisible();
+    expect(posted[0].facts).toMatchObject({
+      platform: 'wix',
+      platformName: 'Wix',
+      originControl: 'none',
+      server: 'pepyaka',
+    });
   });
 
   // The speed result is held back until the test releases it.
@@ -503,9 +754,11 @@ test.describe('the one lead form', () => {
     await expect.poll(() => chipIds(page)).toEqual(['consulting', 'agents', 'audit']);
     expect(await checkedIds(page)).toEqual([]);
     await page.fill('input[name="email"]', 'ops@example.com');
-    await page.getByRole('button', { name: 'Talk to us' }).click();
+    await page.getByRole('button', { name: 'Send request' }).click();
     await expect(page.getByText('Your question was sent.', { exact: true })).toBeVisible();
-    expect(posted.map((p) => p.topic)).toEqual(['agents']);
+    expect(posted).toHaveLength(1);
+    expect(posted.map((p) => p.topic)).toEqual(['general']);
+    expect(topicsOf(posted[0])).toEqual([{ id: 'general', wedge: null, chosen: true }]);
   });
 });
 
@@ -574,10 +827,12 @@ test.describe('next steps and share', () => {
   });
 });
 
-test.describe('v1 and v2 send the same lead', () => {
+test.describe('v1 and v2 send the same signal for a topic', () => {
   // Every wedge the original page offers, on the full report. Each case fills
-  // the original form, then the new one with only that topic ticked, and the
-  // two POST bodies must be identical.
+  // the original form, then the new one with only that topic ticked. The
+  // original form sends one body per topic; the new form sends one body per
+  // submission. The topic, the address, the scanned page and the signal for
+  // the topic must be the same in both.
   const cases: Array<{ wedge: string; sites?: string; note?: string }> = [
     { wedge: 'tollbooth' },
     { wedge: 'agentpass' },
@@ -592,7 +847,7 @@ test.describe('v1 and v2 send the same lead', () => {
 
   for (const c of cases) {
     const name = `${c.wedge}${c.sites ? ' with sites' : ''}${c.note ? ' with a note' : ' and an empty note'}`;
-    test(`${name}: the same body in both`, async ({ page }) => {
+    test(`${name}: the same topic and signal in both`, async ({ page }) => {
       const v1 = await mock(page);
       await stubUmami(page);
       await page.goto('/ai-readability/?ui=v1');
@@ -625,20 +880,25 @@ test.describe('v1 and v2 send the same lead', () => {
       await p2.fill('input[name="email"]', email);
       if (c.sites) await p2.getByLabel('Sites you run (optional)').fill(c.sites);
       if (c.note) await p2.getByLabel('Anything we should know? (optional)').fill(c.note);
-      await p2.getByRole('button', { name: 'Talk to us' }).click();
-      await expect(
-        p2.getByText(
-          'Thanks, your message is in. An engineer replies within one business day (CET).',
-          { exact: true },
-        ),
-      ).toBeVisible();
+      await p2.getByRole('button', { name: 'Send request' }).click();
+      await expect(sentLine(p2, email)).toBeVisible();
       expect(v2.posted).toHaveLength(1);
-      // The page-load timestamp differs per page; the rest of the body is the same.
-      expect(typeof v1.posted[0].t).toBe('number');
-      expect(typeof v2.posted[0].t).toBe('number');
-      const { t: _t1, ...body1 } = v1.posted[0];
-      const { t: _t2, ...body2 } = v2.posted[0];
-      expect(body2).toEqual(body1);
+      const [body1] = v1.posted;
+      const [body2] = v2.posted;
+      expect(typeof body1.t).toBe('number');
+      expect(typeof body2.t).toBe('number');
+      expect(body1.topic).toBe(c.wedge);
+      for (const key of ['topic', 'wedge', 'email', 'name', 'url']) {
+        expect(body2[key], key).toEqual(body1[key]);
+      }
+      expect(body1.lensSignal).toBeTruthy();
+      expect(body2.lensSignals).toEqual({ [c.wedge]: body1.lensSignal });
+      expect(topicsOf(body2)[0]).toEqual({ id: c.wedge, wedge: c.wedge, chosen: true });
+      // The new form sends the note as typed and the site count as a fact.
+      expect(body2.message).toBe(c.note ?? '');
+      expect((body2.facts as Record<string, unknown>).sites).toBe(
+        c.sites ? Number(c.sites) : undefined,
+      );
     });
   }
 });

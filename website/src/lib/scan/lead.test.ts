@@ -3,16 +3,20 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildLeadPayload } from './demand.mjs';
+import { buildLeadPayload, lensSignalFor } from './demand.mjs';
 import {
   FOUND_MARKER,
+  MAX_BODY_BYTES,
+  MAX_SIGNAL_CHARS,
+  bodyBytes,
+  boundSignal,
   chipsFor,
-  noteFor,
-  payloadFor,
-  selectionFor,
-  submitLeads,
-  type Chip,
-  type LeadPayload,
+  emailOk,
+  factsFor,
+  newSubmissionId,
+  payloadForSubmission,
+  topicsFor,
+  type LeadForm,
 } from './lead';
 import { buildReportMarkdown, riskStates } from './report';
 import { riskRows } from './risk-rows';
@@ -196,197 +200,357 @@ describe('chipsFor', () => {
   });
 });
 
-const consulting: Chip = { id: 'consulting', label: 'x', wedge: '', gated: false, selected: true };
-const agents: Chip = { id: 'agents', label: 'y', wedge: '', gated: false, selected: true };
-const chipOf = (id: string) => chipsFor(full, 'good').find((c) => c.id === id)!;
+const form: LeadForm = {
+  email: 'a@b.example',
+  sites: '7',
+  note: ' hello ',
+  url: 'https://typed.example/',
+  mobile: 41,
+  desktop: 88,
+  t: 1700000000000,
+  submissionId: 'sub_1-A',
+};
+const chips = chipsFor(full, 'good');
 
-describe('noteFor', () => {
-  it('prefixes the site count only for the wedges that use it', () => {
-    const form = { sites: '12', note: ' WordPress ' };
-    expect(noteFor('edge-seo', form)).toBe('sites: 12; WordPress');
-    expect(noteFor('response-firewall', form)).toBe('sites: 12; WordPress');
-    expect(noteFor('tollbooth', form)).toBe('WordPress');
-    expect(noteFor('edge-seo', { sites: '', note: 'x' })).toBe('x');
-    expect(noteFor('edge-seo', { sites: '3', note: '' })).toBe('sites: 3');
-    for (const bad of ['-3', '0', '', 'abc']) {
-      expect(noteFor('edge-seo', { sites: bad, note: 'x' })).toBe('x');
-    }
-    expect(noteFor('edge-seo', { sites: '1.5', note: '' })).toBe('sites: 1');
-  });
-});
-
-describe('selectionFor', () => {
-  it('sends the ticked chips as they are', () => {
-    const picked = [chipOf('edge-seo'), consulting];
-    expect(selectionFor(picked)).toBe(picked);
-  });
-
-  it('an untouched form sends one general question', async () => {
-    const posted: LeadPayload[] = [];
-    const out = await submitLeads(
-      selectionFor([]),
-      { email: 'a@b.example', note: 'How do I start?', url: 'https://typed.example/' },
-      full,
-      async (p) => {
-        posted.push(p);
-        return true;
-      },
-    );
-    expect(out.map((o) => [o.chip.id, o.chip.gated, o.ok])).toEqual([['agents', false, true]]);
-    expect(posted).toEqual([
-      {
-        topic: 'agents',
-        email: 'a@b.example',
-        name: '',
-        url: 'https://shop.example.com/',
-        wedge: '',
-        message:
-          '[agents] request from the scan result\nScanned: https://shop.example.com/\n' +
-          'Grade: C (64/100)\nNote: How do I start?',
-      },
-    ]);
-  });
-});
-
-describe('submitLeads', () => {
-  const form = { email: 'a@b.example', sites: '7', note: 'hello', url: 'https://typed.example/' };
-
-  it('posts one lead per chip, one after the other, in selection order', async () => {
-    const log: string[] = [];
-    let open = 0;
-    const post = async (p: LeadPayload) => {
-      open += 1;
-      expect(open).toBe(1);
-      log.push(`start:${p.topic}`);
-      await new Promise((r) => setTimeout(r, 5));
-      log.push(`end:${p.topic}`);
-      open -= 1;
-      return true;
-    };
-    const sel = [chipOf('edge-seo'), consulting, chipOf('tollbooth')];
-    const out = await submitLeads(sel, form, full, post);
-    expect(log).toEqual([
-      'start:edge-seo',
-      'end:edge-seo',
-      'start:consulting',
-      'end:consulting',
-      'start:tollbooth',
-      'end:tollbooth',
-    ]);
-    expect(out.map((o) => o.ok)).toEqual([true, true, true]);
-  });
-
-  it('builds gated payloads with the shared builder and the composed note', async () => {
-    const posted: LeadPayload[] = [];
-    await submitLeads([chipOf('edge-seo'), chipOf('tollbooth')], form, full, async (p) => {
-      posted.push(p);
-      return true;
-    });
-    expect(posted[0]).toEqual(
-      buildLeadPayload({
-        wedge: 'edge-seo',
-        email: form.email,
-        name: '',
-        note: 'sites: 7; hello',
-        report: full,
-      }),
-    );
-    expect(posted[1]).toEqual(
-      buildLeadPayload({
-        wedge: 'tollbooth',
-        email: form.email,
-        name: '',
-        note: 'hello',
-        report: full,
-      }),
-    );
-  });
-
-  it('posts the ungated shape with an empty wedge and the facts in the message', () => {
-    const c = payloadFor(consulting, { ...form, mobile: 41, desktop: 88 }, full);
-    expect(c).toEqual({
-      topic: 'consulting',
+describe('payloadForSubmission', () => {
+  it('one payload carries every selected topic with chosen flags', () => {
+    const p = payloadForSubmission(chips, ['consulting', 'edge-seo', 'agentpass'], form, full);
+    expect(p).toEqual({
       email: 'a@b.example',
       name: '',
       url: 'https://shop.example.com/',
-      wedge: '',
-      message:
-        '[consulting] request from the scan result\nScanned: https://shop.example.com/\n' +
-        'Speed: mobile 41/100, desktop 88/100\nNote: hello',
+      t: 1700000000000,
+      origin: 'scan-result',
+      submissionId: 'sub_1-A',
+      topic: 'agentpass',
+      wedge: 'agentpass',
+      message: 'hello',
+      topics: [
+        { id: 'agentpass', wedge: 'agentpass', chosen: true },
+        { id: 'edge-seo', wedge: 'edge-seo', chosen: true },
+        { id: 'consulting', wedge: null, chosen: true },
+        { id: 'tollbooth', wedge: 'tollbooth', chosen: false },
+        { id: 'compliancefix', wedge: 'compliancefix', chosen: false },
+        { id: 'consent-enforcement', wedge: 'consent-enforcement', chosen: false },
+      ],
+      lensSignals: {
+        agentpass: lensSignalFor('agentpass', full),
+        'edge-seo': lensSignalFor('edge-seo', full),
+      },
+      facts: {
+        grade: 'C',
+        score: 64,
+        speedMobile: 41,
+        speedDesktop: 88,
+        sites: 7,
+        cdn: 'cloudflare',
+      },
     });
-    const a = payloadFor(agents, form, full);
-    expect(a.message).toContain('[agents] request from the scan result');
-    expect(a.message).toContain('Grade: C (64/100)');
-    expect(a.wedge).toBe('');
   });
 
-  it('falls back to the scanned URL when there is no report', () => {
-    const p = payloadFor(agents, { ...form, note: '' }, null);
-    expect(p.url).toBe('https://typed.example/');
-    expect(p.message).toBe(
-      '[agents] request from the scan result\nScanned: https://typed.example/',
+  it('found topics follow chosen ones and the list is capped at six', () => {
+    const one = topicsFor(chips, ['markdown-origin']);
+    expect(one).toHaveLength(6);
+    expect(one[0]).toEqual({ id: 'markdown-origin', wedge: 'markdown-origin', chosen: true });
+    expect(one.slice(1).map((t) => [t.id, t.chosen])).toEqual(
+      GATED_ORDER.slice(0, 5).map((id) => [id, false]),
     );
-  });
-
-  it('keeps going after a failure and reports each outcome', async () => {
-    const post = async (p: LeadPayload) => p.topic !== 'agentpass';
-    const sel = [chipOf('tollbooth'), chipOf('agentpass'), agents];
-    const out = await submitLeads(sel, form, full, post);
-    expect(out.map((o) => [o.chip.id, o.ok])).toEqual([
-      ['tollbooth', true],
-      ['agentpass', false],
-      ['agents', true],
+    // Four ticked chips leave room for two found ones; no ticked chip is dropped.
+    const four = topicsFor(chips, ['audit', 'agents', 'consulting', 'response-firewall']);
+    expect(four.map((t) => [t.id, t.wedge, t.chosen])).toEqual([
+      ['response-firewall', 'response-firewall', true],
+      ['consulting', null, true],
+      ['agents', null, true],
+      ['audit', null, true],
+      ['tollbooth', 'tollbooth', false],
+      ['agentpass', 'agentpass', false],
+    ]);
+    // An ungated chip that is not ticked is never listed.
+    expect(topicsFor(chipsFor(clean, 'good'), ['audit'])).toEqual([
+      { id: 'audit', wedge: null, chosen: true },
     ]);
   });
 
-  it('treats a throwing post as a failure', async () => {
-    const out = await submitLeads([agents], form, full, async () => {
-      throw new Error('offline');
+  it('an untouched form sends the general question as the only chosen topic', () => {
+    const p = payloadForSubmission(chips, [], form, full);
+    // The general topic is its own id, so it is not mistaken for a ticked chip.
+    expect(p.topics[0]).toEqual({ id: 'general', wedge: null, chosen: true });
+    expect(p.topics.filter((t) => t.chosen)).toHaveLength(1);
+    expect(p.topics.slice(1).map((t) => [t.id, t.chosen])).toEqual(
+      GATED_ORDER.slice(0, 5).map((id) => [id, false]),
+    );
+    expect(p.topic).toBe('general');
+    expect(p.wedge).toBe('');
+    const tickedAgents = payloadForSubmission(chips, ['agents'], form, full);
+    expect(tickedAgents.topic).toBe('agents');
+    expect(tickedAgents.topics[0]).toEqual({ id: 'agents', wedge: null, chosen: true });
+    expect(p.lensSignals).toEqual({});
+    // With no report at all the general question is the whole list.
+    const bare = payloadForSubmission(chipsFor(null, null), [], form, null);
+    expect(bare.topics).toEqual([{ id: 'general', wedge: null, chosen: true }]);
+    expect(bare.url).toBe('https://typed.example/');
+    expect(bare.facts).toEqual({ speedMobile: 41, speedDesktop: 88, sites: 7 });
+  });
+
+  it('scalar topic and wedge mirror the first chosen topic', () => {
+    const gated = payloadForSubmission(chips, ['agents', 'edge-seo'], form, full);
+    expect([gated.topic, gated.wedge]).toEqual(['edge-seo', 'edge-seo']);
+    const ungated = payloadForSubmission(chips, ['audit', 'consulting'], form, full);
+    expect([ungated.topic, ungated.wedge]).toEqual(['consulting', '']);
+    expect(ungated.topics[0]).toEqual({ id: 'consulting', wedge: null, chosen: true });
+  });
+
+  it("the message is the visitor's note only", () => {
+    const p = payloadForSubmission(
+      chips,
+      ['edge-seo'],
+      { ...form, note: '  Line one\nline two ' },
+      full,
+    );
+    expect(p.message).toBe('Line one\nline two');
+    for (const note of [undefined, '', '   ']) {
+      expect(payloadForSubmission(chips, ['edge-seo'], { ...form, note }, full).message).toBe('');
+    }
+  });
+
+  it('the body stays under 8192 bytes with four chosen topics and a full-length non-ASCII note', () => {
+    const ticked = ['agentpass', 'page-integrity', 'edge-seo', 'response-firewall'];
+    // The note field takes 1000 characters; these take three bytes each.
+    const note = '\u20ac'.repeat(1000);
+    const p = payloadForSubmission(chips, ticked, { ...form, note }, full);
+    expect(bodyBytes(p)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(p.message).toBe(note);
+    expect(p.topics.filter((t) => t.chosen).map((t) => t.id)).toEqual(ticked);
+
+    // A result with oversized signals loses them largest first, then the
+    // unticked topics; the email, the note and the ticked topics stay.
+    const big = structuredClone(full);
+    big.signedAgentVerification.evidence = Array.from({ length: 300 }, (_, i) => `evidence-${i}`);
+    big.seoDefects.defects = Array.from({ length: 200 }, (_, i) => `defect-${i}`);
+    const cut = payloadForSubmission(chipsFor(big, 'good'), ticked, { ...form, note }, big);
+    expect(bodyBytes(cut)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(Object.keys(cut.lensSignals)).not.toContain('agentpass');
+    expect(cut.email).toBe('a@b.example');
+    expect(cut.message).toBe(note);
+    expect(cut.topics.filter((t) => t.chosen).map((t) => t.id)).toEqual(ticked);
+
+    // Signals alone are not enough here: the unticked topics go as well.
+    const long = { ...form, note: '\u20ac'.repeat(2530) };
+    const bare = payloadForSubmission(chips, ticked, long, full);
+    expect(bodyBytes(bare)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(bare.lensSignals).toEqual({});
+    expect(bare.topics.map((t) => [t.id, t.chosen])).toEqual(ticked.map((id) => [id, true]));
+    expect(bare.message).toBe(long.note);
+  });
+
+  it('facts carry platform fields when the report has them and omit them when it does not', () => {
+    const hosted = structuredClone(full);
+    hosted.platform = {
+      status: 'ok',
+      id: 'wix',
+      name: 'Wix',
+      kind: 'hosted-builder',
+      originControl: 'none',
+      confidence: 'high',
+      evidence: [
+        { signal: 'header', id: 'server-pepyaka' },
+        { signal: 'generator', id: 'wix-generator' },
+      ],
+    };
+    expect(factsFor(form, hosted)).toEqual({
+      grade: 'C',
+      score: 64,
+      speedMobile: 41,
+      speedDesktop: 88,
+      sites: 7,
+      platform: 'wix',
+      platformName: 'Wix',
+      originControl: 'none',
+      server: 'pepyaka',
+      cdn: 'cloudflare',
     });
-    expect(out[0].ok).toBe(false);
+
+    // No platform named: only the server software from the evidence.
+    const own = structuredClone(full);
+    own.platform = {
+      status: 'ok',
+      id: null,
+      name: null,
+      kind: 'unknown',
+      originControl: 'unknown',
+      evidence: [{ signal: 'header', id: 'server-nginx' }],
+    };
+    expect(factsFor(form, own)).toEqual({
+      grade: 'C',
+      score: 64,
+      speedMobile: 41,
+      speedDesktop: 88,
+      sites: 7,
+      server: 'nginx',
+      cdn: 'cloudflare',
+    });
+
+    // A cached or failed result has no platform reading; unmeasured values are left out.
+    for (const platform of [undefined, null, 'wix', { status: 'error' }]) {
+      const report = structuredClone(full);
+      report.platform = platform;
+      expect(factsFor({ ...form, sites: 'abc', mobile: null, desktop: undefined }, report)).toEqual(
+        { grade: 'C', score: 64, cdn: 'cloudflare' },
+      );
+    }
+    expect(factsFor({ ...form, sites: '0' }, null)).toEqual({ speedMobile: 41, speedDesktop: 88 });
+  });
+
+  it('facts carry the CDN when the report names one', () => {
+    const cdnOf = (r: Record<string, unknown>) => factsFor(form, r).cdn;
+    expect(cdnOf(full)).toBe('cloudflare');
+    // The second place a report names it, when the first has none.
+    const other = structuredClone(full);
+    other.seoDefects.delivery.cdn = null;
+    other.responseExposure.delivery.cdn = 'fastly';
+    expect(cdnOf(other)).toBe('fastly');
+    for (const none of [null, '', 'none', undefined]) {
+      const r = structuredClone(full);
+      r.seoDefects.delivery.cdn = none;
+      r.responseExposure.delivery.cdn = none;
+      expect('cdn' in factsFor(form, r)).toBe(false);
+    }
+    const missing = structuredClone(full);
+    delete missing.seoDefects;
+    delete missing.responseExposure;
+    expect('cdn' in factsFor(form, missing)).toBe(false);
+  });
+
+  it('cuts the scanned address to the 500 characters the endpoint keeps', () => {
+    const url = 'https://example.com/' + '\u00e9'.repeat(1500);
+    const long = { ...form, url, note: '\u6f22'.repeat(1000) };
+    const p = payloadForSubmission(chipsFor(null, null), [], long, null);
+    expect(p.url).toBe(url.slice(0, 500));
+    expect(bodyBytes(p)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    const fromReport = payloadForSubmission(chips, ['edge-seo'], long, { ...full, url });
+    expect(fromReport.url).toHaveLength(500);
+    expect(bodyBytes(fromReport)).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(payloadForSubmission(chips, [], form, full).url).toBe('https://shop.example.com/');
+  });
+
+  it('never sends a signal the endpoint would drop', () => {
+    // Long header echoes are cut, and the signal is then small enough to keep.
+    const echo = structuredClone(full);
+    for (const probe of Object.values(echo.signedAgentVerification.probes) as Array<{
+      headers: Record<string, string>;
+    }>) {
+      for (const h of [
+        'www-authenticate',
+        'signature-input',
+        'accept-signature',
+        'server',
+        'via',
+      ]) {
+        probe.headers[h] = 'x'.repeat(300);
+      }
+    }
+    expect(JSON.stringify(lensSignalFor('agentpass', echo)).length).toBeGreaterThan(
+      MAX_SIGNAL_CHARS,
+    );
+    const kept = payloadForSubmission(chipsFor(echo, 'good'), ['agentpass'], form, echo);
+    const signal = kept.lensSignals.agentpass as {
+      classification: string;
+      probes: { signed: { status: number; headers: Record<string, string> } };
+    };
+    expect(JSON.stringify(signal).length).toBeLessThanOrEqual(MAX_SIGNAL_CHARS);
+    expect(signal.classification).toBe('signature-aware');
+    expect(signal.probes.signed.status).toBe(200);
+    expect(signal.probes.signed.headers['www-authenticate']).toBe('x'.repeat(50));
+    // A single long value is cut to 200 characters.
+    expect(boundSignal({ a: 'y'.repeat(5000), n: 1 })).toEqual({ a: 'y'.repeat(200), n: 1 });
+
+    // Many evidence entries: still too large after the cut, so it is left out.
+    const big = structuredClone(full);
+    big.signedAgentVerification.evidence = Array.from({ length: 30 }, (_, i) => ({
+      id: `evidence-item-${i}`,
+      detail: 'x'.repeat(60),
+    }));
+    big.seoDefects.defects = Array.from({ length: 200 }, (_, i) => `defect-${i}`);
+    const ticked = ['agentpass', 'edge-seo', 'tollbooth'];
+    const p = payloadForSubmission(chipsFor(big, 'good'), ticked, form, big);
+    expect(Object.keys(p.lensSignals)).toEqual(['tollbooth']);
+    expect(p.topics.filter((t) => t.chosen).map((t) => t.id)).toEqual([
+      'tollbooth',
+      'agentpass',
+      'edge-seo',
+    ]);
+    for (const s of Object.values(p.lensSignals)) {
+      expect(JSON.stringify(s).length).toBeLessThanOrEqual(MAX_SIGNAL_CHARS);
+    }
+
+    // A signal that fits is sent as it is; a cut never splits a character pair.
+    const plain = lensSignalFor('edge-seo', full);
+    expect(boundSignal(plain)).toEqual(plain);
+    expect(boundSignal(null)).toBeNull();
+    const pair = boundSignal({ text: 'a'.repeat(199) + '\u{1F600}' }) as { text: string };
+    expect(pair.text).toBe('a'.repeat(199));
+  });
+
+  it('accepts an address only when the endpoint would', () => {
+    for (const good of ['name@example.com', ' name@example.com ', 'a.b+c@sub.example.co']) {
+      expect(emailOk(good)).toBe(true);
+    }
+    for (const bad of [
+      '',
+      'name',
+      'name@gmail',
+      'name@@example.com',
+      'na me@example.com',
+      '@a.b',
+    ]) {
+      expect(emailOk(bad), bad).toBe(false);
+    }
+  });
+
+  it('carries the platform script count in the script signals when the scan reports it', () => {
+    const hosted = structuredClone(full);
+    hosted.scriptInventory.totals.platformExternal = 4;
+    const p = payloadForSubmission(chipsFor(hosted, 'good'), ['page-integrity'], form, hosted);
+    const signal = p.lensSignals['page-integrity'] as { totals: Record<string, number> };
+    expect(signal.totals.platformExternal).toBe(4);
+    const plain = lensSignalFor('page-integrity', full) as { totals: Record<string, number> };
+    expect('platformExternal' in plain.totals).toBe(false);
+  });
+
+  it('leaves out the time when the form has none, and a signal the result cannot give', () => {
+    const { t: _t, ...noTime } = form;
+    expect('t' in payloadForSubmission(chips, [], noTime, full)).toBe(false);
+    const broken = structuredClone(full);
+    delete broken.seoDefects;
+    const p = payloadForSubmission(chips, ['edge-seo', 'agentpass'], form, broken);
+    expect(Object.keys(p.lensSignals)).toEqual(['agentpass']);
+    expect(p.topics.filter((t) => t.chosen).map((t) => t.id)).toEqual(['agentpass', 'edge-seo']);
+  });
+
+  it('makes a fresh submission id each time, in the characters the endpoint takes', () => {
+    const a = newSubmissionId();
+    expect(a).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    expect(newSubmissionId()).not.toBe(a);
   });
 });
 
-// The v2 body for a gated chip must be exactly what the shared builder makes,
-// for every wedge and both fixtures.
-describe('payload parity', () => {
-  for (const [name, report] of [
-    ['full', full],
-    ['clean', clean],
-  ] as const) {
-    for (const wedge of GATED_ORDER) {
-      it(`${wedge} on the ${name} report equals buildLeadPayload`, () => {
-        const chip: Chip = { id: wedge, label: wedge, wedge, gated: true, selected: true };
-        const sites = wedge === 'edge-seo' || wedge === 'response-firewall' ? '5' : '';
-        if (name === 'clean') {
-          // No gate fires on the clean report; the builder must still not throw
-          // for wedges without a lens, so only compare where it can run.
-          let expected: unknown;
-          try {
-            expected = buildLeadPayload({
-              wedge,
-              email: 'a@b.example',
-              name: '',
-              note: 'n',
-              report,
-            });
-          } catch {
-            expect(() =>
-              payloadFor(chip, { email: 'a@b.example', note: 'n', url: '' }, report),
-            ).toThrow();
-            return;
-          }
-          expect(payloadFor(chip, { email: 'a@b.example', note: 'n', url: '' }, report)).toEqual(
-            expected,
-          );
-          return;
-        }
-        const note = (sites ? 'sites: 5; ' : '') + 'n';
-        expect(
-          payloadFor(chip, { email: 'a@b.example', sites, note: 'n', url: '' }, report),
-        ).toEqual(buildLeadPayload({ wedge, email: 'a@b.example', name: '', note, report }));
+// The signal a topic carries in the one request is the signal the shared
+// builder puts in a single-topic body, for every wedge.
+describe('signal parity with the single-topic builder', () => {
+  for (const wedge of GATED_ORDER) {
+    it(`${wedge} on the full report`, () => {
+      const single = buildLeadPayload({
+        wedge,
+        email: 'a@b.example',
+        name: '',
+        note: 'n',
+        report: full,
       });
-    }
+      expect(single).toMatchObject({ topic: wedge, wedge, url: 'https://shop.example.com/' });
+      expect(single.message).toContain(`[${wedge}] lead from RenderPeek result`);
+      const p = payloadForSubmission(chips, [wedge], form, full);
+      expect(p.lensSignals).toEqual({ [wedge]: single.lensSignal });
+    });
   }
 });
 
