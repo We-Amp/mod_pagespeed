@@ -34,7 +34,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
+#include <regex>
+#include <set>
+#include <string>
 
+#include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/instaweb_handler.h"
 #include "pagespeed/apache/streaming_pagespeed_resource_fetch.h"
 #include "pagespeed/kernel/base/file_system.h"
@@ -1163,6 +1168,53 @@ TEST_F(DaemonSeamTest, VirtualHostsShareOneAdapterPerVolume) {
   EXPECT_EQ(1, CountSubstring(mod, "DaemonAdapterPooldaemon_adapter_pool;"))
       << "an adapter pool that outlives the pass would carry verdicts over";
   EXPECT_EQ(0, CountSubstring(mod, "CloseRecordCache("));
+}
+
+// A directive that is both in the hand-written command table and produced by
+// the generated loop (any option with help text) is registered twice with
+// Apache, so a deprecated one printed its warning twice.  Each name must come
+// from exactly one of the two.
+TEST_F(DaemonSeamTest, NoDirectiveIsRegisteredByBothCommandTables) {
+  const std::string source = ReadSource("pagespeed/apache/mod_instaweb.cc");
+
+  std::map<std::string, std::string> constants;
+  const std::regex constant_re(
+      R"(const char (kModPagespeed\w+)\[\]\s*=\s*"(\w+)";)");
+  for (std::sregex_iterator it(source.begin(), source.end(), constant_re), end;
+       it != end; ++it) {
+    constants[(*it)[1]] = (*it)[2];
+  }
+
+  const size_t start =
+      source.find("static const command_rec mod_pagespeed_filter_cmds[] = {");
+  ASSERT_NE(std::string::npos, start)
+      << "the hand-written command table has been renamed";
+  const size_t finish = source.find("\n};", start);
+  ASSERT_NE(std::string::npos, finish);
+  const std::string table = source.substr(start, finish - start);
+
+  std::set<std::string> hand_written;
+  const std::regex name_re(R"(APACHE_\w+\(\s*(kModPagespeed\w+|"\w+"))");
+  for (std::sregex_iterator it(table.begin(), table.end(), name_re), end;
+       it != end; ++it) {
+    std::string name = (*it)[1];
+    auto found = constants.find(name);
+    hand_written.insert(found != constants.end()
+                            ? found->second
+                            : name.substr(1, name.size() - 2));
+  }
+  ASSERT_GT(hand_written.size(), 10u) << "the table scan found too little";
+
+  ApacheConfig config("seam_duplicate_check", nullptr);
+  for (const RewriteOptions::OptionBase* option : config.all_options()) {
+    if (option->help_text() == nullptr) {
+      continue;
+    }
+    const std::string name = StrCat("ModPagespeed", option->option_name());
+    EXPECT_EQ(0u, hand_written.count(name))
+        << name << " is in the hand-written table and also registered from "
+        << "the option's help text; Apache would register it twice";
+  }
 }
 
 }  // namespace
