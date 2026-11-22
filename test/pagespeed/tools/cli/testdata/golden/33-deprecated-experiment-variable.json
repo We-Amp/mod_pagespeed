@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/33-deprecated-experiment-variable.conf", "kind": "config", "sha256": "1092578c0ab432292b25631438b8f1e7a26c2b88ad166c410ea47af757330fd9"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS202", "severity": "warning", "file": "seeded/33-deprecated-experiment-variable.conf", "line": 2, "scope": "server", "directive": "ModPagespeedExperimentVariable", "args": ["<masked>"], "message": "'ExperimentVariable' is deprecated and ignored: it only configured the insert_ga filter, which no longer has any effect. Remove the directive."}
+  ]
+}

@@ -116,6 +116,10 @@ const std::vector<Case>& Cases() {
        "seeded/32-deprecated-shard-domain.conf",
        {},
        {{"PS202", 2}}},
+      {"33-deprecated-experiment-variable",
+       "seeded/33-deprecated-experiment-variable.conf",
+       {},
+       {{"PS202", 2}}},
   };
   return *cases;
 }
