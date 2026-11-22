@@ -15,11 +15,6 @@ The Apache config file has:
     # Optimize resources in-place, without changing their urls.
     ModPagespeedRewriteLevel OptimizeForBandwidth
   &lt;/Location&gt;
-  &lt;Location /in_place_optimize_for_browser&gt;
-    # Serve WebP to browsers that support it, and add the response
-    # header "Vary: Accept".
-    ModPagespeedEnableFilters in_place_optimize_for_browser
-  &lt;/Location&gt;
 </pre>
 
 <p>
@@ -41,11 +36,6 @@ Links to optimized and unoptimized resources:
        ><tt>blue.css?PageSpeed=off</tt></a></td>
     <td><a href="styles/blue.css"
       ><tt>styles/blue.css</tt></a></td>
-  <tr>
-    <td><a href="in_place_optimize_for_browser/Puzzle.jpg?PageSpeed=off"
-       ><tt>Puzzle.jpg?PageSpeed=off</tt></a></td>
-    <td><a href="in_place_optimize_for_browser/Puzzle.jpg"
-       ><tt>Puzzle.jpg</tt></a></td>
 </table>
 
 <hr>
@@ -67,11 +57,3 @@ Links to optimized and unoptimized resources:
 <style>
   #unused    {    background-color:    red   }
 </style>
-
-<p>
-
-<!-- This image will be converted to WebP in supporting browsers, and
-     optimized regardless.  The url won't change, but the response will be
-     served with 'Vary: Accept' so it will work with proxy caches in all
-     browsers. -->
-<img src="in_place_optimize_for_browser/Puzzle.jpg">
