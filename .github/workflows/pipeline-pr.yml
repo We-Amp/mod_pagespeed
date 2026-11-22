@@ -1726,7 +1726,8 @@ jobs:
                    //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
-                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+                //test/pagespeed/apache/... //test/pagespeed/nginx/... \
+                //test/pagespeed/tools/...
               rc=$?
               if [ $rc -ne 0 ]; then
                 # bazel-testlogs lives under the container-internal output
@@ -2305,6 +2306,141 @@ jobs:
               python3 tools/html-parse-corpus/gen_goldens.py --check \
                 --probe bazel-bin/pagespeed/kernel/html/html_parse_probe
             '
+
+      - name: Remove this job's dev image tag
+        if: always()
+        run: |
+          # Only the per-run tag; the content-hashed image stays for the next job.
+          docker rmi "${DEV_IMAGE}" >/dev/null 2>&1 || true
+
+
+  pagespeed-lint:
+    permissions:
+      contents: read
+    name: pagespeed lint (release build)
+    needs: [changes, vendor]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-24.04' || 'fleet-heavy' }}
+    timeout-minutes: 45
+    env:
+      DEV_IMAGE: pagespeed1.1-dev:ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          fail-on-cache-miss: true
+
+      # Hub channel: extract the vendor job's tarball over this checkout
+      # (same SHA; the tarball also carries vendor/ and the GIT_COMMIT stamp
+      # verified below). Integrity-checked with a hub fallback
+      # (tools/ci/extract-vendor-tarball.sh).
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Verify GIT_COMMIT stamp (hub channel)
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          STAMPED="$(tr -d '[:space:]' < "${GITHUB_WORKSPACE}/GIT_COMMIT" 2>/dev/null || true)"
+          [ "${STAMPED}" = "${GITHUB_SHA}" ] || {
+            echo "::error::[vendor-tarball-unavailable] stale or missing GIT_COMMIT stamp in the extracted workspace; re-run the full workflow, not only the failed jobs"
+            exit 1
+          }
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host flock around the build
+          # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds
+          # the image cold every time: the degraded mode.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag "${DEV_IMAGE}" x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # A per-runner directory for the Bazel disk cache, mounted at /cache.
+      # It persists across jobs on a fleet runner and is empty on a hosted
+      # one. The name is suffixed per runner instance (two instances can
+      # share one host's home) and is never logged.
+      - name: Prepare the per-runner Bazel cache directory
+        run: |
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
+          mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}/disk" 7d 12G || true
+          echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+
+      # `pagespeed lint` is built in release mode only (a bad option value can
+      # reach LOG(DFATAL), which aborts a debug build), so its tests run here
+      # with -c opt: the goldens, the masking allowlist and the rule x secret
+      # option matrix (//test/pagespeed/tools/cli). Then the built binary:
+      # every report matches the committed JSON Schema, the exit codes, 20
+      # runs agree, and no socket, process-spawning import or fetcher is
+      # linked (tools/ci/check_pagespeed_lint.py).
+      - name: Test and check the pagespeed lint binary
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
+          EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
+          BAZEL_CONFIG="--config=ci"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/remote-cache-docker-args.sh"
+            remote_cache_docker_args EXTRA_DOCKER
+          else
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
+            echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          rm -rf "${GITHUB_WORKSPACE}/.lint-out"
+          docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/cache -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              # BAZEL_CONFIG is an intentional flag list -> word-splitting.
+              # shellcheck disable=SC2086
+              bazel test ${BAZEL_CONFIG} --disk_cache=/cache/disk -c opt \
+                --test_output=errors //test/pagespeed/tools/cli:all
+              # shellcheck disable=SC2086
+              bazel build ${BAZEL_CONFIG} --disk_cache=/cache/disk -c opt \
+                //pagespeed/tools/cli:pagespeed
+              mkdir -p .lint-out
+              cp bazel-bin/pagespeed/tools/cli/pagespeed .lint-out/pagespeed
+              python3 -I tools/ci/check_pagespeed_lint.py --self-test
+              python3 -I tools/ci/check_pagespeed_lint.py symbols --binary .lint-out/pagespeed
+              python3 -I tools/ci/check_pagespeed_lint.py report --binary .lint-out/pagespeed \
+                --testdata test/pagespeed/tools/cli/testdata \
+                --schema pagespeed/tools/cli/pagespeed-lint.schema.json
+            '
+
+      # Networking off: the same reports from a new network namespace. Run on
+      # the runner itself, as a container cannot make one without privileges.
+      - name: The pagespeed lint binary runs with networking off
+        run: |
+          python3 -I tools/ci/check_pagespeed_lint.py offline --binary .lint-out/pagespeed \
+            --testdata test/pagespeed/tools/cli/testdata
 
       - name: Remove this job's dev image tag
         if: always()
@@ -3195,6 +3331,35 @@ jobs:
             //test/pagespeed/kernel/image:avif_test `
             //test/pagespeed/kernel/packs/... `
             //third_party/css_parser:css_parser_test
+          exit $LASTEXITCODE
+
+      # `pagespeed lint` in release mode, as it ships (its tests and goldens
+      # are the Linux ones, byte for byte), and the binary's import table: no
+      # Winsock or HTTP client DLL (tools/ci/check_pagespeed_lint.py).
+      - name: Test and check the pagespeed lint binary (release build)
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:GITHUB_WORKSPACE
+          $bazel = $env:BAZEL_CMD
+          $root = "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)"
+          $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
+          $common = @('--config=windows', '--config=clang-cl', '-c', 'opt', '--jobs=HOST_CPUS*.75', '--nostamp',
+                      "--workspace_status_command=echo.",
+                      "--disk_cache=$diskCache",
+                      '--test_env=CI_WIN_TEST_RESULTS_EPOCH=2026-11-08')
+          if (Test-Path -LiteralPath 'vendor') { $common = @('--config=vendored') + $common }
+          if ($env:BAZEL_REMOTE_CACHE_URL) { $common += "--remote_cache=$($env:BAZEL_REMOTE_CACHE_URL)" }
+          & $bazel $root test @common --test_output=errors -- //test/pagespeed/tools/cli:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $bazel $root build @common -- //pagespeed/tools/cli:pagespeed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bazelBin = (& $bazel $root info @common bazel-bin 2>$null).Trim()
+          $exe = Join-Path $bazelBin 'pagespeed\tools\cli\pagespeed.exe'
+          python -I tools\ci\check_pagespeed_lint.py symbols --binary $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I tools\ci\check_pagespeed_lint.py report --binary $exe `
+            --testdata test\pagespeed\tools\cli\testdata `
+            --schema pagespeed\tools\cli\pagespeed-lint.schema.json
           exit $LASTEXITCODE
 
 

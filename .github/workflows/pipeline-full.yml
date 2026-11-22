@@ -2068,7 +2068,8 @@ jobs:
                    //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
-                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+                //test/pagespeed/apache/... //test/pagespeed/nginx/... \
+                //test/pagespeed/tools/...
             '
 
       - name: Stop the test services
