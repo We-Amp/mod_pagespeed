@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/15-global-in-conditional.conf", "kind": "config", "sha256": "a244aa606e767831cc74e1b079fcf822a51d1dd99fd5159e12a943001471de73"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS306", "severity": "error", "file": "seeded/15-global-in-conditional.conf", "line": 2, "scope": "server+conditional", "directive": "ModPagespeedStrictAdminAccess", "args": ["<masked>"], "message": "Global directive ModPagespeedStrictAdminAccess invalid inside conditional."}
+  ]
+}

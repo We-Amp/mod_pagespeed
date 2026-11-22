@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/03-arity.conf", "kind": "config", "sha256": "75fcf6776f408eaf68b563938f05e48567de3a18021e551c98ef343eebf759ee"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS103", "severity": "error", "file": "seeded/03-arity.conf", "line": 2, "scope": "server", "directive": "ModPagespeedEnableFilters", "args": ["<masked>", "<masked>"], "message": "ModPagespeedEnableFilters takes one argument"}
+  ]
+}

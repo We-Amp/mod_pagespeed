@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/29-include-wildcard.conf", "kind": "config", "sha256": "f346b79badb52643e7d8aa37791b66b79151c8e947ea0615ca7c1238e5e6b941"},
+    {"path": "good/sites/a.conf", "kind": "include", "sha256": "db9b2e43cff7c46a9c5b1290dcf87c7b02e8acea485c1c7df99ec5718f1d797e"},
+    {"path": "good/sites/b.conf", "kind": "include", "sha256": "ff9a24b4b8821ef685a90f6ed63beb40ce66e02e81903c9feb2f07471b96751b"}
+  ],
+  "summary": {"error": 0, "warning": 0, "info": 0},
+  "findings": []
+}

@@ -461,15 +461,29 @@ SystemRewriteOptions::ParseAndSetOptionFromName1(StringPiece name,
   // The experimental gRPC central controller was removed; these options are
   // kept registered so old configs still parse, but they no longer do
   // anything. Warn when they are set.
-  if (StringCaseEqual(name, kCentralControllerPort) ||
-      StringCaseEqual(name, kPopularityContestMaxInFlight) ||
-      StringCaseEqual(name, kPopularityContestMaxQueueSize)) {
-    handler->Message(kWarning,
-                     "'%s' is deprecated and ignored; the experimental gRPC "
-                     "central controller was removed.",
-                     name.as_string().c_str());
+  if (IsCentralControllerOption(name)) {
+    GoogleString warning;
+    DeprecatedOptionMessage(name, &warning);
+    handler->MessageS(kWarning, warning);
   }
   return RewriteOptions::ParseAndSetOptionFromName1(name, arg, msg, handler);
+}
+
+bool SystemRewriteOptions::DeprecatedOptionMessage(StringPiece name,
+                                                   GoogleString* message) {
+  if (IsCentralControllerOption(name)) {
+    *message = StrCat("'", name,
+                      "' is deprecated and ignored; the experimental gRPC "
+                      "central controller was removed.");
+    return true;
+  }
+  return RewriteOptions::DeprecatedOptionMessage(name, message);
+}
+
+bool SystemRewriteOptions::IsCentralControllerOption(StringPiece name) {
+  return StringCaseEqual(name, kCentralControllerPort) ||
+         StringCaseEqual(name, kPopularityContestMaxInFlight) ||
+         StringCaseEqual(name, kPopularityContestMaxQueueSize);
 }
 
 bool SystemRewriteOptions::HttpsOptions::SetFromString(

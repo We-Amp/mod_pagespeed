@@ -72,6 +72,7 @@
 
 #ifdef LEGACY_CONFIG_APACHE
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_directive_table.h"
 #endif
 
 namespace net_instaweb {
@@ -141,7 +142,7 @@ GoogleString FunctionBody(const GoogleString& source,
 // ---------------------------------------------------------------------------
 
 // The directive names (without "ModPagespeed", lower case) that used to load
-// and are now refused on purpose.  Every expect=removed line in a corpus must
+// and are now refused on purpose: RewriteOptions::RemovedOptions().  Every expect=removed line in a corpus must
 // name one of these, and every name here must appear in the corpus as
 // expect=removed.  Adding a name needs the replacement documented in the
 // upgrade notes.  FileCacheInodeLimit, FileCacheCleanIntervalMs,
@@ -149,7 +150,14 @@ GoogleString FunctionBody(const GoogleString& source,
 // DistributedRewriteServers and DistributedRewriteTimeoutMs were refused by
 // nginx up to 2.8.2; they now load with a warning, as on Apache.
 const std::set<GoogleString>& KnownRemoved() {
-  static const std::set<GoogleString>* removed = new std::set<GoogleString>{};
+  static const std::set<GoogleString>* removed = [] {
+    auto* names = new std::set<GoogleString>;
+    for (const RewriteOptions::RemovedOption& r :
+         RewriteOptions::RemovedOptions()) {
+      names->insert(Lower(r.name));
+    }
+    return names;
+  }();
   return *removed;
 }
 
@@ -649,9 +657,11 @@ Result ApplyNginx(const Directive& d, const NgxTables& t,
 // ---------------------------------------------------------------------------
 
 // httpd refuses a directive that is not in the module's command table before
-// the module sees it.  The table is the hand-written one in mod_instaweb.cc
-// plus one entry per registered option that has help text, plus one per
-// deprecated name (see the end of mod_instaweb.cc).
+// the module sees it.  The table is the hand-written one in
+// apache_directive_table.h (which mod_instaweb.cc builds its command_rec
+// array from) plus one entry per registered option that has help text, plus
+// one per deprecated name (ForEachOptionCommand, called by InstallCommands at
+// the end of mod_instaweb.cc).
 bool InApacheCommandTable(const ApacheConfig& config,
                           const GoogleString& mod_instaweb_source,
                           StringPiece option) {
@@ -670,9 +680,14 @@ bool InApacheCommandTable(const ApacheConfig& config,
   if (RewriteOptions::IsDeprecatedOptionName(option)) {
     return true;
   }
-  return Lower(mod_instaweb_source)
-             .find(Lower(StrCat("\"ModPagespeed", option, "\""))) !=
-         GoogleString::npos;
+  using namespace apache_directive;  // NOLINT(build/namespaces)
+  const GoogleString wanted = StrCat("ModPagespeed", option);
+  bool found = false;
+#define LEGACY_CONFIG_FIND(kind, name, help) \
+  found = found || StringCaseEqual(name, wanted);
+  PAGESPEED_APACHE_DIRECTIVE_TABLE(LEGACY_CONFIG_FIND)
+#undef LEGACY_CONFIG_FIND
+  return found;
 }
 
 // Where in the httpd configuration a directive is written.
@@ -687,69 +702,23 @@ struct ApacheCommandScope {
   bool errors_in_vhost = false;  // "used inside a <VirtualHost> ..."
 };
 
-// The hand-written entries of mod_pagespeed_filter_cmds:
-// APACHE_CONFIG_[DIR_]OPTION[2|3|23](name, ...).  The DIR_ forms register
-// OR_ALL, the others RSRC_CONF.  The name is a kModPagespeedFoo constant
-// (the directive is "ModPagespeedFoo"), RewriteQuery::kModPagespeed (the
-// plain "ModPagespeed" directive) or a string literal.  Returns the option
-// names (lower case, without "ModPagespeed") mapped to "allowed in
-// <Directory>".
-std::map<GoogleString, bool> ReadHandWrittenCommands(
-    const GoogleString& source) {
+// The hand-written entries of mod_pagespeed_filter_cmds, from the shared
+// table mod_instaweb.cc builds them from: the option names (lower case,
+// without "ModPagespeed") mapped to "allowed in <Directory>" (the command's
+// override class includes OR_ALL or ACCESS_CONF).
+std::map<GoogleString, bool> ReadHandWrittenCommands() {
+  using namespace apache_directive;  // NOLINT(build/namespaces)
   std::map<GoogleString, bool> out;
-  const size_t table = source.find("mod_pagespeed_filter_cmds[] = {");
-  if (table == GoogleString::npos) {
-    return out;
+#define LEGACY_CONFIG_ENTRY(kind, name, help)                               \
+  {                                                                         \
+    const StringPiece n(name);                                              \
+    if (StringCaseStartsWith(n, "ModPagespeed")) {                          \
+      out[Lower(n.substr(12))] =                                            \
+          (InfoFor(Kind::kind).req_override & (kOrAll | kAccessConf)) != 0; \
+    }                                                                       \
   }
-  const GoogleString kMacro = "APACHE_CONFIG_";
-  size_t pos = table;
-  while ((pos = source.find(kMacro, pos)) != GoogleString::npos) {
-    pos += kMacro.size();
-    const bool dir = source.compare(pos, 4, "DIR_") == 0;
-    if (dir) {
-      pos += 4;
-    }
-    if (source.compare(pos, 6, "OPTION") != 0) {
-      continue;
-    }
-    pos += 6;
-    while (pos < source.size() &&
-           isdigit(static_cast<unsigned char>(source[pos]))) {
-      ++pos;
-    }
-    if (pos >= source.size() || source[pos] != '(') {
-      continue;
-    }
-    ++pos;
-    while (pos < source.size() &&
-           isspace(static_cast<unsigned char>(source[pos]))) {
-      ++pos;
-    }
-    size_t end = pos;
-    GoogleString name;
-    if (source[pos] == '"') {
-      end = source.find('"', pos + 1);
-      name = source.substr(pos + 1, end - pos - 1);
-    } else {
-      while (end < source.size() &&
-             (isalnum(static_cast<unsigned char>(source[end])) ||
-              source[end] == '_' || source[end] == ':')) {
-        ++end;
-      }
-      name = source.substr(pos, end - pos);
-      const size_t colons = name.rfind("::");
-      if (colons != GoogleString::npos) {
-        name = name.substr(colons + 2);
-      }
-      if (name.compare(0, 1, "k") == 0) {
-        name = name.substr(1);
-      }
-    }
-    if (name.compare(0, 12, "ModPagespeed") != 0) {
-      continue;
-    }
-    out[Lower(name.substr(12))] = dir;
-  }
+  PAGESPEED_APACHE_DIRECTIVE_TABLE(LEGACY_CONFIG_ENTRY)
+#undef LEGACY_CONFIG_ENTRY
   return out;
 }
 
@@ -769,32 +738,18 @@ const char* ScopeLabel(RewriteOptions::OptionScope scope) {
   return "";
 }
 
-// What FillInApacheCommand does for an option scope, read from the switch in
-// mod_instaweb.cc rather than copied: the case's statements, up to its
-// break, say whether the command is OR_ALL (allowed in <Directory>) and
-// whether it is registered as kErrorInVHost.  A case label that is missing
-// from the switch fails the test.
-ApacheCommandScope ScopeOf(const GoogleString& mod_instaweb_source,
-                           RewriteOptions::OptionScope scope) {
+// What FillInApacheCommand does for an option scope: the shared
+// CommandForOptionScope it calls says whether the command is OR_ALL (allowed
+// in <Directory>) and whether it is registered as kErrorInVHost.
+ApacheCommandScope ScopeOf(RewriteOptions::OptionScope scope) {
+  using namespace apache_directive;  // NOLINT(build/namespaces)
+  const OptionCommand command = CommandForOptionScope(scope);
   ApacheCommandScope s;
-  const GoogleString body = FunctionBody(
-      mod_instaweb_source, "void ApacheProcessContext::FillInApacheCommand(");
-  const GoogleString label =
-      StrCat("case RewriteOptions::", ScopeLabel(scope), ":");
-  const size_t at = body.find(label);
-  if (at == GoogleString::npos) {
-    ADD_FAILURE() << "FillInApacheCommand has no `" << label << "`";
-    return s;
-  }
-  // Labels that fall through share the statements after the last one.
-  const size_t end = body.find("break;", at);
-  const GoogleString block = body.substr(
-      at, end == GoogleString::npos ? GoogleString::npos : end - at);
-  const bool or_all = block.find("OR_ALL") != GoogleString::npos;
-  const bool rsrc_conf = block.find("RSRC_CONF") != GoogleString::npos;
-  EXPECT_NE(or_all, rsrc_conf) << label << " must set one req_override";
-  s.in_directory = or_all;
-  s.errors_in_vhost = block.find("kErrorInVHost") != GoogleString::npos;
+  EXPECT_TRUE(command.req_override == kOrAll ||
+              command.req_override == kRsrcConf)
+      << ScopeLabel(scope) << " must set one req_override";
+  s.in_directory = command.req_override == kOrAll;
+  s.errors_in_vhost = command.vhost == VHostHandling::kErrorInVHost;
   return s;
 }
 
@@ -805,7 +760,7 @@ ApacheCommandScope ScopeOf(const GoogleString& mod_instaweb_source,
 // CheckGlobalOption; the hand-written names that are global are refused by
 // the factory instead (is_process_scope).
 ApacheCommandScope CommandScope(
-    const ApacheConfig& config, const GoogleString& mod_instaweb_source,
+    const ApacheConfig& config,
     const std::map<GoogleString, bool>& hand_written, StringPiece option) {
   ApacheCommandScope s;
   const auto hw = hand_written.find(Lower(option));
@@ -816,14 +771,14 @@ ApacheCommandScope CommandScope(
   for (const RewriteOptions::OptionBase* o : config.all_options()) {
     if (o != nullptr && o->help_text() != nullptr &&
         StringCaseEqual(o->option_name(), option)) {
-      return ScopeOf(mod_instaweb_source, o->scope());
+      return ScopeOf(o->scope());
     }
   }
   const RewriteOptions::Properties* deprecated =
       RewriteOptions::deprecated_properties();
   for (int i = 0, n = deprecated->size(); i < n; ++i) {
     if (StringCaseEqual(deprecated->property(i)->option_name(), option)) {
-      return ScopeOf(mod_instaweb_source, deprecated->property(i)->scope());
+      return ScopeOf(deprecated->property(i)->scope());
     }
   }
   return s;
@@ -847,9 +802,8 @@ Result ApplyApache(const Directive& d, const GoogleString& mod_instaweb_source,
     return refused;
   }
   if (where != ApacheWhere::kServerConfig) {
-    const ApacheCommandScope scope = CommandScope(
-        *config, mod_instaweb_source,
-        ReadHandWrittenCommands(mod_instaweb_source), option);
+    const ApacheCommandScope scope =
+        CommandScope(*config, ReadHandWrittenCommands(), option);
     if (where == ApacheWhere::kDirectory && !scope.in_directory) {
       refused.message =
           StrCat(d.args[0], " not allowed in <Directory> context");
@@ -1082,7 +1036,7 @@ class LegacyConfigCompatTest : public testing::Test {
     ASSERT_GE(corpus.size(), 300u);
     const GoogleString mod_instaweb = ReadSource(kModInstawebCc);
     ASSERT_FALSE(mod_instaweb.empty());
-    ASSERT_GE(ReadHandWrittenCommands(mod_instaweb).size(), 30u);
+    ASSERT_GE(ReadHandWrittenCommands().size(), 30u);
     std::unique_ptr<OptionParsingFactory> factory = NewFactory();
     RecordingHandler handler;
     struct Case {
@@ -1331,7 +1285,7 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   ASSERT_FALSE(parse1.empty());
   const size_t cache_path = parse1.find("kModPagespeedFileCachePath)");
   const size_t rename =
-      parse1.find("directive=kModPagespeedImageInlineMaxBytes");
+      parse1.find("directive=CanonicalDirectiveName(directive)");
   const size_t name1 = parse1.find("config->ParseAndSetOptionFromName1(option");
   const size_t factory1 = parse1.find("factory->ParseAndSetOption1(");
   const size_t deprecated =
@@ -1343,27 +1297,31 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   EXPECT_LT(rename, name1);
   EXPECT_LT(name1, factory1);
   EXPECT_LT(factory1, deprecated);
-  EXPECT_NE(GoogleString::npos,
-            parse1.find("directive=kModPagespeedImageMaxRewritesAtOnce"));
+  // The renames themselves, which ApplyApache follows.
+  EXPECT_EQ("ModPagespeedImageInlineMaxBytes",
+            apache_directive::CanonicalDirectiveName(
+                "ModPagespeedImgInlineMaxBytes"));
+  EXPECT_EQ("ModPagespeedImageMaxRewritesAtOnce",
+            apache_directive::CanonicalDirectiveName(
+                "ModPagespeedImgMaxRewritesAtOnce"));
   const GoogleString parse2 = Condense(
       FunctionBody(source, "static const char* ParseDirective2(cmd_parms*"));
   EXPECT_NE(GoogleString::npos,
             parse2.find("config->ParseAndSetOptionFromName2(option"));
   EXPECT_NE(GoogleString::npos, parse2.find("factory->ParseAndSetOption2("));
-  // The command table: the hand-written entries, then one per registered
-  // option with help text, then one per deprecated name.
+  // The command table: the hand-written entries from the shared table, then
+  // the shared walk (one per registered option with help text, then one per
+  // deprecated name), placed by the shared scope mapping that ScopeOf reads.
   const GoogleString all = Condense(source);
-  EXPECT_NE(GoogleString::npos, all.find("if(option->help_text()!=nullptr)"));
   EXPECT_NE(GoogleString::npos,
-            all.find("RewriteOptions::deprecated_properties()"));
-  // The scope rules ScopeOf and CheckApacheScopes read.
+            all.find("PAGESPEED_APACHE_DIRECTIVE_TABLE(PAGESPEED_APACHE_CMD)"));
   EXPECT_NE(GoogleString::npos,
-            all.find("caseRewriteOptions::kProcessScopeStrict:"
-                     "vhost_command_handling_map_[cmd]=kErrorInVHost;"
-                     "cmd->req_override=RSRC_CONF;"));
+            all.find("ForEachOptionCommand(config_template,"));
+  EXPECT_NE(GoogleString::npos,
+            all.find("OptionCommandcommand=CommandForOptionScope(scope);"));
+  EXPECT_NE(GoogleString::npos,
+            all.find("vhost_command_handling_map_[cmd]=command.vhost;"));
   EXPECT_NE(GoogleString::npos, all.find("!cmd->server->is_virtual"));
-  EXPECT_NE(GoogleString::npos, all.find("NULL,RSRC_CONF,help)"));
-  EXPECT_NE(GoogleString::npos, all.find("NULL,OR_ALL,help)"));
 }
 
 #endif  // LEGACY_CONFIG_APACHE

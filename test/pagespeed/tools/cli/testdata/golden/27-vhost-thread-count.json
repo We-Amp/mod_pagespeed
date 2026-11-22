@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/27-vhost-thread-count.conf", "kind": "config", "sha256": "64fc2a82117b101a5da4f6c67de7f85c94b0ea3066f3370733b29ecf801f571d"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS302", "severity": "error", "file": "seeded/27-vhost-thread-count.conf", "line": 2, "scope": "virtualhost", "directive": "ModPagespeedNumRewriteThreads", "args": ["<masked>"], "message": "ModPagespeedNumRewriteThreads applies to the whole server and cannot be set inside <VirtualHost>"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/14-nested-conditional.conf", "kind": "config", "sha256": "d8682b06f0465d94ab68d997601446d22fff21e3e0b0f614e45cc75fef833b4a"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS305", "severity": "error", "file": "seeded/14-nested-conditional.conf", "line": 3, "scope": "server+conditional", "directive": "<ModPagespeedIf>", "args": ["!spdy"], "message": "Can't nest <ModPagespeedIf> blocks"}
+  ]
+}

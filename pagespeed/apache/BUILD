@@ -92,7 +92,6 @@ cc_library(
     name = "apache_core",
     target_compatible_with = ["@platforms//os:linux"],
     srcs = [
-        "apache_config.cc",
         "apache_fetch.cc",
         "apache_message_handler.cc",
         "apache_mmap_bucket.cc",
@@ -115,7 +114,6 @@ cc_library(
         "streaming_pagespeed_resource_fetch.cc",
     ],
     hdrs = [
-        "apache_config.h",
         "apache_fetch.h",
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
@@ -155,6 +153,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":apache_apr",
+        ":apache_config",
         "//pagespeed/automatic",
         "//pagespeed/kernel/thread:event_scheduler",
         "//pagespeed/kernel/thread:libevent_dispatcher",
@@ -177,6 +176,31 @@ cc_library(
         # instaweb_context.cc) and the httpd util_filter API; it is no longer
         # for memcached. Declared here because apache_apr no longer pulls it.
         "@aprutil",
+    ],
+)
+
+# ApacheConfig and the Apache directive table, without httpd: no httpd or APR
+# header is included, so this builds on every platform.  The module
+# (apache_core, mod_instaweb.cc) and the offline config linter
+# (//pagespeed/tools/cli) both depend on it, so each source is compiled into
+# exactly one target and the two read the same option and directive tables.
+cc_library(
+    name = "apache_config",
+    srcs = [
+        "apache_config.cc",
+        "apache_directive_table.cc",
+    ],
+    hdrs = [
+        "apache_config.h",
+        "apache_directive_table.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb:net_instaweb_lib",
+        "//net/instaweb/rewriter:rewriter_core",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:daemon_reader",
+        "//pagespeed/system:system_rewrite_options",
     ],
 )
 

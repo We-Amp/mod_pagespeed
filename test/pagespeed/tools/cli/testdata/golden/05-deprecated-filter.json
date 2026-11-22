@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/05-deprecated-filter.conf", "kind": "config", "sha256": "e174c58b6e158a68e26be46e402e37faedc15b333169036fcf22761803ffb22a"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS204", "severity": "warning", "file": "seeded/05-deprecated-filter.conf", "line": 2, "scope": "server", "directive": "ModPagespeedEnableFilters", "args": ["<masked>"], "message": "Filter 'insert_ga' is deprecated and has no effect: it targeted Universal Analytics, which was discontinued in July 2023. Use your own analytics snippet."}
+  ]
+}

@@ -74,6 +74,10 @@ class SystemRewriteOptions : public RewriteOptions {
       StringPiece name, StringPiece arg, GoogleString* msg,
       MessageHandler* handler) override;
 
+  // RewriteOptions::DeprecatedOptionMessage plus the retired options of the
+  // removed central controller.
+  static bool DeprecatedOptionMessage(StringPiece name, GoogleString* message);
+
   OptionSettingResult ParseAndSetOptionFromName2(
       StringPiece name, StringPiece arg1, StringPiece arg2, GoogleString* msg,
       MessageHandler* handler) override;
@@ -561,6 +565,8 @@ class SystemRewriteOptions : public RewriteOptions {
   // accept-encoding:gzip, even when used in a context when we want
   // cleartext.  We'll decompress as we read the content if needed.
   Option<bool> fetch_with_gzip_;
+
+  static bool IsCentralControllerOption(StringPiece name);
 
   // Deprecated no-op options, kept registered so old configs still parse.
   // Setting any of these logs a deprecation warning (see

@@ -2272,10 +2272,11 @@ def self_test():
 # What the jobs after `adopt` check against the binding
 
 # Release files whose SHA256SUMS row an adopting run may change: the files of
-# the Windows build (the installer is rebuilt from the signed binaries), and
-# the two manifests, which name this run and are written again.
+# the Windows build (the installer and the pagespeed lint zip are rebuilt from
+# the signed binaries), and the two manifests, which name this run and are
+# written again.
 SUMS_MAY_DIFFER = ("manifest.json", "sidecar-pair.json")
-SUMS_MAY_DIFFER_RE = re.compile(r"^pagespeed-iis-.*-win-x64\.msi$")
+SUMS_MAY_DIFFER_RE = re.compile(r"^(pagespeed-iis-.*-win-x64\.msi|pagespeed-lint-.*-win-x64\.zip)$")
 
 
 def load_binding(path):

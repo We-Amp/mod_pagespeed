@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/07-deprecated-spelling.conf", "kind": "config", "sha256": "53b48b8ad51f699fa0dffd6206297953ce0aa3a96be6137313f25e45e358b051"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS201", "severity": "warning", "file": "seeded/07-deprecated-spelling.conf", "line": 2, "scope": "server", "directive": "ModPagespeedImgInlineMaxBytes", "args": ["<masked>"], "message": "ModPagespeedImgInlineMaxBytes is a deprecated spelling; use ModPagespeedImageInlineMaxBytes"}
+  ]
+}

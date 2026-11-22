@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/31-crlf.conf", "kind": "config", "sha256": "c60de495acd3dbe160e42b1e1debb6243617f4f674790603b5aef8a1c7c248e4"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS204", "severity": "warning", "file": "seeded/31-crlf.conf", "line": 3, "scope": "server", "directive": "ModPagespeedEnableFilters", "args": ["<masked>"], "message": "Filter 'insert_ga' is deprecated and has no effect: it targeted Universal Analytics, which was discontinued in July 2023. Use your own analytics snippet."}
+  ]
+}

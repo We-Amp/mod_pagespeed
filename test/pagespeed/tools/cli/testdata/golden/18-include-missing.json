@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/18-include-missing.conf", "kind": "config", "sha256": "9ca86053037b25e22b80f46db88c9a213d34d3ae92d3e768da4cfb3f0c95e29f"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS901", "severity": "error", "file": "seeded/18-include-missing.conf", "line": 2, "scope": "server", "directive": "Include", "args": [], "message": "Include target not found: seeded/conf.d/missing.conf"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/25-glued-equals.conf", "kind": "config", "sha256": "a0ef3e931b1fc0e791700017f37b01ef4d87127a160ddba2e5997972d6990b3d"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS106", "severity": "error", "file": "seeded/25-glued-equals.conf", "line": 1, "scope": "server", "directive": "ModPagespeedRewriteLevel", "args": ["<masked>"], "message": "ModPagespeedRewriteLevel is followed by '=': Apache directives take their arguments after a space"}
+  ]
+}

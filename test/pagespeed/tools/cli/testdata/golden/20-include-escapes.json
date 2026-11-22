@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/20-include-escapes.conf", "kind": "config", "sha256": "136c8ce6f5c86a59f4c0449a76cf621a39e35298fa4b62959707a990280301e8"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS903", "severity": "error", "file": "seeded/20-include-escapes.conf", "line": 1, "scope": "server", "directive": "Include", "args": [], "message": "Include path leaves the configuration root"}
+  ]
+}

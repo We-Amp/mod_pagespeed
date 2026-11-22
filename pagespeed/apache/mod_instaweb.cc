@@ -39,6 +39,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_directive_table.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
 #include "pagespeed/apache/apache_self_fetch.h"
 #include "pagespeed/apache/apache_server_context.h"
@@ -107,87 +108,11 @@ namespace net_instaweb {
 
 namespace {
 
-// Passed to CheckGlobalOption
-enum VHostHandling : std::uint8_t { kTolerateInVHost, kErrorInVHost };
-
-// TODO(sligocki): Separate options parsing from all the other stuff here.
-// Instaweb directive names -- these must match
-// install/common/pagespeed.conf.template.
+// The directive names, the directive table and the placement rules are in
+// apache_directive_table.h, shared with the offline config linter.
 // If you add a new option, exercise it in a system test under
 // test/system/ to make sure it parses correctly.
-
-const char kModPagespeedIf[] = "<ModPagespeedIf";
-
-const char kModPagespeedAdminDomains[] = "ModPagespeedAdminDomains";
-const char kModPagespeedAllow[] = "ModPagespeedAllow";
-const char kModPagespeedBlockingRewriteRefererUrls[] =
-    "ModPagespeedBlockingRewriteRefererUrls";
-const char kModPagespeedConsoleDomains[] = "ModPagespeedConsoleDomains";
-const char kModPagespeedCreateSharedMemoryMetadataCache[] =
-    "ModPagespeedCreateSharedMemoryMetadataCache";
-const char kModPagespeedAddResourceHeader[] = "ModPagespeedAddResourceHeader";
-const char kModPagespeedCustomFetchHeader[] = "ModPagespeedCustomFetchHeader";
-const char kModPagespeedDisableFilters[] = "ModPagespeedDisableFilters";
-const char kModPagespeedDisallow[] = "ModPagespeedDisallow";
-const char kModPagespeedDomain[] = "ModPagespeedDomain";
-const char kModPagespeedDownstreamCachePurgeLocationPrefix[] =
-    "ModPagespeedDownstreamCachePurgeLocationPrefix";
-const char kModPagespeedEnableFilters[] = "ModPagespeedEnableFilters";
-const char kModPagespeedFetcherTimeoutMs[] = "ModPagespeedFetcherTimeOutMs";
-const char kModPagespeedFileCachePath[] = "ModPagespeedFileCachePath";
-const char kModPagespeedForbidFilters[] = "ModPagespeedForbidFilters";
-const char kModPagespeedForceCaching[] = "ModPagespeedForceCaching";
-const char kModPagespeedExperimentVariable[] = "ModPagespeedExperimentVariable";
-const char kModPagespeedExperimentSpec[] = "ModPagespeedExperimentSpec";
-const char kModPagespeedGlobalAdminDomains[] = "ModPagespeedGlobalAdminDomains";
-const char kModPagespeedGlobalStatisticsDomains[] =
-    "ModPagespeedGlobalStatisticsDomains";
-const char kModPagespeedImageInlineMaxBytes[] =
-    "ModPagespeedImageInlineMaxBytes";
-const char kModPagespeedImageMaxRewritesAtOnce[] =
-    "ModPagespeedImageMaxRewritesAtOnce";
-const char kModPagespeedInstallCrashHandler[] =
-    "ModPagespeedInstallCrashHandler";
-const char kModPagespeedLibrary[] = "ModPagespeedLibrary";
-const char kModPagespeedListOutstandingUrlsOnError[] =
-    "ModPagespeedListOutstandingUrlsOnError";
-const char kModPagespeedLoadFromFile[] = "ModPagespeedLoadFromFile";
-const char kModPagespeedLoadFromFileMatch[] = "ModPagespeedLoadFromFileMatch";
-const char kModPagespeedLoadFromFileRule[] = "ModPagespeedLoadFromFileRule";
-const char kModPagespeedLoadFromFileRuleMatch[] =
-    "ModPagespeedLoadFromFileRuleMatch";
-const char kModPagespeedLogDir[] = "ModPagespeedLogDir";
-const char kModPagespeedMapOriginDomain[] = "ModPagespeedMapOriginDomain";
-const char kModPagespeedMapProxyDomain[] = "ModPagespeedMapProxyDomain";
-const char kModPagespeedMapRewriteDomain[] = "ModPagespeedMapRewriteDomain";
-const char kModPagespeedMessageBufferSize[] = "ModPagespeedMessageBufferSize";
-const char kModPagespeedMessagesDomains[] = "ModPagespeedMessagesDomains";
-const char kModPagespeedNumExpensiveRewriteThreads[] =
-    "ModPagespeedNumExpensiveRewriteThreads";
-const char kModPagespeedNumRewriteThreads[] = "ModPagespeedNumRewriteThreads";
-const char kModPagespeedPermitIdsForCssCombining[] =
-    "ModPagespeedPermitIdsForCssCombining";
-const char kModPagespeedProxySuffix[] = "ModPagespeedProxySuffix";
-const char kModPagespeedRetainComment[] = "ModPagespeedRetainComment";
-const char kModPagespeedRulePackTrustKey[] = "ModPagespeedRulePackTrustKey";
-const char kModPagespeedRunExperiment[] = "ModPagespeedRunExperiment";
-const char kModPagespeedShardDomain[] = "ModPagespeedShardDomain";
-const char kModPagespeedStaticAssetPrefix[] = "ModPagespeedStaticAssetPrefix";
-const char kModPagespeedStatisticsDomains[] = "ModPagespeedStatisticsDomains";
-const char kModPagespeedTrackOriginalContentLength[] =
-    "ModPagespeedTrackOriginalContentLength";
-const char kModPagespeedUrlValuedAttribute[] = "ModPagespeedUrlValuedAttribute";
-const char kModPagespeedUsePerVHostStatistics[] =
-    "ModPagespeedUsePerVHostStatistics";
-
-// The following are deprecated due to spelling
-const char kModPagespeedImgInlineMaxBytes[] = "ModPagespeedImgInlineMaxBytes";
-const char kModPagespeedImgMaxRewritesAtOnce[] =
-    "ModPagespeedImgMaxRewritesAtOnce";
-const char kModPagespeedImageWebpRecompressionQuality[] =
-    "ModPagespeedImageWebpRecompressionQuality";
-const char kModPagespeedImageWebpRecompressionQualityForSmallScreens[] =
-    "ModPagespeedImageWebpRecompressionQualityForSmallScreens";
+using namespace apache_directive;  // NOLINT(build/namespaces)
 
 enum RewriteOperation : std::uint8_t { REWRITE, FLUSH, FINISH };
 
@@ -1764,8 +1689,7 @@ static const char* CmdOptions(const cmd_parms* cmd, void* data,
     // not see SPDY vs. non-SPDY distinction.
     if (cmd->directive->data != nullptr) {
       *config_out = nullptr;
-      return "Can't use <ModPagespeedIf except at top-level or VirtualHost "
-             "context";
+      return kConditionalInDirectoryError;
     }
   }
   // Apache parses .htaccess files with cmd->pool == cmd->temp_pool, which
@@ -1781,29 +1705,20 @@ static const char* CmdOptions(const cmd_parms* cmd, void* data,
 // This should be called for global options to see if they were used properly.
 // In particular, it returns an error string if a global option is inside a
 // <ModPagespeedIf. It also either warns or errors out if we're using a global
-// option inside a virtual host, depending on "mode".
+// option inside a virtual host, depending on "mode".  The rule itself is
+// CheckProcessScopeUse, shared with the offline config linter.
 //
 // Returns NULL if successful, error string otherwise.
 static char* CheckGlobalOption(const cmd_parms* cmd, VHostHandling mode,
                                MessageHandler* handler) {
-  if (cmd->server->is_virtual) {
-    char* vhost_error = apr_pstrcat(
-        cmd->pool, "Directive ", cmd->directive->directive,
-        " used inside a <VirtualHost> but applies globally.",
-        (mode == kTolerateInVHost ? " Accepting for backwards compatibility. "
-                                  : nullptr),
-        NULL);
-    if (mode == kErrorInVHost) {
-      return vhost_error;
-    } else {
-      GoogleString message(vhost_error);
-      handler->MessageS(kWarning, message);
-    }
+  ProcessScopeUse use = CheckProcessScopeUse(cmd->directive->directive, mode,
+                                             cmd->server->is_virtual != 0,
+                                             cmd->directive->data != nullptr);
+  if (!use.warning.empty()) {
+    handler->MessageS(kWarning, use.warning);
   }
-  if (cmd->directive->data != nullptr) {
-    return apr_pstrcat(cmd->pool, "Global directive ",
-                       cmd->directive->directive,
-                       " invalid inside conditional.", NULL);
+  if (!use.error.empty()) {
+    return apr_pstrdup(cmd->pool, use.error.c_str());
   }
   return nullptr;
 }
@@ -1881,11 +1796,7 @@ static const char* ParseDirective(cmd_parms* cmd, void* data, const char* arg) {
   }
 
   // Rename deprecated options so lookup below will succeed.
-  if (StringCaseEqual(directive, kModPagespeedImgInlineMaxBytes)) {
-    directive = kModPagespeedImageInlineMaxBytes;
-  } else if (StringCaseEqual(directive, kModPagespeedImgMaxRewritesAtOnce)) {
-    directive = kModPagespeedImageMaxRewritesAtOnce;
-  }
+  directive = CanonicalDirectiveName(directive);
 
   if (StringCaseStartsWith(directive, prefix)) {
     StringPiece option = directive.substr(prefix.size());
@@ -1959,11 +1870,10 @@ static const char* ProcessParsedScope(ApacheServerContext* server_context,
   for (ap_directive_t* cur = root; cur != nullptr; cur = cur->next) {
     StringPiece directive(cur->directive);
     if (!StringCaseStartsWith(directive, RewriteQuery::kModPagespeed)) {
-      return "Only mod_pagespeed directives should be inside <ModPagespeedIf "
-             "blocks";
+      return kConditionalOnlyOurDirectivesError;
     }
     if (StringCaseStartsWith(directive, kModPagespeedIf)) {
-      return "Can't nest <ModPagespeedIf> blocks";
+      return kConditionalNestedError;
     }
 
     if (cur->first_child != nullptr) {
@@ -1993,12 +1903,8 @@ static const char* ParseScope(cmd_parms* cmd, ap_directive_t** mconfig,
       InstawebContext::ServerContextFromServerRec(cmd->server);
 
   bool for_spdy = false;
-  if (StringCaseEqual(mode, "spdy>")) {
-    for_spdy = true;
-  } else if (StringCaseEqual(mode, "!spdy>")) {
-    for_spdy = false;
-  } else {
-    return "Conditional must be spdy or !spdy.";
+  if (!ParseConditionalArgument(mode, &for_spdy)) {
+    return kConditionalArgumentError;
   }
 
   // We need to manually check nesting since Apache's code doesn't seem to catch
@@ -2127,199 +2033,60 @@ static const char* ParseDirective3(cmd_parms* cmd, void* data, const char* arg1,
 // options should be allowable inside a Directory or Location by ORing in
 // ACCESS_CONF to RSRC_CONF.
 
-#define APACHE_CONFIG_OPTION(name, help)                                   \
-  AP_INIT_TAKE1(name, reinterpret_cast<const char* (*)()>(ParseDirective), \
-                NULL, RSRC_CONF, help)
-#define APACHE_CONFIG_DIR_OPTION(name, help)                               \
-  AP_INIT_TAKE1(name, reinterpret_cast<const char* (*)()>(ParseDirective), \
-                NULL, OR_ALL, help)
-
-// For stuff similar to <IfVersion>, and the like.
-// Note that Apache does not seem to apply RSRC_CONF (only global/vhost)
-// enforcement for these, so they require manual checking.
-#define APACHE_SCOPE_OPTION(name, help)                                      \
+// One command_rec initializer per directive kind; apache_directive::InfoFor
+// gives each kind's req_override, and the static_asserts below tie its
+// argument count and callback to the AP_INIT_* macro used here.
+#define PAGESPEED_APACHE_CMD_kScope(name, help)                              \
   AP_INIT_TAKE1(name, reinterpret_cast<const char* (*)()>(ParseScope), NULL, \
-                RSRC_CONF | EXEC_ON_READ, help)
-
-// Like APACHE_CONFIG_OPTION, but gets 2 arguments.
-#define APACHE_CONFIG_OPTION2(name, help)                                   \
+                InfoFor(Kind::kScope).req_override, help)
+#define PAGESPEED_APACHE_CMD_kDir1(name, help)                             \
+  AP_INIT_TAKE1(name, reinterpret_cast<const char* (*)()>(ParseDirective), \
+                NULL, InfoFor(Kind::kDir1).req_override, help)
+#define PAGESPEED_APACHE_CMD_kServer1(name, help)                          \
+  AP_INIT_TAKE1(name, reinterpret_cast<const char* (*)()>(ParseDirective), \
+                NULL, InfoFor(Kind::kServer1).req_override, help)
+#define PAGESPEED_APACHE_CMD_kDir2(name, help)                              \
   AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
-                NULL, RSRC_CONF, help)
-#define APACHE_CONFIG_DIR_OPTION2(name, help)                               \
+                NULL, InfoFor(Kind::kDir2).req_override, help)
+#define PAGESPEED_APACHE_CMD_kFetch2(name, help)                            \
   AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
-                NULL, OR_ALL, help)
-
-// APACHE_CONFIG_OPTION for 3 arguments
-#define APACHE_CONFIG_DIR_OPTION3(name, help)                               \
-  AP_INIT_TAKE3(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
-                NULL, OR_ALL, help)
-
-// Directives that steer the server's own fetches: where a resource is
-// fetched from and with which request headers.  They are accepted in the
-// configuration the operator writes (server, <VirtualHost>, <Directory>,
-// <Location>) but not in .htaccess, as a fetch made for one site fills a
-// cache that other sites on the same server read.
-#define APACHE_CONFIG_FETCH_OPTION2(name, help)                             \
-  AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
-                NULL, RSRC_CONF | ACCESS_CONF, help)
-#define APACHE_CONFIG_FETCH_OPTION23(name, help)                             \
+                NULL, InfoFor(Kind::kFetch2).req_override, help)
+#define PAGESPEED_APACHE_CMD_kFetch23(name, help)                            \
   AP_INIT_TAKE23(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
-                 NULL, RSRC_CONF | ACCESS_CONF, help)
+                 NULL, InfoFor(Kind::kFetch23).req_override, help)
+#define PAGESPEED_APACHE_CMD_kServer2(name, help)                           \
+  AP_INIT_TAKE2(name, reinterpret_cast<const char* (*)()>(ParseDirective2), \
+                NULL, InfoFor(Kind::kServer2).req_override, help)
+#define PAGESPEED_APACHE_CMD_kDir3(name, help)                              \
+  AP_INIT_TAKE3(name, reinterpret_cast<const char* (*)()>(ParseDirective3), \
+                NULL, InfoFor(Kind::kDir3).req_override, help)
+#define PAGESPEED_APACHE_CMD(kind, name, help) \
+  PAGESPEED_APACHE_CMD_##kind(name, help),
+
+static_assert(kOrAll == OR_ALL, "httpd OR_ALL");
+static_assert(kAccessConf == ACCESS_CONF, "httpd ACCESS_CONF");
+static_assert(kRsrcConf == RSRC_CONF, "httpd RSRC_CONF");
+static_assert(kExecOnRead == EXEC_ON_READ, "httpd EXEC_ON_READ");
+
+constexpr bool KindIs(Kind kind, Args args, Handler handler) {
+  return InfoFor(kind).args == args && InfoFor(kind).handler == handler;
+}
+static_assert(KindIs(Kind::kScope, Args::kTake1, Handler::kParseScope), "");
+static_assert(KindIs(Kind::kDir1, Args::kTake1, Handler::kParseDirective), "");
+static_assert(KindIs(Kind::kServer1, Args::kTake1, Handler::kParseDirective),
+              "");
+static_assert(KindIs(Kind::kDir2, Args::kTake2, Handler::kParseDirective2), "");
+static_assert(KindIs(Kind::kFetch2, Args::kTake2, Handler::kParseDirective2),
+              "");
+static_assert(KindIs(Kind::kFetch23, Args::kTake23, Handler::kParseDirective3),
+              "");
+static_assert(KindIs(Kind::kServer2, Args::kTake2, Handler::kParseDirective2),
+              "");
+static_assert(KindIs(Kind::kDir3, Args::kTake3, Handler::kParseDirective3), "");
 
 static const command_rec mod_pagespeed_filter_cmds[] = {
-    // Special conditional op.
-    APACHE_SCOPE_OPTION(kModPagespeedIf,
-                        "Conditionally apply some mod_pagespeed options. "
-                        "Possible arguments: spdy, !spdy"),
-
-    APACHE_CONFIG_DIR_OPTION(RewriteQuery::kModPagespeed, "Enable instaweb"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedAllow, "wildcard_spec for urls"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedDisableFilters,
-                             "Comma-separated list of disabled filters"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedDisallow, "wildcard_spec for urls"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedDomain,
-        "Authorize mod_pagespeed to rewrite resources in a domain."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedDownstreamCachePurgeLocationPrefix,
-        "The host:port/path prefix to be used for purging requests from "
-        "the downstream cache."),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedEnableFilters,
-                             "Comma-separated list of enabled filters"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedForbidFilters,
-                             "Comma-separated list of forbidden filters"),
-    APACHE_CONFIG_DIR_OPTION(kModPagespeedExperimentVariable,
-                             "Deprecated and ignored (configured the "
-                             "insert_ga filter)."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedExperimentSpec,
-        "Configuration for one side of an experiment in the form: "
-        "'id= ;enabled= ;disabled= ;ga= ;percent= ...' The 'ga=' "
-        "component is accepted for compatibility and ignored."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedListOutstandingUrlsOnError,
-        "Adds an error message into the log for every URL fetch in "
-        "flight when the HTTP stack encounters a system error, e.g. "
-        "Connection Refused"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedPermitIdsForCssCombining,
-        "Allow combining CSS files with IDs matching wildcard"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedProxySuffix,
-        "Sets up a proxy suffix to be used when slurping."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedRetainComment,
-        "Retain HTML comments matching wildcard, even with remove_comments "
-        "enabled"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedRunExperiment,
-        "Run an experiment to test the effectiveness of rewriters."),
-
-    // All one parameter deprecated options.
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedImgInlineMaxBytes,
-        "DEPRECATED, use ModPagespeedImageInlineMaxBytes."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedImageWebpRecompressionQuality,
-        "Deprecated.  Use ModPagespeedWebpRecompressionQuality"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedImageWebpRecompressionQualityForSmallScreens,
-        "Deprecated.  Use ModPagespeedWebpRecompressionQualityForSmallScreens"),
-
-    // All one parameter options that can only be specified at the server level.
-    // (Not in <Directory> blocks.)
-    APACHE_CONFIG_OPTION(kModPagespeedFetcherTimeoutMs,
-                         "Set internal fetcher timeout in milliseconds"),
-    APACHE_CONFIG_OPTION(kModPagespeedForceCaching,
-                         "Ignore HTTP cache headers and TTLs"),
-    APACHE_CONFIG_OPTION(kModPagespeedImgMaxRewritesAtOnce,
-                         "DEPRECATED, use ModPagespeedImageMaxRewritesAtOnce."),
-    APACHE_CONFIG_OPTION(kModPagespeedInstallCrashHandler,
-                         "Try to dump backtrace on crashes. For developer use"),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedMessageBufferSize,
-        "Set the size of buffer used for /mod_pagespeed_message."),
-    APACHE_CONFIG_OPTION(kModPagespeedNumRewriteThreads,
-                         "Number of threads to use for inexpensive portions of "
-                         "resource-rewriting. <= 0 to auto-detect"),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedNumExpensiveRewriteThreads,
-        "Number of threads to use for computation-intensive portions of "
-        "resource-rewriting. <= 0 to auto-detect"),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedStaticAssetPrefix,
-        "Where to serve static support files for pagespeed filters from."),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedTrackOriginalContentLength,
-        "Add X-Original-Content-Length headers to rewritten resources"),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedUsePerVHostStatistics,
-        "If true, keep track of statistics per VHost and not just globally"),
-    APACHE_CONFIG_OPTION(
-        kModPagespeedBlockingRewriteRefererUrls,
-        "wildcard_spec for referer urls which trigger blocking "
-        "rewrites"),
-
-    // All two parameter options that are allowed in <Directory> blocks.
-    APACHE_CONFIG_DIR_OPTION2(
-        kModPagespeedAddResourceHeader,
-        "add_resource_header_name add_resource_header_value"),
-    APACHE_CONFIG_FETCH_OPTION2(kModPagespeedCustomFetchHeader,
-                                "custom_header_name custom_header_value"),
-    APACHE_CONFIG_FETCH_OPTION23(
-        kModPagespeedMapOriginDomain,
-        "to_domain from_domain[,from_domain]* [host_header]"),
-    APACHE_CONFIG_FETCH_OPTION23(kModPagespeedMapProxyDomain,
-                                 "proxy_domain origin_domain [to_domain]"),
-    APACHE_CONFIG_DIR_OPTION2(kModPagespeedMapRewriteDomain,
-                              "to_domain from_domain[,from_domain]*"),
-    APACHE_CONFIG_DIR_OPTION2(kModPagespeedShardDomain,
-                              "from_domain shard_domain1[,shard_domain2]*"),
-
-    // All two parameter options that can only be specified at the server level.
-    // (Not in <Directory> blocks.)
-    APACHE_CONFIG_OPTION2(kModPagespeedCreateSharedMemoryMetadataCache,
-                          "name size_kb"),
-    APACHE_CONFIG_OPTION2(kModPagespeedRulePackTrustKey,
-                          "Trust rule packs signed with this key: <key id> "
-                          "<base64 Ed25519 public key>"),
-    APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFile,
-                          "url_prefix filename_prefix"),
-    APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFileMatch,
-                          "url_regexp filename_prefix"),
-    APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFileRule,
-                          "<Allow|Disallow> filename_prefix"),
-    APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFileRuleMatch,
-                          "<Allow|Disallow> filename_regexp"),
-    APACHE_CONFIG_OPTION2(kModPagespeedStatisticsDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-    APACHE_CONFIG_OPTION2(kModPagespeedGlobalStatisticsDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-    APACHE_CONFIG_OPTION2(kModPagespeedMessagesDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-    APACHE_CONFIG_OPTION2(kModPagespeedConsoleDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-    APACHE_CONFIG_OPTION2(kModPagespeedAdminDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-    APACHE_CONFIG_OPTION2(kModPagespeedGlobalAdminDomains,
-                          "<Allow|Disallow> domain_wildcard"),
-
-    APACHE_CONFIG_OPTION2("ModPagespeedExperimentalMeasurementProxy",
-                          "https://root.domain password (Experimental)"),
-
-    // All three parameter options that are allowed in <Directory> blocks.
-    APACHE_CONFIG_DIR_OPTION3(kModPagespeedUrlValuedAttribute,
-                              "Specify an additional url-valued attribute."),
-    APACHE_CONFIG_DIR_OPTION3(
-        kModPagespeedLibrary,
-        "Specify size, md5, and canonical url for JavaScript library, "
-        "separated by spaces.\n"
-        "These values may be obtained by running:\n"
-        "  js_minify --print_size_and_hash library.js\n"
-        "Yielding an entry like:\n"
-        "  ModPagespeedLibrary 105527 ltVVzzYxo0 "
-        "//ajax.googleapis.com/ajax/libs/1.6.1.0/prototype.js"),
-};  // Do not null terminate; we use arraysize for initialization.
+    PAGESPEED_APACHE_DIRECTIVE_TABLE(
+        PAGESPEED_APACHE_CMD)};  // Do not null terminate; we use arraysize for initialization.
 
 // We use pool-based cleanup for ApacheConfigs.  This is 99% effective.
 // There is at least one base config which is created with create_dir_config,
@@ -2451,23 +2218,11 @@ void ApacheProcessContext::FillInApacheCommand(
   cmd->name = cmd_names_.back().c_str();
   cmd->func = reinterpret_cast<const char* (*)()>(ParseDirective);
   cmd->cmd_data = nullptr;
-  switch (scope) {
-    case RewriteOptions::kDirectoryScope:
-    case RewriteOptions::kQueryScope:
-      cmd->req_override = OR_ALL;
-      break;
-    case RewriteOptions::kServerScope:
-      cmd->req_override = RSRC_CONF;
-      break;
-    case RewriteOptions::kProcessScopeStrict:
-      vhost_command_handling_map_[cmd] = kErrorInVHost;
-      cmd->req_override = RSRC_CONF;
-      break;
-    case RewriteOptions::kLegacyProcessScope:
-      vhost_command_handling_map_[cmd] = kTolerateInVHost;
-      cmd->req_override = RSRC_CONF;
-      break;
+  OptionCommand command = CommandForOptionScope(scope);
+  if (command.vhost != VHostHandling::kNotProcessScope) {
+    vhost_command_handling_map_[cmd] = command.vhost;
   }
+  cmd->req_override = command.req_override;
   cmd->args_how = TAKE1;
   cmd->errmsg = help_text;
 }
@@ -2498,23 +2253,14 @@ void ApacheProcessContext::InstallCommands() {
          num_cmds * sizeof(*apache_cmds_));
   command_rec* cmd = apache_cmds_ + num_cmds;
 
-  for (auto option : v) {
-    // Skip entries with null documentation -- entries lacking doc
-    // are an indication that the option is not available for MPS.
-    if (option->help_text() != nullptr) {
-      FillInApacheCommand(option->option_name(), option->scope(),
-                          option->help_text(), cmd);
-      ++cmd;
-    }
-  }
-
-  for (int i = 0, n = deprecated_properties->size(); i < n; ++i) {
-    const RewriteOptions::PropertyBase* dep_prop =
-        deprecated_properties->property(i);
-    FillInApacheCommand(dep_prop->option_name(), dep_prop->scope(),
-                        dep_prop->help_text(), cmd);
-    ++cmd;
-  }
+  // The same walk the offline config linter makes.
+  ForEachOptionCommand(
+      config_template,
+      [this, &cmd](StringPiece option_name, RewriteOptions::OptionScope scope,
+                   const char* help_text, bool deprecated) {
+        FillInApacheCommand(option_name, scope, help_text, cmd);
+        ++cmd;
+      });
 
   // Add a null terminator.
   cmd->name = nullptr;

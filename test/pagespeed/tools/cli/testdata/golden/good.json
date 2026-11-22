@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "good/pagespeed.conf", "kind": "config", "sha256": "f4ce7e516292ab6d22386427cb7d9ff60dcd5a65573027c0b57b47cf01bc6504"},
+    {"path": "good/sites/a.conf", "kind": "include", "sha256": "db9b2e43cff7c46a9c5b1290dcf87c7b02e8acea485c1c7df99ec5718f1d797e"},
+    {"path": "good/sites/b.conf", "kind": "include", "sha256": "ff9a24b4b8821ef685a90f6ed63beb40ce66e02e81903c9feb2f07471b96751b"}
+  ],
+  "summary": {"error": 0, "warning": 0, "info": 0},
+  "findings": []
+}

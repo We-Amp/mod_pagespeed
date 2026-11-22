@@ -823,7 +823,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 |---|---|---|
 | `release-assets` | the validated asset set, `SHA256SUMS`, `manifest.json` | the result |
 | `asset-source` | `mod_pagespeed-<version>.tar.gz` | yes |
-| `asset-linux-x64`, `asset-linux-arm64` | Apache deb and rpm, `libmod_pagespeed-linux-<arch>.so`, the nginx module tarball | yes |
+| `asset-linux-x64`, `asset-linux-arm64` | Apache deb and rpm, `libmod_pagespeed-linux-<arch>.so`, the nginx module tarball, `pagespeed-lint-<version>-linux-<arch>.tar.gz` | yes |
 | `asset-nginx-x64`, `asset-nginx-arm64`, `asset-nginx-el10` | nginx module debs and rpms | yes |
 | `asset-apache-el10` | the stock Apache rpm built on el10 | yes |
 | `asset-ea4-el9`, `asset-ea4-el8`, `asset-ea4-el10` | unsigned cPanel rpms (el10 and the others as built) | yes |
@@ -840,7 +840,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `signed-windows` | the same, signed (real run) | no |
 | `msi-unsigned` | the installer before signing (real run) | no |
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
-| `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`: signed in a real run, unsigned in a dry run | yes |
+| `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`, and `pagespeed-lint-<version>-win-x64.zip`: signed in a real run, unsigned in a dry run | yes |
 | `release-signature` | `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json` (real run) | both are added to the release by `create-release` |
 | `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
 | `adopt-binding` | `adopt-binding.json`, what an adopting run took over and the candidate's job list and `SHA256SUMS` rows (adopting run only) | no |

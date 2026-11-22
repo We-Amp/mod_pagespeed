@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/10-vhost-strict.conf", "kind": "config", "sha256": "12782fe44b41bba6325375dbd0433cd894a4a7c65442b8f31d80bc9fd1ebf234"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS302", "severity": "error", "file": "seeded/10-vhost-strict.conf", "line": 3, "scope": "virtualhost", "directive": "ModPagespeedStrictAdminAccess", "args": ["<masked>"], "message": "Directive ModPagespeedStrictAdminAccess used inside a <VirtualHost> but applies globally."}
+  ]
+}

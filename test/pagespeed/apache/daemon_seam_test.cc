@@ -40,6 +40,7 @@
 #include <string>
 
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_directive_table.h"
 #include "pagespeed/apache/instaweb_handler.h"
 #include "pagespeed/apache/streaming_pagespeed_resource_fetch.h"
 #include "pagespeed/kernel/base/file_system.h"
@@ -1175,40 +1176,14 @@ TEST_F(DaemonSeamTest, VirtualHostsShareOneAdapterPerVolume) {
 // Apache, so a deprecated one printed its warning twice.  Each name must come
 // from exactly one of the two.
 TEST_F(DaemonSeamTest, NoDirectiveIsRegisteredByBothCommandTables) {
-  const std::string source = ReadSource("pagespeed/apache/mod_instaweb.cc");
-
-  std::map<std::string, std::string> constants;
-  const std::regex constant_re(
-      R"re(const char (kModPagespeed\w+)\[\]\s*=\s*"(<?\w+)";)re");
-  for (std::sregex_iterator it(source.begin(), source.end(), constant_re), end;
-       it != end; ++it) {
-    constants[(*it)[1]] = (*it)[2];
-  }
-
-  const size_t start =
-      source.find("static const command_rec mod_pagespeed_filter_cmds[] = {");
-  ASSERT_NE(std::string::npos, start)
-      << "the hand-written command table has been renamed";
-  const size_t finish = source.find("\n};", start);
-  ASSERT_NE(std::string::npos, finish);
-  const std::string table = source.substr(start, finish - start);
-
+  // The hand-written table is the one mod_instaweb.cc builds its command_rec
+  // array from (apache_directive_table.h).
+  using namespace apache_directive;  // NOLINT(build/namespaces)
   std::set<std::string> hand_written;
-  const std::regex name_re(R"re(APACHE_\w+\(\s*(kModPagespeed\w+|"\w+"))re");
-  for (std::sregex_iterator it(table.begin(), table.end(), name_re), end;
-       it != end; ++it) {
-    const std::string token = (*it)[1];
-    if (token[0] == '"') {
-      hand_written.insert(token.substr(1, token.size() - 2));
-      continue;
-    }
-    auto found = constants.find(token);
-    ASSERT_TRUE(found != constants.end())
-        << token << " is used in the hand-written table but its definition "
-        << "was not found; the scan in this test needs updating";
-    hand_written.insert(found->second);
-  }
-  ASSERT_GT(hand_written.size(), 10u) << "the table scan found too little";
+#define PAGESPEED_SEAM_NAME(kind, name, help) hand_written.insert(name);
+  PAGESPEED_APACHE_DIRECTIVE_TABLE(PAGESPEED_SEAM_NAME)
+#undef PAGESPEED_SEAM_NAME
+  ASSERT_GT(hand_written.size(), 10u) << "the table is unexpectedly small";
 
   // Refcounted, so safe next to other tests in this binary that do the same.
   ApacheConfig::Initialize();

@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/06-removed-property.conf", "kind": "config", "sha256": "357b138bdc81f3a7c557d794d8c0c0cc0c455e9a87d4ee970a6f7d6bbb100fc5"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS202", "severity": "warning", "file": "seeded/06-removed-property.conf", "line": 2, "scope": "server", "directive": "ModPagespeedDistributedRewriteServers", "args": ["<masked>"], "message": "ModPagespeedDistributedRewriteServers was removed and is ignored; remove it from the configuration"}
+  ]
+}

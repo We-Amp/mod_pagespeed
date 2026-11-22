@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/21-unclosed.conf", "kind": "config", "sha256": "37b8d4d5b71017ff6cf810bfcb7ed69ad35d404e8eb00c60564ba1833ebe316f"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS104", "severity": "error", "file": "seeded/21-unclosed.conf", "line": 1, "scope": "virtualhost", "directive": "", "args": [], "message": "<VirtualHost> not closed in this file"}
+  ]
+}
