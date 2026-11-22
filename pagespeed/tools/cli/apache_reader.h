@@ -66,7 +66,9 @@ class ApacheLineVisitor {
 // A path that resolves outside the root through a symbolic link is not read
 // (PS905), a directory reached twice is expanded once (PS904), and one
 // Include expands to at most kMaxIncludeFiles files and kMaxIncludeLevels
-// directory levels, a whole run to kMaxInputFiles files (PS906).
+// directory levels, a whole run to kMaxInputFiles files, kMaxIncludeDirectives
+// Include directives and a listing budget of directories and entries (PS906).
+// A file is read through the path that was checked, at most 16 MiB of it.
 //
 // Findings about the file structure (PS104, PS307, PS901..PS906) go to the
 // report; directive lines go to the visitor.  Nothing the reader reports
@@ -76,6 +78,13 @@ class ApacheConfigReader {
   static constexpr int kMaxIncludeFiles = 1024;
   static constexpr int kMaxIncludeLevels = 16;
   static constexpr int kMaxInputFiles = 4096;
+  // Work budgets of one run: Include directives expanded, directories
+  // listed and directory entries looked at.
+  static constexpr int kMaxIncludeDirectives = 1024;
+  static constexpr int kMaxDirectoriesListed = 4096;
+  static constexpr int kMaxEntriesListed = 65536;
+  // A wildcard component longer than this matches nothing.
+  static constexpr size_t kMaxWildcardLength = 255;
 
   ApacheConfigReader(const std::filesystem::path& root, const ValueMask* mask,
                      Report* report, ApacheLineVisitor* visitor);
@@ -118,10 +127,15 @@ class ApacheConfigReader {
   void Expand(const std::vector<GoogleString>& components, size_t index,
               const std::filesystem::path& disk, const GoogleString& logical,
               int levels, ExpandState* state, std::vector<Resolved>* out) const;
-  // True when `disk` resolves (symbolic links followed) inside the root;
-  // sets *resolved to the resolved path.
-  bool InsideRoot(const std::filesystem::path& disk,
-                  GoogleString* resolved) const;
+  // Where `disk` resolves to, symbolic links followed; *resolved is the
+  // resolved path when it exists.
+  enum class Where { kInside, kOutside, kMissing };
+  Where Resolve(const std::filesystem::path& disk,
+                GoogleString* resolved) const;
+  // The sorted names in `dir`, within the run's listing budget; sets
+  // budget_exhausted_ when the budget runs out.
+  std::vector<GoogleString> SortedEntries(
+      const std::filesystem::path& dir) const;
   Placement PlacementFor(bool htaccess) const;
   void AddFinding(const char* rule, Severity severity, const GoogleString& file,
                   int line, const Placement& placement,
@@ -130,6 +144,10 @@ class ApacheConfigReader {
   std::filesystem::path root_;
   std::filesystem::path root_resolved_;
   int files_read_ = 0;
+  int includes_expanded_ = 0;
+  mutable int directories_listed_ = 0;
+  mutable int entries_listed_ = 0;
+  mutable bool budget_exhausted_ = false;
   const ValueMask* mask_;
   Report* report_;
   ApacheLineVisitor* visitor_;

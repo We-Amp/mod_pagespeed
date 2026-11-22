@@ -5,6 +5,14 @@
 
 #include <openssl/sha.h>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -88,17 +96,6 @@ GoogleString JoinLogical(const std::vector<GoogleString>& components,
     out += components[i];
   }
   return out;
-}
-
-std::vector<GoogleString> SortedEntries(const fs::path& dir) {
-  std::vector<GoogleString> names;
-  std::error_code ec;
-  for (fs::directory_iterator it(dir, ec), end; !ec && it != end;
-       it.increment(ec)) {
-    names.push_back(U8(it->path().filename()));
-  }
-  std::sort(names.begin(), names.end());
-  return names;
 }
 
 bool HasWildcard(const GoogleString& s) {
@@ -206,6 +203,60 @@ bool GetWord(StringPiece line, size_t* pos, GoogleString* word) {
   return true;
 }
 
+// Reads at most `limit` bytes of the regular file `path` into *data.  False
+// when it cannot be opened, is not a regular file (on POSIX the last
+// component must not be a symbolic link: the path is already resolved), or
+// is larger than `limit` (*too_large).
+bool ReadBounded(const GoogleString& path, uintmax_t limit, GoogleString* data,
+                 bool* too_large) {
+  *too_large = false;
+  data->clear();
+#ifdef _WIN32
+  std::ifstream in(FromU8(path), std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  char buf[65536];
+  while (in) {
+    in.read(buf, sizeof(buf));
+    data->append(buf, static_cast<size_t>(in.gcount()));
+    if (data->size() > limit) {
+      *too_large = true;
+      return false;
+    }
+  }
+  return !in.bad();
+#else
+  const int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) {
+    return false;
+  }
+  struct stat st;
+  bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+  char buf[65536];
+  while (ok) {
+    const ssize_t n = read(fd, buf, sizeof(buf));
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      ok = false;
+      break;
+    }
+    if (n == 0) {
+      break;
+    }
+    data->append(buf, static_cast<size_t>(n));
+    if (data->size() > limit) {
+      *too_large = true;
+      ok = false;
+    }
+  }
+  close(fd);
+  return ok;
+#endif
+}
+
 }  // namespace
 
 GoogleString ScopeLabel(const Placement& placement) {
@@ -269,7 +320,8 @@ bool ApacheConfigReader::ReadTop(StringPiece path, bool htaccess) {
   }
   std::error_code ec;
   GoogleString resolved;
-  if (!fs::is_regular_file(disk, ec) || !InsideRoot(disk, &resolved)) {
+  if (!fs::is_regular_file(disk, ec) ||
+      Resolve(disk, &resolved) != Where::kInside) {
     return false;
   }
   stack_.clear();
@@ -349,12 +401,12 @@ bool ApacheConfigReader::ResolveFixed(
   return true;
 }
 
-bool ApacheConfigReader::InsideRoot(const fs::path& disk,
-                                    GoogleString* resolved) const {
+ApacheConfigReader::Where ApacheConfigReader::Resolve(
+    const fs::path& disk, GoogleString* resolved) const {
   std::error_code ec;
   const fs::path real = fs::canonical(disk, ec);
   if (ec) {
-    return false;
+    return Where::kMissing;
   }
   *resolved = U8(real);
   auto r = root_resolved_.begin();
@@ -364,10 +416,30 @@ bool ApacheConfigReader::InsideRoot(const fs::path& disk,
       continue;  // a trailing separator of the root
     }
     if (d == real.end() || *r != *d) {
-      return false;
+      return Where::kOutside;
     }
   }
-  return true;
+  return Where::kInside;
+}
+
+std::vector<GoogleString> ApacheConfigReader::SortedEntries(
+    const fs::path& dir) const {
+  std::vector<GoogleString> names;
+  if (budget_exhausted_ || ++directories_listed_ > kMaxDirectoriesListed) {
+    budget_exhausted_ = true;
+    return names;
+  }
+  std::error_code ec;
+  for (fs::directory_iterator it(dir, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    if (++entries_listed_ > kMaxEntriesListed) {
+      budget_exhausted_ = true;
+      break;
+    }
+    names.push_back(U8(it->path().filename()));
+  }
+  std::sort(names.begin(), names.end());
+  return names;
 }
 
 // Expands components[index..] below `disk`: fixed components resolve as in
@@ -385,18 +457,21 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
   if (state->truncated) {
     return;
   }
-  if (levels > kMaxIncludeLevels ||
+  if (budget_exhausted_ || levels > kMaxIncludeLevels ||
       out->size() >= static_cast<size_t>(kMaxIncludeFiles)) {
     state->truncated = true;
     return;
   }
   std::error_code ec;
   GoogleString resolved;
-  if (!InsideRoot(disk, &resolved)) {
-    if (fs::exists(disk, ec)) {
+  switch (Resolve(disk, &resolved)) {
+    case Where::kInside:
+      break;
+    case Where::kOutside:
       state->outside_root = true;
-    }
-    return;
+      return;
+    case Where::kMissing:
+      return;
   }
   const bool is_dir = fs::is_directory(disk, ec);
   if (index == components.size()) {
@@ -410,6 +485,9 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
         Expand(components, index, disk / FromU8(e), StrCat(logical, "/", e),
                levels + 1, state, out);
       }
+      if (budget_exhausted_) {
+        state->truncated = true;
+      }
     } else if (fs::is_regular_file(disk, ec)) {
       out->push_back({logical, disk});
     }
@@ -421,7 +499,13 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
   const GoogleString& want = components[index];
   const GoogleString prefix = logical.empty() ? "" : StrCat(logical, "/");
   std::vector<GoogleString> entries = SortedEntries(disk);
+  if (budget_exhausted_) {
+    state->truncated = true;
+  }
   if (HasWildcard(want)) {
+    if (want.size() > kMaxWildcardLength) {
+      return;  // matches nothing
+    }
     const bool last = index + 1 == components.size();
     for (const GoogleString& e : entries) {
       if (!WildMatch(want, e)) {
@@ -461,6 +545,14 @@ void ApacheConfigReader::Include(StringPiece arg, bool optional,
                                  const GoogleString& file, int line,
                                  const Placement& placement, int depth) {
   const char* directive = optional ? "IncludeOptional" : "Include";
+  if (++includes_expanded_ > kMaxIncludeDirectives) {
+    if (includes_expanded_ == kMaxIncludeDirectives + 1) {
+      AddFinding("PS906", Severity::kError, file, line, placement, directive,
+                 StrCat("More than ", kMaxIncludeDirectives,
+                        " Include directives; the rest are not followed"));
+    }
+    return;
+  }
   std::vector<GoogleString> components;
   if (!Normalise(arg, &components) || components.empty()) {
     AddFinding("PS903", Severity::kError, file, line, placement, directive,
@@ -487,7 +579,9 @@ void ApacheConfigReader::Include(StringPiece arg, bool optional,
     AddFinding("PS906", Severity::kError, file, line, placement, directive,
                StrCat("Include expands to more than ", kMaxIncludeFiles,
                       " files or ", kMaxIncludeLevels,
-                      " directory levels; the rest is not read: ", logical));
+                      " directory levels, or the run's directory listing "
+                      "budget is used up; the rest is not read: ",
+                      logical));
   }
   if (files.empty()) {
     if (state.outside_root) {
@@ -541,7 +635,7 @@ void ApacheConfigReader::ReadFile(const GoogleString& logical,
                                   bool htaccess, int depth) {
   const Placement top = PlacementFor(htaccess);
   GoogleString key;
-  if (!InsideRoot(disk, &key)) {
+  if (Resolve(disk, &key) != Where::kInside) {
     AddFinding("PS905", Severity::kError, logical, 0, top, "",
                "File resolves outside the configuration root and is not read");
     return;
@@ -559,23 +653,16 @@ void ApacheConfigReader::ReadFile(const GoogleString& logical,
                "Include cycle, or includes nested too deeply");
     return;
   }
-  std::error_code ec;
-  const uintmax_t size = fs::file_size(disk, ec);
-  if (ec || size > kMaxFileBytes) {
-    AddFinding(
-        "PS901", Severity::kError, logical, 0, top, "",
-        StrCat("Cannot read ", logical, ec ? "" : " (larger than 16 MiB)"));
-    return;
-  }
-  std::ifstream in(disk, std::ios::binary);
-  if (!in) {
+  // Read through the resolved path that was checked, not the path as
+  // written, and never more than the cap.
+  GoogleString data;
+  bool too_large = false;
+  if (!ReadBounded(key, kMaxFileBytes, &data, &too_large)) {
     AddFinding("PS901", Severity::kError, logical, 0, top, "",
-               StrCat("Cannot read ", logical));
+               StrCat("Cannot read ", logical,
+                      too_large ? " (larger than 16 MiB)" : ""));
     return;
   }
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  const GoogleString data = ss.str();
   report_->AddInput({logical, kind, HexSha256(data)});
   open_files_.insert(key);
   const size_t base_depth = stack_.size();

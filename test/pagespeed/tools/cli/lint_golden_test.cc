@@ -213,6 +213,17 @@ TEST_F(LintGoldenTest, LongUnknownNamesTakeBoundedTime) {
   EXPECT_EQ("PS105", last_report_.findings()[1].rule);
 }
 
+TEST_F(LintGoldenTest, FindingsAreCapped) {
+  GoogleString config;
+  for (size_t i = 0; i < Report::kMaxFindings + 10; ++i) {
+    config += "ModPagespeedNoSuchThing 1\n";
+  }
+  WriteFile("many.conf", config);
+  Lint("many.conf");
+  ASSERT_EQ(Report::kMaxFindings + 1, last_report_.findings().size());
+  EXPECT_EQ("PS907", last_report_.findings().back().rule);
+}
+
 TEST_F(LintGoldenTest, ExitCodes) {
   Lint("good/pagespeed.conf");
   EXPECT_EQ(kExitClean, last_report_.ExitCode(Severity::kError));

@@ -41,7 +41,7 @@
         "required": ["rule", "severity", "file", "line", "scope", "directive", "args", "message"],
         "properties": {
           "rule": {
-            "description": "PS1xx validity, PS2xx deprecated or removed, PS3xx placement, PS9xx input files.",
+            "description": "PS1xx validity, PS2xx deprecated or removed, PS3xx placement, PS9xx input files and limits.",
             "type": "string",
             "pattern": "^PS[0-9]{3}$"
           },

@@ -51,7 +51,10 @@ struct Input {
 class Report {
  public:
   void AddInput(Input input) { inputs_.push_back(std::move(input)); }
-  void Add(Finding finding) { findings_.push_back(std::move(finding)); }
+  // At most kMaxFindings findings are kept; the next one is replaced by a
+  // single PS907 "limit reached" finding and the rest are dropped.
+  static constexpr size_t kMaxFindings = 20000;
+  void Add(Finding finding);
 
   const std::vector<Input>& inputs() const { return inputs_; }
   const std::vector<Finding>& findings() const { return findings_; }

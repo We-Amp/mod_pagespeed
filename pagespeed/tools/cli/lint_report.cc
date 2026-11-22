@@ -82,6 +82,24 @@ GoogleString PrintableText(StringPiece s) {
   return out;
 }
 
+void Report::Add(Finding finding) {
+  if (findings_.size() < kMaxFindings) {
+    findings_.push_back(std::move(finding));
+    return;
+  }
+  if (findings_.size() == kMaxFindings) {
+    Finding limit;
+    limit.rule = "PS907";
+    limit.severity = Severity::kError;
+    limit.file = finding.file;
+    limit.line = finding.line;
+    limit.scope = finding.scope;
+    limit.message = StrCat("More than ", kMaxFindings,
+                           " findings; the rest are not reported");
+    findings_.push_back(std::move(limit));
+  }
+}
+
 int Report::Count(Severity severity) const {
   int n = 0;
   for (const Finding& f : findings_) {

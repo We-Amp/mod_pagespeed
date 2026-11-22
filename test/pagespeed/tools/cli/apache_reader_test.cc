@@ -254,6 +254,68 @@ TEST_F(ApacheReaderTest, ExpansionIsCapped) {
             report_.inputs().size());
 }
 
+TEST_F(ApacheReaderTest, ListingBudgetBoundsWideTrees) {
+  for (int i = 0; i < ApacheConfigReader::kMaxDirectoriesListed + 100; ++i) {
+    fs::create_directories(root_ / "wide" / StrCat("d", i));
+  }
+  Write("main.conf", "IncludeOptional wide/*/x.conf\n");
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_LT(Since(start), 20.0);
+  EXPECT_EQ(std::vector<GoogleString>({"PS906:1"}), Rules());
+}
+
+TEST_F(ApacheReaderTest, IncludeDirectivesAreCapped) {
+  GoogleString config;
+  for (int i = 0; i < ApacheConfigReader::kMaxIncludeDirectives + 50; ++i) {
+    config += "IncludeOptional nothing.conf\n";
+  }
+  Write("main.conf", config);
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_EQ(std::vector<GoogleString>({StrCat(
+                "PS906:", ApacheConfigReader::kMaxIncludeDirectives + 1)}),
+            Rules());
+}
+
+TEST_F(ApacheReaderTest, LongWildcardsMatchNothing) {
+  Write("w/a", "ModPagespeedA 1\n");
+  GoogleString pattern;
+  for (int i = 0; i < 100; ++i) {
+    pattern += "[abcdefghij]";
+  }
+  Write("main.conf", StrCat("Include w/", pattern, "*\nInclude w/[a]\n"));
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_LT(Since(start), 5.0);
+  EXPECT_EQ(std::vector<GoogleString>({"PS901:1"}), Rules());
+  ASSERT_EQ(1u, recorder_.seen.size());
+}
+
+TEST_F(ApacheReaderTest, ReadsAreBoundedAndThroughTheResolvedPath) {
+  {
+    std::ofstream big(root_ / "big.conf", std::ios::binary);
+    const GoogleString chunk(1 << 20, '#');
+    for (int i = 0; i < 17; ++i) {
+      big << chunk;
+    }
+  }
+  Write("real/x.conf", "ModPagespeedX 1\n");
+  std::error_code ec;
+  fs::create_symlink(root_ / "real" / "x.conf", root_ / "link.conf", ec);
+  Write("main.conf",
+        ec ? "Include big.conf\n" : "Include big.conf\nInclude link.conf\n");
+  ASSERT_TRUE(Read("main.conf"));
+  ASSERT_FALSE(report_.findings().empty());
+  EXPECT_EQ("PS901", report_.findings()[0].rule);
+  EXPECT_NE(GoogleString::npos,
+            report_.findings()[0].message.find("larger than 16 MiB"));
+  if (!ec) {
+    // A link inside the root is followed and reported under its own name.
+    ASSERT_EQ(1u, recorder_.seen.size());
+    EXPECT_EQ("link.conf", recorder_.seen[0].file);
+  }
+}
+
 }  // namespace
 }  // namespace lint
 }  // namespace net_instaweb
