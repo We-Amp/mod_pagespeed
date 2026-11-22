@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #ifdef _WIN32
+#include <fcntl.h>
 #include <io.h>
 #define isatty _isatty
 #define fileno _fileno
@@ -965,6 +966,10 @@ int Main(int argc, char** argv) {
     return 2;
   }
   GoogleString json = RenderJson(argv_inputs);
+#ifdef _WIN32
+  // Text-mode stdout would turn every \n into \r\n: same bytes everywhere.
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
   fwrite(json.data(), 1, json.size(), stdout);
   fflush(stdout);
   for (const Finding& f : findings) {
