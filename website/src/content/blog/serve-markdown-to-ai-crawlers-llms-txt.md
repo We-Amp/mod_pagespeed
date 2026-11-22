@@ -2,12 +2,14 @@
 title: 'Serving markdown to AI crawlers, and synthesizing /llms.txt'
 description: 'How to serve markdown to AI crawlers on the same URL via Accept: text/markdown, synthesize /llms.txt from the sitemap, and honor AI opt-out directives.'
 date: 2026-06-14
-lastUpdated: 2026-10-22
+lastUpdated: 2026-11-22
 author: 'Otto van der Schaaf'
 tags: ['architecture', 'deep-dive', 'operations']
 draft: false
 product: '2.0'
 ---
+
+> **Correction (2026-11-22):** The request-side check described under "The serve-side gate" below is out of date. It is no longer presence-only. The optimizer now chooses by q-value, as RFC 9110 describes: it serves Markdown when `text/markdown` is named explicitly with a q-value above 0 and at least the q-value that `text/html` resolves to, and an equal q-value selects Markdown. `Accept: text/markdown;q=0`, a wildcard on its own (`*/*`) and a malformed `Accept` header get your normal HTML. See [Agent optimization](/docs/agent-optimize/) for the exact rules and examples.
 
 A crawler sends `GET /docs/configuration/` with `Accept: text/markdown`. Instead of a few hundred kilobytes of HTML wrapped in nav bars, script tags, and a cookie banner, it gets back a markdown document: headings, paragraphs, a code fence, the canonical link targets, and nothing else. The response carries `Content-Type: text/markdown`, `Vary: Accept`, `X-Robots-Tag: noindex`, and `Cache-Control: private`. The same origin also publishes a synthesized `/llms.txt` site-index built from its own sitemap.
 
