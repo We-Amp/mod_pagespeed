@@ -80,7 +80,7 @@ const WORDS: Record<string, string> = {
 };
 
 export const TOKEN_CAPTION =
-  'Most AI crawlers read only the raw HTML. When the raw count is far below the count after JavaScript, those crawlers see little of your content.';
+  'As far as published measurements show, most AI crawlers read only the raw HTML. When the raw count is far below the count after JavaScript, those crawlers see little of your content.';
 
 /** The category the robots.txt reading belongs to. */
 export const CRAWLER_CATEGORY = 'Crawler access';
@@ -225,7 +225,8 @@ export function alsoFoundSentences(r: Report): AireadModel['alsoFound'] {
     // How much of the page is in the raw HTML, then who may fetch it. The
     // crawler clause comes from the scan's reading of robots.txt, the same
     // source as the line on the crawler access row; a result without that
-    // reading says AI crawlers are allowed and names no count.
+    // reading says AI crawlers are allowed and names no count. Where the
+    // server offers apply, a second sentence says what the scan did not see.
     const pct = Number(av.detail.exposurePct);
     const blocked = crawlersBlocked(r);
     const text =
@@ -235,8 +236,9 @@ export function alsoFoundSentences(r: Report): AireadModel['alsoFound'] {
         ? ', and AI crawlers are allowed to read it'
         : blocked
           ? ''
-          : ', and robots.txt lets AI crawlers fetch it') +
-      (offers ? ', but your server can’t tell a real signed agent from an impostor.' : '.');
+          : ', and robots.txt lets the AI crawlers this scan checks fetch it') +
+      '.' +
+      (offers ? ' ' + NO_SIGNATURE_CHECK : '');
     out.push({ wedge: 'tollbooth', text });
   }
   if (agentPassCtaApplies(sa)) {
@@ -300,6 +302,10 @@ function crawlerRow(
     ? { verdict: line, note: '', fromRules: true }
     : { verdict, note: '', fromRules: false };
 }
+
+/** The second sentence of the crawler line when the server offers apply. */
+const NO_SIGNATURE_CHECK =
+  'The scan saw no sign that your server checks agent signatures or license tokens.';
 
 export function formatAiread(r: Report): AireadModel {
   const categories = Object.entries(r.categories ?? {}).map(([name, c]) => ({

@@ -8,8 +8,7 @@ import NoscriptLead from '../../components/scan/NoscriptLead.astro';
 import { ORGANIZATION_REF } from '../../data/organization';
 import { LICENSE_CLAUSE } from '../../data/product-facts.mjs';
 
-// Public front end for the AI-readability scanner (D10). The render backend
-// runs on a separate box; nginx proxies /ai-readability/api/* to it.
+// Public front end for the AI-readability scanner. Requests to /ai-readability/api/* go to the render service.
 // Local dev (page served from localhost): append ?api=http://localhost:8787 to point at a local render service.
 const title = 'AI readability checker: can ChatGPT read your page? (free)';
 const description =
@@ -91,7 +90,8 @@ const faqPage = {
 };
 
 // Per-bot rendering matrix shown in the visible table. The three non-Google
-// rows rest on a 2024 study of crawler traffic, not on vendor documentation;
+// rows rest on the December 2024 Vercel and MERJ study of crawler traffic,
+// not on vendor documentation;
 // Google documents that Googlebot renders JavaScript.
 const botRendering = [
   { bot: 'GPTBot', agent: 'OpenAI', rendersJs: false },
@@ -141,9 +141,9 @@ const jsonLd = [webApp, faqPage];
     <p class="mt-4 max-w-2xl text-sm text-text-muted leading-relaxed">
       As far as published measurements show, most AI crawlers read your raw HTML and do not run your
       JavaScript, so anything your scripts render is invisible to them. Scan a page to see the gap.
-      The same self-hosted mod_pagespeed worker that powers this site then optimizes and cleans that
-      HTML inline, on your own servers rather than behind a CDN. The optimizer worker can also serve
-      AI agents a Markdown version of a page at the same URL. That is an
+      The mod_pagespeed optimizer worker, which serves this site, then optimizes that HTML on your
+      own servers. The optimizer worker can also serve AI agents a Markdown version of a page at the
+      same URL. That is an
       <a
         href="/blog/serve-markdown-to-ai-agents/"
         class="text-interactive underline underline-offset-2"
@@ -236,21 +236,21 @@ const jsonLd = [webApp, faqPage];
          there). -->
     <div class="mt-14 max-w-2xl">
       <h2 class="text-xl font-semibold text-text-body">Can AI crawlers execute JavaScript?</h2>
+      <!-- prettier-ignore -->
       <p class="mt-2 text-sm text-text-annotation leading-relaxed">
-        Most do not, as far as published measurements show. A 2024 study of crawler traffic found
-        that the crawlers of OpenAI, Anthropic and Perplexity fetched HTML without running the
-        scripts in it. Googlebot does run JavaScript, and Gemini draws on the pages it fetches. When
-        we rendered the top 1,000 sites on 28 May 2026, 403 of them showed a non-rendering agent a
-        nearly empty page, with content that appeared only after JavaScript ran: that is 40% of all
-        1,000 sites, and 57% of the 711 we could read at all, because the other 289 returned little
-        even after rendering. Read
+        Most do not, as far as published measurements show.
+        <a href="https://vercel.com/blog/the-rise-of-the-ai-crawler" target="_blank" rel="noopener noreferrer" class="text-interactive underline underline-offset-2">A December 2024 study by Vercel and MERJ<span class="sr-only"> (opens in new tab)</span></a> of crawler traffic found that the crawlers of OpenAI, Anthropic and Perplexity fetched HTML
+        without running the scripts in it. Googlebot does run JavaScript, and
+        <a href="https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers#google-extended" target="_blank" rel="noopener noreferrer" class="text-interactive underline underline-offset-2">Gemini draws on the pages it fetches<span class="sr-only"> (opens in new tab)</span></a>. When we rendered the top 1,000 sites on 28 May 2026, 403 of them showed a non-rendering
+        agent a nearly empty page, with content that appeared only after JavaScript ran: that is 40%
+        of all 1,000 sites, and 57% of the 711 we could read at all, because the other 289 returned
+        little even after rendering. Read
         <a
           href="/blog/can-ai-read-your-website/"
           class="text-interactive underline underline-offset-2"
         >
           the full results
-        </a>
-        .
+        </a>.
       </p>
     </div>
 
@@ -259,7 +259,7 @@ const jsonLd = [webApp, faqPage];
     <div class="mt-14 max-w-2xl">
       <h2 class="text-xl font-semibold text-text-body">Which AI crawlers render JavaScript?</h2>
       <p class="mt-2 text-sm text-text-annotation leading-relaxed">
-        The table lists what is known for four crawlers. For the first three it rests on a 2024
+        The table lists what is known for four crawlers. For the first three it rests on the 2024
         study of crawler traffic, because their operators do not document whether they run
         JavaScript. Google documents that Googlebot does. Crawler behavior can change, so scan your
         page again to see what a crawler that does not run scripts reads now. We measured the same

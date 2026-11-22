@@ -72,7 +72,7 @@ const faqEntries: { q: string; a: string }[] = [
   },
   {
     q: 'Can mod_pagespeed fix every PageSpeed Insights issue?',
-    a: 'No. mod_pagespeed handles byte-level work: image transcoding, CSS/JS minification, critical-CSS inlining, cache extension, dimension inference. It cannot reduce DOM size, tree-shake legacy JavaScript bundles, or rewrite third-party scripts. Origin TTFB on the first request stays out of reach too. The optimizer worker caches HTML in shared memory when the origin allows it, so repeat visits skip the origin; the first hit always reaches it. The analyzer above labels each audit accordingly.',
+    a: 'No. mod_pagespeed handles byte-level work: image transcoding, CSS/JS minification, critical-CSS inlining, cache extension, dimension inference. It cannot reduce DOM size, tree-shake legacy JavaScript bundles, or rewrite third-party scripts. Origin TTFB on the first request stays out of reach too. The optimizer worker caches HTML in shared memory when the origin allows it, so repeat visits skip the origin; the first hit always reaches it. The report from a test labels each audit accordingly.',
   },
   {
     q: 'Is this a PageSpeed Insights API alternative?',
@@ -153,7 +153,7 @@ const jsonLd = [
       From PageSpeed report to nginx config in three steps
     </h2>
     <p class="lede mt-3 text-center max-w-2xl mx-auto">
-      No account, no upload. Paste a URL, get the fixes.
+      No account, no upload. Test a page, get the fixes.
     </p>
 
     <ol class="mt-10 grid gap-6 sm:grid-cols-3">
@@ -204,40 +204,45 @@ const jsonLd = [
       These are the PageSpeed Insights findings mod_pagespeed addresses on every request, with no
       code changes on the origin. Most filters below have been production-tested in the upstream
       <code class="text-sm">mod_pagespeed</code> codebase since 2010. A few are still marked
-      &ldquo;test first&rdquo;; the analyzer flags those per-page in the live results.
+      &ldquo;test first&rdquo;; the report from a test flags those per page.
     </p>
 
-    {/* Toggle for the highlights cards. Always visible; it changes only
-        these cards (the script at the end of the page). */}
-    <div id="psi-highlights-toggle" class="mt-8 flex flex-col items-center gap-2">
-      <span class="text-xs font-medium uppercase tracking-wide text-text-annotation">
-        Showing cards for
-      </span>
-      <div
-        class="inline-flex gap-1 rounded-lg bg-bg-elevated p-1"
-        role="group"
-        aria-label="Which part you configure"
-      >
-        <button
-          type="button"
-          data-edition="2.0"
-          aria-pressed="true"
-          class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-          data-umami-event="psi-highlights-edition-toggle"
-          data-umami-event-edition="2.0"
+    {/* Toggle for the highlights cards; it changes only these cards (the
+        script at the end of the page). It needs JavaScript, so the layout's
+        noscript style hides it; without it every card shows, each marked with
+        the part it needs, which is the default (worker) view. The wrapper
+        carries the attribute so the flex class cannot override the hiding. */}
+    <div data-scan-needs-js>
+      <div id="psi-highlights-toggle" class="mt-8 flex flex-col items-center gap-2">
+        <span class="text-xs font-medium uppercase tracking-wide text-text-annotation">
+          Showing cards for
+        </span>
+        <div
+          class="inline-flex gap-1 rounded-lg bg-bg-elevated p-1"
+          role="group"
+          aria-label="Which part you configure"
         >
-          Optimizer worker
-        </button>
-        <button
-          type="button"
-          data-edition="1.1"
-          aria-pressed="false"
-          class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-          data-umami-event="psi-highlights-edition-toggle"
-          data-umami-event-edition="1.1"
-        >
-          Module
-        </button>
+          <button
+            type="button"
+            data-edition="2.0"
+            aria-pressed="true"
+            class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+            data-umami-event="psi-highlights-edition-toggle"
+            data-umami-event-edition="2.0"
+          >
+            Optimizer worker
+          </button>
+          <button
+            type="button"
+            data-edition="1.1"
+            aria-pressed="false"
+            class="product-tab rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+            data-umami-event="psi-highlights-edition-toggle"
+            data-umami-event-edition="1.1"
+          >
+            Module
+          </button>
+        </div>
       </div>
     </div>
 
@@ -294,8 +299,8 @@ const jsonLd = [
         third-party script impact (analytics, tag managers, ads), Interaction to Next Paint (INP),
         forced reflows in handler code, and font-display behavior. Origin TTFB on the first request
         is also out of reach. The optimizer worker can mask it on repeat visits by caching HTML when
-        the origin allows it, but the first hit always reaches the origin. The analyzer above labels
-        every one of these in your report.
+        the origin allows it, but the first hit always reaches the origin. The report from a test
+        labels every one of these.
       </p>
     </div>
   </section>

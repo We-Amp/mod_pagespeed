@@ -226,7 +226,7 @@ describe('nextSteps over the fixtures', () => {
 describe('the statement that AI crawlers can read the page', () => {
   it('says only what the report shows', () => {
     expect(READABLE_LINE).toBe(
-      'AI crawlers can read this page: the text is in the HTML and robots.txt blocks none of them.',
+      'The text of this page is in the HTML, and robots.txt blocks none of the AI crawlers this scan checks.',
     );
     expect(READABLE_LINE).not.toMatch(/cite|rank|mention|answer/i);
   });
@@ -272,14 +272,14 @@ describe('the statement that AI crawlers can read the page', () => {
     const r = fixture('sample-product');
     expect(new URL(r.url).pathname).toBe('/');
     expect(nextSteps(r).readableLine).toBe(
-      'AI crawlers can read this page: the text is in the HTML and robots.txt blocks none of them.',
+      'The text of this page is in the HTML, and robots.txt blocks none of the AI crawlers this scan checks.',
     );
     for (const url of [`${r.url}docs/install/`, `${r.url}pricing`, 'not a url', undefined]) {
       r.url = url;
       const steps = nextSteps(r);
       expect(steps.readable).toBe(true);
       expect(steps.readableLine).toBe(
-        'AI crawlers can read this page’s text: it is in the HTML, and robots.txt lets them fetch the site’s home page.',
+        'The text of this page is in the HTML, and robots.txt lets the AI crawlers this scan checks fetch the site’s home page.',
       );
       expect(steps.readableLine).toBe(READABLE_LINE_SUBPAGE);
     }

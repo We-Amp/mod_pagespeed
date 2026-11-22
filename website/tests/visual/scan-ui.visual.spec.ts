@@ -207,12 +207,13 @@ const STATES: State[] = [
     n: 8,
     slug: 'form-topics',
     title: 'form with the topic chips',
-    mock: 'As state 4; scroll to the form; the chips from the full report are marked as found and none is selected.',
+    mock: 'As state 4; scroll to the form; the chips from the full report are marked as found and none is selected, except the speed-help chip, which a poor Speed result ticks.',
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
       await toForm(page);
-      await expect(page.locator('[data-scan-chip] input:checked')).toHaveCount(0);
+      await expect(page.locator('[data-scan-chip] input:checked')).toHaveCount(1);
+      await expect(chipInput(page, 'consulting')).toBeChecked();
       await shot('form-topics', { fullPage: true });
     },
   },
@@ -234,12 +235,15 @@ const STATES: State[] = [
     n: 10,
     slug: 'form-cap-message',
     title: 'topic cap message',
-    mock: 'As state 8, then select a fifth chip so the "Pick up to four topics." message shows.',
+    mock: 'As state 8, then tick chips until five are selected so the "Pick up to four topics." message shows.',
     run: async ({ page, mocks, shot }) => {
       await submitScan(page);
       await resultsSettled(page);
       await toForm(page);
-      await chipInput(page, 'page-integrity').check();
+      const unticked = page.locator('[data-scan-chip] input:not(:checked)');
+      while ((await page.locator('[data-scan-chip] input:checked').count()) < 5) {
+        await unticked.first().check();
+      }
       await expect(leadMsg(page)).toHaveText('Pick up to four topics.');
       await shot('form-cap-message', { fullPage: true });
     },
@@ -257,7 +261,7 @@ const STATES: State[] = [
       await page.click('form[data-scan-lead] button[type="submit"]');
       await expect(
         page.getByText(
-          'Sent. An engineer at We-Amp replies to reviewer@example.com within one business day.',
+          'Sent. We usually reply to reviewer@example.com within one business day (CET).',
           { exact: true },
         ),
       ).toBeVisible();

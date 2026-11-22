@@ -204,14 +204,15 @@ describe('formatAiread extras', () => {
     unknown.agentSignals.markdown.negotiated = null;
     expect(formatAiread(unknown).alsoFound.map((f) => f.wedge)).not.toContain('markdown-origin');
   });
-  const IMPOSTOR = ', but your server can’t tell a real signed agent from an impostor.';
+  const NO_CHECK =
+    '. The scan saw no sign that your server checks agent signatures or license tokens.';
   const first = (r: Parameters<typeof formatAiread>[0]) => formatAiread(r).alsoFound[0].text;
 
   it('names no count of allowed crawlers when the result has no robots.txt reading', () => {
     const full = fixture('full');
     expect(first(full)).toBe(
       'About 38% of this page’s content is in the raw HTML, and AI crawlers are allowed to read it' +
-        IMPOSTOR,
+        NO_CHECK,
     );
     full.access.crawlerRules = { parsed: false, reason: 'missing' };
     expect(first(full)).toContain('and AI crawlers are allowed to read it');
@@ -223,18 +224,18 @@ describe('formatAiread extras', () => {
   it('takes the crawler clause from the robots.txt reading when there is one', () => {
     // Unknown platform, some crawlers blocked: no claim that crawlers may fetch it.
     expect(first(fixture('unknown'))).toBe(
-      'About 38% of this page’s content is in the raw HTML' + IMPOSTOR,
+      'About 38% of this page’s content is in the raw HTML' + NO_CHECK,
     );
     const open = fixture('unknown');
     open.access.crawlerRules = fixture('hosted').access.crawlerRules;
     expect(first(open)).toBe(
-      'About 38% of this page’s content is in the raw HTML, and robots.txt lets AI crawlers fetch it' +
-        IMPOSTOR,
+      'About 38% of this page’s content is in the raw HTML, and robots.txt lets the AI crawlers this scan checks fetch it' +
+        NO_CHECK,
     );
     // Hosted: the same two, without the part about the origin.
     const hosted = fixture('hosted');
     expect(first(hosted)).toBe(
-      'About 38% of this page’s content is in the raw HTML, and robots.txt lets AI crawlers fetch it.',
+      'About 38% of this page’s content is in the raw HTML, and robots.txt lets the AI crawlers this scan checks fetch it.',
     );
     hosted.access.crawlerRules.wildcardBlocksAll = true;
     expect(first(hosted)).toBe('About 38% of this page’s content is in the raw HTML.');
@@ -246,11 +247,11 @@ describe('formatAiread extras', () => {
     const hosted = fixture('hosted');
     hosted.agentVerifiability.detail.exposurePct = 100;
     expect(first(hosted)).toBe(
-      'All of this page’s content is in the raw HTML, and robots.txt lets AI crawlers fetch it.',
+      'All of this page’s content is in the raw HTML, and robots.txt lets the AI crawlers this scan checks fetch it.',
     );
     const unknown = fixture('unknown');
     unknown.agentVerifiability.detail.exposurePct = 100;
-    expect(first(unknown)).toBe('All of this page’s content is in the raw HTML' + IMPOSTOR);
+    expect(first(unknown)).toBe('All of this page’s content is in the raw HTML' + NO_CHECK);
   });
 
   it('keeps the findings and drops the server sentences on a hosted platform', () => {
@@ -269,7 +270,7 @@ describe('formatAiread extras', () => {
       text: 'This page did not return Markdown when asked for it (Accept: text/markdown).',
     });
     for (const f of found) {
-      expect(f.text).not.toMatch(/your own server|self-hosted|mod_pagespeed|impostor/);
+      expect(f.text).not.toMatch(/your own server|self-hosted|mod_pagespeed|agent signatures/);
       expect(f.link).toBeUndefined();
     }
     // The same report without the platform reading words them as for an unknown platform.
@@ -280,7 +281,7 @@ describe('formatAiread extras', () => {
         (f) => f.text,
       ),
     );
-    expect(formatAiread(plain).alsoFound[0].text).toContain('your server can’t tell');
+    expect(formatAiread(plain).alsoFound[0].text).toContain('your server checks agent signatures');
   });
   it('builds the token line from the report', () => {
     expect(formatAiread(fixture('full')).tokenLine).toBe(

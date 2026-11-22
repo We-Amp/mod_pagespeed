@@ -17,7 +17,7 @@ const A11Y =
 const A11Y_BUILDER =
   'The scan found 2 accessibility issues: Elements must meet minimum color contrast ratio thresholds; Heading levels should only increase by one. These are automated checks, not an accessibility audit.';
 const READABLE =
-  'AI crawlers can read this page: the text is in the HTML and robots.txt blocks none of them.';
+  'The text of this page is in the HTML, and robots.txt blocks none of the AI crawlers this scan checks.';
 
 const steps = (page: Page) =>
   page.locator('[data-scan-step]').evaluateAll((items) =>

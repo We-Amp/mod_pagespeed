@@ -387,7 +387,7 @@ export function initLeadForm(state: ScanState) {
     thanks.tabIndex = -1;
     const line = document.createElement('p');
     line.className = 'text-text-body [overflow-wrap:anywhere]';
-    line.textContent = `Sent. An engineer at We-Amp replies to ${email} within one business day.`;
+    line.textContent = `Sent. We usually reply to ${email} within one business day (CET).`;
     const topics = document.createElement('p');
     topics.className = 'mt-1 text-sm text-text-muted';
     // A general question names no topic: the visitor ticked none.

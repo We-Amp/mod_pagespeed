@@ -7,8 +7,9 @@ import { mockScan, startScan } from './helpers/scan-mock';
 
 // axe-core (WCAG 2.2 AA) over the rendered scan result with a mocked scanner:
 // each panel open in turn, the contact form filled, the email error showing
-// and the confirmation, on a phone and on a desktop. Every finding fails,
-// whatever its impact, and no rule or element is left out.
+// and the confirmation, on a phone, a tablet and a desktop. Every other result
+// kind is checked at the tablet width with each panel open. Every finding
+// fails, whatever its impact, and no rule or element is left out.
 
 async function findings(page: Page): Promise<string[]> {
   // A colour that is still in a transition (a button leaving its disabled
@@ -26,6 +27,7 @@ async function findings(page: Page): Promise<string[]> {
 for (const fixture of ['full', 'hosted'] as const) {
   for (const [label, width, height] of [
     ['390 px', 390, 844],
+    ['768 px', 768, 1024],
     ['desktop', 1280, 800],
   ] as const) {
     test(`axe: the ${fixture} result at ${label}`, async ({ page }) => {
@@ -69,4 +71,31 @@ for (const fixture of ['full', 'hosted'] as const) {
       ).toBe(true);
     });
   }
+}
+
+for (const fixture of [
+  'clean',
+  'blocked',
+  'unknown',
+  'sample-builder',
+  'sample-static',
+  'sample-product',
+] as const) {
+  test(`axe: the ${fixture} result at 768 px`, async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await mockScan(page, fixture);
+    await startScan(page);
+    expect(await findings(page), 'all panels closed').toEqual([]);
+    for (const id of ['speed', 'airead', 'risk']) {
+      await page.click(`[data-scan-tile="${id}"]`);
+      await expect(page.locator(`[data-scan-panel="${id}"]`)).toBeVisible();
+      expect(await findings(page), `${id} panel open`).toEqual([]);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
 }

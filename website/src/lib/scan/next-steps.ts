@@ -55,13 +55,13 @@ export const STEPS_HEADING = 'Your next steps';
 export const NOTHING_URGENT = 'Nothing urgent on this page. Open a panel for the details.';
 /** A statement, not a step: shown above the list when the report supports it. */
 export const READABLE_LINE =
-  'AI crawlers can read this page: the text is in the HTML and robots.txt blocks none of them.';
+  'The text of this page is in the HTML, and robots.txt blocks none of the AI crawlers this scan checks.';
 /**
  * The same for a page other than the home page: the scan reads robots.txt for
  * the home page only, so the statement says no more than that.
  */
 export const READABLE_LINE_SUBPAGE =
-  'AI crawlers can read this page’s text: it is in the HTML, and robots.txt lets them fetch the site’s home page.';
+  'The text of this page is in the HTML, and robots.txt lets the AI crawlers this scan checks fetch the site’s home page.';
 
 function isHomePage(url: unknown): boolean {
   try {

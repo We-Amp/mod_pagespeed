@@ -81,7 +81,7 @@ const checkedIds = (page: Page) =>
     .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
 
 const sentLine = (page: Page, email = 'ops@example.com') =>
-  page.getByText(`Sent. An engineer at We-Amp replies to ${email} within one business day.`, {
+  page.getByText(`Sent. We usually reply to ${email} within one business day (CET).`, {
     exact: true,
   });
 const topicsOf = (body: Record<string, unknown>) =>
