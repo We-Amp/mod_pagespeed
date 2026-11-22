@@ -61,11 +61,14 @@ const privacyLink =
   </p>
   <p class="mt-3 text-xs text-text-annotation leading-relaxed">
     Only check sites you own or are authorized to test. Our scanner (in the US) requests the page a
-    few times: once in a headless browser and a few times as plain requests. Results and the share
-    link are kept for at most 24 hours. URLs are sent to Google PageSpeed Insights (in the US) for
-    the speed panel. If you send the form under a result, we keep your email address, your note, the
-    scanned address and the scan findings. We log your IP address and rate-limit requests per
-    address to prevent abuse. See our
+    few times: once in a headless browser and as plain requests, one of them identifying as an AI
+    crawler (GPTBot). Results and the share link are kept for at most 24 hours. For up to 30 days we
+    keep a pseudonymous record per site, without the address or page content, of whether an AI
+    crawler gets the page's text and which platform and server software it runs on; our request logs
+    also hold the scanned address for 30 days. URLs are sent to Google PageSpeed Insights (in the
+    US) for the speed panel. If you send the form under a result, we keep your email address, your
+    note, the scanned address and the scan findings. We log your IP address and rate-limit requests
+    per address to prevent abuse. See our
     <span set:html={privacyLink} />
   </p>
   <p class="mt-3 text-xs text-text-annotation leading-relaxed">
