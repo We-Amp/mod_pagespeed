@@ -2530,6 +2530,7 @@ namespace {
 enum class DeprecatedWhen {
   kWhenSet,       // whenever it is set, before its value is parsed
   kWhenAccepted,  // once its value has been accepted
+  kByDomainLawyer,  // warned by the domain lawyer when the mapping is added
 };
 
 // The retired options that are still registered so that an existing
@@ -2575,6 +2576,11 @@ const struct {
     {RewriteOptions::kExperimentVariable, DeprecatedWhen::kWhenAccepted,
      " is deprecated and ignored: it only configured the insert_ga filter, "
      "which no longer has any effect. Remove the directive."},
+    // Still honored, not ignored.  The warning names the mapping, so
+    // DomainLawyer::AddShard logs it (deduped per mapping) from
+    // DomainLawyer::ShardDeprecationMessage; the entry is here so the
+    // offline config linter reports it by its rule id.
+    {RewriteOptions::kShardDomain, DeprecatedWhen::kByDomainLawyer, ""},
 };
 
 void WarnDeprecatedOption(StringPiece name, DeprecatedWhen when,
@@ -2601,9 +2607,28 @@ RewriteOptions::RemovedOptions() {
 }
 
 bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
+                                             StringPiece arg1, StringPiece arg2,
                                              GoogleString* message) {
   for (const auto& deprecated : kDeprecatedOptionNotes) {
-    if (StringCaseEqual(name, deprecated.name)) {
+    if (deprecated.when == DeprecatedWhen::kByDomainLawyer &&
+        StringCaseEqual(name, deprecated.name)) {
+      // ShardDomain with an empty list is the documented way to switch
+      // sharding off: nothing is sharded, nothing is warned.
+      if (arg2.empty()) {
+        return false;
+      }
+      *message = DomainLawyer::ShardDeprecationMessage(arg1, arg2);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
+                                             GoogleString* message) {
+  for (const auto& deprecated : kDeprecatedOptionNotes) {
+    if (deprecated.when != DeprecatedWhen::kByDomainLawyer &&
+        StringCaseEqual(name, deprecated.name)) {
       *message = StrCat("'", name, "'", deprecated.note);
       return true;
     }

@@ -3282,6 +3282,12 @@ class RewriteOptions {
   // own retired options.
   static bool DeprecatedOptionMessage(StringPiece name, GoogleString* message);
 
+  // The same for a deprecated two-argument option whose warning names its
+  // arguments (ShardDomain): the warning the parser gives for this setting,
+  // or false when it gives none.
+  static bool DeprecatedOptionMessage(StringPiece name, StringPiece arg1,
+                                      StringPiece arg2, GoogleString* message);
+
   // An option name that is no longer accepted at all (a configuration that
   // sets it fails to load), with what to do instead.
   struct RemovedOption {

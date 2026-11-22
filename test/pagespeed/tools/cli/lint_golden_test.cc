@@ -112,6 +112,10 @@ const std::vector<Case>& Cases() {
       {"29-include-wildcard", "seeded/29-include-wildcard.conf", {}, {}},
       {"30-continuation", "seeded/30-continuation.conf", {}, {}},
       {"31-crlf", "seeded/31-crlf.conf", {}, {{"PS204", 3}}},
+      {"32-deprecated-shard-domain",
+       "seeded/32-deprecated-shard-domain.conf",
+       {},
+       {{"PS202", 2}}},
   };
   return *cases;
 }

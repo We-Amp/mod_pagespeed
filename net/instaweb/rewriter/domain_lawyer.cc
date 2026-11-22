@@ -801,6 +801,15 @@ bool ShouldWarnShardDeprecation(const GoogleString& mapping) {
 
 }  // namespace
 
+GoogleString DomainLawyer::ShardDeprecationMessage(
+    const StringPiece& to_domain, const StringPiece& comma_separated_shards) {
+  return StrCat(
+      "Domain sharding of ", to_domain, " to {", comma_separated_shards,
+      "} is deprecated: it hurts performance with HTTP/2 and HTTP/3, which "
+      "multiplex over a single connection. Remove the ShardDomain "
+      "directive.");
+}
+
 bool DomainLawyer::AddShard(const StringPiece& shard_domain_name,
                             const StringPiece& comma_separated_shards,
                             MessageHandler* handler) {
@@ -815,13 +824,9 @@ bool DomainLawyer::AddShard(const StringPiece& shard_domain_name,
     // multiplexed connection already provides full parallelism.
     if (ShouldWarnShardDeprecation(
             StrCat(shard_domain_name, "->", comma_separated_shards))) {
-      handler->Message(
-          kWarning,
-          "Domain sharding of %s to {%s} is deprecated: it hurts performance "
-          "with HTTP/2 and HTTP/3, which multiplex over a single connection. "
-          "Remove the ShardDomain directive.",
-          shard_domain_name.as_string().c_str(),
-          comma_separated_shards.as_string().c_str());
+      handler->MessageS(kWarning, ShardDeprecationMessage(
+                                      shard_domain_name,
+                                      comma_separated_shards));
     }
   }
   can_rewrite_domains_ |= result;

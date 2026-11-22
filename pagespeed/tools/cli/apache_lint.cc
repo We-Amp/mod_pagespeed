@@ -584,11 +584,19 @@ void ApacheLinter::CheckValue(const Line& at, const ApacheCommand& command) {
                "<VirtualHost>"));
   }
   GoogleString deprecated;
-  const bool is_deprecated = !directive.substr(kPrefixSize).empty() &&
-                             SystemRewriteOptions::DeprecatedOptionMessage(
-                                 directive.substr(kPrefixSize), &deprecated);
+  const StringPiece option_name = directive.substr(kPrefixSize);
+  const bool is_deprecated =
+      !option_name.empty() &&
+      (SystemRewriteOptions::DeprecatedOptionMessage(option_name,
+                                                     &deprecated) ||
+       (command.handler == Handler::kParseDirective2 && at.args.size() >= 2 &&
+        RewriteOptions::DeprecatedOptionMessage(option_name, at.args[0],
+                                                at.args[1], &deprecated)));
   if (is_deprecated) {
-    Add(at, "PS202", Severity::kWarning, deprecated);
+    Add(at, "PS202", Severity::kWarning,
+        at.values_safe ? deprecated
+                       : StrCat(at.name, " is deprecated (text not shown, the "
+                                         "value may be secret)"));
   }
   if (filter_list || ignored_here) {
     return;  // Their parser warnings are reported above.
