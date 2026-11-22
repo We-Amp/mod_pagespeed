@@ -82,7 +82,7 @@ const inputClass =
   'mt-1 block w-full rounded-md border border-control-border bg-bg-elevated text-text-body px-3 py-2 focus:border-interactive focus:ring-2 focus:ring-interactive';
 
 const nextSteps = [
-  { when: 'within 1 business day', what: 'An engineer replies to every message.' },
+  { when: 'usually within 1 business day', what: 'We reply to every message.' },
   {
     when: 'within 3 business days',
     what: 'Enterprise and hosting-partner topics get a written proposal; Standard and Priority are bought at checkout on the pricing page.',
@@ -96,12 +96,12 @@ const nextSteps = [
 
 <BaseLayout
   title="Contact mod_pagespeed: setup, support and partners"
-  description="Setup help, support, Enterprise, audits, hosting partners, consulting and IISpeed transfers. One form; we reply within one business day (CET)."
+  description="Setup help, support, Enterprise, audits, hosting partners, consulting and IISpeed transfers. One form; we usually reply within one business day (CET)."
 >
   <PageHero id="contact-title" title="One form for setup, support and partnerships.">
     <Fragment slot="lede">
       Setup help, support subscriptions, partnerships and consulting all go through this form. We
-      reply within one business day (CET). Security reports have their own channel.
+      usually reply within one business day (CET). Security reports have their own channel.
     </Fragment>
     <p class="mt-3 text-small text-text-annotation max-w-2xl">
       Setup steps live in the
@@ -287,7 +287,7 @@ const nextSteps = [
           Send message
         </button>
         <p id="contact-form-hint" class="text-xs text-text-annotation">
-          We reply within one business day (CET). Prefer email? Reach us at
+          We usually reply within one business day (CET). Prefer email? Reach us at
           <a
             href={`mailto:${COMMERCIAL_EMAIL}`}
             class="text-interactive hover:text-interactive-hover underline"

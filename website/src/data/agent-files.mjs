@@ -180,7 +180,7 @@ export const SURFACES = [
         path: '/contact/',
         title: 'Contact',
         description:
-          'Setup help, support subscriptions, the hosting partner program, consulting and IISpeed license transfers; replies within one business day (CET). Security disclosure has its own channel.',
+          'Setup help, support subscriptions, the hosting partner program, consulting and IISpeed license transfers; usually replies within one business day (CET). Security disclosure has its own channel.',
       },
       {
         path: '/mod-pagespeed-still-maintained/',
