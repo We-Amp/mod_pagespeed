@@ -30,10 +30,10 @@ namespace net_instaweb {
 
 namespace {
 
-// Mirror of MPS 2.0's AcceptContains (capability_mask.cc): the `text/markdown`
-// media-range present as a comma/space/tab-delimited token (tolerating a
-// trailing `;q=...`), never matched by `*/*`. Kept byte-for-byte in lockstep
-// with 2.0 so the agent negotiation signal is identical across products.
+// The `text/markdown` media-range present as a comma/space/tab-delimited token
+// (tolerating a trailing `;q=...`), never matched by `*/*`. This presence test
+// decides `Vary: Accept` only; selecting a Markdown body uses
+// AcceptMarkdownPreference.
 bool AcceptContainsMarkdown(StringPiece accept) {
   const StringPiece kMarkdown("text/markdown");
   size_t pos = 0;
@@ -58,7 +58,225 @@ bool AcceptContainsMarkdown(StringPiece accept) {
   return false;
 }
 
+// RFC 9110 section 5.6.2 tchar.
+bool IsTchar(unsigned char c) {
+  if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z')) {
+    return true;
+  }
+  switch (c) {
+    case '!':
+    case '#':
+    case '$':
+    case '%':
+    case '&':
+    case '\'':
+    case '*':
+    case '+':
+    case '-':
+    case '.':
+    case '^':
+    case '_':
+    case '`':
+    case '|':
+    case '~':
+      return true;
+    default:
+      return false;
+  }
+}
+
+void SkipOws(StringPiece s, size_t* pos) {
+  while (*pos < s.size() && (s[*pos] == ' ' || s[*pos] == '\t')) {
+    ++*pos;
+  }
+}
+
+StringPiece ParseToken(StringPiece s, size_t* pos) {
+  const size_t start = *pos;
+  while (*pos < s.size() && IsTchar(static_cast<unsigned char>(s[*pos]))) {
+    ++*pos;
+  }
+  return StringPiece(s.substr(start, *pos - start));
+}
+
+// RFC 9110 section 5.6.4 quoted-string; *pos is at the opening quote.
+bool SkipQuotedString(StringPiece s, size_t* pos) {
+  ++*pos;
+  while (*pos < s.size()) {
+    unsigned char c = static_cast<unsigned char>(s[*pos]);
+    if (c == '"') {
+      ++*pos;
+      return true;
+    }
+    if (c == '\\') {
+      if (*pos + 1 >= s.size()) {
+        return false;
+      }
+      c = static_cast<unsigned char>(s[*pos + 1]);
+      ++*pos;
+    }
+    // qdtext and quoted-pair: HTAB, SP, VCHAR, obs-text.
+    if (c != '\t' && (c < 0x20 || c == 0x7f)) {
+      return false;
+    }
+    ++*pos;
+  }
+  return false;
+}
+
+// RFC 9110 section 12.4.2:
+//   qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )
+// Stores the value in thousandths.
+bool ParseQValue(StringPiece v, int* q) {
+  if (v.empty() || (v[0] != '0' && v[0] != '1')) {
+    return false;
+  }
+  const int whole = v[0] - '0';
+  int frac = 0;
+  if (v.size() > 1) {
+    if (v[1] != '.' || v.size() > 5) {
+      return false;
+    }
+    for (size_t i = 2; i < 5; ++i) {
+      int digit = 0;
+      if (i < v.size()) {
+        if (v[i] < '0' || v[i] > '9') {
+          return false;
+        }
+        digit = v[i] - '0';
+      }
+      frac = frac * 10 + digit;
+    }
+  }
+  if (whole == 1 && frac != 0) {
+    return false;
+  }
+  *q = whole * 1000 + frac;
+  return true;
+}
+
+void KeepMax(int q, int* slot) {
+  if (q > *slot) {
+    *slot = q;
+  }
+}
+
 }  // namespace
+
+// One media range with its parameters, starting at *pos. Returns false when it
+// is malformed. RFC 9110 sections 5.6.6 and 12.5.1.
+bool AcceptMarkdownPreference::ParseElement(StringPiece s, size_t* pos) {
+  const StringPiece type = ParseToken(s, pos);
+  if (type.empty() || *pos >= s.size() || s[*pos] != '/') {
+    return false;
+  }
+  ++*pos;
+  const StringPiece subtype = ParseToken(s, pos);
+  if (subtype.empty()) {
+    return false;
+  }
+  if (type == "*" && subtype != "*") {
+    return false;
+  }
+
+  int q = 1000;
+  bool have_q = false;
+  for (;;) {
+    const size_t before = *pos;
+    SkipOws(s, pos);
+    if (*pos >= s.size() || s[*pos] != ';') {
+      *pos = before;
+      break;
+    }
+    ++*pos;
+    SkipOws(s, pos);
+    // An empty parameter is allowed: parameters = *( OWS ";" OWS [ parameter ] )
+    if (*pos >= s.size() || s[*pos] == ';' || s[*pos] == ',') {
+      continue;
+    }
+    const StringPiece name = ParseToken(s, pos);
+    if (name.empty() || *pos >= s.size() || s[*pos] != '=') {
+      return false;
+    }
+    ++*pos;
+    const bool is_q = StringCaseEqual(name, "q");
+    if (*pos < s.size() && s[*pos] == '"') {
+      // The weight is never quoted.
+      if (is_q || !SkipQuotedString(s, pos)) {
+        return false;
+      }
+      continue;
+    }
+    const StringPiece value = ParseToken(s, pos);
+    if (value.empty()) {
+      return false;
+    }
+    if (is_q) {
+      if (have_q || !ParseQValue(value, &q)) {
+        return false;
+      }
+      have_q = true;
+    }
+  }
+
+  if (type == "*") {
+    KeepMax(q, &any_q_);
+  } else if (StringCaseEqual(type, "text")) {
+    if (StringCaseEqual(subtype, "markdown")) {
+      if (markdown_q_ >= 0 && markdown_q_ != q) {
+        return false;
+      }
+      markdown_q_ = q;
+    } else if (StringCaseEqual(subtype, "html")) {
+      KeepMax(q, &html_q_);
+    } else if (subtype == "*") {
+      KeepMax(q, &text_any_q_);
+    }
+  }
+  return true;
+}
+
+void AcceptMarkdownPreference::AddLine(StringPiece line) {
+  size_t pos = 0;
+  while (!malformed_) {
+    // Empty list elements are allowed (RFC 9110 section 5.6.1).
+    SkipOws(line, &pos);
+    while (pos < line.size() && line[pos] == ',') {
+      ++pos;
+      SkipOws(line, &pos);
+    }
+    if (pos >= line.size()) {
+      return;
+    }
+    if (!ParseElement(line, &pos)) {
+      malformed_ = true;
+      return;
+    }
+    SkipOws(line, &pos);
+    if (pos >= line.size()) {
+      return;
+    }
+    if (line[pos] != ',') {
+      malformed_ = true;
+    }
+  }
+}
+
+bool AcceptMarkdownPreference::PrefersMarkdown() const {
+  if (malformed_ || markdown_q_ <= 0) {
+    return false;
+  }
+  int html_q = 0;
+  if (html_q_ >= 0) {
+    html_q = html_q_;
+  } else if (text_any_q_ >= 0) {
+    html_q = text_any_q_;
+  } else if (any_q_ >= 0) {
+    html_q = any_q_;
+  }
+  return markdown_q_ >= html_q;
+}
 
 AgentOptimizeVaryFilter::AgentOptimizeVaryFilter(RewriteDriver* driver)
     : CommonFilter(driver) {}
@@ -80,6 +298,22 @@ bool AgentOptimizeVaryFilter::RequestAcceptsMarkdown(
     }
   }
   return false;
+}
+
+bool AgentOptimizeVaryFilter::RequestPrefersMarkdown(
+    const RequestHeaders* request_headers) {
+  if (request_headers == nullptr) {
+    return false;
+  }
+  // The stored header lines, not Lookup(): Lookup() splits Accept at every
+  // comma, including one inside a quoted parameter value.
+  AcceptMarkdownPreference preference;
+  for (int i = 0, n = request_headers->NumAttributes(); i < n; ++i) {
+    if (StringCaseEqual(request_headers->Name(i), HttpAttributes::kAccept)) {
+      preference.AddLine(request_headers->Value(i));
+    }
+  }
+  return preference.PrefersMarkdown();
 }
 
 void AgentOptimizeVaryFilter::StartDocumentImpl() {

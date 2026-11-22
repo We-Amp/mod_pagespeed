@@ -33,12 +33,56 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_AGENT_OPTIMIZE_VARY_FILTER_H_
 
 #include "net/instaweb/rewriter/public/common_filter.h"
+#include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
 
 class HtmlElement;
 class RequestHeaders;
 class RewriteDriver;
+
+// Decides whether a request's Accept header selects a Markdown representation
+// rather than HTML, by RFC 9110 q-values:
+//
+//   - `text/markdown` must be named explicitly; `*/*` and `text/*` never
+//     select it, at any q;
+//   - its q must be above 0 and at least the q `text/html` resolves to
+//     (the most specific of `text/html`, `text/*`, `*/*`, else 0);
+//   - equal q selects Markdown, whatever the order;
+//   - a malformed header selects HTML: a q outside [0, 1] or with more than
+//     three decimals, an unparseable media range, or `text/markdown` listed
+//     twice with different q-values.
+//
+// Type, subtype and parameter names are case-insensitive; media-type
+// parameters other than q do not change the match. Several `text/html` (or
+// wildcard) ranges resolve to their highest q, which can only favour HTML.
+// The vectors in
+// test/net/instaweb/rewriter/testdata/accept_markdown_vectors.txt are the
+// specification; the optimizer checks in the same file and the same rule.
+//
+// Feed every Accept header line of the request, in order, to AddLine(); the
+// lines combine as one comma-separated list (RFC 9110 section 5.3). No
+// allocation.
+//
+// This is the selection test. The `Vary: Accept` decision below stays on the
+// presence of the `text/markdown` token (RequestAcceptsMarkdown).
+class AcceptMarkdownPreference {
+ public:
+  AcceptMarkdownPreference() = default;
+
+  void AddLine(StringPiece line);
+  bool PrefersMarkdown() const;
+
+ private:
+  bool ParseElement(StringPiece line, size_t* pos);
+
+  bool malformed_ = false;
+  // q-values in thousandths; -1 = the range is not listed.
+  int markdown_q_ = -1;
+  int html_q_ = -1;
+  int text_any_q_ = -1;
+  int any_q_ = -1;
+};
 
 // Adds `Vary: Accept` to the HTML response when:
 //   options()->agent_optimize()  (gates this filter's presence, set at AddFilters;
@@ -69,6 +113,12 @@ class AgentOptimizeVaryFilter : public CommonFilter {
   // without auditing that caller: it would silently start emitting the tag
   // into the markdown-negotiated variant.
   static bool RequestAcceptsMarkdown(const RequestHeaders* request_headers);
+
+  // Returns true if the request's Accept header lines, taken together, rank
+  // `text/markdown` at least as high as `text/html` (AcceptMarkdownPreference). Null
+  // request_headers (or no Accept header) returns false. This is the test for
+  // selecting a Markdown body; RequestAcceptsMarkdown stays the Vary signal.
+  static bool RequestPrefersMarkdown(const RequestHeaders* request_headers);
 
  private:
   AgentOptimizeVaryFilter(const AgentOptimizeVaryFilter&) = delete;
