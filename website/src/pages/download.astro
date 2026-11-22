@@ -93,6 +93,9 @@ const rel21DockerTag = dockerTag(rel21);
 // Every card is the current release: the chip above the grid names it once.
 // Row order: current-line native integrations first (Apache, nginx), then
 // Docker, Helm, IIS, the ASP.NET Core middleware, and the sidecar.
+// Separate nginx.org lane package, named on the nginx card.
+const NGINXORG_PACKAGE = 'nginx-module-pagespeed-nginxorg';
+
 const integrations = [
   {
     id: 'apache',
@@ -113,6 +116,7 @@ const integrations = [
       "Prebuilt signed dynamic module from the apt/yum repository, pinned to each distro's stock nginx. Loads alongside your existing nginx binary — no rebuild, no traffic detour.",
     requirements: `${NGINX_APT_SHORT} (amd64 + arm64); RHEL/AlmaLinux/Rocky ${NGINX_RPM_SHORT} via dnf. Each module is pinned to its distro's exact stock nginx — running a different nginx version? Contact us for a matching build.`,
     href: '/download/apt-yum/',
+    nginxorg: true,
     cta: 'Install on nginx',
     umamiEvent: 'cta_download_nginx',
   },
@@ -264,7 +268,26 @@ const jsonLd = await productJsonLd({
           {integration.note && (
             <p class="mt-3 text-small italic text-text-annotation">{integration.note}</p>
           )}
-          <p class="mt-3 text-small text-text-annotation flex-1">{integration.requirements}</p>
+          <p
+            class:list={['mt-3 text-small text-text-annotation', !integration.nginxorg && 'flex-1']}
+          >
+            {integration.requirements}
+          </p>
+          {integration.nginxorg && (
+            <p class="mt-3 text-small text-text-annotation flex-1">
+              Running nginx.org's stable nginx or the official nginx Docker image? Install{' '}
+              <code class="rounded bg-bg-elevated px-1 py-0.5 text-small">{NGINXORG_PACKAGE}</code>{' '}
+              instead; see{' '}
+              <a
+                href="/docs/installation-module/#nginxorgs-nginx-and-the-nginx-docker-image"
+                class="relative z-10 text-interactive hover:text-interactive-hover underline"
+              >
+                the nginx.org install steps
+              </a>
+              . It is built for stable only (no mainline build), amd64 only, with no Enterprise
+              Linux 10 build.
+            </p>
+          )}
           <p class="mt-6 text-small">
             <span class="link-arrow">{integration.cta}</span>
           </p>

@@ -3748,8 +3748,9 @@ upgrades.
 If you are replacing another ngx_pagespeed build, see
 [Migrate from ngx_pagespeed](https://modpagespeed.com/docs/migrate-from-ngx-pagespeed/): your
 `pagespeed` directives carry over to the maintained module, except seven
-deprecated names: 2.8.2 refuses them, so delete them before you install it. The
-next release accepts them with a deprecation warning.
+deprecated names. From 2.9.0 on, nginx accepts these names and logs
+`pagespeed <Name> is deprecated and has no effect`, as Apache does. Earlier
+releases fail `nginx -t` with `not recognized`.
 
 Plesk is a trademark of its owner. This page is not affiliated with or endorsed
 by Plesk.
