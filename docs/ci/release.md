@@ -823,7 +823,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 |---|---|---|
 | `release-assets` | the validated asset set, `SHA256SUMS`, `manifest.json` | the result |
 | `asset-source` | `mod_pagespeed-<version>.tar.gz` | yes |
-| `asset-linux-x64`, `asset-linux-arm64` | Apache deb and rpm, `libmod_pagespeed-linux-<arch>.so`, the nginx module tarball, `pagespeed-lint-<version>-linux-<arch>.tar.gz` | yes |
+| `asset-linux-x64`, `asset-linux-arm64` | Apache deb and rpm, `libmod_pagespeed-linux-<arch>.so`, the nginx module tarball, `pagespeed-lint-<version>-linux-<arch>.tar.gz` (`<arch>` is `x86_64` or `aarch64`) | yes |
 | `asset-nginx-x64`, `asset-nginx-arm64`, `asset-nginx-el10` | nginx module debs and rpms | yes |
 | `asset-apache-el10` | the stock Apache rpm built on el10 | yes |
 | `asset-ea4-el9`, `asset-ea4-el8`, `asset-ea4-el10` | unsigned cPanel rpms (el10 and the others as built) | yes |
