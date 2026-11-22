@@ -81,10 +81,9 @@ bool ParseVectors(absl::string_view contents, std::vector<Vector>* out) {
     }
     v.id = std::stoi(GoogleString(row.substr(0, sp)));
     size_t verdict_end = row.find(' ', sp + 1);
-    const absl::string_view verdict =
-        row.substr(sp + 1, verdict_end == absl::string_view::npos
-                               ? absl::string_view::npos
-                               : verdict_end - sp - 1);
+    const absl::string_view verdict = row.substr(
+        sp + 1, verdict_end == absl::string_view::npos ? absl::string_view::npos
+                                                       : verdict_end - sp - 1);
     if (verdict == "MD") {
       v.markdown = true;
     } else if (verdict != "HTML") {
