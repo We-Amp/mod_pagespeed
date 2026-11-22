@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/11-vhost-legacy.conf", "kind": "config", "sha256": "86ab0f03ec82e7f4fa3bea8cc22e0e35a386f06139d365a27aa23474b1b197ff"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS303", "severity": "warning", "file": "seeded/11-vhost-legacy.conf", "line": 3, "scope": "virtualhost", "directive": "ModPagespeedFetchWithGzip", "args": ["<masked>"], "message": "Directive ModPagespeedFetchWithGzip used inside a <VirtualHost> but applies globally. Accepting for backwards compatibility. "}
+  ]
+}

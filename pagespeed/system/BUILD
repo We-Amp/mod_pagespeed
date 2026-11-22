@@ -530,3 +530,17 @@ cc_library(
     ],
 )
 
+
+# The admin console's option allowlist and its secret-name pattern are a
+# build input of the offline config linter (//pagespeed/tools/cli), which
+# masks every value the console would mask.
+exports_files(
+    [
+        "console/src/lib/data/safe-option-names.ts",
+        "console/src/lib/utils/diagnostics.ts",
+    ],
+    visibility = [
+        "//pagespeed/tools/cli:__pkg__",
+        "//test/pagespeed/tools/cli:__pkg__",
+    ],
+)

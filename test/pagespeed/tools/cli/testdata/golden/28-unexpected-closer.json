@@ -1,0 +1,13 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/28-unexpected-closer.conf", "kind": "config", "sha256": "0b2c6d6c8b6e2daf4d77f2c2062c1df7c3785cfeaa067dc1a185e85a7acdafb7"}
+  ],
+  "summary": {"error": 2, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS104", "severity": "error", "file": "seeded/28-unexpected-closer.conf", "line": 2, "scope": "server", "directive": "", "args": [], "message": "Unexpected </VirtualHost>"},
+    {"rule": "PS104", "severity": "error", "file": "seeded/28-unexpected-closer.conf", "line": 3, "scope": "server", "directive": "", "args": [], "message": "Unexpected </<masked>>"}
+  ]
+}

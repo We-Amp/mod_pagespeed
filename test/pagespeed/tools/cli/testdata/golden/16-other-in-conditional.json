@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/16-other-in-conditional.conf", "kind": "config", "sha256": "c21c784065d060c87e2190c5198e7b47b5bdb484f50e581d9a129b9d4f9fa744"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS307", "severity": "error", "file": "seeded/16-other-in-conditional.conf", "line": 2, "scope": "server+conditional", "directive": "<masked>", "args": [], "message": "Only mod_pagespeed directives should be inside <ModPagespeedIf blocks"}
+  ]
+}

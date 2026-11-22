@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/22-enabled-value.conf", "kind": "config", "sha256": "f6bfbb0641f85ac843a8e60bf98026658341bd9425f17caf141df6515b97beda"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS102", "severity": "error", "file": "seeded/22-enabled-value.conf", "line": 1, "scope": "server", "directive": "ModPagespeed", "args": ["<masked>"], "message": "Invalid value for ModPagespeed (value not shown)"}
+  ]
+}

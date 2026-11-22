@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/08-deprecated-option.conf", "kind": "config", "sha256": "a0e484cb747de90a625c74634eba3f87215425bb1807d1657138ca90c22748c7"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS202", "severity": "warning", "file": "seeded/08-deprecated-option.conf", "line": 2, "scope": "server", "directive": "ModPagespeedAnalyticsID", "args": ["UA-1"], "message": "'AnalyticsID' is deprecated and ignored: it only configured the insert_ga filter, which no longer has any effect. Remove the directive."}
+  ]
+}

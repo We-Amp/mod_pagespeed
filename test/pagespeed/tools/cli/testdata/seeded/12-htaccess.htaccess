@@ -1,0 +1,6 @@
+ModPagespeedCustomFetchHeader X-Test yes
+ModPagespeedFileCachePath /tmp/x
+<ModPagespeedIf spdy>
+</ModPagespeedIf>
+ModPagespeedRewriteLevel PassThrough
+ModPagespeedDisableFilters rewrite_images

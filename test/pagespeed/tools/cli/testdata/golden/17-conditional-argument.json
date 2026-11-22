@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/17-conditional-argument.conf", "kind": "config", "sha256": "a1c1058579e8f248caa34c597e20e5f54b31f2f014530de57ae0f1985fcf73d6"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS102", "severity": "error", "file": "seeded/17-conditional-argument.conf", "line": 1, "scope": "server", "directive": "<ModPagespeedIf>", "args": ["<masked>"], "message": "Conditional must be spdy or !spdy."}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/30-continuation.conf", "kind": "config", "sha256": "a7f938c852f11fc501f31435ae8a24ebe47a5c77013fda3a2108afe2494224e5"}
+  ],
+  "summary": {"error": 0, "warning": 0, "info": 0},
+  "findings": []
+}

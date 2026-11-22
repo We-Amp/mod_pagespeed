@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/24-unknown-filter.conf", "kind": "config", "sha256": "c0b9d677626ff558c0ebb820f6105439d3cfbde9fdd2be4c73446d27ab1db483"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS105", "severity": "error", "file": "seeded/24-unknown-filter.conf", "line": 1, "scope": "server", "directive": "ModPagespeedEnableFilters", "args": ["<masked>"], "message": "Unknown filter name (not shown); did you mean rewrite_css?"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/02-invalid-value.conf", "kind": "config", "sha256": "21cb80c099ffea9cd7ba7f8e8b940cbd19c0b1d04079ce31e91a06c4a87a650b"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS102", "severity": "error", "file": "seeded/02-invalid-value.conf", "line": 2, "scope": "server", "directive": "ModPagespeedRewriteLevel", "args": ["Bogus"], "message": "Cannot set option RewriteLevel to Bogus. "}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/19-include-case.conf", "kind": "config", "sha256": "348ffa92e9582c55976f2b0cd3cf8b712d1f86a6e77ddb9a2c79b689adaae53d"},
+    {"path": "seeded/conf.d/Sites.conf", "kind": "include", "sha256": "2608a7183a0c0c847d7324edd434c53e92a70f5a1139d102f9a1cdd40624d8ec"}
+  ],
+  "summary": {"error": 1, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS902", "severity": "warning", "file": "seeded/19-include-case.conf", "line": 1, "scope": "server", "directive": "Include", "args": [], "message": "Include path differs only by letter case from the file on disk: seeded/conf.d/Sites.conf (works on case-insensitive file systems only)"},
+    {"rule": "PS101", "severity": "error", "file": "seeded/conf.d/Sites.conf", "line": 2, "scope": "server", "directive": "<masked>", "args": ["<masked>"], "message": "Unknown directive (name not shown)"}
+  ]
+}

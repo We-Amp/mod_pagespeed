@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/09-directory.conf", "kind": "config", "sha256": "8c38107b4b864282bfb345f23e8a15b3af939dd9ebbaaa7af813b5aea1a6cb6e"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS301", "severity": "error", "file": "seeded/09-directory.conf", "line": 3, "scope": "directory", "directive": "ModPagespeedFileCachePath", "args": ["/tmp/x"], "message": "ModPagespeedFileCachePath is not allowed inside <Directory>, <Location>, <Files>, <If> or <Proxy>"}
+  ]
+}

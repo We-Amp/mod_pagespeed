@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/04-arity-take2.conf", "kind": "config", "sha256": "fd8ed1e24df206e7f96b4a5d0661d6ed8a3d3c990cfa2bb6c61c9f91ac31e3c9"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS103", "severity": "error", "file": "seeded/04-arity-take2.conf", "line": 2, "scope": "server", "directive": "ModPagespeedMapRewriteDomain", "args": ["<masked>"], "message": "ModPagespeedMapRewriteDomain takes two arguments"}
+  ]
+}

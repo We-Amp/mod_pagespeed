@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/We-Amp/mod_pagespeed/pagespeed/tools/cli/pagespeed-lint.schema.json",
+  "title": "pagespeed lint report",
+  "description": "Output of `pagespeed lint --json`. Additive changes keep the schema name pagespeed-lint/1; a rule id is never reused for a different check. Argument values are \"<masked>\" unless the option is on the list of options whose values may be shown.",
+  "type": "object",
+  "required": ["schema", "tool_version", "module_version", "inputs", "summary", "findings"],
+  "properties": {
+    "schema": {"const": "pagespeed-lint/1"},
+    "tool_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "module_version": {"type": "string", "minLength": 1},
+    "inputs": {
+      "description": "Every file read, in the order read. Paths are relative to --root, with '/' separators and letter case as written in the configuration.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "kind": {"enum": ["config", "include", "htaccess"]},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["error", "warning", "info"],
+      "properties": {
+        "error": {"type": "integer", "minimum": 0},
+        "warning": {"type": "integer", "minimum": 0},
+        "info": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "description": "In the order found: file order, with included files in place.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule", "severity", "file", "line", "scope", "directive", "args", "message"],
+        "properties": {
+          "rule": {
+            "description": "PS1xx validity, PS2xx deprecated or removed, PS3xx placement, PS9xx input files.",
+            "type": "string",
+            "pattern": "^PS[0-9]{3}$"
+          },
+          "severity": {"enum": ["error", "warning", "info"]},
+          "file": {"type": "string"},
+          "line": {"description": "1-based; 0 when the finding is about a whole file.", "type": "integer", "minimum": 0},
+          "scope": {
+            "type": "string",
+            "pattern": "^(server|virtualhost|directory|virtualhost/directory|htaccess)(\\+conditional)?$"
+          },
+          "directive": {"description": "The directive as written, or \"<masked>\" when it is not a known name.", "type": "string"},
+          "args": {"type": "array", "items": {"type": "string"}},
+          "message": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

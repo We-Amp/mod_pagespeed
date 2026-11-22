@@ -1,0 +1,14 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/12-htaccess.htaccess", "kind": "htaccess", "sha256": "be48ed5bd107239b3ae6a6fc1724fc5966b43d8626f5aa571419cc987a7795c1"}
+  ],
+  "summary": {"error": 3, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS304", "severity": "error", "file": "seeded/12-htaccess.htaccess", "line": 1, "scope": "htaccess", "directive": "ModPagespeedCustomFetchHeader", "args": ["<masked>", "<masked>"], "message": "ModPagespeedCustomFetchHeader is not allowed in .htaccess"},
+    {"rule": "PS304", "severity": "error", "file": "seeded/12-htaccess.htaccess", "line": 2, "scope": "htaccess", "directive": "ModPagespeedFileCachePath", "args": ["/tmp/x"], "message": "ModPagespeedFileCachePath is not allowed in .htaccess"},
+    {"rule": "PS304", "severity": "error", "file": "seeded/12-htaccess.htaccess", "line": 3, "scope": "htaccess", "directive": "<ModPagespeedIf>", "args": ["spdy"], "message": "<ModPagespeedIf> is not allowed in .htaccess"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/01-unknown.conf", "kind": "config", "sha256": "c00ea4bece3413e5962eff5bb2e15d5f65a6c068d06c9acba2e42596b0fc65fe"}
+  ],
+  "summary": {"error": 1, "warning": 0, "info": 0},
+  "findings": [
+    {"rule": "PS101", "severity": "error", "file": "seeded/01-unknown.conf", "line": 2, "scope": "server", "directive": "<masked>", "args": ["<masked>"], "message": "Unknown directive (name not shown); did you mean ModPagespeedEnableFilters?"}
+  ]
+}

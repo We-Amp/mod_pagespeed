@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/23-vhost-ignored.conf", "kind": "config", "sha256": "4e806a5907477aaa65c69bcc838e3631a544e5f59bbf92efdf209c22860ced06"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS303", "severity": "warning", "file": "seeded/23-vhost-ignored.conf", "line": 3, "scope": "virtualhost", "directive": "ModPagespeedForceCaching", "args": ["<masked>"], "message": "ModPagespeedForceCaching applies to the whole server and is ignored inside <VirtualHost>"}
+  ]
+}
