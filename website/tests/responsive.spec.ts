@@ -235,6 +235,7 @@ test.describe('No sideways scroll at 320px', () => {
     '/pricing/',
     '/support/',
     '/features/',
+    '/pagespeed-optimization/',
     '/contact/',
     '/docs/',
     '/docs/getting-started/',

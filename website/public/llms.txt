@@ -173,6 +173,7 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 - [How it works](https://modpagespeed.com/how-it-works/): How the module works inside: asynchronous rewriting, CSS parsing and the metadata cache.
 - [Rule packs](https://modpagespeed.com/packs/): The rule-pack catalogue: rules the module runs at the origin, starting with the free edge SEO pack.
 - [PageSpeed markers](https://modpagespeed.com/pagespeed-markers/): The response headers and URL markers that show the product is active on a page.
+- [PageSpeed optimization](https://modpagespeed.com/pagespeed-optimization/): What PageSpeed optimization involves, by resource type: which optimizations a web server module applies automatically, the filter for each, and what stays in application code.
 
 ## Download, pricing and support
 

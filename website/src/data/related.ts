@@ -23,16 +23,18 @@ const L = {
   edgeSeo: { href: '/platform/edge-seo/', label: 'Edge SEO' },
   consent: { href: '/platform/consent/', label: 'Consent enforcement' },
   psi: { href: '/pagespeed-insights/', label: 'PageSpeed Insights' },
+  psopt: { href: '/pagespeed-optimization/', label: 'PageSpeed optimization' },
 } satisfies Record<string, RelatedLink>;
 
 export const relatedLinks: Record<string, RelatedLink[]> = {
   '/features/': [L.howItWorks, L.examples, L.cwv],
   '/how-it-works/': [L.features, L.cwv, L.alternatives],
-  '/psol/': [L.howItWorks, L.stillMaintained, L.upgrade],
+  '/psol/': [L.howItWorks, L.stillMaintained, L.upgrade, L.psopt],
   '/about/': [L.features, L.howItWorks, L.stillMaintained],
   '/platform/consent/': [L.platform, L.edgeSeo, L.packs],
   '/platform/edge-seo/': [L.platform, L.consent, L.packs],
   '/pagespeed-markers/': [L.psi, L.analyze, L.stillMaintained],
+  '/pagespeed-optimization/': [L.psi, L.cwv, L.features, L.alternatives],
 };
 
 // The links for a page path, or none. Accepts the path with or without its

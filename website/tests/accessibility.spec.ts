@@ -8,6 +8,7 @@ import { auditLinks } from './helpers/link-names';
 const PAGES_FOR_AXE_SCAN = [
   '/',
   '/features/',
+  '/pagespeed-optimization/',
   '/pricing/',
   '/support/',
   '/hosting-partners/',
@@ -32,6 +33,7 @@ const PAGES_FOR_AXE_SCAN = [
 // Scanned at phone width as well: narrow layouts stack and wrap links, which
 // is where small or crowded targets (WCAG 2.5.8) and overflowing regions show.
 const PAGES_FOR_PHONE_AXE_SCAN = [
+  '/pagespeed-optimization/',
   '/docs/filters/',
   '/docs/filters/lazyload_images/',
   '/download/',

@@ -372,6 +372,7 @@ test.describe('Navigation', () => {
       els.map((el) => el.getAttribute('href')),
     );
     expect(guides).toEqual([
+      '/pagespeed-optimization/',
       '/pagespeed-markers/',
       '/pagespeed-insights/',
       '/wordpress/',
@@ -400,7 +401,12 @@ test.describe('Navigation', () => {
     const hrefs = await related
       .locator('a')
       .evaluateAll((els) => els.map((el) => el.getAttribute('href')));
-    expect(hrefs).toEqual(['/how-it-works/', '/mod-pagespeed-still-maintained/', '/docs/upgrade/']);
+    expect(hrefs).toEqual([
+      '/how-it-works/',
+      '/mod-pagespeed-still-maintained/',
+      '/docs/upgrade/',
+      '/pagespeed-optimization/',
+    ]);
     await expect(related.locator('a').first()).toHaveAttribute('data-umami-event', 'nav-related');
     await expect(related.locator('a').first()).toHaveAttribute(
       'data-umami-event-position',

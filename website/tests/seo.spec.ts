@@ -23,6 +23,7 @@ const allPages = [
   '/license/',
   '/terms/',
   '/pagespeed-markers/',
+  '/pagespeed-optimization/',
   // Hand-written HTML in public/, outside the layout's head tags. The dev
   // server serves a public/ file only by its full name (the directory URL is
   // its 404 page there), so name the file.

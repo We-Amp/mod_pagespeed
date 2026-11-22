@@ -8,7 +8,7 @@ lastUpdated: 2026-10-22
 
 mod_pagespeed applies a set of filters to optimize your pages. You control which filters run through the `RewriteLevel` directive and per-filter enable/disable directives.
 
-For what each filter does, see the [PageSpeed filters](/docs/filters/) table. This page covers how to select them.
+For what each filter does, see the [PageSpeed filters](/docs/filters/) table. This page covers how to select them. For where the filters fit in the wider work, and what no filter can do, see [PageSpeed optimization](/pagespeed-optimization/).
 
 ## RewriteLevel
 

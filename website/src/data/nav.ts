@@ -325,6 +325,7 @@ export const footerGroups: Array<{ title: string; links: FooterLink[] }> = [
   {
     title: 'Guides',
     links: [
+      { href: '/pagespeed-optimization/', label: 'PageSpeed optimization' },
       { href: '/pagespeed-markers/', label: 'PageSpeed markers' },
       { href: '/pagespeed-insights/', label: 'PageSpeed Insights' },
       { href: '/wordpress/', label: 'WordPress caching' },

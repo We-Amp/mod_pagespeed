@@ -129,6 +129,12 @@ export const SURFACES = [
         description:
           'The response headers and URL markers that show the product is active on a page.',
       },
+      {
+        path: '/pagespeed-optimization/',
+        title: 'PageSpeed optimization',
+        description:
+          'What PageSpeed optimization involves, by resource type: which optimizations a web server module applies automatically, the filter for each, and what stays in application code.',
+      },
     ],
   },
   {
