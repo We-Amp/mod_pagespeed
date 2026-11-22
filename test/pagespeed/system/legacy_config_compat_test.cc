@@ -709,13 +709,13 @@ struct ApacheCommandScope {
 std::map<GoogleString, bool> ReadHandWrittenCommands() {
   using namespace apache_directive;  // NOLINT(build/namespaces)
   std::map<GoogleString, bool> out;
-#define LEGACY_CONFIG_ENTRY(kind, name, help)                              \
-  {                                                                        \
-    const StringPiece n(name);                                             \
-    if (StringCaseStartsWith(n, "ModPagespeed")) {                         \
-      out[Lower(n.substr(12))] =                                           \
+#define LEGACY_CONFIG_ENTRY(kind, name, help)                               \
+  {                                                                         \
+    const StringPiece n(name);                                              \
+    if (StringCaseStartsWith(n, "ModPagespeed")) {                          \
+      out[Lower(n.substr(12))] =                                            \
           (InfoFor(Kind::kind).req_override & (kOrAll | kAccessConf)) != 0; \
-    }                                                                      \
+    }                                                                       \
   }
   PAGESPEED_APACHE_DIRECTIVE_TABLE(LEGACY_CONFIG_ENTRY)
 #undef LEGACY_CONFIG_ENTRY
@@ -1284,7 +1284,8 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
       FunctionBody(source, "static const char* ParseDirective(cmd_parms*"));
   ASSERT_FALSE(parse1.empty());
   const size_t cache_path = parse1.find("kModPagespeedFileCachePath)");
-  const size_t rename = parse1.find("directive=CanonicalDirectiveName(directive)");
+  const size_t rename =
+      parse1.find("directive=CanonicalDirectiveName(directive)");
   const size_t name1 = parse1.find("config->ParseAndSetOptionFromName1(option");
   const size_t factory1 = parse1.find("factory->ParseAndSetOption1(");
   const size_t deprecated =
@@ -1314,7 +1315,8 @@ TEST_F(LegacyConfigCompatTest, ApacheParseStepsMatchTheSource) {
   const GoogleString all = Condense(source);
   EXPECT_NE(GoogleString::npos,
             all.find("PAGESPEED_APACHE_DIRECTIVE_TABLE(PAGESPEED_APACHE_CMD)"));
-  EXPECT_NE(GoogleString::npos, all.find("ForEachOptionCommand(config_template,"));
+  EXPECT_NE(GoogleString::npos,
+            all.find("ForEachOptionCommand(config_template,"));
   EXPECT_NE(GoogleString::npos,
             all.find("OptionCommandcommand=CommandForOptionScope(scope);"));
   EXPECT_NE(GoogleString::npos,
