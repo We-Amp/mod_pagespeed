@@ -35,6 +35,13 @@ const next = [
     label: 'Rate-limit impostor crawlers',
   },
   {
+    target: 'apache',
+    href: '/ai-crawler-cost/apache-verified-crawlers/',
+    heading: 'Check crawler claims in Apache instead of nginx',
+    body: 'A stock Apache httpd recipe: let a claimed crawler through only from its operator’s published ranges, log the mismatches first, then refuse them with 403.',
+    label: 'Verified crawlers in Apache',
+  },
+  {
     target: 'anubis',
     href: '/ai-crawler-cost/anubis-signed-agents/',
     heading: 'Let signed AI agents past Anubis',

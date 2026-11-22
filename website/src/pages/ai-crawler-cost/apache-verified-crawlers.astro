@@ -1,0 +1,432 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Recipe linked from the AI crawler cost meter at /ai-crawler-cost/. Static copy
+// only: nothing on this page runs or sends anything.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const title = 'Refuse traffic that fakes an AI crawler in Apache httpd';
+const description =
+  'An Apache httpd recipe: a request that claims to be a known crawler gets through only from its operator’s published ranges. Log first, then refuse.';
+const docs = 'https://httpd.apache.org/docs/2.4/';
+const code0 = [
+  '#!/bin/sh',
+  'set -eu',
+  '',
+  'mode=${1:-log}',
+  'conf=${2:-/etc/apache2/crawler-allow.conf}',
+  'case $mode in log | refuse) ;; *) echo "usage: $0 log|refuse [file]" >&2; exit 2 ;; esac',
+  '',
+  'tmp=$(mktemp -d)',
+  'trap \'rm -rf "$tmp"\' EXIT',
+  '',
+  'n=0',
+  'for pair in \\',
+  '  openai=https://openai.com/gptbot.json \\',
+  '  openai=https://openai.com/searchbot.json \\',
+  '  openai=https://openai.com/chatgpt-user.json \\',
+  '  anthropic=https://claude.com/crawling/bots.json \\',
+  '  perplexity=https://www.perplexity.ai/perplexitybot.json \\',
+  '  perplexity=https://www.perplexity.ai/perplexity-user.json \\',
+  '  google=https://developers.google.com/static/crawling/ipranges/common-crawlers.json \\',
+  '  microsoft=https://www.bing.com/toolbox/bingbot.json',
+  'do',
+  '  label=${pair%%=*}',
+  '  url=${pair#*=}',
+  '  n=$((n + 1))',
+  '  list="$tmp/list$n.json"',
+  '  curl -fsSL "$url" -o "$list"',
+  "  jq -e '(.prefixes | length) > 0 and all(.prefixes[];",
+  '      (.ipv4Prefix // .ipv6Prefix | type) == "string"',
+  '      and (.ipv4Prefix // .ipv6Prefix',
+  '           | test("\\\\A([0-9.]+|[0-9A-Fa-f:]+)(/[0-9]{1,3})?\\\\z")))\' \\',
+  '    "$list" > /dev/null',
+  '  jq -r \'.prefixes[] | .ipv4Prefix // .ipv6Prefix\' "$list" >> "$tmp/$label"',
+  'done',
+  '',
+  'block() { # label, user agent pattern, DNS names (Google and Bing only)',
+  '  echo "<If \\"%{HTTP_USER_AGENT} =~ /$2/i\\">"',
+  '  if [ "$mode" = log ]; then',
+  '    tag=$1',
+  '    [ -n "$3" ] && tag="$1-dns"',
+  '    echo "    SetEnvIfExpr \\"true\\" crawler_impostor=$tag"',
+  '    sort -u "$tmp/$1" | sed "s|.*|    SetEnvIfExpr \\"-R \'&\'\\" !crawler_impostor|"',
+  '  else',
+  "    echo '    AuthMerging And'",
+  "    echo '    <RequireAny>'",
+  '    sort -u "$tmp/$1" | sed \'s|^|        Require ip |\'',
+  '    [ -n "$3" ] && echo "        Require host $3"',
+  "    echo '    </RequireAny>'",
+  '  fi',
+  "  echo '</If>'",
+  '}',
+  '',
+  '{',
+  '  echo "# Built by update-crawler-allow.sh ($mode). Do not edit; rebuild instead."',
+  "  block openai 'GPTBot|OAI-SearchBot|ChatGPT-User' ''",
+  "  block anthropic 'ClaudeBot|Claude-SearchBot|Claude-User' ''",
+  "  block perplexity 'PerplexityBot|Perplexity-User' ''",
+  "  block google 'Googlebot' 'googlebot.com google.com'",
+  "  block microsoft 'bingbot' 'search.msn.com'",
+  '} > "$tmp/new.conf"',
+  '',
+  'cp "$tmp/new.conf" "$conf.new"',
+  'rm -f "$conf.prev"',
+  '[ -f "$conf" ] && cp -p "$conf" "$conf.prev"',
+  'mv "$conf.new" "$conf"',
+  '',
+  'if ! apachectl configtest; then',
+  '  if [ -f "$conf.prev" ]; then mv "$conf.prev" "$conf"; else rm -f "$conf"; fi',
+  '  echo "configtest failed: old file restored, Apache not reloaded" >&2',
+  '  exit 1',
+  'fi',
+  'apachectl graceful',
+].join('\n');
+const code1 = [
+  '<If "%{HTTP_USER_AGENT} =~ /GPTBot|OAI-SearchBot|ChatGPT-User/i">',
+  '    SetEnvIfExpr "true" crawler_impostor=openai',
+  '    SetEnvIfExpr "-R \'104.208.184.192/28\'" !crawler_impostor',
+  '    # ... one line per published prefix',
+  '</If>',
+].join('\n');
+const code2 = [
+  '<VirtualHost *:443>',
+  '    ServerName www.example.com',
+  '    # ... your existing configuration, including its own Require rules ...',
+  '',
+  '    LogFormat "%a %{crawler_impostor}e \\"%{User-Agent}i\\" \\"%r\\" %>s" crawler',
+  '    CustomLog /var/log/apache2/crawler-impostors.log crawler env=crawler_impostor',
+  '    Include /etc/apache2/crawler-allow.conf',
+  '</VirtualHost>',
+].join('\n');
+const code3 = [
+  '192.0.2.99 openai "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)" "GET / HTTP/1.1" 200',
+  '192.0.2.99 google-dns "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" "GET / HTTP/1.1" 200',
+].join('\n');
+const code4 = [
+  '<If "%{HTTP_USER_AGENT} =~ /Googlebot/i">',
+  '    AuthMerging And',
+  '    <RequireAny>',
+  '        Require ip 192.178.4.0/27',
+  '        # ... one line per published prefix',
+  '        Require host googlebot.com google.com',
+  '    </RequireAny>',
+  '</If>',
+].join('\n');
+const code5 = [
+  '# /etc/cron.d/crawler-allow: rebuild every Monday at 04:17',
+  'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+  '17 4 * * 1 root update-crawler-allow.sh log',
+].join('\n');
+const code6 = [
+  'RemoteIPHeader X-Forwarded-For',
+  '# Only the address of your own proxy or load balancer:',
+  'RemoteIPInternalProxy 10.0.0.5',
+].join('\n');
+const link = 'text-interactive hover:text-interactive-hover';
+const pre = 'mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body';
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  breadcrumbLeafName="Verified crawlers in Apache"
+>
+  <article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 pb-16 sm:pb-20">
+    <nav aria-label="Breadcrumb" class="text-sm text-text-annotation">
+      <a href="/ai-crawler-cost/" class={link}>
+        AI crawler cost meter
+      </a>
+      <span aria-hidden="true" class="mx-1">
+        /
+      </span>
+      <span aria-current="page">Verified crawlers in Apache</span>
+    </nav>
+    <h1 class="mt-6 text-3xl sm:text-4xl font-bold tracking-tight text-text-body text-balance">
+      Let real AI crawlers through Apache httpd and refuse the ones that only claim to be them
+    </h1>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Anyone can send <code class="text-text-body">User-Agent: GPTBot</code>. The big crawler
+      operators publish the address ranges their crawlers use, so Apache can check the claim. With
+      this recipe, a request that claims to be a listed crawler gets through only when it comes from
+      that operator's published ranges. For Google and Bing it also gets through when a reverse DNS
+      lookup, confirmed by a forward lookup, names the operator. No rule matches a request with a
+      browser user agent, so browsers are not affected.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      It uses stock Apache httpd 2.4 modules only:{' '}
+      <code class="text-text-body">mod_authz_core</code>,{' '}
+      <code class="text-text-body">mod_authz_host</code>,{' '}
+      <code class="text-text-body">mod_setenvif</code> and{' '}
+      <code class="text-text-body">mod_log_config</code>. Most distributions load all four; check
+      with <code class="text-text-body">apachectl -M</code>. Run nginx instead? See the{' '}
+      <a href="/ai-crawler-cost/rate-limit-impostor-crawlers/" class={link}>
+        nginx recipe
+      </a>
+      .
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      Apache refuses with 403; it does not rate-limit
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Stock Apache has no request-rate limit.{' '}
+      <a href={`${docs}mod/mod_ratelimit.html`} class={link}>
+        <code>mod_ratelimit</code>
+      </a>{' '}
+      limits bandwidth, not requests. So where the nginx recipe answers 429 above a limit, this one
+      answers every impostor with 403. A stale list could refuse a real crawler, so the recipe
+      starts in log-only mode: it logs the requests it would refuse and refuses nothing. Turn
+      refusal on when the log looks right.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">1. Build the file</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Save this as <code class="text-text-body">/usr/local/sbin/update-crawler-allow.sh</code>, make
+      it executable and run it as root; it needs <code class="text-text-body">curl</code> and{' '}
+      <code class="text-text-body">jq</code>. The first argument is the mode,{' '}
+      <code class="text-text-body">log</code> or <code class="text-text-body">refuse</code>. The
+      second is the file it writes; the default is the Debian and Ubuntu path, so on RHEL-family
+      systems pass <code class="text-text-body">/etc/httpd/conf/crawler-allow.conf</code>.
+    </p>
+    <pre tabindex="0" class={pre}><code>{code0}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">What it does, in order:</p>
+    <ol class="mt-4 list-decimal space-y-2 pl-5 text-text-muted">
+      <li>
+        Downloads each list to its own temporary file. It stops at the first list that fails to
+        download, is not valid JSON, has no prefixes or has an entry that is not an address range.
+        The old file is then left as it was and Apache is not touched.
+      </li>
+      <li>Writes one block per operator, with each prefix once.</li>
+      <li>
+        Moves the new file into place in one step and keeps the old one as{' '}
+        <code class="text-text-body">.prev</code>.
+      </li>
+      <li>
+        Runs{' '}
+        <a href={`${docs}programs/apachectl.html`} class={link}>
+          <code>apachectl configtest</code>
+        </a>
+        . If the test fails, it moves the old file back, stops and does not reload Apache.
+      </li>
+      <li>
+        If the test passes, runs <code class="text-text-body">apachectl graceful</code>. Apache
+        reads <code class="text-text-body">Require ip</code> ranges when it starts or reloads, so a
+        new list takes effect only after this reload.
+      </li>
+    </ol>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Run it once in log mode now: <code class="text-text-body">update-crawler-allow.sh log</code>.
+      In log mode each block looks like this:
+    </p>
+    <pre tabindex="0" class={pre}><code>{code1}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">Published lists, as of 2026-11-22:</p>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm text-left text-text-muted">
+        <thead>
+          <tr>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Operator
+            </th>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              User agents
+            </th>
+            <th scope="col" class="py-2 pr-4 font-semibold text-text-body">
+              Lists
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">OpenAI</td>
+            <td class="py-2 pr-4">GPTBot, OAI-SearchBot, ChatGPT-User</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://openai.com/gptbot.json</code>,{' '}
+              <code class="text-text-body">https://openai.com/searchbot.json</code>,{' '}
+              <code class="text-text-body">https://openai.com/chatgpt-user.json</code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Anthropic</td>
+            <td class="py-2 pr-4">ClaudeBot, Claude-SearchBot, Claude-User</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://claude.com/crawling/bots.json</code> (one list
+              for all its crawlers)
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Perplexity</td>
+            <td class="py-2 pr-4">PerplexityBot, Perplexity-User</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://www.perplexity.ai/perplexitybot.json</code>,{' '}
+              <code class="text-text-body">https://www.perplexity.ai/perplexity-user.json</code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Google</td>
+            <td class="py-2 pr-4">Googlebot</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">
+                https://developers.google.com/static/crawling/ipranges/common-crawlers.json
+              </code>
+              , then reverse DNS: <code class="text-text-body">googlebot.com</code>,{' '}
+              <code class="text-text-body">google.com</code>
+            </td>
+          </tr>
+          <tr class="border-t border-border align-top">
+            <td class="py-2 pr-4">Microsoft</td>
+            <td class="py-2 pr-4">bingbot</td>
+            <td class="py-2 pr-4">
+              <code class="text-text-body">https://www.bing.com/toolbox/bingbot.json</code>, then
+              reverse DNS: <code class="text-text-body">search.msn.com</code>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      2. Include it in the site
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      In each <code class="text-text-body">VirtualHost</code> you want to protect, after the site's
+      own access rules and outside any{' '}
+      <a href={`${docs}mod/core.html#if`} class={link}>
+        <code>&lt;If&gt;</code>
+      </a>{' '}
+      section (Apache does not allow <code class="text-text-body">Include</code> inside one), add
+      the log and the include. On RHEL-family systems the log directory is{' '}
+      <code class="text-text-body">/var/log/httpd/</code>.
+    </p>
+    <pre tabindex="0" class={pre}><code>{code2}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Then run <code class="text-text-body">apachectl configtest</code> and{' '}
+      <code class="text-text-body">apachectl graceful</code>.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">3. Read the log first</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      In log mode,{' '}
+      <a href={`${docs}mod/mod_setenvif.html#setenvifexpr`} class={link}>
+        <code>SetEnvIfExpr</code>
+      </a>{' '}
+      marks a request that claims a listed crawler, and each{' '}
+      <a href={`${docs}expr.html`} class={link}>
+        <code>-R</code>
+      </a>{' '}
+      test that matches one of the operator's prefixes removes the mark again.{' '}
+      <a href={`${docs}mod/mod_log_config.html#customlog`} class={link}>
+        <code>CustomLog</code>
+      </a>{' '}
+      writes the requests that are still marked. Nothing is refused. A line looks like this:
+    </p>
+    <pre tabindex="0" class={pre}><code>{code3}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The second field is the operator the request claimed. A tag ending in{' '}
+      <code class="text-text-body">-dns</code> means a Google or Bing claim from an address that is
+      not on the list. In refuse mode Apache then asks DNS, so a real Google or Bing crawler from a
+      new range still gets through. Every other line would be refused. If a line looks like a real
+      crawler, check its address against the operator's list before you go on.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">4. Turn refusal on</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Run <code class="text-text-body">update-crawler-allow.sh refuse</code>. It rebuilds the file,
+      tests it and reloads Apache. Each block now looks like this:
+    </p>
+    <pre tabindex="0" class={pre}><code>{code4}</code></pre>
+    <ul class="mt-4 list-disc space-y-2 pl-5 text-text-muted">
+      <li>
+        A request whose user agent matches the{' '}
+        <a href={`${docs}mod/core.html#if`} class={link}>
+          <code>&lt;If&gt;</code>
+        </a>{' '}
+        must pass one test in the{' '}
+        <a href={`${docs}mod/mod_authz_core.html#requireany`} class={link}>
+          <code>&lt;RequireAny&gt;</code>
+        </a>
+        . If it does not, Apache answers 403 and writes{' '}
+        <code class="text-text-body">AH01630: client denied by server configuration</code> to the
+        error log.
+      </li>
+      <li>
+        Apache tries the tests in order. The{' '}
+        <a href={`${docs}mod/mod_authz_host.html`} class={link}>
+          <code>Require ip</code>
+        </a>{' '}
+        lines come first, so a crawler on the list is let through without a DNS lookup.{' '}
+        <code class="text-text-body">Require host</code> is only in the Google and Bing blocks, and
+        always last. It does a reverse lookup on the address, then a forward lookup on the name, and
+        passes only when both agree and the name is in one of the listed domains.
+      </li>
+      <li>
+        <a href={`${docs}mod/mod_authz_core.html#authmerging`} class={link}>
+          <code>AuthMerging And</code>
+        </a>{' '}
+        keeps the site's own rules in force. A listed crawler still has to pass every rule the site
+        already has: a password, an address allow list, a{' '}
+        <code class="text-text-body">Require all denied</code>. Without it, Apache replaces the
+        site's rules with the block's for the requests the block matches, and a listed crawler would
+        get into a password-protected location without a password.
+      </li>
+    </ul>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The lists change. Rebuild weekly from cron, in the mode you run in. Change{' '}
+      <code class="text-text-body">log</code> to <code class="text-text-body">refuse</code> here
+      when you turn refusal on:
+    </p>
+    <pre tabindex="0" class={pre}><code>{code5}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The <code class="text-text-body">PATH</code> line matters: cron's default path does not
+      include <code class="text-text-body">/usr/sbin</code>, where{' '}
+      <code class="text-text-body">apachectl</code> lives.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">Things to know</h2>
+    <ul class="mt-4 list-disc space-y-2 pl-5 text-text-muted">
+      <li>
+        <strong class="text-text-body">The DNS lookups are not cached.</strong> A Google or Bing
+        claim from an address that is not on the list costs two DNS lookups, and Apache keeps no
+        cache of them: each new connection asks again. The request waits for the answer, and a flood
+        of fake Googlebot claims becomes a flood of DNS queries. Run a local caching resolver. If a
+        lookup fails or times out, the request is refused. Requests that match a{' '}
+        <code class="text-text-body">Require ip</code> line, and requests that match no block, do
+        not wait on DNS.
+      </li>
+      <li>
+        <strong class="text-text-body">Behind a proxy or load balancer</strong>, every request comes
+        from the proxy's address, so every crawler claim is refused. Set the client address with{' '}
+        <a href={`${docs}mod/mod_remoteip.html`} class={link}>
+          <code>mod_remoteip</code>
+        </a>{' '}
+        and trust the header only from your own proxy. A forwarded-for header from any other address
+        is then ignored:
+        <pre tabindex="0" class={pre}><code>{code6}</code></pre>
+      </li>
+      <li>
+        <strong class="text-text-body">Other limits you already run.</strong> If you throttle
+        clients with a third-party module such as{' '}
+        <a href="https://mod-qos.sourceforge.net/" class={link}>
+          mod_qos
+        </a>{' '}
+        or{' '}
+        <a href="https://github.com/jzdziarski/mod_evasive" class={link}>
+          mod_evasive
+        </a>
+        , exempt the same ranges there; see their own documentation for how.
+      </li>
+      <li>
+        <strong class="text-text-body">Fewer operators.</strong> To leave an operator out, delete
+        its list lines and its <code class="text-text-body">block</code> line together.
+      </li>
+    </ul>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Checked with Apache httpd 2.4.71. The lists were checked on 2026-11-22.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">What this does not do</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      It does not limit request rates, it does not block crawlers you have not listed, and it does
+      not stop a scraper that sends a browser user agent. It refuses one cheap lie: claiming to be a
+      known crawler. To see how much of that you get, drop your access log on the{' '}
+      <a href="/ai-crawler-cost/" class={link}>
+        AI crawler cost meter
+      </a>
+      .
+    </p>
+  </article>
+</BaseLayout>
