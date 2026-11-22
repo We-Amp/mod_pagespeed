@@ -3970,7 +3970,13 @@ jobs:
           $lintDir = Join-Path $env:RUNNER_TEMP $lintName
           New-Item -ItemType Directory -Force -Path $lintDir | Out-Null
           Copy-Item $lintExe, 'LICENSE', 'NOTICE', 'pagespeed\tools\cli\pagespeed-lint.schema.json' $lintDir
-          Compress-Archive -Path $lintDir -DestinationPath (Join-Path 'msi-out' "$lintName-win-x64.zip") -CompressionLevel Optimal
+          # bsdtar writes '/'-separated zip entries (Compress-Archive in
+          # Windows PowerShell 5.1 writes '\').
+          $zip = Join-Path (Join-Path $env:GITHUB_WORKSPACE 'msi-out') "$lintName-win-x64.zip"
+          & "$($env:SystemRoot)\System32\tar.exe" -a -c -f $zip -C $env:RUNNER_TEMP $lintName
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::could not write $zip"; exit 1 }
+          $entries = @(& "$($env:SystemRoot)\System32\tar.exe" -t -f $zip)
+          if ($entries -match '\\') { Write-Host "::error::$zip has '\' in an entry name"; exit 1 }
           Get-ChildItem msi-out | Format-Table Name, Length
           $msiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $found[0].FullName).Hash.ToLower()
           Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_sha256=$msiHash" -Encoding ascii

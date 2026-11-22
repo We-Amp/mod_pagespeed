@@ -2432,15 +2432,21 @@ jobs:
               python3 -I tools/ci/check_pagespeed_lint.py symbols --binary .lint-out/pagespeed
               python3 -I tools/ci/check_pagespeed_lint.py report --binary .lint-out/pagespeed \
                 --testdata test/pagespeed/tools/cli/testdata \
-                --schema pagespeed/tools/cli/pagespeed-lint.schema.json
+                --schema pagespeed/tools/cli/pagespeed-lint.schema.json \
+                --save .lint-out/reports
             '
 
-      # Networking off: the same reports from a new network namespace. Run on
-      # the runner itself, as a container cannot make one without privileges.
+      # Networking off: the same reports again, from a container with no
+      # network (only the loopback interface), as an unprivileged user.
       - name: The pagespeed lint binary runs with networking off
         run: |
-          python3 -I tools/ci/check_pagespeed_lint.py offline --binary .lint-out/pagespeed \
-            --testdata test/pagespeed/tools/cli/testdata
+          docker run --rm --init --network none \
+            --user "$(id -u):$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            python3 -I tools/ci/check_pagespeed_lint.py offline --binary .lint-out/pagespeed \
+              --testdata test/pagespeed/tools/cli/testdata --expect .lint-out/reports
 
       - name: Remove this job's dev image tag
         if: always()

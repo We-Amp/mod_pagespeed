@@ -11,10 +11,16 @@
       input, refused --show-values into a pipe) and that 20 runs give the same
       bytes.
 
-  check_pagespeed_lint.py offline --binary B --testdata D
-      Runs the binary with networking switched off (a new network namespace:
-      `unshare -rn`, else `sudo -n unshare -n`) and requires the same output
-      as a normal run. Fails when no network namespace can be made.
+  check_pagespeed_lint.py report ... --save DIR
+      Also writes each report to DIR, for `offline --expect DIR`.
+
+  check_pagespeed_lint.py offline --binary B --testdata D [--expect DIR]
+      Runs the binary with networking off and requires the same output as a
+      normal run (or as the reports saved in DIR). Networking is off when the
+      process has no network interface but the loopback one (for example in
+      a container started with --network none); otherwise the runs go
+      through `unshare -rn` (a new user and network namespace, no privilege
+      needed). Fails when neither is possible.
 
   check_pagespeed_lint.py symbols --binary B
       ELF (nm) or PE (objdump/llvm-objdump -p) import check: no socket or
@@ -133,7 +139,9 @@ def run(args, prefix=()):
 def cmd_report(a):
     with open(a.schema, encoding="utf-8") as fh:
         schema = json.load(fh)
-    for config, htaccess in CASES:
+    if a.save:
+        os.makedirs(a.save, exist_ok=True)
+    for i, (config, htaccess) in enumerate(CASES):
         args = lint_args(a.binary, a.testdata, config, htaccess)
         rc, out, err = run(args)
         if rc not in (0, 1):
@@ -153,6 +161,9 @@ def cmd_report(a):
         for _ in range(20):
             if run(args)[1] != out:
                 fail("%s: output differs between runs" % (config or htaccess))
+        if a.save:
+            with open(os.path.join(a.save, "%d.json" % i), "wb") as fh:
+                fh.write(out)
     rc, _out, _err = run(lint_args(a.binary, a.testdata, "no/such.conf", []))
     if rc != 2:
         fail("a missing input exits %d, not 2" % rc)
@@ -166,27 +177,35 @@ def cmd_report(a):
     print("check_pagespeed_lint: %d reports match the schema, exit codes and 20 runs agree" % len(CASES))
 
 
+ISOLATED = "test \"$(tail -n +3 /proc/net/dev | grep -vc '^ *lo:')\" = 0"
+
+
 def cmd_offline(a):
-    prefixes = (["unshare", "-rn", "--"], ["sudo", "-n", "unshare", "-n", "--"])
-    chosen = None
-    for prefix in prefixes:
-        if shutil.which(prefix[0]) is None:
-            continue
-        # /proc/net/dev lists the interfaces of the reader's own namespace:
-        # only the loopback one is in a new one.
-        rc, out, _err = run(["sh", "-c", "test \"$(tail -n +3 /proc/net/dev | grep -vc '^ *lo:')\" = 0"], prefix)
-        if rc == 0:
-            chosen = prefix
-            break
-    if chosen is None:
-        fail("cannot run with networking off: neither `unshare -rn` nor `sudo -n unshare -n` works here")
-    for config, htaccess in CASES:
-        args = lint_args(os.path.abspath(a.binary), os.path.abspath(a.testdata), config, htaccess)
-        normal = run(args)
-        offline = run(args, chosen)
-        if normal[0] != offline[0] or normal[1] != offline[1]:
+    # /proc/net/dev lists the interfaces of the reader's own namespace.
+    if run(["sh", "-c", ISOLATED])[0] == 0:
+        prefix = []
+        how = "no network interface"
+    elif shutil.which("unshare") and run(["sh", "-c", ISOLATED], ["unshare", "-rn", "--"])[0] == 0:
+        prefix = ["unshare", "-rn", "--"]
+        how = "unshare -rn"
+    else:
+        fail("cannot run with networking off: this process has a network interface and "
+             "`unshare -rn` does not work here (run it in a container with --network none)")
+    binary = os.path.abspath(a.binary)
+    testdata = os.path.abspath(a.testdata)
+    for i, (config, htaccess) in enumerate(CASES):
+        args = lint_args(binary, testdata, config, htaccess)
+        if a.expect:
+            with open(os.path.join(a.expect, "%d.json" % i), "rb") as fh:
+                saved = fh.read()
+            want = (1 if json.loads(saved)["summary"]["error"] else 0, saved)
+        else:
+            normal = run(args)
+            want = (normal[0], normal[1])
+        offline = run(args, prefix)
+        if want[0] != offline[0] or want[1] != offline[1]:
             fail("%s: the output with networking off differs" % (config or htaccess))
-    print("check_pagespeed_lint: %d runs with networking off (%s) match" % (len(CASES), " ".join(chosen[:-1])))
+    print("check_pagespeed_lint: %d runs with networking off (%s) match" % (len(CASES), how))
 
 
 def elf_undefined(binary):
@@ -279,6 +298,8 @@ def main(argv):
     ap.add_argument("--binary", required=True)
     ap.add_argument("--testdata")
     ap.add_argument("--schema")
+    ap.add_argument("--save")
+    ap.add_argument("--expect")
     a = ap.parse_args(argv)
     if a.command in ("report", "offline") and not a.testdata:
         ap.error("--testdata is required")
