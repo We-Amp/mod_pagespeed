@@ -1,0 +1,57 @@
+# Accept header vectors for the Markdown-versus-HTML choice.
+#
+# The same file is checked in, byte for byte, in We-Amp/mod_pagespeed
+# (test/net/instaweb/rewriter/testdata/accept_markdown_vectors.txt) and in
+# We-Amp/pagespeed-optimizer (test/lib/classify/testdata/accept_markdown_vectors.txt).
+# Both test suites assert every line and pin the file's FNV-1a 64-bit hash
+# (computed with carriage returns removed). Change the two copies together and
+# update the pin in both tests.
+#
+# Format: <id> <verdict> [<line>]...
+#   verdict MD   = the Markdown copy is selected
+#   verdict HTML = HTML is served
+#   each <...> is one Accept header line, verbatim between the brackets;
+#   several lines are combined in order as one comma-separated list
+#   (RFC 9110 section 5.3); no <...> at all means the header is absent.
+#
+# Rule: Markdown is selected only when text/markdown is named explicitly, its
+# q is above 0, and its q is strictly above the q text/html resolves to (most
+# specific of text/html, text/*, */*, else 0). Wildcards never select
+# Markdown. Equal q selects HTML. A malformed header (q outside [0, 1], more
+# than three decimals, unparseable, or text/markdown listed twice with
+# different q) selects HTML.
+1 MD <text/markdown>
+2 HTML <text/markdown;q=0>
+3 HTML <text/markdown;q=0, text/html>
+4 HTML <text/markdown, text/html>
+5 MD <text/markdown, text/html;q=0.9>
+6 HTML <text/markdown;q=0.5, text/html>
+7 MD <text/html;q=0.5, text/markdown;q=0.8>
+8 HTML <*/*>
+9 HTML <text/markdown;q=0, */*>
+10 HTML <text/*>
+11 HTML <text/*;q=0.9, text/html;q=0.1>
+12 MD <text/markdown;q=0.6, text/*;q=0.9, text/html;q=0.5>
+13 HTML <text/markdown;q=0.4, */*;q=0.5>
+14 MD <text/markdown;charset=utf-8, text/html;q=0.5>
+15 MD <text/markdown;variant=GFM;q=0.9, text/html;q=0.8>
+16 MD <TEXT/Markdown, text/html;q=0.5>
+17 MD <text/markdown;Q=0.9, text/html;q=0.5>
+18 HTML <text/markdown;q=0.9999, text/html;q=0.5>
+19 HTML <text/markdown;q=1.5>
+20 HTML <text/markdown;q=-0.1>
+21 HTML <text/markdown;q=abc, text/html;q=0.1>
+22 HTML <text/markdown;q=0.9, text/markdown;q=0.1, text/html;q=0.5>
+23 MD <text/markdown, text/markdown, text/html;q=0.5>
+24 MD <text/html;q=0.5> <text/markdown>
+25 HTML <text/markdown> <text/html>
+26 HTML <text/markdown> <text/markdown;q=0>
+27 HTML
+28 HTML <>
+29 HTML <text/markdown;;q=>
+30 MD <text/markdown;q=0.001, text/html;q=0>
+31 HTML <text/markdown;q=0.000, text/html;q=0>
+32 MD <application/json, text/markdown;q=0.5>
+33 MD < text/markdown ; q=0.8 , text/html;q=0.5>
+34 HTML <text/markdownx, text/html;q=0.5>
+35 HTML <text/markdown;q=1.0, text/html;q=1>
