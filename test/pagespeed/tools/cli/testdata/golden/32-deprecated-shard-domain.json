@@ -1,0 +1,12 @@
+{
+  "schema": "pagespeed-lint/1",
+  "tool_version": "1.0.0",
+  "module_version": "<module_version>",
+  "inputs": [
+    {"path": "seeded/32-deprecated-shard-domain.conf", "kind": "config", "sha256": "ae8b5295c7f27ade0880626728b1ee897b278a85068f975cebef83d272740ad2"}
+  ],
+  "summary": {"error": 0, "warning": 1, "info": 0},
+  "findings": [
+    {"rule": "PS202", "severity": "warning", "file": "seeded/32-deprecated-shard-domain.conf", "line": 2, "scope": "server", "directive": "ModPagespeedShardDomain", "args": ["<masked>", "<masked>"], "message": "ModPagespeedShardDomain is deprecated (text not shown, the value may be secret)"}
+  ]
+}
