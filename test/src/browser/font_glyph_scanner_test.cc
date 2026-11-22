@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -230,28 +229,20 @@ class FontGlyphScannerCdpTest : public ::testing::Test {
     }
     return -1;
   }
-  // Answer and pump until `condition` holds. The bound is only reached when
-  // the font scan hangs; a slow or stalled host just takes longer.
-  void PumpUntil(const std::function<bool()>& condition,
-                 std::chrono::milliseconds bound = std::chrono::seconds(10)) {
-    const auto end = std::chrono::steady_clock::now() + bound;
-    while (!condition()) {
-      if (std::chrono::steady_clock::now() >= end) return;
-      AutoRespondAll();
-      RunLoop();
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+  // Answer and pump until `condition` holds (test::PumpUntil).
+  void PumpUntil(const std::function<bool()>& condition) {
+    test::PumpUntil(
+        [this] {
+          AutoRespondAll();
+          RunLoop();
+        },
+        condition);
   }
-  // Let a settle timer run out that an event already sent to the client
-  // starts: read that event (which arms the timer), wait out the bound in
-  // wall time, then run the loop so the now-due timer fires. A host stall
-  // anywhere in here only lengthens the wait; it never skips the timer.
+  // Let the settle timer, armed by an event already sent, run out
+  // (test::RunPastTimer).
   void RunOutTheSettleBound() {
-    RunLoop();
-    RunLoop();
-    std::this_thread::sleep_for(std::chrono::milliseconds(kTestSettleMs + 20));
-    RunLoop();
-    RunLoop();
+    test::RunPastTimer([this] { RunLoop(); },
+                       std::chrono::milliseconds(kTestSettleMs));
   }
   // Replay the blank tab's lifecycle on Page.setLifecycleEventsEnabled, as
   // Chromium does.

@@ -4,7 +4,9 @@
 #ifndef TEST_TEST_UTIL_CDP_PIPE_H_
 #define TEST_TEST_UTIL_CDP_PIPE_H_
 
+#include <chrono>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -211,6 +213,35 @@ inline ssize_t PipeRead(int fd, void* buf, size_t len) {
 // Cross-platform microsecond sleep.
 inline void SleepUs(int us) {
   std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+
+// Run `step` (answer the fake browser's commands, run the loop) until `done`
+// holds. Wait on the step a test expects, never on a fixed window of wall
+// time: on a busy host the setup round trips can take longer than any window.
+// `bound` only stops a real hang; a slow or stalled host just takes longer.
+inline void PumpUntil(
+    const std::function<void()>& step, const std::function<bool()>& done,
+    std::chrono::milliseconds bound = std::chrono::seconds(10)) {
+  const auto end = std::chrono::steady_clock::now() + bound;
+  while (!done()) {
+    if (std::chrono::steady_clock::now() >= end) return;
+    step();
+    SleepUs(2000);
+  }
+}
+
+// Let a libuv timer of `delay` run out that an event already sent to the
+// client arms: run the loop to read that event (which starts the timer),
+// sleep past `delay` in wall time, then run the loop so the now-due timer
+// fires. A host stall anywhere in here only lengthens the wait; the timer
+// never misses it.
+inline void RunPastTimer(const std::function<void()>& run_loop,
+                         std::chrono::milliseconds delay) {
+  run_loop();
+  run_loop();
+  std::this_thread::sleep_for(delay + std::chrono::milliseconds(20));
+  run_loop();
+  run_loop();
 }
 
 }  // namespace test

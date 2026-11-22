@@ -9,9 +9,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -328,14 +328,20 @@ class PageAnalysisTest : public ::testing::Test {
     }
     return -1;
   }
-  // Answer and pump for `d` of wall time (the settle timer is real).
-  void PumpFor(std::chrono::milliseconds d) {
-    const auto end = std::chrono::steady_clock::now() + d;
-    while (std::chrono::steady_clock::now() < end) {
-      AutoRespondAll();
-      RunLoop();
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+  // Answer and pump until `condition` holds (test::PumpUntil).
+  void PumpUntil(const std::function<bool()>& condition) {
+    test::PumpUntil(
+        [this] {
+          AutoRespondAll();
+          RunLoop();
+        },
+        condition);
+  }
+  // Let the settle timer, armed by an event already sent, run out
+  // (test::RunPastTimer).
+  void RunOutTheSettleBound() {
+    test::RunPastTimer([this] { RunLoop(); },
+                       std::chrono::milliseconds(kTestSettleMs));
   }
   // Replay the blank tab's lifecycle on Page.setLifecycleEventsEnabled, as
   // Chromium does.
@@ -1374,7 +1380,7 @@ TEST_F(PageAnalysisTest, CollectsAfterLoadWhenTheNetworkNeverGoesIdle) {
 
   // The page's load, after the reply; no networkIdle follows.
   SendEvent("Page.lifecycleEvent", {{"name", "load"}}, "sess-1");
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 500));
+  PumpUntil([this] { return analysis_done_; });
   ASSERT_TRUE(analysis_done_) << "no collection after the settle bound";
   EXPECT_TRUE(analysis_result_.ok()) << analysis_result_.status();
   EXPECT_GT(IndexOf("Runtime.evaluate"), content);
@@ -1393,7 +1399,7 @@ TEST_F(PageAnalysisTest, LoadBeforeTheContentReplyStartsTheSettle) {
                      analysis_result_ = std::move(result);
                      analysis_done_ = true;
                    });
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 500));
+  PumpUntil([this] { return analysis_done_; });
   ASSERT_TRUE(analysis_done_) << "the load before the reply was dropped";
   EXPECT_TRUE(analysis_result_.ok()) << analysis_result_.status();
   EXPECT_GT(IndexOf("Runtime.evaluate"), IndexOf("Page.setDocumentContent"));
@@ -1412,13 +1418,18 @@ TEST_F(PageAnalysisTest, SettleBeforeTheContentReplyCollectsAtTheReply) {
                      analysis_result_ = std::move(result);
                      analysis_done_ = true;
                    });
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 200));
+  // Wait for the command itself, not a fixed time: the setup round trips
+  // before it can take longer than the settle bound on a busy host.
+  PumpUntil([this] { return held_content_reply_id_ >= 0; });
   ASSERT_GE(held_content_reply_id_, 0) << "setDocumentContent was not sent";
+  // The page's load went out with the command; the bound runs out before
+  // the reply.
+  RunOutTheSettleBound();
   EXPECT_EQ(IndexOf("Runtime.evaluate"), -1)
       << "collected before the document was written";
   EXPECT_FALSE(analysis_done_);
   RespondToCommand(held_content_reply_id_, json::object());
-  PumpFor(std::chrono::milliseconds(500));
+  PumpUntil([this] { return analysis_done_; });
   ASSERT_TRUE(analysis_done_);
   EXPECT_TRUE(analysis_result_.ok()) << analysis_result_.status();
 }
