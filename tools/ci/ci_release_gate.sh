@@ -84,6 +84,7 @@ REQUIRED=(
   'pr / Lint (clang-tidy + clang-format)'
   'pr / JS Minify Corpus'
   'pr / HTML Parse Corpus Goldens'
+  'pr / pagespeed lint (release build)'
   'pr / Fuzz smoke (deterministic replay plus 60s libFuzzer)'
   'pr / Windows Build'
   'pr / Windows Unit Tests'

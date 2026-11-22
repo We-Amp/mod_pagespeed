@@ -1693,7 +1693,7 @@ jobs:
                 --disk_cache=/cache -c opt)
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out \
-                test "${flags[@]}" ${BAZEL_CACHE_FLAGS} --test_output=errors \
+                test "${flags[@]}" ${BAZEL_CACHE_FLAGS} --nocache_test_results --test_output=errors \
                 -- //test/pagespeed/tools/cli:all
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out \
@@ -3651,7 +3651,7 @@ jobs:
           Get-ChildItem (Join-Path $staging 'iis') | Format-Table Name, Length
           # `pagespeed lint` (pagespeed.exe), signed with the module and
           # shipped as its own zip; its tests run first with the same flags.
-          & $bazel @startup test @common --test_output=errors -- //test/pagespeed/tools/cli:all
+          & $bazel @startup test @common --nocache_test_results --test_output=errors -- //test/pagespeed/tools/cli:all
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $bazel @startup build @common -- //pagespeed/tools/cli:pagespeed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
