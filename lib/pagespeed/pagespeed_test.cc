@@ -7489,7 +7489,7 @@ TEST(PageSpeedCApi, HtmlTransformWithSpeculationUrls) {
 // agent_optimize native FFI
 // ---------------------------------------------------------------------------
 
-// P3.5: ps_wants_agent_markdown — presence-only text/markdown negotiation,
+// P3.5: ps_wants_agent_markdown — q-ranked text/markdown negotiation,
 // token-bounded, never matched by a wildcard accept.
 TEST(PageSpeedCApi, WantsAgentMarkdown) {
   EXPECT_EQ(ps_wants_agent_markdown(nullptr), 0);

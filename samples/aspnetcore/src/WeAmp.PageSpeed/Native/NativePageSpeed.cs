@@ -66,9 +66,9 @@ internal static partial class NativePageSpeed
         StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int ClassifyContentType(string contentType);
 
-    // 1 if the Accept header explicitly requests text/markdown
-    // (the agent-optimize negotiation signal), else 0. Presence-only,
-    // token-bounded, never matched by a wildcard accept.
+    // 1 if the Accept header ranks text/markdown at least as high as
+    // text/html (the agent-optimize negotiation signal), else 0. q-value
+    // ranked; never matched by a wildcard accept; equal q selects Markdown.
     [LibraryImport(Lib, EntryPoint = "ps_wants_agent_markdown",
         StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int WantsAgentMarkdown(string? accept);

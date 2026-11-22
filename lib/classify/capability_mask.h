@@ -4,7 +4,9 @@
 #ifndef PAGESPEED_LIB_CLASSIFY_CAPABILITY_MASK_H_
 #define PAGESPEED_LIB_CLASSIFY_CAPABILITY_MASK_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace pagespeed {
@@ -168,11 +170,51 @@ class CapabilityMask {
   TransferEncoding transfer_encoding_;
 };
 
-// True iff the Accept header names `text/markdown` as a whole token (the
-// agent_optimize same-URL negotiation). Presence-only (not q-ranked) and NOT
-// matched by `*/*`. Kept separate from CapabilityMask::FromHeaders because the
-// 32-bit mask has no free bit; the caller ANDs this with the SharedConfig
-// agent_optimize flag to gate the kAgentMarkdown variant.
+// Decides whether a request's Accept header selects the Markdown copy (the
+// agent_optimize same-URL negotiation) over HTML, by RFC 9110 q-values:
+//
+//   - `text/markdown` must be named explicitly; `*/*` and `text/*` never
+//     select it, at any q;
+//   - its q must be above 0 and at least the q `text/html` resolves to
+//     (the most specific of `text/html`, `text/*`, `*/*`, else 0);
+//   - equal q selects Markdown, whatever the order;
+//   - a malformed header selects HTML: a q outside [0, 1] or with more than
+//     three decimals, an unparseable media range, or `text/markdown` listed
+//     twice with different q-values.
+//
+// Type, subtype and parameter names are case-insensitive; media-type
+// parameters other than q do not change the match. Several `text/html` (or
+// wildcard) ranges resolve to their highest q, which can only favour HTML.
+// The vectors in test/lib/classify/testdata/accept_markdown_vectors.txt are
+// the specification.
+//
+// Feed every Accept header line of the request, in order, to AddLine(); the
+// lines combine as one comma-separated list (RFC 9110 section 5.3). No
+// allocation.
+class AcceptMarkdownPreference {
+ public:
+  void AddLine(std::string_view line);
+  bool PrefersMarkdown() const;
+
+ private:
+  bool ParseElement(std::string_view line, size_t* pos);
+
+  bool malformed_ = false;
+  // q-values in thousandths; -1 = the range is not listed.
+  int markdown_q_ = -1;
+  int html_q_ = -1;
+  int text_any_q_ = -1;
+  int any_q_ = -1;
+};
+
+// AcceptMarkdownPreference over the given Accept header lines.
+bool AcceptPrefersMarkdown(std::span<const std::string_view> accept_lines);
+
+// True iff the (single, already combined) Accept value selects the Markdown
+// copy under AcceptMarkdownPreference. Kept separate from
+// CapabilityMask::FromHeaders because the 32-bit mask has no free bit; the
+// caller ANDs this with the SharedConfig agent_optimize flag to gate the
+// kAgentMarkdown variant.
 bool WantsAgentMarkdown(std::string_view accept);
 
 }  // namespace pagespeed

@@ -180,3 +180,58 @@ GET /llms.txt
 --- response_headers
 Content-Type: text/markdown; charset=utf-8
 x-markdown-tokens: 3
+
+
+=== TEST 9: Accept with text/markdown at q=0 gets the HTML
+--- config eval: $::config
+--- more_headers
+Accept: text/markdown;q=0
+--- request
+GET /md
+--- response_body chomp
+<html><body>stored parent</body></html>
+--- response_headers
+X-PageSpeed: HIT
+Vary: Accept-Encoding, User-Agent, Accept
+x-markdown-tokens:
+
+
+=== TEST 10: Accept with text/markdown and text/html at equal q gets the Markdown copy
+--- config eval: $::config
+--- more_headers
+Accept: text/markdown, text/html, */*
+--- request
+GET /md
+--- response_body chomp
+# markdown copy for agents
+--- response_headers
+Content-Type: text/markdown
+Vary: Accept
+
+
+=== TEST 11: text/markdown at q=0 is not overridden by */*
+--- config eval: $::config
+--- more_headers
+Accept: text/markdown;q=0, */*
+--- request
+GET /md
+--- response_body chomp
+<html><body>stored parent</body></html>
+--- response_headers
+X-PageSpeed: HIT
+Vary: Accept-Encoding, User-Agent, Accept
+x-markdown-tokens:
+
+
+=== TEST 12: Accept header lines are combined: text/markdown preferred over text/html
+--- config eval: $::config
+--- more_headers
+Accept: text/html;q=0.5
+Accept: text/markdown
+--- request
+GET /md
+--- response_body chomp
+# markdown copy for agents
+--- response_headers
+Content-Type: text/markdown
+Vary: Accept

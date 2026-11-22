@@ -11,6 +11,14 @@ gtest_test(
 )
 
 gtest_test(
+    name = "accept_markdown_preference_test",
+    data = ["testdata/accept_markdown_vectors.txt"],
+    deps = [
+        "//lib/classify:capability_mask",
+    ],
+)
+
+gtest_test(
     name = "capability_mask_test",
     deps = [
         "//lib/classify:alternate_id",

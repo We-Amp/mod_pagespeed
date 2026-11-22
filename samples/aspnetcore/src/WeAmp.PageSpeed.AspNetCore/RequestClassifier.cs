@@ -35,10 +35,11 @@ public static class RequestClassifier
             contentType);
 
     /// <summary>
-    /// Does the Accept header explicitly request text/markdown
-    /// (the agent-optimize demand signal)? Delegates to the native
-    /// ps_wants_agent_markdown — presence-only, token-bounded, never matched by
-    /// a wildcard Accept.
+    /// Does the Accept header rank text/markdown at least as high as
+    /// text/html (the agent-optimize demand signal)? Delegates to the native
+    /// ps_wants_agent_markdown: text/markdown named explicitly with a q above
+    /// 0 and at least the q of text/html; never matched by a wildcard Accept;
+    /// equal q selects Markdown.
     /// </summary>
     public static bool WantsAgentMarkdown(HttpRequest request)
     {

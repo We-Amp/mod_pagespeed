@@ -80,6 +80,7 @@ extern "C" {
 #include "src/worker/async_css_loader.h"
 #include "src/worker/serve_stats.h"
 
+using pagespeed::AcceptMarkdownPreference;
 using pagespeed::AlternateId;
 using pagespeed::AlternateMetadata;
 using pagespeed::BuildCacheControlHeader;
@@ -100,7 +101,6 @@ using pagespeed::ReadResult;
 using pagespeed::ResetPersistentConnection;
 using pagespeed::SendNotificationPersistent;
 using pagespeed::SentinelId;
-using pagespeed::WantsAgentMarkdown;
 
 // Saved next filters in the body/header filter chains
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
@@ -1280,7 +1280,7 @@ typedef struct {
   unsigned serve_stale_body : 1;       // Body filter: serve cached content
   unsigned mask_valid : 1;             // Whether mask has been classified
   unsigned force_refresh : 1;          // Client sent force-refresh signal
-  unsigned agent_wants_markdown : 1;   // Accept: text/markdown
+  unsigned agent_wants_markdown : 1;   // Accept prefers text/markdown
   unsigned served_agent_markdown : 1;  // served the 0x7C variant
   // Issue #652: this request re-fetched expired origin content (stale
   // verdict full re-fetch, or conditional revalidation answered 200) while
@@ -1817,6 +1817,34 @@ static ngx_str_t ngx_http_pagespeed_get_header(ngx_http_request_t* r,
   return value;
 }
 
+// Whether the request's Accept header lines, all of them in order, select the
+// agent_optimize Markdown copy (AcceptMarkdownPreference: explicit
+// `text/markdown` with a q above 0 and above the q `text/html` resolves to).
+static bool ngx_http_pagespeed_accept_prefers_markdown(ngx_http_request_t* r) {
+  static const ngx_str_t accept_name = ngx_string("Accept");
+  AcceptMarkdownPreference preference;
+  ngx_list_part_t* part = &r->headers_in.headers.part;
+  ngx_table_elt_t* h = static_cast<ngx_table_elt_t*>(part->elts);
+  for (ngx_uint_t i = 0;; i++) {
+    if (i >= part->nelts) {
+      if (part->next == nullptr) {
+        break;
+      }
+      part = part->next;
+      h = static_cast<ngx_table_elt_t*>(part->elts);
+      i = 0;
+    }
+    if (h[i].key.len == accept_name.len &&
+        ngx_strncasecmp(h[i].key.data, accept_name.data, accept_name.len) ==
+            0) {
+      preference.AddLine(std::string_view(
+          h[i].value.data ? reinterpret_cast<const char*>(h[i].value.data) : "",
+          h[i].value.data ? h[i].value.len : 0));
+    }
+  }
+  return preference.PrefersMarkdown();
+}
+
 // Determine ContentType from Content-Type response header
 static ContentType ngx_http_pagespeed_detect_content_type(
     ngx_http_request_t* r) {
@@ -1885,7 +1913,8 @@ static ngx_int_t ngx_http_pagespeed_classify(ngx_http_request_t* r,
   ctx->mask_valid = 1;
   // Does this request ask for the agent_optimize markdown variant?
   // ANDed with the serve-side entitlement (g_shared_config) at the cache read.
-  ctx->agent_wants_markdown = WantsAgentMarkdown(accept_sv) ? 1 : 0;
+  ctx->agent_wants_markdown =
+      ngx_http_pagespeed_accept_prefers_markdown(r) ? 1 : 0;
 
   // Observe-only Web Bot Auth classification.  Default off —
   // one bool check when the operator has not enabled it.  The verdict is a

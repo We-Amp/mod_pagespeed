@@ -19896,6 +19896,14 @@ layout settled. JS-heavy pages that are otherwise invisible to agents become
 clean, structured text. Everyone else gets your normal optimized HTML at that
 same URL.
 
+The Markdown copy is chosen only when the request ranks it at least as high as
+HTML: `text/markdown` must be listed by name with a q-value above 0 and at
+least the q-value that `text/html` gets (directly, or through `text/*` or
+`*/*`). `Accept: text/markdown`, `Accept: text/markdown, text/html, */*`
+(equal q) and `Accept: text/markdown, text/html;q=0.9` get Markdown;
+`Accept: text/markdown;q=0`, `Accept: text/markdown;q=0.5, text/html`,
+`Accept: */*` and a malformed `Accept` get HTML.
+
 The agent response is content-negotiated, with these guarantees:
 
 - `Vary: Accept` — shared caches never serve the Markdown copy to a browser, or

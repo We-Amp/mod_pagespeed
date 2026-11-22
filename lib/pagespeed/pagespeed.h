@@ -133,9 +133,13 @@ PS_EXPORT uint32_t ps_classify(const char* accept, const char* user_agent,
                                const char* save_data,
                                const char* accept_encoding);
 
-/* 1 if the Accept header requests text/markdown (the agent-optimize
- * negotiation signal; presence-only, token-bounded, never matched by a wildcard
- * accept), else 0.  The capability mask has no free bit, so this is standalone. */
+/* 1 if the Accept header ranks text/markdown at least as high as text/html
+ * (the agent-optimize negotiation signal), else 0.  text/markdown must be
+ * named explicitly with a q above 0 and at least the q text/html resolves to;
+ * a wildcard never selects it, equal q selects Markdown, and a malformed
+ * header selects HTML.
+ * Pass several Accept lines joined with ", ".  The capability mask has no free
+ * bit, so this is standalone. */
 PS_EXPORT int ps_wants_agent_markdown(const char* accept);
 
 PS_EXPORT uint32_t ps_mask_set_viewport_from_width(uint32_t mask,

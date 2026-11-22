@@ -637,8 +637,11 @@ TEST(CapabilityMaskTest, FromHeadersAndroidPhoneNotBrokenByIPadFix) {
 TEST(CapabilityMaskTest, WantsAgentMarkdown) {
   EXPECT_TRUE(WantsAgentMarkdown("text/markdown"));
   EXPECT_TRUE(WantsAgentMarkdown("text/markdown;q=0.9"));
-  EXPECT_TRUE(WantsAgentMarkdown("text/html, text/markdown"));
   EXPECT_TRUE(WantsAgentMarkdown("text/markdown, text/html;q=0.1"));
+  // Equal q selects Markdown, q=0 selects HTML; the full matrix is
+  // accept_markdown_preference_test.cc.
+  EXPECT_TRUE(WantsAgentMarkdown("text/html, text/markdown"));
+  EXPECT_FALSE(WantsAgentMarkdown("text/markdown;q=0"));
   // Must NOT fire on the wildcard or on plain HTML/other.
   EXPECT_FALSE(WantsAgentMarkdown("*/*"));
   EXPECT_FALSE(WantsAgentMarkdown("text/html"));

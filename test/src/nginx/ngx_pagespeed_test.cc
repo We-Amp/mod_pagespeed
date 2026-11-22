@@ -488,7 +488,7 @@ TEST_F(AgentOptimizeServeTest, BrowserGetsHtmlNotMarkdown) {
 }
 
 // Even a `*/*` (wildcard) browser request must not match — WantsAgentMarkdown is
-// presence-only and never matched by `*/*`.
+// never matched by `*/*`.
 TEST_F(AgentOptimizeServeTest, WildcardAcceptGetsHtmlNotMarkdown) {
   CreateCache();
   WriteOriginal("/page.html", "<html>HI</html>", ContentType::kHtml);
@@ -498,6 +498,40 @@ TEST_F(AgentOptimizeServeTest, WildcardAcceptGetsHtmlNotMarkdown) {
                    /*agent_optimize_entitled=*/true);
   EXPECT_FALSE(out.served_agent_markdown);
   EXPECT_EQ(out.body, "<html>HI</html>");
+}
+
+// An agent that lists text/markdown but ranks it below HTML gets the HTML:
+// q=0, a lower q, and an explicit q=0 that */* does not override.
+TEST_F(AgentOptimizeServeTest, MarkdownNotPreferredGetsHtml) {
+  CreateCache();
+  WriteOriginal("/page.html", "<html>HI</html>", ContentType::kHtml);
+  WriteAgentMarkdown("/page.html", "# Hi\n");
+
+  for (std::string_view accept :
+       {"text/markdown;q=0", "text/markdown;q=0.5, text/html",
+        "text/markdown;q=0, */*"}) {
+    auto out = Serve("/page.html", CapabilityMask(), accept,
+                     /*agent_optimize_entitled=*/true);
+    EXPECT_FALSE(out.served_agent_markdown) << accept;
+    EXPECT_EQ(out.body, "<html>HI</html>") << accept;
+  }
+}
+
+// Agents that list text/markdown first, tied with text/html or above it, get
+// the Markdown copy (Claude Code and an MCP fetch tool's headers).
+TEST_F(AgentOptimizeServeTest, MarkdownTiedOrPreferredGetsMarkdown) {
+  CreateCache();
+  WriteOriginal("/page.html", "<html>HI</html>", ContentType::kHtml);
+  WriteAgentMarkdown("/page.html", "# Hi\n");
+
+  for (std::string_view accept :
+       {"text/markdown, text/html, */*",
+        "text/markdown, text/html;q=0.9, */*;q=0.8"}) {
+    auto out = Serve("/page.html", CapabilityMask(), accept,
+                     /*agent_optimize_entitled=*/true);
+    EXPECT_TRUE(out.served_agent_markdown) << accept;
+    EXPECT_EQ(out.body, "# Hi\n") << accept;
+  }
 }
 
 // Flag OFF (operator did not enable agent_optimize): even a text/markdown
@@ -526,11 +560,13 @@ TEST_F(AgentOptimizeServeTest,
   EXPECT_EQ(out.body, "<html>HI</html>");
 }
 
-// The Accept-header predicate the module gates on: presence-only, token-bounded,
-// NOT q-ranked, NOT matched by `*/*`.
+// The Accept-header predicate the module gates on: `text/markdown` named
+// explicitly with a q above 0 and at least the q `text/html` resolves to; never
+// matched by `*/*`; equal q selects Markdown.
 TEST_F(AgentOptimizeServeTest, WantsAgentMarkdownDecisionMatrix) {
   EXPECT_TRUE(pagespeed::WantsAgentMarkdown("text/markdown"));
   EXPECT_TRUE(pagespeed::WantsAgentMarkdown("text/html, text/markdown"));
+  EXPECT_TRUE(pagespeed::WantsAgentMarkdown("text/html;q=0.9, text/markdown"));
   EXPECT_TRUE(pagespeed::WantsAgentMarkdown("text/markdown;q=0.9"));
   EXPECT_FALSE(pagespeed::WantsAgentMarkdown("*/*"));
   EXPECT_FALSE(
