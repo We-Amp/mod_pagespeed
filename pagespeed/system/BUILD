@@ -503,3 +503,28 @@ cc_library(
     ],
 )
 
+
+# Spike (offline config lint): SystemRewriteOptions on its own, without the
+# caches, fetchers and shared memory of the full system library.
+cc_library(
+    name = "system_rewrite_options_offline",
+    srcs = ["system_rewrite_options.cc"],
+    hdrs = ["system_rewrite_options.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":external_server_spec",
+        "//net/instaweb/rewriter:rewriter_core",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/util",
+    ],
+)
+
+# Spike: the console's option allowlist feeds the lint's masking at build time.
+exports_files(
+    [
+        "console/src/lib/data/safe-option-names.ts",
+        "console/src/lib/utils/diagnostics.ts",
+    ],
+    visibility = ["//visibility:public"],
+)

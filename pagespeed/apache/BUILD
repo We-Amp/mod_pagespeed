@@ -116,6 +116,7 @@ cc_library(
     ],
     hdrs = [
         "apache_config.h",
+        "apache_directive_table.h",
         "apache_fetch.h",
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
@@ -207,5 +208,25 @@ cc_library(
     deps = [
         ":apache_core",
         "//pagespeed/system:file_owner",
+    ],
+)
+
+# Spike (offline config lint): the directive table and ApacheConfig without
+# httpd, for //pagespeed/tools/lint_spike.  Not linked into the module.
+cc_library(
+    name = "apache_directive_table",
+    hdrs = ["apache_directive_table.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//net/instaweb/rewriter:rewriter_core"],
+)
+
+cc_library(
+    name = "apache_config_offline",
+    srcs = ["apache_config.cc"],
+    hdrs = ["apache_config.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/system:daemon_reader",
+        "//pagespeed/system:system_rewrite_options_offline",
     ],
 )
