@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -229,14 +230,28 @@ class FontGlyphScannerCdpTest : public ::testing::Test {
     }
     return -1;
   }
-  // Answer and pump for `d` of wall time (the settle timer is real).
-  void PumpFor(std::chrono::milliseconds d) {
-    const auto end = std::chrono::steady_clock::now() + d;
-    while (std::chrono::steady_clock::now() < end) {
+  // Answer and pump until `condition` holds. The bound is only reached when
+  // the font scan hangs; a slow or stalled host just takes longer.
+  void PumpUntil(const std::function<bool()>& condition,
+                 std::chrono::milliseconds bound = std::chrono::seconds(10)) {
+    const auto end = std::chrono::steady_clock::now() + bound;
+    while (!condition()) {
+      if (std::chrono::steady_clock::now() >= end) return;
       AutoRespondAll();
       RunLoop();
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
+  }
+  // Let a settle timer run out that an event already sent to the client
+  // starts: read that event (which arms the timer), wait out the bound in
+  // wall time, then run the loop so the now-due timer fires. A host stall
+  // anywhere in here only lengthens the wait; it never skips the timer.
+  void RunOutTheSettleBound() {
+    RunLoop();
+    RunLoop();
+    std::this_thread::sleep_for(std::chrono::milliseconds(kTestSettleMs + 20));
+    RunLoop();
+    RunLoop();
   }
   // Replay the blank tab's lifecycle on Page.setLifecycleEventsEnabled, as
   // Chromium does.
@@ -546,7 +561,7 @@ TEST_F(FontGlyphScannerCdpTest, CollectsAfterLoadWhenTheNetworkNeverGoesIdle) {
 
   // The page's load, after the reply; no networkIdle follows.
   SendEvent("Page.lifecycleEvent", {{"name", "load"}}, "sess-1");
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 500));
+  PumpUntil([this] { return scan_done_; });
   ASSERT_TRUE(scan_done_) << "no collection after the settle bound";
   EXPECT_TRUE(scan_result_.ok()) << scan_result_.status();
   EXPECT_GT(IndexOf("Runtime.evaluate"), content);
@@ -564,7 +579,7 @@ TEST_F(FontGlyphScannerCdpTest, LoadBeforeTheContentReplyStartsTheSettle) {
                  scan_result_ = std::move(r);
                  scan_done_ = true;
                });
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 500));
+  PumpUntil([this] { return scan_done_; });
   ASSERT_TRUE(scan_done_) << "the load before the reply was dropped";
   EXPECT_TRUE(scan_result_.ok()) << scan_result_.status();
   EXPECT_GT(IndexOf("Runtime.evaluate"), IndexOf("Page.setDocumentContent"));
@@ -582,13 +597,18 @@ TEST_F(FontGlyphScannerCdpTest, SettleBeforeTheContentReplyCollectsAtTheReply) {
                  scan_result_ = std::move(r);
                  scan_done_ = true;
                });
-  PumpFor(std::chrono::milliseconds(kTestSettleMs + 200));
+  // Wait for the command itself, not a fixed time: the setup round trips
+  // before it can take longer than the settle bound on a busy host.
+  PumpUntil([this] { return held_content_reply_id_ >= 0; });
   ASSERT_GE(held_content_reply_id_, 0) << "setDocumentContent was not sent";
+  // The page's load went out with the command; the bound runs out before
+  // the reply.
+  RunOutTheSettleBound();
   EXPECT_EQ(IndexOf("Runtime.evaluate"), -1)
       << "collected before the document was written";
   EXPECT_FALSE(scan_done_);
   RespondToCommand(held_content_reply_id_, json::object());
-  PumpFor(std::chrono::milliseconds(500));
+  PumpUntil([this] { return scan_done_; });
   ASSERT_TRUE(scan_done_);
   EXPECT_TRUE(scan_result_.ok()) << scan_result_.status();
 }
