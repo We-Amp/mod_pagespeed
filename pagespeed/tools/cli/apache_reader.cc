@@ -105,52 +105,72 @@ bool HasWildcard(const GoogleString& s) {
   return s.find_first_of("*?[") != GoogleString::npos;
 }
 
-// fnmatch() without flags, for one path component: '*', '?' and '[...]',
-// case-sensitive.
-bool WildMatch(const char* p, const char* s) {
-  if (*p == '\0') {
-    return *s == '\0';
+// One pattern element of WildMatch at p[*pi] ('?', a '[...]' class or a
+// literal) against c.  Advances *pi past the element.
+bool MatchOne(StringPiece p, size_t* pi, char c) {
+  const size_t i = *pi;
+  if (p[i] == '?') {
+    *pi = i + 1;
+    return true;
   }
-  if (*p == '*') {
-    for (const char* t = s;; ++t) {
-      if (WildMatch(p + 1, t)) {
-        return true;
-      }
-      if (*t == '\0') {
-        return false;
-      }
-    }
-  }
-  if (*s == '\0') {
-    return false;
-  }
-  if (*p == '?') {
-    return WildMatch(p + 1, s + 1);
-  }
-  if (*p == '[') {
-    const char* q = p + 1;
-    const bool negate = (*q == '!' || *q == '^');
+  if (p[i] == '[') {
+    size_t q = i + 1;
+    const bool negate = q < p.size() && (p[q] == '!' || p[q] == '^');
     if (negate) {
       ++q;
     }
     bool hit = false;
-    for (bool first = true; *q != '\0' && (first || *q != ']');
+    for (bool first = true; q < p.size() && (first || p[q] != ']');
          ++q, first = false) {
-      if (q[1] == '-' && q[2] != '\0' && q[2] != ']') {
-        if (*s >= q[0] && *s <= q[2]) {
+      if (q + 2 < p.size() && p[q + 1] == '-' && p[q + 2] != ']') {
+        if (c >= p[q] && c <= p[q + 2]) {
           hit = true;
         }
         q += 2;
-      } else if (*q == *s) {
+      } else if (p[q] == c) {
         hit = true;
       }
     }
-    if (*q != ']') {
-      return *p == *s && WildMatch(p + 1, s + 1);  // no closing ']': literal
+    if (q < p.size()) {  // at the closing ']'
+      *pi = q + 1;
+      return hit != negate;
     }
-    return (hit != negate) && WildMatch(q + 1, s + 1);
+    // No closing ']': the '[' is a literal.
   }
-  return *p == *s && WildMatch(p + 1, s + 1);
+  *pi = i + 1;
+  return p[i] == c;
+}
+
+// fnmatch() without flags, for one path component: '*', '?' and '[...]',
+// case-sensitive.  Greedy with one backtrack point (the last '*'), so the
+// time is bounded by the product of the two lengths whatever the pattern.
+bool WildMatch(StringPiece p, StringPiece s) {
+  size_t pi = 0;
+  size_t si = 0;
+  size_t star = StringPiece::npos;
+  size_t mark = 0;
+  while (si < s.size()) {
+    if (pi < p.size() && p[pi] == '*') {
+      star = pi++;
+      mark = si;
+      continue;
+    }
+    size_t next = pi;
+    if (pi < p.size() && MatchOne(p, &next, s[si])) {
+      pi = next;
+      ++si;
+      continue;
+    }
+    if (star == StringPiece::npos) {
+      return false;
+    }
+    pi = star + 1;
+    si = ++mark;
+  }
+  while (pi < p.size() && p[pi] == '*') {
+    ++pi;
+  }
+  return pi == p.size();
 }
 
 bool GetWord(StringPiece line, size_t* pos, GoogleString* word) {
@@ -223,7 +243,13 @@ std::vector<GoogleString> ApacheConfigReader::Words(StringPiece line) {
 ApacheConfigReader::ApacheConfigReader(const fs::path& root,
                                        const ValueMask* mask, Report* report,
                                        ApacheLineVisitor* visitor)
-    : root_(root), mask_(mask), report_(report), visitor_(visitor) {}
+    : root_(root), mask_(mask), report_(report), visitor_(visitor) {
+  std::error_code ec;
+  root_resolved_ = fs::canonical(root, ec);
+  if (ec) {
+    root_resolved_ = root;
+  }
+}
 
 bool ApacheConfigReader::ReadConfig(StringPiece path) {
   return ReadTop(path, false);
@@ -242,7 +268,8 @@ bool ApacheConfigReader::ReadTop(StringPiece path, bool htaccess) {
     return false;
   }
   std::error_code ec;
-  if (!fs::is_regular_file(disk, ec)) {
+  GoogleString resolved;
+  if (!fs::is_regular_file(disk, ec) || !InsideRoot(disk, &resolved)) {
     return false;
   }
   stack_.clear();
@@ -322,25 +349,73 @@ bool ApacheConfigReader::ResolveFixed(
   return true;
 }
 
+bool ApacheConfigReader::InsideRoot(const fs::path& disk,
+                                    GoogleString* resolved) const {
+  std::error_code ec;
+  const fs::path real = fs::canonical(disk, ec);
+  if (ec) {
+    return false;
+  }
+  *resolved = U8(real);
+  auto r = root_resolved_.begin();
+  auto d = real.begin();
+  for (; r != root_resolved_.end(); ++r, ++d) {
+    if (r->empty()) {
+      continue;  // a trailing separator of the root
+    }
+    if (d == real.end() || *r != *d) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Expands components[index..] below `disk`: fixed components resolve as in
 // ResolveFixed, a wildcard component matches every sorted entry.  A final
 // directory expands to every file below it, sorted and depth first, as httpd
-// reads it.
+// reads it.  Every path is resolved before it is used: one outside the root
+// is skipped, a directory already read whole is skipped (a symbolic link loop),
+// and the expansion stops at kMaxIncludeFiles files or kMaxIncludeLevels
+// levels.
 void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
                                 size_t index, const fs::path& disk,
-                                const GoogleString& logical,
-                                bool* case_mismatch,
+                                const GoogleString& logical, int levels,
+                                ExpandState* state,
                                 std::vector<Resolved>* out) const {
+  if (state->truncated) {
+    return;
+  }
+  if (levels > kMaxIncludeLevels ||
+      out->size() >= static_cast<size_t>(kMaxIncludeFiles)) {
+    state->truncated = true;
+    return;
+  }
   std::error_code ec;
+  GoogleString resolved;
+  if (!InsideRoot(disk, &resolved)) {
+    if (fs::exists(disk, ec)) {
+      state->outside_root = true;
+    }
+    return;
+  }
+  const bool is_dir = fs::is_directory(disk, ec);
   if (index == components.size()) {
-    if (fs::is_directory(disk, ec)) {
+    if (is_dir) {
+      // Only the recursive read of a directory can loop.
+      if (!state->directories.insert(resolved).second) {
+        state->loop = true;
+        return;
+      }
       for (const GoogleString& e : SortedEntries(disk)) {
         Expand(components, index, disk / FromU8(e), StrCat(logical, "/", e),
-               case_mismatch, out);
+               levels + 1, state, out);
       }
     } else if (fs::is_regular_file(disk, ec)) {
       out->push_back({logical, disk});
     }
+    return;
+  }
+  if (!is_dir) {
     return;
   }
   const GoogleString& want = components[index];
@@ -349,7 +424,7 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
   if (HasWildcard(want)) {
     const bool last = index + 1 == components.size();
     for (const GoogleString& e : entries) {
-      if (!WildMatch(want.c_str(), e.c_str())) {
+      if (!WildMatch(want, e)) {
         continue;
       }
       const fs::path p = disk / FromU8(e);
@@ -358,13 +433,13 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
       if (last ? !fs::is_regular_file(p, ec) : !fs::is_directory(p, ec)) {
         continue;
       }
-      Expand(components, index + 1, p, prefix + e, case_mismatch, out);
+      Expand(components, index + 1, p, prefix + e, levels + 1, state, out);
     }
     return;
   }
   if (std::binary_search(entries.begin(), entries.end(), want)) {
     Expand(components, index + 1, disk / FromU8(want), prefix + want,
-           case_mismatch, out);
+           levels + 1, state, out);
     return;
   }
   const GoogleString* match = nullptr;
@@ -376,9 +451,9 @@ void ApacheConfigReader::Expand(const std::vector<GoogleString>& components,
     }
   }
   if (count == 1) {
-    *case_mismatch = true;
+    state->case_mismatch = true;
     Expand(components, index + 1, disk / FromU8(*match), prefix + want,
-           case_mismatch, out);
+           levels + 1, state, out);
   }
 }
 
@@ -393,10 +468,31 @@ void ApacheConfigReader::Include(StringPiece arg, bool optional,
     return;
   }
   const GoogleString logical = JoinLogical(components, components.size());
-  bool case_mismatch = false;
+  ExpandState state;
   std::vector<Resolved> files;
-  Expand(components, 0, root_, "", &case_mismatch, &files);
+  Expand(components, 0, root_, "", 0, &state, &files);
+  if (state.outside_root) {
+    AddFinding("PS905", Severity::kError, file, line, placement, directive,
+               StrCat("Include target resolves outside the configuration "
+                      "root (through a symbolic link) and is not read: ",
+                      logical));
+  }
+  if (state.loop) {
+    AddFinding("PS904", Severity::kError, file, line, placement, directive,
+               StrCat("Include reaches a directory twice (a symbolic link "
+                      "loop); it is read once: ",
+                      logical));
+  }
+  if (state.truncated) {
+    AddFinding("PS906", Severity::kError, file, line, placement, directive,
+               StrCat("Include expands to more than ", kMaxIncludeFiles,
+                      " files or ", kMaxIncludeLevels,
+                      " directory levels; the rest is not read: ", logical));
+  }
   if (files.empty()) {
+    if (state.outside_root) {
+      return;
+    }
     // IncludeOptional ignores a missing target; so does Include for a
     // wildcard that matches nothing in a directory that exists, but the
     // linter reports that too as it is almost always a mistake.
@@ -406,7 +502,7 @@ void ApacheConfigReader::Include(StringPiece arg, bool optional,
     }
     return;
   }
-  if (case_mismatch) {
+  if (state.case_mismatch) {
     AddFinding(
         "PS902", Severity::kWarning, file, line, placement, directive,
         StrCat("Include path differs only by letter case from the "
@@ -444,7 +540,20 @@ void ApacheConfigReader::ReadFile(const GoogleString& logical,
                                   const fs::path& disk, const char* kind,
                                   bool htaccess, int depth) {
   const Placement top = PlacementFor(htaccess);
-  const GoogleString key = U8(disk);
+  GoogleString key;
+  if (!InsideRoot(disk, &key)) {
+    AddFinding("PS905", Severity::kError, logical, 0, top, "",
+               "File resolves outside the configuration root and is not read");
+    return;
+  }
+  if (++files_read_ > kMaxInputFiles) {
+    if (files_read_ == kMaxInputFiles + 1) {
+      AddFinding("PS906", Severity::kError, logical, 0, top, "",
+                 StrCat("More than ", kMaxInputFiles,
+                        " files to read; the rest is not read"));
+    }
+    return;
+  }
   if (open_files_.count(key) > 0 || depth > kMaxIncludeDepth) {
     AddFinding("PS904", Severity::kError, logical, 0, top, "Include",
                "Include cycle, or includes nested too deeply");

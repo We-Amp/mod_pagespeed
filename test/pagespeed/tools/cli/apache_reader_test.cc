@@ -3,8 +3,10 @@
 
 #include "pagespeed/tools/cli/apache_reader.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -40,9 +42,10 @@ class Recorder : public ApacheLineVisitor {
 class ApacheReaderTest : public testing::Test {
  protected:
   void SetUp() override {
-    root_ = fs::path(GTestTempDir()) /
-            StrCat("reader_",
-                   testing::UnitTest::GetInstance()->current_test_info()->name());
+    root_ =
+        fs::path(GTestTempDir()) /
+        StrCat("reader_",
+               testing::UnitTest::GetInstance()->current_test_info()->name());
     fs::remove_all(root_);
     fs::create_directories(root_);
   }
@@ -127,10 +130,10 @@ TEST_F(ApacheReaderTest, IncludesAreSortedAndRooted) {
   for (const Seen& s : recorder_.seen) {
     files.push_back(s.file);
   }
-  EXPECT_EQ(std::vector<GoogleString>({"conf.d/a.conf", "conf.d/b.conf",
-                                       "dir/sub/z.conf", "dir/y.conf",
-                                       "win/x.conf"}),
-            files);
+  EXPECT_EQ(
+      std::vector<GoogleString>({"conf.d/a.conf", "conf.d/b.conf",
+                                 "dir/sub/z.conf", "dir/y.conf", "win/x.conf"}),
+      files);
   ASSERT_EQ(6u, report_.inputs().size());
   EXPECT_EQ("config", report_.inputs()[0].kind);
   EXPECT_EQ("include", report_.inputs()[1].kind);
@@ -146,9 +149,9 @@ TEST_F(ApacheReaderTest, IncludeProblems) {
   ASSERT_TRUE(Read("main.conf"));
   // PS902: Self.conf matched self.conf by letter case only; reading it then
   // includes main.conf again, a cycle (PS904).
-  EXPECT_EQ(std::vector<GoogleString>(
-                {"PS901:1", "PS903:3", "PS902:4", "PS904:0"}),
-            Rules());
+  EXPECT_EQ(
+      std::vector<GoogleString>({"PS901:1", "PS903:3", "PS902:4", "PS904:0"}),
+      Rules());
 }
 
 TEST_F(ApacheReaderTest, SectionProblemsMaskUnknownNames) {
@@ -158,9 +161,9 @@ TEST_F(ApacheReaderTest, SectionProblemsMaskUnknownNames) {
         "<Directory /x\n"
         "<VirtualHost *:80>\n");
   ASSERT_TRUE(Read("main.conf"));
-  EXPECT_EQ(std::vector<GoogleString>(
-                {"PS104:1", "PS104:2", "PS104:3", "PS104:4"}),
-            Rules());
+  EXPECT_EQ(
+      std::vector<GoogleString>({"PS104:1", "PS104:2", "PS104:3", "PS104:4"}),
+      Rules());
   for (const Finding& f : report_.findings()) {
     EXPECT_EQ(GoogleString::npos, f.message.find("s3cret")) << f.message;
   }
@@ -173,6 +176,82 @@ TEST_F(ApacheReaderTest, CrlfAndUnreadable) {
   EXPECT_EQ(std::vector<GoogleString>({"2"}), recorder_.seen[1].args);
   EXPECT_FALSE(Read("nope.conf"));
   EXPECT_FALSE(Read("../crlf.conf"));
+}
+
+// Seconds since `start`.
+double Since(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+TEST_F(ApacheReaderTest, SymlinkLoopIsReadOnce) {
+  Write("loop/a.conf", "ModPagespeedA 1\n");
+  std::error_code ec;
+  fs::create_directory_symlink(".", root_ / "loop" / "self", ec);
+  if (ec) {
+    GTEST_SKIP() << "cannot create a symbolic link here: " << ec.message();
+  }
+  Write("main.conf", "Include loop\nInclude loop/self/self/*.conf\n");
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_LT(Since(start), 5.0);
+  EXPECT_EQ(std::vector<GoogleString>({"PS904:1"}), Rules());
+  // loop/a.conf is read for the first Include; the second reaches the same
+  // file by another name and reads it again (a file, not a directory loop).
+  EXPECT_EQ(2u, recorder_.seen.size());
+}
+
+TEST_F(ApacheReaderTest, LinksOutOfTheRootAreRefused) {
+  const fs::path outside =
+      root_.parent_path() / StrCat(root_.filename().string(), "_outside");
+  fs::remove_all(outside);
+  fs::create_directories(outside);
+  {
+    std::ofstream(outside / "x.conf") << "ModPagespeedX 1\n";
+  }
+  std::error_code ec;
+  fs::create_directory_symlink(outside, root_ / "out", ec);
+  if (ec) {
+    GTEST_SKIP() << "cannot create a symbolic link here: " << ec.message();
+  }
+  fs::create_symlink(outside / "x.conf", root_ / "x-link.conf", ec);
+  Write("main.conf", "Include out/x.conf\nInclude out\nInclude x-link.conf\n");
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_EQ(std::vector<GoogleString>({"PS905:1", "PS905:2", "PS905:3"}),
+            Rules());
+  EXPECT_TRUE(recorder_.seen.empty());
+  EXPECT_EQ(1u, report_.inputs().size());  // main.conf only
+  EXPECT_FALSE(Read("out/x.conf"));        // as the top-level file too
+}
+
+TEST_F(ApacheReaderTest, WildcardsTakeBoundedTime) {
+  Write(StrCat("wild/", GoogleString(60, 'a'), "c"), "ModPagespeedA 1\n");
+  Write("wild/ab", "ModPagespeedB 1\n");
+  GoogleString pattern = "wild/";
+  for (int i = 0; i < 30; ++i) {
+    pattern += "*a";
+  }
+  pattern += "*b";
+  Write("main.conf",
+        StrCat("IncludeOptional ", pattern, "\nInclude wild/[a]?\n"));
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_LT(Since(start), 5.0);
+  ASSERT_EQ(1u, recorder_.seen.size());  // [a]? matches "ab" only
+  EXPECT_EQ("wild/ab", recorder_.seen[0].file);
+}
+
+TEST_F(ApacheReaderTest, ExpansionIsCapped) {
+  for (int i = 0; i < ApacheConfigReader::kMaxIncludeFiles + 10; ++i) {
+    Write(StrCat("many/f", i, ".conf"), "");
+  }
+  Write("main.conf", "Include many\n");
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(Read("main.conf"));
+  EXPECT_LT(Since(start), 20.0);
+  EXPECT_EQ(std::vector<GoogleString>({"PS906:1"}), Rules());
+  EXPECT_EQ(static_cast<size_t>(ApacheConfigReader::kMaxIncludeFiles) + 1,
+            report_.inputs().size());
 }
 
 }  // namespace

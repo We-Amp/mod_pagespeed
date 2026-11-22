@@ -11,6 +11,7 @@
 // test's undeclared outputs (test.outputs/outputs.zip under bazel-testlogs),
 // to be reviewed and copied to testdata/golden/.
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <set>
@@ -26,7 +27,7 @@ constexpr char kTestData[] = "test/pagespeed/tools/cli/testdata/";
 
 struct Case {
   const char* name;
-  const char* config;             // "" for none
+  const char* config;  // "" for none
   std::vector<GoogleString> htaccess;
   // Some (rule, line) pairs the case must report, as a readable check next
   // to the golden.
@@ -40,43 +41,73 @@ const std::vector<Case>& Cases() {
       {"02-invalid-value", "seeded/02-invalid-value.conf", {}, {{"PS102", 2}}},
       {"03-arity", "seeded/03-arity.conf", {}, {{"PS103", 2}}},
       {"04-arity-take2", "seeded/04-arity-take2.conf", {}, {{"PS103", 2}}},
-      {"05-deprecated-filter", "seeded/05-deprecated-filter.conf", {},
+      {"05-deprecated-filter",
+       "seeded/05-deprecated-filter.conf",
+       {},
        {{"PS204", 2}}},
-      {"06-removed-property", "seeded/06-removed-property.conf", {},
+      {"06-removed-property",
+       "seeded/06-removed-property.conf",
+       {},
        {{"PS202", 2}}},
-      {"07-deprecated-spelling", "seeded/07-deprecated-spelling.conf", {},
+      {"07-deprecated-spelling",
+       "seeded/07-deprecated-spelling.conf",
+       {},
        {{"PS201", 2}}},
-      {"08-deprecated-option", "seeded/08-deprecated-option.conf", {},
+      {"08-deprecated-option",
+       "seeded/08-deprecated-option.conf",
+       {},
        {{"PS202", 2}}},
       {"09-directory", "seeded/09-directory.conf", {}, {{"PS301", 3}}},
       {"10-vhost-strict", "seeded/10-vhost-strict.conf", {}, {{"PS302", 3}}},
       {"11-vhost-legacy", "seeded/11-vhost-legacy.conf", {}, {{"PS303", 3}}},
-      {"12-htaccess", "", {"seeded/12-htaccess.htaccess"},
+      {"12-htaccess",
+       "",
+       {"seeded/12-htaccess.htaccess"},
        {{"PS304", 1}, {"PS304", 2}, {"PS304", 3}}},
-      {"14-nested-conditional", "seeded/14-nested-conditional.conf", {},
+      {"14-nested-conditional",
+       "seeded/14-nested-conditional.conf",
+       {},
        {{"PS305", 3}}},
-      {"15-global-in-conditional", "seeded/15-global-in-conditional.conf", {},
+      {"15-global-in-conditional",
+       "seeded/15-global-in-conditional.conf",
+       {},
        {{"PS306", 2}}},
-      {"16-other-in-conditional", "seeded/16-other-in-conditional.conf", {},
+      {"16-other-in-conditional",
+       "seeded/16-other-in-conditional.conf",
+       {},
        {{"PS307", 2}}},
-      {"17-conditional-argument", "seeded/17-conditional-argument.conf", {},
+      {"17-conditional-argument",
+       "seeded/17-conditional-argument.conf",
+       {},
        {{"PS102", 1}}},
-      {"18-include-missing", "seeded/18-include-missing.conf", {},
+      {"18-include-missing",
+       "seeded/18-include-missing.conf",
+       {},
        {{"PS901", 2}}},
-      {"19-include-case", "seeded/19-include-case.conf", {},
+      {"19-include-case",
+       "seeded/19-include-case.conf",
+       {},
        {{"PS902", 1}, {"PS101", 2}}},
-      {"20-include-escapes", "seeded/20-include-escapes.conf", {},
+      {"20-include-escapes",
+       "seeded/20-include-escapes.conf",
+       {},
        {{"PS903", 1}}},
       {"21-unclosed", "seeded/21-unclosed.conf", {}, {{"PS104", 1}}},
       {"22-enabled-value", "seeded/22-enabled-value.conf", {}, {{"PS102", 1}}},
       {"23-vhost-ignored", "seeded/23-vhost-ignored.conf", {}, {{"PS303", 3}}},
-      {"24-unknown-filter", "seeded/24-unknown-filter.conf", {},
+      {"24-unknown-filter",
+       "seeded/24-unknown-filter.conf",
+       {},
        {{"PS105", 1}}},
       {"25-glued-equals", "seeded/25-glued-equals.conf", {}, {{"PS106", 1}}},
       {"26-limit", "seeded/26-limit.conf", {}, {{"PS301", 3}}},
-      {"27-vhost-thread-count", "seeded/27-vhost-thread-count.conf", {},
+      {"27-vhost-thread-count",
+       "seeded/27-vhost-thread-count.conf",
+       {},
        {{"PS302", 2}}},
-      {"28-unexpected-closer", "seeded/28-unexpected-closer.conf", {},
+      {"28-unexpected-closer",
+       "seeded/28-unexpected-closer.conf",
+       {},
        {{"PS104", 2}, {"PS104", 3}}},
       {"29-include-wildcard", "seeded/29-include-wildcard.conf", {}, {}},
       {"30-continuation", "seeded/30-continuation.conf", {}, {}},
@@ -120,9 +151,9 @@ TEST_F(LintGoldenTest, MatchesGoldens) {
     const GoogleString json = Lint(c.config, c.htaccess, &readable);
     EXPECT_TRUE(readable);
     if (write_dir != nullptr) {
-      std::ofstream out(std::filesystem::path(write_dir) /
-                            StrCat(c.name, ".json"),
-                        std::ios::binary);
+      std::ofstream out(
+          std::filesystem::path(write_dir) / StrCat(c.name, ".json"),
+          std::ios::binary);
       out << json;
     }
     EXPECT_EQ(ReadRunfile(StrCat("golden/", c.name, ".json")), json);
@@ -165,6 +196,21 @@ TEST_F(LintGoldenTest, UnreadableInputIsReported) {
   EXPECT_FALSE(readable);
   Lint("", {"no-such.htaccess"}, &readable);
   EXPECT_FALSE(readable);
+}
+
+TEST_F(LintGoldenTest, LongUnknownNamesTakeBoundedTime) {
+  WriteFile("long.conf", StrCat("ModPagespeed", GoogleString(200000, 'x'),
+                                " 1\n", "ModPagespeedEnableFilters ",
+                                GoogleString(200000, 'y'), "\n"));
+  const auto start = std::chrono::steady_clock::now();
+  Lint("long.conf");
+  EXPECT_LT(
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+          .count(),
+      5.0);
+  ASSERT_EQ(2u, last_report_.findings().size());
+  EXPECT_EQ("PS101", last_report_.findings()[0].rule);
+  EXPECT_EQ("PS105", last_report_.findings()[1].rule);
 }
 
 TEST_F(LintGoldenTest, ExitCodes) {

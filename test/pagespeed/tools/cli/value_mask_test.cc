@@ -15,8 +15,7 @@ namespace {
 
 GoogleString ReadSafeOptionNamesTs() {
   std::ifstream in(
-      RunfilePath(
-          "pagespeed/system/console/src/lib/data/safe-option-names.ts"),
+      RunfilePath("pagespeed/system/console/src/lib/data/safe-option-names.ts"),
       std::ios::binary);
   std::ostringstream ss;
   ss << in.rdbuf();
@@ -45,8 +44,8 @@ TEST(ValueMaskTest, AllowlistMatchesTheConsoleList) {
   ValueMask mask;
   EXPECT_GT(mask.safe_name_count(), 100);
   EXPECT_EQ(entries, ValueMask::SourceEntryCount());
-  EXPECT_EQ(entries, mask.safe_name_count() +
-                         ValueMask::SourceSecretExcludedCount());
+  EXPECT_EQ(entries,
+            mask.safe_name_count() + ValueMask::SourceSecretExcludedCount());
 }
 
 TEST(ValueMaskTest, OnlyAllowlistedValuesAreShown) {

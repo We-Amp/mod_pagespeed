@@ -26,9 +26,8 @@ class LintSecretTest : public LintTestBase {
   void ExpectNoMarker() {
     const GoogleString json = last_report_.ToJson("<module_version>");
     const GoogleString text = last_report_.ToText();
-    EXPECT_EQ(GoogleString::npos, json.find(kMarker))
-        << json.substr(json.find(kMarker) > 200 ? json.find(kMarker) - 200 : 0,
-                       400);
+    EXPECT_EQ(GoogleString::npos, json.find(kMarker)) << json.substr(
+        json.find(kMarker) > 200 ? json.find(kMarker) - 200 : 0, 400);
     EXPECT_EQ(GoogleString::npos, text.find(kMarker));
   }
 
@@ -86,8 +85,8 @@ TEST_F(LintSecretTest, NoMaskedValueIsEverPrinted) {
       }
     }
     // The malformed forms.
-    StrAppend(&server, name, "=", Mark(), "\n", name, ":", Mark(), " x\n",
-              name, Mark(), " ", Mark(), "\n");
+    StrAppend(&server, name, "=", Mark(), "\n", name, ":", Mark(), " x\n", name,
+              Mark(), " ", Mark(), "\n");
     StrAppend(&htaccess, name, "=", Mark(), "\n");
   }
   const GoogleString config = StrCat(

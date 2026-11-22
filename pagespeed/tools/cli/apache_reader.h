@@ -63,11 +63,20 @@ class ApacheLineVisitor {
 // drive letter is taken as relative to the root; a path that leaves the root
 // is refused (PS903).
 //
-// Findings about the file structure (PS104, PS307, PS901..PS904) go to the
+// A path that resolves outside the root through a symbolic link is not read
+// (PS905), a directory reached twice is expanded once (PS904), and one
+// Include expands to at most kMaxIncludeFiles files and kMaxIncludeLevels
+// directory levels, a whole run to kMaxInputFiles files (PS906).
+//
+// Findings about the file structure (PS104, PS307, PS901..PS906) go to the
 // report; directive lines go to the visitor.  Nothing the reader reports
 // contains a name or value that is not known to be safe.
 class ApacheConfigReader {
  public:
+  static constexpr int kMaxIncludeFiles = 1024;
+  static constexpr int kMaxIncludeLevels = 16;
+  static constexpr int kMaxInputFiles = 4096;
+
   ApacheConfigReader(const std::filesystem::path& root, const ValueMask* mask,
                      Report* report, ApacheLineVisitor* visitor);
 
@@ -98,15 +107,29 @@ class ApacheConfigReader {
   bool Normalise(StringPiece raw, std::vector<GoogleString>* components) const;
   bool ResolveFixed(const std::vector<GoogleString>& components,
                     std::filesystem::path* disk, bool* case_mismatch) const;
+  // What one Include expansion ran into.
+  struct ExpandState {
+    bool case_mismatch = false;
+    bool outside_root = false;  // a path resolved outside the root: skipped
+    bool loop = false;          // a directory reached twice: skipped
+    bool truncated = false;     // too many files or levels: stopped
+    std::set<GoogleString> directories;  // resolved, already expanded
+  };
   void Expand(const std::vector<GoogleString>& components, size_t index,
               const std::filesystem::path& disk, const GoogleString& logical,
-              bool* case_mismatch, std::vector<Resolved>* out) const;
+              int levels, ExpandState* state, std::vector<Resolved>* out) const;
+  // True when `disk` resolves (symbolic links followed) inside the root;
+  // sets *resolved to the resolved path.
+  bool InsideRoot(const std::filesystem::path& disk,
+                  GoogleString* resolved) const;
   Placement PlacementFor(bool htaccess) const;
   void AddFinding(const char* rule, Severity severity, const GoogleString& file,
                   int line, const Placement& placement,
                   const GoogleString& directive, const GoogleString& message);
 
   std::filesystem::path root_;
+  std::filesystem::path root_resolved_;
+  int files_read_ = 0;
   const ValueMask* mask_;
   Report* report_;
   ApacheLineVisitor* visitor_;

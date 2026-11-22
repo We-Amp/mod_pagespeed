@@ -47,8 +47,19 @@ class CaptureHandler : public MessageHandler {
   }
 };
 
-// Levenshtein distance on ASCII-lowered strings, bounded for speed.
-int Distance(StringPiece a, StringPiece b) {
+// Names longer than this get no "did you mean" suggestion: a directive or
+// filter name is short, and the distance costs the product of the lengths.
+constexpr size_t kMaxSuggestLength = 128;
+
+// Levenshtein distance on ASCII-lowered strings, or `bound` when it is at
+// least `bound` (computed only that far).
+int Distance(StringPiece a, StringPiece b, int bound) {
+  const size_t diff =
+      a.size() > b.size() ? a.size() - b.size() : b.size() - a.size();
+  if (a.size() > kMaxSuggestLength || b.size() > kMaxSuggestLength ||
+      diff >= static_cast<size_t>(bound)) {
+    return bound;
+  }
   std::vector<int> prev(b.size() + 1);
   std::vector<int> cur(b.size() + 1);
   for (size_t j = 0; j <= b.size(); ++j) {
@@ -56,14 +67,19 @@ int Distance(StringPiece a, StringPiece b) {
   }
   for (size_t i = 1; i <= a.size(); ++i) {
     cur[0] = static_cast<int>(i);
+    int row_min = cur[0];
     for (size_t j = 1; j <= b.size(); ++j) {
       const bool same = LowerChar(a[i - 1]) == LowerChar(b[j - 1]);
       cur[j] =
           std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (same ? 0 : 1)});
+      row_min = std::min(row_min, cur[j]);
+    }
+    if (row_min >= bound) {
+      return bound;
     }
     std::swap(prev, cur);
   }
-  return prev[b.size()];
+  return std::min(prev[b.size()], bound);
 }
 
 const char* ArgsText(Args args) {
@@ -111,7 +127,7 @@ GoogleString NearestFilter(StringPiece name) {
     if (candidate.empty()) {
       continue;
     }
-    const int d = Distance(name, candidate);
+    const int d = Distance(name, candidate, best_distance);
     if (d < best_distance) {
       best_distance = d;
       best = candidate.as_string();
@@ -162,7 +178,7 @@ const ApacheCommand* ApacheCommandTable::Nearest(StringPiece name) const {
     if (c.handler == Handler::kParseScope) {
       continue;
     }
-    const int d = Distance(name, c.name);
+    const int d = Distance(name, c.name, best_distance);
     if (d < best_distance) {
       best_distance = d;
       best = &c;
@@ -378,6 +394,7 @@ void ApacheLinter::Conditional(const GoogleString& file, int line,
   static const GoogleString kName = "<ModPagespeedIf>";
   // The argument is shown only when it is one of the two valid ones.
   std::vector<GoogleString> shown;
+  shown.reserve(args.size());
   for (const GoogleString& a : args) {
     shown.push_back(StringCaseEqual(a, "spdy") || StringCaseEqual(a, "!spdy")
                         ? a
