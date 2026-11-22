@@ -342,6 +342,33 @@ cc_library(
     ],
 )
 
+# SystemRewriteOptions on its own: the option class every server port
+# configures, without the caches, fetchers and shared memory of the full
+# system library.  The system libraries depend on it (the source is compiled
+# in exactly one target), and so does the offline config linter in
+# //pagespeed/tools/cli, which must link the real option parser and no
+# network code.
+cc_library(
+    name = "system_rewrite_options",
+    srcs = [
+        "system_process_options.cc",
+        "system_rewrite_options.cc",
+    ],
+    hdrs = [
+        "system_process_options.h",
+        "system_rewrite_options.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":external_server_spec",
+        ":optimization_thread_policy",
+        "//net/instaweb/rewriter:rewriter_core",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/util",
+    ],
+)
+
 # Circuit breaker for resource fetching reliability.
 # Implements the circuit breaker pattern with CLOSED, OPEN, and HALF_OPEN states.
 cc_library(

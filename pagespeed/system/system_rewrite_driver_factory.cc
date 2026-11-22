@@ -71,6 +71,7 @@
 #include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/rule_pack_store.h"
 #include "pagespeed/system/system_caches.h"
+#include "pagespeed/system/system_process_options.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "pagespeed/system/system_thread_system.h"
@@ -83,64 +84,11 @@ namespace {
 
 const char kShutdownCount[] = "child_shutdown_count";
 
-const char kStaticAssetPrefix[] = "StaticAssetPrefix";
-const char kUsePerVHostStatistics[] = "UsePerVHostStatistics";
-const char kInstallCrashHandler[] = "InstallCrashHandler";
-const char kNumRewriteThreads[] = "NumRewriteThreads";
-const char kNumExpensiveRewriteThreads[] = "NumExpensiveRewriteThreads";
-const char kForceCaching[] = "ForceCaching";
-const char kListOutstandingUrlsOnError[] = "ListOutstandingUrlsOnError";
-const char kMessageBufferSize[] = "MessageBufferSize";
-const char kTrackOriginalContentLength[] = "TrackOriginalContentLength";
-const char kCreateSharedMemoryMetadataCache[] =
-    "CreateSharedMemoryMetadataCache";
-
-// The literal that asks for the computed policy by name.
-const char kAutoThreadCountLiteral[] = "auto";
-
-// Parses a NumRewriteThreads / NumExpensiveRewriteThreads argument.  Accepts
-// `auto` and its alias `0` (both yielding kAutoThreadCount) and any positive
-// integer; rejects everything else with a message naming the directive, which
-// is what the operator sees at startup.
-//
-// A positive value above kMaxOptimizationThreadsPerPool is clamped rather than
-// rejected, with a warning naming both the requested and the resolved count.
-// An explicit count is an override, so it is not the policy's business to
-// refuse it -- but installing thousands of threads per server process because
-// a digit was mistyped, silently, is exactly what this policy exists to stop.
-bool ParseThreadCountArgument(StringPiece option, StringPiece arg, int* count,
-                              GoogleString* msg, MessageHandler* handler) {
-  if (StringCaseEqual(arg, kAutoThreadCountLiteral)) {
-    *count = SystemRewriteDriverFactory::kAutoThreadCount;
-    return true;
-  }
-  int value = 0;
-  if (!StringToInt(arg, &value)) {
-    *msg = StrCat("'", option, "' must be a positive integer or '",
-                  kAutoThreadCountLiteral, "'; got '", arg, "'.");
-    return false;
-  }
-  if (value < 0) {
-    *msg = StrCat("'", option, "' must not be negative; got '", arg, "'. Use '",
-                  kAutoThreadCountLiteral,
-                  "' (or 0) to size the pool automatically.");
-    return false;
-  }
-  if (value > kMaxOptimizationThreadsPerPool) {
-    GoogleString option_str;
-    option.CopyToString(&option_str);
-    handler->Message(kWarning,
-                     "'%s' was set to %d, which is far more threads than any "
-                     "server process can use; using %d instead. Leave it "
-                     "unset, or set it to '%s', to size the pool from the CPU "
-                     "budget.",
-                     option_str.c_str(), value, kMaxOptimizationThreadsPerPool,
-                     kAutoThreadCountLiteral);
-    value = kMaxOptimizationThreadsPerPool;
-  }
-  *count = value;  // 0 is the alias for `auto`.
-  return true;
-}
+// The process-scope option parsing lives in SystemProcessOptions, shared
+// with the offline config linter; the factory only applies the result.
+static_assert(SystemRewriteDriverFactory::kAutoThreadCount ==
+                  SystemProcessOptions::kAutoThreadCount,
+              "one auto thread-count value");
 
 }  // namespace
 
@@ -431,131 +379,58 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
                                                bool process_scope,
                                                GoogleString* msg,
                                                MessageHandler* handler) {
-  // First check the scope.
-  if (StringCaseEqual(option, kStaticAssetPrefix) ||
-      StringCaseEqual(option, kUsePerVHostStatistics) ||
-      StringCaseEqual(option, kInstallCrashHandler) ||
-      StringCaseEqual(option, kNumRewriteThreads) ||
-      StringCaseEqual(option, kNumExpensiveRewriteThreads)) {
-    if (!process_scope) {
-      *msg = StrCat("'", option, "' is global and can't be set at this scope.");
-      return RewriteOptions::kOptionValueInvalid;
-    }
-  } else if (StringCaseEqual(option, kForceCaching) ||
-             StringCaseEqual(option, kListOutstandingUrlsOnError) ||
-             StringCaseEqual(option, kMessageBufferSize) ||
-             StringCaseEqual(option, kTrackOriginalContentLength)) {
-    if (!process_scope) {
-      // msg is only printed to the user on error, so warnings must be logged.
-      handler->Message(kWarning, "'%s' is global and is ignored at this scope",
-                       option.as_string().c_str());
-      // OK here means "move on" not "accepted and applied".
-      return RewriteOptions::kOptionOk;
-    }
-  } else {
-    return RewriteOptions::kOptionNameUnknown;
+  SystemProcessOptions::Value value;
+  RewriteOptions::OptionSettingResult result = SystemProcessOptions::Parse1(
+      option, arg, process_scope, &value, msg, handler);
+  if (result == RewriteOptions::kOptionNameUnknown || !value.apply) {
+    return result;
   }
-
-  // Scope is ok and option is known.  Parse and apply.
-
-  if (StringCaseEqual(option, kStaticAssetPrefix)) {
-    set_static_asset_prefix(arg);
-    return RewriteOptions::kOptionOk;
+  using Option = SystemProcessOptions::Option;
+  switch (value.option) {
+    case Option::kStaticAssetPrefix:
+      set_static_asset_prefix(value.string_value);
+      break;
+    case Option::kUsePerVHostStatistics:
+      set_use_per_vhost_statistics(value.bool_value);
+      break;
+    case Option::kForceCaching:
+      set_force_caching(value.bool_value);
+      break;
+    case Option::kInstallCrashHandler:
+      set_install_crash_handler(value.bool_value);
+      break;
+    case Option::kListOutstandingUrlsOnError:
+      set_list_outstanding_urls_on_error(value.bool_value);
+      break;
+    case Option::kTrackOriginalContentLength:
+      set_track_original_content_length(value.bool_value);
+      break;
+    case Option::kNumRewriteThreads:
+      set_num_rewrite_threads(value.int_value);
+      break;
+    case Option::kNumExpensiveRewriteThreads:
+      set_num_expensive_rewrite_threads(value.int_value);
+      break;
+    case Option::kMessageBufferSize:
+      set_message_buffer_size(value.int_value);
+      break;
   }
-
-  // Most of our options take booleans, so just parse once.
-  bool is_on = false;
-  RewriteOptions::OptionSettingResult parsed_as_bool =
-      RewriteOptions::ParseFromString(arg, &is_on)
-          ? RewriteOptions::kOptionOk
-          : RewriteOptions::kOptionValueInvalid;
-  if (StringCaseEqual(option, kUsePerVHostStatistics)) {
-    set_use_per_vhost_statistics(is_on);
-    return parsed_as_bool;
-  } else if (StringCaseEqual(option, kForceCaching)) {
-    set_force_caching(is_on);
-    return parsed_as_bool;
-  } else if (StringCaseEqual(option, kInstallCrashHandler)) {
-    set_install_crash_handler(is_on);
-    return parsed_as_bool;
-  } else if (StringCaseEqual(option, kListOutstandingUrlsOnError)) {
-    set_list_outstanding_urls_on_error(is_on);
-    return parsed_as_bool;
-  } else if (StringCaseEqual(option, kTrackOriginalContentLength)) {
-    set_track_original_content_length(is_on);
-    return parsed_as_bool;
-  }
-
-  // The two thread counts accept `auto` as a literal, with `0` as its alias,
-  // and reject anything negative: a negative count used to
-  // convert to size_t as SIZE_MAX on its way to the worker pools, which means
-  // unbounded thread creation and a CHECK failure at child init.  Nothing
-  // validated it, so the only symptom was the crash.
-  if (StringCaseEqual(option, kNumRewriteThreads) ||
-      StringCaseEqual(option, kNumExpensiveRewriteThreads)) {
-    int count = kAutoThreadCount;
-    if (!ParseThreadCountArgument(option, arg, &count, msg, handler)) {
-      return RewriteOptions::kOptionValueInvalid;
-    }
-    if (StringCaseEqual(option, kNumRewriteThreads)) {
-      set_num_rewrite_threads(count);
-    } else {
-      set_num_expensive_rewrite_threads(count);
-    }
-    return RewriteOptions::kOptionOk;
-  }
-
-  // Others take an integer >= 0.
-  //
-  // Values of 0 have special meanings:
-  //   MessageBufferSize: disable the message buffer
-  int int_value = 0;
-  RewriteOptions::OptionSettingResult parsed_as_int =
-      RewriteOptions::ParseFromString(arg, &int_value)
-          ? RewriteOptions::kOptionOk
-          : RewriteOptions::kOptionValueInvalid;
-  if (StringCaseEqual(option, kMessageBufferSize)) {
-    // The size is handed straight to the shared-memory circular buffer, so
-    // reject what that buffer cannot represent: a negative value or one
-    // past its capacity bound would otherwise fail silently at child init,
-    // where a false return from InitSegment is dropped.
-    if (parsed_as_int == RewriteOptions::kOptionOk &&
-        (int_value < 0 || int_value > CircularBuffer::kMaxCapacity)) {
-      *msg = StrCat("MessageBufferSize must be between 0 and ",
-                    CircularBuffer::kMaxCapacity, ".");
-      return RewriteOptions::kOptionValueInvalid;
-    }
-    set_message_buffer_size(int_value);
-    return parsed_as_int;
-  }
-
-  LOG(ERROR) << "Unknown option '" << option << "' should have been handled "
-             << "in scope checking; ignoring";
-  return RewriteOptions::kOptionNameUnknown;
+  return result;
 }
 
 RewriteOptions::OptionSettingResult
 SystemRewriteDriverFactory::ParseAndSetOption2(
     StringPiece option, StringPiece arg1, StringPiece arg2, bool process_scope,
     GoogleString* msg, MessageHandler* handler) {
-  if (StringCaseEqual(option, kCreateSharedMemoryMetadataCache)) {
-    if (!process_scope) {
-      // msg is only printed to the user on error, so warnings must be logged.
-      handler->Message(kWarning, "'%s' is global and is ignored at this scope",
-                       option.as_string().c_str());
-      // OK here means "move on" not "accepted and applied".
-      return RewriteOptions::kOptionOk;
-    }
-
-    int64 kb = 0;
-    if (!StringToInt64(arg2, &kb) || kb < 0) {
-      *msg = "size_kb must be a positive 64-bit integer";
-      return RewriteOptions::kOptionValueInvalid;
-    }
-    bool ok = caches()->CreateShmMetadataCache(arg1, kb, msg);
-    return ok ? RewriteOptions::kOptionOk : RewriteOptions::kOptionValueInvalid;
+  bool apply = false;
+  int64 kb = 0;
+  RewriteOptions::OptionSettingResult result = SystemProcessOptions::Parse2(
+      option, arg1, arg2, process_scope, &apply, &kb, msg, handler);
+  if (result != RewriteOptions::kOptionOk || !apply) {
+    return result;
   }
-  return RewriteOptions::kOptionNameUnknown;
+  bool ok = caches()->CreateShmMetadataCache(arg1, kb, msg);
+  return ok ? RewriteOptions::kOptionOk : RewriteOptions::kOptionValueInvalid;
 }
 
 void SystemRewriteDriverFactory::PostConfig(

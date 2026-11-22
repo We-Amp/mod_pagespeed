@@ -59,7 +59,6 @@ SYSTEM_CORE_SRCS = [
     "system_message_handler.cc",
     "system_request_context.cc",
     "system_rewrite_driver_factory.cc",
-    "system_rewrite_options.cc",
     "system_server_context.cc",
     "system_thread_system.cc",
 ]
@@ -84,7 +83,6 @@ SYSTEM_CORE_HDRS = [
     "system_message_handler.h",
     "system_request_context.h",
     "system_rewrite_driver_factory.h",
-    "system_rewrite_options.h",
     "system_server_context.h",
     "system_thread_system.h",
 ]
@@ -100,6 +98,7 @@ SYSTEM_CORE_DEPS = [
     ":rule_pack_decision_log",
     ":rule_pack_signature",
     ":serve_host_names",
+    ":system_rewrite_options",
     "//net/instaweb/http",
     "//net/instaweb/rewriter",
     "//net/instaweb/rewriter:rule_packs",

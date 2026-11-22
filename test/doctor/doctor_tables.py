@@ -22,10 +22,11 @@ SCRIPT = ROOT / "install/common/pagespeed-doctor"
 SOURCES = [
     "net/instaweb/rewriter/rewrite_options.cc",
     "pagespeed/system/system_rewrite_options.cc",
-    "pagespeed/system/system_rewrite_driver_factory.cc",
+    "pagespeed/system/system_process_options.cc",
     "pagespeed/nginx/ngx_rewrite_options.cc",
     "pagespeed/apache/apache_config.cc",
     "pagespeed/apache/mod_instaweb.cc",
+    "pagespeed/apache/apache_directive_table.h",
 ]
 # Accepted with a warning by both servers; named through constants in the
 # source, so they are listed here and checked to still exist there.
@@ -56,13 +57,13 @@ def strip_prefix(v):
 def scopes():
     """Option name -> narrowest place nginx accepts it: 3 = http {} only,
     2 = http {} or server {}. Mirrors NgxRewriteOptions::GetOptionScope and
-    SystemRewriteDriverFactory::ParseAndSetOption1/2 (kLegacyProcessScope
+    SystemProcessOptions::Parse1/2 (kLegacyProcessScope
     counts as http {} only, as nginx enforces it)."""
     files = SOURCES + ["net/instaweb/rewriter/rewrite_options_properties.inc"]
     const = {}
     for rel in files:
         for m in re.finditer(
-                r'const char (?:[A-Za-z]+::)?(k[A-Za-z0-9]+)\[\]\s*=\s*"([A-Z][A-Za-z0-9]+)"',
+                r'(?:const char |inline constexpr char\s+)(?:[A-Za-z]+::)?(k[A-Za-z0-9]+)\[\]\s*=\s*"([A-Z][A-Za-z0-9]+)"',
                 read(rel)):
             const.setdefault(m.group(1), m.group(2))
     rank = {}
@@ -94,16 +95,17 @@ def scopes():
             sys.exit(f"doctor_tables: {arr} not found in ngx_rewrite_options.cc")
         for name in re.findall(r'"([A-Za-z]+)"', m.group(1)):
             put(name, r)
-    fac = read("pagespeed/system/system_rewrite_driver_factory.cc")
-    m = re.search(r"First check the scope\.(.*?)if \(!process_scope\)", fac, re.S)
-    if not m:
-        sys.exit("doctor_tables: the factory's global-option check moved")
-    for k in re.findall(r"StringCaseEqual\(option,\s*(k\w+)\)", m.group(1)):
+    # The factory's own options: the strict ones (an error below process
+    # scope) and CreateSharedMemoryMetadataCache.
+    fac = read("pagespeed/system/system_process_options.cc")
+    strict = re.findall(r"\{(k\w+),\s*SystemProcessOptions::Option::\w+,\s*true\}", fac)
+    if not strict:
+        sys.exit("doctor_tables: the factory's global-option table moved")
+    for k in strict:
         if k in const:
             put(const[k], 3)
-    m = re.search(r"ParseAndSetOption2\((.*?)\n}", fac, re.S)
-    for k in re.findall(r"StringCaseEqual\(option,\s*(k\w+)\)\)\s*\{\s*if \(!process_scope\)",
-                        m.group(1) if m else ""):
+    m = re.search(r"SystemProcessOptions::Parse2\((.*?)\n}", fac, re.S)
+    for k in re.findall(r"!StringCaseEqual\(option,\s*(k\w+)\)\)", m.group(1) if m else ""):
         if k in const:
             put(const[k], 3)
     put("ProcessScriptVariables", 3)
@@ -116,7 +118,7 @@ def tables():
     for rel in SOURCES:
         s = read(rel)
         for m in re.finditer(
-                r'const char (?:[A-Za-z]+::)?k[A-Za-z0-9]+\[\]\s*=\s*"([A-Z][A-Za-z0-9]+)"', s):
+                r'(?:const char |inline constexpr char\s+)(?:[A-Za-z]+::)?k[A-Za-z0-9]+\[\]\s*=\s*"([A-Z][A-Za-z0-9]+)"', s):
             valid.add(m.group(1))
         for m in re.finditer(r'IsDirective\(directive,\s*"([A-Za-z]+)"\)', s):
             valid.add(m.group(1))
