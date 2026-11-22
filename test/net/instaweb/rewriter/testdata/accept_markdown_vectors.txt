@@ -15,15 +15,19 @@
 #   (RFC 9110 section 5.3); no <...> at all means the header is absent.
 #
 # Rule: Markdown is selected only when text/markdown is named explicitly, its
-# q is above 0, and its q is strictly above the q text/html resolves to (most
+# q is above 0, and its q is at least the q text/html resolves to (most
 # specific of text/html, text/*, */*, else 0). Wildcards never select
-# Markdown. Equal q selects HTML. A malformed header (q outside [0, 1], more
-# than three decimals, unparseable, or text/markdown listed twice with
-# different q) selects HTML.
+# Markdown. Equal q selects Markdown, whatever the order. A malformed header
+# (q outside [0, 1], more than three decimals, unparseable, or text/markdown
+# listed twice with different q) selects HTML.
+#
+# Vectors 36 to 42 are Accept headers real clients send: 36 Claude Code,
+# 37 Cursor, 38 OpenCode, 39 an MCP fetch server, 42 a browser-style header
+# (as sent by Codex and ChatGPT-User).
 1 MD <text/markdown>
 2 HTML <text/markdown;q=0>
 3 HTML <text/markdown;q=0, text/html>
-4 HTML <text/markdown, text/html>
+4 MD <text/markdown, text/html>
 5 MD <text/markdown, text/html;q=0.9>
 6 HTML <text/markdown;q=0.5, text/html>
 7 MD <text/html;q=0.5, text/markdown;q=0.8>
@@ -44,7 +48,7 @@
 22 HTML <text/markdown;q=0.9, text/markdown;q=0.1, text/html;q=0.5>
 23 MD <text/markdown, text/markdown, text/html;q=0.5>
 24 MD <text/html;q=0.5> <text/markdown>
-25 HTML <text/markdown> <text/html>
+25 MD <text/markdown> <text/html>
 26 HTML <text/markdown> <text/markdown;q=0>
 27 HTML
 28 HTML <>
@@ -54,4 +58,11 @@
 32 MD <application/json, text/markdown;q=0.5>
 33 MD < text/markdown ; q=0.8 , text/html;q=0.5>
 34 HTML <text/markdownx, text/html;q=0.5>
-35 HTML <text/markdown;q=1.0, text/html;q=1>
+35 MD <text/markdown;q=1.0, text/html;q=1>
+36 MD <text/markdown, text/html, */*>
+37 MD <text/markdown,text/html;q=0.9,application/xhtml+xml;q=0.8,application/xml;q=0.7,image/webp;q=0.6,*/*;q=0.5>
+38 MD <text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1>
+39 MD <text/markdown, text/html;q=0.9, */*;q=0.8>
+40 MD <text/markdown, */*>
+41 MD <text/html, text/markdown>
+42 HTML <text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7>

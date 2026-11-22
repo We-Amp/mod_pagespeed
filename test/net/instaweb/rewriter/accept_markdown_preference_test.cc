@@ -30,8 +30,8 @@ const char kVectorPath[] =
 // constant is in the optimizer's
 // test/lib/classify/accept_markdown_preference_test.cc. When the vectors
 // change, change both copies of the file and both pins together.
-const uint64_t kVectorFileHash = 0xffced6346df2fffaULL;
-const int kVectorCount = 35;
+const uint64_t kVectorFileHash = 0x9f65b6ac7e2ed602ULL;
+const int kVectorCount = 42;
 
 struct Vector {
   int id = 0;

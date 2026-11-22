@@ -275,7 +275,7 @@ bool AcceptMarkdownPreference::PrefersMarkdown() const {
   } else if (any_q_ >= 0) {
     html_q = any_q_;
   }
-  return markdown_q_ > html_q;
+  return markdown_q_ >= html_q;
 }
 
 AgentOptimizeVaryFilter::AgentOptimizeVaryFilter(RewriteDriver* driver)

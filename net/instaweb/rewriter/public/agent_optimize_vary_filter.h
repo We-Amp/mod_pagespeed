@@ -42,13 +42,13 @@ class RequestHeaders;
 class RewriteDriver;
 
 // Decides whether a request's Accept header selects a Markdown representation
-// over HTML, by RFC 9110 q-values:
+// rather than HTML, by RFC 9110 q-values:
 //
 //   - `text/markdown` must be named explicitly; `*/*` and `text/*` never
 //     select it, at any q;
-//   - its q must be above 0 and strictly above the q `text/html` resolves to
+//   - its q must be above 0 and at least the q `text/html` resolves to
 //     (the most specific of `text/html`, `text/*`, `*/*`, else 0);
-//   - equal q selects HTML;
+//   - equal q selects Markdown, whatever the order;
 //   - a malformed header selects HTML: a q outside [0, 1] or with more than
 //     three decimals, an unparseable media range, or `text/markdown` listed
 //     twice with different q-values.
@@ -114,8 +114,8 @@ class AgentOptimizeVaryFilter : public CommonFilter {
   // into the markdown-negotiated variant.
   static bool RequestAcceptsMarkdown(const RequestHeaders* request_headers);
 
-  // Returns true if the request's Accept header lines, taken together, prefer
-  // `text/markdown` over `text/html` (AcceptMarkdownPreference). Null
+  // Returns true if the request's Accept header lines, taken together, rank
+  // `text/markdown` at least as high as `text/html` (AcceptMarkdownPreference). Null
   // request_headers (or no Accept header) returns false. This is the test for
   // selecting a Markdown body; RequestAcceptsMarkdown stays the Vary signal.
   static bool RequestPrefersMarkdown(const RequestHeaders* request_headers);
