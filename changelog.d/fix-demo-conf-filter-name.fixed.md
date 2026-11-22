@@ -1,1 +1,3 @@
-- **The demo Apache configuration (`install/demo.conf`) named the in-place browser filter `inplace_optimize_for_browser`, a name the module does not recognise, so the line was rejected. It now uses the correct name, `in_place_optimize_for_browser`.**
+- Fixed: the demo Apache configuration (`install/demo.conf`) named the in-place browser
+  filter `inplace_optimize_for_browser`, a name the module does not recognise, so the
+  line was rejected. It now uses the correct name, `in_place_optimize_for_browser`.
