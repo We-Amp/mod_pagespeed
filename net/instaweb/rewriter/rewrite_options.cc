@@ -2152,6 +2152,54 @@ bool ShouldWarnDeprecatedFilter(RewriteOptions::Filter filter) {
   return WarnedDeprecatedFilters()->insert(filter).second;
 }
 
+// The deprecated filters whose names are still accepted, with the warning
+// each gets when it is enabled.  The one list of them: the option parser
+// warns from it and the offline config linter reports from it.
+const struct {
+  RewriteOptions::Filter filter;
+  const char* note;
+} kDeprecatedFilterNotes[] = {
+    // The standalone "defer_iframe" filter was never wired up to anything:
+    // DeferIframeFilter is an integral part of defer_javascript and
+    // disable_javascript, and enabling it on its own only set a bit that
+    // nothing read.
+    {RewriteOptions::kDeferIframeDeprecated,
+     "Filter 'defer_iframe' is deprecated and has no effect; iframe "
+     "deferral is built into 'defer_javascript'."},
+    {RewriteOptions::kDivStructureDeprecated,
+     "Filter 'div_structure' is deprecated and has no effect."},
+    {RewriteOptions::kExplicitCloseTagsDeprecated,
+     "Filter 'explicit_close_tags' is deprecated and has no effect."},
+    {RewriteOptions::kFlushSubresourcesDeprecated,
+     "Filter 'flush_subresources' is deprecated and has no effect; "
+     "the flush-early flow it fed was removed."},
+    {RewriteOptions::kInsertGA,
+     "Filter 'insert_ga' is deprecated and has no effect: it "
+     "targeted Universal Analytics, which was discontinued in July "
+     "2023. Use your own analytics snippet."},
+    {RewriteOptions::kInPlaceOptimizeForBrowser,
+     "Filter 'in_place_optimize_for_browser' is deprecated and has "
+     "no effect; image format negotiation at the original URL is "
+     "controlled by the optimizer worker, not this filter."},
+    {RewriteOptions::kLocalStorageCache,
+     "Filter 'local_storage_cache' is deprecated and has no effect: "
+     "it is retired, and no cookie or script is added to pages."},
+    {RewriteOptions::kMobilize,
+     "Filter 'mobilize' is deprecated and has no effect."},
+    {RewriteOptions::kMobilizePrecomputeDeprecated,
+     "Filter 'mobilize_precompute' is deprecated and has no "
+     "effect."},
+    {RewriteOptions::kSplitHtmlDeprecated,
+     "Filter 'split_html' is deprecated and has no effect."},
+    {RewriteOptions::kSplitHtmlHelperDeprecated,
+     "Filter 'split_html_helper' is deprecated and has no effect."},
+    // A Universal-Analytics-era filter.
+    {RewriteOptions::kMakeGoogleAnalyticsAsyncDeprecated,
+     "make_google_analytics_async is deprecated and is now a no-op: it "
+     "rewrote the synchronous ga.js snippet, which Universal Analytics' "
+     "shutdown made obsolete."},
+};
+
 }  // namespace
 
 bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
@@ -2238,59 +2286,11 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     // compatibility, but nothing reads the bits they set. Warn the operator
     // that they have no effect — but only when enabling: disabling or
     // forbidding is what the warning recommends, so those mentions stay
-    // silent (same gate as the analytics warnings below).
+    // silent.
     if (enabling && handler != nullptr) {
-      if (filter == kDeferIframeDeprecated) {
-        // The standalone "defer_iframe" filter was never wired up to
-        // anything: DeferIframeFilter is an integral part of
-        // defer_javascript and disable_javascript, and enabling it on its
-        // own only set a bit that nothing read.
-        if (ShouldWarnDeprecatedFilter(filter)) {
-          handler->Message(
-              kWarning,
-              "Filter 'defer_iframe' is deprecated and has no effect; iframe "
-              "deferral is built into 'defer_javascript'.");
-        }
-      } else {
-        static const struct {
-          Filter filter;
-          const char* warning;
-        } kDeprecatedWarnings[] = {
-            {kDivStructureDeprecated,
-             "Filter 'div_structure' is deprecated and has no effect."},
-            {kExplicitCloseTagsDeprecated,
-             "Filter 'explicit_close_tags' is deprecated and has no effect."},
-            {kFlushSubresourcesDeprecated,
-             "Filter 'flush_subresources' is deprecated and has no effect; "
-             "the flush-early flow it fed was removed."},
-            {kInsertGA,
-             "Filter 'insert_ga' is deprecated and has no effect: it "
-             "targeted Universal Analytics, which was discontinued in July "
-             "2023. Use your own analytics snippet."},
-            {kInPlaceOptimizeForBrowser,
-             "Filter 'in_place_optimize_for_browser' is deprecated and has "
-             "no effect; image format negotiation at the original URL is "
-             "controlled by the optimizer worker, not this filter."},
-            {kLocalStorageCache,
-             "Filter 'local_storage_cache' is deprecated and has no effect: "
-             "it is retired, and no cookie or script is added to pages."},
-            {kMobilize, "Filter 'mobilize' is deprecated and has no effect."},
-            {kMobilizePrecomputeDeprecated,
-             "Filter 'mobilize_precompute' is deprecated and has no "
-             "effect."},
-            {kSplitHtmlDeprecated,
-             "Filter 'split_html' is deprecated and has no effect."},
-            {kSplitHtmlHelperDeprecated,
-             "Filter 'split_html_helper' is deprecated and has no effect."},
-        };
-        for (auto deprecated : kDeprecatedWarnings) {
-          if (deprecated.filter == filter) {
-            if (ShouldWarnDeprecatedFilter(filter)) {
-              handler->Message(kWarning, "%s", deprecated.warning);
-            }
-            break;
-          }
-        }
+      const char* note = DeprecatedFilterNote(filter);
+      if (note != nullptr && ShouldWarnDeprecatedFilter(filter)) {
+        handler->Message(kWarning, "%s", note);
       }
     }
     set->Insert(filter);
@@ -2298,21 +2298,17 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     if (filter == kResizeMobileImages) {
       set->Insert(kDelayImages);
     }
-    // Warn about deprecated Universal-Analytics-era filters, but only when
-    // they are being enabled: disabling or forbidding them is exactly what
-    // the warning asks operators to do, so those mentions stay silent.
-    if (enabling && handler != nullptr) {
-      if (filter == kMakeGoogleAnalyticsAsyncDeprecated &&
-          ShouldWarnDeprecatedFilter(filter)) {
-        handler->Message(
-            kWarning,
-            "make_google_analytics_async is deprecated and is now a no-op: it "
-            "rewrote the synchronous ga.js snippet, which Universal Analytics' "
-            "shutdown made obsolete.");
-      }
-    }
   }
   return ret;
+}
+
+const char* RewriteOptions::DeprecatedFilterNote(Filter filter) {
+  for (const auto& deprecated : kDeprecatedFilterNotes) {
+    if (deprecated.filter == filter) {
+      return deprecated.note;
+    }
+  }
+  return nullptr;
 }
 
 // Forget which deprecated filters have already been warned about: the next
@@ -2528,20 +2524,99 @@ bool IsRenderOnlyDirectiveName(StringPiece name) {
 
 }  // namespace
 
+namespace {
+
+// When the parser warns about a deprecated option.
+enum class DeprecatedWhen {
+  kWhenSet,       // whenever it is set, before its value is parsed
+  kWhenAccepted,  // once its value has been accepted
+};
+
+// The retired options that are still registered so that an existing
+// configuration keeps loading, with the warning each gets: the one list of
+// them.  The option parser warns from it and the offline config linter
+// reports from it.  The message is "'<name>'" followed by the note.
+const struct {
+  const char* name;
+  DeprecatedWhen when;
+  const char* note;
+} kDeprecatedOptionNotes[] = {
+    {RewriteOptions::kAllowVaryOn, DeprecatedWhen::kWhenSet,
+     " is deprecated and ignored: in-place optimization no longer produces "
+     "browser-dependent output, so it never emits a Vary header.  Please "
+     "remove it from your configuration."},
+    {RewriteOptions::kPrivateNotVaryForIE, DeprecatedWhen::kWhenSet,
+     " is deprecated and ignored: in-place optimization no longer produces "
+     "browser-dependent output, so it never emits a Vary header.  Please "
+     "remove it from your configuration."},
+    {RewriteOptions::kAnalyticsID, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+    {RewriteOptions::kLogMobilizationSamples, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: the mobilize filter it served has been "
+     "removed. Remove the directive."},
+    {RewriteOptions::kUseAnalyticsJs, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+    {RewriteOptions::kContentExperimentID, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+    {RewriteOptions::kContentExperimentVariantID, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+    {RewriteOptions::kIncreaseSpeedTracking, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+    // Either value warns: with the legacy minifier gone, 'on' is as
+    // meaningless as 'off'.
+    {RewriteOptions::kUseExperimentalJsMinifier, DeprecatedWhen::kWhenAccepted,
+     ": the legacy JavaScript minifier has been removed; the option is "
+     "deprecated and ignored. Remove the directive."},
+    {RewriteOptions::kExperimentVariable, DeprecatedWhen::kWhenAccepted,
+     " is deprecated and ignored: it only configured the insert_ga filter, "
+     "which no longer has any effect. Remove the directive."},
+};
+
+void WarnDeprecatedOption(StringPiece name, DeprecatedWhen when,
+                          MessageHandler* handler) {
+  if (handler == nullptr) {
+    return;
+  }
+  for (const auto& deprecated : kDeprecatedOptionNotes) {
+    if (deprecated.when == when && StringCaseEqual(name, deprecated.name)) {
+      handler->Message(kWarning, "'%s'%s", name.as_string().c_str(),
+                       deprecated.note);
+      return;
+    }
+  }
+}
+
+}  // namespace
+
+const std::vector<RewriteOptions::RemovedOption>&
+RewriteOptions::RemovedOptions() {
+  static const std::vector<RemovedOption>* removed =
+      new std::vector<RemovedOption>{};
+  return *removed;
+}
+
+bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
+                                             GoogleString* message) {
+  for (const auto& deprecated : kDeprecatedOptionNotes) {
+    if (StringCaseEqual(name, deprecated.name)) {
+      *message = StrCat("'", name, "'", deprecated.note);
+      return true;
+    }
+  }
+  return false;
+}
+
 RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName1(
     StringPiece name, StringPiece arg, GoogleString* msg,
     MessageHandler* handler) {
   // Retired directives are still registered so that an existing configuration
   // file keeps loading, but tell the operator they now do nothing.
-  if (StringCaseEqual(name, kAllowVaryOn) ||
-      StringCaseEqual(name, kPrivateNotVaryForIE)) {
-    handler->Message(kWarning,
-                     "'%s' is deprecated and ignored: in-place optimization no "
-                     "longer produces browser-dependent output, so it never "
-                     "emits a Vary header.  Please remove it from your "
-                     "configuration.",
-                     name.as_string().c_str());
-  }
+  WarnDeprecatedOption(name, DeprecatedWhen::kWhenSet, handler);
   // Parse and set with the equvalent of "query = false".
   return ParseAndSetOptionFromNameWithScope(
       name, arg, RewriteOptions::kProcessScopeStrict, msg, handler);
@@ -2555,43 +2630,8 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
   OptionSettingResult result =
       SetOptionFromNameInternal(name, arg, max_scope, &error_detail);
   if (result != RewriteOptions::kOptionNameUnknown) {
-    if (result == RewriteOptions::kOptionOk && handler != nullptr) {
-      if (StringCaseEqual(name, kAnalyticsID)) {
-        handler->Message(
-            kWarning,
-            "'AnalyticsID' is deprecated and ignored: it only configured the "
-            "insert_ga filter, which no longer has any effect. Remove the "
-            "directive.");
-      } else if (StringCaseEqual(name, kLogMobilizationSamples)) {
-        handler->Message(
-            kWarning,
-            "'LogMobilizationSamples' is deprecated and ignored: the mobilize "
-            "filter it served has been removed. Remove the directive.");
-      } else if (StringCaseEqual(name, kUseAnalyticsJs)) {
-        handler->Message(
-            kWarning,
-            "'UseAnalyticsJs' is deprecated and ignored: it only configured "
-            "the insert_ga filter, which no longer has any effect. Remove "
-            "the directive.");
-      } else if (StringCaseEqual(name, kContentExperimentID) ||
-                 StringCaseEqual(name, kContentExperimentVariantID) ||
-                 StringCaseEqual(name, kIncreaseSpeedTracking)) {
-        handler->Message(
-            kWarning, "%s",
-            StrCat("'", name,
-                   "' is deprecated and ignored: it only "
-                   "configured the insert_ga filter, which no longer has any "
-                   "effect. Remove the directive.")
-                .c_str());
-      } else if (StringCaseEqual(name, kUseExperimentalJsMinifier)) {
-        // Either value warns: with the legacy minifier gone, 'on' is as
-        // meaningless as 'off'.
-        handler->Message(
-            kWarning,
-            "'UseExperimentalJsMinifier': the legacy JavaScript minifier has "
-            "been removed; the option is deprecated and ignored. Remove the "
-            "directive.");
-      }
+    if (result == RewriteOptions::kOptionOk) {
+      WarnDeprecatedOption(name, DeprecatedWhen::kWhenAccepted, handler);
     }
     return FormatSetOptionMessage(result, name, arg, error_detail, msg);
   }
@@ -2642,13 +2682,7 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
       result = RewriteOptions::kOptionValueInvalid;
     } else {
       set_experiment_ga_slot(slot);
-      if (handler != nullptr) {
-        handler->Message(
-            kWarning,
-            "'ExperimentVariable' is deprecated and ignored: it only "
-            "configured the insert_ga filter, which no longer has any "
-            "effect. Remove the directive.");
-      }
+      WarnDeprecatedOption(name, DeprecatedWhen::kWhenAccepted, handler);
     }
   } else if (StringCaseEqual(name, kExperimentSpec) &&
              max_scope < kServerScope &&

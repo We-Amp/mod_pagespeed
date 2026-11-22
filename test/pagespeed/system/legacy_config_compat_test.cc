@@ -142,7 +142,7 @@ GoogleString FunctionBody(const GoogleString& source,
 // ---------------------------------------------------------------------------
 
 // The directive names (without "ModPagespeed", lower case) that used to load
-// and are now refused on purpose.  Every expect=removed line in a corpus must
+// and are now refused on purpose: RewriteOptions::RemovedOptions().  Every expect=removed line in a corpus must
 // name one of these, and every name here must appear in the corpus as
 // expect=removed.  Adding a name needs the replacement documented in the
 // upgrade notes.  FileCacheInodeLimit, FileCacheCleanIntervalMs,
@@ -150,7 +150,14 @@ GoogleString FunctionBody(const GoogleString& source,
 // DistributedRewriteServers and DistributedRewriteTimeoutMs were refused by
 // nginx up to 2.8.2; they now load with a warning, as on Apache.
 const std::set<GoogleString>& KnownRemoved() {
-  static const std::set<GoogleString>* removed = new std::set<GoogleString>{};
+  static const std::set<GoogleString>* removed = [] {
+    auto* names = new std::set<GoogleString>;
+    for (const RewriteOptions::RemovedOption& r :
+         RewriteOptions::RemovedOptions()) {
+      names->insert(Lower(r.name));
+    }
+    return names;
+  }();
   return *removed;
 }
 

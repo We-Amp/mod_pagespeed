@@ -1487,6 +1487,11 @@ class RewriteOptions {
   // order, so they start from a known state.
   static void ResetDeprecatedFilterWarnings();
 
+  // The warning a deprecated filter gets when it is enabled (its name is
+  // still accepted, but it has no effect), or nullptr when `filter` is not
+  // deprecated.
+  static const char* DeprecatedFilterNote(Filter filter);
+
   // Enables extend_cache_css, extend_cache_images, and extend_cache_scripts.
   // Does not enable extend_cache_pdfs.
   void EnableExtendCacheFilters();
@@ -3270,6 +3275,25 @@ class RewriteOptions {
   // Determine if this is an option name that used to do things, and which
   // we may therefore want to accept w/a warning for backwards compatibility.
   static bool IsDeprecatedOptionName(StringPiece option_name);
+
+  // For a retired option that is still accepted but ignored, sets *message
+  // to the warning the parser gives when it is set (naming it as `name`) and
+  // returns true.  False for any other name.  SystemRewriteOptions adds its
+  // own retired options.
+  static bool DeprecatedOptionMessage(StringPiece name, GoogleString* message);
+
+  // An option name that is no longer accepted at all (a configuration that
+  // sets it fails to load), with what to do instead.
+  struct RemovedOption {
+    const char* name;
+    const char* instead;
+  };
+  // Every removed option name: the one list, read by the offline config
+  // linter and the legacy configuration test.  Adding a name needs the
+  // replacement documented in the upgrade notes.  Empty while every retired
+  // option still loads with a warning (deprecated_properties(),
+  // DeprecatedOptionMessage()).
+  static const std::vector<RemovedOption>& RemovedOptions();
 
   // Return the list of all options.  Used to initialize the configuration
   // vector to the Apache configuration system.
