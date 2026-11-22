@@ -60,41 +60,44 @@ uint64_t Fnv1a64(StringPiece data) {
 }
 
 // "<id> <MD|HTML> [<line>]..." per line; '#' lines and blank lines skipped.
-bool ParseVectors(StringPiece contents, std::vector<Vector>* out) {
+// Parsed as absl::string_view (from string_util.h): StringPiece::substr takes
+// uint32_t, so npos and size_t offsets would narrow.
+bool ParseVectors(absl::string_view contents, std::vector<Vector>* out) {
   size_t start = 0;
   while (start < contents.size()) {
     size_t nl = contents.find('\n', start);
-    if (nl == StringPiece::npos) {
+    if (nl == absl::string_view::npos) {
       nl = contents.size();
     }
-    StringPiece row(contents.substr(start, nl - start));
+    const absl::string_view row = contents.substr(start, nl - start);
     start = nl + 1;
     if (row.empty() || row[0] == '#') {
       continue;
     }
     Vector v;
     size_t sp = row.find(' ');
-    if (sp == StringPiece::npos) {
+    if (sp == absl::string_view::npos) {
       return false;
     }
     v.id = std::stoi(GoogleString(row.substr(0, sp)));
     size_t verdict_end = row.find(' ', sp + 1);
-    StringPiece verdict(row.substr(sp + 1, verdict_end == StringPiece::npos
-                                               ? StringPiece::npos
-                                               : verdict_end - sp - 1));
+    const absl::string_view verdict =
+        row.substr(sp + 1, verdict_end == absl::string_view::npos
+                               ? absl::string_view::npos
+                               : verdict_end - sp - 1);
     if (verdict == "MD") {
       v.markdown = true;
     } else if (verdict != "HTML") {
       return false;
     }
     size_t pos = verdict_end;
-    while (pos != StringPiece::npos && pos < row.size()) {
+    while (pos != absl::string_view::npos && pos < row.size()) {
       size_t open = row.find('<', pos);
-      if (open == StringPiece::npos) {
+      if (open == absl::string_view::npos) {
         break;
       }
       size_t close = row.find('>', open + 1);
-      if (close == StringPiece::npos) {
+      if (close == absl::string_view::npos) {
         return false;
       }
       v.lines.emplace_back(row.substr(open + 1, close - open - 1));
