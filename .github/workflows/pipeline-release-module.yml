@@ -1661,6 +1661,53 @@ jobs:
               ./install/nginx/build_nginx_package.sh -o .
             '
 
+      # `pagespeed lint`, the offline configuration check, as a release file
+      # of its own (no package carries it). Built with the module's release
+      # flags; its tests run with the same flags first, and the binary is
+      # checked: its reports match the JSON Schema, no socket, spawn or
+      # fetcher is linked (tools/ci/check_pagespeed_lint.py).
+      - name: Build the pagespeed lint tarball
+        run: |
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CI_CONFIG -e HARDEN_ISA -e BAZEL_CACHE_FLAGS -e SO_ARCH \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              flags=(--config="${BAZEL_CI_CONFIG}" --config=hardening --config="${HARDEN_ISA}" \
+                --disk_cache=/cache -c opt)
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                test "${flags[@]}" ${BAZEL_CACHE_FLAGS} --test_output=errors \
+                -- //test/pagespeed/tools/cli:all
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                build "${flags[@]}" ${BAZEL_CACHE_FLAGS} \
+                -- //pagespeed/tools/cli:pagespeed
+              BIN=bazel-bin/pagespeed/tools/cli/pagespeed
+              bash tools/assert-binary-hardening.sh "$BIN"
+              python3 -I tools/ci/check_pagespeed_lint.py symbols --binary "$BIN"
+              python3 -I tools/ci/check_pagespeed_lint.py report --binary "$BIN" \
+                --testdata test/pagespeed/tools/cli/testdata \
+                --schema pagespeed/tools/cli/pagespeed-lint.schema.json
+              bash tools/ci/package_pagespeed_lint.sh "$BIN" "${SO_ARCH}" /workspace/lint-out
+            '
+
       - name: Collect the files
         run: |
           set -euo pipefail
@@ -1669,6 +1716,7 @@ jobs:
           cp packages/* "$OUT/asset/"
           cp libmod_pagespeed.so "$OUT/asset/libmod_pagespeed-linux-${SO_ARCH}.so"
           cp ngx_pagespeed-*-linux-"${SO_ARCH}".tar.gz "$OUT/asset/"
+          cp lint-out/pagespeed-lint-*-linux-"${SO_ARCH}".tar.gz "$OUT/asset/"
           cp packages-old/* "$OUT/oldpkgs/"
           cp debug/* "$OUT/debug/"
           tar -C debug -czf "$OUT/asset/libmod_pagespeed-debug-linux-${SO_ARCH}.tar.gz" libmod_pagespeed.so.debug
@@ -3601,6 +3649,21 @@ jobs:
           if ($pdb) { Copy-Item $pdb.FullName (Join-Path $staging 'iis\pagespeed_iis.pdb') }
           else { Write-Host "::warning::no debug symbols file found for the IIS module" }
           Get-ChildItem (Join-Path $staging 'iis') | Format-Table Name, Length
+          # `pagespeed lint` (pagespeed.exe), signed with the module and
+          # shipped as its own zip; its tests run first with the same flags.
+          & $bazel @startup test @common --test_output=errors -- //test/pagespeed/tools/cli:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $bazel @startup build @common -- //pagespeed/tools/cli:pagespeed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $lintExe = "$bazelBin\pagespeed\tools\cli\pagespeed.exe"
+          python -I tools\ci\check_pagespeed_lint.py symbols --binary $lintExe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I tools\ci\check_pagespeed_lint.py report --binary $lintExe `
+            --testdata test\pagespeed\tools\cli\testdata `
+            --schema pagespeed\tools\cli\pagespeed-lint.schema.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force -Path (Join-Path $staging 'lint') | Out-Null
+          Copy-Item $lintExe (Join-Path $staging 'lint')
 
       # The optimizer worker the installer carries: the Windows zip of the
       # pinned optimizer release, verified against the pin. Exit 3 means the
@@ -3764,6 +3827,8 @@ jobs:
             $p = Join-Path 'signed-output\optimizer' $f
             if (Test-Path -LiteralPath $p) { $files += $p }
           }
+          # `pagespeed lint`, shipped as its own zip by msi-build.
+          if (Test-Path -LiteralPath 'signed-output\lint\pagespeed.exe') { $files += 'signed-output\lint\pagespeed.exe' }
           .\tools\ci\Sign-Windows.ps1 -Files $files
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -3817,6 +3882,7 @@ jobs:
             /LICENSE
             /NOTICE
             /net/instaweb/public/VERSION
+            /pagespeed/tools/cli/pagespeed-lint.schema.json
             /tools/ci/release_version.sh
           sparse-checkout-cone-mode: false
 
@@ -3896,6 +3962,15 @@ jobs:
             Write-Host "::error::expected exactly $want, found: $($found.Name -join ', ')"
             exit 1
           }
+          # `pagespeed lint` as its own release file, from the same payload
+          # (signed in a real run): pagespeed-lint-<version>-win-x64.zip.
+          $lintExe = Join-Path $env:GITHUB_WORKSPACE 'payload\lint\pagespeed.exe'
+          if (-not (Test-Path -LiteralPath $lintExe)) { Write-Host "::error::the payload has no pagespeed.exe"; exit 1 }
+          $lintName = "pagespeed-lint-$($env:RELEASE_VERSION)"
+          $lintDir = Join-Path $env:RUNNER_TEMP $lintName
+          New-Item -ItemType Directory -Force -Path $lintDir | Out-Null
+          Copy-Item $lintExe, 'LICENSE', 'NOTICE', 'pagespeed\tools\cli\pagespeed-lint.schema.json' $lintDir
+          Compress-Archive -Path $lintDir -DestinationPath (Join-Path 'msi-out' "$lintName-win-x64.zip") -CompressionLevel Optimal
           Get-ChildItem msi-out | Format-Table Name, Length
           $msiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $found[0].FullName).Hash.ToLower()
           Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_sha256=$msiHash" -Encoding ascii
@@ -3915,7 +3990,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: msi-unsigned
-          path: msi-out/*.msi
+          path: |
+            msi-out/*.msi
+            msi-out/*.zip
           retention-days: 14
           overwrite: true
           if-no-files-found: error
@@ -3925,7 +4002,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: asset-windows
-          path: msi-out/*.msi
+          path: |
+            msi-out/*.msi
+            msi-out/*.zip
           retention-days: 14
           if-no-files-found: error
 
@@ -3989,7 +4068,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: asset-windows
-          path: msi/*.msi
+          path: |
+            msi/*.msi
+            msi/*.zip
           retention-days: 14
           if-no-files-found: error
 
@@ -4416,7 +4497,7 @@ jobs:
           python3 -I tools/ci/release_signature_check.py --self-test
           cd "${RUNNER_TEMP}"
           set -- signed-windows/iis/pagespeed_iis.dll
-          for f in signed-windows/optimizer/factory_worker.exe signed-windows/optimizer/pagespeed.dll; do
+          for f in signed-windows/optimizer/factory_worker.exe signed-windows/optimizer/pagespeed.dll signed-windows/lint/pagespeed.exe; do
             [ ! -f "$f" ] || set -- "$@" "$f"
           done
           python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_signature_check.py" pe "$@"

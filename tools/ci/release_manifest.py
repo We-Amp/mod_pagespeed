@@ -186,6 +186,9 @@ def sanitize(name):
 def required(pkg_version, prerelease, msi=False):
     """(description, artifact, regex over the original name) for a complete set."""
     v = re.escape(pkg_version)
+    # Names spelled with the version as the tag spells it (a hyphen before a
+    # pre-release, where dpkg has a '~').
+    tag_version = re.escape(pkg_version.replace("~", "-"))
     req = []
     for arch, deb_arch, rpm_arch, tar_arch, so_arch, art in (
         ("x64", "amd64", "x86_64", "x86_64", "x86_64", "x64"),
@@ -201,6 +204,9 @@ def required(pkg_version, prerelease, msi=False):
                     r"^libmod_pagespeed-debug-linux-%s\.tar\.gz$" % so_arch))
         req.append(("nginx tarball " + arch, "asset-linux-" + art,
                     r"^ngx_pagespeed-.*-linux-%s\.tar\.gz$" % tar_arch))
+        # `pagespeed lint`, the offline configuration check.
+        req.append(("pagespeed lint " + arch, "asset-linux-" + art,
+                    r"^pagespeed-lint-%s-linux-%s\.tar\.gz$" % (tag_version, tar_arch)))
         for suite in SUITES:
             req.append(("nginx deb %s %s" % (suite, arch), "asset-nginx-" + art,
                         r"^nginx-module-pagespeed_%s-[^_]*~%s_%s\.deb$" % (v, suite, deb_arch)))
@@ -221,9 +227,7 @@ def required(pkg_version, prerelease, msi=False):
     req.append(("optimizer rpm x86_64", "asset-optimizer", r"^pagespeed-optimizer-.*\.x86_64\.rpm$"))
     req.append(("optimizer rpm aarch64", "asset-optimizer", r"^pagespeed-optimizer-.*\.aarch64\.rpm$"))
     req.append(("source tarball", "asset-source", r"^mod_pagespeed-.*\.tar\.gz$"))
-    # The sidecar pair is named with the version as the tag spells it (a
-    # hyphen before a pre-release, where dpkg has a '~').
-    tag_version = re.escape(pkg_version.replace("~", "-"))
+    # The sidecar pair is named with the version as the tag spells it.
     for rid in ("linux-x64", "linux-arm64"):
         req.append(("sidecar native pair " + rid, "asset-sidecar-" + rid.split("-")[1],
                     r"^pagespeed-sidecar-native-%s-%s\.tar\.gz$" % (tag_version, rid)))
@@ -237,6 +241,8 @@ def required(pkg_version, prerelease, msi=False):
         # tree: the package version with a '-' where dpkg has a '~'.
         req.append(("windows installer", "asset-windows",
                     r"^pagespeed-iis-%s-win-x64\.msi$" % re.escape(pkg_version.replace("~", "-"))))
+        req.append(("pagespeed lint windows", "asset-windows",
+                    r"^pagespeed-lint-%s-win-x64\.zip$" % tag_version))
     return req
 
 
@@ -576,6 +582,7 @@ def self_test():
             mk(st8, "asset-linux-" + art, "libmod_pagespeed-linux-%s.so" % tar_arch)
             mk(st8, "asset-linux-" + art, "libmod_pagespeed-debug-linux-%s.tar.gz" % tar_arch)
             mk(st8, "asset-linux-" + art, "ngx_pagespeed-%s-linux-%s.tar.gz" % (v, tar_arch))
+            mk(st8, "asset-linux-" + art, "pagespeed-lint-%s-linux-%s.tar.gz" % (v, tar_arch))
             for suite in SUITES:
                 mk(st8, "asset-nginx-" + art, "nginx-module-pagespeed_%s-r1~%s_%s.deb" % (v, suite, deb_arch))
             mk(st8, "asset-nginx-" + art, "nginx-module-pagespeed-%s-1.el9.%s.rpm" % (v, rpm_arch))
@@ -630,6 +637,9 @@ def self_test():
         # the part-b profile also needs the installer, named for the version
         expect_exit("missing installer", lambda: build(ns(st8, os.path.join(tmp, "o12b"), profile="part-b", pre="true")))
         mk(st8, "asset-windows", "pagespeed-iis-1.19.0-win-x64.msi", b"msi")
+        # ... and the pagespeed lint zip
+        expect_exit("missing lint zip", lambda: build(ns(st8, os.path.join(tmp, "o12f"), profile="part-b", pre="true")))
+        mk(st8, "asset-windows", "pagespeed-lint-1.19.0-win-x64.zip", b"zip")
         out12c = os.path.join(tmp, "o12c")
         build(ns(st8, out12c, profile="part-b", pre="true"))
         with open(os.path.join(out12c, "manifest.json")) as fh:
@@ -651,6 +661,17 @@ def self_test():
             print("FAIL: installer rule of a pre-release: %r" % rc)
             fail = 1
         shutil.rmtree(os.path.join(st8, "asset-windows"))
+        # the pagespeed lint tarball is part of a complete set
+        lint = os.path.join(st8, "asset-linux-arm64", "pagespeed-lint-%s-linux-aarch64.tar.gz" % v)
+        aside = os.path.join(tmp, "lint-arm64-aside")
+        os.rename(lint, aside)
+        expect_exit("missing lint arm64", lambda: build(ns(st8, os.path.join(tmp, "o12g"), profile="part-a", pre="true")))
+        os.rename(aside, lint)
+        # a pre-release lint file is spelled with a hyphen
+        rl = [r for r in required("1.19.0~rc.1", True) if r[0] == "pagespeed lint x64"]
+        if len(rl) != 1 or not re.search(rl[0][2], "pagespeed-lint-1.19.0-rc.1-linux-x86_64.tar.gz"):
+            print("FAIL: lint rule of a pre-release: %r" % rl)
+            fail = 1
         # an extra deb no rule claims
         mk(st8, "asset-linux-x64", "extra_1.0_amd64.deb")
         expect_exit("extra deb", lambda: build(ns(st8, os.path.join(tmp, "o13"), profile="part-a", pre="true")))
