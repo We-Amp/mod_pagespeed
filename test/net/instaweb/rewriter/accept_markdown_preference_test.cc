@@ -79,10 +79,9 @@ bool ParseVectors(StringPiece contents, std::vector<Vector>* out) {
     }
     v.id = std::stoi(GoogleString(row.substr(0, sp)));
     size_t verdict_end = row.find(' ', sp + 1);
-    StringPiece verdict(row.substr(
-        sp + 1,
-        verdict_end == StringPiece::npos ? StringPiece::npos
-                                         : verdict_end - sp - 1));
+    StringPiece verdict(row.substr(sp + 1, verdict_end == StringPiece::npos
+                                               ? StringPiece::npos
+                                               : verdict_end - sp - 1));
     if (verdict == "MD") {
       v.markdown = true;
     } else if (verdict != "HTML") {
@@ -153,8 +152,8 @@ TEST(AcceptMarkdownPreferenceTest, AllVectorsThroughRequestHeaders) {
     for (const GoogleString& line : v.lines) {
       headers.Add(HttpAttributes::kAccept, line);
     }
-    EXPECT_EQ(v.markdown, AgentOptimizeVaryFilter::RequestPrefersMarkdown(
-                              &headers))
+    EXPECT_EQ(v.markdown,
+              AgentOptimizeVaryFilter::RequestPrefersMarkdown(&headers))
         << "vector " << v.id;
   }
 }
@@ -203,8 +202,8 @@ TEST(AcceptMarkdownPreferenceTest, VarySignalStaysOnPresence) {
 // Every truncation of every vector line and every single-byte overwrite of it
 // parses without fault; the result is only required to be deterministic.
 TEST(AcceptMarkdownPreferenceTest, MutatedVectorsParse) {
-  const char kBytes[] = {',', ';', '=', '"',  '\\',   ' ',   '\t', '/',
-                         '*', 'q', '0', '1',  '.',    '\0',  '\x7f', '\xff'};
+  const char kBytes[] = {',', ';', '=', '"', '\\', ' ',  '\t',   '/',
+                         '*', 'q', '0', '1', '.',  '\0', '\x7f', '\xff'};
   for (const Vector& v : LoadVectors()) {
     for (const GoogleString& line : v.lines) {
       for (size_t n = 0; n <= line.size(); ++n) {
