@@ -1,0 +1,150 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+//
+// Recipe linked from the AI crawler cost meter at /ai-crawler-cost/. Static copy
+// only: nothing on this page runs or sends anything.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const title = 'Let signed AI agents past Anubis';
+const description =
+  'Keep Anubis for unknown traffic and let through AI agents whose Web Bot Auth signature nginx has verified, with the nginx and Anubis settings.';
+const code0 = [
+  'location / {',
+  '    proxy_set_header Host            $host;',
+  '    proxy_set_header X-Real-IP       $remote_addr;',
+  '    proxy_set_header X-Verified-Bot  $x_verified_bot;',
+  '    proxy_pass http://127.0.0.1:8923;',
+  '}',
+].join('\n');
+const code1 = ['BIND=127.0.0.1:8923'].join('\n');
+const code2 = [
+  'bots:',
+  '  - name: web-bot-auth-verified',
+  '    headers_regex:',
+  '      X-Verified-Bot: ", ed25519-verified$"',
+  '    action: ALLOW',
+  '  - import: (data)/meta/default-config.yaml',
+].join('\n');
+---
+
+<BaseLayout title={title} description={description} breadcrumbLeafName="Signed agents and Anubis">
+  <article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 pb-16 sm:pb-20">
+    <nav aria-label="Breadcrumb" class="text-sm text-text-annotation">
+      <a href="/ai-crawler-cost/" class="text-interactive hover:text-interactive-hover">
+        AI crawler cost meter
+      </a>
+      <span aria-hidden="true" class="mx-1">
+        /
+      </span>
+      <span aria-current="page">Signed agents and Anubis</span>
+    </nav>
+    <h1 class="mt-6 text-3xl sm:text-4xl font-bold tracking-tight text-text-body text-balance">
+      Let signed AI agents past Anubis
+    </h1>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      <a
+        href="https://github.com/TecharoHQ/anubis"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-interactive hover:text-interactive-hover"
+      >
+        Anubis<span class="sr-only"> (opens in new tab)</span>
+      </a>{' '}
+      puts a proof-of-work challenge in front of your site. Its default policy also denies a long
+      list of AI crawlers and AI assistants by user agent. That stops scrapers, and it stops agents
+      that identify themselves properly too.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Some agents now sign their requests with Web Bot Auth (HTTP Message Signatures, RFC 9421). A
+      signature can be checked; a user agent cannot. This recipe keeps Anubis for everything else
+      and lets through requests whose signature nginx has verified.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      You need nginx in front of Anubis, with the mod_pagespeed nginx module and its experimental,
+      off-by-default{' '}
+      <a
+        href="/blog/verify-ai-crawlers-web-bot-auth/"
+        class="text-interactive hover:text-interactive-hover"
+      >
+        Web Bot Auth verifier
+      </a>{' '}
+      turned on. The verifier writes its verdict into{' '}
+      <code class="text-text-body">$x_verified_bot</code>:{' '}
+      <code class="text-text-body">&lt;name&gt;, ed25519-verified</code> for a valid signature from
+      a key you named in <code class="text-text-body">WebBotAuthVerifiedBots</code>, otherwise{' '}
+      <code class="text-text-body">human</code>, <code class="text-text-body">unknown</code> or{' '}
+      <code class="text-text-body">signed-agent</code>.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      1. Pass the verdict to Anubis
+    </h2>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code0}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Because <code class="text-text-body">proxy_set_header</code> names{' '}
+      <code class="text-text-body">X-Verified-Bot</code>, nginx never forwards a header of that name
+      sent by the client. When the verifier is off the header is absent.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Repeat these lines in every location that proxies to Anubis. A location that sets any{' '}
+      <code class="text-text-body">proxy_set_header</code> of its own does not inherit them, and
+      would pass a client's <code class="text-text-body">X-Verified-Bot</code> through.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      2. Make sure only nginx can reach Anubis
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Anubis trusts the header, so nothing but nginx may talk to it. Bind it to the loopback address
+      or a Unix socket:
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code1}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      If Anubis is reachable from outside, anyone can send the header and skip the challenge.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      3. Allow verified signatures first
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Rules are checked from the top and the first match decides. Put the allow rule above the
+      default configuration (set <code class="text-text-body">POLICY_FNAME</code> to this file):
+    </p>
+    <pre
+      tabindex="0"
+      class="mt-4 overflow-x-auto rounded-lg bg-bg-recessed p-4 text-xs text-text-body"
+    ><code>{code2}</code></pre>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Only keys you named pass. To let through every valid signature from the key directories you
+      allowed in nginx, use{' '}
+      <code class="text-text-body">^(signed-agent|.+, ed25519-verified)$</code> instead.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">
+      What already passes without this
+    </h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      The default configuration lets several search crawlers through when they come from their
+      published addresses (<code class="text-text-body">(data)/crawlers/_allow-good.yaml</code>,
+      which covers Googlebot, Bingbot, Applebot, DuckDuckBot and others). This recipe adds agents
+      that prove who they are with a signature, from any address.
+    </p>
+    <h2 class="mt-12 text-2xl font-bold tracking-tight text-text-body">Check it</h2>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      Send a signed request through nginx and an unsigned one with the same user agent. The signed
+      one reaches your site; the unsigned one gets Anubis's deny or challenge page. The module ships
+      a signing tool and a smoke test, described in the verifier post, that you can use for the
+      signed request.
+    </p>
+    <p class="mt-4 text-text-muted leading-relaxed">
+      To see how much crawler traffic you get in the first place, drop your access log on the{' '}
+      <a href="/ai-crawler-cost/" class="text-interactive hover:text-interactive-hover">
+        AI crawler cost meter
+      </a>
+      .
+    </p>
+  </article>
+</BaseLayout>

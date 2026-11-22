@@ -19,7 +19,13 @@ describe('ai-crawlers.json', () => {
       expect(KINDS.has(c.kind)).toBe(true);
       expect(c.docs).toMatch(/^https:\/\//);
       expect(c.added).toMatch(DATE);
+      expect([true, false, 'unknown']).toContain(c.executes_js);
     }
+  });
+  it('sets executes_js only where the operator documents it', () => {
+    // CCBot: commoncrawl.org/faq, "JavaScript is not executed and Cookies are not used."
+    const set = crawlers.filter((c) => c.executes_js !== 'unknown');
+    expect(set.map((c) => [c.token, c.executes_js])).toEqual([['CCBot', false]]);
   });
   it('carries the tokens the goldens rely on, with their kinds', () => {
     const byToken = new Map(crawlers.map((c) => [c.token, c]));

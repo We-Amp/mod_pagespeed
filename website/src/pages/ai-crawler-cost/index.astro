@@ -28,6 +28,20 @@ const next = [
     label: 'Get the block files',
   },
   {
+    target: 'rate-limit',
+    href: '/ai-crawler-cost/rate-limit-impostor-crawlers/',
+    heading: 'Rate-limit traffic that claims to be a crawler but is not',
+    body: 'A stock nginx recipe: compare the claimed user agent with the address ranges the crawler operators publish, and refuse only the requests above a limit that do not match.',
+    label: 'Rate-limit impostor crawlers',
+  },
+  {
+    target: 'anubis',
+    href: '/ai-crawler-cost/anubis-signed-agents/',
+    heading: 'Let signed AI agents past Anubis',
+    body: 'If you run the Anubis proof-of-work gate, keep it for unknown traffic and let through agents whose request signatures nginx has verified.',
+    label: 'Signed agents and Anubis',
+  },
+  {
     target: 'markdown',
     href: '/blog/serve-markdown-to-ai-agents/',
     heading: 'Serve agents a clean copy instead',

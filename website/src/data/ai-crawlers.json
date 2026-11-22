@@ -3,6 +3,7 @@
     "token": "GPTBot",
     "operator": "OpenAI",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://platform.openai.com/docs/bots",
     "added": "2026-10-14"
   },
@@ -10,6 +11,7 @@
     "token": "OAI-SearchBot",
     "operator": "OpenAI",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://platform.openai.com/docs/bots",
     "added": "2026-10-14"
   },
@@ -17,6 +19,7 @@
     "token": "ChatGPT-User",
     "operator": "OpenAI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://platform.openai.com/docs/bots",
     "added": "2026-10-14"
   },
@@ -24,6 +27,7 @@
     "token": "ClaudeBot",
     "operator": "Anthropic",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
     "added": "2026-10-14"
   },
@@ -31,6 +35,7 @@
     "token": "Claude-SearchBot",
     "operator": "Anthropic",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
     "added": "2026-10-14"
   },
@@ -38,6 +43,7 @@
     "token": "Claude-User",
     "operator": "Anthropic",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
     "added": "2026-10-14"
   },
@@ -45,6 +51,7 @@
     "token": "anthropic-ai",
     "operator": "Anthropic",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
     "added": "2026-10-14"
   },
@@ -52,6 +59,7 @@
     "token": "Claude-Web",
     "operator": "Anthropic",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://support.anthropic.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler",
     "added": "2026-10-14"
   },
@@ -59,6 +67,7 @@
     "token": "PerplexityBot",
     "operator": "Perplexity",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://docs.perplexity.ai/guides/bots",
     "added": "2026-10-14"
   },
@@ -66,6 +75,7 @@
     "token": "Perplexity-User",
     "operator": "Perplexity",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://docs.perplexity.ai/guides/bots",
     "added": "2026-10-14"
   },
@@ -73,6 +83,7 @@
     "token": "Bytespider",
     "operator": "ByteDance",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -80,6 +91,7 @@
     "token": "CCBot",
     "operator": "Common Crawl",
     "kind": "other",
+    "executes_js": false,
     "docs": "https://commoncrawl.org/ccbot",
     "added": "2026-10-14"
   },
@@ -87,6 +99,7 @@
     "token": "Amazonbot",
     "operator": "Amazon",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://developer.amazon.com/amazonbot",
     "added": "2026-10-14"
   },
@@ -94,6 +107,7 @@
     "token": "Meta-ExternalAgent",
     "operator": "Meta",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers/",
     "added": "2026-10-14"
   },
@@ -101,6 +115,7 @@
     "token": "Meta-ExternalFetcher",
     "operator": "Meta",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers/",
     "added": "2026-10-14"
   },
@@ -108,6 +123,7 @@
     "token": "cohere-ai",
     "operator": "Cohere",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -115,6 +131,7 @@
     "token": "DuckAssistBot",
     "operator": "DuckDuckGo",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot/",
     "added": "2026-10-14"
   },
@@ -122,6 +139,7 @@
     "token": "YouBot",
     "operator": "You.com",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -129,6 +147,7 @@
     "token": "MistralAI-User",
     "operator": "Mistral AI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://docs.mistral.ai/robots/",
     "added": "2026-10-14"
   },
@@ -136,6 +155,7 @@
     "token": "AI2Bot-DeepResearchEval",
     "operator": "Ai2",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -143,6 +163,7 @@
     "token": "AI2Bot",
     "operator": "Ai2",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://allenai.org/crawler",
     "added": "2026-10-14"
   },
@@ -150,6 +171,7 @@
     "token": "Diffbot-User",
     "operator": "Diffbot",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://www.diffbot.com/",
     "added": "2026-10-14"
   },
@@ -157,6 +179,7 @@
     "token": "Diffbot",
     "operator": "Diffbot",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.diffbot.com/",
     "added": "2026-10-14"
   },
@@ -164,6 +187,7 @@
     "token": "Google-CloudVertexBot",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers",
     "added": "2026-10-14"
   },
@@ -171,6 +195,7 @@
     "token": "AddSearchBot",
     "operator": "Unknown",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -178,6 +203,7 @@
     "token": "AgentDataBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -185,6 +211,7 @@
     "token": "AgentTimes",
     "operator": "The Agent Times",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://theagenttimes.com/about",
     "added": "2026-10-14"
   },
@@ -192,6 +219,7 @@
     "token": "aiHitBot",
     "operator": "aiHit",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -199,6 +227,7 @@
     "token": "AIWebIndex",
     "operator": "Lyrenth",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://lyrenth.com",
     "added": "2026-10-14"
   },
@@ -206,6 +235,7 @@
     "token": "amazon-kendra",
     "operator": "Amazon",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -213,6 +243,7 @@
     "token": "amazon-QBusiness",
     "operator": "Amazon",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -220,6 +251,7 @@
     "token": "AmazonBuyForMe",
     "operator": "Amazon",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://amazon.com",
     "added": "2026-10-14"
   },
@@ -227,6 +259,7 @@
     "token": "Amzn-SearchBot",
     "operator": "Amazon",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -234,6 +267,7 @@
     "token": "Amzn-User",
     "operator": "Amazon",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -241,6 +275,7 @@
     "token": "Andibot",
     "operator": "Andi",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://andisearch.com/",
     "added": "2026-10-14"
   },
@@ -248,6 +283,7 @@
     "token": "Anomura",
     "operator": "Direqt",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://direqt.ai",
     "added": "2026-10-14"
   },
@@ -255,6 +291,7 @@
     "token": "ApifyBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -262,6 +299,7 @@
     "token": "ApifyWebsiteContentCrawler",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -269,6 +307,7 @@
     "token": "Applebot",
     "operator": "Apple",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -276,6 +315,7 @@
     "token": "Aranet-SearchBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -283,6 +323,7 @@
     "token": "atlassian-bot",
     "operator": "Atlassian",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://www.atlassian.com",
     "added": "2026-10-14"
   },
@@ -290,6 +331,7 @@
     "token": "Awario",
     "operator": "Awario",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -297,6 +339,7 @@
     "token": "AzureAI-SearchBot",
     "operator": "Microsoft",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -304,6 +347,7 @@
     "token": "bedrockbot",
     "operator": "Amazon",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://amazon.com",
     "added": "2026-10-14"
   },
@@ -311,6 +355,7 @@
     "token": "bigsur.ai",
     "operator": "Big Sur AI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -318,6 +363,7 @@
     "token": "BixelBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -325,6 +371,7 @@
     "token": "Bravebot",
     "operator": "Brave",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://safe.search.brave.com/help/brave-search-crawler",
     "added": "2026-10-14"
   },
@@ -332,6 +379,7 @@
     "token": "Brightbot",
     "operator": "Unknown",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -339,6 +387,7 @@
     "token": "BuddyBot",
     "operator": "BuddyBotLearning",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.buddybotlearning.com",
     "added": "2026-10-14"
   },
@@ -346,6 +395,7 @@
     "token": "Channel3Bot",
     "operator": "Unknown",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -353,6 +403,7 @@
     "token": "ChatGLM-Spider",
     "operator": "Unknown",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -360,6 +411,7 @@
     "token": "ChatGPT Agent",
     "operator": "OpenAI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -367,6 +419,7 @@
     "token": "Claude-Code",
     "operator": "Anthropic",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -374,6 +427,7 @@
     "token": "Cloudflare-AutoRAG",
     "operator": "Cloudflare",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://developers.cloudflare.com/autorag",
     "added": "2026-10-14"
   },
@@ -381,6 +435,7 @@
     "token": "CloudflareBrowserRenderingCrawler",
     "operator": "Cloudflare",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -388,6 +443,7 @@
     "token": "CloudVertexBot",
     "operator": "Google",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -395,6 +451,7 @@
     "token": "cohere-training-data-crawler",
     "operator": "Cohere",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -402,6 +459,7 @@
     "token": "Cotoyogi",
     "operator": "ROIS",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://ds.rois.ac.jp/en_center8/en_crawler/",
     "added": "2026-10-14"
   },
@@ -409,6 +467,7 @@
     "token": "CragCrawler",
     "operator": "CragSoftware",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -416,6 +475,7 @@
     "token": "Crawl4AI",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -423,6 +483,7 @@
     "token": "Crawlspace",
     "operator": "Crawlspace",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://crawlspace.dev",
     "added": "2026-10-14"
   },
@@ -430,6 +491,7 @@
     "token": "Datenbank Crawler",
     "operator": "Datenbank",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -437,6 +499,7 @@
     "token": "DeepSeekBot",
     "operator": "DeepSeek",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -444,6 +507,7 @@
     "token": "DoubaoBot",
     "operator": "ByteDance",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -451,6 +515,7 @@
     "token": "Echobot Bot",
     "operator": "Echobox",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -458,6 +523,7 @@
     "token": "EchoboxBot",
     "operator": "Echobox",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://echobox.com",
     "added": "2026-10-14"
   },
@@ -465,6 +531,7 @@
     "token": "ERNIEBot",
     "operator": "Baidu",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -472,6 +539,7 @@
     "token": "ExaBot",
     "operator": "Unknown",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -479,6 +547,7 @@
     "token": "ExaSearchBot",
     "operator": "Exa",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://exa.ai",
     "added": "2026-10-14"
   },
@@ -486,6 +555,7 @@
     "token": "FacebookBot",
     "operator": "Meta",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -493,6 +563,7 @@
     "token": "Factset_spyderbot",
     "operator": "Factset",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://www.factset.com/ai",
     "added": "2026-10-14"
   },
@@ -500,6 +571,7 @@
     "token": "FirecrawlAgent",
     "operator": "Firecrawl",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -507,6 +579,7 @@
     "token": "FriendlyCrawler",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -514,6 +587,7 @@
     "token": "GeistHaus-PageFetcher",
     "operator": "GeistHaus",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -521,6 +595,7 @@
     "token": "Gemini-Deep-Research",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -528,6 +603,7 @@
     "token": "Google-Agent",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -535,6 +611,7 @@
     "token": "Google-Firebase",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -542,6 +619,7 @@
     "token": "Google-Gemini-CLI",
     "operator": "Google",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -549,6 +627,7 @@
     "token": "Google-NotebookLM",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -556,6 +635,7 @@
     "token": "GoogleAgent-Mariner",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -563,6 +643,7 @@
     "token": "GoogleAgent-URLContext",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -570,6 +651,7 @@
     "token": "GoogleOther",
     "operator": "Google",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -577,6 +659,7 @@
     "token": "HenkBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -584,6 +667,7 @@
     "token": "iAskBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -591,6 +675,7 @@
     "token": "iaskspider/2.0",
     "operator": "iAsk",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -598,6 +683,7 @@
     "token": "iaskspider",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -605,6 +691,7 @@
     "token": "ICC-Crawler",
     "operator": "NICT",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://nict.go.jp",
     "added": "2026-10-14"
   },
@@ -612,6 +699,7 @@
     "token": "ImagesiftBot",
     "operator": "ImageSift",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://imagesift.com",
     "added": "2026-10-14"
   },
@@ -619,6 +707,7 @@
     "token": "imageSpider",
     "operator": "Unknown",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -626,6 +715,7 @@
     "token": "img2dataset",
     "operator": "img2dataset",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/rom1504/img2dataset",
     "added": "2026-10-14"
   },
@@ -633,6 +723,7 @@
     "token": "ISSCyberRiskCrawler",
     "operator": "ISS-Corporate",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://iss-cyber.com",
     "added": "2026-10-14"
   },
@@ -640,6 +731,7 @@
     "token": "kagi-fetcher",
     "operator": "Kagi",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -647,6 +739,7 @@
     "token": "Kangaroo Bot",
     "operator": "Unknown",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -654,6 +747,7 @@
     "token": "KeenableBot",
     "operator": "Keenable",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://keenable.ai/",
     "added": "2026-10-14"
   },
@@ -661,6 +755,7 @@
     "token": "Kimi-Agent",
     "operator": "Moonshot AI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -668,6 +763,7 @@
     "token": "Kimi-SearchBot",
     "operator": "Moonshot AI",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://www.moonshot.ai",
     "added": "2026-10-14"
   },
@@ -675,6 +771,7 @@
     "token": "Kimi-User",
     "operator": "Moonshot AI",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -682,6 +779,7 @@
     "token": "KimiBot",
     "operator": "Moonshot AI",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://www.moonshot.ai",
     "added": "2026-10-14"
   },
@@ -689,6 +787,7 @@
     "token": "KlaviyoAIBot",
     "operator": "Klaviyo",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://www.klaviyo.com",
     "added": "2026-10-14"
   },
@@ -696,6 +795,7 @@
     "token": "KunatoCrawler",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -703,6 +803,7 @@
     "token": "laion-huggingface-processor",
     "operator": "Unknown",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -710,6 +811,7 @@
     "token": "LAIONDownloader",
     "operator": "LAION",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://laion.ai/",
     "added": "2026-10-14"
   },
@@ -717,6 +819,7 @@
     "token": "LinerBot",
     "operator": "Unknown",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -724,6 +827,7 @@
     "token": "Linguee Bot",
     "operator": "Linguee",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.linguee.com",
     "added": "2026-10-14"
   },
@@ -731,6 +835,7 @@
     "token": "LinkupBot",
     "operator": "Unknown",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -738,6 +843,7 @@
     "token": "Manus-User",
     "operator": "Butterfly Effect",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -745,6 +851,7 @@
     "token": "meta-webindexer",
     "operator": "Meta",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers/",
     "added": "2026-10-14"
   },
@@ -752,6 +859,7 @@
     "token": "MistralAI-Index",
     "operator": "Mistral AI",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -759,6 +867,7 @@
     "token": "MistralAI-Training",
     "operator": "Mistral AI",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://mistral.ai",
     "added": "2026-10-14"
   },
@@ -766,6 +875,7 @@
     "token": "Mozilla-Tabstack",
     "operator": "Mozilla",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -773,6 +883,7 @@
     "token": "MyCentralAIScraperBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -780,6 +891,7 @@
     "token": "NagetBot",
     "operator": "Naget",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -787,6 +899,7 @@
     "token": "netEstate Imprint Crawler",
     "operator": "netEstate",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -794,6 +907,7 @@
     "token": "NotebookLM",
     "operator": "Google",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -801,6 +915,7 @@
     "token": "NovaAct",
     "operator": "Unknown",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -808,6 +923,7 @@
     "token": "OAI-AdsBot",
     "operator": "OpenAI",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -815,6 +931,7 @@
     "token": "omgili",
     "operator": "Webz.io",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://webz.io/",
     "added": "2026-10-14"
   },
@@ -822,6 +939,7 @@
     "token": "PanguBot",
     "operator": "Huawei",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -829,6 +947,7 @@
     "token": "Panscient",
     "operator": "Panscient",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://panscient.com",
     "added": "2026-10-14"
   },
@@ -836,6 +955,7 @@
     "token": "PetalBot",
     "operator": "Huawei",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://huawei.com/",
     "added": "2026-10-14"
   },
@@ -843,6 +963,7 @@
     "token": "PhindBot",
     "operator": "Phind",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -850,6 +971,7 @@
     "token": "Poggio-Citations",
     "operator": "Poggio",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -857,6 +979,7 @@
     "token": "Poseidon Research Crawler",
     "operator": "Poseidon Research",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.poseidonresearch.com",
     "added": "2026-10-14"
   },
@@ -864,6 +987,7 @@
     "token": "qodercli",
     "operator": "Qoder",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -871,6 +995,7 @@
     "token": "QualifiedBot",
     "operator": "Qualified",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://www.qualified.com",
     "added": "2026-10-14"
   },
@@ -878,6 +1003,7 @@
     "token": "Querit-SearchBot",
     "operator": "Querit",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -885,6 +1011,7 @@
     "token": "QueritBot",
     "operator": "Querit",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -892,6 +1019,7 @@
     "token": "QuillBot",
     "operator": "Quillbot",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -899,6 +1027,7 @@
     "token": "QwenBot",
     "operator": "Alibaba",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -906,6 +1035,7 @@
     "token": "Reflectionbot",
     "operator": "Reflection",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://reflection.ai/",
     "added": "2026-10-14"
   },
@@ -913,6 +1043,7 @@
     "token": "SBIntuitionsBot",
     "operator": "SB Intuitions",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.sbintuitions.co.jp/en/",
     "added": "2026-10-14"
   },
@@ -920,6 +1051,7 @@
     "token": "SemrushBot-OCOB",
     "operator": "Semrush",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.semrush.com/",
     "added": "2026-10-14"
   },
@@ -927,6 +1059,7 @@
     "token": "SemrushBot-SWA",
     "operator": "Semrush",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://www.semrush.com/",
     "added": "2026-10-14"
   },
@@ -934,6 +1067,7 @@
     "token": "Shap-User",
     "operator": "Unknown",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -941,6 +1075,7 @@
     "token": "ShapBot",
     "operator": "Parallel",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://parallel.ai",
     "added": "2026-10-14"
   },
@@ -948,6 +1083,7 @@
     "token": "Sidetrade indexer bot",
     "operator": "Sidetrade",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -955,6 +1091,7 @@
     "token": "TavilyBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -962,6 +1099,7 @@
     "token": "Terra Cotta",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -969,6 +1107,7 @@
     "token": "TerraCotta",
     "operator": "Ceramic AI",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://ceramic.ai/",
     "added": "2026-10-14"
   },
@@ -976,6 +1115,7 @@
     "token": "Thinkbot",
     "operator": "Thinkbot",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.thinkbot.agency",
     "added": "2026-10-14"
   },
@@ -983,6 +1123,7 @@
     "token": "TikTokSpider",
     "operator": "ByteDance",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -990,6 +1131,7 @@
     "token": "Timpibot",
     "operator": "Timpi",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://timpi.io",
     "added": "2026-10-14"
   },
@@ -997,6 +1139,7 @@
     "token": "TongyiBot",
     "operator": "Alibaba",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -1004,6 +1147,7 @@
     "token": "TwinAgent",
     "operator": "Twin",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -1011,6 +1155,7 @@
     "token": "VelenPublicWebCrawler",
     "operator": "Velen Crawler",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://velen.io",
     "added": "2026-10-14"
   },
@@ -1018,6 +1163,7 @@
     "token": "WARDBot",
     "operator": "WEBSPARK",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -1025,6 +1171,7 @@
     "token": "wpbot",
     "operator": "QuantumCloud",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://www.quantumcloud.com",
     "added": "2026-10-14"
   },
@@ -1032,6 +1179,7 @@
     "token": "WRTNBot",
     "operator": "Unknown",
     "kind": "other",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -1039,6 +1187,7 @@
     "token": "YandexAdditional",
     "operator": "Yandex",
     "kind": "training",
+    "executes_js": "unknown",
     "docs": "https://yandex.ru",
     "added": "2026-10-14"
   },
@@ -1046,6 +1195,7 @@
     "token": "YiyanBot",
     "operator": "Baidu",
     "kind": "fetcher",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   },
@@ -1053,6 +1203,7 @@
     "token": "ZanistaBot",
     "operator": "Unknown",
     "kind": "search",
+    "executes_js": "unknown",
     "docs": "https://github.com/ai-robots-txt/ai.robots.txt/blob/main/table-of-bot-metrics.md",
     "added": "2026-10-14"
   }
