@@ -15,6 +15,13 @@
 #include <openssl/sha.h>
 
 #include <algorithm>
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -25,7 +32,9 @@
 #include <string>
 #include <vector>
 
+#include "base/logging.h"
 #include "net/instaweb/public/version.h"
+#include "spdlog/spdlog.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -45,6 +54,15 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// UTF-8 bytes <-> path, the same on every platform (no locale code page).
+std::string U8(const fs::path& p) {
+  std::u8string s = p.generic_u8string();
+  return std::string(s.begin(), s.end());
+}
+fs::path FromU8(const std::string& s) {
+  return fs::path(std::u8string(s.begin(), s.end()));
+}
+
 const char kToolVersion[] = "0.0.0-spike";
 const char kMasked[] = "<masked>";
 
@@ -63,6 +81,19 @@ class CaptureHandler : public MessageHandler {
     messages.emplace_back(type, message);
   }
 };
+
+// The module's LOG() goes to spdlog's default logger, which writes to stdout
+// with a timestamp, and some messages quote option values.  The lint turns
+// that logger off and only counts what the parser logged per directive.
+class CountingLogSink : public pagespeed_logging::LogSink {
+ public:
+  int count = 0;
+  void send(int severity, const char*, const char*, int, const char*,
+            size_t) override {
+    if (severity >= 2 /* ERROR */) ++count;
+  }
+};
+CountingLogSink* log_sink = nullptr;
 
 // ---------------------------------------------------------------------------
 struct Finding {
@@ -124,7 +155,10 @@ struct CaseLess {
 };
 std::set<GoogleString, CaseLess>* safe_names = nullptr;
 
+bool show_values = false;  // --show-values, only when stdout is a terminal
+
 bool ValuesAreSafe(StringPiece directive) {
+  if (show_values) return true;
   StringPiece prefix("ModPagespeed");
   if (!StringCaseStartsWith(directive, prefix)) return false;
   StringPiece option = directive.substr(prefix.size());
@@ -212,7 +246,7 @@ std::vector<GoogleString> SortedEntries(const fs::path& dir) {
   std::error_code ec;
   for (fs::directory_iterator it(dir, ec), end; !ec && it != end;
        it.increment(ec)) {
-    names.push_back(it->path().filename().generic_u8string().c_str());
+    names.push_back(U8(it->path().filename()));
   }
   std::sort(names.begin(), names.end());
   return names;
@@ -266,7 +300,7 @@ bool ResolveComponents(const std::vector<GoogleString>& comps, size_t n,
     std::vector<GoogleString> entries = SortedEntries(cur);
     const GoogleString& want = comps[i];
     if (std::binary_search(entries.begin(), entries.end(), want)) {
-      cur /= fs::u8path(want);
+      cur /= FromU8(want);
       continue;
     }
     const GoogleString* match = nullptr;
@@ -279,7 +313,7 @@ bool ResolveComponents(const std::vector<GoogleString>& comps, size_t n,
     }
     if (count != 1) return false;
     *case_mismatch = true;
-    cur /= fs::u8path(*match);
+    cur /= FromU8(*match);
   }
   *disk = cur;
   return true;
@@ -325,7 +359,7 @@ bool ExpandInclude(StringPiece arg, const GoogleString& from_file, int line,
     std::vector<GoogleString> base(comps.begin(), comps.end() - 1);
     for (const GoogleString& e : SortedEntries(dir)) {
       if (!WildMatch(comps.back().c_str(), e.c_str())) continue;
-      fs::path p = dir / fs::u8path(e);
+      fs::path p = dir / FromU8(e);
       if (!fs::is_regular_file(p)) continue;
       std::vector<GoogleString> c = base;
       c.push_back(e);
@@ -347,7 +381,7 @@ bool ExpandInclude(StringPiece arg, const GoogleString& from_file, int line,
       std::vector<GoogleString> entries = SortedEntries(dp);
       std::vector<std::pair<GoogleString, fs::path>> sub;
       for (const GoogleString& e : entries) {
-        fs::path p = dp / fs::u8path(e);
+        fs::path p = dp / FromU8(e);
         if (fs::is_directory(p)) {
           sub.emplace_back(StrCat(lp, "/", e), p);
         } else if (fs::is_regular_file(p)) {
@@ -633,7 +667,13 @@ void LintDirective(const GoogleString& file, int line, const Placement& p,
   if (s.verdict == Verdict::kWarning) {
     AddFinding(s.rule, "warning", file, line, scope, name, shown, s.message);
   }
+  log_sink->count = 0;
   ValueResult v = CheckValue(*d, name, args, p);
+  if (log_sink->count > 0) {
+    AddFinding("PS111", "warning", file, line, scope, name, shown,
+               StrCat("The option parser logged ", log_sink->count,
+                      " internal error(s) for this line (text not shown)"));
+  }
   if (v.kind == ValueResult::kUnknown) {
     AddFinding("PS101", "error", file, line, scope, name, shown,
                StrCat("Unknown directive ", name));
@@ -671,7 +711,7 @@ void LintDirective(const GoogleString& file, int line, const Placement& p,
 
 void LintFile(const GoogleString& logical, const fs::path& disk, bool htaccess,
               std::vector<Frame>* stack, int depth) {
-  GoogleString key = disk.generic_u8string().c_str();
+  GoogleString key = U8(disk);
   if (open_files.count(key) || depth > 32) {
     AddFinding("PS903", "error", logical, 0, "server", "Include", {},
                "Include cycle");
@@ -846,6 +886,13 @@ int Main(int argc, char** argv) {
       root = argv[++i];
     } else if (a == "--htaccess" && i + 1 < argc) {
       htaccess.push_back(argv[++i]);
+    } else if (a == "--show-values") {
+      if (!isatty(fileno(stdout))) {
+        fprintf(stderr, "--show-values is refused when stdout is not a "
+                        "terminal\n");
+        return 2;
+      }
+      show_values = true;
     } else if (a == "--list-directives") {
       list = true;
     } else if (a.starts_with("--")) {
@@ -859,6 +906,9 @@ int Main(int argc, char** argv) {
     }
   }
 
+  spdlog::default_logger()->set_level(spdlog::level::off);
+  log_sink = new CountingLogSink;
+  pagespeed_logging::AddLogSink(log_sink);
   ApacheConfig::Initialize();
   domain_registry::Init();
   HtmlKeywords::Init();
@@ -868,20 +918,14 @@ int Main(int argc, char** argv) {
       std::begin(kSafeOptionNames), std::end(kSafeOptionNames));
 
   if (list) {
-    // name<TAB>nargs<TAB>safe : the seed list for the secret test.
+    // name<TAB>nargs<TAB>safe<TAB>override : the seed list for the secret
+    // test, every directive httpd would accept.
     for (int i = 0; i < NumApacheDirectives(); ++i) {
-      (void)i;
-    }
-    GoogleString out;
-    ApacheConfig tmpl("list", nullptr);
-    std::vector<GoogleString> names;
-    for (auto* option : tmpl.all_options()) {
-      if (option->help_text() == nullptr) continue;
-      names.push_back(StrCat("ModPagespeed", option->option_name()));
-    }
-    std::sort(names.begin(), names.end());
-    for (const GoogleString& n : names) {
-      printf("%s\t1\t%d\n", n.c_str(), ValuesAreSafe(n) ? 1 : 0);
+      const ApacheDirective& d = ApacheDirectiveAt(i);
+      int n = d.args == ApacheArgs::kTake2 || d.args == ApacheArgs::kTake23 ? 2
+              : d.args == ApacheArgs::kTake3 ? 3 : 1;
+      printf("%s\t%d\t%d\t%u\n", d.name.c_str(), n,
+             ValuesAreSafe(d.name) ? 1 : 0, d.req_override);
     }
     printf("#directives\t%d\n#safe_ts\t%d\n#safe_secret_excluded\t%d\n",
            NumApacheDirectives(), kSafeOptionNamesTsCount,
@@ -890,7 +934,7 @@ int Main(int argc, char** argv) {
   }
 
   std::error_code ec;
-  root_dir = fs::absolute(fs::u8path(root), ec);
+  root_dir = fs::absolute(FromU8(root), ec);
   if (ec || !fs::is_directory(root_dir)) {
     fprintf(stderr, "root is not a directory\n");
     return 2;

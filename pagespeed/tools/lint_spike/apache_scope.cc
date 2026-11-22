@@ -159,6 +159,7 @@ const ApacheDirective* LookupApacheDirective(StringPiece name) {
 }
 
 int NumApacheDirectives() { return static_cast<int>(directives->size()); }
+const ApacheDirective& ApacheDirectiveAt(int i) { return (*directives)[i]; }
 
 bool CheckArity(const ApacheDirective& d, int n, GoogleString* message) {
   switch (d.args) {

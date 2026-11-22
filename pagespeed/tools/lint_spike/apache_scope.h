@@ -86,6 +86,7 @@ ScopeResult CheckApacheScope(const ApacheDirective& d, const Placement& p);
 bool CheckArity(const ApacheDirective& d, int nargs, GoogleString* message);
 
 int NumApacheDirectives();
+const ApacheDirective& ApacheDirectiveAt(int i);
 
 }  // namespace lint
 }  // namespace net_instaweb
