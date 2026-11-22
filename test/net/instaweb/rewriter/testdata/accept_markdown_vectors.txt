@@ -23,7 +23,9 @@
 #
 # Vectors 36 to 42 are Accept headers real clients send: 36 Claude Code,
 # 37 Cursor, 38 OpenCode, 39 an MCP fetch server, 42 a browser-style header
-# (as sent by Codex and ChatGPT-User).
+# (as sent by Codex and ChatGPT-User). Vector 42 is reconstructed: the
+# published capture is truncated, so its tail is completed from Chrome's
+# standard Accept header.
 1 MD <text/markdown>
 2 HTML <text/markdown;q=0>
 3 HTML <text/markdown;q=0, text/html>
@@ -65,4 +67,4 @@
 39 MD <text/markdown, text/html;q=0.9, */*;q=0.8>
 40 MD <text/markdown, */*>
 41 MD <text/html, text/markdown>
-42 HTML <text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7>
+42 HTML <text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9>
