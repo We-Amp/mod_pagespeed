@@ -46,7 +46,13 @@ bool IsPrivateV4(std::string_view ip);
 // (lower-cased, zone id after '%' dropped). Handles ::1, ::, embedded dotted v4
 // (private), ALL `::ffff:`-prefixed (v4-mapped — blocked regardless of embedded
 // publicness, exactly as ssrf.mjs does), ULA fc00::/7, link-local fe80::/10,
-// multicast ff00::/8, and 2001:db8::/32 documentation.
+// multicast ff00::/8, and 2001:db8::/32 documentation.  Beyond ssrf.mjs, on the
+// parsed address: v4-mapped in any spelling, the local-use NAT64 range
+// 64:ff9b:1::/48, and an IPv4 address embedded by v4-compatible (::/96),
+// NAT64 (64:ff9b::/96), 6to4 (2002::/16), Teredo (2001::/32, server and
+// de-obfuscated client), SIIT (::ffff:0:a.b.c.d) or ISATAP (::5efe:a.b.c.d)
+// form judged as that IPv4 address; Teredo, site-local fec0::/10 and the
+// discard prefix 100::/64 are never public.
 bool IsPrivateV6(std::string_view ip);
 
 // Mirrors ssrf.mjs isPrivateIp. Classifies via inet_pton (the net.isIP analog):
@@ -61,6 +67,9 @@ bool IsPrivateIp(std::string_view ip);
 // returns false for any non-literal input. Used by the G1 upstream carve-out,
 // which may legitimately reach loopback/RFC1918 backends but must NEVER pin a
 // link-local/metadata address even for the render's own configured origin.
+// An IPv6 address that carries an IPv4 link-local address (v4-mapped,
+// v4-compatible, NAT64 or 6to4 form, e.g. ::ffff:169.254.169.254 or
+// 64:ff9b::a9fe:a9fe) counts as link-local too.
 bool IsLinkLocalIp(std::string_view ip);
 
 // Scheme allowlist (ssrf.mjs resolveSafe): only "http"/"https" (case-insensitive,

@@ -25,9 +25,13 @@
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +41,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "lib/cache/vary_storability.h"
 #include "lib/net/curl_fetcher.h"
 #include "lib/net/fetch_policy.h"
 #include "lib/net/ssrf_guard.h"
@@ -223,6 +228,160 @@ std::vector<HttpHeader> SanitizeResponseHeaders(
   return out;
 }
 
+namespace {
+
+// True the first time `origin` is passed (process-wide).  Bounded: past the
+// cap every origin reads as already seen, so a stream of names cannot grow
+// it.
+// True the first time `key` is passed to this set (process-wide).  Bounded:
+// past the cap every key reads as already seen, so a stream of names cannot
+// grow it.
+class SeenOnce {
+ public:
+  bool First(const std::string& key) {
+    constexpr std::size_t kMaxKeys = 1024;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (seen_.size() >= kMaxKeys) return false;
+    return seen_.insert(key).second;
+  }
+
+ private:
+  std::mutex mu_;
+  std::set<std::string> seen_;
+};
+
+bool FirstPrivateAddressRefusal(const std::string& origin) {
+  static SeenOnce seen;
+  return seen.First(origin);
+}
+
+bool FirstUnsharedAnswerRefusal(const std::string& origin) {
+  static SeenOnce seen;
+  return seen.First(origin);
+}
+
+std::atomic<std::uint64_t> g_refused_cookie{0};
+std::atomic<std::uint64_t> g_refused_no_store{0};
+std::atomic<std::uint64_t> g_refused_private{0};
+std::atomic<std::uint64_t> g_refused_vary{0};
+std::atomic<std::uint64_t> g_refused_private_address{0};
+
+void CountUnshared(UnsharedReason r) {
+  switch (r) {
+    case UnsharedReason::kCookie:
+      g_refused_cookie.fetch_add(1, std::memory_order_relaxed);
+      break;
+    case UnsharedReason::kNoStore:
+      g_refused_no_store.fetch_add(1, std::memory_order_relaxed);
+      break;
+    case UnsharedReason::kPrivate:
+      g_refused_private.fetch_add(1, std::memory_order_relaxed);
+      break;
+    case UnsharedReason::kVary:
+      g_refused_vary.fetch_add(1, std::memory_order_relaxed);
+      break;
+    case UnsharedReason::kNone:
+      break;
+  }
+}
+
+}  // namespace
+
+UnsharedReason UnsharedAnswerReason(const std::vector<HttpHeader>& headers) {
+  bool cookie = false, no_store = false, priv = false;
+  std::string vary;
+  for (const HttpHeader& h : headers) {
+    std::string_view name = absl::StripAsciiWhitespace(h.name);
+    if (absl::EqualsIgnoreCase(name, "set-cookie") ||
+        absl::EqualsIgnoreCase(name, "set-cookie2")) {
+      cookie = true;
+      continue;
+    }
+    if (absl::EqualsIgnoreCase(name, "vary")) {
+      if (!vary.empty()) vary.push_back(',');
+      vary.append(h.value);
+      continue;
+    }
+    if (!absl::EqualsIgnoreCase(name, "cache-control")) {
+      continue;
+    }
+    // A quoted field list (private="a, b") may hold commas; splitting on them
+    // only yields extra non-directive pieces, never hides a directive name.
+    for (std::string_view part : absl::StrSplit(h.value, ',')) {
+      std::string_view d = absl::StripAsciiWhitespace(part);
+      std::size_t eq = d.find('=');
+      std::string_view dname = absl::StripAsciiWhitespace(
+          eq == std::string_view::npos ? d : d.substr(0, eq));
+      if (absl::EqualsIgnoreCase(dname, "no-store")) no_store = true;
+      if (absl::EqualsIgnoreCase(dname, "private")) priv = true;
+    }
+  }
+  if (cookie) return UnsharedReason::kCookie;
+  if (no_store) return UnsharedReason::kNoStore;
+  if (priv) return UnsharedReason::kPrivate;
+  if (VaryUncacheable(vary)) return UnsharedReason::kVary;
+  return UnsharedReason::kNone;
+}
+
+bool ForbidsSharedCopy(const std::vector<HttpHeader>& headers) {
+  return UnsharedAnswerReason(headers) != UnsharedReason::kNone;
+}
+
+std::string_view UnsharedReasonName(UnsharedReason reason) {
+  switch (reason) {
+    case UnsharedReason::kCookie:
+      return "cookie";
+    case UnsharedReason::kNoStore:
+      return "no-store";
+    case UnsharedReason::kPrivate:
+      return "private";
+    case UnsharedReason::kVary:
+      return "vary";
+    case UnsharedReason::kNone:
+      break;
+  }
+  return "";
+}
+
+SharedCopyRefusalCounts GetSharedCopyRefusalCounts() {
+  SharedCopyRefusalCounts c;
+  c.cookie = g_refused_cookie.load(std::memory_order_relaxed);
+  c.no_store = g_refused_no_store.load(std::memory_order_relaxed);
+  c.private_answer = g_refused_private.load(std::memory_order_relaxed);
+  c.vary = g_refused_vary.load(std::memory_order_relaxed);
+  c.private_address = g_refused_private_address.load(std::memory_order_relaxed);
+  return c;
+}
+
+std::optional<std::vector<PinnedUpstream>> ParseOperatorOrigins(
+    const std::vector<std::string>& entries) {
+  std::vector<PinnedUpstream> out;
+  for (const std::string& raw : entries) {
+    std::string_view e = absl::StripAsciiWhitespace(raw);
+    if (absl::EndsWith(e, "/")) e.remove_suffix(1);
+    if (e.empty()) continue;
+    if (e.find('*') != std::string_view::npos) return std::nullopt;
+    std::vector<std::string> forms;
+    if (e.find("://") != std::string_view::npos) {
+      forms.emplace_back(e);
+    } else {
+      forms.push_back(absl::StrCat("http://", e));
+      forms.push_back(absl::StrCat("https://", e));
+    }
+    for (const std::string& f : forms) {
+      std::optional<PinnedUpstream> up = ParseUpstream(f);
+      if (!up.has_value()) return std::nullopt;
+      // An origin, not a URL: a path, query or fragment is a typo.
+      std::size_t scheme_end = f.find("://") + 3;
+      if (f.find_first_of("/?#", scheme_end) != std::string::npos) {
+        return std::nullopt;
+      }
+      out.push_back(*up);
+    }
+  }
+  return out;
+}
+
 std::string ResolveRedirectTarget(std::string_view base_url,
                                   std::string_view location) {
   std::string_view loc = absl::StripAsciiWhitespace(location);
@@ -383,6 +542,32 @@ AgentFetchOutcome FetchSubresource(std::string_view url_in, ResourceClass rc,
                       "g1: link-local/metadata ip");
         }
       }
+      // Shared-copy fetches: an own origin that resolves (in ANY of its
+      // addresses) to loopback or a private range is fetched only when the
+      // operator named that origin.
+      if (deps.shared_copy &&
+          !IsPinnedUpstream(url, deps.private_address_origins)) {
+        for (const std::string& a : addrs) {
+          if (IsPrivateIp(a)) {
+            const std::string origin =
+                absl::StrCat(auth->scheme, "://", auth->host, ":", auth->port);
+            g_refused_private_address.fetch_add(1, std::memory_order_relaxed);
+            if (deps.on_private_address_refusal &&
+                FirstPrivateAddressRefusal(origin)) {
+              deps.on_private_address_refusal(absl::StrCat(
+                  "agent_optimize: not fetching from ", origin,
+                  ": it resolves to a loopback or private address (", a,
+                  "); list the origin in --agent-render-private-origins to "
+                  "fetch it"));
+            }
+            AgentFetchOutcome o =
+                deny(FetchAction::kDenyBlockedByClient,
+                     "g1: private address not named by the operator");
+            o.private_address = true;
+            return o;
+          }
+        }
+      }
       pinned_ip = auth->host_is_ip_literal ? auth->host : addrs.front();
     }
 
@@ -402,6 +587,30 @@ AgentFetchOutcome FetchSubresource(std::string_view url_in, ResourceClass rc,
     std::optional<ParsedHttpResponse> resp = ParseCurlResponse(spawned.output);
     if (!resp.has_value()) {
       return deny(FetchAction::kDenyBlockedByClient, "unparseable response");
+    }
+    // An answer (own origin or allowlisted third party, a redirect
+    // included) that is not for a shared cache is not used by a caller that
+    // builds a shared output from it.
+    if (deps.shared_copy || deps.refuse_unshared_answers) {
+      const UnsharedReason why = UnsharedAnswerReason(resp->headers);
+      if (why != UnsharedReason::kNone) {
+        CountUnshared(why);
+        if (deps.on_unshared_answer_refusal) {
+          const std::string origin =
+              absl::StrCat(auth->scheme, "://", auth->host, ":", auth->port);
+          if (FirstUnsharedAnswerRefusal(origin)) {
+            deps.on_unshared_answer_refusal(absl::StrCat(
+                "not using answers from ", origin, " in shared output (first: ",
+                url, " answered with ", UnsharedReasonName(why),
+                "); serve shared resources without cookies, private or "
+                "no-store, and with Vary on Accept-Encoding only"));
+          }
+        }
+        AgentFetchOutcome o =
+            deny(FetchAction::kDenyBlockedByClient, "answer is not shareable");
+        o.unshared = why;
+        return o;
+      }
     }
 
     if (resp->status >= 300 && resp->status < 400 && !resp->location.empty()) {

@@ -153,6 +153,9 @@ class PageAnalyzer {
 
  private:
   struct Session;
+  // Step 1 onwards: create the target (in the session's browser context,
+  // if it has one), attach, and drive the render.
+  static void StartTarget(const std::shared_ptr<Session>& session);
   CdpClient* client_;
   uint64_t settle_after_load_ms_;
 };

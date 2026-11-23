@@ -220,6 +220,26 @@ TEST(ChromeProcessArgs, DeadResolverFlagAlwaysPresent) {
             args.end());
 }
 
+TEST(ChromeProcessArgs, NoWebRtcUdpFlagPresentRegardlessOfConfig) {
+  for (bool headless : {false, true}) {
+    for (bool no_sandbox : {false, true}) {
+      for (const char* udd : {"", "/tmp/x"}) {
+        ChromeProcessConfig config;
+        config.headless = headless;
+        config.no_sandbox = no_sandbox;
+        config.user_data_dir = udd;
+        auto args = ChromeProcess::BuildChromeArgs(config);
+        EXPECT_NE(
+            std::find(args.begin(), args.end(),
+                      "--webrtc-ip-handling-policy=disable_non_proxied_udp"),
+            args.end());
+        // Before the start URL, so Chrome reads it as a switch.
+        EXPECT_EQ(args.back(), "about:blank");
+      }
+    }
+  }
+}
+
 TEST(ChromeProcessArgs, DeadResolverFlagPresentRegardlessOfConfig) {
   // Present whether or not the conditional flags (headless, user_data_dir) fire.
   for (bool headless : {false, true}) {

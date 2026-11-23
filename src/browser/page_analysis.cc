@@ -16,6 +16,12 @@
 //     - window.__PS_LCP, window.__PS_CLS
 //     - img getBoundingClientRect for each image
 // 11. Target.closeTarget({targetId})
+//
+// An agent_optimize render (network-enabled) runs in a browser context of its
+// own: Target.createBrowserContext before step 1, the target created in it,
+// and Target.disposeBrowserContext after step 11, so no storage, cache or
+// service worker state carries from one render to the next.  Service worker
+// registration is hidden from its pages as well.
 
 #include "src/browser/page_analysis.h"
 
@@ -107,6 +113,25 @@ static constexpr std::string_view kObserverScript = R"JS(
       }
     }).observe({type: 'layout-shift', buffered: true});
   } catch(e) {}
+})();
+)JS";
+
+// Prepended to the observer script in an agent_optimize render: removes the
+// service worker API from every document of the render (frames included,
+// as Page.addScriptToEvaluateOnNewDocument runs in each), so a page cannot
+// install a worker that answers or fetches outside the Fetch interception.
+// A page sees what it sees in a browser without service workers.  Defence in
+// depth: the browser's switches already keep the render's own network use
+// to the Fetch interception (tools/packaging/smoke-chrome-egress.sh).
+static constexpr std::string_view kNoServiceWorkerScript = R"JS(
+(() => {
+  try { delete Navigator.prototype.serviceWorker; } catch (e) {}
+  try {
+    if ('serviceWorker' in navigator) {
+      Object.defineProperty(Navigator.prototype, 'serviceWorker', {
+        get: () => undefined, configurable: false });
+    }
+  } catch (e) {}
 })();
 )JS";
 
@@ -257,6 +282,9 @@ struct PageAnalyzer::Session : public std::enable_shared_from_this<Session> {
   std::shared_ptr<const AgentRenderOptions> agent;
   int agent_fetches_in_flight = 0;
 
+  // The render's own browser context (agent_optimize renders only; empty
+  // otherwise).  Disposed in Finish().
+  std::string browser_context_id;
   std::string target_id;
   std::string session_id;
   std::string frame_id;
@@ -381,6 +409,10 @@ struct PageAnalyzer::Session : public std::enable_shared_from_this<Session> {
                               [](auto) {});
       (void)status;  // Best effort cleanup.
     }
+    // Dispose of the render's browser context (closes anything left in it).
+    if (!browser_context_id.empty() && client->connected()) {
+      DisposeBrowserContext(client, browser_context_id);
+    }
 
     // Release the event callback's strong reference to this session.
     client->SetEventCallback(nullptr);
@@ -391,6 +423,20 @@ struct PageAnalyzer::Session : public std::enable_shared_from_this<Session> {
   }
 
   void FinishError(std::string_view msg) { Finish(absl::InternalError(msg)); }
+
+  // Whether this render gets a browser context of its own: an agent_optimize
+  // render, the one that egresses.
+  bool IsolatedRender() const { return agent != nullptr && agent->policy; }
+
+  static void DisposeBrowserContext(CdpClient* c, const std::string& id) {
+    auto status =
+        c->SendCommand(CdpCommand{.method = "Target.disposeBrowserContext",
+                                  .params = {{"browserContextId", id}},
+                                  .session_id = {},
+                                  .timeout_ms = 5000},
+                       [](auto) {});
+    (void)status;  // Best effort cleanup.
+  }
 
   // Bound on concurrent out-of-Chrome agent_optimize fetches per render. A hostile
   // page must not be able to spawn unbounded curl processes / starve the libuv work
@@ -785,177 +831,6 @@ void PageAnalyzer::Analyze(std::string_view html_content,
   // Start overall session timeout.
   session->StartTimeout();
 
-  // Step 1: Create target.
-  CdpCommand create_cmd;
-  create_cmd.method = "Target.createTarget";
-  create_cmd.params = {{"url", "about:blank"}};
-  create_cmd.timeout_ms = 10000;
-
-  auto send_result = client_->SendCommand(
-      create_cmd, [session](absl::StatusOr<CdpResponse> result) {
-        if (!result.ok() || result->is_error()) {
-          session->FinishError("createTarget failed");
-          return;
-        }
-        session->target_id = result->result.value("targetId", "");
-        if (session->target_id.empty()) {
-          session->FinishError("createTarget: no targetId");
-          return;
-        }
-
-        // Step 2: Attach to target.
-        CdpCommand attach_cmd;
-        attach_cmd.method = "Target.attachToTarget";
-        attach_cmd.params = {
-            {"targetId", session->target_id},
-            {"flatten", true},
-        };
-
-        session->Send(attach_cmd, [session](
-                                      absl::StatusOr<CdpResponse> result) {
-          if (!result.ok() || result->is_error()) {
-            session->FinishError("attachToTarget failed");
-            return;
-          }
-          session->session_id = result->result.value("sessionId", "");
-          if (session->session_id.empty()) {
-            session->FinishError("no sessionId");
-            return;
-          }
-
-          const auto& s = session;
-
-          // Step 3: Network offline (SSRF defense —
-          // MUST succeed).
-          CdpCommand offline_cmd;
-          offline_cmd.method = "Network.emulateNetworkConditions";
-          offline_cmd.params = {
-              {"offline", true},
-              {"latency", 0},
-              {"downloadThroughput", -1},
-              {"uploadThroughput", -1},
-          };
-          offline_cmd.session_id = s->session_id;
-
-          s->Send(offline_cmd, [s](auto result) {
-            if (!result.ok() || result->is_error()) {
-              s->FinishError("Network offline setup failed");
-              return;
-            }
-            // Step 4: Enable Fetch interception (SSRF
-            // defense — MUST succeed).
-            CdpCommand fetch_cmd;
-            fetch_cmd.method = "Fetch.enable";
-            fetch_cmd.params = {
-                {"patterns", json::array({{{"urlPattern", "*"}}})}};
-            fetch_cmd.session_id = s->session_id;
-
-            s->Send(fetch_cmd, [s](auto result) {
-              if (!result.ok() || result->is_error()) {
-                s->FinishError("Fetch.enable setup failed");
-                return;
-              }
-              // Step 5: Emulate the device (metrics, touch, UA).
-              EmulateDevice(s, s->viewport_width, s->viewport_height, [s]() {
-                // Step 6: Inject observer script.
-                CdpCommand script_cmd;
-                script_cmd.method =
-                    "Page."
-                    "addScriptToEvaluateOnNewDocument";
-                script_cmd.params = {{"source", std::string(kObserverScript)}};
-                script_cmd.session_id = s->session_id;
-
-                s->Send(script_cmd, [s](auto result) {
-                  if (!result.ok() || result->is_error()) {
-                    s->FinishError("addScript setup failed");
-                    return;
-                  }
-                  // Step 7: Enable Page + lifecycle.
-                  CdpCommand page_cmd;
-                  page_cmd.method = "Page.enable";
-                  page_cmd.session_id = s->session_id;
-
-                  s->Send(page_cmd, [s](auto result) {
-                    if (!result.ok() || result->is_error()) {
-                      s->FinishError("Page.enable failed");
-                      return;
-                    }
-                    // A fresh window for the document (LoadFreshBlankDocument).
-                    LoadFreshBlankDocument(s, [s]() {
-                      CdpCommand lc_cmd;
-                      lc_cmd.method =
-                          "Page."
-                          "setLifecycleEventsEnabled";
-                      lc_cmd.params = {{"enabled", true}};
-                      lc_cmd.session_id = s->session_id;
-
-                      s->Send(lc_cmd, [s](auto result) {
-                        if (!result.ok() || result->is_error()) {
-                          s->FinishError("lifecycle enable failed");
-                          return;
-                        }
-                        // Step 8: Get frame + set content.
-                        CdpCommand tree_cmd;
-                        tree_cmd.method = "Page.getFrameTree";
-                        tree_cmd.session_id = s->session_id;
-
-                        s->Send(
-                            tree_cmd, [s](absl::StatusOr<CdpResponse> result) {
-                              if (!result.ok() || result->is_error()) {
-                                s->FinishError("getFrameTree failed");
-                                return;
-                              }
-                              s->frame_id =
-                                  result->result
-                                      .value("frameTree", json::object())
-                                      .value("frame", json::object())
-                                      .value("id", "");
-
-                              CdpCommand content_cmd;
-                              content_cmd.method = "Page.setDocumentContent";
-                              content_cmd.params = {
-                                  {"frameId", s->frame_id},
-                                  {"html", s->html_content},
-                              };
-                              content_cmd.session_id = s->session_id;
-                              content_cmd.timeout_ms = 15000;
-
-                              s->content_sent = true;
-                              s->Send(content_cmd, [s](auto r) {
-                                // Release HTML memory — no
-                                // longer needed after loading.
-                                s->html_content.clear();
-                                s->html_content.shrink_to_fit();
-                                if (!r.ok() || r->is_error()) {
-                                  s->FinishError(
-                                      "setDocumentContent "
-                                      "failed");
-                                  return;
-                                }
-                                // From here a networkIdle describes the
-                                // page.
-                                s->content_set = true;
-                                if (s->settled_before_reply) {
-                                  s->OnPageSettled();
-                                }
-                              });
-                            });
-                      });
-                    });
-                  });
-                });
-              });
-            });
-          });
-        });
-      });
-
-  if (!send_result.ok()) {
-    session->FinishError(
-        absl::StrCat("SendCommand failed: ", send_result.status().message()));
-    return;
-  }
-
   // Set event callback to handle lifecycle + Fetch events.
   client_->SetEventCallback([session](const CdpEvent& event) {
     if (session->completed) return;
@@ -979,6 +854,205 @@ void PageAnalyzer::Analyze(std::string_view html_content,
             });
       }
     }
+  });
+
+  if (!session->IsolatedRender()) {
+    StartTarget(session);
+    return;
+  }
+  // Step 0 (agent_optimize): a browser context of the render's own (MUST
+  // succeed: the render never runs in the shared default context).
+  CdpCommand context_cmd;
+  context_cmd.method = "Target.createBrowserContext";
+  context_cmd.params = {{"disposeOnDetach", true}};
+  context_cmd.timeout_ms = 10000;
+  session->Send(context_cmd, [session](absl::StatusOr<CdpResponse> result) {
+    std::string id;
+    if (result.ok() && !result->is_error()) {
+      id = result->result.value("browserContextId", "");
+    }
+    if (session->completed) {
+      // Ended (timeout) while the context was being made: drop it.
+      if (!id.empty() && session->client->connected()) {
+        Session::DisposeBrowserContext(session->client, id);
+      }
+      return;
+    }
+    if (id.empty()) {
+      session->FinishError("createBrowserContext failed");
+      return;
+    }
+    session->browser_context_id = std::move(id);
+    StartTarget(session);
+  });
+}
+
+void PageAnalyzer::StartTarget(const std::shared_ptr<Session>& session) {
+  // Step 1: Create target.
+  CdpCommand create_cmd;
+  create_cmd.method = "Target.createTarget";
+  create_cmd.params = {{"url", "about:blank"}};
+  if (!session->browser_context_id.empty()) {
+    create_cmd.params["browserContextId"] = session->browser_context_id;
+  }
+  create_cmd.timeout_ms = 10000;
+
+  session->Send(create_cmd, [session](absl::StatusOr<CdpResponse> result) {
+    if (!result.ok() || result->is_error()) {
+      session->FinishError("createTarget failed");
+      return;
+    }
+    session->target_id = result->result.value("targetId", "");
+    if (session->target_id.empty()) {
+      session->FinishError("createTarget: no targetId");
+      return;
+    }
+
+    // Step 2: Attach to target.
+    CdpCommand attach_cmd;
+    attach_cmd.method = "Target.attachToTarget";
+    attach_cmd.params = {
+        {"targetId", session->target_id},
+        {"flatten", true},
+    };
+
+    session->Send(attach_cmd, [session](absl::StatusOr<CdpResponse> result) {
+      if (!result.ok() || result->is_error()) {
+        session->FinishError("attachToTarget failed");
+        return;
+      }
+      session->session_id = result->result.value("sessionId", "");
+      if (session->session_id.empty()) {
+        session->FinishError("no sessionId");
+        return;
+      }
+
+      const auto& s = session;
+
+      // Step 3: Network offline (SSRF defense —
+      // MUST succeed).
+      CdpCommand offline_cmd;
+      offline_cmd.method = "Network.emulateNetworkConditions";
+      offline_cmd.params = {
+          {"offline", true},
+          {"latency", 0},
+          {"downloadThroughput", -1},
+          {"uploadThroughput", -1},
+      };
+      offline_cmd.session_id = s->session_id;
+
+      s->Send(offline_cmd, [s](auto result) {
+        if (!result.ok() || result->is_error()) {
+          s->FinishError("Network offline setup failed");
+          return;
+        }
+        // Step 4: Enable Fetch interception (SSRF
+        // defense — MUST succeed).
+        CdpCommand fetch_cmd;
+        fetch_cmd.method = "Fetch.enable";
+        fetch_cmd.params = {{"patterns", json::array({{{"urlPattern", "*"}}})}};
+        fetch_cmd.session_id = s->session_id;
+
+        s->Send(fetch_cmd, [s](auto result) {
+          if (!result.ok() || result->is_error()) {
+            s->FinishError("Fetch.enable setup failed");
+            return;
+          }
+          // Step 5: Emulate the device (metrics, touch, UA).
+          EmulateDevice(s, s->viewport_width, s->viewport_height, [s]() {
+            // Step 6: Inject observer script.
+            CdpCommand script_cmd;
+            script_cmd.method =
+                "Page."
+                "addScriptToEvaluateOnNewDocument";
+            script_cmd.params = {
+                {"source",
+                 s->IsolatedRender()
+                     ? absl::StrCat(kNoServiceWorkerScript, kObserverScript)
+                     : std::string(kObserverScript)}};
+            script_cmd.session_id = s->session_id;
+
+            s->Send(script_cmd, [s](auto result) {
+              if (!result.ok() || result->is_error()) {
+                s->FinishError("addScript setup failed");
+                return;
+              }
+              // Step 7: Enable Page + lifecycle.
+              CdpCommand page_cmd;
+              page_cmd.method = "Page.enable";
+              page_cmd.session_id = s->session_id;
+
+              s->Send(page_cmd, [s](auto result) {
+                if (!result.ok() || result->is_error()) {
+                  s->FinishError("Page.enable failed");
+                  return;
+                }
+                // A fresh window for the document (LoadFreshBlankDocument).
+                LoadFreshBlankDocument(s, [s]() {
+                  CdpCommand lc_cmd;
+                  lc_cmd.method =
+                      "Page."
+                      "setLifecycleEventsEnabled";
+                  lc_cmd.params = {{"enabled", true}};
+                  lc_cmd.session_id = s->session_id;
+
+                  s->Send(lc_cmd, [s](auto result) {
+                    if (!result.ok() || result->is_error()) {
+                      s->FinishError("lifecycle enable failed");
+                      return;
+                    }
+                    // Step 8: Get frame + set content.
+                    CdpCommand tree_cmd;
+                    tree_cmd.method = "Page.getFrameTree";
+                    tree_cmd.session_id = s->session_id;
+
+                    s->Send(tree_cmd, [s](absl::StatusOr<CdpResponse> result) {
+                      if (!result.ok() || result->is_error()) {
+                        s->FinishError("getFrameTree failed");
+                        return;
+                      }
+                      s->frame_id =
+                          result->result.value("frameTree", json::object())
+                              .value("frame", json::object())
+                              .value("id", "");
+
+                      CdpCommand content_cmd;
+                      content_cmd.method = "Page.setDocumentContent";
+                      content_cmd.params = {
+                          {"frameId", s->frame_id},
+                          {"html", s->html_content},
+                      };
+                      content_cmd.session_id = s->session_id;
+                      content_cmd.timeout_ms = 15000;
+
+                      s->content_sent = true;
+                      s->Send(content_cmd, [s](auto r) {
+                        // Release HTML memory — no
+                        // longer needed after loading.
+                        s->html_content.clear();
+                        s->html_content.shrink_to_fit();
+                        if (!r.ok() || r->is_error()) {
+                          s->FinishError(
+                              "setDocumentContent "
+                              "failed");
+                          return;
+                        }
+                        // From here a networkIdle describes the
+                        // page.
+                        s->content_set = true;
+                        if (s->settled_before_reply) {
+                          s->OnPageSettled();
+                        }
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
   });
 }
 

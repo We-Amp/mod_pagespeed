@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/ascii.h"
@@ -605,6 +606,445 @@ TEST(FetchSubresource, RedirectWithBackslashAuthorityDenied) {
 // SF-1: encoding/integrity/framing headers describe the wire form, but curl has
 // already decoded the body (--compressed), so they no longer match it and MUST be
 // stripped before fulfill.
+// ---- shared-copy fetches (agent render, /llms.txt) -------------------------
+
+FetchPolicy OwnOriginPolicy(std::string_view origin) {
+  FetchPolicy p;
+  auto up = ParseUpstream(origin);
+  if (up.has_value()) p.pinned_upstreams.push_back(*up);
+  return p;
+}
+
+AgentFetcherDeps SharedCopyDeps(
+    FakeSpawn* spawn, std::map<std::string, std::vector<std::string>> dns) {
+  AgentFetcherDeps d = MakeDeps(spawn, std::move(dns));
+  d.shared_copy = true;
+  return d;
+}
+
+TEST(ForbidsSharedCopy, Directives) {
+  auto cc = [](std::string name, std::string value) {
+    return std::vector<HttpHeader>{{std::move(name), std::move(value)}};
+  };
+  EXPECT_TRUE(ForbidsSharedCopy(cc("Cache-Control", "private")));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("cache-control", "max-age=60, PRIVATE")));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("Cache-Control", "private=\"x-user\"")));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("Cache-Control", "no-store")));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("CACHE-CONTROL", " No-Store ,public")));
+  EXPECT_FALSE(ForbidsSharedCopy(cc("Cache-Control", "public, max-age=60")));
+  EXPECT_FALSE(ForbidsSharedCopy(cc("Cache-Control", "no-cache")));
+  EXPECT_FALSE(ForbidsSharedCopy(cc("X-Cache-Control", "private")));
+  EXPECT_FALSE(ForbidsSharedCopy({}));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("Set-Cookie", "sid=1")));
+  EXPECT_TRUE(ForbidsSharedCopy(cc("set-cookie2", "a=b")));
+  // A second Cache-Control header counts as well.
+  EXPECT_TRUE(ForbidsSharedCopy(
+      {{"Cache-Control", "max-age=60"}, {"Cache-Control", "no-store"}}));
+}
+
+// An own-origin answer marked private or no-store is not used for a shared
+// copy: the render sees a failed request, never the bytes.
+TEST(FetchSubresource, SharedCopyAnswerRules) {
+  for (const char* cc : {"private", "no-store", "max-age=0, private=\"a\""}) {
+    FakeSpawn spawn;
+    spawn.handler = [cc](const std::vector<std::string>&, int) {
+      return Ok(std::string("HTTP/1.1 200 OK\r\nCache-Control: ") + cc +
+                "\r\nContent-Type: application/json\r\n\r\n{\"secret\":1}");
+    };
+    auto deps =
+        SharedCopyDeps(&spawn, {{"www.example.com", {"93.184.216.34"}}});
+    auto out =
+        FetchSubresource("https://www.example.com/api/me", ResourceClass::kXhr,
+                         OwnOriginPolicy("https://www.example.com"), deps);
+    EXPECT_FALSE(out.fulfilled) << cc;
+    EXPECT_EQ(out.action, FetchAction::kDenyBlockedByClient) << cc;
+    EXPECT_TRUE(out.body.empty()) << cc;
+  }
+}
+
+TEST(FetchSubresource, SharedCopyCookieAnswer) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok(
+        "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n"
+        "Content-Type: application/json\r\n\r\n{\"me\":1}");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"www.example.com", {"93.184.216.34"}}});
+  auto out =
+      FetchSubresource("https://www.example.com/api/me", ResourceClass::kXhr,
+                       OwnOriginPolicy("https://www.example.com"), deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_TRUE(out.body.empty());
+}
+
+// A redirect marked private is refused too (its target is never fetched).
+TEST(FetchSubresource, SharedCopyRedirectAnswerRules) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int idx) {
+    EXPECT_EQ(idx, 0) << "the redirect target must not be fetched";
+    return Ok(
+        "HTTP/1.1 302 Found\r\nCache-Control: no-store\r\n"
+        "Location: /account\r\n\r\n");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"www.example.com", {"93.184.216.34"}}});
+  auto out = FetchSubresource("https://www.example.com/me", ResourceClass::kXhr,
+                              OwnOriginPolicy("https://www.example.com"), deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 1u);
+}
+
+// A public own-origin answer is still used.
+TEST(FetchSubresource, SharedCopyUsesOrdinaryAnswer) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok(
+        "HTTP/1.1 200 OK\r\nCache-Control: public, max-age=60\r\n"
+        "Content-Type: text/css\r\n\r\nbody{}");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"www.example.com", {"93.184.216.34"}}});
+  auto out = FetchSubresource("https://www.example.com/site.css",
+                              ResourceClass::kStylesheet,
+                              OwnOriginPolicy("https://www.example.com"), deps);
+  EXPECT_TRUE(out.fulfilled);
+  EXPECT_EQ(out.action, FetchAction::kProxyUpstream);
+  EXPECT_EQ(out.body, "body{}");
+}
+
+// Without shared_copy (other callers of the fetcher) the answer is used as
+// before.
+TEST(FetchSubresource, OtherCallersUnchanged) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok("HTTP/1.1 200 OK\r\nCache-Control: private\r\n\r\nx");
+  };
+  auto deps = MakeDeps(&spawn, {{"www.example.com", {"93.184.216.34"}}});
+  auto out = FetchSubresource("https://www.example.com/a", ResourceClass::kXhr,
+                              OwnOriginPolicy("https://www.example.com"), deps);
+  EXPECT_TRUE(out.fulfilled);
+}
+
+// An own origin that resolves to loopback or a private range is not fetched
+// for a shared copy unless the operator named it; no request leaves.
+TEST(FetchSubresource, SharedCopyAddressRules) {
+  const std::vector<std::vector<std::string>> cases = {
+      {"127.0.0.1"},    {"10.1.2.3"},
+      {"192.168.1.10"}, {"172.16.0.9"},
+      {"100.64.0.1"},   {"::1"},
+      {"fd00::1"},      {"93.184.216.34", "127.0.0.1"},  // any address
+  };
+  for (const auto& addrs : cases) {
+    FakeSpawn spawn;
+    spawn.handler = [](const std::vector<std::string>&, int) {
+      ADD_FAILURE() << "must not fetch an own origin at a private address";
+      return Ok("HTTP/1.1 200 OK\r\n\r\nINTERNAL");
+    };
+    auto deps = SharedCopyDeps(&spawn, {{"www.example.com", addrs}});
+    auto out = FetchSubresource(
+        "https://www.example.com/admin.js", ResourceClass::kScript,
+        OwnOriginPolicy("https://www.example.com"), deps);
+    EXPECT_FALSE(out.fulfilled) << addrs.back();
+    EXPECT_EQ(out.action, FetchAction::kDenyBlockedByClient) << addrs.back();
+    EXPECT_EQ(spawn.calls.size(), 0u) << addrs.back();
+  }
+}
+
+// The same for an own origin that IS an address literal.
+TEST(FetchSubresource, SharedCopyLiteralAddressRules) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    ADD_FAILURE() << "must not fetch";
+    return Ok("HTTP/1.1 200 OK\r\n\r\nx");
+  };
+  auto deps = SharedCopyDeps(&spawn, {});
+  auto out = FetchSubresource("http://127.0.0.1:3000/api", ResourceClass::kXhr,
+                              MakePolicy(), deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 0u);
+}
+
+// A redirect from a public own-origin address to one that resolves
+// privately is refused on the second hop.
+TEST(FetchSubresource, SharedCopyRedirectAddressRules) {
+  FetchPolicy p = OwnOriginPolicy("https://www.example.com");
+  auto internal = ParseUpstream("https://intra.example.com");
+  ASSERT_TRUE(internal.has_value());
+  p.pinned_upstreams.push_back(*internal);
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int idx) {
+    EXPECT_EQ(idx, 0);
+    return Ok(
+        "HTTP/1.1 302 Found\r\nLocation: https://intra.example.com/x\r\n\r\n");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"www.example.com", {"93.184.216.34"}},
+                                      {"intra.example.com", {"10.0.0.7"}}});
+  auto out = FetchSubresource("https://www.example.com/x", ResourceClass::kXhr,
+                              p, deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 1u);
+}
+
+// The operator's list lets a named origin through at its private address,
+// and only that origin (scheme and port included).
+TEST(FetchSubresource, OperatorNamedOrigin) {
+  auto named = ParseOperatorOrigins({"www.example.com:8080"});
+  ASSERT_TRUE(named.has_value());
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok("HTTP/1.1 200 OK\r\nContent-Type: text/css\r\n\r\nbody{}");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"www.example.com", {"127.0.0.1"}}});
+  deps.private_address_origins = *named;
+  FetchPolicy p = OwnOriginPolicy("http://www.example.com:8080");
+  auto ok = FetchSubresource("http://www.example.com:8080/site.css",
+                             ResourceClass::kStylesheet, p, deps);
+  EXPECT_TRUE(ok.fulfilled);
+  EXPECT_TRUE(HasResolve(spawn.calls.at(0), "www.example.com:8080:127.0.0.1"));
+
+  // Same host, another port: not named.
+  FetchPolicy p2 = OwnOriginPolicy("http://www.example.com");
+  auto refused = FetchSubresource("http://www.example.com/site.css",
+                                  ResourceClass::kStylesheet, p2, deps);
+  EXPECT_FALSE(refused.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 1u);
+}
+
+// The operator's list never relaxes the private/no-store rule.
+TEST(FetchSubresource, OperatorNamedOriginAnswerRules) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok("HTTP/1.1 200 OK\r\nCache-Control: private\r\n\r\nx");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"app.local", {"10.0.0.5"}}});
+  deps.private_address_origins = *ParseOperatorOrigins({"http://app.local"});
+  auto out = FetchSubresource("http://app.local/me", ResourceClass::kXhr,
+                              OwnOriginPolicy("http://app.local"), deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 1u);
+}
+
+// Link-local stays refused whatever the operator names.
+TEST(FetchSubresource, OperatorNamedOriginAddressRules) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    ADD_FAILURE() << "must not fetch";
+    return Ok("HTTP/1.1 200 OK\r\n\r\nx");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"app.local", {"169.254.169.254"}}});
+  deps.private_address_origins = *ParseOperatorOrigins({"app.local"});
+  auto out = FetchSubresource("http://app.local/x", ResourceClass::kXhr,
+                              OwnOriginPolicy("http://app.local"), deps);
+  EXPECT_FALSE(out.fulfilled);
+  EXPECT_EQ(spawn.calls.size(), 0u);
+}
+
+TEST(ParseOperatorOrigins, Forms) {
+  auto both = ParseOperatorOrigins({" app.local ", "", "https://x.test:8443/"});
+  ASSERT_TRUE(both.has_value());
+  ASSERT_EQ(both->size(), 3u);
+  EXPECT_EQ((*both)[0].scheme, "http");
+  EXPECT_EQ((*both)[0].port, 80);
+  EXPECT_EQ((*both)[1].scheme, "https");
+  EXPECT_EQ((*both)[1].port, 443);
+  EXPECT_EQ((*both)[2].canon_host, "x.test");
+  EXPECT_EQ((*both)[2].port, 8443);
+  EXPECT_FALSE(ParseOperatorOrigins({"ftp://x.test"}).has_value());
+  EXPECT_FALSE(ParseOperatorOrigins({"http://x.test/path"}).has_value());
+  EXPECT_FALSE(ParseOperatorOrigins({"http://u@x.test"}).has_value());
+  EXPECT_FALSE(ParseOperatorOrigins({"x.test:99999"}).has_value());
+  auto empty = ParseOperatorOrigins({});
+  ASSERT_TRUE(empty.has_value());
+  EXPECT_TRUE(empty->empty());
+}
+
+// Third-party (allowlisted) fetches are unchanged by shared_copy: they were
+// already public-address only.
+TEST(FetchSubresource, SharedCopyThirdPartyUnchanged) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok("HTTP/1.1 200 OK\r\n\r\nconsole.log(1)");
+  };
+  auto deps = SharedCopyDeps(&spawn, {{"cdn.example.com", {"93.184.216.34"}}});
+  auto out = FetchSubresource("https://cdn.example.com/lib.js",
+                              ResourceClass::kScript, MakePolicy(), deps);
+  EXPECT_TRUE(out.fulfilled);
+  EXPECT_EQ(out.action, FetchAction::kFetchAllowlisted);
+}
+
+// The flag takes exact origins only.
+TEST(ParseOperatorOrigins, RejectsWildcards) {
+  EXPECT_FALSE(ParseOperatorOrigins({"*.example.com"}).has_value());
+  EXPECT_FALSE(ParseOperatorOrigins({"https://*.example.com"}).has_value());
+  EXPECT_FALSE(ParseOperatorOrigins({"*"}).has_value());
+  EXPECT_FALSE(
+      ParseOperatorOrigins({"ok.example.com", "a*.example.com"}).has_value());
+}
+
+// A refusal for a private address is reported once per origin, naming the
+// flag; another origin is reported on its own.
+TEST(FetchSubresource, SkippedOriginIsLoggedOnce) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    ADD_FAILURE() << "must not fetch";
+    return Ok("HTTP/1.1 200 OK\r\n\r\nx");
+  };
+  std::vector<std::string> logged;
+  auto deps = SharedCopyDeps(&spawn, {{"once-a.example", {"10.9.8.7"}},
+                                      {"once-b.example", {"127.0.0.1"}}});
+  deps.on_private_address_refusal = [&logged](const std::string& m) {
+    logged.push_back(m);
+  };
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_FALSE(FetchSubresource(
+                     "https://once-a.example/x.css", ResourceClass::kStylesheet,
+                     OwnOriginPolicy("https://once-a.example"), deps)
+                     .fulfilled);
+  }
+  ASSERT_EQ(logged.size(), 1u);
+  EXPECT_NE(logged[0].find("https://once-a.example:443"), std::string::npos);
+  EXPECT_NE(logged[0].find("--agent-render-private-origins"),
+            std::string::npos);
+  EXPECT_FALSE(FetchSubresource("https://once-b.example/x.css",
+                                ResourceClass::kStylesheet,
+                                OwnOriginPolicy("https://once-b.example"), deps)
+                   .fulfilled);
+  EXPECT_EQ(logged.size(), 2u);
+}
+
+// A private or loopback IPv4 address written inside an IPv6 address
+// (v4-mapped, v4-compatible, NAT64, 6to4) is refused for a shared copy.
+TEST(FetchSubresource, SharedCopyIpv6Forms) {
+  for (const char* a : {"::ffff:127.0.0.1", "::ffff:7f00:1", "::7f00:1",
+                        "64:ff9b::a00:5", "64:ff9b::127.0.0.1", "64:ff9b:1::5",
+                        "2002:c0a8:101::1", "0:0:0:0:0:ffff:a00:5"}) {
+    FakeSpawn spawn;
+    spawn.handler = [a](const std::vector<std::string>&, int) {
+      ADD_FAILURE() << "must not fetch " << a;
+      return Ok("HTTP/1.1 200 OK\r\n\r\nx");
+    };
+    auto deps = SharedCopyDeps(&spawn, {{"v6.example.com", {a}}});
+    auto out =
+        FetchSubresource("https://v6.example.com/x.js", ResourceClass::kScript,
+                         OwnOriginPolicy("https://v6.example.com"), deps);
+    EXPECT_FALSE(out.fulfilled) << a;
+    EXPECT_EQ(spawn.calls.size(), 0u) << a;
+  }
+}
+
+// The metadata address inside an IPv6 address is refused on every own-origin
+// fetch, shared copy or not, and whatever the operator names.
+TEST(FetchSubresource, OwnOriginIpv6Forms) {
+  for (const char* a :
+       {"::ffff:169.254.169.254", "::ffff:a9fe:a9fe", "::169.254.169.254",
+        "64:ff9b::a9fe:a9fe", "64:ff9b:1::a9fe:a9fe", "2002:a9fe:a9fe::"}) {
+    for (bool shared : {false, true}) {
+      FakeSpawn spawn;
+      spawn.handler = [a](const std::vector<std::string>&, int) {
+        ADD_FAILURE() << "must not fetch " << a;
+        return Ok("HTTP/1.1 200 OK\r\n\r\nCREDS");
+      };
+      auto deps = MakeDeps(&spawn, {{"app.customer.com", {a}}});
+      deps.shared_copy = shared;
+      deps.private_address_origins =
+          *ParseOperatorOrigins({"app.customer.com"});
+      auto out =
+          FetchSubresource("http://app.customer.com/api", ResourceClass::kXhr,
+                           OwnOriginPolicy("http://app.customer.com"), deps);
+      EXPECT_FALSE(out.fulfilled) << a << " shared=" << shared;
+      EXPECT_EQ(spawn.calls.size(), 0u) << a;
+    }
+  }
+}
+
+// The answer rule alone (the sub-resource gate's HEAD): unshared answers are
+// not used, a loopback own origin is still fetched.
+TEST(FetchSubresource, UnsharedAnswerRuleAlone) {
+  for (const auto& [headers, used] : std::vector<std::pair<std::string, bool>>{
+           {"Cache-Control: public, max-age=60\r\n", true},
+           {"Content-Type: text/css\r\n", true},
+           {"Cache-Control: private\r\n", false},
+           {"Cache-Control: no-store\r\n", false},
+           {"Set-Cookie: a=b\r\n", false}}) {
+    FakeSpawn spawn;
+    spawn.handler = [h = headers](const std::vector<std::string>&, int) {
+      return Ok("HTTP/1.1 200 OK\r\n" + h + "\r\nbody{}");
+    };
+    auto deps = MakeDeps(&spawn, {});
+    deps.refuse_unshared_answers = true;
+    auto out = FetchSubresource("http://127.0.0.1:3000/a.css",
+                                ResourceClass::kStylesheet, MakePolicy(), deps);
+    EXPECT_EQ(out.fulfilled, used) << headers;
+    EXPECT_EQ(spawn.calls.size(), 1u) << headers;
+  }
+}
+
+TEST(UnsharedAnswerReason, ReasonsAndVary) {
+  using R = UnsharedReason;
+  auto h = [](std::vector<std::pair<std::string, std::string>> v) {
+    std::vector<HttpHeader> out;
+    out.reserve(v.size());
+    for (auto& [n, val] : v) out.push_back({n, val});
+    return out;
+  };
+  EXPECT_EQ(UnsharedAnswerReason(h({})), R::kNone);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Vary", "Accept-Encoding"}})), R::kNone);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Vary", "Cookie"}})), R::kVary);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"vary", "authorization"}})), R::kVary);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Vary", "*"}})), R::kVary);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Vary", "Origin"}})), R::kVary);
+  // Several Vary lines are judged together.
+  EXPECT_EQ(UnsharedAnswerReason(
+                h({{"Vary", "Accept-Encoding"}, {"Vary", "Cookie"}})),
+            R::kVary);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Set-Cookie", "a=b"}})), R::kCookie);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Cache-Control", "no-store"}})),
+            R::kNoStore);
+  EXPECT_EQ(UnsharedAnswerReason(h({{"Cache-Control", "private"}})),
+            R::kPrivate);
+  EXPECT_EQ(UnsharedReasonName(R::kVary), "vary");
+  EXPECT_EQ(UnsharedReasonName(R::kCookie), "cookie");
+  EXPECT_EQ(UnsharedReasonName(R::kNone), "");
+}
+
+// Shared-copy rules apply to allowlisted third-party answers as well.
+TEST(FetchSubresource, SharedCopyThirdPartyAnswerRules) {
+  for (const char* hdr : {"Cache-Control: private\r\n", "Set-Cookie: t=1\r\n",
+                          "Vary: Cookie\r\n", "Cache-Control: no-store\r\n"}) {
+    FakeSpawn spawn;
+    spawn.handler = [hdr](const std::vector<std::string>&, int) {
+      return Ok(std::string("HTTP/1.1 200 OK\r\n") + hdr + "\r\nx");
+    };
+    auto deps =
+        SharedCopyDeps(&spawn, {{"cdn.example.com", {"93.184.216.34"}}});
+    auto out = FetchSubresource("https://cdn.example.com/lib.js",
+                                ResourceClass::kScript, MakePolicy(), deps);
+    EXPECT_FALSE(out.fulfilled) << hdr;
+    EXPECT_NE(out.unshared, UnsharedReason::kNone) << hdr;
+  }
+}
+
+// The answer-rule refusal is logged once per origin with the reason.
+TEST(FetchSubresource, UnsharedAnswerLoggedOncePerOrigin) {
+  FakeSpawn spawn;
+  spawn.handler = [](const std::vector<std::string>&, int) {
+    return Ok("HTTP/1.1 200 OK\r\nVary: Authorization\r\n\r\nx");
+  };
+  std::vector<std::string> logged;
+  auto deps = MakeDeps(&spawn, {{"logonce.example", {"93.184.216.34"}}});
+  deps.refuse_unshared_answers = true;
+  deps.on_unshared_answer_refusal = [&logged](const std::string& m) {
+    logged.push_back(m);
+  };
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_FALSE(FetchSubresource("https://logonce.example/a.css",
+                                  ResourceClass::kStylesheet,
+                                  OwnOriginPolicy("https://logonce.example"),
+                                  deps)
+                     .fulfilled);
+  }
+  ASSERT_EQ(logged.size(), 1u);
+  EXPECT_NE(logged[0].find("vary"), std::string::npos) << logged[0];
+}
+
 TEST(SanitizeResponseHeaders, StripsEncodingIntegrityFraming) {
   std::vector<HttpHeader> in = {
       {"Content-Type", "text/html"}, {"Content-Encoding", "gzip"},

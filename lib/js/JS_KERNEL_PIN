@@ -13,5 +13,5 @@
 # changes arriving via PR, the floor only moves forward.
 # Convention: on a routine pin bump, move the floor to the new pin in the
 # same commit. See lib/js/CLAUDE.md.
-8447fa07a6d9153c24d1a473be35c6651d7f0aa4  module: 2.8.0 part 2/2: cache integrity, input provenance, HTML parsing
-floor 8447fa07a6d9153c24d1a473be35c6651d7f0aa4
+260586aa605800e7a597ff0f6a5f3e7f7a73f02e  Release 2.10.0 landing (#887)
+floor 260586aa605800e7a597ff0f6a5f3e7f7a73f02e

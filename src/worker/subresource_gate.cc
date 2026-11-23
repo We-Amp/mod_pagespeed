@@ -74,9 +74,13 @@ SubresourceVerdict SubresourceGate::Check(const SubresourceRead& read,
   // for the request only where the worker may not ask the page's host; a
   // host it may ask is asked, stamped or not.  Only an entry read from the
   // page's own site keyspace counts.
+  // The entry must also not be marked no-store or private: the stamp is the
+  // writer's word, and the flags byte comes from the writer.
+  constexpr std::uint16_t kNotShared =
+      AlternateMetadata::kCCOriginNoStore | AlternateMetadata::kCCOriginPrivate;
   if (!read.host_fetch_allowed && read.entry_read &&
       (read.entry_flags & AlternateMetadata::kFlagAnonymousRecorded) != 0 &&
-      read.entry_site == read.site) {
+      read.entry_site == read.site && (read.entry_cc_flags & kNotShared) == 0) {
     return SubresourceVerdict::kAdmitted;
   }
 
@@ -93,7 +97,9 @@ SubresourceVerdict SubresourceGate::Check(const SubresourceRead& read,
     return SubresourceVerdict::kUnknown;
   }
 
-  const std::string key = MemoKey(read.site, scheme, host, read.url);
+  const std::string key =
+      (read.shared_copy ? std::string("shared\n") : std::string()) +
+      MemoKey(read.site, scheme, host, read.url);
   const std::int64_t now = now_ ? now_() : 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -106,14 +112,31 @@ SubresourceVerdict SubresourceGate::Check(const SubresourceRead& read,
 
   // Ask only the page's own host, and only for a sender that may ask for
   // fetches from it.
-  if (!may_fetch || !read.host_fetch_allowed || !head_ ||
+  SharedCopyHeadFn shared_head;
+  HeadFn plain_head;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (read.shared_copy) {
+      shared_head = shared_copy_head_;
+    } else {
+      plain_head = head_;
+    }
+  }
+  if (!may_fetch || !read.host_fetch_allowed ||
+      (read.shared_copy ? !shared_head : !plain_head) ||
       host != NormalizeHostname(read.page_host)) {
     return SubresourceVerdict::kUnknown;
   }
 
   const std::string origin = std::string(scheme) + "://" + host;
   const std::string absolute_url = origin + std::string(read.url);
-  const std::optional<int> status = head_(origin, absolute_url);
+  static const std::vector<PinnedUpstream> kNoOrigins;
+  const std::optional<int> status =
+      read.shared_copy ? shared_head(origin, absolute_url,
+                                     read.private_address_origins != nullptr
+                                         ? *read.private_address_origins
+                                         : kNoOrigins)
+                       : plain_head(origin, absolute_url);
 
   SubresourceVerdict verdict = SubresourceVerdict::kUnknown;
   if (status.has_value()) {
@@ -138,6 +161,21 @@ SubresourceVerdict SubresourceGate::Check(const SubresourceRead& read,
   return verdict;
 }
 
+bool CcFlagsAllowShared(std::uint16_t origin_cc_flags) {
+  return (origin_cc_flags & (AlternateMetadata::kCCOriginNoStore |
+                             AlternateMetadata::kCCOriginPrivate)) == 0;
+}
+
+void SubresourceGate::SetHead(HeadFn head) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  head_ = std::move(head);
+}
+
+void SubresourceGate::SetSharedCopyHead(SharedCopyHeadFn head) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  shared_copy_head_ = std::move(head);
+}
+
 std::uint64_t SubresourceGate::heads_sent() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return heads_sent_;
@@ -148,27 +186,72 @@ std::uint64_t SubresourceGate::refusals() const {
   return refusals_;
 }
 
-SubresourceGate::HeadFn MakeAnonymousHeadFn() {
-  return [](const std::string& origin,
-            const std::string& absolute_url) -> std::optional<int> {
-    std::optional<PinnedUpstream> upstream = ParseUpstream(origin);
-    if (!upstream.has_value()) return std::nullopt;
-    FetchPolicy policy;
-    policy.pinned_upstreams.push_back(*upstream);
-    AgentFetcherDeps deps;
-    deps.spawn = RealCurlSpawn();
-    deps.resolve = RealHostResolver();
-    // A redirect is not the resource: it is not followed, and reads as no
-    // answer.
-    deps.max_redirect_hops = 0;
-    deps.curl_opts.head = true;
-    deps.curl_opts.max_time_sec = 3;
-    deps.curl_opts.max_response_bytes = 64u << 10;
-    AgentFetchOutcome outcome =
-        FetchSubresource(absolute_url, ResourceClass::kDocument, policy, deps);
-    if (!outcome.fulfilled) return std::nullopt;
-    return outcome.status;
+namespace {
+
+AgentFetcherDeps AnonymousHeadDeps() {
+  AgentFetcherDeps deps;
+  // The answer decides whether bytes go into an output served to every
+  // client: an answer marked private or no-store, setting a cookie, or with a
+  // Vary the shared store refuses, does not admit.
+  deps.refuse_unshared_answers = true;
+  deps.spawn = RealCurlSpawn();
+  deps.resolve = RealHostResolver();
+  // A redirect is not the resource: it is not followed, and reads as no
+  // answer.
+  deps.max_redirect_hops = 0;
+  deps.curl_opts.head = true;
+  deps.curl_opts.max_time_sec = 3;
+  deps.curl_opts.max_response_bytes = 64u << 10;
+  return deps;
+}
+
+std::optional<int> AnonymousHead(const std::string& origin,
+                                 const std::string& absolute_url,
+                                 const AgentFetcherDeps& deps) {
+  std::optional<PinnedUpstream> upstream = ParseUpstream(origin);
+  if (!upstream.has_value()) return std::nullopt;
+  FetchPolicy policy;
+  policy.pinned_upstreams.push_back(*upstream);
+  AgentFetchOutcome outcome =
+      FetchSubresource(absolute_url, ResourceClass::kDocument, policy, deps);
+  // An answer the server gave but that may not be shared, or an address the
+  // shared-copy rules refuse, is a refusal (kRefused), not "no answer".
+  if (outcome.unshared != UnsharedReason::kNone || outcome.private_address) {
+    return kRefusedStatus;
+  }
+  if (!outcome.fulfilled) return std::nullopt;
+  return outcome.status;
+}
+
+}  // namespace
+
+SubresourceGate::HeadFn MakeAnonymousHeadFn(
+    SpawnCurlFn spawn, ResolveHostFn resolve,
+    std::function<void(const std::string&)> log_refusal) {
+  return [spawn, resolve, log_refusal](
+             const std::string& origin,
+             const std::string& absolute_url) -> std::optional<int> {
+    AgentFetcherDeps deps = AnonymousHeadDeps();
+    if (spawn) deps.spawn = spawn;
+    if (resolve) deps.resolve = resolve;
+    deps.on_unshared_answer_refusal = log_refusal;
+    return AnonymousHead(origin, absolute_url, deps);
   };
+}
+
+SubresourceGate::SharedCopyHeadFn MakeSharedCopyHeadFn(
+    std::function<void(const std::string&)> log_refusal) {
+  return
+      [log_refusal](const std::string& origin, const std::string& absolute_url,
+                    const std::vector<PinnedUpstream>& private_origins)
+          -> std::optional<int> {
+        AgentFetcherDeps deps = AnonymousHeadDeps();
+        deps.shared_copy = true;
+        deps.private_address_origins = private_origins;
+        deps.on_private_address_refusal = log_refusal;
+        deps.on_unshared_answer_refusal = log_refusal;
+        return AnonymousHead(origin, absolute_url, deps);
+      };
 }
 
 SubresourceGate::NowFn MonotonicNowMs() {

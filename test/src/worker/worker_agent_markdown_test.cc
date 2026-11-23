@@ -18,6 +18,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -34,6 +36,7 @@
 #include "src/worker/browser_analysis_manager.h"
 #include "src/worker/browser_analysis_manager_internal.h"
 #include "src/worker/html_scanner.h"
+#include "src/worker/subresource_gate.h"
 #include "src/worker/worker.h"
 #include "test/test_util/worker_quiescence.h"
 
@@ -921,6 +924,54 @@ TEST_F(WorkerTest, UnvouchedLlmsTxtRequestStartsNoBuild) {
     reached |= w.find("llms.txt: empty hostname") != std::string::npos;
   }
   EXPECT_TRUE(reached) << "the vouched request reaches the build";
+}
+
+// The agent render uses the page only when the gate admits the page's own
+// URL for a shared copy: an answer that sets a cookie, is private/no-store or
+// varies on a request field is refused; an unconfirmed (memo-only) answer is
+// not admitted either.
+TEST(AgentPageAdmittedTest, AsksTheSharedCopyQuestionAboutThePage) {
+  std::map<std::string, int> status;
+  std::vector<std::string> asked;
+  SubresourceGate gate(
+      [](const std::string&, const std::string&) -> std::optional<int> {
+        ADD_FAILURE() << "the ordinary HEAD must not answer for the page";
+        return 200;
+      },
+      [] { return std::int64_t{0}; });
+  gate.SetSharedCopyHead(
+      [&status, &asked](
+          const std::string&, const std::string& url,
+          const std::vector<PinnedUpstream>&) -> std::optional<int> {
+        asked.push_back(url);
+        auto it = status.find(url);
+        return it == status.end() ? std::optional<int>() : it->second;
+      });
+  status["https://example.com/open.html"] = 200;
+  status["https://example.com/held.html"] = kRefusedStatus;
+  AnalysisQueue::Item item;
+  item.hostname = "example.com";
+  item.scheme = "https";
+  item.host_vouched = true;
+  const std::vector<PinnedUpstream> none;
+
+  item.url = "/open.html";
+  EXPECT_FALSE(browser_internal::AgentPageAdmitted(&gate, item, false, none))
+      << "memo only and never asked: not admitted";
+  EXPECT_TRUE(browser_internal::AgentPageAdmitted(&gate, item, true, none));
+  EXPECT_TRUE(browser_internal::AgentPageAdmitted(&gate, item, false, none))
+      << "the warmed answer serves the render and the write";
+
+  item.url = "/held.html";
+  EXPECT_FALSE(browser_internal::AgentPageAdmitted(&gate, item, true, none));
+  EXPECT_FALSE(browser_internal::AgentPageAdmitted(&gate, item, false, none));
+
+  status["https://example.com/other.html"] = 200;
+  item.url = "/other.html";  // never asked: an unvouched item is not asked
+  item.host_vouched = false;
+  EXPECT_FALSE(browser_internal::AgentPageAdmitted(&gate, item, true, none));
+  EXPECT_FALSE(browser_internal::AgentPageAdmitted(nullptr, item, true, none));
+  EXPECT_EQ(asked.size(), 2u);
 }
 
 }  // namespace

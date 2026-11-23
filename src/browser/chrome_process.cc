@@ -118,6 +118,10 @@ std::vector<std::string> ChromeProcess::BuildChromeArgs(
   // offline emulation is bypassed). MUST remain unconditional; asserted by
   // chrome_process_test's DeadResolverFlagAlwaysPresent.
   arg_strings.push_back("--host-resolver-rules=MAP * ~NOTFOUND");
+  // Keep the render's WebRTC to proxied connections only.  MUST remain
+  // unconditional; asserted by chrome_process_test and
+  // tools/packaging/smoke-chrome-webrtc.sh against a real Chrome.
+  arg_strings.push_back("--webrtc-ip-handling-policy=disable_non_proxied_udp");
   arg_strings.push_back("about:blank");
   return arg_strings;
 }

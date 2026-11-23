@@ -4,6 +4,16 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+Security: fixed an issue that could let content not meant to be shared reach optimized pages served to other visitors. Affected: 2.9.2 and earlier. Update recommended.
+
+Changed: a stylesheet, script or image is inlined, combined or used for image dimensions in an optimized page only when your server marks it as shareable: not `Cache-Control: private` or `no-store`, no `Vary` on anything but `Accept-Encoding` (so `Vary: Origin` or `Vary: User-Agent` also stops these optimizations), and no `Set-Cookie`. This includes load-balancer affinity (sticky-session) cookies and session or consent cookies. Assets sent with `Cache-Control: private` are not rare (some frameworks, application servers and hosting defaults send it); such assets are no longer inlined, combined or sized, so affected pages can be larger or make more requests than before. `/v1/stats` counts the refusals under `subresource_refusals`, and the worker log names each origin once with the reason. Serve shared static assets with a shareable `Cache-Control`, without those cookies and without a `Vary` beyond `Accept-Encoding` to keep these optimizations.
+
+Security: fixed an issue in the experimental agent optimization (off by default) that could let content not meant to be shared reach the stored Markdown copy and `/llms.txt`. Affected: 2.9.2 and earlier releases that include agent optimization. Update recommended.
+
+Security: fixed an issue in browser analysis (off by default) that could let an analysed page reach network destinations it should not. Affected: 2.9.2 and earlier releases that include browser analysis. Update recommended.
+
+Changed: agent optimization now fetches only public origins by default. If a site you optimize is served from an internal address, list it with the new worker flag `--agent-render-private-origins` (container: `PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS`). The worker logs a warning naming the flag the first time it skips such a site.
+
 ## 2.9.2 - 2026-11-18
 
 Security: the nginx bundled in the container images (`pagespeed-nginx` and the combined image) is updated to 1.30.7, nginx's security release of 2026-11-18, which fixes nine security issues in nginx: memory-safety issues (among them in HTTP/2, HTTP/3, the resolver and the mail proxy), two TLS-verification and access-restriction bypasses in the stream module, and a denial-of-service loop (CVE-2026-125283, CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425, CVE-2026-120967, CVE-2026-123640, CVE-2026-118899). Update recommended.

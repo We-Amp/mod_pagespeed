@@ -23,6 +23,7 @@
 #include "lib/base/message_handler.h"
 #include "lib/classify/url_normalizer.h"
 #include "nlohmann/json.hpp"
+#include "src/browser/agent_fetcher.h"
 #include "src/product_version/build_commit.h"
 #include "src/product_version/version.h"
 #include "src/worker/config_file.h"
@@ -219,6 +220,16 @@ json BuildStatsJson(ApiContext& ctx) {
       // accepted and its work stored under the default context.
       {"accepted_non_default_option_context",
        s.notifications_accepted_non_default_option_context.load()}};
+  // Answers not used in shared output (sub-resource checks, agent render,
+  // /llms.txt), by reason, since start.
+  {
+    const SharedCopyRefusalCounts r = GetSharedCopyRefusalCounts();
+    j["subresource_refusals"] = {{"cookie", r.cookie},
+                                 {"no_store", r.no_store},
+                                 {"private", r.private_answer},
+                                 {"vary", r.vary},
+                                 {"private_address", r.private_address}};
+  }
   j["known_sites"] = {{"overflow", s.known_sites_overflow.load()},
                       {"incomplete", s.known_sites_incomplete.load() != 0}};
   j["variants"] = {{"written", s.variants_written.load()},

@@ -200,7 +200,9 @@ class PageAnalysisTest : public ::testing::Test {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -287,7 +289,9 @@ class PageAnalysisTest : public ::testing::Test {
         }
         continue;
       }
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -849,7 +853,9 @@ TEST_F(PageAnalysisTest, NetworkOfflineFailureAbortsAnalysis) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -890,7 +896,9 @@ TEST_F(PageAnalysisTest, FetchEnableFailureAbortsAnalysis) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -932,7 +940,9 @@ TEST_F(PageAnalysisTest, EvaluateReturnsEmptyAbortsAnalysis) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -983,7 +993,9 @@ TEST_F(PageAnalysisTest, EvaluateReturnsMalformedJsonAbortsAnalysis) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1035,7 +1047,9 @@ TEST_F(PageAnalysisTest, ViewportSetupFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1074,7 +1088,9 @@ TEST_F(PageAnalysisTest, AddScriptSetupFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1113,7 +1129,9 @@ TEST_F(PageAnalysisTest, PageEnableFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1152,7 +1170,9 @@ TEST_F(PageAnalysisTest, LifecycleEnableFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1190,7 +1210,9 @@ TEST_F(PageAnalysisTest, GetFrameTreeFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1229,7 +1251,9 @@ TEST_F(PageAnalysisTest, SetDocumentContentFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1488,7 +1512,9 @@ TEST_F(PageAnalysisTest, AttachToTargetFailure) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         json err = {
@@ -1521,7 +1547,9 @@ TEST_F(PageAnalysisTest, ResultsWithNoCls) {
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
 
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1819,7 +1847,9 @@ TEST_F(PageAnalysisTest, AgentOptimizeRendersDomToMarkdown) {
       int id = cmd.value("id", 0);
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1881,7 +1911,9 @@ TEST_F(PageAnalysisTest, AgentOptimizeEvaluateFailureAborts) {
       int id = cmd.value("id", 0);
       std::string method = cmd.value("method", "");
       responded_ids_.insert(id);
-      if (method == "Target.createTarget") {
+      if (method == "Target.createBrowserContext") {
+        RespondToCommand(id, {{"browserContextId", "ctx-1"}});
+      } else if (method == "Target.createTarget") {
         RespondToCommand(id, {{"targetId", "target-1"}});
       } else if (method == "Target.attachToTarget") {
         RespondToCommand(id, {{"sessionId", "sess-1"}});
@@ -1918,6 +1950,128 @@ TEST_F(PageAnalysisTest, AgentOptimizeEvaluateFailureAborts) {
 
   ASSERT_TRUE(analysis_done_);
   EXPECT_FALSE(analysis_result_.ok());
+}
+
+// ---- agent_optimize render isolation ---------------------------------------
+
+TEST_F(PageAnalysisTest, AgentRenderRunsInABrowserContextOfItsOwn) {
+  PageAnalyzer analyzer(client_.get());
+  auto resources = std::make_shared<const PageAnalyzer::ResourceMap>();
+  auto opts = std::make_shared<AgentRenderOptions>();
+  opts->policy = std::make_shared<FetchPolicy>();
+  opts->settle_ms = 0;
+  opts->deps.spawn = [](const std::vector<std::string>&, std::size_t) {
+    return CurlSpawnOutcome{};
+  };
+  opts->deps.resolve = [](std::string_view) {
+    return std::vector<std::string>{};
+  };
+
+  analyzer.Analyze(
+      "<html><body><p>x</p></body></html>", resources, 1440, 900,
+      [this](absl::StatusOr<PageAnalysisResult> result) {
+        analysis_result_ = std::move(result);
+        analysis_done_ = true;
+      },
+      PageAnalyzer::kDefaultTimeoutMs, opts);
+  for (int i = 0; i < 20; ++i) {
+    AutoRespondAll();
+    RunLoop();
+  }
+  SendEvent("Page.lifecycleEvent", {{"name", "networkIdle"}}, "sess-1");
+  for (int i = 0; i < 10; ++i) {
+    AutoRespondAll();
+    RunLoop();
+    if (analysis_done_) break;
+  }
+  ASSERT_TRUE(analysis_done_);
+  RunLoop();
+
+  // The context is made first, the target is made in it, and the context is
+  // disposed of after the target is closed.
+  const int ctx = IndexOf("Target.createBrowserContext");
+  const int create = IndexOf("Target.createTarget");
+  const int close = IndexOf("Target.closeTarget");
+  const int dispose = IndexOf("Target.disposeBrowserContext");
+  ASSERT_GE(ctx, 0);
+  ASSERT_GT(create, ctx);
+  ASSERT_GT(close, create);
+  ASSERT_GT(dispose, close);
+  EXPECT_EQ(received_commands_[create]["params"].value("browserContextId", ""),
+            "ctx-1");
+  EXPECT_EQ(received_commands_[dispose]["params"].value("browserContextId", ""),
+            "ctx-1");
+
+  // Service worker registration is removed from the render's documents.
+  const int script = IndexOf("Page.addScriptToEvaluateOnNewDocument");
+  ASSERT_GE(script, 0);
+  EXPECT_NE(received_commands_[script]["params"]
+                .value("source", "")
+                .find("delete Navigator.prototype.serviceWorker"),
+            std::string::npos);
+}
+
+// No context, no render: the agent render never falls back to the shared
+// default context.
+TEST_F(PageAnalysisTest, AgentRenderFailsClosedWithoutABrowserContext) {
+  PageAnalyzer analyzer(client_.get());
+  auto resources = std::make_shared<const PageAnalyzer::ResourceMap>();
+  auto opts = std::make_shared<AgentRenderOptions>();
+  opts->policy = std::make_shared<FetchPolicy>();
+  opts->settle_ms = 0;
+  opts->deps.spawn = [](const std::vector<std::string>&, std::size_t) {
+    return CurlSpawnOutcome{};
+  };
+  opts->deps.resolve = [](std::string_view) {
+    return std::vector<std::string>{};
+  };
+
+  analyzer.Analyze(
+      "<html><body></body></html>", resources, 1440, 900,
+      [this](absl::StatusOr<PageAnalysisResult> result) {
+        analysis_result_ = std::move(result);
+        analysis_done_ = true;
+      },
+      PageAnalyzer::kDefaultTimeoutMs, opts);
+  for (int i = 0; i < 20 && !analysis_done_; ++i) {
+    RunLoop();
+    for (auto& cmd : received_commands_) {
+      int id = cmd.value("id", 0);
+      if (responded_ids_.count(id)) continue;
+      responded_ids_.insert(id);
+      if (cmd.value("method", "") == "Target.createBrowserContext") {
+        json err = {{"id", id},
+                    {"error", {{"code", -32000}, {"message", "no contexts"}}}};
+        SendFromChrome(err.dump());
+      } else {
+        RespondToCommand(id, json::object());
+      }
+    }
+    RunLoop();
+  }
+  ASSERT_TRUE(analysis_done_);
+  EXPECT_FALSE(analysis_result_.ok());
+  EXPECT_LT(IndexOf("Target.createTarget"), 0);
+}
+
+// The performance render (no egress) is unchanged: default context, no
+// service worker removal.
+TEST_F(PageAnalysisTest, PerformanceRenderKeepsTheDefaultContext) {
+  PageAnalyzer analyzer(client_.get());
+  AnalyzeWithEval(analyzer, EmptyEvalResult());
+  ASSERT_TRUE(analysis_done_);
+  EXPECT_LT(IndexOf("Target.createBrowserContext"), 0);
+  EXPECT_LT(IndexOf("Target.disposeBrowserContext"), 0);
+  const int create = IndexOf("Target.createTarget");
+  ASSERT_GE(create, 0);
+  EXPECT_FALSE(
+      received_commands_[create]["params"].contains("browserContextId"));
+  const int script = IndexOf("Page.addScriptToEvaluateOnNewDocument");
+  ASSERT_GE(script, 0);
+  EXPECT_EQ(received_commands_[script]["params"]
+                .value("source", "")
+                .find("serviceWorker"),
+            std::string::npos);
 }
 
 }  // namespace

@@ -55,6 +55,9 @@
 #                                       it -- no token or entitlement.
 #   PAGESPEED_AGENT_OPTIMIZE_LLMS_TXT - Enable the synthesized /llms.txt site-index
 #                                       (default: false). Requires PAGESPEED_AGENT_OPTIMIZE.
+#   PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS - Own origins the agent render may fetch at a
+#                                       loopback or private address (comma-separated
+#                                       scheme://host[:port] or host[:port]; default: none).
 #   PAGESPEED_WEB_BOT_AUTH            - Enable the observe-only Web Bot Auth classifier
 #                                       (default: false). The verdict never
 #                                       changes request handling.
@@ -193,6 +196,7 @@ export PAGESPEED_PURGE_TOKEN
 # Gated additionally by --enable-browser-analysis; the operator flags alone enable it.
 [ "${PAGESPEED_AGENT_OPTIMIZE:-false}" = "true" ] && ARGS+=(--agent-optimize)
 [ "${PAGESPEED_AGENT_OPTIMIZE_LLMS_TXT:-false}" = "true" ] && ARGS+=(--agent-optimize-llms-txt)
+[ -n "${PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS:-}" ] && ARGS+=(--agent-render-private-origins "$PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS")
 
 # Web Bot Auth: observe-only RFC 9421 crawler verification.
 # The worker rejects non-https key-directory URLs at startup.

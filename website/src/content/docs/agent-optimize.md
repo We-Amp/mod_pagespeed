@@ -176,6 +176,22 @@ Text hidden by CSS classes or an external stylesheet stays in the copy, because
 the conversion works from the page's markup, not from computed styles. Treat the
 copy as untrusted page content, not as instructions.
 
+## What the render fetches
+
+The render fetches the page's own stylesheets, scripts, fonts and data
+requests from your site, and third-party hosts only when they are listed in
+`--agent-render-allow-hosts`.
+
+When your site's name resolves to a loopback or private address (for example
+`127.0.0.1`, `10.0.0.0/8` or `192.168.0.0/16`), the worker does not fetch from
+it for the Markdown copy or `/llms.txt`. To fetch from such an origin, list it
+with `--agent-render-private-origins`, for example
+`--agent-render-private-origins https://www.example.com` or
+`--agent-render-private-origins www.example.com:8080` (a name without a scheme
+stands for both http and https; no wildcards). The flag can be given more than
+once. The worker logs a warning naming the flag the first time it skips an
+origin.
+
 ## How the page cache treats signed-in visitors
 
 The page cache is shared between visitors, so it follows rules about requests

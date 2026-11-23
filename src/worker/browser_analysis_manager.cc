@@ -163,6 +163,22 @@ bool MayRunAgentRender(const AnalysisQueue::Item& item, bool agent_optimize,
   return agent_optimize && chrome_running && item.host_vouched;
 }
 
+bool AgentPageAdmitted(SubresourceGate* gate, const AnalysisQueue::Item& item,
+                       bool may_fetch,
+                       const std::vector<PinnedUpstream>& private_origins) {
+  if (gate == nullptr) return false;
+  SubresourceRead read;
+  read.site = item.site;
+  read.scheme = item.scheme;
+  read.host = item.hostname;
+  read.url = item.url;
+  read.page_host = item.hostname;
+  read.host_fetch_allowed = item.host_vouched;
+  read.shared_copy = true;
+  read.private_address_origins = &private_origins;
+  return gate->Admitted(read, may_fetch);
+}
+
 AnalysisQueue::Item BuildReanalysisItem(const AnalysisQueue::Item& src,
                                         int next_retry_count) {
   AnalysisQueue::Item retry;
@@ -488,6 +504,7 @@ std::string ChromeExitReason(int64_t exit_status, int term_signal) {
 
 // Bring browser_internal names into local scope for existing callers.
 using browser_internal::AgentBindingStillLive;
+using browser_internal::AgentPageAdmitted;
 using browser_internal::BuildReanalysisItem;
 using browser_internal::ChromeExitReason;
 using browser_internal::GetViewportProfile;
@@ -903,9 +920,15 @@ void BrowserAnalysisManager::OnChromeExit(int64_t exit_status,
 
 std::function<std::optional<std::string>(std::string_view)>
 BrowserAnalysisManager::GatedLookup(const AnalysisQueue::Item& item,
-                                    bool may_fetch) {
-  return [this, &item,
-          may_fetch](std::string_view url) -> std::optional<std::string> {
+                                    bool may_fetch, bool shared_copy) {
+  std::vector<PinnedUpstream> private_origins;
+  if (shared_copy) {
+    private_origins = ParseOperatorOrigins(config_.agent_render_private_origins)
+                          .value_or(std::vector<PinnedUpstream>{});
+  }
+  return [this, &item, may_fetch, shared_copy,
+          private_origins = std::move(private_origins)](
+             std::string_view url) -> std::optional<std::string> {
     if (cache_ == nullptr || subresource_gate_ == nullptr) return std::nullopt;
     std::string_view url_host = UrlHostname(url);
     const std::string host =
@@ -919,6 +942,8 @@ BrowserAnalysisManager::GatedLookup(const AnalysisQueue::Item& item,
     // An item is queued only for a sender that may ask for fetches
     // (Worker::MayRequestHostFetches); the host is asked only when vouched.
     read.host_fetch_allowed = item.host_vouched;
+    read.shared_copy = shared_copy;
+    read.private_address_origins = &private_origins;
     auto read_entry = [&] {
       return cache_->ReadBestAlternate(
           std::string(url), host, item.scheme, CapabilityMask(),
@@ -935,6 +960,7 @@ BrowserAnalysisManager::GatedLookup(const AnalysisQueue::Item& item,
               0) {
         read.entry_read = true;
         read.entry_flags = first->metadata.flags;
+        read.entry_cc_flags = first->metadata.origin_cc_flags;
         read.entry_site = item.site;  // the read above is keyed by item.site
         if (subresource_gate_->Admitted(read, may_fetch)) {
           r.emplace(std::move(*first));
@@ -946,11 +972,25 @@ BrowserAnalysisManager::GatedLookup(const AnalysisQueue::Item& item,
       if (!subresource_gate_->Admitted(read, may_fetch)) return std::nullopt;
       auto again = read_entry();
       if (!again.has_value()) return std::nullopt;
+      if (!CcFlagsAllowShared(again->metadata.origin_cc_flags)) {
+        return std::nullopt;
+      }
       r.emplace(std::move(*again));
     }
     auto span = r->content();
     return std::string(reinterpret_cast<const char*>(span.data()), span.size());
   };
+}
+
+std::vector<PinnedUpstream> BrowserAnalysisManager::AgentPrivateOrigins()
+    const {
+  return ParseOperatorOrigins(config_.agent_render_private_origins)
+      .value_or(std::vector<PinnedUpstream>{});
+}
+
+void BrowserAnalysisManager::LogPrivateAddressRefusal(
+    const std::string& message) {
+  if (handler_ != nullptr) handler_->Warning("%s", message.c_str());
 }
 
 bool BrowserAnalysisManager::EnqueueAnalysis(
@@ -1011,6 +1051,17 @@ bool BrowserAnalysisManager::EnqueueAnalysis(
     if (!item.force_agent_render) {
       BuildAnalysisResourceMap(docs.document, item.url, item.hostname,
                                item.scheme, warm, config_.url_normalization);
+    }
+    // The agent render's document asks the gate in shared-copy mode, the
+    // page itself included.
+    if (config_.agent_optimize) {
+      (void)AgentPageAdmitted(subresource_gate_.get(), item,
+                              /*may_fetch=*/true, AgentPrivateOrigins());
+      auto warm_shared =
+          GatedLookup(item, /*may_fetch=*/true, /*shared_copy=*/true);
+      (void)browser_internal::BuildAnalysisDocuments(item.original_html,
+                                                     item.url, item.hostname,
+                                                     item.scheme, warm_shared);
     }
   }
 
@@ -1096,6 +1147,7 @@ void BrowserAnalysisManager::RunAnalysis(AnalysisQueue::Item item) {
   // of the page.
   std::string pre_inline_html;
   if (combined_css_builder_) pre_inline_html = html_content;
+  std::string agent_html;
 
   // The documents the renders load: the stylesheets inlined and an absolute
   // <base>; the coverage render's without <noscript> content (see
@@ -1107,6 +1159,15 @@ void BrowserAnalysisManager::RunAnalysis(AnalysisQueue::Item item) {
     // hostname for relative URLs.  Nginx stores CSS keyed by the Host header
     // of the CSS request (the CSS URL's own hostname).  Only sheets the
     // server serves to any client are loaded (memo only on this loop).
+    // The agent render's document, from shared-copy admitted sheets only.
+    if (config_.agent_optimize) {
+      auto shared_lookup =
+          GatedLookup(item, /*may_fetch=*/false, /*shared_copy=*/true);
+      agent_html =
+          browser_internal::BuildAnalysisDocuments(
+              html_content, item.url, item.hostname, item.scheme, shared_lookup)
+              .document;
+    }
     auto lookup = GatedLookup(item, /*may_fetch=*/false);
     CssInliningStats css_stats;
     browser_internal::AnalysisDocuments docs =
@@ -1129,6 +1190,7 @@ void BrowserAnalysisManager::RunAnalysis(AnalysisQueue::Item item) {
   current_analysis_ = std::make_unique<AnalysisContext>();
   current_analysis_->item = std::move(item);
   current_analysis_->html_content = std::move(html_content);
+  current_analysis_->agent_html = std::move(agent_html);
   current_analysis_->coverage_html = std::move(coverage_html);
   current_analysis_->coverage_refusal = std::move(coverage_refusal);
   current_analysis_->pre_inline_html = std::move(pre_inline_html);
@@ -1775,11 +1837,38 @@ void BrowserAnalysisManager::RunAgentRender() {
   opts->policy = std::move(policy);
   opts->deps.spawn = RealCurlSpawn();
   opts->deps.resolve = RealHostResolver();
+  // The answers go into a copy served to other clients.
+  opts->deps.shared_copy = true;
+  opts->deps.private_address_origins =
+      ParseOperatorOrigins(config_.agent_render_private_origins)
+          .value_or(std::vector<PinnedUpstream>{});
+  opts->deps.on_private_address_refusal = [this](const std::string& m) {
+    LogPrivateAddressRefusal(m);
+  };
 
   // Desktop viewport — the rendered-DOM markdown is viewport-independent
   // (mirrors RunScriptAnalysis).
+  // The agent render loads only the shared-copy document, and only for a
+  // page whose own anonymous answer may be shared (memo only on this loop;
+  // warmed at enqueue).
+  if (current_analysis_->agent_html.empty()) {
+    OnAnalysisComplete();
+    return;
+  }
+  if (!AgentPageAdmitted(subresource_gate_.get(), current_analysis_->item,
+                         /*may_fetch=*/false, AgentPrivateOrigins())) {
+    stats_.agent_render_page_refused.fetch_add(1, std::memory_order_relaxed);
+    if (handler_ != nullptr) {
+      handler_->Info(
+          "agent_optimize: no Markdown copy for %s: its answer is not "
+          "confirmed as shareable",
+          current_analysis_->item.url.c_str());
+    }
+    OnAnalysisComplete();
+    return;
+  }
   page_analyzer_->Analyze(
-      current_analysis_->html_content, resources, 1440, 900,
+      current_analysis_->agent_html, resources, 1440, 900,
       [this](absl::StatusOr<PageAnalysisResult> result) {
         OnAgentRenderDone(std::move(result));
       },
@@ -1801,7 +1890,17 @@ void BrowserAnalysisManager::OnAgentRenderDone(
     // origin advanced underneath the render (or no binding was captured) — the
     // v1-render-overwrites-v2 race.  Fail-closed: never bind rendered content
     // to a stale/wrong origin hash.
-    if (!AgentBindingStillLive(*cache_, item)) {
+    if (!AgentPageAdmitted(subresource_gate_.get(), item, /*may_fetch=*/false,
+                           AgentPrivateOrigins())) {
+      // Checked again at the write: the answer must still be shareable.
+      stats_.agent_render_page_refused.fetch_add(1, std::memory_order_relaxed);
+      if (handler_) {
+        handler_->Info(
+            "agent_optimize: discarding markdown for %s (answer no longer "
+            "confirmed as shareable)",
+            item.url.c_str());
+      }
+    } else if (!AgentBindingStillLive(*cache_, item)) {
       if (handler_) {
         handler_->Info(
             "agent_optimize: discarding markdown for %s (origin advanced or "
@@ -2204,6 +2303,8 @@ std::string BrowserAnalysisManager::StatusJson() const {
       s.noscript_strip_refusals.load(std::memory_order_relaxed),
       ",\"reanalyses_scheduled\":",
       s.reanalyses_scheduled.load(std::memory_order_relaxed),
+      ",\"agent_render_page_refused\":",
+      s.agent_render_page_refused.load(std::memory_order_relaxed),
       ",\"revalidations_queued\":",
       s.revalidations_queued.load(std::memory_order_relaxed),
       ",\"revalidations_rate_limited\":",

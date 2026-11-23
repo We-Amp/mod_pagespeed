@@ -207,6 +207,67 @@ LiteralClass ClassifyHostLiteral(std::string_view host) {
   return {false, std::string(host)};
 }
 
+// The IPv4 addresses an IPv6 address can carry, so a v4 rule (private,
+// loopback, link-local) is applied to each: v4-mapped ::ffff:0:0/96,
+// v4-compatible ::/96, NAT64 64:ff9b::/96 (RFC 6052), the local-use NAT64
+// range 64:ff9b:1::/48 (RFC 8215; both the /48 and the /96 embedding
+// positions, since the operator picks the prefix length), and 6to4
+// 2002::/16 (RFC 3056).  `b` is the address in network order.
+std::vector<std::string> EmbeddedV4Candidates(const unsigned char b[16]) {
+  std::vector<std::string> out;
+  auto dotted = [&out](unsigned char a, unsigned char c, unsigned char d,
+                       unsigned char e) {
+    out.push_back(std::to_string(a) + "." + std::to_string(c) + "." +
+                  std::to_string(d) + "." + std::to_string(e));
+  };
+  auto zero = [b](int from, int to) {
+    for (int i = from; i < to; ++i) {
+      if (b[i] != 0) return false;
+    }
+    return true;
+  };
+  if (zero(0, 10) && b[10] == 0xff && b[11] == 0xff) {
+    dotted(b[12], b[13], b[14], b[15]);  // v4-mapped
+  } else if (zero(0, 12)) {
+    dotted(b[12], b[13], b[14], b[15]);  // v4-compatible
+  } else if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) {
+    if (zero(4, 12)) {
+      dotted(b[12], b[13], b[14], b[15]);  // 64:ff9b::/96
+    } else if (b[4] == 0x00 && b[5] == 0x01) {
+      dotted(b[6], b[7], b[9], b[10]);     // 64:ff9b:1::/48
+      dotted(b[12], b[13], b[14], b[15]);  // a /96 inside it
+    }
+  } else if (b[0] == 0x20 && b[1] == 0x02) {
+    dotted(b[2], b[3], b[4], b[5]);  // 6to4
+  } else if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00) {
+    // Teredo 2001::/32 (RFC 4380): the server address in bits 32-63, the
+    // client address obfuscated (inverted) in the last 32 bits.
+    dotted(b[4], b[5], b[6], b[7]);
+    dotted(
+        static_cast<unsigned char>(~b[12]), static_cast<unsigned char>(~b[13]),
+        static_cast<unsigned char>(~b[14]), static_cast<unsigned char>(~b[15]));
+  }
+  // SIIT IPv4-translated ::ffff:0:a.b.c.d (RFC 2765).
+  if (zero(0, 8) && b[8] == 0xff && b[9] == 0xff && b[10] == 0 && b[11] == 0) {
+    dotted(b[12], b[13], b[14], b[15]);
+  }
+  // ISATAP interface identifier ::0:5efe:a.b.c.d / ::200:5efe:a.b.c.d
+  // (RFC 5214), under any prefix.
+  if ((b[8] == 0x00 || b[8] == 0x02) && b[9] == 0x00 && b[10] == 0x5e &&
+      b[11] == 0xfe) {
+    dotted(b[12], b[13], b[14], b[15]);
+  }
+  return out;
+}
+
+// Parse a textual IPv6 address (zone id dropped) to bytes.
+bool ParseV6Bytes(std::string_view ip, unsigned char out[16]) {
+  std::string z(ip);
+  const size_t pct = z.find('%');
+  if (pct != std::string::npos) z.resize(pct);
+  return !z.empty() && inet_pton(AF_INET6, z.c_str(), out) == 1;
+}
+
 }  // namespace
 
 bool IsPrivateV4(std::string_view ip) {
@@ -262,6 +323,34 @@ bool IsPrivateV6(std::string_view ip) {
   }
   if (s.rfind("ff", 0) == 0) return true;        // mcast :50
   if (s.rfind("2001:db8", 0) == 0) return true;  // doc  :51
+  // Beyond ssrf.mjs: the binary forms the textual rules above miss.  Every
+  // v4-mapped address in any spelling is blocked (as the ::ffff: text rule
+  // intends), the local-use NAT64 range is never a public address, and an
+  // IPv4 address embedded by v4-compatible, NAT64 or 6to4 form is judged as
+  // that IPv4 address.
+  unsigned char b[16];
+  if (ParseV6Bytes(s, b)) {
+    bool mapped = true;
+    for (int i = 0; i < 10; ++i) mapped = mapped && b[i] == 0;
+    if (mapped && b[10] == 0xff && b[11] == 0xff) return true;
+    if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b &&
+        b[4] == 0x00 && b[5] == 0x01) {
+      return true;  // 64:ff9b:1::/48
+    }
+    // Teredo 2001::/32: a tunnel endpoint, never a backend address.
+    if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00) {
+      return true;
+    }
+    // Deprecated site-local fec0::/10 (RFC 3879).
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0xc0) return true;
+    // Discard-only 100::/64 (RFC 6666).
+    bool discard = b[0] == 0x01 && b[1] == 0x00;
+    for (int i = 2; i < 8; ++i) discard = discard && b[i] == 0;
+    if (discard) return true;
+    for (const std::string& v4 : EmbeddedV4Candidates(b)) {
+      if (IsPrivateV4(v4)) return true;
+    }
+  }
   return false;
 }
 
@@ -291,8 +380,14 @@ bool IsLinkLocalIp(std::string_view ip) {
     return buf[0] == 169 &&
            buf[1] == 254;  // 169.254.0.0/16 (incl. metadata .254)
   }
-  if (inet_pton(AF_INET6, z.c_str(), buf) == 1) {
-    return buf[0] == 0xfe && (buf[1] & 0xc0) == 0x80;  // fe80::/10
+  if (ParseV6Bytes(z, buf)) {
+    if (buf[0] == 0xfe && (buf[1] & 0xc0) == 0x80) return true;  // fe80::/10
+    // An IPv4 link-local address carried inside an IPv6 one (v4-mapped,
+    // v4-compatible, NAT64, 6to4) reaches the same endpoint.
+    for (const std::string& v4 : EmbeddedV4Candidates(buf)) {
+      if (IsLinkLocalIp(v4)) return true;
+    }
+    return false;
   }
   return false;  // not an IP literal => not link-local
 }

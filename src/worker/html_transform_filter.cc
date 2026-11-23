@@ -962,6 +962,7 @@ void HtmlTransformFilter::ApplyImageDimensions(
               0) {
         read.entry_read = true;
         read.entry_flags = first->metadata.flags;
+        read.entry_cc_flags = first->metadata.origin_cc_flags;
         read.entry_site = site_;  // the read above is keyed by site_
         if (subresource_gate_->Admitted(read, /*may_fetch=*/true)) {
           read_result.emplace(std::move(*first));
@@ -973,6 +974,7 @@ void HtmlTransformFilter::ApplyImageDimensions(
       if (!subresource_gate_->Admitted(read, /*may_fetch=*/true)) return;
       auto again = read_image();
       if (!again.has_value()) return;
+      if (!CcFlagsAllowShared(again->metadata.origin_cc_flags)) return;
       read_result.emplace(std::move(*again));
     }
   }

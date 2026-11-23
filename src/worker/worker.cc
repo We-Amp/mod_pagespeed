@@ -1416,6 +1416,15 @@ class UmaskGuard {
 #endif
 
 bool Worker::Initialize() {
+  // Gate reads that feed a shared copy (the agent render's document,
+  // /llms.txt) ask with the shared-copy HEAD: the same refusals as the
+  // render's own fetches.
+  subresource_gate_->SetSharedCopyHead(MakeSharedCopyHeadFn(
+      [this](const std::string& m) { LogWarning("%s", m.c_str()); }));
+  // The ordinary HEAD logs its first refusal per origin with the reason.
+  subresource_gate_->SetHead(MakeAnonymousHeadFn(
+      nullptr, nullptr,
+      [this](const std::string& m) { LogWarning("%s", m.c_str()); }));
 #ifdef _WIN32
   // On Windows, libuv passes pipe names directly to CreateNamedPipeW without
   // prepending a prefix. Convert Unix-style socket paths to Windows Named Pipe
@@ -4426,9 +4435,19 @@ bool Worker::BorrowCopyUntorn(ReadResult& rr, bool leases_enabled) {
 bool Worker::SubresourceAdmitted(const CacheNotification& notification,
                                  std::string_view read_url,
                                  std::string_view read_host, bool may_fetch,
-                                 const AlternateMetadata* entry) {
+                                 const AlternateMetadata* entry,
+                                 bool shared_copy) {
   if (subresource_gate_ == nullptr) return false;
   SubresourceRead read;
+  std::vector<pagespeed::PinnedUpstream> private_origins;
+  if (shared_copy) {
+    const auto cfg = live_config_.load();
+    private_origins = pagespeed::ParseOperatorOrigins(
+                          cfg->browser_analysis.agent_render_private_origins)
+                          .value_or(std::vector<pagespeed::PinnedUpstream>{});
+    read.shared_copy = true;
+    read.private_address_origins = &private_origins;
+  }
   read.site = notification.site;
   read.scheme = notification.scheme;
   read.host = read_host;
@@ -4440,6 +4459,7 @@ bool Worker::SubresourceAdmitted(const CacheNotification& notification,
   if (entry != nullptr) {
     read.entry_read = true;
     read.entry_flags = entry->flags;
+    read.entry_cc_flags = entry->origin_cc_flags;
     read.entry_site = notification.site;
   }
   const SubresourceVerdict verdict = subresource_gate_->Check(read, may_fetch);
@@ -4483,6 +4503,12 @@ std::optional<ReadResult> Worker::ReadAdmittedSubresource(
   }
   auto entry = read();
   if (!entry.has_value()) return std::nullopt;
+  // The entry read after the answer may be another than the one asked
+  // about: its own recorded Cache-Control decides too.
+  if (!CcFlagsAllowShared(entry->metadata.origin_cc_flags)) {
+    if (refused != nullptr) *refused = true;
+    return std::nullopt;
+  }
   return std::optional<ReadResult>(std::move(*entry));
 }
 
@@ -7703,6 +7729,15 @@ void Worker::HandleLlmsTxtBuild(const CacheNotification& notification,
   pagespeed::AgentFetcherDeps deps;
   deps.spawn = pagespeed::RealCurlSpawn();
   deps.resolve = pagespeed::RealHostResolver();
+  // The answers go into /llms.txt, served to other clients.
+  deps.shared_copy = true;
+  deps.private_address_origins =
+      pagespeed::ParseOperatorOrigins(
+          cfg->browser_analysis.agent_render_private_origins)
+          .value_or(std::vector<pagespeed::PinnedUpstream>{});
+  deps.on_private_address_refusal = [this](const std::string& m) {
+    LogWarning("%s", m.c_str());
+  };
 
   LlmsTxtFetchFn fetch = [policy, deps](const std::string& url) {
     pagespeed::AgentFetchOutcome o = pagespeed::FetchSubresource(
@@ -7732,7 +7767,10 @@ void Worker::HandleLlmsTxtBuild(const CacheNotification& notification,
     if (path.empty()) path = "/";
     // Another page's markdown goes into /llms.txt only when the server serves
     // that page to any client.
-    if (!SubresourceAdmitted(notification, path, host)) return std::nullopt;
+    if (!SubresourceAdmitted(notification, path, host, /*may_fetch=*/true,
+                             /*entry=*/nullptr, /*shared_copy=*/true)) {
+      return std::nullopt;
+    }
     auto md = cache_->ReadAlternate(
         path, host, scheme,
         static_cast<AlternateId>(SentinelId::kAgentMarkdown), site);

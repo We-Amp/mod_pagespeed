@@ -894,6 +894,14 @@
       "platform": null
     },
     {
+      "name": "--agent-render-private-origins",
+      "arg": "ORIGINS",
+      "default": "none",
+      "description": "Own origins the agent render may fetch at a loopback or private address: comma-separated scheme://host[:port] or host[:port], no wildcards; repeatable (default: none)",
+      "section": "Agent Optimize (EXPERIMENTAL — off by default)",
+      "platform": null
+    },
+    {
       "name": "--web-bot-auth",
       "arg": null,
       "default": null,

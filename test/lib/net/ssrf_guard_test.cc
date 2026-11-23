@@ -398,23 +398,79 @@ TEST(SsrfGuardHardening, ZoneIdEndToEnd) {
   EXPECT_FALSE(IsPublicUrl("http://[fe80::1%25eth0]/", {"93.184.216.34"}));
 }
 
-// S5 — dotted-embedded v4 is caught; non-dotted v4-mapped is not (both impls).
-// Parity-correct today; pinned so a future change is conscious + coordinated.
-TEST(SsrfGuardHardening, V4CompatibleAsymmetryPinned) {
+// S5 (revised) — an embedded IPv4 address is judged as that address in every
+// spelling: dotted or hex, v4-compatible, NAT64 or 6to4.  This goes beyond
+// ssrf.mjs on purpose.
+TEST(SsrfGuardHardening, Ipv6FormsOfIpv4) {
   EXPECT_TRUE(IsPrivateV6("::127.0.0.1"));
-  EXPECT_FALSE(IsPrivateV6("::7f00:1"));
+  EXPECT_TRUE(IsPrivateV6("::7f00:1"));
   EXPECT_TRUE(IsPrivateV6("64:ff9b::127.0.0.1"));
-  EXPECT_FALSE(IsPrivateV6("64:ff9b::7f00:1"));
+  EXPECT_TRUE(IsPrivateV6("64:ff9b::7f00:1"));
+  EXPECT_TRUE(IsPrivateV6("64:ff9b::a00:5"));     // 10.0.0.5
+  EXPECT_TRUE(IsPrivateV6("64:ff9b::c0a8:101"));  // 192.168.1.1
+  EXPECT_TRUE(IsPrivateV6("64:ff9b:1::1"));       // local-use NAT64 range
+  EXPECT_TRUE(IsPrivateV6("2002:7f00:1::"));      // 6to4 embedding 127.x
+  EXPECT_TRUE(IsPrivateV6("2002:0a00:1::"));      // 6to4 embedding 10.x
+  EXPECT_TRUE(IsPrivateV6("2002:a9fe:a9fe::1"));  // 6to4 embedding metadata
+  EXPECT_TRUE(IsPrivateV6("0:0:0:0:0:ffff:5db8:d822"));  // mapped, long form
+  EXPECT_TRUE(IsPrivateIp("64:ff9b::a9fe:a9fe"));
+  EXPECT_TRUE(IsPrivateIp("2002:c0a8:0101::"));
+  // Embedded PUBLIC addresses stay public (only v4-mapped is blanket-blocked).
+  EXPECT_FALSE(IsPrivateV6("64:ff9b::93.184.216.34"));
+  EXPECT_FALSE(IsPrivateV6("64:ff9b::5db8:d822"));
+  EXPECT_FALSE(IsPrivateV6("2002:5db8:d822::1"));
+  EXPECT_FALSE(IsPrivateV6("2606:4700::1111"));
 }
 
-// N2 — 6to4 / site-local / Teredo are NOT blocked by ssrf.mjs; C++ matches.
+// N2 — site-local / Teredo are NOT blocked by ssrf.mjs; C++ matches.
 // Pinned so widening these is a deliberate, parity-coordinated change.
-TEST(SsrfGuardHardening, ReservedV6GapsPinned) {
-  EXPECT_FALSE(IsPrivateV6("2002:7f00:1::"));  // 6to4 embedding 127.x
-  EXPECT_FALSE(IsPrivateV6("2002:0a00:1::"));  // 6to4 embedding 10.x
-  EXPECT_FALSE(IsPrivateV6("fec0::1"));        // deprecated site-local
-  EXPECT_FALSE(IsPrivateV6("feff::1"));
-  EXPECT_FALSE(IsPrivateV6("2001:0:4137:9e76::1"));  // Teredo
+TEST(SsrfGuardHardening, ReservedV6Ranges) {
+  EXPECT_TRUE(IsPrivateV6("fec0::1"));              // site-local
+  EXPECT_TRUE(IsPrivateV6("feff::1"));              // top of fec0::/10
+  EXPECT_TRUE(IsPrivateV6("2001:0:4137:9e76::1"));  // Teredo
+  EXPECT_TRUE(IsPrivateV6("2001::5db8:d822:0:0"));  // Teredo, any form
+  EXPECT_TRUE(IsPrivateV6("100::1"));               // discard-only
+  EXPECT_TRUE(IsPrivateV6("100::ffff:ffff:ffff:ffff"));
+  EXPECT_FALSE(IsPrivateV6("100:0:0:1::1"));     // outside 100::/64
+  EXPECT_FALSE(IsPrivateV6("2001:4860::8888"));  // public, not Teredo
+  // SIIT and ISATAP carrying a private IPv4 address.
+  EXPECT_TRUE(IsPrivateV6("::ffff:0:a00:5"));
+  EXPECT_TRUE(IsPrivateV6("::ffff:0:127.0.0.1"));
+  EXPECT_TRUE(IsPrivateV6("2606:4700::5efe:a00:5"));
+  EXPECT_TRUE(IsPrivateV6("2606:4700::200:5efe:192.168.1.1"));
+  // ...and a public one.
+  // (A ::ffff:-spelled SIIT address is blocked whatever it carries, by the
+  // textual ::ffff: rule.)
+  EXPECT_TRUE(IsPrivateV6("::ffff:0:5db8:d822"));
+  EXPECT_FALSE(IsPrivateV6("2606:4700::5efe:5db8:d822"));
+}
+
+TEST(SsrfGuardHardening, IsLinkLocalIpTunnelForms) {
+  // Teredo: server 169.254.169.254, or client obfuscated (~a9fe:a9fe).
+  EXPECT_TRUE(IsLinkLocalIp("2001:0:a9fe:a9fe::1"));
+  EXPECT_TRUE(IsLinkLocalIp("2001:0:5db8:d822::5601:5601"));
+  EXPECT_TRUE(IsLinkLocalIp("::ffff:0:a9fe:a9fe"));         // SIIT
+  EXPECT_TRUE(IsLinkLocalIp("2606:4700::5efe:a9fe:a9fe"));  // ISATAP
+  EXPECT_FALSE(IsLinkLocalIp("2001:0:5db8:d822::1"));
+}
+
+// Link-local / metadata carried inside an IPv6 address.
+TEST(SsrfGuardHardening, IsLinkLocalIpIpv6Forms) {
+  EXPECT_TRUE(IsLinkLocalIp("::ffff:169.254.169.254"));
+  EXPECT_TRUE(IsLinkLocalIp("::ffff:a9fe:a9fe"));
+  EXPECT_TRUE(IsLinkLocalIp("0:0:0:0:0:ffff:a9fe:a9fe"));
+  EXPECT_TRUE(IsLinkLocalIp("::169.254.169.254"));
+  EXPECT_TRUE(IsLinkLocalIp("::a9fe:a9fe"));
+  EXPECT_TRUE(IsLinkLocalIp("64:ff9b::a9fe:a9fe"));
+  EXPECT_TRUE(IsLinkLocalIp("64:ff9b::169.254.169.254"));
+  EXPECT_TRUE(IsLinkLocalIp("64:ff9b:1::a9fe:a9fe"));      // /96 inside the /48
+  EXPECT_TRUE(IsLinkLocalIp("64:ff9b:1:a9fe:a9:fe00::"));  // /48 position
+  EXPECT_TRUE(IsLinkLocalIp("2002:a9fe:a9fe::1"));
+  EXPECT_TRUE(IsLinkLocalIp("fe80::1%eth0"));
+  EXPECT_FALSE(IsLinkLocalIp("::ffff:10.0.0.5"));
+  EXPECT_FALSE(IsLinkLocalIp("64:ff9b::5db8:d822"));
+  EXPECT_FALSE(IsLinkLocalIp("2002:5db8:d822::1"));
+  EXPECT_FALSE(IsLinkLocalIp("2606:4700::1111"));
 }
 
 // N3 — pathological inputs fail closed (and return fast via the >2^31 early-out).

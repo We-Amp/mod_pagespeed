@@ -155,6 +155,7 @@ cc_library(
     hdrs = ["agent_fetcher.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//lib/cache:vary_storability",
         "//lib/net:curl_fetcher",
         "//lib/net:fetch_policy",
         "//lib/net:ssrf_guard",

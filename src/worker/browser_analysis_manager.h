@@ -94,6 +94,11 @@ struct BrowserAnalysisConfig {
   // allow-list names opt-in third-party hosts reachable through the G2 SSRF guard.
   bool agent_optimize = false;
   std::vector<std::string> agent_render_allow_hosts;
+  // Own origins the operator allows to resolve to a loopback or private
+  // address for the agent render and /llms.txt fetches (entries as
+  // ParseOperatorOrigins reads them; validated at startup).  Any other own
+  // origin that resolves there is not fetched.
+  std::vector<std::string> agent_render_private_origins;
 
   // The off-by-default /llms.txt site-index. Synthesis is gated on
   // the operator flags agent_optimize && agent_optimize_llms_txt.
@@ -146,6 +151,9 @@ struct BrowserStats {
   std::atomic<uint64_t> css_inlining_stylesheets_cached{0};
   std::atomic<uint64_t> css_inlining_bytes_inlined{0};
   std::atomic<uint64_t> reanalyses_scheduled{0};
+  // Agent renders (or their Markdown writes) skipped because the page's own
+  // anonymous answer was not confirmed as shareable.
+  std::atomic<uint64_t> agent_render_page_refused{0};
   // Analyses queued because a template's validation record no longer matched
   // the stylesheet its page is served with (RequestRevalidation), and requests
   // the per-template rate limit turned away.
@@ -399,9 +407,16 @@ class BrowserAnalysisManager {
   std::shared_ptr<SubresourceGate> subresource_gate_;
   // A cache lookup for the analysis of `item` that returns only what the
   // gate admits; the lookup's url is a cache URL (or an absolute URL whose
-  // host keys the read).  `may_fetch` false: memo only.
+  // host keys the read).  `may_fetch` false: memo only.  `shared_copy`: the
+  // bytes go into the agent render's document, so the gate asks with its
+  // shared-copy HEAD (SubresourceRead::shared_copy).
   std::function<std::optional<std::string>(std::string_view)> GatedLookup(
-      const AnalysisQueue::Item& item, bool may_fetch);
+      const AnalysisQueue::Item& item, bool may_fetch,
+      bool shared_copy = false);
+  // The operator's private-address origins, parsed.
+  std::vector<PinnedUpstream> AgentPrivateOrigins() const;
+  // Logs a shared-copy refusal (private address not named by the operator).
+  void LogPrivateAddressRefusal(const std::string& message);
   ValidationRunner validation_runner_;
   // Set only while TestValidateOneViewport is driving: stops the pipeline at
   // the end of the viewport rather than advancing the schedule, which would
@@ -488,6 +503,10 @@ class BrowserAnalysisManager {
     // is already in it, so a "critical only" candidate built from it would
     // carry the whole sheet as well.
     std::string html_content;
+    // The agent render's document: as html_content, but built only from
+    // sub-resources the gate admits for a shared copy.  Set when
+    // agent_optimize is on.
+    std::string agent_html;
     // The CSS coverage render's document: html_content without its <noscript>
     // elements (that render runs with script execution
     // disabled). Empty when `coverage_refusal` says why it may not be

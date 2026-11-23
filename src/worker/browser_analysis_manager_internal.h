@@ -26,6 +26,7 @@
 #include "src/worker/cascade_layer_order.h"
 #include "src/worker/css_cache_inliner.h"
 #include "src/worker/html_scanner.h"
+#include "src/worker/subresource_gate.h"
 
 namespace pagespeed {
 namespace browser_internal {
@@ -148,6 +149,14 @@ bool ShouldInlineCriticalCss(float coverage_ratio);
 // for that host, besides agent_optimize and a running Chrome.
 bool MayRunAgentRender(const AnalysisQueue::Item& item, bool agent_optimize,
                        bool chrome_running);
+
+// Whether the agent render may use the page itself: the gate admits the
+// item's own URL for a shared copy (an anonymous answer that may be shared,
+// from an origin the shared-copy address rule allows).  `may_fetch` false:
+// memo only.  False without a gate.
+bool AgentPageAdmitted(SubresourceGate* gate, const AnalysisQueue::Item& item,
+                       bool may_fetch,
+                       const std::vector<PinnedUpstream>& private_origins);
 
 AnalysisQueue::Item BuildReanalysisItem(const AnalysisQueue::Item& src,
                                         int next_retry_count);

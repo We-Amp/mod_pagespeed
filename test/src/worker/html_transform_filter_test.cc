@@ -2960,13 +2960,15 @@ class CacheHelper {
 
   // Write image data at the default mask (what nginx does on cache miss).
   void WriteImage(std::string_view url, std::string_view hostname,
-                  std::span<const uint8_t> image_data) {
+                  std::span<const uint8_t> image_data,
+                  std::uint16_t cc_flags = 0) {
     CapabilityMask mask;  // Default = Desktop/Identity = 0x08
     AlternateId id =
         MaskToAlternateId(static_cast<uint8_t>(mask.Encode() & 0xFF));
     AlternateMetadata meta;
     meta.full_mask = mask.Encode();
     meta.content_type = ContentType::kImage;
+    meta.origin_cc_flags = cc_flags;
 
     auto wh = cache_->WriteAlternate(url, hostname, "https", id,
                                      image_data.size(), meta);
@@ -3064,6 +3066,128 @@ TEST(HtmlTransformFilterTest, ImageDimensionsSkipRefusedImage) {
   EXPECT_NE(output.find("src=\"/open/b.png\" width=\"1\""), std::string::npos)
       << output;
   EXPECT_EQ(asked.size(), 2u);
+}
+
+// On the normal path, an image whose anonymous answer is marked private or
+// no-store, or sets a cookie, sizes nothing; a cacheable one still does, also
+// when the site is on this host (its name resolves to loopback).
+TEST(HtmlTransformFilterTest, ImageDimensionsUseOnlyCacheableAnswers) {
+  CacheHelper cache_helper;
+  ASSERT_TRUE(cache_helper.valid()) << "Cache creation failed";
+  const std::string hostname = "example.com";
+  for (const char* path :
+       {"/pub.png", "/priv.png", "/nostore.png", "/cookie.png"}) {
+    cache_helper.WriteImage(path, hostname,
+                            std::span<const uint8_t>(kMinimalPng));
+  }
+  auto spawn = [](const std::vector<std::string>& argv,
+                  std::size_t) -> CurlSpawnOutcome {
+    std::string url;
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i) {
+      if (argv[i] == "--url") url = argv[i + 1];
+    }
+    std::string h = "Cache-Control: public, max-age=600\r\n";
+    if (url.find("/priv.png") != std::string::npos) {
+      h = "Cache-Control: private\r\n";
+    } else if (url.find("/nostore.png") != std::string::npos) {
+      h = "Cache-Control: no-store\r\n";
+    } else if (url.find("/cookie.png") != std::string::npos) {
+      h = "Set-Cookie: lb=1\r\n";
+    }
+    CurlSpawnOutcome o;
+    o.spawned = true;
+    o.exit_code = 0;
+    o.output = "HTTP/1.1 200 OK\r\n" + h + "\r\n";
+    return o;
+  };
+  SubresourceGate gate(
+      MakeAnonymousHeadFn(spawn,
+                          [](std::string_view) {
+                            return std::vector<std::string>{"127.0.0.1"};
+                          }),
+      [] { return std::int64_t{0}; });
+
+  HtmlTransformConfig config;
+  config.enable_critical_css = false;
+  config.enable_lazy_load = false;
+  config.enable_image_dimensions = true;
+  config.enable_lcp_preload = false;
+  config.enable_preconnect_injection = false;
+
+  net_instaweb::HtmlKeywords::Init();
+  net_instaweb::NullMessageHandler message_handler;
+  net_instaweb::HtmlParse parser(&message_handler);
+  HtmlTransformFilter transform(&parser, config, "", cache_helper.cache(),
+                                hostname, "https");
+  transform.set_subresource_gate(&gate, /*host_fetch_allowed=*/true);
+  parser.AddFilter(&transform);
+  std::string output;
+  net_instaweb::StringWriter writer(&output);
+  net_instaweb::HtmlWriterFilter writer_filter(&parser);
+  writer_filter.set_writer(&writer);
+  parser.AddFilter(&writer_filter);
+  ASSERT_TRUE(parser.StartParse("https://example.com/"));
+  parser.ParseText(
+      "<html><body><img src=\"/pub.png\"><img src=\"/priv.png\">"
+      "<img src=\"/nostore.png\"><img src=\"/cookie.png\"></body></html>");
+  parser.FinishParse();
+
+  EXPECT_NE(output.find("src=\"/pub.png\" width=\"1\""), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("<img src=\"/priv.png\">"), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("<img src=\"/nostore.png\">"), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("<img src=\"/cookie.png\">"), std::string::npos)
+      << output;
+}
+
+// After the server admits a URL, the entry read for it still has to allow
+// a shared output: one recorded as private or no-store sizes nothing.
+TEST(HtmlTransformFilterTest, ImageDimensionsCheckTheReReadEntry) {
+  CacheHelper cache_helper;
+  ASSERT_TRUE(cache_helper.valid()) << "Cache creation failed";
+  const std::string hostname = "example.com";
+  cache_helper.WriteImage("/ok.png", hostname,
+                          std::span<const uint8_t>(kMinimalPng));
+  cache_helper.WriteImage("/p.png", hostname,
+                          std::span<const uint8_t>(kMinimalPng),
+                          AlternateMetadata::kCCOriginPrivate);
+  cache_helper.WriteImage("/ns.png", hostname,
+                          std::span<const uint8_t>(kMinimalPng),
+                          AlternateMetadata::kCCOriginNoStore);
+  SubresourceGate gate(
+      [](const std::string&, const std::string&) -> std::optional<int> {
+        return 200;
+      },
+      [] { return std::int64_t{0}; });
+  HtmlTransformConfig config;
+  config.enable_critical_css = false;
+  config.enable_lazy_load = false;
+  config.enable_image_dimensions = true;
+  config.enable_lcp_preload = false;
+  config.enable_preconnect_injection = false;
+  net_instaweb::HtmlKeywords::Init();
+  net_instaweb::NullMessageHandler message_handler;
+  net_instaweb::HtmlParse parser(&message_handler);
+  HtmlTransformFilter transform(&parser, config, "", cache_helper.cache(),
+                                hostname, "https");
+  transform.set_subresource_gate(&gate, /*host_fetch_allowed=*/true);
+  parser.AddFilter(&transform);
+  std::string output;
+  net_instaweb::StringWriter writer(&output);
+  net_instaweb::HtmlWriterFilter writer_filter(&parser);
+  writer_filter.set_writer(&writer);
+  parser.AddFilter(&writer_filter);
+  ASSERT_TRUE(parser.StartParse("https://example.com/"));
+  parser.ParseText(
+      "<html><body><img src=\"/ok.png\"><img src=\"/p.png\">"
+      "<img src=\"/ns.png\"></body></html>");
+  parser.FinishParse();
+  EXPECT_NE(output.find("src=\"/ok.png\" width=\"1\""), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("<img src=\"/p.png\">"), std::string::npos) << output;
+  EXPECT_NE(output.find("<img src=\"/ns.png\">"), std::string::npos) << output;
 }
 
 // Without a gate, and for a sender that may not have the worker ask the

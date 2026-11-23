@@ -5,6 +5,7 @@
 #define SRC_BROWSER_AGENT_FETCHER_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -14,6 +15,7 @@
 
 #include "lib/net/curl_fetcher.h"
 #include "lib/net/fetch_policy.h"
+#include "lib/net/upstream_pin.h"
 
 // The out-of-Chrome, IP-pinned subresource fetcher for the agent_optimize
 // render. This is the SYSTEMS layer wrapped around the pure lib/net
@@ -79,7 +81,76 @@ struct AgentFetcherDeps {
   // fetching trust-anchor material (Web Bot Auth key directories):
   // a single http hop would hand the response body to an on-path attacker.
   bool require_https = false;
+  // Set by callers whose answers go into a copy that is stored and served to
+  // other clients (the agent render's Markdown copy, /llms.txt).  For an
+  // own-origin (kProxyUpstream) fetch it adds two refusals:
+  //  * an answer for which ForbidsSharedCopy holds is not used;
+  //  * a site name that resolves to a loopback or private address (any
+  //    address ssrf_guard IsPrivateIp classifies so) is not fetched unless
+  //    the operator listed that origin in `private_address_origins`.
+  bool shared_copy = false;
+  // The first of those refusals alone: an own-origin answer for which
+  // ForbidsSharedCopy holds is not used.  Loopback and private own-origin
+  // addresses stay allowed.  Implied by `shared_copy`.  Set by the
+  // sub-resource gate's HEAD, whose answer decides whether another URL's
+  // bytes go into a shared output.
+  bool refuse_unshared_answers = false;
+  // Origins (scheme, host, port) the operator named as allowed to resolve to
+  // a loopback or private address for shared-copy fetches.  Compared like
+  // the G1 pin (byte equality after canonicalization).  See
+  // ParseOperatorOrigins.
+  std::vector<PinnedUpstream> private_address_origins;
+  // Called with a message the FIRST time (per process) an origin is refused
+  // for resolving to a loopback or private address, naming the flag that
+  // allows it.  Optional.
+  std::function<void(const std::string&)> on_private_address_refusal;
+  // Called with a message the FIRST time (per process) an origin's answer is
+  // refused under the answer rule (ForbidsSharedCopy), naming the reason.
+  // Optional.
+  std::function<void(const std::string&)> on_unshared_answer_refusal;
 };
+
+// Why an answer may not go into a shared copy (UnsharedAnswerReason).
+enum class UnsharedReason : std::uint8_t {
+  kNone,
+  kCookie,   // Set-Cookie / Set-Cookie2
+  kNoStore,  // Cache-Control: no-store
+  kPrivate,  // Cache-Control: private, any form
+  kVary,     // a Vary the shared store refuses (vary_storability.h)
+};
+
+// The first reason that applies, in the order above; kNone when the answer
+// may be shared.
+UnsharedReason UnsharedAnswerReason(const std::vector<HttpHeader>& headers);
+
+// "cookie", "no-store", "private", "vary" ("" for kNone).
+std::string_view UnsharedReasonName(UnsharedReason reason);
+
+// Process-wide counts of shared-copy and answer-rule refusals, by reason.
+struct SharedCopyRefusalCounts {
+  std::uint64_t cookie = 0;
+  std::uint64_t no_store = 0;
+  std::uint64_t private_answer = 0;
+  std::uint64_t vary = 0;
+  std::uint64_t private_address = 0;
+};
+SharedCopyRefusalCounts GetSharedCopyRefusalCounts();
+
+// Parse the operator's private-address origin list.  Each entry is
+// "scheme://host[:port]" or a bare "host[:port]" (which stands for both
+// http and https).  Surrounding whitespace is trimmed; empty entries are
+// skipped.  nullopt if any entry is not a valid origin (fail closed at
+// startup rather than silently ignore a typo).  A wildcard ('*') is
+// rejected: each origin is named exactly.
+std::optional<std::vector<PinnedUpstream>> ParseOperatorOrigins(
+    const std::vector<std::string>& entries);
+
+// Whether a response may not go into a shared copy: it sets a cookie, its
+// Cache-Control header(s) say `no-store` or `private` in any form, or its
+// Vary names anything the shared store refuses (anything but
+// Accept-Encoding, `*` included).  Names are matched without regard to
+// case; every header counts.
+bool ForbidsSharedCopy(const std::vector<HttpHeader>& headers);
 
 // The per-render agent_optimize configuration handed to PageAnalyzer::Analyze.
 // `policy` == nullptr (the default) preserves the legacy offline/cache-only render
@@ -112,6 +183,11 @@ struct AgentFetchOutcome {
   std::string body;        // raw bytes (the bridge base64-encodes)
   std::string final_url;   // URL after redirects (diagnostics)
   std::string diagnostic;  // human-readable deny/fail reason (logging)
+  // Set when the deny was the answer rule (an answer was received but may
+  // not be shared), with its reason; kNone otherwise.
+  UnsharedReason unshared = UnsharedReason::kNone;
+  // Set when the deny was the shared-copy address rule.
+  bool private_address = false;
 };
 
 // Adjudicate + (if allowed) fetch one subresource. BLOCKING — runs on the libuv

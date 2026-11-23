@@ -440,7 +440,10 @@ bool JsMinifyingTokenizer::WhitespaceNeededBefore(JsKeywords::Type type,
   } else if (strings::EndsWith(prev_token_, "+")) {
     return strings::StartsWith(token, "+");
   } else if (strings::EndsWith(prev_token_, "<")) {
-    return strings::StartsWith(token, "!");
+    // "<"+"!" would start an HTML comment, and "<"+"/" (a regular expression
+    // after "<") an HTML end tag such as "</textarea": output that is written
+    // into an HTML page must not gain either.
+    return strings::StartsWith(token, "!") || strings::StartsWith(token, "/");
   } else if (strings::EndsWith(prev_token_, "!") ||
              strings::EndsWith(prev_token_, "-")) {
     return strings::StartsWith(token, "-");
@@ -489,8 +492,11 @@ bool MinifyUtf8JsWithSourceMap(
         // only exists on the decline path), so accepted-input output is
         // byte-identical; on valid-but-unmodelable input (the n4 class)
         // it is a correctness fix for the seam, not a behavior regression.
+        // Likewise for "<" and a "/" after it, which would form an HTML end
+        // tag such as "</textarea" that the input does not have.
         if (!output->empty() && !token.empty() &&
-            CanFuseAtSeam(output->back(), token[0])) {
+            (CanFuseAtSeam(output->back(), token[0]) ||
+             (output->back() == '<' && token[0] == '/'))) {
           output->push_back(' ');
         }
         output->append(token.data(), token.size());

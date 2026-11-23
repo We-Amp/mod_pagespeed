@@ -12,10 +12,15 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "lib/base/json_message_handler.h"
 #include "lib/base/message_handler.h"
+#include "src/browser/agent_fetcher.h"
 #include "src/browser/browser_sandbox.h"
 #include "src/product_version/build_commit.h"
 #include "src/product_version/version.h"
@@ -312,6 +317,15 @@ void PrintUsage(const char* program) {
          "names (no\n"
          "                             wildcards), still SSRF-guarded "
          "(default: none)\n"
+      << "  --agent-render-private-origins ORIGINS  Own origins the agent "
+         "render may\n"
+         "                             fetch at a loopback or private "
+         "address:\n"
+         "                             comma-separated scheme://host[:port] "
+         "or\n"
+         "                             host[:port], no wildcards; "
+         "repeatable\n"
+         "                             (default: none)\n"
       << "\n"
       << "Web Bot Auth (observe-only — off by default):\n"
       << "  --web-bot-auth             Classify RFC 9421-signed agent "
@@ -988,6 +1002,24 @@ static int WorkerMain(int argc,  // NOLINT(bugprone-exception-escape)
                 hosts.substr(start, end - start));
           }
           pos = comma + 1;
+        }
+      } else if (arg == "--agent-render-private-origins" && i + 1 < argc) {
+        // Comma-separated own origins ("scheme://host[:port]" or a bare
+        // "host[:port]" for both schemes, no wildcards) the agent render and
+        // /llms.txt may fetch although they resolve to a loopback or private
+        // address.  Repeatable: each use adds to the list.
+        std::vector<std::string> origins =
+            absl::StrSplit(argv[++i], ',', absl::SkipWhitespace());
+        if (!pagespeed::ParseOperatorOrigins(origins).has_value()) {
+          std::cerr << "Error: --agent-render-private-origins takes "
+                       "comma-separated origins (scheme://host[:port] or "
+                       "host[:port], no wildcards)\n";
+          return 1;
+        }
+        auto& list = config.browser_analysis.agent_render_private_origins;
+        for (std::string& o : origins) {
+          std::string_view t = absl::StripAsciiWhitespace(o);
+          if (!t.empty()) list.emplace_back(t);
         }
       } else if (arg == "--agent-optimize-llms-txt") {
         // Enable the synthesized /llms.txt site-index. OFF by

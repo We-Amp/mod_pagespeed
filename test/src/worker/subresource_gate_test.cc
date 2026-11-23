@@ -3,6 +3,7 @@
 
 #include "src/worker/subresource_gate.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -11,7 +12,19 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "src/browser/agent_fetcher.h"
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <thread>
+#endif
 #include "lib/classify/alternate_metadata.h"
+#include "lib/net/upstream_pin.h"
 
 namespace pagespeed {
 namespace {
@@ -315,6 +328,293 @@ TEST_F(SubresourceGateTest, StampedEntryUnderConfirmedHostIsAskedAsBefore) {
   EXPECT_EQ(gate_.Check(r, /*may_fetch=*/false), SubresourceVerdict::kRefused);
   EXPECT_EQ(server_.asked.size(), 2u);
 }
+
+// ---- shared-copy reads (the agent render's document, /llms.txt) ------------
+
+struct FakeSharedHead {
+  SubresourceGate::SharedCopyHeadFn Head() {
+    return [this](const std::string& origin, const std::string& url,
+                  const std::vector<PinnedUpstream>& private_origins)
+               -> std::optional<int> {
+      asked.push_back(url);
+      origins_seen = private_origins.size();
+      (void)origin;
+      auto it = status.find(url);
+      if (it == status.end()) return std::nullopt;
+      return it->second;
+    };
+  }
+  std::map<std::string, int> status;
+  std::vector<std::string> asked;
+  std::size_t origins_seen = 0;
+};
+
+TEST_F(SubresourceGateTest, SharedCopyReadAsksTheSharedHeadWithTheOrigins) {
+  FakeSharedHead shared;
+  gate_.SetSharedCopyHead(shared.Head());
+  shared.status["https://example.com/a.css"] = 200;
+  std::vector<PinnedUpstream> named = {*ParseUpstream("https://example.com")};
+  SubresourceRead r = Read("/a.css");
+  r.shared_copy = true;
+  r.private_address_origins = &named;
+  EXPECT_EQ(gate_.Check(r, true), SubresourceVerdict::kAdmitted);
+  ASSERT_EQ(shared.asked.size(), 1u);
+  EXPECT_EQ(shared.origins_seen, 1u);
+  EXPECT_TRUE(server_.asked.empty()) << "the ordinary HEAD is not used";
+}
+
+TEST_F(SubresourceGateTest, SharedCopyReadWithoutASharedHeadIsNotAdmitted) {
+  server_.status["https://example.com/a.css"] = 200;
+  SubresourceRead r = Read("/a.css");
+  r.shared_copy = true;
+  EXPECT_EQ(gate_.Check(r, true), SubresourceVerdict::kUnknown);
+  EXPECT_TRUE(server_.asked.empty());
+}
+
+// The ordinary path admits what the shared-copy HEAD refuses (a private
+// answer, an internal address): each keeps its own verdict.
+TEST_F(SubresourceGateTest, SharedCopyAndOrdinaryVerdictsAreKeptApart) {
+  FakeSharedHead shared;
+  gate_.SetSharedCopyHead(shared.Head());
+  server_.status["https://example.com/a.css"] = 200;  // ordinary: 200
+  // shared: no answer (refused by the shared-copy rules)
+  SubresourceRead plain = Read("/a.css");
+  SubresourceRead strict = Read("/a.css");
+  strict.shared_copy = true;
+  EXPECT_TRUE(gate_.Admitted(plain, true));
+  EXPECT_FALSE(gate_.Admitted(strict, true));
+  // Memo only: each answers from its own entry.
+  EXPECT_TRUE(gate_.Admitted(plain, false));
+  EXPECT_FALSE(gate_.Admitted(strict, false));
+  EXPECT_EQ(server_.asked.size(), 1u);
+  EXPECT_EQ(shared.asked.size(), 1u);
+  // And the other way round: an ordinary refusal does not leak into a
+  // shared-copy admission or back.
+  shared.status["https://example.com/b.css"] = 200;
+  SubresourceRead strict_b = Read("/b.css");
+  strict_b.shared_copy = true;
+  EXPECT_TRUE(gate_.Admitted(strict_b, true));
+  EXPECT_FALSE(gate_.Admitted(Read("/b.css"), false));  // never asked: unknown
+}
+
+// A stamped entry is admitted without asking for a shared-copy read only
+// when its recorded Cache-Control is neither no-store nor private; ordinary
+// reads keep admitting it.
+TEST_F(SubresourceGateTest, StampedEntryRules) {
+  for (std::uint16_t cc :
+       {AlternateMetadata::kCCOriginNoStore,
+        AlternateMetadata::kCCOriginPrivate,
+        static_cast<std::uint16_t>(AlternateMetadata::kCCOriginPrivate |
+                                   AlternateMetadata::kCCOriginPublic)}) {
+    SubresourceRead r = Read("/stamped.css");
+    r.host_fetch_allowed = false;
+    r.entry_read = true;
+    r.entry_flags = AlternateMetadata::kFlagAnonymousRecorded;
+    r.entry_site = r.site;
+    r.entry_cc_flags = cc;
+    EXPECT_NE(gate_.Check(r, true), SubresourceVerdict::kAdmitted) << cc;
+    r.shared_copy = true;
+    EXPECT_NE(gate_.Check(r, true), SubresourceVerdict::kAdmitted) << cc;
+  }
+  SubresourceRead clean = Read("/stamped.css");
+  clean.host_fetch_allowed = false;
+  clean.entry_read = true;
+  clean.entry_flags = AlternateMetadata::kFlagAnonymousRecorded;
+  clean.entry_site = clean.site;
+  clean.entry_cc_flags = AlternateMetadata::kCCOriginPublic;
+  clean.shared_copy = true;
+  EXPECT_EQ(gate_.Check(clean, true), SubresourceVerdict::kAdmitted);
+  EXPECT_TRUE(server_.asked.empty());
+}
+
+// The production shared-copy HEAD refuses an origin at a loopback or private
+// address (also inside an IPv6 address) before anything is sent, and logs it
+// once per origin naming the flag.
+TEST(SharedCopyHead, AddressRulesAndLog) {
+  std::vector<std::string> logged;
+  auto head = MakeSharedCopyHeadFn(
+      [&logged](const std::string& m) { logged.push_back(m); });
+  for (const char* origin : {"http://127.0.0.1:9", "http://[64:ff9b::7f00:1]:9",
+                             "http://10.0.0.1:9"}) {
+    const std::string url = std::string(origin) + "/a.css";
+    // A refusal, not "no answer".
+    EXPECT_EQ(head(origin, url, {}), std::optional<int>(kRefusedStatus))
+        << origin;
+    EXPECT_EQ(head(origin, url, {}), std::optional<int>(kRefusedStatus))
+        << origin;
+  }
+  ASSERT_EQ(logged.size(), 3u);
+  for (const std::string& m : logged) {
+    EXPECT_NE(m.find("--agent-render-private-origins"), std::string::npos) << m;
+  }
+}
+
+// ---- the gate's HEAD: answer rules on every call ---------------------------
+
+// A fake curl answering per URL path with the given header block.
+SpawnCurlFn FakeCurl(std::map<std::string, std::string> by_path,
+                     std::vector<std::string>* urls) {
+  return [by_path, urls](const std::vector<std::string>& argv,
+                         std::size_t) -> CurlSpawnOutcome {
+    std::string url;
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i) {
+      if (argv[i] == "--url") url = argv[i + 1];
+    }
+    if (urls != nullptr) urls->push_back(url);
+    CurlSpawnOutcome o;
+    o.spawned = true;
+    o.exit_code = 0;
+    for (const auto& [path, headers] : by_path) {
+      if (url.size() >= path.size() &&
+          url.compare(url.size() - path.size(), path.size(), path) == 0) {
+        o.output = "HTTP/1.1 200 OK\r\n" + headers + "\r\n";
+      }
+    }
+    return o;
+  };
+}
+
+ResolveHostFn Loopback() {
+  return [](std::string_view) { return std::vector<std::string>{"127.0.0.1"}; };
+}
+
+// The ordinary HEAD: an answer marked private or no-store, or setting a
+// cookie, does not admit; a cacheable answer does, also from an origin on
+// the same host (loopback).
+TEST(AnonymousHead, AnswerRules) {
+  std::vector<std::string> urls;
+  auto head = MakeAnonymousHeadFn(
+      FakeCurl({{"/public.css", "Cache-Control: public, max-age=600\r\n"},
+                {"/plain.css", "Content-Type: text/css\r\n"},
+                {"/private.css", "Cache-Control: private, max-age=600\r\n"},
+                {"/nostore.css", "Cache-Control: no-store\r\n"},
+                {"/cookie.css", "Set-Cookie: lb=1; Path=/\r\n"}},
+               &urls),
+      Loopback());
+  const std::string o = "https://example.com";
+  EXPECT_EQ(head(o, o + "/public.css"), std::optional<int>(200));
+  EXPECT_EQ(head(o, o + "/plain.css"), std::optional<int>(200));
+  EXPECT_EQ(head(o, o + "/private.css"), std::optional<int>(kRefusedStatus));
+  EXPECT_EQ(head(o, o + "/nostore.css"), std::optional<int>(kRefusedStatus));
+  EXPECT_EQ(head(o, o + "/cookie.css"), std::optional<int>(kRefusedStatus));
+  EXPECT_EQ(urls.size(), 5u) << "every request was sent (no address refusal)";
+}
+
+// Through the gate: only the cacheable answers admit.
+TEST(AnonymousHead, GateAdmitsOnlyCacheableAnswers) {
+  SubresourceGate gate(
+      MakeAnonymousHeadFn(FakeCurl({{"/a.css", "Cache-Control: max-age=60\r\n"},
+                                    {"/b.css", "Cache-Control: private\r\n"},
+                                    {"/c.css", "Set-Cookie: s=1\r\n"}},
+                                   nullptr),
+                          Loopback()),
+      [] { return std::int64_t{0}; });
+  auto read = [](std::string_view url) {
+    SubresourceRead r;
+    r.scheme = "https";
+    r.host = "example.com";
+    r.url = url;
+    r.page_host = "example.com";
+    r.host_fetch_allowed = true;
+    return r;
+  };
+  EXPECT_TRUE(gate.Admitted(read("/a.css"), true));
+  EXPECT_FALSE(gate.Admitted(read("/b.css"), true));
+  EXPECT_FALSE(gate.Admitted(read("/c.css"), true));
+}
+
+// A refused answer is a refusal (kRefused, counted), not "no answer"; the
+// first refusal per origin is logged with its reason; the per-reason
+// counters move.
+TEST(AnonymousHead, RefusalVerdictLogAndCounters) {
+  std::vector<std::string> logged;
+  const SharedCopyRefusalCounts before = GetSharedCopyRefusalCounts();
+  SubresourceGate gate(
+      MakeAnonymousHeadFn(
+          FakeCurl({{"/v.css", "Vary: Cookie\r\n"},
+                    {"/w.css", "Vary: Accept-Encoding\r\n"},
+                    {"/k.css", "Set-Cookie: AWSALB=x\r\n"},
+                    {"/n.css", "Cache-Control: no-store\r\n"},
+                    {"/p.css", "Cache-Control: private\r\n"}},
+                   nullptr),
+          Loopback(), [&logged](const std::string& m) { logged.push_back(m); }),
+      [] { return std::int64_t{0}; });
+  auto read = [](std::string_view url, std::string_view host) {
+    SubresourceRead r;
+    r.scheme = "https";
+    r.host = host;
+    r.url = url;
+    r.page_host = host;
+    r.host_fetch_allowed = true;
+    return r;
+  };
+  EXPECT_EQ(gate.Check(read("/v.css", "refusal-a.example"), true),
+            SubresourceVerdict::kRefused);
+  EXPECT_EQ(gate.Check(read("/w.css", "refusal-a.example"), true),
+            SubresourceVerdict::kAdmitted);
+  EXPECT_EQ(gate.Check(read("/k.css", "refusal-a.example"), true),
+            SubresourceVerdict::kRefused);
+  EXPECT_EQ(gate.Check(read("/n.css", "refusal-b.example"), true),
+            SubresourceVerdict::kRefused);
+  EXPECT_EQ(gate.Check(read("/p.css", "refusal-b.example"), true),
+            SubresourceVerdict::kRefused);
+  EXPECT_EQ(gate.refusals(), 4u);
+  ASSERT_EQ(logged.size(), 2u);  // once per origin
+  EXPECT_NE(logged[0].find("vary"), std::string::npos) << logged[0];
+  EXPECT_NE(logged[1].find("no-store"), std::string::npos) << logged[1];
+  const SharedCopyRefusalCounts after = GetSharedCopyRefusalCounts();
+  EXPECT_EQ(after.vary - before.vary, 1u);
+  EXPECT_EQ(after.cookie - before.cookie, 1u);
+  EXPECT_EQ(after.no_store - before.no_store, 1u);
+  EXPECT_EQ(after.private_answer - before.private_answer, 1u);
+}
+
+#ifndef _WIN32
+// The production HEAD (real curl) against a server on this host: the
+// loopback origin is asked, and only its cacheable answer admits.
+TEST(AnonymousHead, RealCurlAgainstLoopbackServer) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  ASSERT_GE(fd, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  ASSERT_EQ(bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+  ASSERT_EQ(listen(fd, 8), 0);
+  socklen_t len = sizeof(addr);
+  ASSERT_EQ(getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len), 0);
+  const int port = ntohs(addr.sin_port);
+  std::atomic<int> served{0};
+  std::thread server([fd, &served] {
+    for (int i = 0; i < 3; ++i) {
+      int c = accept(fd, nullptr, nullptr);
+      if (c < 0) return;
+      char buf[2048];
+      ssize_t n = read(c, buf, sizeof(buf) - 1);
+      std::string req(buf, n > 0 ? static_cast<std::size_t>(n) : 0);
+      std::string h = "Cache-Control: max-age=60\r\n";
+      if (req.find("/private.css") != std::string::npos) {
+        h = "Cache-Control: private\r\n";
+      } else if (req.find("/cookie.css") != std::string::npos) {
+        h = "Set-Cookie: s=1\r\n";
+      }
+      std::string resp = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n" + h +
+                         "Connection: close\r\n\r\n";
+      (void)!write(c, resp.data(), resp.size());
+      close(c);
+      ++served;
+    }
+  });
+  auto head = MakeAnonymousHeadFn();
+  const std::string o = "http://127.0.0.1:" + std::to_string(port);
+  EXPECT_EQ(head(o, o + "/public.css"), std::optional<int>(200));
+  EXPECT_EQ(head(o, o + "/private.css"), std::optional<int>(kRefusedStatus));
+  EXPECT_EQ(head(o, o + "/cookie.css"), std::optional<int>(kRefusedStatus));
+  server.join();
+  close(fd);
+  EXPECT_EQ(served.load(), 3);
+}
+#endif
 
 }  // namespace
 }  // namespace pagespeed

@@ -1091,10 +1091,13 @@ class Worker {
   // serves that URL to an anonymous client (SubresourceGate).  Not admitted
   // reads as absent.  `may_fetch` false answers from the gate's memo only,
   // for callers that must not block.
+  // `shared_copy`: the bytes go into a copy served to other clients
+  // (/llms.txt), so the gate asks with its shared-copy HEAD.
   bool SubresourceAdmitted(const CacheNotification& notification,
                            std::string_view read_url,
                            std::string_view read_host, bool may_fetch = true,
-                           const AlternateMetadata* entry = nullptr);
+                           const AlternateMetadata* entry = nullptr,
+                           bool shared_copy = false);
 
   // The best cached entry for `read_url` (keyed under `read_host` and the
   // notification's site) when it may go into an output built for

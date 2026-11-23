@@ -14,6 +14,8 @@ gtest_test(
     name = "subresource_gate_test",
     deps = [
         "//lib/classify:alternate_metadata",
+        "//lib/net:upstream_pin",
+        "//src/browser:agent_fetcher",
         "//src/worker:subresource_gate",
     ],
 )
