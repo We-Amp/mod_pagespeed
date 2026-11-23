@@ -1013,6 +1013,154 @@ TEST_F(JavascriptFilterTest, HtmlInlineScriptLosesXmlComment) {
                    absl::StrFormat(kInlineJs, "var s=\"<i>x</i>\";"));
 }
 
+// Pages that an XML parser reads. In such a page the text of a script is
+// character data, CDATA sections and comments, and minification must leave
+// that structure as it was: where it cannot, the script is kept as it is.
+class JavascriptFilterXmlPageTest
+    : public JavascriptFilterTest,
+      public ::testing::WithParamInterface<const char*> {
+ protected:
+  void SetUp() override {
+    JavascriptFilterTest::SetUp();
+    SetMimetype(GetParam());
+    InitFiltersAndTest(100);
+  }
+
+  void ExpectKept(StringPiece id, StringPiece script) {
+    ValidateNoChanges(id, absl::StrFormat(kInlineJs, script));
+  }
+  void ExpectMinified(StringPiece id, StringPiece script,
+                      StringPiece minified) {
+    ValidateExpected(id, absl::StrFormat(kInlineJs, script),
+                     absl::StrFormat(kInlineJs, minified));
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(XmlTypes, JavascriptFilterXmlPageTest,
+                         ::testing::Values("application/xhtml+xml",
+                                           "application/ce-html+xml",
+                                           "Application/XHTML+XML",
+                                           "APPLICATION/CE-HTML+XML",
+                                           "application/xhtml+xml; "
+                                           "charset=utf-8"));
+
+TEST_P(JavascriptFilterXmlPageTest, CommentedSectionIsMinified) {
+  ExpectMinified("commented section", "//<![CDATA[\nvar active = 1 + 2;\n//]]>",
+                 "//<![CDATA[\nvar active=1+2;\n//]]>");
+  ExpectMinified("block-commented section",
+                 "/*<![CDATA[*/\nvar active = 1 + 2;\n/*]]>*/",
+                 "//<![CDATA[\nvar active=1+2;\n//]]>");
+  ExpectMinified("plain script", "var active = 1 + 2;", "var active=1+2;");
+}
+
+// "<!--" inside a CDATA section is text to an XML parser, and a JavaScript
+// comment to the browser: it goes as usual.
+TEST_P(JavascriptFilterXmlPageTest, CommentOpenerInsideSectionIsMinified) {
+  ExpectMinified("comment opener in section",
+                 absl::StrFormat(kCdataWrapper, kJsData),
+                 absl::StrFormat(kCdataWrapper, kJsMinData));
+}
+
+// A section opened outside a JavaScript comment and closed inside one, where
+// minification joins brackets into a "]]>" earlier in the script: the counts
+// of the markers stay the same, but the section would end at the join.
+TEST_P(JavascriptFilterXmlPageTest, SectionEndStaysWhereItWas) {
+  static const char kCode[] =
+      "(function() { var ok = items[order[0]] > 0; "
+      "var p = '<div id=\"x\">y</div>'; })()";
+  ExpectKept("line-commented end", StrCat("<![CDATA[\n", kCode, "\n//]]>"));
+  ExpectKept("block-commented end", StrCat("<![CDATA[\n", kCode, "\n/*]]>*/"));
+  ExpectKept("other join", "<![CDATA[\n(a[b[c]] > d) && f('<b>x</b>')\n//]]>");
+  ExpectKept("join in commented section",
+             StrCat("//<![CDATA[\nvar ok = a[b[c]] > d; "
+                    "var p = '<b>x</b>';\n//]]>"));
+}
+
+// An XML comment hides what it holds from the XML parser, but only the first
+// line from JavaScript: dropping it would turn hidden lines into live code.
+TEST_P(JavascriptFilterXmlPageTest, XmlCommentIsKept) {
+  ExpectKept("comment with section text",
+             "<!--\nvar cfg = \"<![CDATA[\"; var debug = \"x\";\n//-->");
+  ExpectKept(
+      "comment before section",
+      "<!--\nvar hidden = 1;\n//-->\n//<![CDATA[\nvar shown = 2;\n//]]>");
+  ExpectKept("one-line comment idiom",
+             "<!--//--><![CDATA[//><!--\nvar a = 1 ;\n//--><!]]>");
+}
+
+// Structure that minification could not keep, or that is not one section of
+// script: left as it is.
+TEST_P(JavascriptFilterXmlPageTest, OtherStructureIsKept) {
+  ExpectKept("stray section end", "var a = 1; // ]]>\nvar b = 2;");
+  ExpectKept("nested sections",
+             "//<![CDATA[\nvar a = 1;\n//<![CDATA[\nvar b = 2;\n//]]>\n"
+             "var c = 3;\n//]]>");
+  ExpectKept("unclosed section", "//<![CDATA[\nvar a = 1;\n");
+  ExpectKept("section text in a string",
+             "//<![CDATA[\nvar s = \"<![CDATA[\";\n//]]>");
+  ExpectKept("entity", "var ok = a &amp;&amp; b ;");
+  ExpectKept("element in a comment", "// <b>x</b>\nvar a = 1;");
+}
+
+// The same scripts in a page that has an XHTML doctype but no known type:
+// the page may be read as XML, so CDATA sections are kept where they were.
+TEST_F(JavascriptFilterTest, XhtmlDoctypeScriptKeepsSectionEnd) {
+  InitFiltersAndTest(100);
+  ValidateNoChanges(
+      "doctype joined end",
+      StrCat(kXhtmlDtd,
+             absl::StrFormat(kInlineJs,
+                             "<![CDATA[\n(function() { var ok = "
+                             "items[order[0]] > 0; var p = '<b>x</b>'; })()\n"
+                             "//]]>")));
+  ValidateNoChanges(
+      "doctype comment with section text",
+      StrCat(kXhtmlDtd,
+             absl::StrFormat(kInlineJs,
+                             "<!--\nvar cfg = \"<![CDATA[\"; var d = 1;\n"
+                             "//-->")));
+  ValidateExpected(
+      "doctype one-line comment idiom",
+      StrCat(kXhtmlDtd,
+             absl::StrFormat(kInlineJs,
+                             "<!--//--><![CDATA[//><!--\nvar a = 1 ;\n"
+                             "//--><!]]>")),
+      StrCat(kXhtmlDtd, absl::StrFormat(kInlineJs,
+                                        "//<![CDATA[\nvar a=1;\n"
+                                        "//]]>")));
+}
+
+// An XHTML doctype on a page served as text/html: an HTML parser reads the
+// script as text, so the markers go with the minification as before.
+TEST_F(JavascriptFilterTest, XhtmlDoctypeOnHtmlPageIsMinified) {
+  SetHtmlMimetype();
+  InitFiltersAndTest(100);
+  ValidateExpected(
+      "html doctype section",
+      StrCat(
+          kXhtmlDtd,
+          absl::StrFormat(kInlineJs, absl::StrFormat(kCdataWrapper, kJsData))),
+      StrCat(kXhtmlDtd, absl::StrFormat(kInlineJs, kJsMinData)));
+}
+
+// Response headers that are never finalized (as on Apache): the type the
+// parse was started with decides.
+TEST_F(JavascriptFilterTest, XmlStructureKeptWithoutFinalizedHeaders) {
+  server_context()->set_response_headers_finalized(false);
+  InitFiltersAndTest(100);
+  for (const char* script :
+       {"<![CDATA[\nvar ok = items[order[0]] > 0; var p = '<b>x</b>';\n//]]>",
+        "<!--\nvar cfg = \"<![CDATA[\"; var d = 1;\n//-->"}) {
+    const GoogleString html = absl::StrFormat(kInlineJs, script);
+    SetupWriter();
+    rewrite_driver()->StartParseWithType(StrCat(kTestDomain, "x.xhtml"),
+                                         kContentTypeXhtml);
+    rewrite_driver()->ParseText(html);
+    rewrite_driver()->FinishParse();
+    EXPECT_EQ(html, output_buffer_);
+  }
+}
+
 // An inline script inside <noscript>, <noembed> or <noframes> never runs, and
 // browsers may read it as the text of that element: it is not minified.
 TEST_F(JavascriptFilterTest, InlineScriptInsideNoscriptLikeElementIsKept) {
