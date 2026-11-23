@@ -2,8 +2,8 @@
   "_comment": "Pinned grype vulnerability DB for the BLOCKING dep-scan path. The blocking CI job imports THIS archive with GRYPE_DB_AUTO_UPDATE=false so a newly-published CVE cannot non-deterministically break an in-flight PR or release. Report-only / scheduled runs use the live DB instead. To bump: get the current archive from `grype db list -o raw` (or https://grype.anchore.io/databases/v6/latest.json), update path+checksum+built here, re-run the blocking job, and review like any dependency bump. schema/url_base must match the grype version pinned in dep-scan.sh. `max_age_days` is the staleness ratchet — the scheduled dep-scan FAILS once the pin is older than this, so a forgotten pin is loud, not silent. Kept in sync with the sibling repositories' tools/sbom/grype-db-pin.json.",
   "schema": "v6",
   "url_base": "https://grype.anchore.io/databases/v6",
-  "path": "vulnerability-db_v6.1.10_2026-11-14T00:20:33Z_1794637165.tar.zst",
-  "checksum": "sha256:762b01ba9c79e6a250bd73f11ef62fbf44539ee8e08e043d80df4aaad3afc2aa",
-  "built": "2026-11-14T06:19:25Z",
+  "path": "vulnerability-db_v6.1.10_2026-11-22T00:23:04Z_1795328399.tar.zst",
+  "checksum": "sha256:baa591108fd0fafa273503769dea65bf0334ad337e84aeb7f08197849cea9f87",
+  "built": "2026-11-22T06:19:59Z",
   "max_age_days": 14
 }
