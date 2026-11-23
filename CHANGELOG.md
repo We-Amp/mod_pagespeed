@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-23
+
+### Security
+
+- Security: fixed a cross-site scripting issue in HTML rewriting. Affected: 2.9.2 and
+  earlier. Update recommended.
+  Reported by Inanna (@inanna-malick).
+
+### Added
+
+- **New `pagespeed lint` checks an Apache configuration without starting Apache.**
+  It reads a configuration file, the `Include` files it pulls in (`--root` sets
+  their base directory) and any `.htaccess` files named with `--htaccess`. It
+  reports unknown or misspelled directives, invalid values, wrong argument
+  counts, unknown and deprecated filter names, retired options, and directives
+  in places Apache or the module rejects, each with a rule id, file and line.
+  It uses the module's own option parser and makes no network connections.
+  Values are shown only for options known to be safe to print; all others
+  appear as `<masked>`. Example: `pagespeed lint --root /etc/apache2 apache2.conf`.
+  Output is JSON (schema `pagespeed-lint/1`) with `--json` or when piped. Exit
+  status is 0 when clean, 1 when findings reach `--fail-on` (default `error`),
+  2 for a usage or read error, 3 for an internal error. Download it from the
+  release assets as `pagespeed-lint-<version>-linux-x86_64.tar.gz`,
+  `-linux-aarch64.tar.gz` or the signed `-win-x64.zip`.
+
+### Fixed
+
+- **Apache no longer prints the deprecation warning for `ModPagespeedIncreaseSpeedTracking` twice.** The directive was registered twice; it is still accepted and ignored.
+- Fixed: with the optimizer daemon serving in-place resources, a cross-origin
+  CORS request (a web font, a `crossorigin` or module script, a `fetch()`) could
+  be answered with a stored copy that had no `Access-Control-Allow-Origin`, so
+  the browser blocked it when the origin sends that header only to requests
+  carrying `Origin`. Such requests are now answered by the server itself, with
+  its own CORS headers, and their responses are not stored as the copy other
+  requests are served from. `InPlaceCorsGuard off` restores the old behaviour.
+- Fixed: with the Web Bot Auth counter on, `nginx -t` no longer creates the
+  counter file in the cache directory, and nginx started as root gives that
+  file to the worker user (`user`), as it does the cache files, also when an
+  earlier root start left a root-owned one behind.
+
+### Removed
+
+- Removed: the demo configuration and the Optimize for Bandwidth example page no longer
+  enable or demonstrate the retired `in_place_optimize_for_browser` filter, which has no effect.
+
+### Documentation
+
+- IIS: the install guide now explains how the module works with IIS output-cache
+  profiles. A profile without `location="Any"` or `location="Downstream"` makes IIS
+  send `Cache-Control: no-cache` or `private`, so the stylesheets, scripts and images
+  it covers are served unoptimized; the guide says how to set the profile so they are
+  optimized in place.
+
 ## [2.9.2] - 2026-11-18
 
 There is no module release 2.9.1; the module moves from 2.9.0 to 2.9.2 to

@@ -1,3 +1,123 @@
+# mod_pagespeed 2.10.0 Release Notes
+
+**Release date:** 2026-11-23
+
+**Status:** Stable
+
+**Packages:** the same packages, platforms and channels as 2.9.2, plus the new
+`pagespeed lint` downloads (see Added). The module packages for Apache, nginx and IIS, the
+cPanel package and `pagespeed-optimizer` are 2.10.0, and the module is paired with
+`pagespeed-optimizer` 2.10.0. The container images, the NuGet packages (including the
+ASP.NET Core sidecar packages) and the application version of the Helm chart (chart
+0.3.18) ship with the pagespeed-optimizer 2.10.0 release and are 2.10.0
+as well.
+
+## Highlights
+
+- **Security: this release fixes four security issues.** See Security
+  below. Update recommended.
+- **New `pagespeed lint` checks an Apache configuration without starting Apache.**
+- **Markdown for AI agents now follows the `Accept` header's q-values.**
+
+## Security
+
+- **pagespeed-optimizer: content not meant to be shared could reach optimized pages served
+  to other visitors.** Affected: 2.9.2 and earlier. **Update recommended.**
+- **pagespeed-optimizer: in the experimental agent optimization (off by default), content
+  not meant to be shared could reach the stored Markdown copy and `/llms.txt`.** Affected:
+  2.9.2 and earlier releases that include agent optimization. **Update recommended.**
+- **pagespeed-optimizer: in browser analysis (off by default), an analysed page could
+  reach network destinations it should not.** Affected: 2.9.2 and earlier releases that
+  include browser analysis. **Update recommended.**
+- **mod_pagespeed: a cross-site scripting issue in HTML rewriting.** Affected:
+  2.9.2 and earlier. **Update recommended.** Reported by Inanna (@inanna-malick).
+- The pagespeed-optimizer fixes reach the container images and the NuGet packages with
+  their 2.10.0 release.
+
+## Action required when upgrading
+
+- **Check whether your optimized pages still inline, combine or size the assets they
+  did.** The optimizer now uses a stylesheet, script or image in an optimized page only
+  when your server marks it as shareable: not `Cache-Control: private` or `no-store`, no
+  `Vary` on anything but `Accept-Encoding` (so `Vary: Origin` or `Vary: User-Agent` also
+  stops these optimizations), and no `Set-Cookie`. Assets sent with
+  `Cache-Control: private` are not rare (some frameworks, application servers and hosting
+  defaults send it), and neither are cookies set on asset responses, such as
+  load-balancer affinity (sticky-session) cookies and session or consent cookies. Such
+  assets are no longer inlined, combined or sized, so affected pages can be larger or make
+  more requests than before. To keep them optimized, serve shared static assets with a
+  shareable `Cache-Control`, without those cookies and without a `Vary` beyond
+  `Accept-Encoding`. `/v1/stats` counts the refusals under `subresource_refusals`, and the
+  worker log names each origin once with the reason.
+- **Agent optimization now fetches only public origins by default.** If a site you
+  optimize is served from an internal address, list it with the new worker flag
+  `--agent-render-private-origins` (container: `PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS`).
+  The worker logs a warning naming the flag the first time it skips such a site.
+- Upgrade the module and `pagespeed-optimizer` together, as usual.
+
+## Added
+
+- **`pagespeed lint` checks an Apache configuration without starting Apache.** It reads
+  a configuration file, the `Include` files it pulls in (`--root` sets their base
+  directory) and any `.htaccess` files named with `--htaccess`, and reports unknown or
+  misspelled directives, invalid values, wrong argument counts, unknown and deprecated
+  filter names, retired options, and directives in places Apache or the module rejects,
+  each with a rule id, file and line. It uses the module's own option parser and makes no
+  network connections. Values are shown only for options known to be safe to print; all
+  others appear as `<masked>`. Example: `pagespeed lint --root /etc/apache2 apache2.conf`.
+  Output is JSON (schema `pagespeed-lint/1`) with `--json` or when piped. Exit status is
+  0 when clean, 1 when findings reach `--fail-on` (default `error`), 2 for a usage or
+  read error, 3 for an internal error. Download it from the release assets as
+  `pagespeed-lint-<version>-linux-x86_64.tar.gz`, `-linux-aarch64.tar.gz` or the signed
+  `-win-x64.zip`.
+- Two counters on the optimizer's `/v1/metrics`: `pagespeed_cache_busy_reads_total` and
+  `pagespeed_cache_busy_retry_hits_total` (see Changed).
+
+## Changed
+
+- **The Markdown copy for AI agents is chosen by the `Accept` header's q-values.** With
+  agent optimization on, a request gets the Markdown copy only when `text/markdown` is
+  named with a q-value above 0 and at least the q-value `text/html` gets (directly or
+  through `text/*` or `*/*`). A tie selects Markdown, so agents that send
+  `Accept: text/markdown, text/html, */*` still get it; `q=0`, a lower q-value, wildcards
+  alone and malformed `Accept` headers get HTML. The nginx module also reads every
+  `Accept` header line of a request, not only the first. This applies to the nginx
+  module and the ASP.NET Core middleware.
+- A cache read that finds an entry briefly locked by a concurrent write now retries
+  once, after about 1 ms, instead of counting as a miss, so the request is served from
+  the cache. If the retry finds it locked again, the read is a miss as before.
+- The container images no longer print a terms notice at startup, and `ACCEPT_EULA` is
+  no longer needed. The software is licensed under the Apache License 2.0.
+
+## Fixed
+
+- With the optimizer daemon serving in-place resources, a cross-origin CORS request (a
+  web font, a `crossorigin` or module script, a `fetch()`) could be answered with a
+  stored copy without `Access-Control-Allow-Origin`, so the browser blocked it when the
+  origin sends that header only to requests carrying `Origin`. Such requests are now
+  answered by the server itself, with its own CORS headers, and their responses are not
+  stored as the copy other requests are served from. `InPlaceCorsGuard off` restores the
+  old behaviour.
+- With the Web Bot Auth counter on, `nginx -t` no longer creates the counter file in the
+  cache directory, and nginx started as root gives that file to the worker user, also
+  when an earlier root start left a root-owned one behind.
+- Apache no longer prints the deprecation warning for
+  `ModPagespeedIncreaseSpeedTracking` twice.
+
+## Removed
+
+- The demo configuration and the Optimize for Bandwidth example page no longer enable
+  the retired `in_place_optimize_for_browser` filter, which has no effect.
+
+## Documentation
+
+- IIS: the install guide explains how the module works with IIS output-cache profiles:
+  a profile without `location="Any"` or `location="Downstream"` makes IIS send
+  `Cache-Control: no-cache` or `private`, so the assets it covers are served as they are;
+  the guide says how to set the profile so they are optimized.
+- The image filters page describes the module's `PngLossyFallbackMaxSizePercent`
+  option.
+
 # mod_pagespeed 2.9.2 Release Notes
 
 **Release date:** 2026-11-18
