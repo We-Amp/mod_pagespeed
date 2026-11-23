@@ -63,6 +63,86 @@ const char kInlineCspMessage[] =
 const char kModuleCrossHostMessage[] =
     "Not rewriting module script: rewritten URL would be on another host";
 
+// What an XML 1.0 parser makes of the text of a script element: character
+// data, CDATA sections and, where `xml_comments` is set, comments.
+struct XmlScriptShape {
+  int cdata_sections = 0;
+  // A section or comment left open, or "]]>" in character data.
+  bool malformed = false;
+  bool has_comment = false;
+  // "<" or "&" in character data: markup or a reference the XML parser acts
+  // on, which the minifier reads as JavaScript.
+  bool has_markup = false;
+  // Character data other than white space, "/" and "*": text that is not
+  // inside a section and is not only the JavaScript comment around one.
+  bool has_code_outside_sections = false;
+};
+
+XmlScriptShape ScanXmlScript(StringPiece text, bool xml_comments) {
+  static const char kCdataStart[] = "<![CDATA[";
+  static const char kCdataEnd[] = "]]>";
+  static const char kCommentStart[] = "<!--";
+  static const char kCommentEnd[] = "-->";
+  XmlScriptShape shape;
+  size_t pos = 0;
+  while (pos < text.size()) {
+    const StringPiece rest = text.substr(pos);
+    if (rest.starts_with(kCdataStart)) {
+      const size_t end = text.find(kCdataEnd, pos + STATIC_STRLEN(kCdataStart));
+      if (end == StringPiece::npos) {
+        shape.malformed = true;
+        return shape;
+      }
+      ++shape.cdata_sections;
+      pos = end + STATIC_STRLEN(kCdataEnd);
+    } else if (xml_comments && rest.starts_with(kCommentStart)) {
+      shape.has_comment = true;
+      const size_t end =
+          text.find(kCommentEnd, pos + STATIC_STRLEN(kCommentStart));
+      if (end == StringPiece::npos) {
+        shape.malformed = true;
+        return shape;
+      }
+      pos = end + STATIC_STRLEN(kCommentEnd);
+    } else if (rest.starts_with(kCdataEnd)) {
+      shape.malformed = true;
+      return shape;
+    } else {
+      const char c = text[pos];
+      if (c == '<' || c == '&') {
+        shape.has_markup = true;
+      }
+      if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '/' &&
+          c != '*') {
+        shape.has_code_outside_sections = true;
+      }
+      ++pos;
+    }
+  }
+  return shape;
+}
+
+// Whether `rewritten` reads to an XML parser as `original` does: the same
+// number of CDATA sections (none or one), nothing left open or ended early,
+// and, where there is a section, all of the script inside it. In a page known
+// to be XML, comments, markup and references must not occur at all: the
+// minifier reads those as JavaScript and would change what the XML parser
+// sees.
+bool KeepsXmlShape(StringPiece original, StringPiece rewritten,
+                   bool known_xml) {
+  const XmlScriptShape before = ScanXmlScript(original, known_xml);
+  const XmlScriptShape after = ScanXmlScript(rewritten, known_xml);
+  if (before.malformed || after.malformed || before.cdata_sections > 1 ||
+      after.cdata_sections != before.cdata_sections) {
+    return false;
+  }
+  if (known_xml && (before.has_comment || before.has_markup ||
+                    after.has_comment || after.has_markup)) {
+    return false;
+  }
+  return after.cdata_sections == 0 || !after.has_code_outside_sections;
+}
+
 // Whether text has an end tag of an element whose content a browser reads as
 // text: a script inside one would end it there.
 bool HasTextElementEndTag(StringPiece text) {
@@ -590,50 +670,48 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     config_->did_not_shrink()->Add(1);
     return;
   }
-  // Unless the minified code is wrapped in CDATA below, it goes out as it is,
-  // so in a document that may be XML, what an XML parser acts on must survive
-  // minification. Minification can join adjacent brackets into "]]>", and it
-  // drops a "<![CDATA[" or "]]>" that was inside a JavaScript comment, which
-  // leaves a section open or the script exposed to the XML parser. An XML
-  // comment hides a script the same way, and is dropped too; "<!--" is common
-  // in HTML scripts, so it only counts in a document known to be XHTML: by its
-  // response headers, or, where those are never finalized (as on Apache), by
-  // the type the parse was started with.
+  // In a document that may be read as XML, the script is character data,
+  // CDATA sections and comments to the XML parser, and plain text to the
+  // minifier. Minification drops comments, with any marker inside them, and
+  // can join brackets into "]]>", so the rewritten script is checked against
+  // the original as an XML parser reads it, and kept only if that is
+  // unchanged (KeepsXmlShape). An XML comment counts only in a document known
+  // to be XHTML: by its response headers, or, where those are never finalized
+  // (as on Apache), by the type the parse was started with. Elsewhere
+  // "<!--" is the common HTML script idiom.
   const RewriteDriver::XhtmlStatus xhtml_status =
       driver()->MimeTypeXhtmlStatus();
-  const bool changes_xml_markers =
-      xhtml_status != RewriteDriver::kIsNotXhtml &&
-      (CountSubstring(code_block.rewritten_code(), "<![CDATA[") !=
-           CountSubstring(*script, "<![CDATA[") ||
-       CountSubstring(code_block.rewritten_code(), "]]>") !=
-           CountSubstring(*script, "]]>"));
-  const bool known_xhtml =
-      driver()->server_context()->response_headers_finalized()
-          ? xhtml_status == RewriteDriver::kIsXhtml
-          : driver()->content_type().IsXmlLike();
-  const bool drops_xml_comment =
-      known_xhtml && script->find("<!--") != GoogleString::npos;
-  // Replace the old script string with the new, minified one.
-  if ((xhtml_status != RewriteDriver::kIsNotXhtml) &&
-      (script->find("<![CDATA[") != StringPiece::npos) &&
-      !code_block.rewritten_code().starts_with("<![CDATA")) {  // See Issue 542.
-    // Minifier strips leading and trailing CDATA comments from scripts.
-    // Restore them if necessary and safe according to the original script.
-    if (code_block.rewritten_code().find("]]>") != StringPiece::npos) {
-      // Minification can join adjacent brackets into "]]>", which would end
-      // the wrapper early; keep the original script.
-      config_->did_not_shrink()->Add(1);
-      return;
-    }
-    script->clear();
-    StrAppend(script, "//<![CDATA[\n", code_block.rewritten_code(), "\n//]]>");
-  } else if (changes_xml_markers || drops_xml_comment) {
-    config_->did_not_shrink()->Add(1);
-    return;
-  } else {
+  if (xhtml_status == RewriteDriver::kIsNotXhtml) {
     // Swap in the minified code to replace the original code.
     code_block.SwapRewrittenString(script);
     // Note: code_block and rewritten_script are INVALID after this point.
+  } else {
+    const bool known_xhtml =
+        driver()->server_context()->response_headers_finalized()
+            ? xhtml_status == RewriteDriver::kIsXhtml
+            : driver()->content_type().IsXmlLike();
+    const StringPiece rewritten = code_block.rewritten_code();
+    // The minifier drops a CDATA section's markers when they are inside
+    // JavaScript comments; put the section back around all of the code. A
+    // marker left in the minified code stays where the minifier put it, and
+    // the check decides. See Issue 542.
+    GoogleString wrapped;
+    if (ScanXmlScript(*script, known_xhtml).cdata_sections == 1 &&
+        rewritten.find("<![CDATA[") == StringPiece::npos &&
+        rewritten.find("]]>") == StringPiece::npos) {
+      wrapped = StrCat("//<![CDATA[\n", rewritten, "\n//]]>");
+    }
+    if (!KeepsXmlShape(*script, wrapped.empty() ? rewritten : wrapped,
+                       known_xhtml)) {
+      config_->did_not_shrink()->Add(1);
+      return;
+    }
+    if (wrapped.empty()) {
+      code_block.SwapRewrittenString(script);
+      // Note: code_block and rewritten_script are INVALID after this point.
+    } else {
+      script->swap(wrapped);
+    }
   }
   config_->num_uses()->Add(1);
   driver()->log_record()->SetRewriterLoggingStatus(
