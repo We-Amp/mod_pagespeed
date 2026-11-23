@@ -27,10 +27,10 @@
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace net_instaweb {
 
@@ -650,40 +650,6 @@ TEST_F(HTTPValueEncodeTest, EncodeInvalid) {
 // headers in and out, and that the two marker lookups are not affected by it.
 // ============================================================================
 
-namespace {
-
-// Tag 15, wire type 2 (length-delimited): key byte (15 << 3) | 2 = 0x7a,
-// then the length (11) and the payload.
-const char kUnknownFieldWire[] =
-    "\x7a\x0b"
-    "size-record";
-
-GoogleString UnknownFieldWire() {
-  return GoogleString(kUnknownFieldWire, STATIC_STRLEN(kUnknownFieldWire));
-}
-
-GoogleString SerializeHeaders(ResponseHeaders* headers) {
-  GoogleString wire;
-  StringWriter writer(&wire);
-  GoogleMessageHandler handler;
-  EXPECT_TRUE(headers->WriteAsBinary(&writer, &handler));
-  return wire;
-}
-
-bool CarriesUnknownField(ResponseHeaders* headers) {
-  return SerializeHeaders(headers).find(UnknownFieldWire()) !=
-         GoogleString::npos;
-}
-
-void AttachUnknownField(ResponseHeaders* headers) {
-  GoogleString wire = SerializeHeaders(headers);
-  wire.append(UnknownFieldWire());
-  GoogleMessageHandler handler;
-  ASSERT_TRUE(headers->ReadFromBinary(wire, &handler));
-}
-
-}  // namespace
-
 class HTTPValueUnknownFieldTest : public HTTPValueTest {
  protected:
   // The encoded form of a value whose stored headers carry the unknown field.
@@ -718,7 +684,7 @@ TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersAndExtractHeaders) {
     SCOPED_TRACE(headers_first);
     GoogleString encoded = BuildEncodedValueWithUnknownField(headers_first);
     // The stored bytes hold the field as written.
-    EXPECT_NE(GoogleString::npos, encoded.find(UnknownFieldWire()));
+    EXPECT_NE(GoogleString::npos, encoded.find(UnknownHeadersFieldWire()));
 
     HTTPValue value;
     ResponseHeaders linked;
@@ -814,7 +780,7 @@ TEST_F(HTTPValueUnknownFieldTest, AbsentFromDecodedHttpText) {
   ASSERT_TRUE(
       HTTPValue::Decode(without_field, &text_without, &message_handler_));
   EXPECT_EQ(text_without, text_with);
-  EXPECT_EQ(GoogleString::npos, text_with.find("size-record"));
+  EXPECT_EQ(GoogleString::npos, text_with.find(kUnknownHeadersFieldPayload));
 }
 
 }  // namespace net_instaweb

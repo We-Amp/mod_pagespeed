@@ -30,5 +30,6 @@ pagespeed_cc_test(
     ]),
     deps = [
         "//test/net/instaweb/http:http_test_base",
+        "//test/pagespeed/kernel/http:http_test_base",
     ],
 )

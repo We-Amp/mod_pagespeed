@@ -1397,7 +1397,9 @@ TEST_F(CurlUrlAsyncFetcherTestFakeWebServer, TestHangingGet) {
 // of body bytes handed to the fetch, so what it means depends on who decodes
 // the content coding: the cases below pin it for a plain and a
 // gzip-compressed origin, sized and chunked, with the fetcher's own gzip
-// handling on and off.
+// handling on and off.  The native fetcher of the nginx port records something
+// else for the same responses (see ngx_fetch_original_length_pin_test.cc);
+// the difference between the fetchers is tracked in issue #892.
 
 class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
  protected:
@@ -1495,11 +1497,12 @@ class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
     return response;
   }
 
-  // Fetches the canned response for 'c' with length tracking on and returns
-  // the index of the completed fetch.
-  int FetchCase(const Case& c) {
+  // Fetches the canned response for 'c' with length tracking on and sets
+  // '*fetch_index' to the index of the completed fetch.  Call it through
+  // ASSERT_NO_FATAL_FAILURE.
+  void FetchCase(const Case& c, int* fetch_index) {
     CannedResponseThread server(BuildResponse(c), thread_system_.get());
-    EXPECT_TRUE(server.Start());
+    ASSERT_TRUE(server.Start());
     const int port = server.GetListeningPort();
     curl_fetcher_->set_track_original_content_length(true);
     curl_fetcher_->set_fetch_with_gzip(c.fetch_with_gzip);
@@ -1513,7 +1516,7 @@ class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
     EXPECT_EQ(1, WaitTillDone(index, index));
     server.ShutDown();
     last_request_ = server.request();
-    return index;
+    *fetch_index = index;
   }
 
   // The value of the request header 'name' in the last request the canned
@@ -1559,14 +1562,17 @@ TEST_F(CurlOriginalContentLengthTest, PlainOriginRecordsBodySize) {
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    int index = FetchCase(c);
+    int index = -1;
+    ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
     ASSERT_TRUE(fetches_[index]->success());
     EXPECT_EQ(PlainBody(), contents(index));
     EXPECT_EQ(plain_size, RecordedOriginalLength(index));
   }
 }
 
-// FINDING, pinned as it is today: a gzip-compressed origin fetched with the
+// KNOWN DEFECT, tracked in issue #894, pinned as it is today; the fix for
+// that issue inverts this test (the fetch then succeeds and delivers the
+// uncompressed body).  A gzip-compressed origin fetched with the
 // fetcher's own gzip handling on does not arrive.  The transfer is decoded
 // once by the HTTP library, and the result, still labelled gzip, is then
 // handed to the inflater that the same setting installs in front of the
@@ -1584,7 +1590,8 @@ TEST_F(CurlOriginalContentLengthTest,
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    int index = FetchCase(c);
+    int index = -1;
+    ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
     EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
     EXPECT_FALSE(fetches_[index]->success());
     EXPECT_EQ(200, response_headers(index)->status_code());
@@ -1616,7 +1623,8 @@ TEST_F(CurlOriginalContentLengthTest,
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    int index = FetchCase(c);
+    int index = -1;
+    ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
     ASSERT_TRUE(fetches_[index]->success());
     EXPECT_TRUE(response_headers(index)->IsGzipped());
     EXPECT_EQ(gzipped, contents(index));
@@ -1627,7 +1635,8 @@ TEST_F(CurlOriginalContentLengthTest,
 // A length the origin states itself is kept as it is.
 TEST_F(CurlOriginalContentLengthTest, OriginSuppliedLengthIsKept) {
   const Case c = {"origin header", false, false, false, false, "12345"};
-  int index = FetchCase(c);
+  int index = -1;
+  ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
   ASSERT_TRUE(fetches_[index]->success());
   EXPECT_EQ(12345, RecordedOriginalLength(index));
 }
@@ -1638,7 +1647,8 @@ TEST_F(CurlOriginalContentLengthTest, OriginSuppliedLengthIsKept) {
 // module's own fetches.
 TEST_F(CurlOriginalContentLengthTest, EveryRequestCarriesTheModuleMarker) {
   const Case c = {"plain", false, false, false, false, nullptr};
-  int index = FetchCase(c);
+  int index = -1;
+  ASSERT_NO_FATAL_FAILURE(FetchCase(c, &index));
   ASSERT_TRUE(fetches_[index]->success());
   const GoogleString default_user_agent = LastRequestHeader("User-Agent");
   EXPECT_TRUE(strings::StartsWith(default_user_agent, "CurlPagespeed ("))
@@ -1670,10 +1680,11 @@ TEST_F(CurlOriginalContentLengthTest, EveryRequestCarriesTheModuleMarker) {
 // off it adds no Accept-Encoding of its own.
 TEST_F(CurlOriginalContentLengthTest, FetcherGzipDecidesAcceptEncoding) {
   const Case off = {"off", false, false, false, false, nullptr};
-  FetchCase(off);
+  int index = -1;
+  ASSERT_NO_FATAL_FAILURE(FetchCase(off, &index));
   EXPECT_STREQ("", LastRequestHeader("Accept-Encoding"));
   const Case on = {"on", false, false, true, false, nullptr};
-  FetchCase(on);
+  ASSERT_NO_FATAL_FAILURE(FetchCase(on, &index));
   EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
 }
 

@@ -41,6 +41,7 @@
 #include "pagespeed/kernel/http/response_headers_parser.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace net_instaweb {
 
@@ -3098,39 +3099,6 @@ TEST_F(ResponseHeadersTest, ShareableForCookieRequest) {
 
 namespace {
 
-// Tag 15, wire type 2 (length-delimited): key byte (15 << 3) | 2 = 0x7a,
-// then the length (11) and the payload.
-const char kUnknownFieldPayload[] = "size-record";
-const char kUnknownFieldWire[] =
-    "\x7a\x0b"
-    "size-record";
-
-GoogleString UnknownFieldWire() {
-  return GoogleString(kUnknownFieldWire, STATIC_STRLEN(kUnknownFieldWire));
-}
-
-GoogleString SerializeHeaders(ResponseHeaders* headers) {
-  GoogleString wire;
-  StringWriter writer(&wire);
-  GoogleMessageHandler handler;
-  EXPECT_TRUE(headers->WriteAsBinary(&writer, &handler));
-  return wire;
-}
-
-bool CarriesUnknownField(ResponseHeaders* headers) {
-  return SerializeHeaders(headers).find(UnknownFieldWire()) !=
-         GoogleString::npos;
-}
-
-// Re-reads 'headers' from their own serialized form with the unknown field
-// appended, the way an entry written by a newer release would be read.
-void AttachUnknownField(ResponseHeaders* headers) {
-  GoogleString wire = SerializeHeaders(headers);
-  wire.append(UnknownFieldWire());
-  GoogleMessageHandler handler;
-  ASSERT_TRUE(headers->ReadFromBinary(wire, &handler));
-}
-
 void FillPlainHeaders(ResponseHeaders* headers) {
   headers->SetStatusAndReason(HttpStatus::kOK);
   headers->SetDate(MockTimer::kApr_5_2010_ms);
@@ -3246,11 +3214,14 @@ TEST_F(ResponseHeadersTest, UnknownFieldAbsentFromHttpText) {
   StringWriter writer(&text);
   ASSERT_TRUE(headers.WriteAsHttp(&writer, &message_handler_));
   EXPECT_EQ(expected_text, text);
-  EXPECT_EQ(GoogleString::npos, text.find(kUnknownFieldPayload));
-  EXPECT_EQ(GoogleString::npos, headers.ToString().find(kUnknownFieldPayload));
+  EXPECT_EQ(GoogleString::npos, text.find(kUnknownHeadersFieldPayload));
+  EXPECT_EQ(GoogleString::npos,
+            headers.ToString().find(kUnknownHeadersFieldPayload));
   for (int i = 0; i < headers.NumAttributes(); ++i) {
-    EXPECT_EQ(GoogleString::npos, headers.Name(i).find(kUnknownFieldPayload));
-    EXPECT_EQ(GoogleString::npos, headers.Value(i).find(kUnknownFieldPayload));
+    EXPECT_EQ(GoogleString::npos,
+              headers.Name(i).find(kUnknownHeadersFieldPayload));
+    EXPECT_EQ(GoogleString::npos,
+              headers.Value(i).find(kUnknownHeadersFieldPayload));
   }
 }
 

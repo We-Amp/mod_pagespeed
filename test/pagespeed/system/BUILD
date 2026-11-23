@@ -615,6 +615,7 @@ pagespeed_cc_test(
         "//net/instaweb/rewriter",
         "//pagespeed/system:daemon_record_arm",
         "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/kernel/http:http_test_base",
         "//test/pagespeed/system:test_base_core",
     ],
 )

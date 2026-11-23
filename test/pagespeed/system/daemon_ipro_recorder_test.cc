@@ -45,7 +45,6 @@
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -57,6 +56,7 @@
 #include "pagespeed/system/daemon_record_arm.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 #include "test/pagespeed/system/recording_daemon_abi.h"
 
 namespace net_instaweb {
@@ -1144,27 +1144,11 @@ TEST_F(DaemonIproRecorderTest, AnUnknownHeadersFieldNeverReachesThePeer) {
   ASSERT_FALSE(plain_log.empty());
   remove(log_path_.c_str());
 
-  // Tag 15, wire type 2 (length-delimited): key byte (15 << 3) | 2 = 0x7a,
-  // then the length (11) and the payload.
-  const char kUnknownFieldWire[] =
-      "\x7a\x0b"
-      "size-record";
   ResponseHeaders with_field;
   MakeOkHeaders(&with_field);
-  GoogleString wire;
-  {
-    StringWriter writer(&wire);
-    ASSERT_TRUE(with_field.WriteAsBinary(&writer, nullptr));
-  }
-  wire.append(kUnknownFieldWire, STATIC_STRLEN(kUnknownFieldWire));
-  ASSERT_TRUE(with_field.ReadFromBinary(wire, nullptr));
-  GoogleString rewritten;
-  {
-    StringWriter writer(&rewritten);
-    ASSERT_TRUE(with_field.WriteAsBinary(&writer, nullptr));
-  }
+  AttachUnknownField(&with_field);
   // The headers do carry it.
-  ASSERT_NE(GoogleString::npos, rewritten.find("size-record"));
+  ASSERT_TRUE(CarriesUnknownField(&with_field));
 
   const DaemonRecordOutcome outcome = Run(&with_field, kBody);
   EXPECT_TRUE(outcome.gate_ran);
@@ -1173,7 +1157,7 @@ TEST_F(DaemonIproRecorderTest, AnUnknownHeadersFieldNeverReachesThePeer) {
   EXPECT_TRUE(outcome.notified);
 
   const GoogleString log = CallLog();
-  EXPECT_EQ(GoogleString::npos, log.find("size-record")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find(kUnknownHeadersFieldPayload)) << log;
   EXPECT_EQ(plain_log, log);
 }
 

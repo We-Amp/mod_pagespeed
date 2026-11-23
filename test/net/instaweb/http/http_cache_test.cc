@@ -52,6 +52,7 @@
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace {
 // Set the cache size large enough so nothing gets evicted during this test.
@@ -1961,36 +1962,6 @@ TEST_F(HTTPCacheZeroCopyTest, FlagOnGzippedEntryInflatedToOwned) {
 
 namespace {
 
-// Tag 15, wire type 2 (length-delimited): key byte (15 << 3) | 2 = 0x7a,
-// then the length (11) and the payload.
-const char kUnknownFieldWire[] =
-    "\x7a\x0b"
-    "size-record";
-
-GoogleString UnknownFieldWire() {
-  return GoogleString(kUnknownFieldWire, STATIC_STRLEN(kUnknownFieldWire));
-}
-
-GoogleString SerializeHeaders(ResponseHeaders* headers) {
-  GoogleString wire;
-  StringWriter writer(&wire);
-  GoogleMessageHandler handler;
-  EXPECT_TRUE(headers->WriteAsBinary(&writer, &handler));
-  return wire;
-}
-
-bool CarriesUnknownField(ResponseHeaders* headers) {
-  return SerializeHeaders(headers).find(UnknownFieldWire()) !=
-         GoogleString::npos;
-}
-
-void AttachUnknownField(ResponseHeaders* headers) {
-  GoogleString wire = SerializeHeaders(headers);
-  wire.append(UnknownFieldWire());
-  GoogleMessageHandler handler;
-  ASSERT_TRUE(headers->ReadFromBinary(wire, &handler));
-}
-
 bool ValueCarriesUnknownField(const HTTPValue& value) {
   ResponseHeaders headers;
   GoogleMessageHandler handler;
@@ -2315,7 +2286,7 @@ TEST_F(HTTPCacheUnknownFieldTest, KeptBySharedMemoryBackend) {
       HTTPValue value;
       BuildValueWithUnknownField(false, &value);
       PutValue(&value);
-      ASSERT_TRUE(last_put.last_put().find(UnknownFieldWire()) !=
+      ASSERT_TRUE(last_put.last_put().find(UnknownHeadersFieldWire()) !=
                   GoogleString::npos);
 
       for (bool accepts_gzip : {true, false}) {

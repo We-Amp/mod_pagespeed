@@ -12,6 +12,7 @@ pagespeed_cc_test_library(
         "user_agent_matcher_test_base.cc",
     ],
     hdrs = [
+        "unknown_headers_field.h",
         "user_agent_matcher_test_base.h",
     ],
     deps = [

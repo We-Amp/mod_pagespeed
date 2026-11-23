@@ -13,9 +13,14 @@
 //
 //  - With length tracking on, X-Original-Content-Length is taken from the
 //    response's Content-Length header when the headers arrive, before any
-//    body byte is read.  The fetcher does not decode a content coding, so
-//    for a compressed response this is the COMPRESSED length, not the size
-//    of the resource.
+//    body byte is read.  Every fetch is wrapped in an inflating fetch, which
+//    inflates a gzip response when the caller did not ask for gzip itself,
+//    but that happens to the body afterwards: the length is recorded before
+//    the wrapper inflates anything.  So for a compressed response it is the
+//    COMPRESSED length, not the size of the resource.  The fetcher based on
+//    the HTTP library records something else for the same responses (see
+//    curl_url_async_fetcher_test.cc); the difference is tracked in issue
+//    #892.
 //  - A response without a Content-Length (the fetcher sends HTTP/1.0
 //    requests, so that is a close-delimited body) gets no such header from
 //    the fetcher at all.
@@ -129,13 +134,31 @@ TEST(NgxFetchOriginalLengthPinTest, CompletionRecordsBytesOnlyOverAHeader) {
                       "->SetOriginalContentLength(bytes_received_);}"));
 }
 
-TEST(NgxFetchOriginalLengthPinTest, TheFetcherDecodesNoContentCoding) {
-  // No inflater and no content-coding handling in the fetcher: the bytes it
-  // counts and the length it records are those of the transfer.
+TEST(NgxFetchOriginalLengthPinTest, LengthIsRecordedBeforeTheWrapperInflates) {
+  // The fetch itself has no inflater and looks at no content coding: the
+  // bytes it counts and the Content-Length it records are the transfer's.
   const GoogleString cc = ReadStrippedSource(kFetchSource);
   EXPECT_EQ(GoogleString::npos, cc.find("GzipInflater"));
   EXPECT_EQ(GoogleString::npos, cc.find("kContentEncoding"));
   EXPECT_EQ(GoogleString::npos, cc.find("InflatingFetch"));
+
+  // Inflation is done by a wrapper around the caller's fetch, installed by
+  // the fetcher before the native fetch is created.  The native fetch writes
+  // the recorded length into the response headers it shares with that
+  // wrapper while the headers arrive, so the value is fixed before the
+  // wrapper sees a body byte.
+  const GoogleString fetcher_cc =
+      ReadStrippedSource("pagespeed/nginx/ngx_url_async_fetcher.cc");
+  const size_t wrap =
+      fetcher_cc.find("async_fetch=EnableInflation(async_fetch);");
+  ASSERT_NE(GoogleString::npos, wrap);
+  const size_t create = fetcher_cc.find(
+      "NgxFetch*fetch=newNgxFetch(url,async_fetch,message_handler,log_);");
+  ASSERT_NE(GoogleString::npos, create);
+  EXPECT_LT(wrap, create);
+  // Exactly one place wraps, and exactly one creates.
+  EXPECT_EQ(GoogleString::npos, fetcher_cc.find("EnableInflation(", wrap + 1));
+  EXPECT_EQ(GoogleString::npos, fetcher_cc.find("newNgxFetch(", create + 1));
 }
 
 TEST(NgxFetchOriginalLengthPinTest, EveryRequestCarriesTheModuleMarker) {
