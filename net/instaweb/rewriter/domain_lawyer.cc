@@ -824,9 +824,9 @@ bool DomainLawyer::AddShard(const StringPiece& shard_domain_name,
     // multiplexed connection already provides full parallelism.
     if (ShouldWarnShardDeprecation(
             StrCat(shard_domain_name, "->", comma_separated_shards))) {
-      handler->MessageS(kWarning, ShardDeprecationMessage(
-                                      shard_domain_name,
-                                      comma_separated_shards));
+      handler->MessageS(
+          kWarning,
+          ShardDeprecationMessage(shard_domain_name, comma_separated_shards));
     }
   }
   can_rewrite_domains_ |= result;

@@ -2528,8 +2528,8 @@ namespace {
 
 // When the parser warns about a deprecated option.
 enum class DeprecatedWhen {
-  kWhenSet,       // whenever it is set, before its value is parsed
-  kWhenAccepted,  // once its value has been accepted
+  kWhenSet,         // whenever it is set, before its value is parsed
+  kWhenAccepted,    // once its value has been accepted
   kByDomainLawyer,  // warned by the domain lawyer when the mapping is added
 };
 
@@ -2606,8 +2606,8 @@ RewriteOptions::RemovedOptions() {
   return *removed;
 }
 
-bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
-                                             StringPiece arg1, StringPiece arg2,
+bool RewriteOptions::DeprecatedOptionMessage(StringPiece name, StringPiece arg1,
+                                             StringPiece arg2,
                                              GoogleString* message) {
   for (const auto& deprecated : kDeprecatedOptionNotes) {
     if (deprecated.when == DeprecatedWhen::kByDomainLawyer &&

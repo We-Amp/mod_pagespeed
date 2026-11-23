@@ -602,8 +602,9 @@ void ApacheLinter::CheckValue(const Line& at, const ApacheCommand& command) {
     Add(at, "PS202", Severity::kWarning,
         (at.values_safe || !names_arguments)
             ? deprecated
-            : StrCat(at.name, " is deprecated (text not shown, the value may "
-                              "be secret)"));
+            : StrCat(at.name,
+                     " is deprecated (text not shown, the value may "
+                     "be secret)"));
   }
   if (filter_list || ignored_here) {
     return;  // Their parser warnings are reported above.
