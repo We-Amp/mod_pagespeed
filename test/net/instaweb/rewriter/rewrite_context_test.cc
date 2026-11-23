@@ -35,7 +35,9 @@
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/rate_controller.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
+#include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/public/common_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/fake_filter.h"
@@ -6574,6 +6576,136 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleUnchangedResources) {
   // No additional fetches needed — metadata was correctly updated.
   EXPECT_EQ(0, trim_filter_->num_rewrites());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
+// ============================================================================
+// Behaviour pinned for statistics on optimized responses served from cache:
+// which fetches of a .pagespeed. URL answer with the original bytes and which
+// with optimized ones, and what the request for an input looks like when it
+// leaves the rewriting layer.
+// ============================================================================
+
+namespace {
+
+// Records the User-Agent of each request on its way to the wrapped fetcher.
+class UserAgentRecordingFetcher : public UrlAsyncFetcher {
+ public:
+  UserAgentRecordingFetcher(UrlAsyncFetcher* base, StringVector* user_agents)
+      : base_(base), user_agents_(user_agents) {}
+  ~UserAgentRecordingFetcher() override {}
+
+  void Fetch(const GoogleString& url, MessageHandler* message_handler,
+             AsyncFetch* fetch) override {
+    const char* user_agent =
+        fetch->request_headers()->Lookup1(HttpAttributes::kUserAgent);
+    user_agents_->push_back(user_agent == nullptr ? "(none)" : user_agent);
+    base_->Fetch(url, message_handler, fetch);
+  }
+
+ private:
+  UrlAsyncFetcher* base_;
+  StringVector* user_agents_;
+};
+
+}  // namespace
+
+// The marker that identifies the module's own fetches to a server is added by
+// each server's fetcher (see the fetcher tests), not here: the request for an
+// input leaves the rewriting layer with no User-Agent at all, whatever the
+// visitor sent.  Code at this layer therefore cannot tell from its own
+// request that a fetch is the module's; the receiving server can.
+TEST_F(RewriteContextTest, InputFetchLeavesRewritingLayerWithoutUserAgent) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+
+  StringVector user_agents;
+  rewrite_driver()->SetSessionFetcher(
+      new UserAgentRecordingFetcher(mock_url_fetcher(), &user_agents));
+
+  RequestHeaders request_headers;
+  request_headers.Add(HttpAttributes::kUserAgent, "VisitorBrowser/1.0");
+  GoogleString contents;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(Encode(kTestDomain, "tw", "0", "a.css", "css"),
+                               &request_headers, &contents, &headers));
+  EXPECT_STREQ("a", contents);
+
+  ASSERT_EQ(1, user_agents.size());
+  EXPECT_STREQ("(none)", user_agents[0]);
+  EXPECT_EQ(GoogleString::npos,
+            user_agents[0].find(kModPagespeedSubrequestUserAgent));
+}
+
+// A fetch whose rewrite does not finish before the deadline is answered with
+// the ORIGINAL bytes; the same URL fetched again, once the rewrite is done,
+// is answered with the optimized bytes from the cache.  Both go out on the
+// same .pagespeed. URL, so "this response was optimized" is a property of
+// the individual response, not of the URL or of the rewrite.
+TEST_F(RewriteContextTest,
+       DeadlineFetchServesOriginalThenCacheServesOptimized) {
+  InitCombiningFilter(Timer::kMonthMs);
+  EnableDebug();
+  InitResources();
+  combining_filter_->set_prefix("|");
+  GoogleString combined_url =
+      Encode(kTestDomain, CombiningFilter::kFilterId, "0", "a.css", "css");
+  Variable* deadline_alarms =
+      statistics()->GetVariable(RewriteContext::kNumDeadlineAlarmInvocations);
+  Variable* cached_fetches =
+      statistics()->GetVariable("resource_fetches_cached");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_STREQ(" a ", content);  // The input, as fetched.
+  EXPECT_EQ(1, deadline_alarms->Get());
+  EXPECT_EQ(0, cached_fetches->Get());
+
+  ASSERT_TRUE(FetchResourceUrl(combined_url, &content));
+  EXPECT_STREQ("| a ", content);  // The filter's output.
+  EXPECT_EQ(1, deadline_alarms->Get());
+  EXPECT_EQ(1, cached_fetches->Get());
+}
+
+// A fetch naming a hash that is not the one the rewrite produces is answered
+// with the OPTIMIZED bytes, privately cacheable for a short time: from a
+// fresh reconstruction when nothing is cached, and from the cached output
+// under the right hash when the rewrite is already known.  Neither answer is
+// counted as a cache hit on the requested URL.
+TEST_F(RewriteContextTest, HashMismatchFetchServesOptimizedBytes) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  Variable* cached_fetches =
+      statistics()->GetVariable("resource_fetches_cached");
+  const GoogleString wrong_hash_url =
+      Encode(kTestDomain, "tw", "1", "a.css", "css");
+
+  // Cold: reconstructed.
+  GoogleString contents;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(wrong_hash_url, &contents, &headers));
+  EXPECT_STREQ("a", contents);  // Trimmed; the input is " a ".
+  EXPECT_EQ(1, trim_filter_->num_rewrites());
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_EQ(RewriteOptions::kDefaultImplicitCacheTtlMs, headers.cache_ttl_ms());
+  EXPECT_EQ(0, cached_fetches->Get());
+
+  // Warm: the output stored under the right hash is served instead.
+  ClearStats();
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(wrong_hash_url, &contents, &headers));
+  EXPECT_STREQ("a", contents);
+  EXPECT_EQ(0, trim_filter_->num_rewrites());
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+  EXPECT_FALSE(headers.IsProxyCacheable());
+  EXPECT_EQ(0, cached_fetches->Get());
+
+  // The right hash is a plain cache hit with the same bytes.
+  ClearStats();
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(Encode(kTestDomain, "tw", "0", "a.css", "css"),
+                               &contents, &headers));
+  EXPECT_STREQ("a", contents);
+  EXPECT_EQ(1, cached_fetches->Get());
 }
 
 }  // namespace net_instaweb

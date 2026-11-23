@@ -2658,4 +2658,67 @@ TEST_F(InPlaceCorsGuardTest, GuardOffServesOptimizedCopy) {
 
 }  // namespace
 
+// In-place optimization does not store its result under the resource's own
+// URL.  The optimized bytes are written by a nested rewrite of the type's own
+// filter, as that filter's ordinary output: an image under the image filter's
+// id, a stylesheet under the CSS filter's, a script under the JavaScript
+// minifier's.  That hidden output is what a later request for the original
+// URL is answered from, so anything recorded with a filter's output when it
+// is written is also there for in-place serving, keyed by the same filter id.
+TEST_F(InPlaceRewriteContextTest,
+       OptimizedBytesAreStoredAsTheTypesFilterOutput) {
+  Init();
+  const struct {
+    const GoogleString* url;
+    const char* hidden_output_url;
+    const char* filter_id;
+    const char* content_type;
+    const char* first_serve_etag;
+  } kCases[] = {
+      {&cache_png_url_,
+       "http://www.example.com/cacheable.png.pagespeed.ic.0.png",
+       RewriteOptions::kImageCompressionId, kContentTypePng.mime_type(),
+       original_etag_.c_str()},
+      {&cache_css_url_,
+       "http://www.example.com/cacheable.css.pagespeed.cf.0.css",
+       RewriteOptions::kCssFilterId, kContentTypeCss.mime_type(), nullptr},
+      {&cache_js_url_, "http://www.example.com/cacheable.js.pagespeed.jm.0.js",
+       RewriteOptions::kJavascriptMinId, kContentTypeJavascript.mime_type(),
+       nullptr},
+  };
+  for (const auto& c : kCases) {
+    SCOPED_TRACE(c.hidden_output_url);
+    // Nothing is stored for the filter's output before the first request.
+    EXPECT_EQ(HTTPCache::kNotFound,
+              HttpBlockingFindStatus(c.hidden_output_url, http_cache()).status);
+
+    // The first request streams the original bytes and optimizes behind it.
+    FetchAndCheckResponse(*c.url, cache_body_, true, kInjectedSMaxAgeMs,
+                          c.first_serve_etag, start_time_ms());
+
+    HTTPValue value;
+    ResponseHeaders headers;
+    ASSERT_EQ(
+        HTTPCache::kFound,
+        HttpBlockingFind(c.hidden_output_url, http_cache(), &value, &headers)
+            .status);
+    StringPiece contents;
+    ASSERT_TRUE(value.ExtractContents(&contents));
+    EXPECT_EQ(StrCat(cache_body_, ":", c.filter_id), contents);
+    EXPECT_STREQ(c.content_type, headers.Lookup1(HttpAttributes::kContentType));
+    EXPECT_FALSE(headers.IsGzipped());
+    // The stored headers carry the size of the input as the original length.
+    EXPECT_STREQ(IntegerToString(static_cast<int>(cache_body_.size())),
+                 headers.Lookup1(HttpAttributes::kXOriginalContentLength));
+    // It is an ordinary output entry, not a recorded input.
+    EXPECT_FALSE(value.IsFetchedInput());
+
+    // The second request for the original URL is answered with those bytes.
+    ResetHeadersAndStats();
+    FetchAndCheckResponse(*c.url, StrCat(cache_body_, ":", c.filter_id), true,
+                          ttl_ms_, etag_, start_time_ms());
+    ResetHeadersAndStats();
+  }
+}
+
 }  // namespace net_instaweb

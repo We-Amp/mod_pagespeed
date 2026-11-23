@@ -31,6 +31,7 @@
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/public/global_constants.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -1387,6 +1388,290 @@ TEST_F(CurlUrlAsyncFetcherTestFakeWebServer, TestHangingGet) {
   EXPECT_EQ(1, timeouts->Get());
   EXPECT_EQ(282, response_headers(index)->status_code());
   EXPECT_STREQ("This text is less than 500 bytes.\n", contents(index));
+}
+
+// ---- What the fetcher records as the original content length ----
+//
+// With length tracking on, the fetcher adds X-Original-Content-Length when
+// the fetch completes, unless the origin sent one.  The value is the number
+// of body bytes handed to the fetch, so what it means depends on who decodes
+// the content coding: the cases below pin it for a plain and a
+// gzip-compressed origin, sized and chunked, with the fetcher's own gzip
+// handling on and off.
+
+class CurlOriginalContentLengthTest : public CurlUrlAsyncFetcherTest {
+ protected:
+  // Answers one connection with a fixed response.
+  class CannedResponseThread : public PosixTcpServerThread {
+   public:
+    CannedResponseThread(const GoogleString& response,
+                         ThreadSystem* thread_system)
+        : PosixTcpServerThread(0, "canned_response", thread_system),
+          response_(response) {}
+    ~CannedResponseThread() override { ShutDown(); }
+
+    void HandleClientConnection(int client_fd) override {
+      char buffer[kStackBufferSize];
+      while (request_.find("\r\n\r\n") == GoogleString::npos) {
+        ssize_t n = read(client_fd, buffer, sizeof(buffer));
+        if (n <= 0) {
+          break;
+        }
+        request_.append(buffer, n);
+      }
+      size_t offset = 0;
+      while (offset < response_.size()) {
+        ssize_t n = write(client_fd, response_.data() + offset,
+                          response_.size() - offset);
+        if (n <= 0) {
+          break;
+        }
+        offset += n;
+      }
+    }
+
+    // The request as received.  Only read this after ShutDown().
+    const GoogleString& request() const { return request_; }
+
+   private:
+    GoogleString response_;
+    GoogleString request_;
+  };
+
+  struct Case {
+    const char* name;
+    bool gzip_origin;      // The origin sends Content-Encoding: gzip.
+    bool chunked;          // Chunked instead of Content-Length.
+    bool fetch_with_gzip;  // The fetcher's own gzip handling.
+    bool request_gzip;     // The caller asks for gzip itself.
+    const char* origin_original_length;  // Header sent by the origin, or null.
+  };
+
+  static GoogleString PlainBody() {
+    GoogleString body;
+    for (int i = 0; i < 40; ++i) {
+      StrAppend(&body, ".rule", IntegerToString(i),
+                " { color: blue; margin: 0 auto; }\n");
+    }
+    return body;
+  }
+
+  static GoogleString GzipBody() {
+    GoogleString gzipped;
+    StringWriter writer(&gzipped);
+    EXPECT_TRUE(
+        GzipInflater::Deflate(PlainBody(), GzipInflater::kGzip, &writer));
+    return gzipped;
+  }
+
+  static GoogleString BuildResponse(const Case& c) {
+    const GoogleString body = c.gzip_origin ? GzipBody() : PlainBody();
+    GoogleString response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/css\r\n"
+        "Connection: close\r\n";
+    if (c.gzip_origin) {
+      StrAppend(&response, "Content-Encoding: gzip\r\n");
+    }
+    if (c.origin_original_length != nullptr) {
+      StrAppend(&response,
+                "X-Original-Content-Length: ", c.origin_original_length,
+                "\r\n");
+    }
+    if (c.chunked) {
+      // Two chunks and the terminator.
+      const size_t half = body.size() / 2;
+      StrAppend(&response, "Transfer-Encoding: chunked\r\n\r\n");
+      StrAppend(&response, absl::StrFormat("%zx\r\n", half));
+      response.append(body, 0, half);
+      StrAppend(&response, absl::StrFormat("\r\n%zx\r\n", body.size() - half));
+      response.append(body, half, GoogleString::npos);
+      StrAppend(&response, "\r\n0\r\n\r\n");
+    } else {
+      StrAppend(&response, "Content-Length: ",
+                IntegerToString(static_cast<int>(body.size())), "\r\n\r\n");
+      response.append(body);
+    }
+    return response;
+  }
+
+  // Fetches the canned response for 'c' with length tracking on and returns
+  // the index of the completed fetch.
+  int FetchCase(const Case& c) {
+    CannedResponseThread server(BuildResponse(c), thread_system_.get());
+    EXPECT_TRUE(server.Start());
+    const int port = server.GetListeningPort();
+    curl_fetcher_->set_track_original_content_length(true);
+    curl_fetcher_->set_fetch_with_gzip(c.fetch_with_gzip);
+    int index = AddTestUrl(
+        StrCat("http://127.0.0.1:", IntegerToString(port), "/style.css"), ".");
+    if (c.request_gzip) {
+      request_headers(index)->Add(HttpAttributes::kAcceptEncoding,
+                                  HttpAttributes::kGzip);
+    }
+    StartFetch(index);
+    EXPECT_EQ(1, WaitTillDone(index, index));
+    server.ShutDown();
+    last_request_ = server.request();
+    return index;
+  }
+
+  // The value of the request header 'name' in the last request the canned
+  // server received, or "" when it was not sent.
+  GoogleString LastRequestHeader(StringPiece name) const {
+    StringPieceVector lines;
+    SplitStringPieceToVector(last_request_, "\r\n", &lines, true);
+    for (StringPiece line : lines) {
+      const size_t colon = line.find(':');
+      if (colon != StringPiece::npos &&
+          StringCaseEqual(line.substr(0, colon), name)) {
+        StringPiece value = line.substr(colon + 1);
+        TrimWhitespace(&value);
+        return value.as_string();
+      }
+    }
+    return "";
+  }
+
+  GoogleString last_request_;
+
+  // The recorded original content length, or -1 when there is none.
+  int64 RecordedOriginalLength(int index) {
+    const char* header = response_headers(index)->Lookup1(
+        HttpAttributes::kXOriginalContentLength);
+    int64 value = -1;
+    if (header == nullptr || !StringToInt64(header, &value)) {
+      return -1;
+    }
+    return value;
+  }
+};
+
+// A plain origin: the recorded length is the size of the body, whether the
+// response is sized or chunked.
+TEST_F(CurlOriginalContentLengthTest, PlainOriginRecordsBodySize) {
+  const int64 plain_size = PlainBody().size();
+  const Case cases[] = {
+      {"sized", false, false, false, false, nullptr},
+      {"chunked", false, true, false, false, nullptr},
+      {"sized, fetcher gzip on", false, false, true, false, nullptr},
+      {"chunked, fetcher gzip on", false, true, true, false, nullptr},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    int index = FetchCase(c);
+    ASSERT_TRUE(fetches_[index]->success());
+    EXPECT_EQ(PlainBody(), contents(index));
+    EXPECT_EQ(plain_size, RecordedOriginalLength(index));
+  }
+}
+
+// A gzip-compressed origin fetched with the fetcher's own gzip handling on:
+// the transfer is decoded before the bytes are counted, so the recorded
+// length is the uncompressed size.
+TEST_F(CurlOriginalContentLengthTest,
+       CompressedOriginWithFetcherGzipRecordsUncompressedSize) {
+  const int64 plain_size = PlainBody().size();
+  ASSERT_LT(static_cast<int64>(GzipBody().size()), plain_size);
+  const Case cases[] = {
+      {"sized", true, false, true, false, nullptr},
+      {"chunked", true, true, true, false, nullptr},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    int index = FetchCase(c);
+    ASSERT_TRUE(fetches_[index]->success());
+    EXPECT_EQ(PlainBody(), contents(index));
+    EXPECT_EQ(plain_size, RecordedOriginalLength(index));
+  }
+}
+
+// A gzip-compressed origin fetched with the fetcher's own gzip handling off,
+// by a caller that asked for gzip itself and inflates afterwards (this is how
+// the fetcher is set up when another layer does the inflating): the bytes
+// counted are the compressed transfer, so the recorded "original" length is
+// the COMPRESSED size.  It is not the size of the resource before
+// optimization, and a caller that needs that must not take it from this
+// header.
+TEST_F(CurlOriginalContentLengthTest,
+       CompressedOriginWithoutFetcherGzipRecordsCompressedSize) {
+  const GoogleString gzipped = GzipBody();
+  const int64 plain_size = PlainBody().size();
+  const int64 gzip_size = gzipped.size();
+  ASSERT_LT(gzip_size, plain_size);
+  const Case cases[] = {
+      {"sized", true, false, false, true, nullptr},
+      {"chunked", true, true, false, true, nullptr},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    int index = FetchCase(c);
+    ASSERT_TRUE(fetches_[index]->success());
+    EXPECT_TRUE(response_headers(index)->IsGzipped());
+    EXPECT_EQ(gzipped, contents(index));
+    EXPECT_EQ(gzip_size, RecordedOriginalLength(index));
+  }
+}
+
+// A length the origin states itself is kept as it is.
+TEST_F(CurlOriginalContentLengthTest, OriginSuppliedLengthIsKept) {
+  const Case c = {"origin header", false, false, false, false, "12345"};
+  int index = FetchCase(c);
+  ASSERT_TRUE(fetches_[index]->success());
+  EXPECT_EQ(12345, RecordedOriginalLength(index));
+}
+
+// Every request the fetcher sends carries the module's marker in its
+// User-Agent, appended to whatever the caller supplied or to the fetcher's
+// own name when the caller supplied none.  A server uses it to recognize the
+// module's own fetches.
+TEST_F(CurlOriginalContentLengthTest, EveryRequestCarriesTheModuleMarker) {
+  const Case c = {"plain", false, false, false, false, nullptr};
+  int index = FetchCase(c);
+  ASSERT_TRUE(fetches_[index]->success());
+  const GoogleString default_user_agent = LastRequestHeader("User-Agent");
+  EXPECT_TRUE(strings::StartsWith(default_user_agent, "CurlPagespeed ("))
+      << default_user_agent;
+  EXPECT_NE(GoogleString::npos,
+            default_user_agent.find(kModPagespeedSubrequestUserAgent))
+      << default_user_agent;
+
+  CannedResponseThread server(BuildResponse(c), thread_system_.get());
+  ASSERT_TRUE(server.Start());
+  index = AddTestUrl(
+      StrCat("http://127.0.0.1:", IntegerToString(server.GetListeningPort()),
+             "/style.css"),
+      ".");
+  request_headers(index)->Add(HttpAttributes::kUserAgent, "VisitorBrowser/1.0");
+  StartFetch(index);
+  ASSERT_EQ(1, WaitTillDone(index, index));
+  server.ShutDown();
+  last_request_ = server.request();
+  const GoogleString passed_user_agent = LastRequestHeader("User-Agent");
+  EXPECT_TRUE(strings::StartsWith(passed_user_agent, "VisitorBrowser/1.0 ("))
+      << passed_user_agent;
+  EXPECT_NE(GoogleString::npos,
+            passed_user_agent.find(kModPagespeedSubrequestUserAgent))
+      << passed_user_agent;
+}
+
+// With the fetcher's own gzip handling on it asks for gzip itself; with it
+// off it adds no Accept-Encoding of its own.
+TEST_F(CurlOriginalContentLengthTest, FetcherGzipDecidesAcceptEncoding) {
+  const Case off = {"off", false, false, false, false, nullptr};
+  FetchCase(off);
+  EXPECT_STREQ("", LastRequestHeader("Accept-Encoding"));
+  const Case on = {"on", false, false, true, false, nullptr};
+  FetchCase(on);
+  EXPECT_STREQ("gzip", LastRequestHeader("Accept-Encoding"));
+}
+
+// Without tracking nothing is recorded.
+TEST_F(CurlOriginalContentLengthTest, NothingRecordedWithoutTracking) {
+  StartFetch(kModpagespeedSite);
+  ASSERT_EQ(1, WaitTillDone(kModpagespeedSite, kModpagespeedSite));
+  EXPECT_FALSE(response_headers(kModpagespeedSite)
+                   ->Has(HttpAttributes::kXOriginalContentLength));
 }
 
 }  // namespace net_instaweb

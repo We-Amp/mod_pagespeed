@@ -45,6 +45,7 @@
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -1124,6 +1125,56 @@ TEST_F(DaemonIproRecorderTest, AResponseToACorsRequestIsRecordedWithGuardOff) {
   EXPECT_TRUE(outcome.gate_ran);
   EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
   EXPECT_TRUE(outcome.stored);
+}
+
+// --- a headers-message field this build does not know ----------------------
+
+// The stored headers are a serialized message, and a newer release may add a
+// field to it (tag 15 is the next free one).  Headers read back from such an
+// entry carry the field as bytes this build does not interpret.  What is
+// handed to the peer is built from the named attributes one by one, so the
+// field cannot travel with it: the peer is told exactly what it is told for
+// the same headers without the field.
+TEST_F(DaemonIproRecorderTest, AnUnknownHeadersFieldNeverReachesThePeer) {
+  ResponseHeaders plain;
+  MakeOkHeaders(&plain);
+  const DaemonRecordOutcome plain_outcome = Run(&plain, kBody);
+  ASSERT_TRUE(plain_outcome.stored);
+  const GoogleString plain_log = CallLog();
+  ASSERT_FALSE(plain_log.empty());
+  remove(log_path_.c_str());
+
+  // Tag 15, wire type 2 (length-delimited): key byte (15 << 3) | 2 = 0x7a,
+  // then the length (11) and the payload.
+  const char kUnknownFieldWire[] =
+      "\x7a\x0b"
+      "size-record";
+  ResponseHeaders with_field;
+  MakeOkHeaders(&with_field);
+  GoogleString wire;
+  {
+    StringWriter writer(&wire);
+    ASSERT_TRUE(with_field.WriteAsBinary(&writer, nullptr));
+  }
+  wire.append(kUnknownFieldWire, STATIC_STRLEN(kUnknownFieldWire));
+  ASSERT_TRUE(with_field.ReadFromBinary(wire, nullptr));
+  GoogleString rewritten;
+  {
+    StringWriter writer(&rewritten);
+    ASSERT_TRUE(with_field.WriteAsBinary(&writer, nullptr));
+  }
+  // The headers do carry it.
+  ASSERT_NE(GoogleString::npos, rewritten.find("size-record"));
+
+  const DaemonRecordOutcome outcome = Run(&with_field, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(plain_outcome.verdict, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_TRUE(outcome.notified);
+
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find("size-record")) << log;
+  EXPECT_EQ(plain_log, log);
 }
 
 }  // namespace
