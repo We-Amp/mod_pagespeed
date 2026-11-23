@@ -4,6 +4,8 @@ All notable changes to mod_pagespeed are documented in this file.
 
 ## Unreleased
 
+## 2.10.0 - 2026-11-23
+
 Security: fixed an issue that could let content not meant to be shared reach optimized pages served to other visitors. Affected: 2.9.2 and earlier. Update recommended.
 
 Changed: a stylesheet, script or image is inlined, combined or used for image dimensions in an optimized page only when your server marks it as shareable: not `Cache-Control: private` or `no-store`, no `Vary` on anything but `Accept-Encoding` (so `Vary: Origin` or `Vary: User-Agent` also stops these optimizations), and no `Set-Cookie`. This includes load-balancer affinity (sticky-session) cookies and session or consent cookies. Assets sent with `Cache-Control: private` are not rare (some frameworks, application servers and hosting defaults send it); such assets are no longer inlined, combined or sized, so affected pages can be larger or make more requests than before. `/v1/stats` counts the refusals under `subresource_refusals`, and the worker log names each origin once with the reason. Serve shared static assets with a shareable `Cache-Control`, without those cookies and without a `Vary` beyond `Accept-Encoding` to keep these optimizations.
@@ -13,6 +15,14 @@ Security: fixed an issue in the experimental agent optimization (off by default)
 Security: fixed an issue in browser analysis (off by default) that could let an analysed page reach network destinations it should not. Affected: 2.9.2 and earlier releases that include browser analysis. Update recommended.
 
 Changed: agent optimization now fetches only public origins by default. If a site you optimize is served from an internal address, list it with the new worker flag `--agent-render-private-origins` (container: `PAGESPEED_AGENT_RENDER_PRIVATE_ORIGINS`). The worker logs a warning naming the flag the first time it skips such a site.
+
+Changed: the container images no longer print a terms notice at startup, and `ACCEPT_EULA` is no longer needed. The software is licensed under the Apache License 2.0; see https://modpagespeed.com/terms/ for the terms of the website, the package repository and support.
+
+Changed: a cache read that finds the entry briefly locked by a concurrent write now retries once, after about 1 ms, instead of counting as a miss, so the request is served from the cache. If the retry finds it locked again the read is a miss as before. Two new counters on `/v1/metrics` show how often this happens: `pagespeed_cache_busy_reads_total` (reads retried) and `pagespeed_cache_busy_retry_hits_total` (retries that found the entry).
+
+Fixed: with agent optimization on, a request was served the page's Markdown copy whenever its `Accept` header mentioned `text/markdown`, even as `text/markdown;q=0` (which means "not acceptable") or at a lower q-value than `text/html`. The Markdown copy is now chosen only when `text/markdown` is named with a q-value above 0 and at least the q-value `text/html` gets (directly or through `text/*` or `*/*`). A tie selects Markdown, so agents such as those sending `Accept: text/markdown, text/html, */*` still get it; `q=0`, a lower q-value, wildcards alone and malformed `Accept` headers get HTML. The nginx module also reads every `Accept` header line of a request, not only the first. This applies to the nginx module and the ASP.NET Core middleware.
+
+Documentation: the image filters page describes the new `PngLossyFallbackMaxSizePercent` option of the module, which is off by default: how to turn it on for nginx and Apache, when it applies, that a PNG classed as sensitive to compression noise can still be served as lossy WebP with it on, and how to opt a path out.
 
 ## 2.9.2 - 2026-11-18
 

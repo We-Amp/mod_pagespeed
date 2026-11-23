@@ -1,1 +1,0 @@
-Documentation: the image filters page describes the new `PngLossyFallbackMaxSizePercent` option of the module, which is off by default: how to turn it on for nginx and Apache, when it applies, that a PNG classed as sensitive to compression noise can still be served as lossy WebP with it on, and how to opt a path out.
