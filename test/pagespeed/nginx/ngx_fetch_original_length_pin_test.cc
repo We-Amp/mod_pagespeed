@@ -149,16 +149,24 @@ TEST(NgxFetchOriginalLengthPinTest, LengthIsRecordedBeforeTheWrapperInflates) {
   // wrapper sees a body byte.
   const GoogleString fetcher_cc =
       ReadStrippedSource("pagespeed/nginx/ngx_url_async_fetcher.cc");
-  const size_t wrap =
-      fetcher_cc.find("async_fetch=EnableInflation(async_fetch);");
+  const GoogleString wrap_statement =
+      "async_fetch=EnableInflation(async_fetch);";
+  const GoogleString create_statement =
+      "NgxFetch*fetch=newNgxFetch(url,async_fetch,message_handler,log_);";
+  const size_t wrap = fetcher_cc.find(wrap_statement);
   ASSERT_NE(GoogleString::npos, wrap);
-  const size_t create = fetcher_cc.find(
-      "NgxFetch*fetch=newNgxFetch(url,async_fetch,message_handler,log_);");
+  const size_t create = fetcher_cc.find(create_statement);
   ASSERT_NE(GoogleString::npos, create);
   EXPECT_LT(wrap, create);
   // Exactly one place wraps, and exactly one creates.
-  EXPECT_EQ(GoogleString::npos, fetcher_cc.find("EnableInflation(", wrap + 1));
-  EXPECT_EQ(GoogleString::npos, fetcher_cc.find("newNgxFetch(", create + 1));
+  EXPECT_EQ(GoogleString::npos,
+            fetcher_cc.substr(0, wrap).find("EnableInflation("));
+  EXPECT_EQ(GoogleString::npos,
+            fetcher_cc.find("EnableInflation(", wrap + wrap_statement.size()));
+  EXPECT_EQ(GoogleString::npos,
+            fetcher_cc.substr(0, create).find("newNgxFetch("));
+  EXPECT_EQ(GoogleString::npos,
+            fetcher_cc.find("newNgxFetch(", create + create_statement.size()));
 }
 
 TEST(NgxFetchOriginalLengthPinTest, EveryRequestCarriesTheModuleMarker) {
