@@ -1580,7 +1580,13 @@ TEST_F(CurlOriginalContentLengthTest,
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
     int index = FetchCase(c);
-    ASSERT_TRUE(fetches_[index]->success());
+    GoogleString text;
+    StringWriter text_writer(&text);
+    message_handler_.Dump(&text_writer);
+    ASSERT_TRUE(fetches_[index]->success())
+        << text << " status=" << response_headers(index)->status_code()
+        << " ocl=" << RecordedOriginalLength(index)
+        << " body=" << contents(index).size();
     EXPECT_EQ(PlainBody(), contents(index));
     EXPECT_EQ(plain_size, RecordedOriginalLength(index));
   }

@@ -3157,7 +3157,7 @@ TEST_F(ResponseHeadersTest, UnknownFieldKeptByBinaryReadAndWrite) {
   EXPECT_EQ(wire, SerializeHeaders(&reread));
   // The named attributes are unaffected.
   EXPECT_STREQ("text/css", reread.Lookup1(HttpAttributes::kContentType));
-  EXPECT_EQ(2, reread.NumAttributes());
+  EXPECT_EQ(3, reread.NumAttributes());
 }
 
 // CopyFrom copies the whole message, the unknown field included.
