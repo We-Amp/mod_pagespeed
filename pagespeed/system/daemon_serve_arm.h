@@ -491,14 +491,48 @@ class RewriteStats;
 // nothing -- the caller's total already counted the request.
 void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type);
 
+// What a port did with one answered request, as far as the size statistics
+// need it.  Plain values the port already has; nothing is built for it.
+struct DaemonServeSent {
+  // The request is a GET.
+  bool get_request = false;
+  // The whole body went out with a 200: false for a 304 and for a HEAD.
+  bool body_sent = false;
+  // The size of that body.
+  size_t body_size = 0;
+  // The request has a Range header.  The port writes the whole body and the
+  // server cuts it down afterwards, so the size above is not what went out.
+  bool range_request = false;
+  // The request's User-Agent (DaemonServeRequest::user_agent).  Borrowed.
+  StringPiece user_agent;
+};
+
 // Counts one ANSWERED in-place request on the serve leg.  An optimized
 // serve moves ipro_daemon_served and its per-class split; a durable-original
 // serve (origin bytes from the volume) moves ipro_daemon_served_original
 // only.  Exactly one of the two per answered request, 200/304/HEAD alike.
 // No-op for a null stats pointer.  Never called with a kFallThrough
 // decision: the ports return before counting a served request.
+//
+// It also adds the sizes of an optimized image, stylesheet or script whose
+// body was sent to ipro_daemon_served_{image,css,js}_original_bytes and
+// ..._optimized_bytes: what the response was made from, and the body sent.
+// The rule is here, and not in the ports, so that they cannot differ:
+//   - only an optimized serve of an entry the optimizer produced that
+//     records the origin's length (0 means "not recorded");
+//   - only a GET whose whole body went out, without a Range header and
+//     without the module's own marker in the User-Agent
+//     (ServedSavings::RecordOptimizerCacheServe);
+//   - like is compared with like.  A body sent uncompressed is measured
+//     against the origin's uncompressed length.  A stored compressed copy is
+//     measured against the origin's size in that same compression when the
+//     entry records it, and is not counted when it does not: measuring it
+//     against the uncompressed origin would credit the compression to the
+//     optimization.
+// At most two additions, no read and no allocation.
 void RecordDaemonServeCounters(RewriteStats* stats,
-                               const DaemonServeDecision& decision);
+                               const DaemonServeDecision& decision,
+                               const DaemonServeSent& sent);
 
 // ---------------------------------------------------------------------------
 // The pure half.  No I/O, no peer handle: every rule below is testable

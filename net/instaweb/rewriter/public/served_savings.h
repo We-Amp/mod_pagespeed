@@ -67,6 +67,48 @@ class ServedSavings {
   // made from (it has no inputs, say).
   static Outcome Record(const Response& response, RewriteStats* stats);
 
+  // What kind of resource a response from the optimizer's cache is.
+  enum CachedType {
+    kCachedOther,
+    kCachedImage,
+    kCachedCss,
+    kCachedJavascript,
+  };
+
+  // One optimized response answered from the optimizer's cache, as the place
+  // that sends it sees it.  That path has no driver and no parsed request,
+  // so the request is described by plain values; nothing here is built for
+  // the call.
+  struct OptimizerCacheResponse {
+    // The request is a GET.
+    bool get_request = false;
+    // The whole body went out with a 200: false for a 304 and for any answer
+    // without a body.
+    bool body_sent = false;
+    // The request has a Range header.
+    bool range_request = false;
+    // The request's User-Agent; empty when it has none.
+    StringPiece user_agent;
+    CachedType type = kCachedOther;
+    // What the body was made from, and the body sent, measured the same way
+    // (both uncompressed, or both in the one compression the body went out
+    // in).  The caller decides that; see RecordDaemonServeCounters.
+    int64 original_size = 0;
+    int64 optimized_size = 0;
+  };
+
+  // The same decision as Record() for a response answered from the
+  // optimizer's cache, added to that path's own variables
+  // (ipro_daemon_served_{image,css,js}_{original,optimized}_bytes).
+  //
+  // Not counted: a request that is not a GET; an answer whose whole body did
+  // not go out with a 200; a request with a Range header; a request that
+  // carries the module's own marker in its User-Agent; a type other than
+  // image, stylesheet or script.  A response larger than what it was made
+  // from is counted as it is and lowers the saving.
+  static Outcome RecordOptimizerCacheServe(
+      const OptimizerCacheResponse& response, RewriteStats* stats);
+
   // True for the id of a filter whose output is an optimized image,
   // stylesheet or script by itself: image recompression, CSS rewriting,
   // JavaScript minification.  Every output of these that has inputs is

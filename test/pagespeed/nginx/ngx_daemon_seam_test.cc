@@ -1544,6 +1544,33 @@ TEST_F(NgxDaemonSeamTest, ServerBlocksShareOneAdapterPerVolume) {
       << "the pool runs the check once per pair; the context reuses it";
 }
 
+// The sizes of an optimized response are counted by the shared rule from
+// what this port tells it: the method (not header_only, which nginx sets
+// later), whether the whole body goes out, its size, a Range header and the
+// User-Agent.
+TEST_F(NgxDaemonSeamTest, TheServeLegReportsWhatWasSentForTheSizes) {
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  EXPECT_NE(GoogleString::npos,
+            cc.find("sent.get_request=r->method==NGX_HTTP_GET;"))
+      << "the size statistics no longer know the request's method";
+  EXPECT_NE(GoogleString::npos,
+            cc.find("sent.body_sent=sent.get_request&&!decision.not_modified;"))
+      << "a 304 or a HEAD would be counted as a body sent";
+  EXPECT_NE(GoogleString::npos, cc.find("sent.body_size=body_size;"));
+  EXPECT_NE(GoogleString::npos,
+            cc.find("sent.range_request=r->headers_in.range!=nullptr;"))
+      << "a Range request would be counted with the whole body's size";
+  EXPECT_NE(GoogleString::npos,
+            cc.find("sent.user_agent=serve_request.user_agent;"))
+      << "the module's own fetches would be counted as a visitor's";
+  EXPECT_NE(GoogleString::npos,
+            cc.find("RecordDaemonServeCounters(server_context->rewrite_stats(),"
+                    "decision,sent);"));
+  // Only the shared rule moves the size variables.
+  EXPECT_EQ(GoogleString::npos, cc.find("_original_bytes()->Add("));
+  EXPECT_EQ(GoogleString::npos, cc.find("_optimized_bytes()->Add("));
+}
+
 TEST_F(NgxDaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   // The shared serve-counting rule moves the total and its per-class split

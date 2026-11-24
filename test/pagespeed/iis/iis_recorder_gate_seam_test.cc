@@ -248,4 +248,36 @@ TEST_F(IisRecorderGateSeamTest, TheDensityHintReachesBothArms) {
       << "the serve request no longer carries Sec-CH-DPR";
 }
 
+// The sizes of an optimized response answered from the optimizer's cache are
+// counted by the shared rule from what this port tells it: the method,
+// whether the whole body went out, its size, a Range header and the
+// User-Agent.
+TEST_F(IisRecorderGateSeamTest, TheServeLegReportsWhatWasSentForTheSizes) {
+  GoogleString raw;
+  ASSERT_TRUE(file_system_.ReadFile(
+      RunfilePath("pagespeed/iis/iis_http_module.cpp").c_str(), &raw,
+      &handler_));
+  GoogleString source;
+  for (char c : raw) {
+    if (!isspace(static_cast<unsigned char>(c))) source.push_back(c);
+  }
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.get_request=StringCaseEqual(http_context->"
+                        "GetRequest()->GetHttpMethod(),\"GET\");"))
+      << "the size statistics no longer know the request's method";
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.body_sent=sent.get_request&&response.has_body;"))
+      << "a 304 or a HEAD would be counted as a body sent";
+  EXPECT_NE(GoogleString::npos, source.find("sent.body_size=body_size;"));
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.range_request=http_context->GetRequest()->"
+                        "GetHeader(\"Range\")!=nullptr;"))
+      << "a Range request would be counted with the whole body's size";
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.user_agent=serve_request.user_agent;"))
+      << "the module's own fetches would be counted as a visitor's";
+  EXPECT_NE(GoogleString::npos,
+            source.find("RecordDaemonServeCounters(stats,decision,sent);"));
+}
+
 }  // namespace net_instaweb

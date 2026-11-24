@@ -858,11 +858,44 @@ TEST_F(DaemonSeamTest, TheSharedStatisticsGetAStartTimeOnce) {
       << "the gauge has more than one writer site";
 }
 
+// The sizes of an optimized response are counted by the shared rule from
+// what this port tells it: the method, whether the whole body went out, its
+// size, a Range header and the User-Agent.
+TEST_F(DaemonSeamTest, TheServeLegReportsWhatWasSentForTheSizes) {
+  const GoogleString raw = ReadSource("pagespeed/apache/instaweb_handler.cc");
+  GoogleString source;
+  for (char c : raw) {
+    if (c != ' ' && c != '\n' && c != '\t') source.push_back(c);
+  }
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.get_request=request_->method_number==M_GET&&"
+                        "request_->header_only==0;"))
+      << "the size statistics no longer know the request's method";
+  EXPECT_NE(
+      GoogleString::npos,
+      source.find("sent.body_sent=sent.get_request&&!decision.not_modified;"))
+      << "a 304 or a HEAD would be counted as a body sent";
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.body_size=decision.body.size();"));
+  EXPECT_NE(
+      GoogleString::npos,
+      source.find("sent.range_request=!RequestHeader(\"Range\").empty();"))
+      << "a Range request would be counted with the whole body's size";
+  EXPECT_NE(GoogleString::npos,
+            source.find("sent.user_agent=serve_request.user_agent;"))
+      << "the module's own fetches would be counted as a visitor's";
+  EXPECT_NE(GoogleString::npos,
+            source.find("RecordDaemonServeCounters(server_context_->"
+                        "rewrite_stats(),decision,sent);"));
+  // Only the shared rule moves the size variables.
+  EXPECT_EQ(GoogleString::npos, source.find("_original_bytes()->Add("));
+  EXPECT_EQ(GoogleString::npos, source.find("_optimized_bytes()->Add("));
+}
+
 TEST_F(DaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   const GoogleString source =
       ReadSource("pagespeed/apache/instaweb_handler.cc");
-  const size_t serve =
-      source.find("InstawebHandler::ServeFromDaemonSubstrate");
+  const size_t serve = source.find("InstawebHandler::ServeFromDaemonSubstrate");
   ASSERT_NE(GoogleString::npos, serve);
   const size_t fn_end = source.find("\n}\n", serve);
   ASSERT_NE(GoogleString::npos, fn_end);

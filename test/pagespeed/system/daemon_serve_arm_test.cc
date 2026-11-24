@@ -3013,7 +3013,7 @@ TEST_F(DaemonServeArmTest, ADurableOriginalServeIsNotCountedAsOptimizerServed) {
   SetAlternates("0c:00:0");
   const DaemonServeDecision original = Serve(Request("image/webp"));
   ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
-  RecordDaemonServeCounters(&rewrite_stats, original);
+  RecordDaemonServeCounters(&rewrite_stats, original, DaemonServeSent());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served")->Get());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served_image")->Get());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
@@ -3023,13 +3023,13 @@ TEST_F(DaemonServeArmTest, ADurableOriginalServeIsNotCountedAsOptimizerServed) {
   SetAlternates("09:00:1");
   const DaemonServeDecision variant = Serve(Request("image/webp"));
   ASSERT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
-  RecordDaemonServeCounters(&rewrite_stats, variant);
+  RecordDaemonServeCounters(&rewrite_stats, variant, DaemonServeSent());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served")->Get());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
 
   // A null stats pointer (a seam without shared statistics) is a no-op.
-  RecordDaemonServeCounters(nullptr, variant);
+  RecordDaemonServeCounters(nullptr, variant, DaemonServeSent());
 }
 
 // ---------------------------------------------------------------------------
@@ -3984,14 +3984,15 @@ TEST_F(DaemonServeArmTest, TheOriginalOnlyStateIsCounted) {
   SetAlternates("0c:00:0");
   const DaemonServeDecision only = Serve(Request("image/webp"));
   ASSERT_TRUE(only.original_only_family);
-  RecordDaemonServeCounters(&rewrite_stats, only);
-  RecordDaemonServeCounters(&rewrite_stats, only);
+  RecordDaemonServeCounters(&rewrite_stats, only, DaemonServeSent());
+  RecordDaemonServeCounters(&rewrite_stats, only, DaemonServeSent());
   EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original")->Get());
   EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original_only")->Get());
 
   // A variant serve moves neither.
   SetAlternates("09:00:1,0c:00:0");
-  RecordDaemonServeCounters(&rewrite_stats, Serve(Request("image/webp")));
+  RecordDaemonServeCounters(&rewrite_stats, Serve(Request("image/webp")),
+                            DaemonServeSent());
   EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original_only")->Get());
 }
 
@@ -4426,10 +4427,10 @@ TEST_F(DaemonServeArmTest, ADeclinedRequestMovesItsOwnCounter) {
   UseStylesheetFamily();
   DaemonServeRequest request = CssRequest("identity");
   request.site = "";
-  RecordDaemonServeCounters(&rewrite_stats, Serve(request));
+  RecordDaemonServeCounters(&rewrite_stats, Serve(request), DaemonServeSent());
   EXPECT_EQ(1, rewrite_stats.daemon_serve_declined_no_site()->Get());
   request.site = kSite;
-  RecordDaemonServeCounters(&rewrite_stats, Serve(request));
+  RecordDaemonServeCounters(&rewrite_stats, Serve(request), DaemonServeSent());
   EXPECT_EQ(1, rewrite_stats.daemon_serve_declined_no_site()->Get());
 }
 
@@ -4522,6 +4523,249 @@ TEST_F(DaemonServeArmTest, TheThreeNotificationsNameTheSiteAndNothingElse) {
                                          request, decision, default_context_,
                                          default_signature_, nullptr, nullptr));
   EXPECT_TRUE(recording.notifies().empty());
+}
+
+// ---------------------------------------------------------------------------
+// The sizes of optimized responses answered from the optimizer's cache.
+// Decisions are built by hand: the rule reads the decision and what the port
+// did with it, nothing else.
+// ---------------------------------------------------------------------------
+
+class DaemonServedSizesTest : public testing::Test {
+ protected:
+  DaemonServedSizesTest()
+      : thread_system_(Platform::CreateThreadSystem()),
+        stats_(thread_system_.get()) {
+    RewriteStats::InitStats(&stats_);
+    rewrite_stats_ = std::make_unique<RewriteStats>(
+        false, &stats_, thread_system_.get(), nullptr);
+  }
+
+  // An optimized serve of an entry the optimizer produced from 1000 origin
+  // bytes, sent uncompressed.
+  static DaemonServeDecision Optimized(int ps_content_type) {
+    DaemonServeDecision decision;
+    decision.verdict = DaemonServeVerdict::kServeOptimized;
+    decision.reason = daemon_serve_reason::kOptimizedVariant;
+    decision.serve_class = kPsServeClassOptimized;
+    decision.selected = true;
+    decision.worker_processed = true;
+    decision.origin_content_length = 1000;
+    decision.ps_content_type = ps_content_type;
+    return decision;
+  }
+
+  // A GET from a browser answered with a whole body of 400 bytes.
+  static DaemonServeSent Sent() {
+    DaemonServeSent sent;
+    sent.get_request = true;
+    sent.body_sent = true;
+    sent.body_size = 400;
+    sent.user_agent = "Mozilla/5.0 (X11; Linux x86_64)";
+    return sent;
+  }
+
+  int64 Value(const char* name) { return stats_.GetVariable(name)->Get(); }
+
+  // The sum over the six size variables, for "nothing moved".
+  int64 AllSizes() {
+    return Value("ipro_daemon_served_image_original_bytes") +
+           Value("ipro_daemon_served_image_optimized_bytes") +
+           Value("ipro_daemon_served_css_original_bytes") +
+           Value("ipro_daemon_served_css_optimized_bytes") +
+           Value("ipro_daemon_served_js_original_bytes") +
+           Value("ipro_daemon_served_js_optimized_bytes");
+  }
+
+  void Record(const DaemonServeDecision& decision,
+              const DaemonServeSent& sent) {
+    RecordDaemonServeCounters(rewrite_stats_.get(), decision, sent);
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system_;
+  SimpleStats stats_;
+  std::unique_ptr<RewriteStats> rewrite_stats_;
+};
+
+TEST_F(DaemonServedSizesTest, AnImageAddsItsOriginAndItsBody) {
+  Record(Optimized(kPsContentImage), Sent());
+  EXPECT_EQ(1000, Value("ipro_daemon_served_image_original_bytes"));
+  EXPECT_EQ(400, Value("ipro_daemon_served_image_optimized_bytes"));
+  EXPECT_EQ(1400, AllSizes());
+  // The serve itself is counted as before.
+  EXPECT_EQ(1, Value("ipro_daemon_served"));
+  EXPECT_EQ(1, Value("ipro_daemon_served_image"));
+}
+
+TEST_F(DaemonServedSizesTest, AStylesheetAddsItsOriginAndItsBody) {
+  Record(Optimized(kPsContentCss), Sent());
+  EXPECT_EQ(1000, Value("ipro_daemon_served_css_original_bytes"));
+  EXPECT_EQ(400, Value("ipro_daemon_served_css_optimized_bytes"));
+  EXPECT_EQ(1400, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, AScriptAddsItsOriginAndItsBody) {
+  Record(Optimized(kPsContentJs), Sent());
+  EXPECT_EQ(1000, Value("ipro_daemon_served_js_original_bytes"));
+  EXPECT_EQ(400, Value("ipro_daemon_served_js_optimized_bytes"));
+  EXPECT_EQ(1400, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, ServesAddUp) {
+  for (int i = 0; i < 3; ++i) {
+    Record(Optimized(kPsContentImage), Sent());
+  }
+  EXPECT_EQ(3000, Value("ipro_daemon_served_image_original_bytes"));
+  EXPECT_EQ(1200, Value("ipro_daemon_served_image_optimized_bytes"));
+}
+
+TEST_F(DaemonServedSizesTest, TheModulesOwnSizeVariablesDoNotMove) {
+  Record(Optimized(kPsContentImage), Sent());
+  Record(Optimized(kPsContentCss), Sent());
+  Record(Optimized(kPsContentJs), Sent());
+  EXPECT_EQ(0, Value("image_served_original_bytes"));
+  EXPECT_EQ(0, Value("image_served_optimized_bytes"));
+  EXPECT_EQ(0, Value("css_served_original_bytes"));
+  EXPECT_EQ(0, Value("css_served_optimized_bytes"));
+  EXPECT_EQ(0, Value("javascript_served_original_bytes"));
+  EXPECT_EQ(0, Value("javascript_served_optimized_bytes"));
+}
+
+TEST_F(DaemonServedSizesTest, ABodyLargerThanItsOriginIsCountedAsItIs) {
+  DaemonServeSent sent = Sent();
+  sent.body_size = 1500;
+  Record(Optimized(kPsContentImage), sent);
+  EXPECT_EQ(1000, Value("ipro_daemon_served_image_original_bytes"));
+  EXPECT_EQ(1500, Value("ipro_daemon_served_image_optimized_bytes"));
+}
+
+TEST_F(DaemonServedSizesTest, AnOriginLengthAboveTwoGigabytesIsNotNegative) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.origin_content_length = 0xF0000000u;
+  Record(decision, Sent());
+  EXPECT_EQ(int64{0xF0000000},
+            Value("ipro_daemon_served_image_original_bytes"));
+}
+
+// --- what is not counted: the request --------------------------------------
+
+TEST_F(DaemonServedSizesTest, AHeadIsNotCounted) {
+  DaemonServeSent sent = Sent();
+  sent.get_request = false;
+  sent.body_sent = false;
+  Record(Optimized(kPsContentImage), sent);
+  EXPECT_EQ(0, AllSizes());
+  // It is still an answered request.
+  EXPECT_EQ(1, Value("ipro_daemon_served_image"));
+}
+
+TEST_F(DaemonServedSizesTest, ARequestThatIsNotAGetIsNotCounted) {
+  DaemonServeSent sent = Sent();
+  sent.get_request = false;
+  Record(Optimized(kPsContentImage), sent);
+  EXPECT_EQ(0, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, ANotModifiedAnswerIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.not_modified = true;
+  DaemonServeSent sent = Sent();
+  sent.body_sent = false;
+  Record(decision, sent);
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_image"));
+}
+
+TEST_F(DaemonServedSizesTest, ARangeRequestIsNotCounted) {
+  DaemonServeSent sent = Sent();
+  sent.range_request = true;
+  Record(Optimized(kPsContentImage), sent);
+  EXPECT_EQ(0, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, TheModulesOwnFetchIsNotCounted) {
+  DaemonServeSent sent = Sent();
+  sent.user_agent = "Mozilla/5.0 (mod_pagespeed/2.10.0-0)";
+  Record(Optimized(kPsContentCss), sent);
+  EXPECT_EQ(0, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, ADefaultSentCountsNoSizes) {
+  Record(Optimized(kPsContentImage), DaemonServeSent());
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_image"));
+}
+
+// --- what is not counted: the entry ----------------------------------------
+
+TEST_F(DaemonServedSizesTest, AStoredOriginalIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.verdict = DaemonServeVerdict::kServeOriginal;
+  decision.serve_class = kPsServeClassOriginalCold;
+  Record(decision, Sent());
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_original"));
+}
+
+TEST_F(DaemonServedSizesTest, AnEntryTheOptimizerDidNotProduceIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.worker_processed = false;
+  Record(decision, Sent());
+  EXPECT_EQ(0, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, AnEntryWithoutAnOriginLengthIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.origin_content_length = 0;
+  Record(decision, Sent());
+  EXPECT_EQ(0, AllSizes());
+}
+
+TEST_F(DaemonServedSizesTest, AnotherTypeIsNotCounted) {
+  Record(Optimized(kPsContentOther), Sent());
+  Record(Optimized(kPsContentHtml), Sent());
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_other"));
+}
+
+// --- like with like ----------------------------------------------------------
+
+// A stored compressed copy is measured against the origin in that same
+// compression, when the entry says what that comes to.
+TEST_F(DaemonServedSizesTest,
+       ACompressedCopyIsMeasuredAgainstTheCompressedOrigin) {
+  DaemonServeDecision decision = Optimized(kPsContentCss);
+  decision.content_encoding = "gzip";
+  decision.encoded_origin_known = true;
+  decision.encoded_origin_length = 300;
+  DaemonServeSent sent = Sent();
+  sent.body_size = 120;
+  Record(decision, sent);
+  EXPECT_EQ(300, Value("ipro_daemon_served_css_original_bytes"));
+  EXPECT_EQ(120, Value("ipro_daemon_served_css_optimized_bytes"));
+}
+
+// Without it nothing is counted: against the uncompressed origin the
+// compression would be shown as a saving of the optimization.
+TEST_F(DaemonServedSizesTest, ACompressedCopyWithoutThatSizeIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentJs);
+  decision.content_encoding = "br";
+  DaemonServeSent sent = Sent();
+  sent.body_size = 120;
+  Record(decision, sent);
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_js"));
+}
+
+// A body sent uncompressed is measured against the uncompressed origin, also
+// when the entry states the origin's size in an encoding.
+TEST_F(DaemonServedSizesTest, AnUncompressedBodyIgnoresTheEncodedOriginSize) {
+  DaemonServeDecision decision = Optimized(kPsContentCss);
+  decision.encoded_origin_known = true;
+  decision.encoded_origin_length = 300;
+  Record(decision, Sent());
+  EXPECT_EQ(1000, Value("ipro_daemon_served_css_original_bytes"));
+  EXPECT_EQ(400, Value("ipro_daemon_served_css_optimized_bytes"));
 }
 
 TEST(DaemonHealNotifyLimiterTest, TheSameUrlInTwoSitesIsTwoKeys) {

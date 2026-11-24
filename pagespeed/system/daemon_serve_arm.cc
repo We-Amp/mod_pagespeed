@@ -28,6 +28,7 @@
 #include <random>
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "net/instaweb/rewriter/public/served_savings.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -1950,8 +1951,52 @@ void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type) {
   }
 }
 
+namespace {
+
+ServedSavings::CachedType ServedSizesType(int ps_content_type) {
+  switch (ps_content_type) {
+    case kPsContentImage:
+      return ServedSavings::kCachedImage;
+    case kPsContentCss:
+      return ServedSavings::kCachedCss;
+    case kPsContentJs:
+      return ServedSavings::kCachedJavascript;
+    default:
+      return ServedSavings::kCachedOther;
+  }
+}
+
+// The sizes of one optimized serve, by the rule stated at
+// RecordDaemonServeCounters.
+void RecordDaemonServedSizes(RewriteStats* stats,
+                             const DaemonServeDecision& decision,
+                             const DaemonServeSent& sent) {
+  if (decision.serve_class != kPsServeClassOptimized ||
+      !decision.worker_processed || decision.origin_content_length == 0) {
+    return;
+  }
+  ServedSavings::OptimizerCacheResponse response;
+  if (decision.content_encoding.empty()) {
+    response.original_size = decision.origin_content_length;
+  } else if (decision.encoded_origin_known) {
+    response.original_size = static_cast<int64>(decision.encoded_origin_length);
+  } else {
+    return;
+  }
+  response.optimized_size = static_cast<int64>(sent.body_size);
+  response.get_request = sent.get_request;
+  response.body_sent = sent.body_sent;
+  response.range_request = sent.range_request;
+  response.user_agent = sent.user_agent;
+  response.type = ServedSizesType(decision.ps_content_type);
+  ServedSavings::RecordOptimizerCacheServe(response, stats);
+}
+
+}  // namespace
+
 void RecordDaemonServeCounters(RewriteStats* stats,
-                               const DaemonServeDecision& decision) {
+                               const DaemonServeDecision& decision,
+                               const DaemonServeSent& sent) {
   if (stats == nullptr) return;
   if (decision.reason == daemon_serve_reason::kNoSiteId) {
     stats->daemon_serve_declined_no_site()->Add(1);
@@ -1959,6 +2004,7 @@ void RecordDaemonServeCounters(RewriteStats* stats,
   if (decision.verdict == DaemonServeVerdict::kServeOptimized) {
     stats->ipro_daemon_served()->Add(1);
     RecordDaemonServedClass(stats, decision.ps_content_type);
+    RecordDaemonServedSizes(stats, decision, sent);
   } else if (decision.verdict == DaemonServeVerdict::kServeOriginal) {
     stats->ipro_daemon_served_original()->Add(1);
     if (decision.original_only_family) {
