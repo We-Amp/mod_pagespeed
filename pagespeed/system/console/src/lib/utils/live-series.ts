@@ -81,9 +81,9 @@ export class LiveSeriesStore {
 /** The one store per tab. */
 export const liveSeries = new LiveSeriesStore();
 
-/** The Savings page's group: module rewrite savings and optimizer serve savings. */
+/** The Savings page's group: module rewrite savings, optimizer serve savings, and what this server's own rewriting saved in delivery. */
 export const SAVINGS_GROUP = "savings";
-export const SAVINGS_SERIES = ["module.bytes_saved", "optimizer.bytes_saved"] as const;
+export const SAVINGS_SERIES = ["module.bytes_saved", "optimizer.bytes_saved", "module.delivered_saved"] as const;
 
 /** Push one sample, breaking the line at a gap: when the newest retained
  *  sample is more than 2.5 intervals old (a paused tab, a long backoff), an

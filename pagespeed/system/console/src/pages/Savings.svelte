@@ -12,10 +12,11 @@
 </script>
 
 <script lang="ts">
-  // Savings: "how much am I saving?" -- the module's own rewrite savings
-  // and the optimizer's cache-serve savings, labelled for what they are and
-  // never silently added together, plus a live chart accumulated from the
-  // poll this page already runs.
+  // Savings: "how much am I saving?" -- first what was delivered (the sizes
+  // of optimized responses, counted each time one is sent), then the module's
+  // savings at rewrite time and the optimizer's own cache-serve figures, each
+  // labelled for what it is and never silently added together, plus a live
+  // chart accumulated from the poll this page already runs.
   import { usePolling } from "$lib/api/polling.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import { isConnectionFailure } from "$lib/api/connection";
@@ -28,7 +29,19 @@
   import TimeSeriesChart from "$lib/TimeSeriesChart.svelte";
   import { dashArray, seriesToken } from "$lib/utils/chart-style";
   import { bytesRateTicks, chartWindowLabel } from "$lib/utils/chart-summary";
-  import { formatBytes, formatBytesRate, formatCount, formatPercent, formatSignedBytes } from "$lib/utils/format";
+  import { formatBytes, formatBytesRate, formatCount, formatIsoTitle, formatPercent, formatSignedBytes } from "$lib/utils/format";
+  import {
+    DELIVERED_VARIABLES,
+    deliveredFamilies,
+    deliveredFamily,
+    deliveredWindow,
+    requestsAvoided,
+    sizesText,
+    smallerText,
+    windowLine,
+    type DeliveredFamilyKey,
+  } from "$lib/utils/delivered";
+  import { graphsView, isGraphsAbsent, type GraphsView } from "$lib/utils/graphs-view";
   import { useConsole } from "$lib/api/context";
   import {
     availabilityText,
@@ -73,6 +86,23 @@
   // its current value (not set: the module default) can stand next to the fix.
   let config = $state<ParsedConfig | null>(null);
   let configAsked = false;
+  // The statistics log, for the delivered figures over recorded history: read
+  // inside the poll, at most once a minute (it gains a sample every few minutes).
+  const LOG_REFETCH_MS = 60_000;
+  let logView = $state<GraphsView | null>(null);
+  let logFetchedAt = 0;
+
+  async function readLog(): Promise<void> {
+    if (Date.now() - logFetchedAt < LOG_REFETCH_MS) return;
+    // Recorded before the read: a missing endpoint is not asked again on every poll.
+    logFetchedAt = Date.now();
+    try {
+      logView = graphsView(await api.getGraphs({ end: Date.now() }, DELIVERED_VARIABLES));
+    } catch (e) {
+      // No endpoint here: say nothing. Any other failure keeps what was read before.
+      if (e instanceof Error && isGraphsAbsent(e)) logView = { kind: "absent", detail: "" };
+    }
+  }
 
   // Per-sample bookkeeping runs inside the fetcher, not in an $effect (same
   // contract as the Overview page): each sample appends to the live series
@@ -80,8 +110,9 @@
   // This page shows no findings, so its sample leaves the message log alone.
   const poll = usePolling(
     () =>
-      sampleOverview(api, Date.now, { messages: false }).then((sample) => {
+      sampleOverview(api, Date.now, { messages: false }).then(async (sample) => {
         const snap = toSnapshot(sample, daemonView);
+        if (sample.module.ok) await readLog();
         // The stamp is the age of the module figures: a sample whose module
         // read failed does not move it.
         if (sample.module.ok) {
@@ -105,8 +136,14 @@
             ? moduleSavedRaw(variablesOf(sample.module.data))
             : null;
         const optimizerRaw = snap.daemonStats ? daemonSavedRaw(snap.daemonStats.serve_savings) : null;
+        // Delivered by this server's own rewriting; no value from a module that does not count it.
+        const sent =
+          sample.module.ok && sample.module.data.variables
+            ? deliveredFamily(variablesOf(sample.module.data), "module")
+            : null;
+        const deliveredRaw = sent !== null && sent.reported ? sent.total.saved : null;
         // Gap-aware: a paused tab or a long backoff breaks the line.
-        pushSample(liveSeries, SAVINGS_GROUP, sample.at / 1000, [moduleRaw, optimizerRaw], 5);
+        pushSample(liveSeries, SAVINGS_GROUP, sample.at / 1000, [moduleRaw, optimizerRaw, deliveredRaw], 5);
         if (!sample.module.ok) {
           const status = sample.module.error instanceof ApiError ? sample.module.error.status : null;
           if (isConnectionFailure("/stats_json", status)) throw sample.module.error;
@@ -125,6 +162,9 @@
   let summary = $derived(vars ? moduleSummary(vars) : null);
   let rows = $derived(vars ? moduleSavingsByType(vars) : null);
   let total = $derived(rows ? moduleSavingsTotal(rows) : null);
+  let delivered = $derived(vars ? deliveredFamilies(vars) : null);
+  let historyWindow = $derived(deliveredWindow(logView));
+  let avoided = $derived(vars ? requestsAvoided(vars) : []);
   let hitRate = $derived(vars ? optimizedCopyHitRate(vars) : null);
   let reasons = $derived(reasonRows(vars, updatedAt ?? undefined, NOT_OPTIMIZED));
   let good = $derived(reasonRows(vars, updatedAt ?? undefined, ALREADY_GOOD) ?? []);
@@ -198,6 +238,19 @@
   // figure stays, the percentage gives way to these words.
   const TOO_EARLY = "too early for a percentage";
 
+  // A family whose counters all read zero has sent nothing yet: said in
+  // words, never as a row of zeros or a 0%.
+  const NOTHING_SENT: Record<DeliveredFamilyKey, string> = {
+    module:
+      "No optimized image, stylesheet or script sent yet. These counters start again from zero when the web server restarts or reloads, and grow with the first optimized responses sent.",
+    "optimizer-cache": "Nothing answered from the optimizer cache yet.",
+  };
+  const SIZES_BASIS: Record<DeliveredFamilyKey, string> = {
+    module: "Sizes before compression.",
+    "optimizer-cache":
+      "Where a stored compressed copy was sent, both sizes are after compression and the original's is approximate. The optimizer's own figures for these responses are under Optimizer cache serves; the two are not added together.",
+  };
+
   const NO_TRAFFIC: Record<string, string> = {
     css: "No CSS seen yet.",
     js: "No JavaScript seen yet.",
@@ -212,6 +265,7 @@
   const CHART_LABELS: Record<string, string> = {
     "module.bytes_saved": TERMS.savedByRewriting,
     "optimizer.bytes_saved": TERMS.savedByOptimizerCache,
+    "module.delivered_saved": TERMS.savedInDelivery,
   };
 
   function latestSeriesValue(data: ReadonlyArray<number | null>): string {
@@ -259,11 +313,106 @@
   {:else}
     <!-- Two columns where the per-host table fills the space under the
          module card; without it the two cards stack, each as wide as the page. -->
+    {#if delivered}
+      <section class="card delivered-card reads-across-container" data-testid="savings-delivered-card" aria-labelledby="savings-delivered-heading">
+        <h2 class="card-title" id="savings-delivered-heading">Delivered savings <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
+        <p class="note" data-testid="savings-delivered-intro">
+          The sizes of optimized images, stylesheets and scripts, counted each time one is sent, from the cache as well.
+          A response answered by a browser cache or by a cache in front of this server is not counted.
+        </p>
+        <div class="families">
+          {#each delivered as family (family.key)}
+            <div class="family" data-testid="savings-delivered-{family.key}">
+              <h3 class="minor-title">{family.label}</h3>
+              {#if !family.reported}
+                <p class="note" data-testid="savings-delivered-{family.key}-unreported">This module version does not count these sizes.</p>
+              {:else if !family.total.counted}
+                <p class="note" data-testid="savings-delivered-{family.key}-empty">{NOTHING_SENT[family.key]}</p>
+              {:else}
+                <dl class="figures">
+                  <div class="figure">
+                    <dt class="metric-label">{TERMS.savedInDelivery}</dt>
+                    <dd class="metric-value num" data-testid="savings-delivered-{family.key}-total">
+                      {formatSignedBytes(family.total.saved)}
+                      <span class="detail metric-context"
+                        >{#if moduleSince?.warming}{sizesText(family.total)}; {TOO_EARLY}{:else}{smallerText(family.total)} · {sizesText(family.total)}{/if}</span
+                      >
+                    </dd>
+                  </div>
+                </dl>
+                {#if family.anyLarger}
+                  <p class="note" data-testid="savings-delivered-{family.key}-larger">
+                    At least one type was sent larger than its originals; that counts as a negative saving here.
+                  </p>
+                {/if}
+                <!-- Five columns are wider than a phone: the table scrolls inside its own named region, not the page. -->
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <div class="table-scroll" role="region" aria-label="{family.label}, by type" tabindex="0">
+                <table class="data-inline breakdown reads-across" data-testid="savings-delivered-{family.key}-table" aria-label="{family.label}, by type">
+                  <thead>
+                    <tr><th scope="col">Type</th><th scope="col">Original</th><th scope="col">Sent</th><th scope="col">Saved</th><th scope="col">Change</th></tr>
+                  </thead>
+                  <tbody>
+                    {#each family.rows as row (row.key)}
+                      <tr>
+                        <th scope="row">{row.label}</th>
+                        {#if row.counted}
+                          <td class="num">{formatBytes(row.original)}</td>
+                          <td class="num">{formatBytes(row.sent)}</td>
+                          <td class="num">{formatSignedBytes(row.saved)}</td>
+                          <td class="num">{moduleSince?.warming ? "too early" : smallerText(row)}</td>
+                        {:else}
+                          <td class="num">—</td>
+                          <td class="num">—</td>
+                          <td class="num">—</td>
+                          <td class="num">none sent yet</td>
+                        {/if}
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+                </div>
+                <p class="note" data-testid="savings-delivered-{family.key}-basis">{SIZES_BASIS[family.key]}</p>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        <p class="since" data-testid="since-delivered" title={moduleSince?.iso ?? undefined}>
+          {moduleSince?.text ?? "since restart"} (web server restart or reload)
+          {#if moduleSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
+        </p>
+        {#if historyWindow.kind === "data"}
+          <div class="history" data-testid="savings-delivered-window" title="{formatIsoTitle(historyWindow.fromMs)} to {formatIsoTitle(historyWindow.toMs)}">
+            <h3 class="minor-title">Over {historyWindow.spanText} of recorded history</h3>
+            {#each historyWindow.families as family (family.key)}
+              {#if family.total.counted}
+                <p class="note num" data-testid="savings-delivered-window-{family.key}">{family.label}: {windowLine(family)}</p>
+              {/if}
+            {/each}
+            <p class="note">From the statistics log, which also covers the time before a restart. It holds a limited history, so the span is the one it covers now.</p>
+          </div>
+        {:else if historyWindow.kind === "no-log"}
+          <p class="note" data-testid="savings-delivered-no-log">
+            No recorded history: statistics logging is off or has not written yet. With StatisticsLogging on,
+            this card also shows these figures over the history the log holds, restarts included.
+          </p>
+        {/if}
+        {#if avoided.length > 0}
+          <p class="note" data-testid="savings-requests-avoided">
+            Requests avoided (these save requests, not bytes): {avoided.map((a) => `${formatCount(a.count)} ${a.text}`).join(" · ")}
+          </p>
+        {/if}
+      </section>
+    {/if}
     <div class="cards" class:paired={hostTable !== null}>
       <section class="card reads-across-container" data-testid="savings-module-card" aria-labelledby="savings-module-heading">
-        <h2 class="card-title" id="savings-module-heading">Module rewrites <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
+        <h2 class="card-title" id="savings-module-heading">Saved at rewrite time <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if rows && total && summary}
           <RefreshNotice error={moduleError} />
+          <p class="note" data-testid="savings-module-note">
+            Counted once per resource, when it is first optimized, not each time it is sent. With a warm cache little is
+            optimized anew, so a small figure here is normal; what visitors received is under Delivered savings.
+          </p>
           {#if summary.active || total.saved > 0}
             <dl class="figures">
               <div class="figure">
@@ -288,7 +437,7 @@
                 count as no net savings above.
               </p>
             {/if}
-            <table class="data-inline breakdown reads-across" data-testid="savings-module-table" aria-label="Module rewrites, by type">
+            <table class="data-inline breakdown reads-across" data-testid="savings-module-table" aria-label="Saved at rewrite time, by type">
               <thead>
                 <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
               </thead>
@@ -649,6 +798,24 @@
   .chart-card {
     margin-top: var(--ps-space-md);
     overflow: hidden;
+  }
+  .delivered-card {
+    margin-bottom: var(--ps-space-md);
+  }
+  /* The two families side by side once the card is wide enough for two tables. */
+  .families {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+    gap: var(--ps-space-md) var(--ps-space-lg);
+    align-items: start;
+    margin-top: var(--ps-space-sm);
+  }
+  .history {
+    margin-top: var(--ps-space-sm);
+  }
+  /* A grid item may shrink below its table, so the table's region scrolls instead of the page. */
+  .family {
+    min-width: 0;
   }
   .chart-legend {
     display: flex;

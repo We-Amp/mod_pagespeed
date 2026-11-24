@@ -9,6 +9,8 @@
 export const TERMS = {
   /** The module's figure: bytes its rewriting took off the responses it handled. */
   savedByRewriting: "Saved by rewriting",
+  /** The delivered figure: original bytes minus bytes sent, over the optimized responses sent. */
+  savedInDelivery: "Saved in delivery",
   /** The optimizer's figure: transfer bytes saved on responses served from its cache. */
   savedByOptimizerCache: "Saved by the optimizer's cache",
   /** The share of requests answered with an optimized copy from the optimizer's cache. */

@@ -119,6 +119,18 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "In-place JavaScript requests answered from the optimizer's cache since the module started.",
   ipro_daemon_served_image:
     "In-place image requests answered from the optimizer's cache since the module started.",
+  ipro_daemon_served_image_original_bytes:
+    "Bytes of the originals behind the optimized images answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+  ipro_daemon_served_image_optimized_bytes:
+    "Bytes of the optimized images answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
+  ipro_daemon_served_css_original_bytes:
+    "Bytes of the originals behind the optimized stylesheets answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+  ipro_daemon_served_css_optimized_bytes:
+    "Bytes of the optimized stylesheets answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
+  ipro_daemon_served_js_original_bytes:
+    "Bytes of the originals behind the optimized scripts answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+  ipro_daemon_served_js_optimized_bytes:
+    "Bytes of the optimized scripts answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
   ipro_daemon_served_other:
     "In-place requests of other optimizable types answered from the optimizer's cache since the module started.",
   ipro_daemon_fallthrough_css:

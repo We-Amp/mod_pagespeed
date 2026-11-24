@@ -308,6 +308,38 @@ test.describe("Overview verdict and tiles", () => {
     await expect(page.getByTestId("tile-optimizer").locator(".scope-chip")).toHaveText("whole server");
   });
 
+  test("module only, delivered sizes counted: the sentence and the first tile state what was saved in delivery", async ({ page }) => {
+    await open(page, "pagespeed_admin", healthy({
+      stats_json: F.statsDelivered(26 * HOUR, { ipro_daemon_served: 0, ipro_daemon_fallthrough: 0 }),
+      "v1/daemon/health": F.NOT_CONFIGURED,
+      "v1/daemon/stats": F.NOT_CONFIGURED,
+    }));
+    await expect(page.getByTestId("health-summary")).toHaveText(
+      "Working. 38.5 MB saved in delivery since the web server started 1 d ago. No findings.",
+    );
+    const tile = page.getByTestId("tile-rewriting");
+    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery");
+    await expect(page.getByTestId("overview-lead-figure")).toHaveText("38.5 MB");
+    await expect(tile).toContainText("68% smaller · 57.0 MB → 18.5 MB");
+    // The rewrite-time figures stay on the page under their own name.
+    await expect(page.getByTestId("module-by-type")).toContainText("Saved by rewriting, by type");
+  });
+
+  test("just restarted with a warm cache: the first tile says nothing was sent yet, not a zero saving", async ({ page }) => {
+    await open(page, "pagespeed_admin", healthy({
+      stats_json: F.STATS_JUST_RESTARTED,
+      "v1/daemon/health": F.NOT_CONFIGURED,
+      "v1/daemon/stats": F.NOT_CONFIGURED,
+    }));
+    const tile = page.getByTestId("tile-rewriting");
+    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery");
+    await expect(tile.locator(".stat-tile-value")).toHaveText("—");
+    await expect(tile).toContainText("no optimized response sent yet");
+    await expect(tile).not.toContainText("%");
+    await expect(tile).not.toContainText("0 B");
+    await expect(page.getByTestId("health-summary")).toContainText("Warming up.");
+  });
+
   test("module only: the rewriting figure leads, there is no optimizer-cache tile, and the optimizer can be added", async ({ page }) => {
     await open(page, "pagespeed_admin", healthy({
       stats_json: statsStarted(F.STATS_MODULE_ONLY, 26 * HOUR),
