@@ -338,10 +338,12 @@ export class AdminApiClient {
 
   // ── Graphs ─────────────────────────────────────────────────
 
-  async getGraphs(params?: TimeRangeParams): Promise<ConsoleResponse> {
+  /** `names` narrows the reply to those logged variables (the module reads at most 64). */
+  async getGraphs(params?: TimeRangeParams, names?: readonly string[]): Promise<ConsoleResponse> {
     const query = new URLSearchParams();
     // The backend requires "json" to return JSON instead of the SPA shell.
     query.set("json", "1");
+    if (names !== undefined && names.length > 0) query.set("var_titles", names.join(","));
     // Backend uses "start_time" / "end_time" / "granularity" (not "start"/"end"/"granularity_ms").
     if (params?.start !== undefined) query.set("start_time", String(params.start));
     if (params?.end !== undefined) query.set("end_time", String(params.end));

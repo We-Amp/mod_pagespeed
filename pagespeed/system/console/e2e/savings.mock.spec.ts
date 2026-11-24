@@ -53,7 +53,7 @@ test("shows module and optimizer savings on the global console", async ({ page }
   await expect(page.getByTestId("savings-optimizer-total")).toContainText("3% of 21.4 MB");
   await expect(page.getByTestId("savings-optimizer-not-served")).toContainText("HTML, JavaScript");
   // The two sources are labelled for what they are, never summed.
-  await expect(page.getByTestId("savings-module-card")).toContainText("Module rewrites");
+  await expect(page.getByTestId("savings-module-card")).toContainText("Saved at rewrite time");
   await expect(page.getByTestId("savings-optimizer-card")).toContainText("Optimizer cache serves");
 });
 
@@ -164,7 +164,7 @@ test("the chart fills in as samples arrive and announces its series", async ({ p
   await expect(chart).toBeVisible();
   // The latest value is a byte rate: a finite number with its byte unit — the
   // exact figure depends on poll spacing, so the shape is asserted, not the value.
-  await expect(chart).toHaveAccessibleName(/Saved by rewriting latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
+  await expect(chart).toHaveAccessibleName(/Saved at rewrite time latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
 });
 
 for (const [name, viewport] of [
@@ -427,9 +427,10 @@ test("the legend of a bar runs along one line: each share's name next to its cou
   // With room to spare: also where the system's font is wider.
   await widenText(page);
   for (const key of ["css", "image"]) {
-    const rows = await page
-      .getByTestId(`savings-split-${key}`)
-      .locator(".split-figures > div")
+    const shares = page.getByTestId(`savings-split-${key}`).locator(".split-figures > div");
+    // evaluateAll reads what is there at once: wait for the optimizer's figures to be drawn first.
+    await expect(shares).toHaveCount(3);
+    const rows = await shares
       .evaluateAll((els) =>
         els.map((el) => {
           const name = (el.querySelector("dt") as HTMLElement).getBoundingClientRect();
@@ -460,9 +461,9 @@ test("on a laptop window the legend of a bar takes two lines at most", async ({ 
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   for (const key of ["css", "image"]) {
-    const tops = await page
-      .getByTestId(`savings-split-${key}`)
-      .locator(".split-figures > div")
+    const shares = page.getByTestId(`savings-split-${key}`).locator(".split-figures > div");
+    await expect(shares).toHaveCount(3);
+    const tops = await shares
       .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
     expect(tops).toHaveLength(3);
     expect(new Set(tops).size, `${key}: legend lines`).toBeLessThanOrEqual(2);
@@ -474,9 +475,9 @@ test("on a phone the legend wraps inside its card", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   const card = await page.getByTestId("savings-optimizer-card").evaluate((el) => el.getBoundingClientRect().right);
-  const rights = await page
-    .getByTestId("savings-split-css")
-    .locator(".split-figures dt, .split-figures dd")
+  const cells = page.getByTestId("savings-split-css").locator(".split-figures dt, .split-figures dd");
+  await expect(cells).toHaveCount(6);
+  const rights = await cells
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().right));
   expect(rights.length).toBe(6);
   for (const right of rights) expect(right).toBeLessThanOrEqual(card);
@@ -639,7 +640,7 @@ test("the chart names its real window and shows latest values in the card", asyn
   // expect timeout is also 5 s -- so these assertions get 15 s, keeping
   // the second poll inside the window instead of racing it.
   await expect(heading).toContainText(/Last \d+ (s|min)/, { timeout: 15_000 });
-  await expect(page.getByTestId("savings-chart-legend")).toContainText("Saved by rewriting", { timeout: 15_000 });
+  await expect(page.getByTestId("savings-chart-legend")).toContainText("Saved at rewrite time", { timeout: 15_000 });
   await expect(page.getByTestId("savings-chart-legend")).not.toContainText("--", { timeout: 15_000 });
   // The latest rate reads as bytes per second through the shared byte formatter, never a bare "N/s".
   await expect(page.getByTestId("savings-chart-legend").locator(".legend-value").first()).toHaveText(
@@ -916,4 +917,251 @@ test("says nothing about reasons while the web server warms up", async ({ page }
   await expect(page.getByTestId("since-module").getByTestId("warming-pill")).toBeVisible();
   await expect(page.getByTestId("savings-reasons")).toHaveCount(0);
   await expect(page.getByText("Not optimized, by reason")).toHaveCount(0);
+});
+
+// ── Delivered savings ───────────────────────────────────────────────
+
+const DELIVERED = {
+  stats_json: F.statsDelivered(26 * 3_600_000),
+  "v1/daemon/health": HEALTH_OK,
+  "v1/daemon/stats": DAEMON_STATS,
+} as const;
+
+test("delivered savings: per type, original, sent and how much smaller, for this server's own rewriting", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+
+  const card = page.getByTestId("savings-delivered-card");
+  await expect(card.getByRole("heading", { name: /Delivered savings/ })).toBeVisible();
+  // First on the page: what visitors received comes before the rewrite-time figures.
+  const cardTop = (await card.boundingBox())?.y ?? Number.NaN;
+  const moduleTop = (await page.getByTestId("savings-module-card").boundingBox())?.y ?? Number.NaN;
+  expect(cardTop).toBeLessThan(moduleTop);
+
+  const own = page.getByTestId("savings-delivered-module");
+  await expect(own.getByRole("heading")).toHaveText("Optimized by this server");
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("68% smaller · 57.0 MB → 18.5 MB");
+  const table = page.getByRole("table", { name: "Optimized by this server, by type" });
+  await expect(table.getByRole("columnheader")).toHaveText(["Type", "Original", "Sent", "Saved", "Change"]);
+  await expect(table.getByRole("row", { name: /Images/ }).getByRole("cell")).toHaveText(["46.0 MB", "11.3 MB", "34.7 MB", "75% smaller"]);
+  await expect(table.getByRole("row", { name: /CSS/ }).getByRole("cell")).toHaveText(["2.29 MB", "1.79 MB", "516 KB", "22% smaller"]);
+  await expect(table.getByRole("row", { name: /JavaScript/ }).getByRole("cell")).toHaveText(["8.70 MB", "5.39 MB", "3.31 MB", "38% smaller"]);
+  await expect(page.getByTestId("savings-delivered-module-basis")).toHaveText("Sizes before compression.");
+  await expect(page.getByTestId("since-delivered")).toContainText("since 1 d (web server restart or reload)");
+  await expect(card.getByTestId("warming-pill")).toHaveCount(0);
+  await expect(page.getByTestId("savings-requests-avoided")).toHaveText(
+    /1,204 images inlined · 310 stylesheets inlined · 37 stylesheet requests combined away · 1 script request combined away/,
+  );
+});
+
+test("delivered savings: the optimizer cache's responses are a family of their own, with their own basis", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+
+  const cache = page.getByTestId("savings-delivered-optimizer-cache");
+  await expect(cache.getByRole("heading")).toHaveText("Answered from the optimizer cache");
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-total")).toContainText("4.08 MB");
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-total")).toContainText("64% smaller · 6.39 MB → 2.31 MB");
+  const table = page.getByRole("table", { name: "Answered from the optimizer cache, by type" });
+  await expect(table.getByRole("row", { name: /Images/ }).getByRole("cell")).toHaveText(["6.00 MB", "1.98 MB", "4.02 MB", "67% smaller"]);
+  // A type with nothing sent is said in words: no zeros, no percentage.
+  await expect(table.getByRole("row", { name: /JavaScript/ }).getByRole("cell")).toHaveText(["—", "—", "—", "none sent yet"]);
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-basis")).toContainText("after compression");
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-basis")).toContainText("not added together");
+  // Neither family's total holds the other's bytes (38.5 MB + 4.08 MB would read 42.6 MB).
+  await expect(page.getByTestId("savings-delivered-card")).not.toContainText("42.6 MB");
+});
+
+test("the rewrite-time figures are labelled for what they are, not as delivered savings", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const card = page.getByTestId("savings-module-card");
+  await expect(card.getByRole("heading", { name: /Saved at rewrite time/ })).toBeVisible();
+  await expect(page.getByTestId("savings-module-note")).toContainText("Counted once per resource, when it is first optimized");
+  await expect(page.getByTestId("savings-module-note")).toContainText("With a warm cache");
+  await expect(card).not.toContainText("delivery");
+});
+
+test("right after a restart: empty counters read as nothing sent yet, never as 0% saved", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.STATS_JUST_RESTARTED,
+    "v1/daemon/health": HEALTH_OK,
+    "v1/daemon/stats": DAEMON_STATS_EMPTY,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+
+  const card = page.getByTestId("savings-delivered-card");
+  await expect(page.getByTestId("savings-delivered-module-empty")).toContainText("No optimized image, stylesheet or script sent yet.");
+  await expect(page.getByTestId("savings-delivered-module-empty")).toContainText("start again from zero when the web server restarts or reloads");
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-empty")).toHaveText("Nothing answered from the optimizer cache yet.");
+  await expect(card.getByRole("table")).toHaveCount(0);
+  await expect(page.getByTestId("savings-delivered-module-total")).toHaveCount(0);
+  await expect(card).not.toContainText("%");
+  await expect(card).not.toContainText("NaN");
+  await expect(card).not.toContainText("Infinity");
+  await expect(card).not.toContainText("0 B");
+  await expect(page.getByTestId("since-delivered")).toContainText("since 2 min (web server restart or reload)");
+  await expect(page.getByTestId("since-delivered").getByTestId("warming-pill")).toContainText("warming up");
+});
+
+test("minutes after a restart, with the first responses sent: the sizes show, the share waits", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.statsDelivered(3 * 60_000, {
+      ...F.DELIVERED_ZERO,
+      image_served_original_bytes: 241_260,
+      image_served_optimized_bytes: 5_416,
+    }),
+    "v1/daemon/health": HEALTH_OK,
+    "v1/daemon/stats": DAEMON_STATS,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const total = page.getByTestId("savings-delivered-module-total");
+  await expect(total).toContainText("230 KB");
+  await expect(total.locator(".detail")).toHaveText("236 KB → 5.29 KB; too early for a percentage");
+  await expect(total).not.toContainText("%");
+  const table = page.getByRole("table", { name: "Optimized by this server, by type" });
+  await expect(table.getByRole("row", { name: /Images/ }).getByRole("cell")).toHaveText(["236 KB", "5.29 KB", "230 KB", "too early"]);
+  await expect(table.getByRole("row", { name: /CSS/ }).getByRole("cell")).toHaveText(["—", "—", "—", "none sent yet"]);
+  await expect(page.getByTestId("since-delivered").getByTestId("warming-pill")).toBeVisible();
+});
+
+test("a negative saving is shown signed: optimized responses larger than their originals", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.statsDelivered(26 * 3_600_000, {
+      javascript_served_original_bytes: 100_000,
+      javascript_served_optimized_bytes: 104_096,
+    }),
+    "v1/daemon/health": HEALTH_OK,
+    "v1/daemon/stats": DAEMON_STATS,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const table = page.getByRole("table", { name: "Optimized by this server, by type" });
+  await expect(table.getByRole("row", { name: /JavaScript/ }).getByRole("cell")).toHaveText(["97.7 KB", "102 KB", "−4.00 KB", "4% larger"]);
+  await expect(page.getByTestId("savings-delivered-module-larger")).toContainText("negative saving");
+  // The other types keep their savings; the total is the signed sum.
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("35.2 MB");
+  // The other family is not touched by it.
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-larger")).toHaveCount(0);
+});
+
+test("a family larger overall: the headline is negative, never clamped to no savings", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.statsDelivered(26 * 3_600_000, {
+      ...F.DELIVERED_ZERO,
+      css_served_original_bytes: 10_000,
+      css_served_optimized_bytes: 12_048,
+    }),
+    "v1/daemon/health": HEALTH_OK,
+    "v1/daemon/stats": DAEMON_STATS,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const total = page.getByTestId("savings-delivered-module-total");
+  await expect(total).toContainText("−2.00 KB");
+  await expect(total.locator(".detail")).toHaveText("20% larger · 9.77 KB → 11.8 KB");
+});
+
+test("with a statistics log: the figures over the history it holds, across a restart", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.graphsDeliveredHistory() });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const history = page.getByTestId("savings-delivered-window");
+  await expect(history.getByRole("heading")).toHaveText("Over 9 h of recorded history");
+  await expect(page.getByTestId("savings-delivered-window-module")).toHaveText(
+    "Optimized by this server: CSS 25% smaller (488 KB → 366 KB) · Images 75% smaller (3.05 MB → 781 KB)",
+  );
+  await expect(page.getByTestId("savings-delivered-window-optimizer-cache")).toHaveText(
+    "Answered from the optimizer cache: Images 67% smaller (586 KB → 195 KB)",
+  );
+  await expect(page.getByTestId("savings-delivered-no-log")).toHaveCount(0);
+});
+
+test("statistics logging off (the default): the card says how to get a history, naming both settings", async ({ page }) => {
+  // What the module answers while it writes no statistics log.
+  await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.GRAPHS_LOGGING_OFF });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const hint = page.getByTestId("savings-delivered-no-log");
+  await expect(hint).toContainText("statistics logging is off or has not written yet");
+  await expect(hint.locator("code")).toHaveText(["StatisticsLogging on", "LogDir"]);
+  await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
+  // The delivered figures themselves do not depend on the log.
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
+});
+
+test("a log that has not written yet gets the same hint; a server without the graphs endpoint gets none", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.ok({}) });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("savings-delivered-no-log")).toContainText("StatisticsLogging on");
+  await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
+
+  // No graphs leaf at all (another 404 than the logger's): nothing to turn on, so nothing is said.
+  const other = await page.context().newPage();
+  await mockAdmin(other, "pagespeed_global_admin", DELIVERED);
+  await openConsole(other, "pagespeed_global_admin", "#/savings");
+  await expect(other.getByTestId("savings-delivered-module-total")).toBeVisible();
+  await expect(other.getByTestId("savings-delivered-no-log")).toHaveCount(0);
+  await expect(other.getByTestId("savings-delivered-window")).toHaveCount(0);
+});
+
+test("a module that does not count delivered sizes says so, and keeps its rewrite-time figures", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", HEALTHY);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("savings-delivered-module-unreported")).toHaveText("This module version does not count these sizes.");
+  await expect(page.getByTestId("savings-delivered-optimizer-cache-unreported")).toBeVisible();
+  await expect(page.getByTestId("savings-module-total")).toContainText("12.3 MB");
+});
+
+test("the chart draws what was saved in delivery next to the two other figures", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const legend = page.getByTestId("savings-chart-legend");
+  await expect(legend).toContainText("Saved in delivery by this server", { timeout: 15_000 });
+  await expect(legend).toContainText("Saved at rewrite time");
+});
+
+test("the chart's delivered line goes below zero while responses go out larger, instead of breaking", async ({ page }) => {
+  // Each poll adds 1,000 original bytes and 3,000 sent: the saving shrinks by 2,000 bytes per sample.
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...DELIVERED,
+    stats_json: F.statsDelivered(26 * 3_600_000, (call) => ({
+      ...F.DELIVERED_ZERO,
+      css_served_original_bytes: 50_000 + 1_000 * call,
+      css_served_optimized_bytes: 10_000 + 3_000 * call,
+    })),
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const item = page.getByTestId("savings-chart-legend").locator(".chart-legend-item").filter({ hasText: "Saved in delivery by this server" });
+  await expect(item.locator(".legend-value")).toHaveText(/^−[0-9.]+ (B|KB)\/s$/, { timeout: 20_000 });
+});
+
+test("phone: the delivered tables scroll inside their own region, the page does not scroll sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("savings-delivered-module-total")).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  // Named and reachable by keyboard, like the console's other wide tables.
+  const region = page.getByRole("region", { name: "Sizes, Optimized by this server" });
+  await expect(region).toHaveAttribute("tabindex", "0");
+});
+
+test("no optimizer connected: the optimizer-cache family says it stays empty, not that nothing came yet", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.statsDelivered(26 * 3_600_000, {
+      ipro_daemon_served_image_original_bytes: 0,
+      ipro_daemon_served_image_optimized_bytes: 0,
+      ipro_daemon_served_css_original_bytes: 0,
+      ipro_daemon_served_css_optimized_bytes: 0,
+    }),
+    "v1/daemon/health": NOT_CONFIGURED,
+    "v1/daemon/stats": NOT_CONFIGURED,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const empty = page.getByTestId("savings-delivered-optimizer-cache-empty");
+  await expect(empty).toHaveText(
+    "No optimizer is connected to this server, so nothing is answered from an optimizer cache and this stays empty.",
+  );
+  await expect(empty).not.toContainText("yet");
+  // The server's own family is unaffected.
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
 });

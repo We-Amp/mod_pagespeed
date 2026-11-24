@@ -18,6 +18,7 @@ import { MESSAGE_WINDOW_MS, MESSAGE_WINDOW_SECONDS, toMessageDigest, type Messag
 import { formatBytes, formatClock, formatCount, formatRelative } from "$lib/utils/format";
 import type { OptimizedCopyHitRate } from "$lib/utils/savings";
 import { serveSavingsView, type ServeSavingsTotal } from "$lib/utils/serve-savings";
+import { deliveredFamily, type DeliveredFigure } from "$lib/utils/delivered";
 import { sinceLabel } from "$lib/utils/since";
 
 export type Fetched<T> = { ok: true; data: T } | { ok: false; error: Error };
@@ -194,7 +195,14 @@ export function toSnapshot(s: OverviewSample, prev: AlertSnapshot | null = null,
 export interface ModuleSummary {
   /** Any traffic or optimization recorded at all. */
   active: boolean;
+  /** Saved at rewrite time: counted once per resource, when it is first optimized. */
   bytesSaved: number | null;
+  /**
+   * What this server's own rewriting saved in delivery: the sizes of the
+   * optimized responses sent, from the cache as well. Null from a module that
+   * does not count them; `counted` is false until one was sent.
+   */
+  delivered: DeliveredFigure | null;
   originalBytes: number | null;
   savedPercent: number | null;
   servedByOptimizer: number | null;
@@ -240,9 +248,12 @@ export function moduleSummary(vars: Record<string, number>): ModuleSummary {
     bytesSaved !== null && original !== null && original > 0
       ? Math.min(100, Math.round((bytesSaved / original) * 100))
       : null;
+  const sent = deliveredFamily(vars, "module");
   return {
-    active: ACTIVITY.some((name) => (vars[name] ?? 0) > 0),
+    // An optimized response sent is traffic, also when nothing was optimized anew.
+    active: ACTIVITY.some((name) => (vars[name] ?? 0) > 0) || sent.total.counted,
     bytesSaved,
+    delivered: sent.reported ? sent.total : null,
     originalBytes: original,
     savedPercent,
     servedByOptimizer: sumOf(vars, ["ipro_daemon_served"]),
@@ -532,8 +543,17 @@ export function overviewVerdict(
 
   const site = input.wholeServer ? "" : "This site: ";
   const saved = summary.bytesSaved;
+  const sent = summary.delivered;
+  // What was delivered leads once an optimized response was sent: the
+  // rewrite-time figure stands still on a warm cache and says nothing then.
   const rewriting =
-    saved === null
+    sent !== null && sent.counted
+      ? sent.saved < 0
+        ? `${site}${site ? "this server's" : "This server's"} optimized responses were sent ${formatBytes(-sent.saved)} larger than their originals ${moduleSince}.`
+        : sent.saved === 0
+          ? `${site}${site ? "nothing" : "Nothing"} saved in delivery by this server ${moduleSince}.`
+          : `${site}${formatBytes(sent.saved)} saved in delivery by this server ${moduleSince}.`
+      : saved === null
       ? `${site}${site ? "no" : "No"} rewrite savings are reported ${moduleSince}.`
       : saved === 0
         ? `${site}${site ? "nothing" : "Nothing"} saved by rewriting ${moduleSince}.`

@@ -160,6 +160,104 @@ export const DAEMON_STATS_EMPTY = ok({
   },
 });
 
+/**
+ * The sizes of the optimized responses sent, per type: this server's own
+ * rewriting (`*_served_*_bytes`) and the responses answered from the
+ * optimizer's cache (`ipro_daemon_served_*_bytes`), with the counters of the
+ * requests that inlining and combining took away.
+ */
+export const DELIVERED_VARS = {
+  image_served_original_bytes: 48_211_904,
+  image_served_optimized_bytes: 11_873_402,
+  css_served_original_bytes: 2_403_311,
+  css_served_optimized_bytes: 1_874_582,
+  javascript_served_original_bytes: 9_120_448,
+  javascript_served_optimized_bytes: 5_654_677,
+  ipro_daemon_served_image_original_bytes: 6_291_456,
+  ipro_daemon_served_image_optimized_bytes: 2_076_180,
+  ipro_daemon_served_css_original_bytes: 412_300,
+  ipro_daemon_served_css_optimized_bytes: 350_455,
+  ipro_daemon_served_js_original_bytes: 0,
+  ipro_daemon_served_js_optimized_bytes: 0,
+  image_inline: 1204,
+  num_css_inlined: 310,
+  num_js_inlined: 0,
+  css_file_count_reduction: 37,
+  js_file_count_reduction: 1,
+};
+
+/** The twelve size variables at zero, as they read right after a restart. */
+export const DELIVERED_ZERO: Record<string, number> = Object.fromEntries(
+  Object.keys(DELIVERED_VARS)
+    .filter((name) => name.endsWith("_bytes"))
+    .map((name) => [name, 0]),
+);
+
+/**
+ * Whole-server statistics of a module that counts delivered sizes, started
+ * the given age ago (live-relative: the warming rule reads the start). The
+ * patch overrides single variables; as a function it gets the 0-based call
+ * count, for counters that move between polls.
+ */
+export const statsDelivered =
+  (startedAgoMs: number, patch: Record<string, number> | ((call: number) => Record<string, number>) = {}): Responder =>
+  (call) =>
+    ok({
+      variables: {
+        ...GLOBAL_VARS,
+        ...DELIVERED_VARS,
+        process_start_ms: Date.now() - startedAgoMs,
+        ...(typeof patch === "function" ? patch(call) : patch),
+      },
+      maxlength: 60,
+      timestamp_ms: Date.now(),
+    });
+
+/**
+ * A web server restarted two minutes ago with its cache kept: nothing was
+ * optimized anew and every counter reads zero, though the site is about to
+ * serve optimized responses from the cache again.
+ */
+export const STATS_JUST_RESTARTED: Responder = () =>
+  ok({
+    variables: {
+      ...Object.fromEntries(Object.keys(GLOBAL_VARS).map((k) => [k, 0])),
+      ...DELIVERED_ZERO,
+      num_flushes: 2,
+      process_start_ms: Date.now() - 2 * 60_000,
+    },
+    maxlength: 60,
+    timestamp_ms: Date.now(),
+  });
+
+/** The module's answer to a graphs read while it writes no statistics log (the default configuration). */
+export const GRAPHS_LOGGING_OFF: Reply = {
+  status: 404,
+  body: { success: false, error: "console_logger must be enabled to use '?json' query parameter." },
+};
+
+/**
+ * A statistics log of nine hours for the delivered sizes, with a restart in
+ * the middle (every series drops and counts on from zero).
+ */
+export const graphsDeliveredHistory = (): Reply => {
+  const now = Date.now();
+  const hour = 3_600_000;
+  return ok({
+    timestamps: [now - 9 * hour, now - 6 * hour, now - 3 * hour, now],
+    variables: {
+      image_served_original_bytes: [1_000_000, 3_000_000, 200_000, 1_200_000],
+      image_served_optimized_bytes: [250_000, 750_000, 50_000, 300_000],
+      css_served_original_bytes: [0, 400_000, 0, 100_000],
+      css_served_optimized_bytes: [0, 300_000, 0, 75_000],
+      javascript_served_original_bytes: [0, 0, 0, 0],
+      javascript_served_optimized_bytes: [0, 0, 0, 0],
+      ipro_daemon_served_image_original_bytes: [0, 0, 0, 600_000],
+      ipro_daemon_served_image_optimized_bytes: [0, 0, 0, 200_000],
+    },
+  });
+};
+
 /** A global stats reply whose CSS bytes-saved counter the caller sets. */
 export const statsWithSavings = (savedBytes: number): Reply =>
   ok({ variables: { ...GLOBAL_VARS, css_filter_total_bytes_saved: savedBytes }, timestamp_ms: 1_790_000_000_000 });
