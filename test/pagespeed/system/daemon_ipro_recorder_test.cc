@@ -56,6 +56,7 @@
 #include "pagespeed/system/daemon_record_arm.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 #include "test/pagespeed/system/recording_daemon_abi.h"
 
 namespace net_instaweb {
@@ -1124,6 +1125,40 @@ TEST_F(DaemonIproRecorderTest, AResponseToACorsRequestIsRecordedWithGuardOff) {
   EXPECT_TRUE(outcome.gate_ran);
   EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
   EXPECT_TRUE(outcome.stored);
+}
+
+// --- a headers-message field this build does not know ----------------------
+
+// The stored headers are a serialized message, and a newer release may add a
+// field to it (tag 15 is the next free one).  Headers read back from such an
+// entry carry the field as bytes this build does not interpret.  What is
+// handed to the peer is built from the named attributes one by one, so the
+// field cannot travel with it: the peer is told exactly what it is told for
+// the same headers without the field.
+TEST_F(DaemonIproRecorderTest, AnUnknownHeadersFieldNeverReachesThePeer) {
+  ResponseHeaders plain;
+  MakeOkHeaders(&plain);
+  const DaemonRecordOutcome plain_outcome = Run(&plain, kBody);
+  ASSERT_TRUE(plain_outcome.stored);
+  const GoogleString plain_log = CallLog();
+  ASSERT_FALSE(plain_log.empty());
+  remove(log_path_.c_str());
+
+  ResponseHeaders with_field;
+  MakeOkHeaders(&with_field);
+  AttachUnknownField(&with_field);
+  // The headers do carry it.
+  ASSERT_TRUE(CarriesUnknownField(&with_field));
+
+  const DaemonRecordOutcome outcome = Run(&with_field, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(plain_outcome.verdict, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_TRUE(outcome.notified);
+
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find(kUnknownHeadersFieldPayload)) << log;
+  EXPECT_EQ(plain_log, log);
 }
 
 }  // namespace

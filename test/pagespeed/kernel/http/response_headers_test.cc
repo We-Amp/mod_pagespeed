@@ -41,6 +41,7 @@
 #include "pagespeed/kernel/http/response_headers_parser.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace net_instaweb {
 
@@ -3083,6 +3084,144 @@ TEST_F(ResponseHeadersTest, ShareableForCookieRequest) {
                                RequestHeaders::Properties(true, false, false)));
     EXPECT_EQ(c.shareable, headers.MayShareForRequest(
                                RequestHeaders::Properties(false, true, false)));
+  }
+}
+
+// ============================================================================
+// A field of the serialized headers message that this build does not know.
+//
+// The headers are stored as a serialized HttpResponseHeaders message.  These
+// tests pin what happens to a field with a tag the message does not define
+// (15, the next free one), as a newer release might write it: which
+// operations carry it along, which drop it, and that it never shows up in the
+// text form that is sent to a client.
+// ============================================================================
+
+namespace {
+
+void FillPlainHeaders(ResponseHeaders* headers) {
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->SetDate(MockTimer::kApr_5_2010_ms);
+  headers->Add(HttpAttributes::kContentType, "text/css");
+  headers->Add(HttpAttributes::kCacheControl, "max-age=300");
+  headers->ComputeCaching();
+}
+
+}  // namespace
+
+// Reading and writing the binary form keeps the unknown field, byte for byte.
+TEST_F(ResponseHeadersTest, UnknownFieldKeptByBinaryReadAndWrite) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  EXPECT_FALSE(CarriesUnknownField(&headers));
+  AttachUnknownField(&headers);
+  EXPECT_TRUE(CarriesUnknownField(&headers));
+
+  // A second generation: what was written is read and written again.
+  GoogleString wire = SerializeHeaders(&headers);
+  ResponseHeaders reread;
+  ASSERT_TRUE(reread.ReadFromBinary(wire, &message_handler_));
+  EXPECT_TRUE(CarriesUnknownField(&reread));
+  EXPECT_EQ(wire, SerializeHeaders(&reread));
+  // The named attributes are unaffected.
+  EXPECT_STREQ("text/css", reread.Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(3, reread.NumAttributes());
+}
+
+// CopyFrom copies the whole message, the unknown field included.
+TEST_F(ResponseHeadersTest, UnknownFieldKeptByCopyFrom) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  AttachUnknownField(&headers);
+
+  ResponseHeaders copy;
+  copy.CopyFrom(headers);
+  EXPECT_TRUE(CarriesUnknownField(&copy));
+  EXPECT_EQ(SerializeHeaders(&headers), SerializeHeaders(&copy));
+
+  // The copy constructor goes through the same code.
+  ResponseHeaders constructed(headers);
+  EXPECT_TRUE(CarriesUnknownField(&constructed));
+}
+
+// Changing, removing and recomputing named attributes leaves the unknown
+// field where it is.
+TEST_F(ResponseHeadersTest, UnknownFieldKeptByAttributeChanges) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  AttachUnknownField(&headers);
+
+  headers.Add("X-Extra", "1");
+  headers.Replace(HttpAttributes::kCacheControl, "max-age=600");
+  headers.RemoveAll(HttpAttributes::kContentType);
+  headers.SetContentLength(42);
+  headers.ComputeCaching();
+  EXPECT_TRUE(CarriesUnknownField(&headers));
+
+  headers.Add(HttpAttributes::kConnection, "close");
+  EXPECT_TRUE(headers.Sanitize());
+  EXPECT_TRUE(CarriesUnknownField(&headers));
+
+  ResponseHeaders update;
+  update.Add(HttpAttributes::kCacheControl, "max-age=900");
+  headers.UpdateFrom(update);
+  EXPECT_TRUE(CarriesUnknownField(&headers));
+}
+
+// Clear() resets the fields it knows by name, so an unknown field stays on a
+// cleared object.  A change that defines the field has to reset it in Clear()
+// too, or a reused object would carry a stale value.
+TEST_F(ResponseHeadersTest, UnknownFieldNotResetByClear) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  AttachUnknownField(&headers);
+
+  headers.Clear();
+  EXPECT_EQ(0, headers.NumAttributes());
+  EXPECT_TRUE(CarriesUnknownField(&headers));
+}
+
+// Reading a binary form without the field, or copying from headers without
+// it, does replace the whole message: nothing stale is left behind.
+TEST_F(ResponseHeadersTest, UnknownFieldDroppedByReadOrCopyWithoutIt) {
+  ResponseHeaders plain;
+  FillPlainHeaders(&plain);
+  GoogleString plain_wire = SerializeHeaders(&plain);
+
+  ResponseHeaders reread;
+  FillPlainHeaders(&reread);
+  AttachUnknownField(&reread);
+  ASSERT_TRUE(reread.ReadFromBinary(plain_wire, &message_handler_));
+  EXPECT_FALSE(CarriesUnknownField(&reread));
+
+  ResponseHeaders copied;
+  FillPlainHeaders(&copied);
+  AttachUnknownField(&copied);
+  copied.CopyFrom(plain);
+  EXPECT_FALSE(CarriesUnknownField(&copied));
+}
+
+// The text form holds the status line and the named attributes only: the
+// unknown field never appears in what is written to a client.
+TEST_F(ResponseHeadersTest, UnknownFieldAbsentFromHttpText) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  GoogleString expected_text = headers.ToString();
+  AttachUnknownField(&headers);
+  ASSERT_TRUE(CarriesUnknownField(&headers));
+
+  GoogleString text;
+  StringWriter writer(&text);
+  ASSERT_TRUE(headers.WriteAsHttp(&writer, &message_handler_));
+  EXPECT_EQ(expected_text, text);
+  EXPECT_EQ(GoogleString::npos, text.find(kUnknownHeadersFieldPayload));
+  EXPECT_EQ(GoogleString::npos,
+            headers.ToString().find(kUnknownHeadersFieldPayload));
+  for (int i = 0; i < headers.NumAttributes(); ++i) {
+    EXPECT_EQ(GoogleString::npos,
+              headers.Name(i).find(kUnknownHeadersFieldPayload));
+    EXPECT_EQ(GoogleString::npos,
+              headers.Value(i).find(kUnknownHeadersFieldPayload));
   }
 }
 

@@ -25,10 +25,12 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace net_instaweb {
 
@@ -639,6 +641,146 @@ TEST_F(HTTPValueEncodeTest, EncodeInvalid) {
   GoogleString out;
   EXPECT_FALSE(HTTPValue::Decode("invalid encoding", &out, &handler_));
   EXPECT_FALSE(HTTPValue::Encode("invalid http", &out, &handler_));
+}
+
+// ============================================================================
+// A field of the stored headers message that this build does not know (tag
+// 15, the next free one), as a newer release might write it.  These tests pin
+// that an HTTPValue hands it on unchanged through every way of getting the
+// headers in and out, and that the two marker lookups are not affected by it.
+// ============================================================================
+
+class HTTPValueUnknownFieldTest : public HTTPValueTest {
+ protected:
+  // The encoded form of a value whose stored headers carry the unknown field.
+  GoogleString BuildEncodedValueWithUnknownField(bool headers_first) {
+    HTTPValue value;
+    ResponseHeaders headers;
+    FillResponseHeaders(&headers);
+    AttachUnknownField(&headers);
+    if (headers_first) {
+      value.SetHeaders(&headers);
+      value.Write("body", &message_handler_);
+    } else {
+      value.Write("body", &message_handler_);
+      value.SetHeaders(&headers);
+    }
+    return value.share().Value().as_string();
+  }
+
+  void ExpectValueCarriesUnknownField(const HTTPValue& value) {
+    ResponseHeaders extracted;
+    ASSERT_TRUE(value.ExtractHeaders(&extracted, &message_handler_));
+    EXPECT_TRUE(CarriesUnknownField(&extracted));
+    CheckResponseHeaders(extracted);
+    StringPiece body;
+    ASSERT_TRUE(value.ExtractContents(&body));
+    EXPECT_EQ("body", body);
+  }
+};
+
+TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersAndExtractHeaders) {
+  for (bool headers_first : {true, false}) {
+    SCOPED_TRACE(headers_first);
+    GoogleString encoded = BuildEncodedValueWithUnknownField(headers_first);
+    // The stored bytes hold the field as written.
+    EXPECT_NE(GoogleString::npos, encoded.find(UnknownHeadersFieldWire()));
+
+    HTTPValue value;
+    ResponseHeaders linked;
+    SharedString storage(encoded);
+    ASSERT_TRUE(value.Link(storage, &linked, &message_handler_));
+    // Link() fills the caller's headers through the same extraction.
+    EXPECT_TRUE(CarriesUnknownField(&linked));
+    ExpectValueCarriesUnknownField(value);
+  }
+}
+
+TEST_F(HTTPValueUnknownFieldTest, KeptByLinkOfAnotherValue) {
+  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+  HTTPValue source;
+  ResponseHeaders headers;
+  SharedString storage(encoded);
+  ASSERT_TRUE(source.Link(storage, &headers, &message_handler_));
+
+  HTTPValue linked;
+  linked.Link(&source);
+  ExpectValueCarriesUnknownField(linked);
+}
+
+TEST_F(HTTPValueUnknownFieldTest, KeptByLinkMapped) {
+  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+  int releases = 0;
+  {
+    HTTPValue value;
+    ResponseHeaders linked;
+    ASSERT_TRUE(value.LinkMapped(MapBuffer(encoded, &releases), &linked,
+                                 &message_handler_));
+    ASSERT_TRUE(value.is_mapped());
+    EXPECT_TRUE(CarriesUnknownField(&linked));
+    ExpectValueCarriesUnknownField(value);
+
+    // A value that leaves the mapped view for owned storage keeps it too.
+    HTTPValue owned;
+    owned.Link(&value);
+    ExpectValueCarriesUnknownField(owned);
+  }
+  EXPECT_EQ(1, releases);
+}
+
+// A value rebuilt from extracted headers, the way the cache rebuilds one when
+// it changes headers on the way in or out, carries the field again.
+TEST_F(HTTPValueUnknownFieldTest, KeptWhenValueIsRebuiltFromExtractedHeaders) {
+  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+  HTTPValue source;
+  ResponseHeaders extracted;
+  SharedString storage(encoded);
+  ASSERT_TRUE(source.Link(storage, &extracted, &message_handler_));
+
+  extracted.Add("X-Added", "1");
+  extracted.ComputeCaching();
+  HTTPValue rebuilt;
+  rebuilt.SetHeaders(&extracted);
+  rebuilt.Write("body", &message_handler_);
+  ResponseHeaders check;
+  ASSERT_TRUE(rebuilt.ExtractHeaders(&check, &message_handler_));
+  EXPECT_TRUE(CarriesUnknownField(&check));
+  EXPECT_STREQ("1", check.Lookup1("X-Added"));
+}
+
+// Marking a value as a fetched input copies the headers first; the copy keeps
+// the field, and the two marker lookups answer as they do without it.
+TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersMarkingFetchedInput) {
+  ResponseHeaders headers;
+  FillResponseHeaders(&headers);
+  AttachUnknownField(&headers);
+
+  HTTPValue value;
+  value.SetHeadersMarkingFetchedInput(headers);
+  value.Write("body", &message_handler_);
+  EXPECT_TRUE(value.IsFetchedInput());
+  EXPECT_FALSE(value.IsCurrentClientEntry());
+  ExpectValueCarriesUnknownField(value);
+
+  HTTPValue unmarked;
+  unmarked.SetHeaders(&headers);
+  unmarked.Write("body", &message_handler_);
+  EXPECT_FALSE(unmarked.IsFetchedInput());
+  EXPECT_FALSE(unmarked.IsCurrentClientEntry());
+}
+
+// Decode() produces the text of a response: the field is not in it.
+TEST_F(HTTPValueUnknownFieldTest, AbsentFromDecodedHttpText) {
+  GoogleString with_field = BuildEncodedValueWithUnknownField(true);
+  GoogleString without_field = BuildEncodedValue();
+  ASSERT_NE(with_field, without_field);
+
+  GoogleString text_with, text_without;
+  ASSERT_TRUE(HTTPValue::Decode(with_field, &text_with, &message_handler_));
+  ASSERT_TRUE(
+      HTTPValue::Decode(without_field, &text_without, &message_handler_));
+  EXPECT_EQ(text_without, text_with);
+  EXPECT_EQ(GoogleString::npos, text_with.find(kUnknownHeadersFieldPayload));
 }
 
 }  // namespace net_instaweb
