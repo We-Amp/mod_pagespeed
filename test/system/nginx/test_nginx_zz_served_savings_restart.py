@@ -35,10 +35,13 @@ from pagespeed_test_framework import PageSpeedClient
 def test_served_sizes_are_counted_from_the_cache_across_a_restart(
     client: PageSpeedClient,
     example_root: str,
+    test_root: str,
     doc_root: Path,
     stats_snapshot: Callable[[], Dict[str, int]],
 ):
-    check_served_sizes_across(restart_nginx, client, example_root, doc_root, stats_snapshot)
+    check_served_sizes_across(
+        restart_nginx, client, example_root, test_root, doc_root, stats_snapshot
+    )
 
 
 if __name__ == "__main__":
