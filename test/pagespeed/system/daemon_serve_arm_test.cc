@@ -4757,6 +4757,30 @@ TEST_F(DaemonServedSizesTest, ACompressedCopyWithoutThatSizeIsNotCounted) {
   EXPECT_EQ(1, Value("ipro_daemon_served_js"));
 }
 
+// The entry can state that size as 0, which means "not recorded" as it does
+// for the origin's length.
+TEST_F(DaemonServedSizesTest, ACompressedCopyWithAZeroSizeIsNotCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentCss);
+  decision.content_encoding = "gzip";
+  decision.encoded_origin_known = true;
+  decision.encoded_origin_length = 0;
+  DaemonServeSent sent = Sent();
+  sent.body_size = 120;
+  Record(decision, sent);
+  EXPECT_EQ(0, AllSizes());
+  EXPECT_EQ(1, Value("ipro_daemon_served_css"));
+}
+
+// A variant made for another device is an optimized response all the same.
+TEST_F(DaemonServedSizesTest, AFallbackHitIsCounted) {
+  DaemonServeDecision decision = Optimized(kPsContentImage);
+  decision.fallback_hit = true;
+  decision.device_fallback_lifetime = true;
+  Record(decision, Sent());
+  EXPECT_EQ(1000, Value("ipro_daemon_served_image_original_bytes"));
+  EXPECT_EQ(400, Value("ipro_daemon_served_image_optimized_bytes"));
+}
+
 // A body sent uncompressed is measured against the uncompressed origin, also
 // when the entry states the origin's size in an encoding.
 TEST_F(DaemonServedSizesTest, AnUncompressedBodyIgnoresTheEncodedOriginSize) {
@@ -4766,6 +4790,87 @@ TEST_F(DaemonServedSizesTest, AnUncompressedBodyIgnoresTheEncodedOriginSize) {
   Record(decision, Sent());
   EXPECT_EQ(1000, Value("ipro_daemon_served_css_original_bytes"));
   EXPECT_EQ(400, Value("ipro_daemon_served_css_optimized_bytes"));
+}
+
+// --- decisions the reader made ----------------------------------------------
+
+// What a port reports for a decision, the way the three ports compute it: a
+// GET, the whole body unless the answer is a 304, the decision's own body.
+DaemonServeSent SentAsAPortDoes(const DaemonServeRequest& request,
+                                const DaemonServeDecision& decision) {
+  DaemonServeSent sent;
+  sent.get_request = true;
+  sent.body_sent = !decision.not_modified;
+  sent.body_size = decision.body.size();
+  sent.user_agent = request.user_agent;
+  return sent;
+}
+
+TEST_F(DaemonServeArmTest, TheSizesOfARealServeAreItsOriginAndItsBody) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), nullptr);
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "5000", 1);
+  // A stamped source binding gives the serves a validator, without which the
+  // 304 below could not happen.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
+
+  // The client's own variant.
+  SetAlternates("09:00:1");
+  const DaemonServeRequest request = Request("image/webp");
+  const DaemonServeDecision exact = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, exact.verdict);
+  ASSERT_TRUE(exact.worker_processed);
+  ASSERT_FALSE(exact.fallback_hit);
+  ASSERT_EQ(5000u, exact.origin_content_length);
+  ASSERT_FALSE(exact.body.empty());
+  const int64 exact_size = static_cast<int64>(exact.body.size());
+  RecordDaemonServeCounters(&rewrite_stats, exact,
+                            SentAsAPortDoes(request, exact));
+  EXPECT_EQ(
+      5000,
+      stats.GetVariable("ipro_daemon_served_image_original_bytes")->Get());
+  EXPECT_EQ(
+      exact_size,
+      stats.GetVariable("ipro_daemon_served_image_optimized_bytes")->Get());
+
+  // The 304 for it: answered, no body, no sizes.
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = exact.etag;
+  const DaemonServeDecision revalidated = Serve(conditional);
+  ASSERT_TRUE(revalidated.not_modified);
+  RecordDaemonServeCounters(&rewrite_stats, revalidated,
+                            SentAsAPortDoes(conditional, revalidated));
+  EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(
+      5000,
+      stats.GetVariable("ipro_daemon_served_image_original_bytes")->Get());
+
+  // A variant made for another device, served for want of the client's own.
+  SetAlternates("29:00:1,0c:00:0");
+  const DaemonServeDecision fallback = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, fallback.verdict);
+  ASSERT_TRUE(fallback.fallback_hit);
+  const int64 fallback_size = static_cast<int64>(fallback.body.size());
+  RecordDaemonServeCounters(&rewrite_stats, fallback,
+                            SentAsAPortDoes(request, fallback));
+  EXPECT_EQ(
+      10000,
+      stats.GetVariable("ipro_daemon_served_image_original_bytes")->Get());
+  EXPECT_EQ(
+      exact_size + fallback_size,
+      stats.GetVariable("ipro_daemon_served_image_optimized_bytes")->Get());
+
+  // The stored original: origin bytes, no sizes.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  RecordDaemonServeCounters(&rewrite_stats, original,
+                            SentAsAPortDoes(request, original));
+  EXPECT_EQ(
+      10000,
+      stats.GetVariable("ipro_daemon_served_image_original_bytes")->Get());
+  unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
 }
 
 TEST(DaemonHealNotifyLimiterTest, TheSameUrlInTwoSitesIsTwoKeys) {

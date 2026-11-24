@@ -526,10 +526,13 @@ struct DaemonServeSent {
 //   - like is compared with like.  A body sent uncompressed is measured
 //     against the origin's uncompressed length.  A stored compressed copy is
 //     measured against the origin's size in that same compression when the
-//     entry records it, and is not counted when it does not: measuring it
+//     entry records it (0 is "not recorded" there too), and is not counted
+//     when it does not: measuring it
 //     against the uncompressed origin would credit the compression to the
 //     optimization.
-// At most two additions, no read and no allocation.
+// A response is counted when it is handed to the server for sending, so one
+// whose send fails afterwards is still counted.  At most two additions, no
+// cache read and no allocation.
 void RecordDaemonServeCounters(RewriteStats* stats,
                                const DaemonServeDecision& decision,
                                const DaemonServeSent& sent);

@@ -1978,7 +1978,8 @@ void RecordDaemonServedSizes(RewriteStats* stats,
   ServedSavings::OptimizerCacheResponse response;
   if (decision.content_encoding.empty()) {
     response.original_size = decision.origin_content_length;
-  } else if (decision.encoded_origin_known) {
+  } else if (decision.encoded_origin_known &&
+             decision.encoded_origin_length > 0) {
     response.original_size = static_cast<int64>(decision.encoded_origin_length);
   } else {
     return;

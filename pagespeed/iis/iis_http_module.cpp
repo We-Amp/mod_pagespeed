@@ -721,8 +721,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
       StringCaseEqual(http_context->GetRequest()->GetHttpMethod(), "GET");
   sent.body_sent = sent.get_request && response.has_body;
   sent.body_size = body_size;
+  // By length, as this module's other Range test: an absent header may be
+  // returned as an empty string.
   sent.range_request =
-      http_context->GetRequest()->GetHeader("Range") != nullptr;
+      StringPiece(http_context->GetRequest()->GetHeader("Range")).length() > 0;
   sent.user_agent = serve_request.user_agent;
   RecordDaemonServeCounters(stats, decision, sent);
 

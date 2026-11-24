@@ -269,15 +269,19 @@ TEST_F(IisRecorderGateSeamTest, TheServeLegReportsWhatWasSentForTheSizes) {
             source.find("sent.body_sent=sent.get_request&&response.has_body;"))
       << "a 304 or a HEAD would be counted as a body sent";
   EXPECT_NE(GoogleString::npos, source.find("sent.body_size=body_size;"));
-  EXPECT_NE(GoogleString::npos,
-            source.find("sent.range_request=http_context->GetRequest()->"
-                        "GetHeader(\"Range\")!=nullptr;"))
+  EXPECT_NE(
+      GoogleString::npos,
+      source.find("sent.range_request=StringPiece(http_context->GetRequest()"
+                  "->GetHeader(\"Range\")).length()>0;"))
       << "a Range request would be counted with the whole body's size";
   EXPECT_NE(GoogleString::npos,
             source.find("sent.user_agent=serve_request.user_agent;"))
       << "the module's own fetches would be counted as a visitor's";
   EXPECT_NE(GoogleString::npos,
             source.find("RecordDaemonServeCounters(stats,decision,sent);"));
+  // Only the shared rule moves the size variables.
+  EXPECT_EQ(GoogleString::npos, source.find("_original_bytes()->Add("));
+  EXPECT_EQ(GoogleString::npos, source.find("_optimized_bytes()->Add("));
 }
 
 }  // namespace net_instaweb

@@ -12,4 +12,6 @@
   sent uncompressed is measured against the uncompressed original. A stored
   compressed copy (`DaemonServeStoredEncodings`) is measured against the
   original in that same compression when the cache entry records that size, and
-  is not counted when it does not. Applies to nginx, Apache and IIS.
+  is not counted when it does not, so with that option on these figures can be
+  sizes after compression, and the original's compressed size is approximate.
+  Applies to nginx, Apache and IIS.
