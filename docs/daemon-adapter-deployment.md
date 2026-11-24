@@ -422,7 +422,12 @@ see the compressed bytes of these responses.
 the bytes actually sent: for these serves `serve_savings.<type>.optimized_bytes`
 is the compressed size, measured against the uncompressed original, and
 `serve_savings.<type>.by_encoding` shows how many serves (and bytes) went out
-as `identity`, `gzip` and `br`.
+as `identity`, `gzip` and `br`. The web server's own statistics count these
+responses in `ipro_daemon_served_{image,css,js}_original_bytes` and
+`..._optimized_bytes`, where a stored compressed copy is measured against the
+original in the same compression instead, so compression is not shown as a
+saving there; see
+[Savings statistics](operations-monitoring.md#savings-statistics).
 
 **Rollback.** Set the directive to `off` (or remove it) and reload: responses
 go back to exactly what the module sent before.
