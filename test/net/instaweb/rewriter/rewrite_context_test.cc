@@ -6973,6 +6973,8 @@ TEST_F(ServedSavingsCombineTest, MinifiedAndCombinedScriptsCountUnderCombiner) {
   // The page rewrite minifies both scripts and combines the results.
   Parse("minify_and_combine",
         "<script src=\"a.js\"></script><script src=\"b.js\"></script>");
+  ASSERT_NE(GoogleString::npos, output_buffer_.find(".pagespeed.jc."))
+      << output_buffer_;
   const ResponseHeaders::SizeRecord record = StoredRecord(combined);
   EXPECT_STREQ("jc", record.filter_id);
   // The chain is kept: the original size is that of the two files.
