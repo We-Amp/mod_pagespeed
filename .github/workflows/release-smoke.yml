@@ -33,7 +33,8 @@ permissions: {}
 
 jobs:
   smoke:
-    permissions: {}
+    permissions:
+      contents: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.release.tag_name, 'v')
