@@ -25,9 +25,14 @@ to be a cache hit on the rewritten URL. If the first one is not (a cold cache wo
 rebuild the output instead), the test fails at once rather than measure a
 different path.
 
-This is the half of the check that covers rewritten (.pagespeed.) URLs.
-Not covered here: resources optimized in place under their own URL,
-and responses served from the optimizer's cache.
+The same is checked for resources optimized in place: one image, one
+stylesheet and one script are requested under their own URLs until the
+optimized bytes come back, and after the reload or restart every such
+response has to add the size of the source file and the size of the body
+sent, without a cache hit on a rewritten URL and without optimizing anything
+again.
+
+Not covered here: responses served from the optimizer's cache.
 
 Environment: runs only on nginx and skips unless run_nginx_tests.sh exports
 PAGESPEED_NGINX_PID_FILE and PAGESPEED_DOC_ROOT.
@@ -76,6 +81,16 @@ RESOURCES = (
     ("javascript", "rewrite_javascript.html", "rewrite_javascript",
      r'[^"\'\s>/]*rewrite_javascript\.js\.pagespeed\.jm\.[^"\'\s>]+'),
 )
+
+# (type, path under the test root) of resources optimized in place, under
+# their own URL. Each is requested with a query of its own, so that no other
+# test shares its cache entries.
+IN_PLACE_RESOURCES = (
+    ("image", "ipro/test_image_dont_reuse.png"),
+    ("css", "ipro/cc200/example.css"),
+    ("javascript", "normal.js"),
+)
+IN_PLACE_QUERY = "?served_sizes=1"
 
 RELOAD_TIMEOUT_S = 30.0
 
@@ -217,6 +232,7 @@ def check_served_sizes_across(
     bounce: Callable[[PageSpeedClient, str], None],
     client: PageSpeedClient,
     example_root: str,
+    test_root: str,
     doc_root: Path,
     stats_snapshot: Callable[[], Dict[str, int]],
 ) -> None:
@@ -245,6 +261,27 @@ def check_served_sizes_across(
         originals[kind] = source.stat().st_size
         optimized[kind] = len(body.body)
         assert optimized[kind] > 0
+
+    # Warm the in-place half: request each resource under its own URL until
+    # the optimized bytes come back.
+    in_place_urls: Dict[str, str] = {}
+    in_place_originals: Dict[str, int] = {}
+    in_place_optimized: Dict[str, int] = {}
+    for kind, path in IN_PLACE_RESOURCES:
+        source = doc_root / test_root.strip("/") / path
+        assert source.is_file(), f"{kind}: source file {source} not found"
+        original_size = source.stat().st_size
+        url = f"{test_root}/{path}{IN_PLACE_QUERY}"
+        response = client.fetch_until(
+            url,
+            lambda r, original_size=original_size: r.status == 200
+            and 0 < len(r.body) < original_size,
+            timeout=100.0,
+        )
+        assert response.header("Content-Encoding") == "", f"{kind}: {url} came compressed"
+        in_place_urls[kind] = url
+        in_place_originals[kind] = original_size
+        in_place_optimized[kind] = len(response.body)
 
     bounce(client, f"{example_root}/rewrite_css.html?PageSpeed=off")
 
@@ -295,6 +332,36 @@ def check_served_sizes_across(
                 f"{kind} fetches moved {other}_served_optimized_bytes"
             )
 
+    # Resources optimized in place, under their own URL: every response adds
+    # the size of the source file and the uncompressed size of the body sent.
+    # None of them is a cache hit on a rewritten URL.
+    for kind in ("image", "css", "javascript"):
+        start = stats_snapshot()
+        for _ in range(FETCHES_PER_ENCODING):
+            plain = client.get(in_place_urls[kind])
+            assert plain.status == 200
+            assert len(plain.body) == in_place_optimized[kind], (
+                f"{kind}: {in_place_urls[kind]} was not answered with the optimized "
+                "bytes after the reload or restart"
+            )
+            gzipped = client.get_gzip(in_place_urls[kind])
+            assert gzipped.status == 200
+            assert len(gzipped.body) == in_place_optimized[kind], (
+                f"{kind}: decoded in-place body differs"
+            )
+        end = stats_snapshot()
+        fetches = 2 * FETCHES_PER_ENCODING
+        assert _delta(start, end, CACHE_HITS) == 0, f"{kind}: in-place counted as a cache hit"
+        for other in ("image", "css", "javascript"):
+            expected_original = fetches * in_place_originals[kind] if other == kind else 0
+            expected_optimized = fetches * in_place_optimized[kind] if other == kind else 0
+            assert _delta(start, end, f"{other}_served_original_bytes") == expected_original, (
+                f"in-place {kind} fetches moved {other}_served_original_bytes"
+            )
+            assert _delta(start, end, f"{other}_served_optimized_bytes") == expected_optimized, (
+                f"in-place {kind} fetches moved {other}_served_optimized_bytes"
+            )
+
     # Requests that do not send a whole body to a visitor add nothing.
     start = stats_snapshot()
     conditional = client.get(
@@ -303,6 +370,9 @@ def check_served_sizes_across(
     assert conditional.status == 304
     assert client.head(urls["css"]).status == 200
     ranged = client.get(urls["javascript"], headers={"Range": "bytes=0-9"})
+    assert ranged.status in (200, 206)
+    assert client.head(in_place_urls["image"]).status == 200
+    ranged = client.get(in_place_urls["css"], headers={"Range": "bytes=0-9"})
     assert ranged.status in (200, 206)
     end = stats_snapshot()
     for name in SERVED_COUNTERS:
@@ -319,10 +389,13 @@ def check_served_sizes_across(
 def test_served_sizes_are_counted_from_the_cache_across_a_reload(
     client: PageSpeedClient,
     example_root: str,
+    test_root: str,
     doc_root: Path,
     stats_snapshot: Callable[[], Dict[str, int]],
 ):
-    check_served_sizes_across(_reload_nginx, client, example_root, doc_root, stats_snapshot)
+    check_served_sizes_across(
+        _reload_nginx, client, example_root, test_root, doc_root, stats_snapshot
+    )
 
 
 if __name__ == "__main__":
