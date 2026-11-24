@@ -56,7 +56,6 @@ const char kModuleFetch[] = "Mozilla/5.0 (mod_pagespeed/2.10.0-0)";
 const RequestHeaders::Method kGet = RequestHeaders::kGet;
 const ServedSavings::Outcome kNotCounted = ServedSavings::kNotCounted;
 const ServedSavings::Outcome kCounted = ServedSavings::kCounted;
-const ServedSavings::Outcome kUnmeasured = ServedSavings::kUnmeasured;
 
 const Row kRows[] = {
     // Each type, from its own filter.
