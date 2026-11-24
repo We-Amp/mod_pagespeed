@@ -6819,7 +6819,8 @@ TEST_F(RewriteContextTest, SizeRecordOriginalChainsThroughARecordedInput) {
 // An output written from no inputs has no sizes to compare and no record.
 TEST_F(RewriteContextTest, NoSizeRecordWithoutInputs) {
   InitResources();
-  rewrite_driver()->SetBaseUrlForFetch(kTestDomain);
+  // Only for the base URL it gives the driver.
+  ASSERT_TRUE(CreateResource(kTestDomain, "a.css").get() != nullptr);
   GoogleString failure_reason;
   OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
       kTestDomain, RewriteOptions::kCssFilterId, "made_up.css",
