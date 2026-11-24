@@ -46,8 +46,9 @@ const int kStorageTypeOverhead = 1;
 const int kStorageSizeOverhead = 4;
 const int kStorageOverhead = kStorageTypeOverhead + kStorageSizeOverhead;
 
-// See HTTPValue::header_parse_count_for_testing().
-std::atomic<int64_t> header_parse_count{0};
+// See HTTPValue::set_header_parse_counter_for_testing().  Null except while a
+// test counts parses.
+std::atomic<std::atomic<int64_t>*> header_parse_counter{nullptr};
 
 }  // namespace
 
@@ -233,8 +234,9 @@ void HTTPValue::SetHeadersMarkingFetchedInput(const ResponseHeaders& headers) {
   SetHeaders(&marked);
 }
 
-int64 HTTPValue::header_parse_count_for_testing() {
-  return header_parse_count.load(std::memory_order_relaxed);
+void HTTPValue::set_header_parse_counter_for_testing(
+    std::atomic<int64_t>* counter) {
+  header_parse_counter.store(counter, std::memory_order_relaxed);
 }
 
 bool HTTPValue::ExtractRawHeaders(ResponseHeaders* headers,
@@ -257,7 +259,11 @@ bool HTTPValue::ExtractRawHeaders(ResponseHeaders* headers,
         ret = (type_id == kHeadersFirst);
       }
       if (ret) {
-        header_parse_count.fetch_add(1, std::memory_order_relaxed);
+        std::atomic<int64_t>* parse_counter =
+            header_parse_counter.load(std::memory_order_relaxed);
+        if (parse_counter != nullptr) {
+          parse_counter->fetch_add(1, std::memory_order_relaxed);
+        }
         ret = headers->ReadFromBinary(StringPiece(start, size), handler);
       }
     }

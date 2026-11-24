@@ -22,7 +22,9 @@
 
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 
+#include <atomic>
 #include <chrono>  // NOLINT
+#include <cstdint>
 #include <memory>
 #include <thread>  // NOLINT
 #include <utility>
@@ -6709,6 +6711,12 @@ TEST_F(RewriteContextTest, HashMismatchFetchServesOptimizedBytes) {
   EXPECT_EQ(1, cached_fetches->Get());
 }
 
+namespace {
+// Counts stored-header parses while HeaderParsesPerCacheHitFetch runs.  Not a
+// local of the test: a parse on another thread may still reach it.
+std::atomic<int64_t> counted_header_parses{0};
+}  // namespace
+
 // How many times the stored headers are parsed to answer a fetch of a
 // rewritten URL from the cache.  A baseline: a change on this serving path
 // that adds a parse shows up here.
@@ -6724,15 +6732,17 @@ TEST_F(RewriteContextTest, HeaderParsesPerCacheHitFetch) {
   ASSERT_TRUE(FetchResourceUrl(url, &contents));
   ASSERT_EQ(0, cached_fetches->Get());
 
+  HTTPValue::set_header_parse_counter_for_testing(&counted_header_parses);
   for (int i = 0; i < 2; ++i) {
     SCOPED_TRACE(i);
-    const int64 before = HTTPValue::header_parse_count_for_testing();
-    ASSERT_TRUE(FetchResourceUrl(url, &contents));
-    const int64 after = HTTPValue::header_parse_count_for_testing();
+    const int64 before = counted_header_parses.load();
+    EXPECT_TRUE(FetchResourceUrl(url, &contents));
+    const int64 after = counted_header_parses.load();
     EXPECT_STREQ("a", contents);
     EXPECT_EQ(i + 1, cached_fetches->Get());
     EXPECT_EQ(3, after - before);
   }
+  HTTPValue::set_header_parse_counter_for_testing(nullptr);
 }
 
 // ============================================================================

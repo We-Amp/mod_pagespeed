@@ -21,7 +21,9 @@
 
 #include "net/instaweb/http/public/http_cache.h"
 
+#include <atomic>
 #include <cstddef>  // for size_t
+#include <cstdint>
 #include <memory>
 
 #include "net/instaweb/http/public/http_value.h"
@@ -2341,6 +2343,13 @@ INSTANTIATE_TEST_SUITE_P(UnknownFieldAndSizeRecord, HTTPCacheStoredFieldTest,
 
 class HTTPCacheHeaderParseCountTest : public HTTPCacheTest {
  protected:
+  HTTPCacheHeaderParseCountTest() {
+    HTTPValue::set_header_parse_counter_for_testing(&header_parses_);
+  }
+  ~HTTPCacheHeaderParseCountTest() override {
+    HTTPValue::set_header_parse_counter_for_testing(nullptr);
+  }
+
   // Stores a stylesheet under kUrl with the given cache compression level.
   void PutStylesheet(int compression_level) {
     http_cache_->SetCompressionLevel(compression_level);
@@ -2354,9 +2363,9 @@ class HTTPCacheHeaderParseCountTest : public HTTPCacheTest {
   // Parses during one Find that must succeed.
   int64 ParsesForFind(bool accepts_gzip, Callback* callback) {
     callback->request_context()->SetAcceptsGzip(accepts_gzip);
-    const int64 before = HTTPValue::header_parse_count_for_testing();
+    const int64 before = header_parses_.load();
     http_cache_->Find(kUrl, kFragment, &message_handler_, callback);
-    const int64 after = HTTPValue::header_parse_count_for_testing();
+    const int64 after = header_parses_.load();
     EXPECT_TRUE(callback->called_);
     EXPECT_EQ(kFoundResult, callback->result_);
     return after - before;
@@ -2364,11 +2373,13 @@ class HTTPCacheHeaderParseCountTest : public HTTPCacheTest {
 
   int64 ParsesForExtractHeaders(Callback* callback) {
     ResponseHeaders headers;
-    const int64 before = HTTPValue::header_parse_count_for_testing();
+    const int64 before = header_parses_.load();
     EXPECT_TRUE(
         callback->http_value()->ExtractHeaders(&headers, &message_handler_));
-    return HTTPValue::header_parse_count_for_testing() - before;
+    return header_parses_.load() - before;
   }
+
+  std::atomic<int64_t> header_parses_{0};
 };
 
 // An entry served as it is stored: one parse for the lookup, one for each
