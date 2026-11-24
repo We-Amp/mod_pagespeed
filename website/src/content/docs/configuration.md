@@ -366,7 +366,7 @@ values corrected when upgrading.
 
 <!-- generated:begin module-directives -->
 
-Generated from the mod_pagespeed source at tag [`v2.9.2`](https://github.com/We-Amp/mod_pagespeed/tree/v2.9.2): 339 directives.
+Generated from the mod_pagespeed source at tag [`v2.10.0`](https://github.com/We-Amp/mod_pagespeed/tree/v2.10.0): 339 directives.
 
 Areas: [Enabling and filter selection](#area-enabling-and-filter-selection) (13) · [Request handling and policy](#area-request-handling-and-policy) (33) · [In-place resource optimization](#area-in-place-resource-optimization) (15) · [Domains and URLs](#area-domains-and-urls) (24) · [Optimizer worker](#area-optimizer-worker) (7) · [Rule packs](#area-rule-packs) (4) · [Bot authentication and licensing](#area-bot-authentication-and-licensing) (19) · [Statistics, console and logging](#area-statistics-console-and-logging) (33) · [Images](#area-images) (46) · [CSS](#area-css) (10) · [JavaScript](#area-javascript) (9) · [Caching](#area-caching) (49) · [Fetching and origins](#area-fetching-and-origins) (19) · [HTML rewriting and page hints](#area-html-rewriting-and-page-hints) (11) · [Threads and limits](#area-threads-and-limits) (4) · [Experiments and analytics](#area-experiments-and-analytics) (6) · [Other](#area-other) (2) · [Deprecated and ignored](#area-deprecated-and-ignored) (35).
 

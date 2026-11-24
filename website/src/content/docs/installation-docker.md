@@ -83,7 +83,7 @@ services:
 
   # Factory Worker — optimizes cached content
   worker:
-    image: ghcr.io/we-amp/pagespeed-worker:2.9.2
+    image: ghcr.io/we-amp/pagespeed-worker:2.10.0
     pid: 'service:pidns'
     environment:
       # The image's entrypoint prepares this directory, then starts the
@@ -97,7 +97,7 @@ services:
 
   # Nginx with PageSpeed module
   nginx:
-    image: ghcr.io/we-amp/pagespeed-nginx:2.9.2
+    image: ghcr.io/we-amp/pagespeed-nginx:2.10.0
     pid: 'service:pidns'
     ports:
       - '8080:8080'

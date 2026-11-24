@@ -10,12 +10,12 @@ import ReleaseNotesDeepLink from '../../components/ReleaseNotesDeepLink.astro';
 
 <ReleaseNotesDeepLink />
 
-mod_pagespeed 2.9.2 is the current release: the module and the optimizer worker, released together on 2026-11-19 and installed as a matching pair. 2.9.0 was released on 2026-11-17. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version. The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it.
+mod_pagespeed 2.9 was released as 2.9.0 on 2026-11-17 and 2.9.2 on 2026-11-19: the module and the optimizer worker, released together and installed as a matching pair. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version. The [release notes index](/docs/release-notes/) lists every release of every line, and [Security updates](/docs/release-notes/#security-updates) lists every security fix we have published with the release that carried it.
 
-<span id="v2-9-2" class="rn-alias" aria-hidden="true"></span>
-<div class="rn-entry rn-entry-current">
+## Releases
 
-<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.9.2</span> <span class="rn-date">2026-11-19</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span></p>
+<details id="v2-9-2" class="rn-entry">
+<summary><span class="rn-ver">2.9.2</span> <span class="rn-date">2026-11-19</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update, released together with the optimizer worker: the nginx we bundle in the container images and the ASP.NET Core sidecar native pair is updated to 1.30.7. Update recommended.</span></summary>
 
 **Release date:** 2026-11-19
 
@@ -58,12 +58,10 @@ the Helm chart (chart 0.3.17) ship with the pagespeed-optimizer 2.9.2 release an
   workbench fix of `pagespeed-optimizer` 2.9.1:** for nginx sites, the URL Inspector
   shows a URL's optimized variants again.
 
-</div>
+</details>
 
-<span id="v2-9-0" class="rn-alias" aria-hidden="true"></span>
-<div class="rn-entry">
-
-<p class="rn-summary-line"><span class="rn-ver">mod_pagespeed 2.9.0</span> <span class="rn-date">2026-11-17</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span></p>
+<details id="v2-9-0" class="rn-entry">
+<summary><span class="rn-ver">2.9.0</span> <span class="rn-date">2026-11-17</span> <span class="rn-badge rn-badge-pair">module + optimizer worker</span> <span class="rn-lede">Security update, released together with the optimizer worker: several classes of security fix in the module, the optimizer worker and the ASP.NET Core package, <code>pagespeed-doctor</code>, and combined resources that no longer answer 404 while an input is briefly unavailable. Update recommended.</span></summary>
 
 **Release date:** 2026-11-17
 
@@ -343,4 +341,4 @@ _ASP.NET Core package_
 
 **Known issue:** in the pagespeed-optimizer console and workbench (including the VS Code view), opening a URL in the URL Inspector for an nginx site can show "No alternates found" instead of its optimized variants, and selecting a variant or previewing its content fails. Serving from the cache is unaffected, and so is the mod_pagespeed admin console. The fix ships in optimizer 2.9.1 for the host packages, and in the next container image release for Docker.
 
-</div>
+</details>

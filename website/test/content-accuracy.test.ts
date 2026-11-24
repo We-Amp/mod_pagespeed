@@ -1386,6 +1386,7 @@ const DENYLIST: DenyRule[] = [
       'src/content/docs/release-notes-1-15.mdx',
       'src/content/docs/release-notes-2-0.mdx',
       'src/content/docs/release-notes-2-1.mdx',
+      'src/content/docs/release-notes-2-10.mdx',
       'src/content/docs/release-notes-2-2.mdx',
       'src/content/docs/release-notes-2-3.mdx',
       'src/content/docs/release-notes-2-4.mdx',

@@ -13,7 +13,9 @@
 //                                                           tables and sets
 //     pagespeed/system/system_rewrite_options.cc            server-level options
 //     pagespeed/system/system_rewrite_driver_factory.cc     process-level directives
+//     pagespeed/system/system_process_options.cc            (2.10.0 and later)
 //     pagespeed/apache/apache_config.cc, mod_instaweb.cc    Apache-only options,
+//     pagespeed/apache/apache_directive_table.h             (the command table, 2.10.0 and later)
 //                                                           the static command table
 //     pagespeed/nginx/ngx_rewrite_options.cc                nginx-only options
 //     pagespeed/iis/iis_rewrite_options.cpp                 IIS-only options
@@ -53,6 +55,7 @@ import {
   parseApacheCommandTable,
   parseStringArray,
   parseNamedStrings,
+  parseProcessOptionNames,
   parseAcceptedValues,
   parseFilterNames,
   parseFilterVector,
@@ -404,6 +407,14 @@ export function buildModuleDirectives(moduleSrc, warnings) {
   const factoryCc = p('pagespeed/system/system_rewrite_driver_factory.cc');
   const apacheCc = p('pagespeed/apache/apache_config.cc');
   const modInstawebCc = p('pagespeed/apache/mod_instaweb.cc');
+  // From mod_pagespeed 2.10.0 the Apache command table and the process-scope
+  // option names live in their own files; earlier trees have neither.
+  const pIfPresent = (rel) => (existsSync(join(moduleSrc, rel)) ? { rel, src: p(rel) } : null);
+  const directiveTable = pIfPresent('pagespeed/apache/apache_directive_table.h') ?? {
+    rel: 'pagespeed/apache/mod_instaweb.cc',
+    src: modInstawebCc,
+  };
+  const processOptions = pIfPresent('pagespeed/system/system_process_options.cc');
   const ngxCc = p('pagespeed/nginx/ngx_rewrite_options.cc');
   const iisCc = p('pagespeed/iis/iis_rewrite_options.cpp');
   const overlay = loadOverlay('directives-overlay.json', 'directives');
@@ -414,6 +425,7 @@ export function buildModuleDirectives(moduleSrc, warnings) {
     systemCc,
     systemH,
     factoryCc,
+    ...(processOptions ? [processOptions.src] : []),
     apacheCc,
     ngxCc,
     p('pagespeed/kernel/base/timer.h'),
@@ -628,11 +640,29 @@ export function buildModuleDirectives(moduleSrc, warnings) {
     'option',
   );
 
+  // From 2.10.0 the factory hands these names to SystemProcessOptions.
+  if (processOptions) {
+    for (const name of parseProcessOptionNames(processOptions.src)) handledShared.add(name);
+  }
+
   // Process-level factory directives: the factory parser refuses (or warns
   // and ignores) them outside the top-level configuration.
   const factoryNames = new Set(
-    [...parseNamedStrings(factoryCc).values()].filter((v) => handledShared.has(v)),
+    [
+      ...parseNamedStrings(factoryCc).values(),
+      ...(processOptions ? parseNamedStrings(processOptions.src).values() : []),
+    ].filter((v) => handledShared.has(v)),
   );
+  requireEntries(
+    [...factoryNames],
+    processOptions?.rel ?? 'pagespeed/system/system_rewrite_driver_factory.cc',
+    'process-scope directive names',
+  );
+
+  const tableProblems = [];
+  const apacheCommands = parseApacheCommandTable(directiveTable.src, tableProblems);
+  requireNoProblems(tableProblems, directiveTable.rel);
+  requireEntries(apacheCommands, directiveTable.rel, 'Apache command-table entries');
 
   // GetOptionScope compares these lists case-insensitively (the list spells
   // FetcherTimeoutMs, the option is FetcherTimeOutMs).
@@ -643,7 +673,7 @@ export function buildModuleDirectives(moduleSrc, warnings) {
   const nginxScopeFor = (name) =>
     inList(mainOnly, name) ? 'process' : inList(serverOnly, name) ? 'server' : 'directory';
 
-  for (const cmd of parseApacheCommandTable(modInstawebCc)) {
+  for (const cmd of apacheCommands) {
     const name = cmd.name;
     if (name === 'If') {
       byName.set('If', {
@@ -1118,6 +1148,50 @@ export function generate({ moduleSrc, tag }) {
   return { files, warnings };
 }
 
+/**
+ * Throws when a registration source yields nothing: the module moved its
+ * registrations to a layout the parsers do not read, and the reference would
+ * silently lose every entry that file used to provide.
+ */
+export function requireEntries(entries, file, what) {
+  if (entries.length > 0) return;
+  throw new Error(
+    `no ${what} parsed from ${file}: the module source layout changed; ` +
+      'teach scripts/lib/reference-parsers.mjs to read it',
+  );
+}
+
+/**
+ * Throws when a registration table had rows the parser could not read (an
+ * unknown kind or a name that does not resolve): each one would otherwise drop
+ * a directive from the reference without a word.
+ */
+export function requireNoProblems(problems, file) {
+  if (problems.length === 0) return;
+  throw new Error(
+    `${problems.length} unreadable row(s) in ${file}: ${problems.join('; ')}; ` +
+      'teach scripts/lib/reference-parsers.mjs to read them',
+  );
+}
+
+/** Generating fewer than this share of the committed directives is refused. */
+export const MIN_DIRECTIVE_SHARE = 0.9;
+
+/**
+ * Throws when a generation yields sharply fewer module directives than the
+ * committed reference. `committed` is null when there is no committed file.
+ */
+export function checkDirectiveCount(generated, committed) {
+  if (committed === null || committed === undefined) return;
+  if (generated >= committed * MIN_DIRECTIVE_SHARE) return;
+  throw new Error(
+    `generated ${generated} module directives, the committed reference has ${committed}: ` +
+      'a drop this large means registrations moved to a source file the generator does not ' +
+      'read (see the file list at the top of scripts/generate-references.mjs). ' +
+      'If the drop is real, rerun with --allow-shrink.',
+  );
+}
+
 export function serialize(obj) {
   return `${JSON.stringify(obj, null, 2)}\n`;
 }
@@ -1136,16 +1210,40 @@ function main(argv) {
   const moduleSrc = args.get('--module-src');
   if (typeof moduleSrc !== 'string') {
     console.error(
-      'usage: generate-references.mjs --module-src DIR [--out DIR] [--tag vX.Y.Z] [--check]',
+      'usage: generate-references.mjs --module-src DIR [--out DIR] [--tag vX.Y.Z] [--check] [--allow-shrink]',
     );
     process.exit(2);
   }
   const outDir = resolve(typeof args.get('--out') === 'string' ? args.get('--out') : REFERENCE_DIR);
-  const { files, warnings } = generate({
-    moduleSrc: resolve(moduleSrc),
-    tag: typeof args.get('--tag') === 'string' ? args.get('--tag') : undefined,
-  });
+  // Every guard reports the same way: one `error:` line and exit 1.
+  let generated;
+  try {
+    generated = generate({
+      moduleSrc: resolve(moduleSrc),
+      tag: typeof args.get('--tag') === 'string' ? args.get('--tag') : undefined,
+    });
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
+  }
+  const { files, warnings } = generated;
   for (const w of warnings) console.error(`warning: ${w}`);
+
+  if (!args.get('--allow-shrink')) {
+    const committedPath = join(REFERENCE_DIR, 'module-directives.json');
+    if (!existsSync(committedPath)) {
+      console.error(`warning: no committed ${committedPath}; the directive count is not checked`);
+    }
+    const committed = existsSync(committedPath)
+      ? JSON.parse(read(committedPath)).directives.length
+      : null;
+    try {
+      checkDirectiveCount(files['module-directives.json'].directives.length, committed);
+    } catch (e) {
+      console.error(`error: ${e.message}`);
+      process.exit(1);
+    }
+  }
 
   if (args.get('--check')) {
     let stale = 0;
