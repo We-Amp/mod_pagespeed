@@ -113,9 +113,11 @@
   // This page shows no findings, so its sample leaves the message log alone.
   const poll = usePolling(
     () =>
-      sampleOverview(api, Date.now, { messages: false }).then(async (sample) => {
+      sampleOverview(api, Date.now, { messages: false }).then((sample) => {
         const snap = toSnapshot(sample, daemonView);
-        if (sample.module.ok) await readLog();
+        // Not awaited: the history is an extra line on one card, and the page
+        // must not wait for it to show its figures.
+        if (sample.module.ok) void readLog();
         // The stamp is the age of the module figures: a sample whose module
         // read failed does not move it.
         if (sample.module.ok) {

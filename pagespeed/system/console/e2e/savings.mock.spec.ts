@@ -427,9 +427,10 @@ test("the legend of a bar runs along one line: each share's name next to its cou
   // With room to spare: also where the system's font is wider.
   await widenText(page);
   for (const key of ["css", "image"]) {
-    const rows = await page
-      .getByTestId(`savings-split-${key}`)
-      .locator(".split-figures > div")
+    const shares = page.getByTestId(`savings-split-${key}`).locator(".split-figures > div");
+    // evaluateAll reads what is there at once: wait for the optimizer's figures to be drawn first.
+    await expect(shares).toHaveCount(3);
+    const rows = await shares
       .evaluateAll((els) =>
         els.map((el) => {
           const name = (el.querySelector("dt") as HTMLElement).getBoundingClientRect();
@@ -460,9 +461,9 @@ test("on a laptop window the legend of a bar takes two lines at most", async ({ 
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   for (const key of ["css", "image"]) {
-    const tops = await page
-      .getByTestId(`savings-split-${key}`)
-      .locator(".split-figures > div")
+    const shares = page.getByTestId(`savings-split-${key}`).locator(".split-figures > div");
+    await expect(shares).toHaveCount(3);
+    const tops = await shares
       .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
     expect(tops).toHaveLength(3);
     expect(new Set(tops).size, `${key}: legend lines`).toBeLessThanOrEqual(2);
@@ -474,9 +475,9 @@ test("on a phone the legend wraps inside its card", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   const card = await page.getByTestId("savings-optimizer-card").evaluate((el) => el.getBoundingClientRect().right);
-  const rights = await page
-    .getByTestId("savings-split-css")
-    .locator(".split-figures dt, .split-figures dd")
+  const cells = page.getByTestId("savings-split-css").locator(".split-figures dt, .split-figures dd");
+  await expect(cells).toHaveCount(6);
+  const rights = await cells
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().right));
   expect(rights.length).toBe(6);
   for (const right of rights) expect(right).toBeLessThanOrEqual(card);
