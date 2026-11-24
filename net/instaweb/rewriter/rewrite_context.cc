@@ -53,6 +53,7 @@
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "net/instaweb/rewriter/public/served_savings.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -903,8 +904,15 @@ class RewriteContext::FetchContext {
               response_headers);
         }
         StringPiece contents = output_resource_->ExtractUncompressedContents();
-        ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
-                                                async_fetch_, handler_);
+        // The output that was just built is what goes out: an optimized
+        // response, counted with the sizes recorded when it was written.
+        ResponseHeaders::SizeRecord size_record;
+        const bool has_size_record =
+            output_resource_->GetSizeRecord(&size_record);
+        ok = RewriteContext::WriteWholeResponse(
+            original_output_url_, contents, async_fetch_, handler_,
+            rewrite_context_->Driver(),
+            has_size_record ? &size_record : nullptr);
       } else if (rewrite_context_->FailOnHashMismatch() &&
                  !rewrite_context_->fetch_left_out_inputs_) {
         FailForHashMismatch();
@@ -3640,11 +3648,23 @@ bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
   return WriteWholeResponse(output_url_base, contents, async_fetch, handler);
 }
 
-bool RewriteContext::WriteWholeResponse(StringPiece url, StringPiece contents,
-                                        AsyncFetch* async_fetch,
-                                        MessageHandler* handler) {
-  return CompleteWholeResponseHeaders(url, contents, async_fetch, handler) &&
-         async_fetch->Write(contents, handler);
+bool RewriteContext::WriteWholeResponse(
+    StringPiece url, StringPiece contents, AsyncFetch* async_fetch,
+    MessageHandler* handler, const RewriteDriver* driver,
+    const ResponseHeaders::SizeRecord* size_record) {
+  if (!CompleteWholeResponseHeaders(url, contents, async_fetch, handler) ||
+      !async_fetch->Write(contents, handler)) {
+    return false;
+  }
+  if (driver != nullptr && size_record != nullptr) {
+    ServedSavings::Response served;
+    served.nested_driver = driver->is_nested();
+    served.request_headers = async_fetch->request_headers();
+    served.status_code = async_fetch->response_headers()->status_code();
+    served.size_record = size_record;
+    ServedSavings::Record(served, driver->server_context()->rewrite_stats());
+  }
+  return true;
 }
 
 bool RewriteContext::CompleteWholeResponseHeaders(StringPiece url,

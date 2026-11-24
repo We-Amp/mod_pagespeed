@@ -350,9 +350,15 @@ class RewriteContext {
   // is replaced with a bodiless 500 instead, so a response never declares a
   // length or coding its body does not have. Returns whether `contents` was
   // written.
-  static bool WriteWholeResponse(StringPiece url, StringPiece contents,
-                                 AsyncFetch* async_fetch,
-                                 MessageHandler* handler);
+  //
+  // A caller that serves an optimized output passes its driver and the
+  // output's size record: once the body is written, the response is offered
+  // to ServedSavings, which decides whether it counts.  Without them nothing
+  // is counted, which is right for original bytes served on these paths.
+  static bool WriteWholeResponse(
+      StringPiece url, StringPiece contents, AsyncFetch* async_fetch,
+      MessageHandler* handler, const RewriteDriver* driver = nullptr,
+      const ResponseHeaders::SizeRecord* size_record = nullptr);
 
   // The header half of WriteWholeResponse, for callers that write `contents`
   // themselves: on success the headers are complete and the caller writes

@@ -216,6 +216,14 @@ const char* const kGraphsVars[] = {
     "redis_blocking_inserts",
     "redis_blocking_misses",
     "redis_blocking_deletes",
+    // Sizes of optimized responses sent, per type.
+    "image_served_original_bytes",
+    "image_served_optimized_bytes",
+    "css_served_original_bytes",
+    "css_served_optimized_bytes",
+    "javascript_served_original_bytes",
+    "javascript_served_optimized_bytes",
+    "served_savings_unmeasured_responses",
 };
 
 }  // namespace

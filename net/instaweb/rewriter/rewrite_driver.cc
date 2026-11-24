@@ -70,6 +70,7 @@
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/scan_filter.h"
+#include "net/instaweb/rewriter/public/served_savings.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_input_resource.h"
 #include "net/instaweb/rewriter/public/url_left_trim_filter.h"
@@ -1440,6 +1441,26 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
           value->ExtractMappedContents(&content, &mapped_keepalive) &&
           content.size() >= kZeroCopyServeMinBytes;
       bool success = value->ExtractHeaders(response_headers, handler_);
+      // The sizes stored with the entry, read here from the headers that
+      // were just extracted: completing the headers below drops them.
+      ResponseHeaders::SizeRecord size_record;
+      const bool has_size_record =
+          success && response_headers->GetSizeRecord(&size_record);
+      int64 header_original_size = -1;
+      bool stored_gzipped = false;
+      if (success && !has_size_record &&
+          output_resource_->filter_prefix() ==
+              RewriteOptions::kImageCompressionId) {
+        // An entry from before the sizes were stored with it; see
+        // ServedSavings::Record for what is made of these.
+        const char* original_length =
+            response_headers->Lookup1(HttpAttributes::kXOriginalContentLength);
+        if (original_length == nullptr ||
+            !StringToInt64(original_length, &header_original_size)) {
+          header_original_size = -1;
+        }
+        stored_gzipped = response_headers->IsGzipped();
+      }
       if (success) {
         // output_resource_->Link routes to HTTPValue::share(), which
         // collapses a mapped (Cyclone zero-copy) value to owned storage --
@@ -1480,6 +1501,21 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
                                : async_fetch_->WriteShared(
                                      content, value->share(), handler_));
       }
+      if (success) {
+        ServedSavings::Response served;
+        served.nested_driver = driver_->is_nested();
+        served.request_headers = async_fetch_->request_headers();
+        served.status_code = response_headers->status_code();
+        if (has_size_record) {
+          served.size_record = &size_record;
+        } else {
+          served.url_filter_id = output_resource_->filter_prefix();
+          served.header_original_size = header_original_size;
+          served.uncompressed_body_size =
+              stored_gzipped ? -1 : static_cast<int64>(content.size());
+        }
+        ServedSavings::Record(served, stats);
+      }
       async_fetch_->Done(success);
       driver_->FetchComplete();
       delete this;
@@ -1495,7 +1531,9 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         // The entry stored here carries the output's size record; the
         // headers go on to the client, so it comes off them again at once.
         ResponseHeaders::SizeRecord size_record;
-        if (output_resource_->GetSizeRecord(&size_record)) {
+        const bool has_size_record =
+            output_resource_->GetSizeRecord(&size_record);
+        if (has_size_record) {
           response_headers->SetSizeRecord(size_record);
         }
         http_cache->Put(canonical_url_, driver_->CacheFragment(),
@@ -1511,7 +1549,8 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
           server_context->ApplyRewrittenUrlCacheControl(response_headers);
         }
         async_fetch_->Done(RewriteContext::WriteWholeResponse(
-            canonical_url_, content, async_fetch_, handler_));
+            canonical_url_, content, async_fetch_, handler_, driver_,
+            has_size_record ? &size_record : nullptr));
         driver_->FetchComplete();
       } else {
         // Use the filter to reconstruct.
