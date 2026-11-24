@@ -3957,6 +3957,60 @@ TEST_F(RewriteContextFetchQueueTest, CombinedCssFetchWaitIsBounded) {
   EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), again);
 }
 
+// The same request, for the sizes: an input that is given up on under the
+// deadline arrives as the unoptimized file, with no size record, so the
+// combination is measured from the bodies it was really made of.  It is the
+// same size as those and is not counted.  The later request, made from the
+// optimized inputs, counts with the size of the original files.
+TEST_F(RewriteContextFetchQueueTest, CombinedCssFallbackInputHasNoSizeRecord) {
+  UseMd5Hasher();
+  options()->set_rewrite_deadline_ms(-1);
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  WedgeLowPriorityWorker();
+  RewriteStats* stats = server_context()->rewrite_stats();
+  const int64 bound_ms = options()->negative_deadline_fetch_wait_ms();
+  const int64 original_size = 2 * STATIC_STRLEN(kCss);
+
+  GoogleString url = Encode(kTestDomain, "cc", "0",
+                            MultiUrl(Encode("", "cf", "0", "x.css", "css"),
+                                     Encode("", "cf", "0", "y.css", "css")),
+                            "css");
+  StartFetch(url);
+  int64 advanced_ms = 0;
+  bool done_while_busy = AdvanceUntilDone(2 * bound_ms, &advanced_ms);
+  const bool success = done_while_busy && fetch_->success();
+  const GoogleString fallback_out = out_;
+  const int64 css_original_during = stats->css_served_original_bytes()->Get();
+  const int64 css_optimized_during = stats->css_served_optimized_bytes()->Get();
+
+  Release();
+
+  EXPECT_TRUE(success);
+  EXPECT_EQ(StrCat(kCss, "\n", kCss), fallback_out);
+  EXPECT_EQ(0, css_original_during);
+  EXPECT_EQ(0, css_optimized_during);
+  // Nothing was stored for the combination of the unoptimized inputs.
+  HTTPValue value;
+  ResponseHeaders stored;
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(url, http_cache(), &value, &stored).status);
+
+  const int64 css_original_before = stats->css_served_original_bytes()->Get();
+  const int64 css_optimized_before = stats->css_served_optimized_bytes()->Get();
+  GoogleString again;
+  EXPECT_TRUE(FetchResourceUrl(url, &again));
+  EXPECT_EQ(StrCat(kMinifiedCss, "\n", kMinifiedCss), again);
+  // That combination is not stored either (its inputs are named with
+  // hashes that are not their own here), so its sizes are read from what is
+  // counted.
+  EXPECT_LT(static_cast<int64>(again.size()), original_size);
+  EXPECT_EQ(original_size,
+            stats->css_served_original_bytes()->Get() - css_original_before);
+  EXPECT_EQ(static_cast<int64>(again.size()),
+            stats->css_served_optimized_bytes()->Get() - css_optimized_before);
+}
+
 // A combined JavaScript resource is rebuilt from its optimized inputs. With a
 // negative deadline the rebuild of an input is bounded like that of a
 // stylesheet, and the combination is made without waiting for it. The
@@ -7078,6 +7132,102 @@ TEST_F(ServedSavingsCombineTest, CombinedMinifiedStylesheetsBuiltOnAFetch) {
   ExpectServed(original_size, record.optimized_size, 0, 0);
   ASSERT_TRUE(FetchResourceUrl(combined, &content));
   ExpectServed(2 * original_size, 2 * record.optimized_size, 0, 0);
+}
+
+// A combination of one script that was minified first and one that comes
+// straight from the origin: the first counts with the size of the file it
+// was made from, the second with the size of its body.
+TEST_F(ServedSavingsCombineTest, CombinationOfAMinifiedAndAPlainScript) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
+  const int64 original_size = STATIC_STRLEN(kScriptA) + STATIC_STRLEN(kScriptB);
+  const GoogleString combined =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl(Encode("", "jm", "0", "a.js", "js"), "b.js"), "js");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  EXPECT_STREQ("jc", record.filter_id);
+  EXPECT_EQ(original_size, record.original_size);
+  EXPECT_EQ(static_cast<int64>(content.size()), record.optimized_size);
+  // One response, counted once.
+  ExpectServed(0, 0, original_size, record.optimized_size);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 2 * original_size, 2 * record.optimized_size);
+}
+
+// The inputs of a combination named with hashes that are not the current
+// ones.  Each is answered inside the server with the current minified script
+// all the same, and its sizes come along: first when the scripts have to be
+// built, then when they are found in the cache under their current names.
+// Such a combination is not stored, so the sizes are read from what is
+// counted when it is sent.
+TEST_F(ServedSavingsCombineTest, CombinationOfInputsNamedWithAnOutdatedHash) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
+  const int64 original_size = STATIC_STRLEN(kScriptA) + STATIC_STRLEN(kScriptB);
+
+  // Built on the way.
+  GoogleString built;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jc", "0",
+                              MultiUrl(Encode("", "jm", "1", "a.js", "js"),
+                                       Encode("", "jm", "1", "b.js", "js")),
+                              "js"),
+                       &built));
+  const int64 built_size = built.size();
+  EXPECT_LT(built_size, original_size);
+  ExpectServed(0, 0, original_size, built_size);
+
+  // The minified scripts are stored under their current names by now.
+  StoredRecord(Encode(kTestDomain, "jm", "0", "a.js", "js"));
+  StoredRecord(Encode(kTestDomain, "jm", "0", "b.js", "js"));
+  GoogleString from_cache;
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jc", "0",
+                              MultiUrl(Encode("", "jm", "2", "a.js", "js"),
+                                       Encode("", "jm", "2", "b.js", "js")),
+                              "js"),
+                       &from_cache));
+  const int64 from_cache_size = from_cache.size();
+  ExpectServed(0, 0, 2 * original_size, built_size + from_cache_size);
+}
+
+// One input of a combination cannot be loaded.  The request is answered
+// with a combination of the inputs that could be, which is not stored.  Its
+// sizes are those of what it was really made from: the original file of the
+// one script in it, and nothing for the missing one.
+TEST_F(ServedSavingsCombineTest, CombinationWithAFailingInputCountsWhatIsInIt) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
+  SetFetchResponse404("missing.js");
+  const GoogleString combined =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl(Encode("", "jm", "0", "a.js", "js"),
+                      Encode("", "jm", "0", "missing.js", "js")),
+             "js");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  HTTPValue value;
+  ResponseHeaders stored;
+  EXPECT_NE(HTTPCache::kFound,
+            HttpBlockingFind(combined, http_cache(), &value, &stored).status);
+  const int64 size_a = STATIC_STRLEN(kScriptA);
+  EXPECT_LT(static_cast<int64>(content.size()), size_a);
+  ExpectServed(0, 0, size_a, content.size());
+
+  // The input that could be built keeps its own record.
+  const ResponseHeaders::SizeRecord record_a =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "a.js", "js"));
+  EXPECT_EQ(size_a, record_a.original_size);
 }
 
 // Sizes are taken only from the module's own outputs, handed over inside the
