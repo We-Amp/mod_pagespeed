@@ -261,7 +261,6 @@
   "rewrite_cached_output_hits",
   "rewrite_cached_output_missed_deadline",
   "rewrite_cached_output_misses",
-  "served_savings_unmeasured_responses",
   "shm_cache_deletes",
   "shm_cache_hits",
   "shm_cache_inserts",

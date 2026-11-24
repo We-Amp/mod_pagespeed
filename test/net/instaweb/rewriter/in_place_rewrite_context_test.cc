@@ -2776,7 +2776,6 @@ class ServedSavingsFetchTest : public InPlaceRewriteContextTest {
     int64 image_original, image_optimized;
     int64 css_original, css_optimized;
     int64 js_original, js_optimized;
-    int64 unmeasured;
   };
 
   Sizes Served() {
@@ -2786,8 +2785,7 @@ class ServedSavingsFetchTest : public InPlaceRewriteContextTest {
                  stats->css_served_original_bytes()->Get(),
                  stats->css_served_optimized_bytes()->Get(),
                  stats->javascript_served_original_bytes()->Get(),
-                 stats->javascript_served_optimized_bytes()->Get(),
-                 stats->served_savings_unmeasured_responses()->Get()};
+                 stats->javascript_served_optimized_bytes()->Get()};
   }
 
   void ExpectServed(const Sizes& expected) {
@@ -2798,7 +2796,6 @@ class ServedSavingsFetchTest : public InPlaceRewriteContextTest {
     EXPECT_EQ(expected.css_optimized, actual.css_optimized);
     EXPECT_EQ(expected.js_original, actual.js_original);
     EXPECT_EQ(expected.js_optimized, actual.js_optimized);
-    EXPECT_EQ(expected.unmeasured, actual.unmeasured);
   }
 
   // Fetches 'url' with 'request_headers' and returns the body.
@@ -2834,22 +2831,22 @@ TEST_F(ServedSavingsFetchTest, EachOptimizedResponseAddsItsSizes) {
   // Built on request: nothing is in the cache for it yet.
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
   EXPECT_EQ(0, CachedFetches());
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
   // From the cache, twice.
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
   EXPECT_EQ(2, CachedFetches());
-  ExpectServed({12, 21, 0, 0, 0, 0, 0});
+  ExpectServed({12, 21, 0, 0, 0, 0});
 
   EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
   EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
   EXPECT_EQ(3, CachedFetches());
-  ExpectServed({12, 21, 8, 14, 0, 0, 0});
+  ExpectServed({12, 21, 8, 14, 0, 0});
 
   EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
   EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
   EXPECT_EQ(4, CachedFetches());
-  ExpectServed({12, 21, 8, 14, 8, 14, 0});
+  ExpectServed({12, 21, 8, 14, 8, 14});
 
   // The totals the filters keep per rewrite are another matter: each filter
   // ran once however often its output was sent.
@@ -2863,24 +2860,24 @@ TEST_F(ServedSavingsFetchTest, EachOptimizedResponseAddsItsSizes) {
 TEST_F(ServedSavingsFetchTest, RequestsThatDoNotCount) {
   Init();
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
 
   RequestHeaders head;
   head.set_method(RequestHeaders::kHead);
   EXPECT_STREQ("", Fetch(rewritten_png_url_, &head));
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
 
   RequestHeaders ranged;
   ranged.Add("Range", "bytes=0-2");
   Fetch(rewritten_png_url_, &ranged);
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
 
   RequestHeaders module_fetch;
   module_fetch.Add(
       HttpAttributes::kUserAgent,
       StrCat("Fetcher (", kModPagespeedSubrequestUserAgent, "/2.0-0)"));
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_, &module_fetch));
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
 
   // A conditional request is answered with a 304 and no body.
   RequestHeaders conditional;
@@ -2892,11 +2889,11 @@ TEST_F(ServedSavingsFetchTest, RequestsThatDoNotCount) {
                                &response_headers));
   EXPECT_EQ(HttpStatus::kNotModified, response_headers.status_code());
   EXPECT_STREQ("", contents);
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});
+  ExpectServed({4, 7, 0, 0, 0, 0});
 
   // An ordinary request still counts afterwards.
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
-  ExpectServed({8, 14, 0, 0, 0, 0, 0});
+  ExpectServed({8, 14, 0, 0, 0, 0});
 }
 
 // An entry without a size record is served as it is and not counted, an
@@ -2950,11 +2947,11 @@ TEST_F(ServedSavingsFetchTest, InPlaceResponsesAreNotCountedYet) {
   Init();
   FetchAndCheckResponse(cache_png_url_, cache_body_, true, kInjectedSMaxAgeMs,
                         original_etag_, start_time_ms());
-  ExpectServed({0, 0, 0, 0, 0, 0, 0});
+  ExpectServed({0, 0, 0, 0, 0, 0});
   ResetHeadersAndStats();
   FetchAndCheckResponse(cache_png_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-  ExpectServed({0, 0, 0, 0, 0, 0, 0});
+  ExpectServed({0, 0, 0, 0, 0, 0});
 }
 
 // When the first request waits for the optimized bytes, the response is built
@@ -2970,7 +2967,7 @@ TEST_F(ServedSavingsFetchTest, WaitForOptimizedResponseIsNotCountedYet) {
   Init();
   FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-  ExpectServed({0, 0, 0, 0, 0, 0, 0});
+  ExpectServed({0, 0, 0, 0, 0, 0});
 }
 
 }  // namespace net_instaweb

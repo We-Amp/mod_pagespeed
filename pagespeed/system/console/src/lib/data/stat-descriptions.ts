@@ -245,8 +245,6 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Requests for an optimized resource URL that could not be rebuilt, including jobs that could not be queued. Sustained values mean broken or expired optimized URLs are erroring.",
   resource_fetches_cached:
     "Requests for an optimized resource answered straight from cache with no reconstruction work. The desired outcome for optimized asset traffic.",
-  served_savings_unmeasured_responses:
-    "Optimized image, stylesheet and script responses served from cache entries written by an earlier version, whose saving could not be measured.",
   resource_url_domain_acceptances:
     "Referenced URLs the server was permitted to optimize under its domain authorization rules.",
   resource_url_domain_rejections:

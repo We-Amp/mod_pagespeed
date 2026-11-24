@@ -830,7 +830,6 @@ TEST_F(ServerContextTest,
   EXPECT_EQ(4, stats->css_served_original_bytes()->Get());
   EXPECT_EQ(8, stats->css_served_optimized_bytes()->Get());
   EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
-  EXPECT_EQ(0, stats->served_savings_unmeasured_responses()->Get());
 }
 
 // An optimized resource that was written but is no longer in the HTTP cache is

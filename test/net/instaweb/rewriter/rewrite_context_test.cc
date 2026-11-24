@@ -6932,7 +6932,6 @@ class ServedSavingsCombineTest : public RewriteContextTest {
     EXPECT_EQ(css_optimized, stats->css_served_optimized_bytes()->Get());
     EXPECT_EQ(js_original, stats->javascript_served_original_bytes()->Get());
     EXPECT_EQ(js_optimized, stats->javascript_served_optimized_bytes()->Get());
-    EXPECT_EQ(0, stats->served_savings_unmeasured_responses()->Get());
   }
 
   static const char kScriptA[];

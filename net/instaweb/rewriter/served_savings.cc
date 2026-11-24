@@ -68,58 +68,40 @@ ServedSavings::Outcome ServedSavings::Record(const Response& response,
     return kNotCounted;
   }
 
-  if (response.size_record != nullptr) {
-    const ResponseHeaders::SizeRecord& record = *response.size_record;
-    const StringPiece filter_id(record.filter_id);
-    // A combination counts only when it is smaller than what it was made
-    // from: a saving carried in by inputs that were optimized first.
-    // Combining itself saves requests, not bytes, and the little it adds is
-    // not shown as a negative saving.
-    const bool combination_saved = record.optimized_size < record.original_size;
-    ServedType type = kNoType;
-    if (filter_id == RewriteOptions::kImageCompressionId) {
-      type = kImageType;
-    } else if (filter_id == RewriteOptions::kCssFilterId ||
-               (filter_id == RewriteOptions::kCssCombinerId &&
-                combination_saved)) {
-      type = kCssType;
-    } else if (filter_id == RewriteOptions::kJavascriptMinId ||
-               (filter_id == RewriteOptions::kJavascriptCombinerId &&
-                combination_saved)) {
-      type = kJavascriptType;
-    }
-    if (type == kNoType || record.original_size < 0 ||
-        record.optimized_size < 0) {
-      return kNotCounted;
-    }
-    Add(type, record.original_size, record.optimized_size, stats);
-    return kCounted;
+  if (response.size_record == nullptr) {
+    return kNotCounted;
   }
+  const ResponseHeaders::SizeRecord& record = *response.size_record;
+  const StringPiece filter_id(record.filter_id);
+  // A combination counts only when it is smaller than what it was made
+  // from: a saving carried in by inputs that were optimized first.
+  // Combining itself saves requests, not bytes, and the little it adds is
+  // not shown as a negative saving.
+  const bool combination_saved = record.optimized_size < record.original_size;
+  ServedType type = kNoType;
+  if (filter_id == RewriteOptions::kImageCompressionId) {
+    type = kImageType;
+  } else if (filter_id == RewriteOptions::kCssFilterId ||
+             (filter_id == RewriteOptions::kCssCombinerId &&
+              combination_saved)) {
+    type = kCssType;
+  } else if (filter_id == RewriteOptions::kJavascriptMinId ||
+             (filter_id == RewriteOptions::kJavascriptCombinerId &&
+              combination_saved)) {
+    type = kJavascriptType;
+  }
+  if (type == kNoType || record.original_size < 0 ||
+      record.optimized_size < 0) {
+    return kNotCounted;
+  }
+  Add(type, record.original_size, record.optimized_size, stats);
+  return kCounted;
+}
 
-  // No record: an entry stored before the record existed, or an output that
-  // was written without knowing the size of what it was made from.
-  if (response.url_filter_id == RewriteOptions::kImageCompressionId) {
-    if (response.header_original_size >= 0 &&
-        response.uncompressed_body_size >= 0) {
-      Add(kImageType, response.header_original_size,
-          response.uncompressed_body_size, stats);
-      return kCounted;
-    }
-    stats->served_savings_unmeasured_responses()->Add(1);
-    return kUnmeasured;
-  }
-  if (response.url_filter_id == RewriteOptions::kCssFilterId ||
-      response.url_filter_id == RewriteOptions::kJavascriptMinId) {
-    stats->served_savings_unmeasured_responses()->Add(1);
-    return kUnmeasured;
-  }
-  // A combination or any other output without a record is neither counted
-  // nor unmeasured: without sizes a combination that carries a saving cannot
-  // be told from a plain one.  The unmeasured count means an image,
-  // stylesheet or script output from before sizes were stored whose saving
-  // could not be measured.  This gap closes as older cache entries turn
-  // over.
-  return kNotCounted;
+bool ServedSavings::IsOptimizingFilter(StringPiece filter_id) {
+  return filter_id == RewriteOptions::kImageCompressionId ||
+         filter_id == RewriteOptions::kCssFilterId ||
+         filter_id == RewriteOptions::kJavascriptMinId;
 }
 
 }  // namespace net_instaweb

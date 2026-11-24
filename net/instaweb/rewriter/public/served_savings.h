@@ -27,9 +27,6 @@ class ServedSavings {
     kNotCounted,
     // The response's sizes were added to its type's pair of variables.
     kCounted,
-    // An optimized response whose cache entry has no sizes with it: the
-    // unmeasured-responses variable was incremented instead.
-    kUnmeasured,
   };
 
   // One response with a body, as the place that sends it sees it.  Everything
@@ -44,17 +41,6 @@ class ServedSavings {
     int status_code = 0;
     // The size record of what is served, or null when it has none.
     const ResponseHeaders::SizeRecord* size_record = nullptr;
-
-    // The rest describes a response answered from a cache entry that has no
-    // record, and is not read otherwise.
-    //
-    // The filter id in the URL that was asked for; empty when the response is
-    // not such an answer.
-    StringPiece url_filter_id;
-    // The entry's X-Original-Content-Length, or -1 when it has none.
-    int64 header_original_size = -1;
-    // The length of the entry's body when it is stored uncompressed, else -1.
-    int64 uncompressed_body_size = -1;
   };
 
   // Decides whether 'response' counts and adds to 'stats' accordingly.
@@ -75,14 +61,17 @@ class ServedSavings {
   // which is the same size or slightly larger, is not counted.  Other
   // filters are not counted.
   //
-  // Without a record, which is how entries stored before the record existed
-  // read: an image is counted from the entry's X-Original-Content-Length and
-  // the length of its body, which is approximate where the origin compresses
-  // images; a stylesheet or script, or an image without that header, is an
-  // unmeasured response.  A combination or anything else without a record
-  // is neither counted nor unmeasured, a gap that closes as older cache
-  // entries turn over.
+  // Without a record nothing is counted.  The cache generation was raised
+  // when the record was introduced, so no entry from before it is read; an
+  // output without one was written without knowing the size of what it was
+  // made from (it has no inputs, say).
   static Outcome Record(const Response& response, RewriteStats* stats);
+
+  // True for the id of a filter whose output is an optimized image,
+  // stylesheet or script by itself: image recompression, CSS rewriting,
+  // JavaScript minification.  Every output of these that has inputs is
+  // stored with a size record.
+  static bool IsOptimizingFilter(StringPiece filter_id);
 };
 
 }  // namespace net_instaweb

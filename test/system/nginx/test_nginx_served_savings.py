@@ -24,9 +24,7 @@ different path.
 
 This is the half of the check that covers rewritten (.pagespeed.) URLs.
 Not covered here: resources optimized in place under their own URL,
-responses served from the optimizer's cache, and cache entries written by a
-release that did not store sizes (that case is covered by a unit test that
-stores an entry without them).
+and responses served from the optimizer's cache.
 
 Environment: runs only on nginx and skips unless run_nginx_tests.sh exports
 PAGESPEED_NGINX_PID_FILE and PAGESPEED_DOC_ROOT; the restart case also needs
@@ -64,7 +62,6 @@ SERVED_COUNTERS = (
     "css_served_optimized_bytes",
     "javascript_served_original_bytes",
     "javascript_served_optimized_bytes",
-    "served_savings_unmeasured_responses",
 )
 
 CACHE_HITS = "resource_fetches_cached"
@@ -310,11 +307,9 @@ def _check_served_sizes_across(
     for name in SERVED_COUNTERS:
         assert _delta(start, end, name) == 0, f"{name} moved for a request without a full body"
 
-    # From the reload to here nothing was optimized again, and no response was
-    # left unmeasured.
+    # From the reload or restart to here nothing was optimized again.
     for name in REWRITE_TIME_COUNTERS:
         assert _delta(before, end, name) == 0, f"{name} moved after the reload"
-    assert _delta(before, end, "served_savings_unmeasured_responses") == 0
 
 
 @pytest.mark.nginx_only

@@ -218,9 +218,9 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   // is file-local to the implementation; when it changes, this is the line
   // that says so, which is the intent -- a counter reaching the graphs page is
   // a user-visible surface change and should not slip in silently. Last moved
-  // when the seven variables for the sizes of optimized responses sent were
-  // added (three pairs of *_served_*_bytes and the unmeasured count).
-  EXPECT_EQ(107, parsed_var_data.size());
+  // when the six variables for the sizes of optimized responses sent were
+  // added (three pairs of *_served_*_bytes).
+  EXPECT_EQ(106, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
 }

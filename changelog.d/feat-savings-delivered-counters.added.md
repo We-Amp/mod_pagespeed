@@ -12,6 +12,3 @@
   in front of the server never reaches these counters. Combined stylesheets and
   scripts are usually not counted yet; resources optimized in place under their
   own URL and responses served by the optimizer cache are not counted yet.
-  `served_savings_unmeasured_responses` counts optimized image, stylesheet and
-  script responses sent from cache entries written by an earlier version, whose
-  saving could not be measured.

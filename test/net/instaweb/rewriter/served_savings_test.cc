@@ -40,10 +40,6 @@ struct Row {
   const char* filter_id;
   int64 original_size;
   int64 optimized_size;
-  // For a response without a record.
-  const char* url_filter_id;
-  int64 header_original_size;
-  int64 uncompressed_body_size;
   // What must happen.
   ServedSavings::Outcome outcome;
   ExpectedType type;
@@ -59,73 +55,67 @@ const ServedSavings::Outcome kCounted = ServedSavings::kCounted;
 
 const Row kRows[] = {
     // Each type, from its own filter.
-    {"image", false, kGet, 200, nullptr, kBrowser, "ic", 1000, 400, "", -1, -1,
-     kCounted, kImage, 1000, 400},
-    {"stylesheet", false, kGet, 200, nullptr, kBrowser, "cf", 900, 700, "", -1,
-     -1, kCounted, kCss, 900, 700},
-    {"script", false, kGet, 200, nullptr, kBrowser, "jm", 800, 500, "", -1, -1,
-     kCounted, kJavascript, 800, 500},
+    {"image", false, kGet, 200, nullptr, kBrowser, "ic", 1000, 400, kCounted,
+     kImage, 1000, 400},
+    {"stylesheet", false, kGet, 200, nullptr, kBrowser, "cf", 900, 700,
+     kCounted, kCss, 900, 700},
+    {"script", false, kGet, 200, nullptr, kBrowser, "jm", 800, 500, kCounted,
+     kJavascript, 800, 500},
     {"no User-Agent at all", false, kGet, 200, nullptr, nullptr, "ic", 1000,
-     400, "", -1, -1, kCounted, kImage, 1000, 400},
+     400, kCounted, kImage, 1000, 400},
     // A response that is larger than what it was made from is counted as it
     // is; so is one of the same size.
     {"larger than the original", false, kGet, 200, nullptr, kBrowser, "ic", 400,
-     1000, "", -1, -1, kCounted, kImage, 400, 1000},
+     1000, kCounted, kImage, 400, 1000},
     {"same size, optimizing filter", false, kGet, 200, nullptr, kBrowser, "cf",
-     700, 700, "", -1, -1, kCounted, kCss, 700, 700},
+     700, 700, kCounted, kCss, 700, 700},
     // A combination counts under the combiner only when it is smaller than
     // what it was made from, which is a saving carried in by inputs that were
     // optimized first.  Combining itself saves requests, not bytes: a plain
     // combination is the same size or slightly larger, and that overhead is
     // not shown as a negative saving.
     {"combined scripts, smaller", false, kGet, 200, nullptr, kBrowser, "jc",
-     2000, 1500, "", -1, -1, kCounted, kJavascript, 2000, 1500},
+     2000, 1500, kCounted, kJavascript, 2000, 1500},
     {"combined stylesheets, smaller", false, kGet, 200, nullptr, kBrowser, "cc",
-     2000, 1900, "", -1, -1, kCounted, kCss, 2000, 1900},
+     2000, 1900, kCounted, kCss, 2000, 1900},
     {"combined scripts, same size", false, kGet, 200, nullptr, kBrowser, "jc",
-     2000, 2000, "", -1, -1, kNotCounted, kNone, 0, 0},
+     2000, 2000, kNotCounted, kNone, 0, 0},
     {"combined stylesheets, same size", false, kGet, 200, nullptr, kBrowser,
-     "cc", 2000, 2000, "", -1, -1, kNotCounted, kNone, 0, 0},
+     "cc", 2000, 2000, kNotCounted, kNone, 0, 0},
     {"combined scripts, larger", false, kGet, 200, nullptr, kBrowser, "jc",
-     2000, 2100, "", -1, -1, kNotCounted, kNone, 0, 0},
+     2000, 2100, kNotCounted, kNone, 0, 0},
     {"combined stylesheets, larger", false, kGet, 200, nullptr, kBrowser, "cc",
-     2000, 2001, "", -1, -1, kNotCounted, kNone, 0, 0},
+     2000, 2001, kNotCounted, kNone, 0, 0},
     // Filters that do not change bytes.
     {"cache extension", false, kGet, 200, nullptr, kBrowser, "ce", 1000, 1000,
-     "", -1, -1, kNotCounted, kNone, 0, 0},
-    {"image sprite", false, kGet, 200, nullptr, kBrowser, "is", 1000, 800, "",
-     -1, -1, kNotCounted, kNone, 0, 0},
+     kNotCounted, kNone, 0, 0},
+    {"image sprite", false, kGet, 200, nullptr, kBrowser, "is", 1000, 800,
+     kNotCounted, kNone, 0, 0},
     // Requests whose answer is not a whole body sent to a visitor.
-    {"nested driver", true, kGet, 200, nullptr, kBrowser, "ic", 1000, 400, "",
-     -1, -1, kNotCounted, kNone, 0, 0},
+    {"nested driver", true, kGet, 200, nullptr, kBrowser, "ic", 1000, 400,
+     kNotCounted, kNone, 0, 0},
     {"HEAD", false, RequestHeaders::kHead, 200, nullptr, kBrowser, "ic", 1000,
-     400, "", -1, -1, kNotCounted, kNone, 0, 0},
+     400, kNotCounted, kNone, 0, 0},
     {"POST", false, RequestHeaders::kPost, 200, nullptr, kBrowser, "ic", 1000,
-     400, "", -1, -1, kNotCounted, kNone, 0, 0},
-    {"304", false, kGet, 304, nullptr, kBrowser, "ic", 1000, 400, "", -1, -1,
-     kNotCounted, kNone, 0, 0},
-    {"500", false, kGet, 500, nullptr, kBrowser, "ic", 1000, 400, "", -1, -1,
-     kNotCounted, kNone, 0, 0},
+     400, kNotCounted, kNone, 0, 0},
+    {"304", false, kGet, 304, nullptr, kBrowser, "ic", 1000, 400, kNotCounted,
+     kNone, 0, 0},
+    {"500", false, kGet, 500, nullptr, kBrowser, "ic", 1000, 400, kNotCounted,
+     kNone, 0, 0},
     {"range request", false, kGet, 200, "bytes=0-99", kBrowser, "ic", 1000, 400,
-     "", -1, -1, kNotCounted, kNone, 0, 0},
+     kNotCounted, kNone, 0, 0},
     {"the module's own fetch", false, kGet, 200, nullptr, kModuleFetch, "ic",
-     1000, 400, "", -1, -1, kNotCounted, kNone, 0, 0},
+     1000, 400, kNotCounted, kNone, 0, 0},
     // A record that cannot be right is not counted.
     {"negative original", false, kGet, 200, nullptr, kBrowser, "ic", -1, 400,
-     "", -1, -1, kNotCounted, kNone, 0, 0},
+     kNotCounted, kNone, 0, 0},
     {"negative optimized", false, kGet, 200, nullptr, kBrowser, "ic", 1000, -5,
-     "", -1, -1, kNotCounted, kNone, 0, 0},
-    // An output without a record is not counted, whatever it is.  The cache
-    // was emptied by the change that introduced the record, so every stored
-    // output of a filter that knows its inputs has one.
-    {"image without a record", false, kGet, 200, nullptr, kBrowser, nullptr, 0,
-     0, "ic", 1000, 400, kNotCounted, kNone, 0, 0},
-    {"stylesheet without a record", false, kGet, 200, nullptr, kBrowser,
-     nullptr, 0, 0, "cf", 900, 700, kNotCounted, kNone, 0, 0},
-    {"script without a record", false, kGet, 200, nullptr, kBrowser, nullptr, 0,
-     0, "jm", 800, 500, kNotCounted, kNone, 0, 0},
-    {"combination without a record", false, kGet, 200, nullptr, kBrowser,
-     nullptr, 0, 0, "jc", 800, 500, kNotCounted, kNone, 0, 0},
+     kNotCounted, kNone, 0, 0},
+    // A response without a record is not counted.  The cache generation was
+    // raised when the record was introduced, so every stored output of a
+    // filter that knows its inputs has one.
+    {"no record", false, kGet, 200, nullptr, kBrowser, nullptr, 0, 0,
+     kNotCounted, kNone, 0, 0},
 };
 
 class ServedSavingsTest : public testing::Test {
@@ -179,9 +169,6 @@ TEST_F(ServedSavingsTest, EveryRule) {
       record.filter_id = row.filter_id;
       response.size_record = &record;
     }
-    response.url_filter_id = row.url_filter_id;
-    response.header_original_size = row.header_original_size;
-    response.uncompressed_body_size = row.uncompressed_body_size;
 
     EXPECT_EQ(row.outcome,
               ServedSavings::Record(response, rewrite_stats_.get()));

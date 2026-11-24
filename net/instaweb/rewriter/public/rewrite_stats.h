@@ -61,9 +61,6 @@ class RewriteStats {
   static const char kCssServedOptimizedBytes[];
   static const char kJavascriptServedOriginalBytes[];
   static const char kJavascriptServedOptimizedBytes[];
-  // Optimized responses sent from a cache entry that has no sizes with it,
-  // which the pairs above therefore leave out.
-  static const char kServedSavingsUnmeasuredResponses[];
 
   // When this module's shared statistics were initialised, in epoch
   // milliseconds -- the time base every counter in the shared set counts
@@ -228,9 +225,6 @@ class RewriteStats {
   Variable* javascript_served_optimized_bytes() {
     return javascript_served_optimized_bytes_;
   }
-  Variable* served_savings_unmeasured_responses() {
-    return served_savings_unmeasured_responses_;
-  }
 
   Histogram* beacon_timings_ms_histogram() {
     return beacon_timings_ms_histogram_;
@@ -315,7 +309,6 @@ class RewriteStats {
   Variable* css_served_optimized_bytes_;
   Variable* javascript_served_original_bytes_;
   Variable* javascript_served_optimized_bytes_;
-  Variable* served_savings_unmeasured_responses_;
 
   Histogram* beacon_timings_ms_histogram_;
   Histogram* beacon_lcp_ms_histogram_;

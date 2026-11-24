@@ -223,7 +223,6 @@ const char* const kGraphsVars[] = {
     "css_served_optimized_bytes",
     "javascript_served_original_bytes",
     "javascript_served_optimized_bytes",
-    "served_savings_unmeasured_responses",
 };
 
 }  // namespace

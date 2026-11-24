@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <list>
@@ -1446,21 +1447,6 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
       ResponseHeaders::SizeRecord size_record;
       const bool has_size_record =
           success && response_headers->GetSizeRecord(&size_record);
-      int64 header_original_size = -1;
-      bool stored_gzipped = false;
-      if (success && !has_size_record &&
-          output_resource_->filter_prefix() ==
-              RewriteOptions::kImageCompressionId) {
-        // An entry from before the sizes were stored with it; see
-        // ServedSavings::Record for what is made of these.
-        const char* original_length =
-            response_headers->Lookup1(HttpAttributes::kXOriginalContentLength);
-        if (original_length == nullptr ||
-            !StringToInt64(original_length, &header_original_size)) {
-          header_original_size = -1;
-        }
-        stored_gzipped = response_headers->IsGzipped();
-      }
       if (success) {
         // output_resource_->Link routes to HTTPValue::share(), which
         // collapses a mapped (Cyclone zero-copy) value to owned storage --
@@ -1508,11 +1494,22 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         served.status_code = response_headers->status_code();
         if (has_size_record) {
           served.size_record = &size_record;
-        } else {
-          served.url_filter_id = output_resource_->filter_prefix();
-          served.header_original_size = header_original_size;
-          served.uncompressed_body_size =
-              stored_gzipped ? -1 : static_cast<int64>(content.size());
+        } else if (ServedSavings::IsOptimizingFilter(
+                       output_resource_->filter_prefix())) {
+          // Not counted.  The cache holds no entry from before sizes were
+          // stored, so this is an output written without knowing the size of
+          // what it was made from, or a fault; say so once, so that a fault
+          // does not go unseen.
+          static std::atomic<bool> reported{false};
+          if (!reported.load(std::memory_order_relaxed) &&
+              !reported.exchange(true)) {
+            handler_->Message(
+                kInfo,
+                "%s was served from the cache without the sizes it was "
+                "stored with, and is not counted in the served-size "
+                "statistics. Reported once.",
+                canonical_url_.c_str());
+          }
         }
         ServedSavings::Record(served, stats);
       }
