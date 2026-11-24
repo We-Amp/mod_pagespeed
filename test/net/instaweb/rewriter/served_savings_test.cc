@@ -116,28 +116,17 @@ const Row kRows[] = {
      "", -1, -1, kNotCounted, kNone, 0, 0},
     {"negative optimized", false, kGet, 200, nullptr, kBrowser, "ic", 1000, -5,
      "", -1, -1, kNotCounted, kNone, 0, 0},
-    // Entries without a record.
-    {"old image entry with the length header", false, kGet, 200, nullptr,
-     kBrowser, nullptr, 0, 0, "ic", 1000, 400, kCounted, kImage, 1000, 400},
-    {"old image entry without the header", false, kGet, 200, nullptr, kBrowser,
-     nullptr, 0, 0, "ic", -1, 400, kUnmeasured, kNone, 0, 0},
-    {"old image entry, body stored compressed", false, kGet, 200, nullptr,
-     kBrowser, nullptr, 0, 0, "ic", 1000, -1, kUnmeasured, kNone, 0, 0},
-    {"old stylesheet entry", false, kGet, 200, nullptr, kBrowser, nullptr, 0, 0,
-     "cf", 900, 700, kUnmeasured, kNone, 0, 0},
-    {"old script entry", false, kGet, 200, nullptr, kBrowser, nullptr, 0, 0,
-     "jm", 800, 500, kUnmeasured, kNone, 0, 0},
-    {"old combination entry", false, kGet, 200, nullptr, kBrowser, nullptr, 0,
-     0, "jc", 800, 500, kNotCounted, kNone, 0, 0},
-    {"old cache-extension entry", false, kGet, 200, nullptr, kBrowser, nullptr,
-     0, 0, "ce", 800, 800, kNotCounted, kNone, 0, 0},
-    {"no record and not a cache answer", false, kGet, 200, nullptr, kBrowser,
-     nullptr, 0, 0, "", -1, -1, kNotCounted, kNone, 0, 0},
-    // The request rules come first for entries without a record as well.
-    {"old stylesheet entry, HEAD", false, RequestHeaders::kHead, 200, nullptr,
-     kBrowser, nullptr, 0, 0, "cf", 900, 700, kNotCounted, kNone, 0, 0},
-    {"old image entry, the module's own fetch", false, kGet, 200, nullptr,
-     kModuleFetch, nullptr, 0, 0, "ic", 1000, 400, kNotCounted, kNone, 0, 0},
+    // An output without a record is not counted, whatever it is.  The cache
+    // was emptied by the change that introduced the record, so every stored
+    // output of a filter that knows its inputs has one.
+    {"image without a record", false, kGet, 200, nullptr, kBrowser, nullptr, 0,
+     0, "ic", 1000, 400, kNotCounted, kNone, 0, 0},
+    {"stylesheet without a record", false, kGet, 200, nullptr, kBrowser,
+     nullptr, 0, 0, "cf", 900, 700, kNotCounted, kNone, 0, 0},
+    {"script without a record", false, kGet, 200, nullptr, kBrowser, nullptr, 0,
+     0, "jm", 800, 500, kNotCounted, kNone, 0, 0},
+    {"combination without a record", false, kGet, 200, nullptr, kBrowser,
+     nullptr, 0, 0, "jc", 800, 500, kNotCounted, kNone, 0, 0},
 };
 
 class ServedSavingsTest : public testing::Test {
@@ -210,9 +199,13 @@ TEST_F(ServedSavingsTest, EveryRule) {
               Value(RewriteStats::kJavascriptServedOriginalBytes));
     EXPECT_EQ(row.type == kJavascript ? row.added_optimized : 0,
               Value(RewriteStats::kJavascriptServedOptimizedBytes));
-    EXPECT_EQ(row.outcome == kUnmeasured ? 1 : 0,
-              Value(RewriteStats::kServedSavingsUnmeasuredResponses));
   }
+}
+
+// There is no count of unmeasured responses: nothing is left to be unmeasured.
+TEST_F(ServedSavingsTest, NoUnmeasuredResponsesVariable) {
+  EXPECT_TRUE(stats_.FindVariable("served_savings_unmeasured_responses") ==
+              nullptr);
 }
 
 // The header names are matched whatever their case, and a response without

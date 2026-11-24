@@ -2899,12 +2899,13 @@ TEST_F(ServedSavingsFetchTest, RequestsThatDoNotCount) {
   ExpectServed({8, 14, 0, 0, 0, 0, 0});
 }
 
-// Entries stored before sizes were kept with them have no record.  An image
-// is counted from the entry's X-Original-Content-Length and its body; a
-// stylesheet or script is an unmeasured response.
-TEST_F(ServedSavingsFetchTest, EntriesWithoutASizeRecord) {
+// An entry without a size record is served as it is and not counted, an
+// image with an X-Original-Content-Length header included.  The cache was
+// emptied when the record was introduced, so such an entry is an output
+// written without knowing the size of what it was made from, or a fault.
+TEST_F(ServedSavingsFetchTest, EntriesWithoutASizeRecordAreNotCounted) {
   Init();
-  // Store each output, then store it again the way an older release did.
+  // Store each output, then store it again without its record.
   for (const GoogleString* url :
        {&rewritten_png_url_, &rewritten_css_url_, &rewritten_js_url_}) {
     Fetch(*url);
@@ -2913,6 +2914,7 @@ TEST_F(ServedSavingsFetchTest, EntriesWithoutASizeRecord) {
     ASSERT_EQ(HTTPCache::kFound,
               HttpBlockingFind(*url, http_cache(), &value, &stored).status);
     ASSERT_TRUE(stored.HasSizeRecord());
+    ASSERT_TRUE(stored.Has(HttpAttributes::kXOriginalContentLength));
     stored.ClearSizeRecord();
     StringPiece contents;
     ASSERT_TRUE(value.ExtractContents(&contents));
@@ -2925,27 +2927,18 @@ TEST_F(ServedSavingsFetchTest, EntriesWithoutASizeRecord) {
   ClearStats();
 
   EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
-  ExpectServed({4, 7, 0, 0, 0, 0, 0});  // From the header and the body.
   EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
-  ExpectServed({4, 7, 0, 0, 0, 0, 1});
   EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
-  ExpectServed({4, 7, 0, 0, 0, 0, 2});
   EXPECT_EQ(3, CachedFetches());
-
-  // An image entry that has no length header either is unmeasured too.
-  HTTPValue value;
-  ResponseHeaders stored;
-  ASSERT_EQ(HTTPCache::kFound,
-            HttpBlockingFind(rewritten_png_url_, http_cache(), &value, &stored)
-                .status);
-  stored.RemoveAll(HttpAttributes::kXOriginalContentLength);
-  stored.ComputeCaching();
-  http_cache()->Put(rewritten_png_url_, rewrite_driver()->CacheFragment(),
-                    RequestHeaders::Properties(),
-                    ResponseHeaders::GetVaryOption(options()->respect_vary()),
-                    &stored, "good:ic", message_handler());
-  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
-  ExpectServed({4, 7, 0, 0, 0, 0, 3});
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->image_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->css_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->css_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->javascript_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->javascript_served_optimized_bytes()->Get());
+  EXPECT_TRUE(statistics()->FindVariable(
+                  "served_savings_unmeasured_responses") == nullptr);
 }
 
 // Serving a resource under its own URL, optimized in place, is not counted by
