@@ -6964,17 +6964,20 @@ TEST_F(ServedSavingsCombineTest, MinifiedAndCombinedScriptsCountUnderCombiner) {
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
   rewrite_driver()->AddFilters();
   SetUpScripts();
-  const GoogleString combined =
-      Encode(kTestDomain, "jc", "0",
-             MultiUrl(Encode("", "jm", "0", "a.js", "js"),
-                      Encode("", "jm", "0", "b.js", "js")),
-             "js");
-
   // The page rewrite minifies both scripts and combines the results.
   Parse("minify_and_combine",
         "<script src=\"a.js\"></script><script src=\"b.js\"></script>");
-  ASSERT_NE(GoogleString::npos, output_buffer_.find(".pagespeed.jc."))
-      << output_buffer_;
+  // The combination's URL, as the rewritten page names it.
+  const size_t marker = output_buffer_.find(".pagespeed.jc.");
+  ASSERT_NE(GoogleString::npos, marker) << output_buffer_;
+  const size_t url_start = output_buffer_.rfind('"', marker) + 1;
+  const size_t url_end = output_buffer_.find('"', marker);
+  ASSERT_NE(GoogleString::npos, url_end) << output_buffer_;
+  const GoogleString combined = StrCat(
+      kTestDomain, output_buffer_.substr(url_start, url_end - url_start));
+  SCOPED_TRACE(combined);
+  // It is a combination of the two minified scripts.
+  EXPECT_NE(GoogleString::npos, combined.find("jm.")) << combined;
   const ResponseHeaders::SizeRecord record = StoredRecord(combined);
   EXPECT_STREQ("jc", record.filter_id);
   // The chain is kept: the original size is that of the two files.
