@@ -714,7 +714,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   // original's bytes move ipro_daemon_served_original.  A 200, a 304 and a
   // HEAD alike, and the three counters cover every in-place-eligible
   // request between them.
-  RecordDaemonServeCounters(stats, decision);
+  // The sizes of an optimized response are counted by the same call, for a
+  // GET that was answered with the whole body.
+  DaemonServeSent sent;
+  sent.get_request =
+      StringCaseEqual(http_context->GetRequest()->GetHttpMethod(), "GET");
+  sent.body_sent = sent.get_request && response.has_body;
+  sent.body_size = body_size;
+  // By length, as this module's other Range test: an absent header may be
+  // returned as an empty string.
+  sent.range_request =
+      StringPiece(http_context->GetRequest()->GetHeader("Range")).length() > 0;
+  sent.user_agent = serve_request.user_agent;
+  RecordDaemonServeCounters(stats, decision, sent);
 
   // A FALLBACK HIT IS SERVED -- and it is also ANSWERED. The serve recorded
   // nothing, so without this nothing would ever ask the worker for the

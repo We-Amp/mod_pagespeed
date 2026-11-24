@@ -61,6 +61,12 @@ class RewriteStats {
   static const char kCssServedOptimizedBytes[];
   static const char kJavascriptServedOriginalBytes[];
   static const char kJavascriptServedOptimizedBytes[];
+  static const char kIproDaemonServedImageOriginalBytes[];
+  static const char kIproDaemonServedImageOptimizedBytes[];
+  static const char kIproDaemonServedCssOriginalBytes[];
+  static const char kIproDaemonServedCssOptimizedBytes[];
+  static const char kIproDaemonServedJsOriginalBytes[];
+  static const char kIproDaemonServedJsOptimizedBytes[];
 
   // When this module's shared statistics were initialised, in epoch
   // milliseconds -- the time base every counter in the shared set counts
@@ -226,6 +232,30 @@ class RewriteStats {
     return javascript_served_optimized_bytes_;
   }
 
+  // The same two sizes for optimized responses answered from the optimizer's
+  // cache, per type.  A family of its own: a request is answered either by
+  // the module's own rewriting or from the optimizer's cache, never both, so
+  // the two families never count one response twice and can be read apart.
+  // Moved only by RecordDaemonServeCounters.
+  Variable* ipro_daemon_served_image_original_bytes() {
+    return ipro_daemon_served_image_original_bytes_;
+  }
+  Variable* ipro_daemon_served_image_optimized_bytes() {
+    return ipro_daemon_served_image_optimized_bytes_;
+  }
+  Variable* ipro_daemon_served_css_original_bytes() {
+    return ipro_daemon_served_css_original_bytes_;
+  }
+  Variable* ipro_daemon_served_css_optimized_bytes() {
+    return ipro_daemon_served_css_optimized_bytes_;
+  }
+  Variable* ipro_daemon_served_js_original_bytes() {
+    return ipro_daemon_served_js_original_bytes_;
+  }
+  Variable* ipro_daemon_served_js_optimized_bytes() {
+    return ipro_daemon_served_js_optimized_bytes_;
+  }
+
   Histogram* beacon_timings_ms_histogram() {
     return beacon_timings_ms_histogram_;
   }
@@ -309,6 +339,12 @@ class RewriteStats {
   Variable* css_served_optimized_bytes_;
   Variable* javascript_served_original_bytes_;
   Variable* javascript_served_optimized_bytes_;
+  Variable* ipro_daemon_served_image_original_bytes_;
+  Variable* ipro_daemon_served_image_optimized_bytes_;
+  Variable* ipro_daemon_served_css_original_bytes_;
+  Variable* ipro_daemon_served_css_optimized_bytes_;
+  Variable* ipro_daemon_served_js_original_bytes_;
+  Variable* ipro_daemon_served_js_optimized_bytes_;
 
   Histogram* beacon_timings_ms_histogram_;
   Histogram* beacon_lcp_ms_histogram_;

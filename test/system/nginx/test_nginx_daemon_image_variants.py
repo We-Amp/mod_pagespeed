@@ -16,6 +16,10 @@ Save-Data. This checks, on the wire under nginx with the worker running, that
   * the second fetch of a variant is answered from the cache again (same
     validator, the cache's Age header, and the daemon-served image counter
     moves while the fall-through counter does not);
+  * each such fetch adds the photo's size and the variant's size to
+    ipro_daemon_served_image_original_bytes and ..._optimized_bytes, and to
+    no other size variable, while a conditional request, a HEAD and a range
+    request add nothing;
   * a stylesheet names none of the device headers.
 
 The cases fetch their own copy of the photo (lane-1.jpg ... lane-N.jpg,
@@ -69,6 +73,19 @@ DEVICE_HEADERS = {"user-agent", "save-data", "sec-ch-dpr"}
 # origin's own validator.
 VARIANT_ETAG_MARK = 'ps-'
 
+# The sizes of optimized responses answered from the optimizer's cache, and
+# of those the server optimized itself.
+CACHE_SIZE_VARS = [
+    f"ipro_daemon_served_{kind}_{side}_bytes"
+    for kind in ("image", "css", "js")
+    for side in ("original", "optimized")
+]
+OWN_SIZE_VARS = [
+    f"{kind}_served_{side}_bytes"
+    for kind in ("image", "css", "javascript")
+    for side in ("original", "optimized")
+]
+
 CLIENTS = {
     "desktop": {"Accept": WEBP, "User-Agent": DESKTOP_UA},
     "desktop-no-webp": {"Accept": JPEG_ONLY, "User-Agent": DESKTOP_UA},
@@ -98,6 +115,18 @@ def _summary(seen) -> list:
 def _daemon_counters(site, server_config) -> dict:
     stats = site.get_statistics(stats_path=server_config.stats_path, disable_pagespeed=False)
     return {k: v for k, v in sorted(stats.items()) if k.startswith("ipro_daemon")}
+
+
+def _moved(before, after, names) -> dict:
+    """The named variables that changed, with how much."""
+    return {n: after.get(n, 0) - before.get(n, 0) for n in names if after.get(n, 0) != before.get(n, 0)}
+
+
+def _origin_size(seen) -> int:
+    """The photo's size: the length of the stored original the cache served."""
+    originals = [r for _, r in seen if r.status == 200 and VARIANT_ETAG_MARK not in r.header("ETag")]
+    assert originals, f"no stored original was served from the cache: {_summary(seen)}"
+    return len(originals[0].body)
 
 
 @pytest.fixture(scope="module")
@@ -270,6 +299,42 @@ def test_second_fetch_is_served_from_the_cache(site, server_config, served, name
         after,
     )
     assert after.get("ipro_daemon_fallthrough", 0) == before.get("ipro_daemon_fallthrough", 0), name
+    # The sizes of this one response: what the variant was made from, and the
+    # bytes sent. An image is never sent compressed, so both are plain sizes.
+    assert _moved(before, after, CACHE_SIZE_VARS) == {
+        "ipro_daemon_served_image_original_bytes": _origin_size(served[2]),
+        "ipro_daemon_served_image_optimized_bytes": len(again.body),
+    }, (name, before, after)
+    assert len(again.body) < _origin_size(served[2]), name
+    # The server optimized nothing itself here.
+    assert _moved(before, after, OWN_SIZE_VARS) == {}, (name, before, after)
+
+
+@pytest.mark.parametrize("name", list(CLIENTS))
+def test_requests_without_a_whole_body_add_no_sizes(site, server_config, served, name):
+    path, variants, _ = served
+    headers = CLIENTS[name]
+    stats_path = server_config.stats_path
+
+    def stats():
+        return site.get_statistics(stats_path=stats_path, disable_pagespeed=False)
+
+    before = stats()
+    revalidated = site.get(path, headers={**headers, "If-None-Match": variants[name].header("ETag")})
+    head = site.head(path, headers=headers)
+    ranged = site.get(path, headers={**headers, "Range": "bytes=0-99"})
+    after = stats()
+
+    assert revalidated.status == 304, (name, revalidated.status)
+    assert head.status == 200 and head.body == b"", (name, head.status, len(head.body))
+    assert ranged.status == 206 and len(ranged.body) == 100, (name, ranged.status, len(ranged.body))
+    # All three were answered from the cache, and none of them counts a size.
+    assert after.get("ipro_daemon_served_image", 0) - before.get("ipro_daemon_served_image", 0) == 3, (
+        name,
+        before,
+        after,
+    )
+    assert _moved(before, after, CACHE_SIZE_VARS + OWN_SIZE_VARS) == {}, (name, before, after)
 
 
 def test_a_stylesheet_names_no_device_header(site):

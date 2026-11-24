@@ -3301,7 +3301,17 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
   // after ngx_http_output_filter is exactly where it must not be.  The hit
   // is recorded under Apache's exact condition -- optimized, worker
   // processed, origin length known -- on the 200 leg only, never on a 304.
-  RecordDaemonServeCounters(server_context->rewrite_stats(), decision);
+  //
+  // The sizes of an optimized response are counted by the same call, for a
+  // GET that is answered with the whole body.  The method is the test, not
+  // r->header_only, which nginx sets in a filter that runs after this.
+  DaemonServeSent sent;
+  sent.get_request = r->method == NGX_HTTP_GET;
+  sent.body_sent = sent.get_request && !decision.not_modified;
+  sent.body_size = body_size;
+  sent.range_request = r->headers_in.range != nullptr;
+  sent.user_agent = serve_request.user_agent;
+  RecordDaemonServeCounters(server_context->rewrite_stats(), decision, sent);
   if (serve_stats != nullptr && !decision.not_modified &&
       decision.serve_class == kPsServeClassOptimized &&
       decision.worker_processed && decision.origin_content_length > 0) {

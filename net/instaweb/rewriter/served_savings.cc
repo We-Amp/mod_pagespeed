@@ -98,6 +98,39 @@ ServedSavings::Outcome ServedSavings::Record(const Response& response,
   return kCounted;
 }
 
+ServedSavings::Outcome ServedSavings::RecordOptimizerCacheServe(
+    const OptimizerCacheResponse& response, RewriteStats* stats) {
+  if (!response.get_request || !response.body_sent || response.range_request ||
+      response.original_size < 0 || response.optimized_size < 0 ||
+      response.user_agent.find(kModPagespeedSubrequestUserAgent) !=
+          StringPiece::npos) {
+    return kNotCounted;
+  }
+  switch (response.type) {
+    case kCachedImage:
+      stats->ipro_daemon_served_image_original_bytes()->Add(
+          response.original_size);
+      stats->ipro_daemon_served_image_optimized_bytes()->Add(
+          response.optimized_size);
+      return kCounted;
+    case kCachedCss:
+      stats->ipro_daemon_served_css_original_bytes()->Add(
+          response.original_size);
+      stats->ipro_daemon_served_css_optimized_bytes()->Add(
+          response.optimized_size);
+      return kCounted;
+    case kCachedJavascript:
+      stats->ipro_daemon_served_js_original_bytes()->Add(
+          response.original_size);
+      stats->ipro_daemon_served_js_optimized_bytes()->Add(
+          response.optimized_size);
+      return kCounted;
+    case kCachedOther:
+      break;
+  }
+  return kNotCounted;
+}
+
 bool ServedSavings::IsOptimizingFilter(StringPiece filter_id) {
   return filter_id == RewriteOptions::kImageCompressionId ||
          filter_id == RewriteOptions::kCssFilterId ||

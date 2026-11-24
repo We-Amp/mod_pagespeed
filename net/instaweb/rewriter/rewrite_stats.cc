@@ -250,6 +250,18 @@ const char RewriteStats::kJavascriptServedOriginalBytes[] =
     "javascript_served_original_bytes";
 const char RewriteStats::kJavascriptServedOptimizedBytes[] =
     "javascript_served_optimized_bytes";
+const char RewriteStats::kIproDaemonServedImageOriginalBytes[] =
+    "ipro_daemon_served_image_original_bytes";
+const char RewriteStats::kIproDaemonServedImageOptimizedBytes[] =
+    "ipro_daemon_served_image_optimized_bytes";
+const char RewriteStats::kIproDaemonServedCssOriginalBytes[] =
+    "ipro_daemon_served_css_original_bytes";
+const char RewriteStats::kIproDaemonServedCssOptimizedBytes[] =
+    "ipro_daemon_served_css_optimized_bytes";
+const char RewriteStats::kIproDaemonServedJsOriginalBytes[] =
+    "ipro_daemon_served_js_original_bytes";
+const char RewriteStats::kIproDaemonServedJsOptimizedBytes[] =
+    "ipro_daemon_served_js_optimized_bytes";
 const char RewriteStats::kProcessStartMs[] = "process_start_ms";
 
 // In Apache, this is called in the root process to establish shared memory
@@ -349,6 +361,12 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kCssServedOptimizedBytes);
   statistics->AddVariable(kJavascriptServedOriginalBytes);
   statistics->AddVariable(kJavascriptServedOptimizedBytes);
+  statistics->AddVariable(kIproDaemonServedImageOriginalBytes);
+  statistics->AddVariable(kIproDaemonServedImageOptimizedBytes);
+  statistics->AddVariable(kIproDaemonServedCssOriginalBytes);
+  statistics->AddVariable(kIproDaemonServedCssOptimizedBytes);
+  statistics->AddVariable(kIproDaemonServedJsOriginalBytes);
+  statistics->AddVariable(kIproDaemonServedJsOptimizedBytes);
   statistics->AddTimedVariable(kTotalFetchCount, Statistics::kDefaultGroup);
   statistics->AddTimedVariable(kTotalRewriteCount, Statistics::kDefaultGroup);
   statistics->AddTimedVariable(kRewritesExecuted, Statistics::kDefaultGroup);
@@ -445,6 +463,18 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kJavascriptServedOriginalBytes)),
       javascript_served_optimized_bytes_(
           stats->GetVariable(kJavascriptServedOptimizedBytes)),
+      ipro_daemon_served_image_original_bytes_(
+          stats->GetVariable(kIproDaemonServedImageOriginalBytes)),
+      ipro_daemon_served_image_optimized_bytes_(
+          stats->GetVariable(kIproDaemonServedImageOptimizedBytes)),
+      ipro_daemon_served_css_original_bytes_(
+          stats->GetVariable(kIproDaemonServedCssOriginalBytes)),
+      ipro_daemon_served_css_optimized_bytes_(
+          stats->GetVariable(kIproDaemonServedCssOptimizedBytes)),
+      ipro_daemon_served_js_original_bytes_(
+          stats->GetVariable(kIproDaemonServedJsOriginalBytes)),
+      ipro_daemon_served_js_optimized_bytes_(
+          stats->GetVariable(kIproDaemonServedJsOptimizedBytes)),
       beacon_timings_ms_histogram_(
           stats->GetHistogram(kBeaconTimingsMsHistogram)),
       beacon_lcp_ms_histogram_(stats->GetHistogram(kBeaconLcpMsHistogram)),

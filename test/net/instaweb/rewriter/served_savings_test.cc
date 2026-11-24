@@ -242,5 +242,123 @@ TEST_F(ServedSavingsTest, ResponsesAddUp) {
   EXPECT_EQ(1200, Value(RewriteStats::kImageServedOptimizedBytes));
 }
 
+// ---------------------------------------------------------------------------
+// Responses answered from the optimizer's cache: the same request rules, and
+// variables of their own.
+// ---------------------------------------------------------------------------
+
+struct CacheRow {
+  const char* name;
+  bool get_request;
+  bool body_sent;
+  bool range_request;
+  const char* user_agent;  // Empty for none.
+  ServedSavings::CachedType type;
+  int64 original_size;
+  int64 optimized_size;
+  // What must happen.
+  ServedSavings::Outcome outcome;
+};
+
+const ServedSavings::CachedType kCachedImage = ServedSavings::kCachedImage;
+const ServedSavings::CachedType kCachedCss = ServedSavings::kCachedCss;
+const ServedSavings::CachedType kCachedJavascript =
+    ServedSavings::kCachedJavascript;
+
+const CacheRow kCacheRows[] = {
+    // Each type.
+    {"image", true, true, false, kBrowser, kCachedImage, 1000, 400, kCounted},
+    {"stylesheet", true, true, false, kBrowser, kCachedCss, 900, 700, kCounted},
+    {"script", true, true, false, kBrowser, kCachedJavascript, 800, 500,
+     kCounted},
+    {"no User-Agent at all", true, true, false, "", kCachedImage, 1000, 400,
+     kCounted},
+    // Larger than what it was made from, or the same size: counted as it is.
+    {"larger than the original", true, true, false, kBrowser, kCachedImage, 400,
+     1000, kCounted},
+    {"same size", true, true, false, kBrowser, kCachedCss, 700, 700, kCounted},
+    // Requests and answers that are not a whole body sent to a visitor.
+    {"not a GET", false, true, false, kBrowser, kCachedImage, 1000, 400,
+     kNotCounted},
+    {"no body sent (304, HEAD)", true, false, false, kBrowser, kCachedImage,
+     1000, 400, kNotCounted},
+    {"HEAD", false, false, false, kBrowser, kCachedImage, 1000, 400,
+     kNotCounted},
+    {"Range request", true, true, true, kBrowser, kCachedImage, 1000, 400,
+     kNotCounted},
+    {"the module's own fetch", true, true, false, kModuleFetch, kCachedImage,
+     1000, 400, kNotCounted},
+    // Anything that is not an image, a stylesheet or a script.
+    {"another type", true, true, false, kBrowser, ServedSavings::kCachedOther,
+     1000, 400, kNotCounted},
+    // Sizes that cannot be right.
+    {"negative original", true, true, false, kBrowser, kCachedImage, -1, 400,
+     kNotCounted},
+    {"negative optimized", true, true, false, kBrowser, kCachedImage, 1000, -1,
+     kNotCounted},
+};
+
+TEST_F(ServedSavingsTest, OptimizerCacheRuleTable) {
+  for (const CacheRow& row : kCacheRows) {
+    SCOPED_TRACE(row.name);
+    stats_.Clear();
+
+    ServedSavings::OptimizerCacheResponse response;
+    response.get_request = row.get_request;
+    response.body_sent = row.body_sent;
+    response.range_request = row.range_request;
+    response.user_agent = row.user_agent;
+    response.type = row.type;
+    response.original_size = row.original_size;
+    response.optimized_size = row.optimized_size;
+
+    EXPECT_EQ(row.outcome, ServedSavings::RecordOptimizerCacheServe(
+                               response, rewrite_stats_.get()));
+
+    const bool counted = row.outcome == kCounted;
+    const bool image = counted && row.type == kCachedImage;
+    const bool css = counted && row.type == kCachedCss;
+    const bool js = counted && row.type == kCachedJavascript;
+    EXPECT_EQ(image ? row.original_size : 0,
+              Value(RewriteStats::kIproDaemonServedImageOriginalBytes));
+    EXPECT_EQ(image ? row.optimized_size : 0,
+              Value(RewriteStats::kIproDaemonServedImageOptimizedBytes));
+    EXPECT_EQ(css ? row.original_size : 0,
+              Value(RewriteStats::kIproDaemonServedCssOriginalBytes));
+    EXPECT_EQ(css ? row.optimized_size : 0,
+              Value(RewriteStats::kIproDaemonServedCssOptimizedBytes));
+    EXPECT_EQ(js ? row.original_size : 0,
+              Value(RewriteStats::kIproDaemonServedJsOriginalBytes));
+    EXPECT_EQ(js ? row.optimized_size : 0,
+              Value(RewriteStats::kIproDaemonServedJsOptimizedBytes));
+
+    // The two families are separate: a response from the optimizer's cache
+    // never moves the variables for the module's own optimized responses.
+    EXPECT_EQ(0, Value(RewriteStats::kImageServedOriginalBytes));
+    EXPECT_EQ(0, Value(RewriteStats::kImageServedOptimizedBytes));
+    EXPECT_EQ(0, Value(RewriteStats::kCssServedOriginalBytes));
+    EXPECT_EQ(0, Value(RewriteStats::kCssServedOptimizedBytes));
+    EXPECT_EQ(0, Value(RewriteStats::kJavascriptServedOriginalBytes));
+    EXPECT_EQ(0, Value(RewriteStats::kJavascriptServedOptimizedBytes));
+  }
+}
+
+// And the other way round: a response the module optimized itself never moves
+// the variables for the optimizer's cache.
+TEST_F(ServedSavingsTest, ModuleResponsesLeaveTheOptimizerCacheVariablesAlone) {
+  RequestHeaders request_headers;
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 1000;
+  record.optimized_size = 400;
+  record.filter_id = "ic";
+  ServedSavings::Response response;
+  response.request_headers = &request_headers;
+  response.status_code = 200;
+  response.size_record = &record;
+  EXPECT_EQ(kCounted, ServedSavings::Record(response, rewrite_stats_.get()));
+  EXPECT_EQ(0, Value(RewriteStats::kIproDaemonServedImageOriginalBytes));
+  EXPECT_EQ(0, Value(RewriteStats::kIproDaemonServedImageOptimizedBytes));
+}
+
 }  // namespace
 }  // namespace net_instaweb
