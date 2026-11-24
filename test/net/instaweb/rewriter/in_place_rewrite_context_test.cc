@@ -37,6 +37,7 @@
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
