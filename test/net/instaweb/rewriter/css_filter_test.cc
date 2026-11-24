@@ -35,6 +35,7 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex
 #include "pagespeed/kernel/base/basictypes.h"
@@ -558,6 +559,10 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   EXPECT_TRUE(out_headers.FindContentLength(&content_length));
   EXPECT_EQ(STATIC_STRLEN(kCss), content_length);
   EXPECT_FALSE(out_headers.IsGzipped());
+  // The original went out, so no optimized response is counted.
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_EQ(0, stats->css_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->css_served_optimized_bytes()->Get());
 }
 
 // With the HTTP cache storing compressed copies (HttpCacheCompressionLevel
@@ -854,6 +859,169 @@ TEST_F(CssFilterGzipConsistencyTest,
       EXPECT_EQ(StringPiece::npos, StringPiece(decoded).find("url(i"))
           << decoded;
     }
+  }
+}
+
+// The sizes of optimized stylesheets sent (css_served_original_bytes and
+// css_served_optimized_bytes) for responses that leave through the
+// stylesheet's own fallback write, which may correct URLs on the way out.
+class CssServedSavingsFallbackTest : public CssFilterGzipConsistencyTest {
+ protected:
+  struct Served {
+    int64 original;
+    int64 optimized;
+  };
+
+  Served CssServed() {
+    RewriteStats* stats = server_context()->rewrite_stats();
+    // Nothing here is an image or a script.
+    EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+    EXPECT_EQ(0, stats->javascript_served_original_bytes()->Get());
+    return Served{stats->css_served_original_bytes()->Get(),
+                  stats->css_served_optimized_bytes()->Get()};
+  }
+};
+
+// A stylesheet requested under a hash that is not the current one, and under
+// a name that puts it one directory above its input, has its relative URLs
+// corrected on the way out, so the body sent is longer than the optimized
+// one in the cache.  The optimized side of what is counted is the body that
+// was sent; the original side is the size of the file it was made from.  A
+// stylesheet the filter could not optimize is answered with its original,
+// corrected the same way, and adds nothing.
+TEST_F(CssServedSavingsFallbackTest, CorrectedUrlsCountTheBodySent) {
+  const GoogleString small_css = ".a { background: url(i.png) }\n";
+  GoogleString large_css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&large_css, ".r", IntegerToString(i), " { background: url(i",
+              IntegerToString(i), ".png) }\n");
+  }
+  options()->set_http_cache_compression_level(6);
+  options()->set_css_parse_max_bytes(256);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+
+  // The optimized one.
+  SeedCompressedInput(StrCat(kTestDomain, "dir/small.css"), small_css);
+  GoogleString optimized;
+  ASSERT_TRUE(FetchAcceptingGzip(
+      StrCat(kTestDomain, Encode("dir/", "cf", "0", "small.css", "css")),
+      &optimized));
+  const int64 original_size = small_css.size();
+  Served served = CssServed();
+  EXPECT_EQ(original_size, served.original);
+  EXPECT_EQ(static_cast<int64>(optimized.size()), served.optimized);
+
+  GoogleString url = Encode(kTestDomain, "cf", "1", "small.css", "css");
+  url.replace(url.find("small.css"), strlen("small.css"), "dir,_small.css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    GoogleString sent;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &sent));
+    EXPECT_NE(StringPiece::npos, StringPiece(sent).find("url(dir/i")) << sent;
+    EXPECT_GT(sent.size(), optimized.size());
+    const Served now = CssServed();
+    EXPECT_EQ(original_size, now.original - served.original);
+    EXPECT_EQ(static_cast<int64>(sent.size()), now.optimized - served.optimized);
+    served = now;
+  }
+
+  // The one that is not optimized.
+  SeedCompressedInput(StrCat(kTestDomain, "dir/large.css"), large_css);
+  GoogleString decoded;
+  ASSERT_TRUE(FetchAcceptingGzip(
+      StrCat(kTestDomain, Encode("dir/", "cf", "0", "large.css", "css")),
+      &decoded));
+  url = Encode(kTestDomain, "cf", "1", "large.css", "css");
+  url.replace(url.find("large.css"), strlen("large.css"), "dir,_large.css");
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded));
+    EXPECT_NE(StringPiece::npos, StringPiece(decoded).find("url(dir/i"))
+        << decoded;
+  }
+  const Served after = CssServed();
+  EXPECT_EQ(served.original, after.original);
+  EXPECT_EQ(served.optimized, after.optimized);
+}
+
+// A stylesheet requested under a hash that is not the current one, with no
+// URL to correct, is answered with the optimized output as the cache holds
+// it: the compressed copy for a client that accepts gzip.  Both sides of
+// what is counted are sizes before compression, whichever copy went out.
+TEST_F(CssServedSavingsFallbackTest, StoredCopyCountsSizesBeforeCompression) {
+  GoogleString css;
+  GoogleString minified;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { color: red; }\n");
+    StrAppend(&minified, ".rule", IntegerToString(i), "{color:red}");
+  }
+  options()->set_http_cache_compression_level(6);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  // Its own URL first, so the cache holds the optimized output.
+  GoogleString decoded;
+  ASSERT_TRUE(FetchAcceptingGzip(Encode(kTestDomain, "cf", "0", "a.css", "css"),
+                                 &decoded));
+  EXPECT_EQ(minified, decoded);
+  const int64 original_size = css.size();
+  const int64 optimized_size = minified.size();
+  Served served = CssServed();
+  EXPECT_EQ(original_size, served.original);
+  EXPECT_EQ(optimized_size, served.optimized);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "1", "a.css", "css");
+  bool sent_gzip = false;
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    bool gzipped = false;
+    ASSERT_TRUE(FetchConsistent(url, (i % 2) == 0, &decoded, &gzipped));
+    EXPECT_EQ(minified, decoded);
+    sent_gzip |= gzipped;
+    const Served now = CssServed();
+    EXPECT_EQ(original_size, now.original - served.original);
+    EXPECT_EQ(optimized_size, now.optimized - served.optimized);
+    served = now;
+  }
+  // The case this test is for was among them.
+  EXPECT_TRUE(sent_gzip);
+}
+
+// A stylesheet built for a request that names another hash, with its URLs
+// mapped to another domain: the response counts with the size of the body
+// sent, when it is built and when it comes from the cache.
+TEST_F(CssFilterTest, ServingFallbackCountsTheBodySent) {
+  const char css_input[] =
+      "@import url(x.ss);\n"
+      "body { background: url(a.png); }\n";
+  const char expected_output[] =
+      "@import url(http://cdn.example.com/x.ss);"
+      "body{background:url(http://cdn.example.com/a.png)}";
+
+  UseMd5Hasher();
+  options()->ClearSignatureForTesting();
+  options()->SetRewriteLevel(RewriteOptions::kPassThrough);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kRewriteDomains);
+  options()->WriteableDomainLawyer()->AddRewriteDomainMapping(
+      "http://cdn.example.com", kTestDomain, message_handler());
+  server_context()->ComputeSignature(options());
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, css_input, 100);
+
+  const GoogleString url =
+      Encode(kTestDomain, "cf", "0" /* wrong hash */, "foo.css", "css");
+  RewriteStats* stats = server_context()->rewrite_stats();
+  for (int i = 1; i <= 2; ++i) {
+    SCOPED_TRACE(i);
+    TestFallbackFetch(url, expected_output);
+    EXPECT_EQ(i * static_cast<int64>(STATIC_STRLEN(css_input)),
+              stats->css_served_original_bytes()->Get());
+    EXPECT_EQ(i * static_cast<int64>(STATIC_STRLEN(expected_output)),
+              stats->css_served_optimized_bytes()->Get());
   }
 }
 
