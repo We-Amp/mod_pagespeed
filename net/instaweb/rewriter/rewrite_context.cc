@@ -662,7 +662,20 @@ class RewriteContext::ResourceReconstructCallback
 
   ~ResourceReconstructCallback() override {}
 
+  // The nested driver answers with one of the module's own outputs and says
+  // what its sizes are.  Kept until the response is complete.
+  void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) override {
+    size_record_ = record;
+    has_size_record_ = true;
+  }
+
   void HandleDone(bool success) override {
+    if (success && has_size_record_) {
+      // The rewrite this resource is an input of starts from the size of
+      // the files the output was made from, not from the output's own size.
+      resource_->set_size_record(size_record_);
+    }
     // Compute the final post-write state of the object, including the hash.
     // Also takes care of dropping creation lock.
     resource_->EndWrite(driver_->message_handler());
@@ -686,6 +699,8 @@ class RewriteContext::ResourceReconstructCallback
   RewriteDriver* driver_;
   ResourceCallbackUtils delegate_;
   OutputResourcePtr resource_;
+  bool has_size_record_ = false;
+  ResponseHeaders::SizeRecord size_record_;
   ResourceReconstructCallback(const ResourceReconstructCallback&) = delete;
   ResourceReconstructCallback& operator=(const ResourceReconstructCallback&) =
       delete;
@@ -3683,6 +3698,11 @@ bool RewriteContext::WriteWholeResponse(
     return false;
   }
   if (driver != nullptr && size_record != nullptr) {
+    if (driver->is_nested()) {
+      // The module's own fetch of this output, as the input of another
+      // rewrite: that rewrite starts from these sizes.
+      async_fetch->SetOwnOutputSizeRecord(*size_record);
+    }
     ServedSavings::Response served;
     served.nested_driver = driver->is_nested();
     served.request_headers = async_fetch->request_headers();
