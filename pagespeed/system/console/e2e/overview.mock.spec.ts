@@ -315,14 +315,14 @@ test.describe("Overview verdict and tiles", () => {
       "v1/daemon/stats": F.NOT_CONFIGURED,
     }));
     await expect(page.getByTestId("health-summary")).toHaveText(
-      "Working. 38.5 MB saved in delivery since the web server started 1 d ago. No findings.",
+      "Working. 38.5 MB saved in delivery by this server since the web server started 1 d ago. No findings.",
     );
     const tile = page.getByTestId("tile-rewriting");
-    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery");
+    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery by this server");
     await expect(page.getByTestId("overview-lead-figure")).toHaveText("38.5 MB");
     await expect(tile).toContainText("68% smaller · 57.0 MB → 18.5 MB");
     // The rewrite-time figures stay on the page under their own name.
-    await expect(page.getByTestId("module-by-type")).toContainText("Saved by rewriting, by type");
+    await expect(page.getByTestId("module-by-type")).toContainText("Saved at rewrite time, by type");
   });
 
   test("just restarted with a warm cache: the first tile says nothing was sent yet, not a zero saving", async ({ page }) => {
@@ -332,7 +332,7 @@ test.describe("Overview verdict and tiles", () => {
       "v1/daemon/stats": F.NOT_CONFIGURED,
     }));
     const tile = page.getByTestId("tile-rewriting");
-    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery");
+    await expect(tile.getByRole("heading")).toHaveText("Saved in delivery by this server");
     await expect(tile.locator(".stat-tile-value")).toHaveText("—");
     await expect(tile).toContainText("no optimized response sent yet");
     await expect(tile).not.toContainText("%");

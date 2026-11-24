@@ -7,7 +7,7 @@ import {
   deliveredFamilies,
   deliveredFamily,
   deliveredWindow,
-  growthOver,
+  growthAcross,
   requestsAvoided,
   sizesText,
   smallerText,
@@ -122,6 +122,14 @@ describe("deliveredFamilies", () => {
     expect(smallerText(same.rows[2])).toBe("same size");
   });
 
+  it("never reads 100% smaller while bytes were sent", () => {
+    const nearly = deliveredFamily({ image_served_original_bytes: 1_000_000, image_served_optimized_bytes: 1_200 }, "module");
+    expect(smallerText(nearly.rows[2])).toBe("more than 99% smaller");
+    expect(smallerText(nearly.rows[2])).not.toContain("100%");
+    const below = deliveredFamily({ image_served_original_bytes: 1_000_000, image_served_optimized_bytes: 10_000 }, "module");
+    expect(smallerText(below.rows[2])).toBe("99% smaller");
+  });
+
   it("never divides by a zero original: sent bytes without an original have no percentage", () => {
     const odd = deliveredFamily({ css_served_original_bytes: 0, css_served_optimized_bytes: 70 }, "module");
     expect(odd.rows[0]).toMatchObject({ saved: -70, percent: null, direction: "larger", counted: true });
@@ -143,18 +151,26 @@ describe("deliveredFamilies", () => {
   });
 });
 
-describe("growthOver", () => {
-  it("is the last sample minus the first for a counter that only grew", () => {
-    expect(growthOver([10, 25, 25, 60])).toBe(50);
+describe("growthAcross", () => {
+  it("is the last sample minus the first for counters that only grew", () => {
+    expect(growthAcross({ a: [10, 25, 25, 60], b: [0, 5, 5, 6] })).toEqual({ a: 50, b: 6 });
   });
   it("counts on from zero after a restart, so the history spans it", () => {
     // 100 -> 400 (+300), restart, 0 -> 50 (+50), -> 90 (+40).
-    expect(growthOver([100, 400, 50, 90])).toBe(300 + 50 + 40);
+    expect(growthAcross({ a: [100, 400, 50, 90] })).toEqual({ a: 300 + 50 + 40 });
+  });
+  it("a drop in one series is a restart for all of them at that sample", () => {
+    // A restart inside one logging interval: the original counter passed its
+    // old value again (1000 -> 1200), the optimized one did not (400 -> 300).
+    // Read apart, the pair would count +200 against +300: "50% larger".
+    const grown = growthAcross({ original: [0, 1000, 1200], optimized: [0, 400, 300] });
+    expect(grown).toEqual({ original: 1000 + 1200, optimized: 400 + 300 });
   });
   it("skips gaps and unusable samples", () => {
-    expect(growthOver([null, 5, null, 9, Number.NaN, 12])).toBe(7);
-    expect(growthOver([])).toBe(0);
-    expect(growthOver([42])).toBe(0);
+    expect(growthAcross({ a: [null, 5, null, 9, Number.NaN, 12] })).toEqual({ a: 7 });
+    expect(growthAcross({ a: [] })).toEqual({ a: 0 });
+    expect(growthAcross({ a: [42] })).toEqual({ a: 0 });
+    expect(growthAcross({})).toEqual({});
   });
 });
 
@@ -193,6 +209,49 @@ describe("deliveredWindow", () => {
     expect(module.rows[0].counted).toBe(false);
     expect(cache.total.counted).toBe(false);
     expect(windowLine(module)).toBe("Images 75% smaller (3.05 MB → 781 KB)");
+  });
+
+  it("a restart that only one counter of a pair shows does not turn a saving into a loss", () => {
+    const w = deliveredWindow(
+      graphsView({
+        timestamps: [T0, T0 + HOUR, T0 + 2 * HOUR],
+        variables: {
+          image_served_original_bytes: [0, 1000, 1200],
+          image_served_optimized_bytes: [0, 250, 300],
+          // Unrelated to images, and it is the only series that drops.
+          css_served_original_bytes: [0, 900, 10],
+          css_served_optimized_bytes: [0, 600, 5],
+        },
+      }),
+    );
+    expect(w.kind).toBe("data");
+    if (w.kind !== "data") return;
+    expect(w.families[0].rows[2]).toMatchObject({ original: 2200, sent: 550, percent: 75, direction: "smaller" });
+    expect(w.families[0].anyLarger).toBe(false);
+  });
+
+  it("the span starts at the first sample that holds these variables, not at the start of the log", () => {
+    // The log was begun by a version without the variables: six hours of nulls first.
+    const w = deliveredWindow(
+      graphsView({
+        timestamps: [T0, T0 + 3 * HOUR, T0 + 6 * HOUR, T0 + 7 * HOUR, T0 + 8 * HOUR, T0 + 9 * HOUR],
+        variables: {
+          image_served_original_bytes: [null, null, 0, 4000, 8000, null],
+          image_served_optimized_bytes: [null, null, 0, 1000, 2000, null],
+        },
+      }),
+    );
+    expect(w.kind).toBe("data");
+    if (w.kind !== "data") return;
+    expect(w.fromMs).toBe(T0 + 6 * HOUR);
+    expect(w.toMs).toBe(T0 + 8 * HOUR);
+    expect(w.spanText).toBe("2 h");
+    // One held sample is no span.
+    expect(
+      deliveredWindow(
+        graphsView({ timestamps: [T0, T0 + HOUR, T0 + 2 * HOUR], variables: { image_served_original_bytes: [null, null, 7] } }),
+      ),
+    ).toEqual({ kind: "quiet" });
   });
 
   it("is quiet for a log with one sample or without growth in these variables", () => {

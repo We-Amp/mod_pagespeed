@@ -189,6 +189,8 @@ export function smallerText(f: DeliveredFigure): string {
   if (!f.counted || f.direction === null || f.percent === null) return "—";
   if (f.direction === "same") return "same size";
   if (f.percentOver) return `more than 100% ${f.direction}`;
+  // Bytes were sent, so it was not 100% smaller, whatever the rounding says.
+  if (f.direction === "smaller" && f.sent > 0 && f.percent >= 99.5) return "more than 99% smaller";
   return `${formatPercent(f.percent, Math.abs(f.saved))} ${f.direction}`;
 }
 
@@ -213,18 +215,33 @@ export type DeliveredWindow =
   | { kind: "data"; fromMs: number; toMs: number; spanText: string; families: DeliveredFamily[] };
 
 /**
- * A counter's growth over a logged series. A decrease is a restart: the
- * counter began again at zero, so the new value is what it grew by since
- * (a lower bound; what was counted between the last sample and the restart is
- * lost). Gaps are skipped.
+ * Each counter's growth over the logged samples, index for index. A decrease
+ * in ANY of the series at a sample is a restart for ALL of them at that
+ * sample: the counters restart together, and a busy counter can pass its old
+ * value within one logging interval, so a pair read series by series could
+ * count a restart on one side only. After a restart a counter began again at
+ * zero, so its new value is what it grew by since (a lower bound: what was
+ * counted between the last sample and the restart is lost). Gaps are skipped.
  */
-export function growthOver(samples: ReadonlyArray<number | null>): number {
-  let prev: number | null = null;
-  let grown = 0;
-  for (const v of samples) {
-    if (v === null || !Number.isFinite(v) || v < 0) continue;
-    if (prev !== null) grown += v >= prev ? v - prev : v;
-    prev = v;
+export function growthAcross(series: Readonly<Record<string, ReadonlyArray<number | null>>>): Record<string, number> {
+  const names = Object.keys(series);
+  const usable = (v: number | null | undefined): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const grown: Record<string, number> = Object.fromEntries(names.map((n) => [n, 0]));
+  const prev: Record<string, number | null> = Object.fromEntries(names.map((n) => [n, null]));
+  const length = names.reduce((max, n) => Math.max(max, series[n].length), 0);
+  for (let i = 0; i < length; i++) {
+    const restarted = names.some((n) => {
+      const v = series[n][i];
+      const before = prev[n];
+      return usable(v) && before !== null && v < before;
+    });
+    for (const n of names) {
+      const v = series[n][i];
+      if (!usable(v)) continue;
+      const before = prev[n];
+      if (before !== null) grown[n] += restarted ? v : v - before;
+      prev[n] = v;
+    }
   }
   return grown;
 }
@@ -232,14 +249,23 @@ export function growthOver(samples: ReadonlyArray<number | null>): number {
 export function deliveredWindow(view: GraphsView | null): DeliveredWindow {
   if (view === null || view.kind === "absent") return { kind: "unavailable" };
   if (view.kind === "no-log" || view.kind === "empty-range") return { kind: "no-log" };
-  const fromMs = Math.min(...view.timestamps);
-  const toMs = Math.max(...view.timestamps);
-  if (view.timestamps.length < 2 || toMs <= fromMs) return { kind: "quiet" };
-  const grown: Record<string, number> = {};
+  const series: Record<string, ReadonlyArray<number | null>> = {};
   for (const g of view.graphs) {
-    if (DELIVERED_VARIABLES.includes(g.name)) grown[g.name] = growthOver(g.data);
+    if (DELIVERED_VARIABLES.includes(g.name)) series[g.name] = g.data;
   }
-  const families = deliveredFamilies(grown);
+  // The span runs from the first to the last sample that holds one of these
+  // variables: a log begun by a version without them does not lengthen it.
+  const held = view.timestamps.filter((_, i) =>
+    Object.values(series).some((data) => {
+      const v = data[i];
+      return typeof v === "number" && Number.isFinite(v);
+    }),
+  );
+  if (held.length < 2) return { kind: "quiet" };
+  const fromMs = Math.min(...held);
+  const toMs = Math.max(...held);
+  if (toMs <= fromMs) return { kind: "quiet" };
+  const families = deliveredFamilies(growthAcross(series));
   if (!families.some((f) => f.total.counted)) return { kind: "quiet" };
   return { kind: "data", fromMs, toMs, spanText: formatSpan((toMs - fromMs) / 1000), families };
 }

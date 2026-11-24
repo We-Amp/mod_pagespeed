@@ -43,6 +43,12 @@ export function formatBytesRate(bytesPerSecond: number | null | undefined): stri
   return bytes === "—" ? bytes : `${bytes}/s`;
 }
 
+/** A byte rate with a sign: a negative rate reads "−1.50 KB/s", not "—". */
+export function formatSignedBytesRate(bytesPerSecond: number | null | undefined): string {
+  if (bytesPerSecond === null || bytesPerSecond === undefined || !Number.isFinite(bytesPerSecond)) return "—";
+  return bytesPerSecond < 0 ? `−${formatBytesRate(-bytesPerSecond)}` : formatBytesRate(bytesPerSecond);
+}
+
 /** A whole percent; a real but sub-half saving is "<1%", never "0%".
  *  `amount` is the quantity behind an already-rounded percentage: when it
  *  is nonzero, a percentage that reads 0 still renders "<1%". */

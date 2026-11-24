@@ -164,7 +164,7 @@ test("the chart fills in as samples arrive and announces its series", async ({ p
   await expect(chart).toBeVisible();
   // The latest value is a byte rate: a finite number with its byte unit — the
   // exact figure depends on poll spacing, so the shape is asserted, not the value.
-  await expect(chart).toHaveAccessibleName(/Saved by rewriting latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
+  await expect(chart).toHaveAccessibleName(/Saved at rewrite time latest [0-9.]+ (B|KB|MB|GB|TB)\/s/);
 });
 
 for (const [name, viewport] of [
@@ -639,7 +639,7 @@ test("the chart names its real window and shows latest values in the card", asyn
   // expect timeout is also 5 s -- so these assertions get 15 s, keeping
   // the second poll inside the window instead of racing it.
   await expect(heading).toContainText(/Last \d+ (s|min)/, { timeout: 15_000 });
-  await expect(page.getByTestId("savings-chart-legend")).toContainText("Saved by rewriting", { timeout: 15_000 });
+  await expect(page.getByTestId("savings-chart-legend")).toContainText("Saved at rewrite time", { timeout: 15_000 });
   await expect(page.getByTestId("savings-chart-legend")).not.toContainText("--", { timeout: 15_000 });
   // The latest rate reads as bytes per second through the shared byte formatter, never a bare "N/s".
   await expect(page.getByTestId("savings-chart-legend").locator(".legend-value").first()).toHaveText(
@@ -1074,13 +1074,25 @@ test("with a statistics log: the figures over the history it holds, across a res
   await expect(page.getByTestId("savings-delivered-no-log")).toHaveCount(0);
 });
 
-test("without a statistics log: the card says how to get a history; without the endpoint it says nothing", async ({ page }) => {
+test("statistics logging off (the default): the card says how to get a history, naming both settings", async ({ page }) => {
+  // What the module answers while it writes no statistics log.
+  await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.GRAPHS_LOGGING_OFF });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const hint = page.getByTestId("savings-delivered-no-log");
+  await expect(hint).toContainText("statistics logging is off or has not written yet");
+  await expect(hint.locator("code")).toHaveText(["StatisticsLogging on", "LogDir"]);
+  await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
+  // The delivered figures themselves do not depend on the log.
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
+});
+
+test("a log that has not written yet gets the same hint; a server without the graphs endpoint gets none", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.ok({}) });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
-  await expect(page.getByTestId("savings-delivered-no-log")).toContainText("statistics logging is off or has not written yet");
-  await expect(page.getByTestId("savings-delivered-no-log")).toContainText("StatisticsLogging");
+  await expect(page.getByTestId("savings-delivered-no-log")).toContainText("StatisticsLogging on");
   await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
 
+  // No graphs leaf at all (another 404 than the logger's): nothing to turn on, so nothing is said.
   const other = await page.context().newPage();
   await mockAdmin(other, "pagespeed_global_admin", DELIVERED);
   await openConsole(other, "pagespeed_global_admin", "#/savings");
@@ -1101,8 +1113,23 @@ test("the chart draws what was saved in delivery next to the two other figures",
   await mockAdmin(page, "pagespeed_global_admin", DELIVERED);
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   const legend = page.getByTestId("savings-chart-legend");
-  await expect(legend).toContainText("Saved in delivery", { timeout: 15_000 });
-  await expect(legend).toContainText("Saved by rewriting");
+  await expect(legend).toContainText("Saved in delivery by this server", { timeout: 15_000 });
+  await expect(legend).toContainText("Saved at rewrite time");
+});
+
+test("the chart's delivered line goes below zero while responses go out larger, instead of breaking", async ({ page }) => {
+  // Each poll adds 1,000 original bytes and 3,000 sent: the saving shrinks by 2,000 bytes per sample.
+  await mockAdmin(page, "pagespeed_global_admin", {
+    ...DELIVERED,
+    stats_json: F.statsDelivered(26 * 3_600_000, (call) => ({
+      ...F.DELIVERED_ZERO,
+      css_served_original_bytes: 50_000 + 1_000 * call,
+      css_served_optimized_bytes: 10_000 + 3_000 * call,
+    })),
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const item = page.getByTestId("savings-chart-legend").locator(".chart-legend-item").filter({ hasText: "Saved in delivery by this server" });
+  await expect(item.locator(".legend-value")).toHaveText(/^−[0-9.]+ (B|KB)\/s$/, { timeout: 20_000 });
 });
 
 test("phone: the delivered tables scroll inside their own region, the page does not scroll sideways", async ({ page }) => {
@@ -1113,6 +1140,27 @@ test("phone: the delivered tables scroll inside their own region, the page does 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   // Named and reachable by keyboard, like the console's other wide tables.
-  const region = page.getByRole("region", { name: "Optimized by this server, by type" });
+  const region = page.getByRole("region", { name: "Sizes, Optimized by this server" });
   await expect(region).toHaveAttribute("tabindex", "0");
+});
+
+test("no optimizer connected: the optimizer-cache family says it stays empty, not that nothing came yet", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_global_admin", {
+    stats_json: F.statsDelivered(26 * 3_600_000, {
+      ipro_daemon_served_image_original_bytes: 0,
+      ipro_daemon_served_image_optimized_bytes: 0,
+      ipro_daemon_served_css_original_bytes: 0,
+      ipro_daemon_served_css_optimized_bytes: 0,
+    }),
+    "v1/daemon/health": NOT_CONFIGURED,
+    "v1/daemon/stats": NOT_CONFIGURED,
+  });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  const empty = page.getByTestId("savings-delivered-optimizer-cache-empty");
+  await expect(empty).toHaveText(
+    "No optimizer is connected to this server, so nothing is answered from an optimizer cache and this stays empty.",
+  );
+  await expect(empty).not.toContainText("yet");
+  // The server's own family is unaffected.
+  await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
 });

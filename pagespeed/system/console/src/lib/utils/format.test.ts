@@ -13,6 +13,7 @@ import {
   formatRelative,
   formatSpan,
   formatSig,
+  formatSignedBytesRate,
   formatUnit,
 } from "./format";
 
@@ -170,6 +171,12 @@ describe("formatClock", () => {
 describe("formatBytesRate", () => {
   it("is the byte formatter with /s", () => {
     expect(formatBytesRate(10055)).toBe("9.82 KB/s");
+    // Signed: a negative rate keeps its figure.
+    expect(formatSignedBytesRate(10055)).toBe("9.82 KB/s");
+    expect(formatSignedBytesRate(-10055)).toBe("−9.82 KB/s");
+    expect(formatSignedBytesRate(0)).toBe("0 B/s");
+    expect(formatSignedBytesRate(null)).toBe("—");
+    expect(formatSignedBytesRate(Number.NaN)).toBe("—");
     expect(formatBytesRate(0)).toBe("0 B/s");
     expect(formatBytesRate(512)).toBe("512 B/s");
     expect(formatBytesRate(3 * 1024 * 1024)).toBe("3.00 MB/s");

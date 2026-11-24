@@ -29,7 +29,7 @@
   import TimeSeriesChart from "$lib/TimeSeriesChart.svelte";
   import { dashArray, seriesToken } from "$lib/utils/chart-style";
   import { bytesRateTicks, chartWindowLabel } from "$lib/utils/chart-summary";
-  import { formatBytes, formatBytesRate, formatCount, formatIsoTitle, formatPercent, formatSignedBytes } from "$lib/utils/format";
+  import { formatBytes, formatCount, formatIsoTitle, formatPercent, formatSignedBytes, formatSignedBytesRate } from "$lib/utils/format";
   import {
     DELIVERED_VARIABLES,
     deliveredFamilies,
@@ -41,7 +41,7 @@
     windowLine,
     type DeliveredFamilyKey,
   } from "$lib/utils/delivered";
-  import { graphsView, isGraphsAbsent, type GraphsView } from "$lib/utils/graphs-view";
+  import { graphsView, isGraphsAbsent, isStatisticsLogOff, type GraphsView } from "$lib/utils/graphs-view";
   import { useConsole } from "$lib/api/context";
   import {
     availabilityText,
@@ -87,8 +87,8 @@
   let config = $state<ParsedConfig | null>(null);
   let configAsked = false;
   // The statistics log, for the delivered figures over recorded history: read
-  // inside the poll, at most once a minute (it gains a sample every few minutes).
-  const LOG_REFETCH_MS = 60_000;
+  // inside the poll, at most every five minutes (it gains a sample every few minutes).
+  const LOG_REFETCH_MS = 5 * 60_000;
   let logView = $state<GraphsView | null>(null);
   let logFetchedAt = 0;
 
@@ -99,8 +99,11 @@
     try {
       logView = graphsView(await api.getGraphs({ end: Date.now() }, DELIVERED_VARIABLES));
     } catch (e) {
-      // No endpoint here: say nothing. Any other failure keeps what was read before.
-      if (e instanceof Error && isGraphsAbsent(e)) logView = { kind: "absent", detail: "" };
+      // The module refuses the read while it writes no statistics log (the
+      // default): say how to get one. No endpoint at all: say nothing. Any
+      // other failure keeps what was read before.
+      if (e instanceof Error && isStatisticsLogOff(e)) logView = { kind: "no-log" };
+      else if (e instanceof Error && isGraphsAbsent(e)) logView = { kind: "absent", detail: "" };
     }
   }
 
@@ -141,9 +144,15 @@
           sample.module.ok && sample.module.data.variables
             ? deliveredFamily(variablesOf(sample.module.data), "module")
             : null;
-        const deliveredRaw = sent !== null && sent.reported ? sent.total.saved : null;
+        const counts = sent !== null && sent.reported;
         // Gap-aware: a paused tab or a long backoff breaks the line.
-        pushSample(liveSeries, SAVINGS_GROUP, sample.at / 1000, [moduleRaw, optimizerRaw, deliveredRaw], 5);
+        pushSample(
+          liveSeries,
+          SAVINGS_GROUP,
+          sample.at / 1000,
+          [moduleRaw, optimizerRaw, counts ? sent.total.original : null, counts ? sent.total.sent : null],
+          5,
+        );
         if (!sample.module.ok) {
           const status = sample.module.error instanceof ApiError ? sample.module.error.status : null;
           if (isConnectionFailure("/stats_json", status)) throw sample.module.error;
@@ -245,6 +254,13 @@
       "No optimized image, stylesheet or script sent yet. These counters start again from zero when the web server restarts or reloads, and grow with the first optimized responses sent.",
     "optimizer-cache": "Nothing answered from the optimizer cache yet.",
   };
+  // Without an optimizer nothing is ever answered from its cache: "yet" would promise something.
+  const NO_OPTIMIZER = "No optimizer is connected to this server, so nothing is answered from an optimizer cache and this stays empty.";
+  let nothingSent = $derived<Record<DeliveredFamilyKey, string>>({
+    ...NOTHING_SENT,
+    "optimizer-cache":
+      daemonView?.daemon === "not-configured" || daemonView?.daemon === "unsupported" ? NO_OPTIMIZER : NOTHING_SENT["optimizer-cache"],
+  });
   const SIZES_BASIS: Record<DeliveredFamilyKey, string> = {
     module: "Sizes before compression.",
     "optimizer-cache":
@@ -265,16 +281,22 @@
   const CHART_LABELS: Record<string, string> = {
     "module.bytes_saved": TERMS.savedByRewriting,
     "optimizer.bytes_saved": TERMS.savedByOptimizerCache,
-    "module.delivered_saved": TERMS.savedInDelivery,
   };
 
   function latestSeriesValue(data: ReadonlyArray<number | null>): string {
     for (let i = data.length - 1; i >= 0; --i) {
       const v = data[i];
-      if (v !== null && Number.isFinite(v)) return formatBytesRate(v);
+      if (v !== null && Number.isFinite(v)) return formatSignedBytesRate(v);
     }
     return "—";
   }
+
+  /** a - b where both have a value, else a gap. */
+  const difference = (a: ReadonlyArray<number | null>, b: ReadonlyArray<number | null>): (number | null)[] =>
+    a.map((v, i) => {
+      const w = b[i];
+      return v === null || w === null || w === undefined ? null : v - w;
+    });
 
   let chartView = $derived.by(() => {
     // Re-derive after each completed sample; the store itself is not reactive.
@@ -282,14 +304,22 @@
     const view = liveSeries.get(SAVINGS_GROUP);
     if (sampled === undefined && view === null) return null;
     if (view === null || view.timestamps.length < 2) return null;
+    // Bytes saved per second: the rate view divides by the seconds between
+    // samples, so poll-spacing jitter is not a chart artefact.
+    const rate = (name: string) => toRatesPerSecond(view.timestamps, view.series[view.names.indexOf(name)] ?? []);
     return {
       timestamps: view.timestamps,
-      series: view.names.map((name, i) => ({
-        label: CHART_LABELS[name] ?? name,
-        // Bytes saved per second: the rate view divides by the seconds
-        // between samples, so poll-spacing jitter is not a chart artefact.
-        data: toRatesPerSecond(view.timestamps, view.series[i]),
-      })),
+      series: [
+        ...Object.keys(CHART_LABELS).map((name) => ({ label: CHART_LABELS[name], data: rate(name) })),
+        // Delivered: the rate of the originals minus the rate of what was
+        // sent, each a counter that only grows. The difference is negative
+        // while responses go out larger than their originals; a cumulative
+        // saving would lose those intervals as counter resets.
+        {
+          label: TERMS.savedInDeliveryOwn,
+          data: difference(rate("module.delivered_original"), rate("module.delivered_sent")),
+        },
+      ],
     };
   });
 </script>
@@ -327,7 +357,7 @@
               {#if !family.reported}
                 <p class="note" data-testid="savings-delivered-{family.key}-unreported">This module version does not count these sizes.</p>
               {:else if !family.total.counted}
-                <p class="note" data-testid="savings-delivered-{family.key}-empty">{NOTHING_SENT[family.key]}</p>
+                <p class="note" data-testid="savings-delivered-{family.key}-empty">{nothingSent[family.key]}</p>
               {:else}
                 <dl class="figures">
                   <div class="figure">
@@ -347,7 +377,7 @@
                 {/if}
                 <!-- Five columns are wider than a phone: the table scrolls inside its own named region, not the page. -->
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                <div class="table-scroll" role="region" aria-label="{family.label}, by type" tabindex="0">
+                <div class="table-scroll" role="region" aria-label="Sizes, {family.label}" tabindex="0">
                 <table class="data-inline breakdown reads-across" data-testid="savings-delivered-{family.key}-table" aria-label="{family.label}, by type">
                   <thead>
                     <tr><th scope="col">Type</th><th scope="col">Original</th><th scope="col">Sent</th><th scope="col">Saved</th><th scope="col">Change</th></tr>
@@ -393,8 +423,9 @@
           </div>
         {:else if historyWindow.kind === "no-log"}
           <p class="note" data-testid="savings-delivered-no-log">
-            No recorded history: statistics logging is off or has not written yet. With StatisticsLogging on,
-            this card also shows these figures over the history the log holds, restarts included.
+            No recorded history: statistics logging is off or has not written yet. With <code>StatisticsLogging on</code>
+            and a log directory (<code>LogDir</code>), this card also shows these figures over the history the log holds,
+            restarts included.
           </p>
         {/if}
         {#if avoided.length > 0}
@@ -406,7 +437,7 @@
     {/if}
     <div class="cards" class:paired={hostTable !== null}>
       <section class="card reads-across-container" data-testid="savings-module-card" aria-labelledby="savings-module-heading">
-        <h2 class="card-title" id="savings-module-heading">Saved at rewrite time <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
+        <h2 class="card-title" id="savings-module-heading">{TERMS.savedByRewriting} <ScopeChip label={moduleScopeLabel} shown={moduleChip} /></h2>
         {#if rows && total && summary}
           <RefreshNotice error={moduleError} />
           <p class="note" data-testid="savings-module-note">
@@ -437,7 +468,7 @@
                 count as no net savings above.
               </p>
             {/if}
-            <table class="data-inline breakdown reads-across" data-testid="savings-module-table" aria-label="Saved at rewrite time, by type">
+            <table class="data-inline breakdown reads-across" data-testid="savings-module-table" aria-label="{TERMS.savedByRewriting}, by type">
               <thead>
                 <tr><th scope="col">Type</th><th scope="col">Saved</th><th scope="col">Of original</th><th scope="col">Saved %</th></tr>
               </thead>
@@ -763,7 +794,7 @@
           height={220}
           showLegend={false}
           tickValues={bytesRateTicks}
-          formatValue={formatBytesRate}
+          formatValue={formatSignedBytesRate}
         />
       {:else}
         <p class="note" data-testid="savings-chart-warming">

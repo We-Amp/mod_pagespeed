@@ -416,8 +416,9 @@
       <div class="stat-tiles" data-testid="overview-tiles">
         <section class="card stat-tile" data-testid="tile-rewriting" aria-labelledby="tile-rewriting-label">
           {#if summary.delivered !== null}
-            <!-- What visitors received: the sizes of the optimized responses sent, from the cache as well. -->
-            <h2 class="stat-tile-label" id="tile-rewriting-label">{TERMS.savedInDelivery}</h2>
+            <!-- What visitors received from this server's own rewriting: the sizes of the optimized responses sent,
+                 from the cache as well. Responses answered from the optimizer cache are not in it. -->
+            <h2 class="stat-tile-label" id="tile-rewriting-label">{TERMS.savedInDeliveryOwn}</h2>
             <div data-testid="module-bytes-saved">
               <p class="stat-tile-value" data-testid={optimizerLeads ? undefined : "overview-lead-figure"}>
                 {summary.delivered.counted ? formatSignedBytes(summary.delivered.saved) : "—"}

@@ -13,7 +13,10 @@
   After a restart or reload the counters start again from zero: the card then
   says that nothing was sent yet instead of showing 0%, and holds back
   percentages for the first 15 minutes. With statistics logging on
-  (`StatisticsLogging`), it also shows the same figures over the history the
-  statistics log holds, restarts included. The Overview's first tile and its
-  status sentence use the delivered figure once an optimized response was sent,
-  and the Savings chart draws it as a third line.
+  (`StatisticsLogging on` and a `LogDir`), it also shows the same figures over
+  the history the statistics log holds, restarts included; with logging off it
+  says which settings turn it on. The Overview's first tile and its status
+  sentence state what the server's own rewriting saved in delivery once an
+  optimized response was sent, and the Savings chart draws that as a third
+  line, which goes below zero while responses go out larger than their
+  originals.

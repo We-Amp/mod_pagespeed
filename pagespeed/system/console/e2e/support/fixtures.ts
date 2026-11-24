@@ -196,13 +196,19 @@ export const DELIVERED_ZERO: Record<string, number> = Object.fromEntries(
 /**
  * Whole-server statistics of a module that counts delivered sizes, started
  * the given age ago (live-relative: the warming rule reads the start). The
- * patch overrides single variables.
+ * patch overrides single variables; as a function it gets the 0-based call
+ * count, for counters that move between polls.
  */
 export const statsDelivered =
-  (startedAgoMs: number, patch: Record<string, number> = {}): Responder =>
-  () =>
+  (startedAgoMs: number, patch: Record<string, number> | ((call: number) => Record<string, number>) = {}): Responder =>
+  (call) =>
     ok({
-      variables: { ...GLOBAL_VARS, ...DELIVERED_VARS, process_start_ms: Date.now() - startedAgoMs, ...patch },
+      variables: {
+        ...GLOBAL_VARS,
+        ...DELIVERED_VARS,
+        process_start_ms: Date.now() - startedAgoMs,
+        ...(typeof patch === "function" ? patch(call) : patch),
+      },
       maxlength: 60,
       timestamp_ms: Date.now(),
     });
@@ -223,6 +229,12 @@ export const STATS_JUST_RESTARTED: Responder = () =>
     maxlength: 60,
     timestamp_ms: Date.now(),
   });
+
+/** The module's answer to a graphs read while it writes no statistics log (the default configuration). */
+export const GRAPHS_LOGGING_OFF: Reply = {
+  status: 404,
+  body: { success: false, error: "console_logger must be enabled to use '?json' query parameter." },
+};
 
 /**
  * A statistics log of nine hours for the delivered sizes, with a restart in

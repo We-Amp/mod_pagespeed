@@ -619,9 +619,9 @@ describe("overviewVerdict", () => {
       // No page flushed and no rewrite counted: the optimized responses sent are the traffic.
       expect(moduleSummary(warm)).toMatchObject({ active: true, bytesSaved: 0 });
       expect(moduleSummary(warm).delivered).toMatchObject({ saved: 3_000_000, counted: true });
-      expect(at(warm).text).toBe("Working. 2.86 MB saved in delivery since the web server started 2 h ago.");
+      expect(at(warm).text).toBe("Working. 2.86 MB saved in delivery by this server since the web server started 2 h ago.");
       expect(at(warm, { wholeServer: false }).text).toBe(
-        "Working. This site: 2.86 MB saved in delivery since the web server started 2 h ago.",
+        "Working. This site: 2.86 MB saved in delivery by this server since the web server started 2 h ago.",
       );
       expect(at(warm).text).not.toContain("Nothing saved");
     });
@@ -635,9 +635,9 @@ describe("overviewVerdict", () => {
     it("optimized responses that were larger are said so, not shown as a saving", () => {
       const larger = { ...rewriteTime, ...sentZero, css_served_original_bytes: 1000, css_served_optimized_bytes: 1512, num_flushes: 4 };
       expect(at(larger).text).toBe(
-        "Working. Optimized responses were sent 512 B larger than their originals since the web server started 2 h ago.",
+        "Working. This server's optimized responses were sent 512 B larger than their originals since the web server started 2 h ago.",
       );
-      expect(at(larger, { wholeServer: false }).text).toContain("This site: optimized responses were sent 512 B larger");
+      expect(at(larger, { wholeServer: false }).text).toContain("This site: this server's optimized responses were sent 512 B larger");
     });
 
     it("a module that does not report the sizes keeps the rewrite-time sentence", () => {

@@ -120,15 +120,15 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   ipro_daemon_served_image:
     "In-place image requests answered from the optimizer's cache since the module started.",
   ipro_daemon_served_image_original_bytes:
-    "Bytes of the originals behind the optimized images answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+    "Bytes of the originals behind the optimized images answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD and range requests and 304 responses are not counted.",
   ipro_daemon_served_image_optimized_bytes:
     "Bytes of the optimized images answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
   ipro_daemon_served_css_original_bytes:
-    "Bytes of the originals behind the optimized stylesheets answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+    "Bytes of the originals behind the optimized stylesheets answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD and range requests and 304 responses are not counted.",
   ipro_daemon_served_css_optimized_bytes:
     "Bytes of the optimized stylesheets answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
   ipro_daemon_served_js_original_bytes:
-    "Bytes of the originals behind the optimized scripts answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD, range and conditional requests are excluded.",
+    "Bytes of the originals behind the optimized scripts answered from the optimizer's cache, per response sent. For a stored compressed copy: the original's approximate size in that compression. HEAD and range requests and 304 responses are not counted.",
   ipro_daemon_served_js_optimized_bytes:
     "Bytes of the optimized scripts answered from the optimizer's cache, as sent, per response sent. Subtract it from the original bytes for the saving in delivery, which can be negative. Counted apart from what this server optimized itself.",
   ipro_daemon_served_other:
@@ -656,7 +656,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   image_rewrite_total_original_bytes:
     "Cumulative original size of all successfully optimized images. Divide the bytes saved by this for the overall image compression ratio.",
   image_served_original_bytes:
-    "Uncompressed bytes of the original images behind the optimized images sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+    "Uncompressed bytes of the original images behind the optimized images sent to clients, counted each time one is sent, from the cache as well. HEAD and range requests and 304 responses are not counted.",
   image_served_optimized_bytes:
     "Uncompressed bytes of the optimized images sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   image_rewrite_latency_total_ms:
@@ -732,7 +732,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   css_filter_total_original_bytes:
     "Cumulative original size of all successfully optimized stylesheets, the denominator for the stylesheet saving ratio.",
   css_served_original_bytes:
-    "Uncompressed bytes of the original stylesheets behind the optimized stylesheets sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+    "Uncompressed bytes of the original stylesheets behind the optimized stylesheets sent to clients, counted each time one is sent, from the cache as well. HEAD and range requests and 304 responses are not counted.",
   css_served_optimized_bytes:
     "Uncompressed bytes of the optimized stylesheets sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   css_file_count_reduction:
@@ -782,7 +782,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   javascript_total_original_bytes:
     "Cumulative original size of the scripts that were successfully shrunk, the denominator for the script saving ratio.",
   javascript_served_original_bytes:
-    "Uncompressed bytes of the original scripts behind the optimized scripts sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+    "Uncompressed bytes of the original scripts behind the optimized scripts sent to clients, counted each time one is sent, from the cache as well. HEAD and range requests and 304 responses are not counted.",
   javascript_served_optimized_bytes:
     "Uncompressed bytes of the optimized scripts sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   js_file_count_reduction:

@@ -549,10 +549,10 @@ export function overviewVerdict(
   const rewriting =
     sent !== null && sent.counted
       ? sent.saved < 0
-        ? `${site}${site ? "optimized" : "Optimized"} responses were sent ${formatBytes(-sent.saved)} larger than their originals ${moduleSince}.`
+        ? `${site}${site ? "this server's" : "This server's"} optimized responses were sent ${formatBytes(-sent.saved)} larger than their originals ${moduleSince}.`
         : sent.saved === 0
-          ? `${site}${site ? "nothing" : "Nothing"} saved in delivery ${moduleSince}.`
-          : `${site}${formatBytes(sent.saved)} saved in delivery ${moduleSince}.`
+          ? `${site}${site ? "nothing" : "Nothing"} saved in delivery by this server ${moduleSince}.`
+          : `${site}${formatBytes(sent.saved)} saved in delivery by this server ${moduleSince}.`
       : saved === null
       ? `${site}${site ? "no" : "No"} rewrite savings are reported ${moduleSince}.`
       : saved === 0
