@@ -74,15 +74,23 @@ const Row kRows[] = {
      1000, "", -1, -1, kCounted, kImage, 400, 1000},
     {"same size, optimizing filter", false, kGet, 200, nullptr, kBrowser, "cf",
      700, 700, "", -1, -1, kCounted, kCss, 700, 700},
-    // Combinations count under the combiner when the sizes differ.
-    {"combined scripts, sizes differ", false, kGet, 200, nullptr, kBrowser,
-     "jc", 2000, 1500, "", -1, -1, kCounted, kJavascript, 2000, 1500},
-    {"combined stylesheets, sizes differ", false, kGet, 200, nullptr, kBrowser,
-     "cc", 2000, 1900, "", -1, -1, kCounted, kCss, 2000, 1900},
+    // A combination counts under the combiner only when it is smaller than
+    // what it was made from, which is a saving carried in by inputs that were
+    // optimized first.  Combining itself saves requests, not bytes: a plain
+    // combination is the same size or slightly larger, and that overhead is
+    // not shown as a negative saving.
+    {"combined scripts, smaller", false, kGet, 200, nullptr, kBrowser, "jc",
+     2000, 1500, "", -1, -1, kCounted, kJavascript, 2000, 1500},
+    {"combined stylesheets, smaller", false, kGet, 200, nullptr, kBrowser, "cc",
+     2000, 1900, "", -1, -1, kCounted, kCss, 2000, 1900},
     {"combined scripts, same size", false, kGet, 200, nullptr, kBrowser, "jc",
      2000, 2000, "", -1, -1, kNotCounted, kNone, 0, 0},
     {"combined stylesheets, same size", false, kGet, 200, nullptr, kBrowser,
      "cc", 2000, 2000, "", -1, -1, kNotCounted, kNone, 0, 0},
+    {"combined scripts, larger", false, kGet, 200, nullptr, kBrowser, "jc",
+     2000, 2100, "", -1, -1, kNotCounted, kNone, 0, 0},
+    {"combined stylesheets, larger", false, kGet, 200, nullptr, kBrowser, "cc",
+     2000, 2001, "", -1, -1, kNotCounted, kNone, 0, 0},
     // Filters that do not change bytes.
     {"cache extension", false, kGet, 200, nullptr, kBrowser, "ce", 1000, 1000,
      "", -1, -1, kNotCounted, kNone, 0, 0},

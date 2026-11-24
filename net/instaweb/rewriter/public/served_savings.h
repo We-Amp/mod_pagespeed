@@ -66,18 +66,22 @@ class ServedSavings {
   // server).
   //
   // With a size record, the type is that of the filter that wrote the served
-  // bytes: image recompression, CSS rewriting, JavaScript minification, and
-  // the CSS and JavaScript combiners when the sizes differ (a combination of
-  // inputs that were minified first; a combination that changed no size
-  // saves requests, not bytes, and is not counted).  Other filters are not
-  // counted.  The record's sizes are added as they are, so a response that
-  // is larger than what it was made from lowers the saving.
+  // bytes: image recompression, CSS rewriting and JavaScript minification,
+  // whose sizes are added as they are, so a response that is larger than
+  // what it was made from lowers the saving.  The CSS and JavaScript
+  // combiners count only when the combination is smaller than what it was
+  // made from, a saving carried in by inputs that were optimized first;
+  // combining itself saves requests, not bytes, and a plain combination,
+  // which is the same size or slightly larger, is not counted.  Other
+  // filters are not counted.
   //
   // Without a record, which is how entries stored before the record existed
   // read: an image is counted from the entry's X-Original-Content-Length and
   // the length of its body, which is approximate where the origin compresses
   // images; a stylesheet or script, or an image without that header, is an
-  // unmeasured response; a combination or anything else is not counted.
+  // unmeasured response.  A combination or anything else without a record
+  // is neither counted nor unmeasured, a gap that closes as older cache
+  // entries turn over.
   static Outcome Record(const Response& response, RewriteStats* stats);
 };
 

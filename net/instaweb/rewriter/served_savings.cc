@@ -71,16 +71,21 @@ ServedSavings::Outcome ServedSavings::Record(const Response& response,
   if (response.size_record != nullptr) {
     const ResponseHeaders::SizeRecord& record = *response.size_record;
     const StringPiece filter_id(record.filter_id);
-    const bool size_changed = record.original_size != record.optimized_size;
+    // A combination counts only when it is smaller than what it was made
+    // from: a saving carried in by inputs that were optimized first.
+    // Combining itself saves requests, not bytes, and the little it adds is
+    // not shown as a negative saving.
+    const bool combination_saved = record.optimized_size < record.original_size;
     ServedType type = kNoType;
     if (filter_id == RewriteOptions::kImageCompressionId) {
       type = kImageType;
     } else if (filter_id == RewriteOptions::kCssFilterId ||
-               (filter_id == RewriteOptions::kCssCombinerId && size_changed)) {
+               (filter_id == RewriteOptions::kCssCombinerId &&
+                combination_saved)) {
       type = kCssType;
     } else if (filter_id == RewriteOptions::kJavascriptMinId ||
                (filter_id == RewriteOptions::kJavascriptCombinerId &&
-                size_changed)) {
+                combination_saved)) {
       type = kJavascriptType;
     }
     if (type == kNoType || record.original_size < 0 ||
@@ -108,6 +113,12 @@ ServedSavings::Outcome ServedSavings::Record(const Response& response,
     stats->served_savings_unmeasured_responses()->Add(1);
     return kUnmeasured;
   }
+  // A combination or any other output without a record is neither counted
+  // nor unmeasured: without sizes a combination that carries a saving cannot
+  // be told from a plain one.  The unmeasured count means an image,
+  // stylesheet or script output from before sizes were stored whose saving
+  // could not be measured.  This gap closes as older cache entries turn
+  // over.
   return kNotCounted;
 }
 

@@ -6939,22 +6939,78 @@ class ServedSavingsCombineTest : public RewriteContextTest {
   static const char kScriptB[];
 };
 
+// Long comments, so that minifying saves more than combining adds.
 const char ServedSavingsCombineTest::kScriptA[] =
-    "// The first script.\nvar  first_value  =  1 ;\n\n\n";
+    "// The first script.  This comment is here to be removed by the\n"
+    "// minifier, and it is long enough that the minified script, even in\n"
+    "// the wrapping a combination puts around it, is smaller than this.\n"
+    "// More of the same follows, line after line, saying nothing at all.\n"
+    "// More of the same follows, line after line, saying nothing at all.\n"
+    "var  first_value  =  1 ;\n\n\n";
 const char ServedSavingsCombineTest::kScriptB[] =
-    "/* The second script. */\nvar  second_value  =  2 ;\n\n";
+    "/* The second script.  This comment is here to be removed by the\n"
+    "   minifier, and it is long enough that the minified script, even in\n"
+    "   the wrapping a combination puts around it, is smaller than this.\n"
+    "   More of the same follows, line after line, saying nothing at all.\n"
+    "   More of the same follows, line after line, saying nothing at all. */\n"
+    "var  second_value  =  2 ;\n\n";
 
 // Scripts are minified first and combined after, so the URL that is served
-// names the combiner.  A combination of minified scripts is counted, under
-// the combiner, with the sizes in its record; the module's own fetches of the
-// two minified inputs while it builds the combination add nothing.
+// names the combiner.  A combination that a page rewrite made of minified
+// scripts is smaller than the files it began with: it is counted, under the
+// combiner, with the size of those files as its original size.
 TEST_F(ServedSavingsCombineTest, MinifiedAndCombinedScriptsCountUnderCombiner) {
   options()->EnableFilter(RewriteOptions::kCombineJavascript);
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
   rewrite_driver()->AddFilters();
   SetUpScripts();
-  const GoogleString minified_a = Encode(kTestDomain, "jm", "0", "a.js", "js");
-  const GoogleString minified_b = Encode(kTestDomain, "jm", "0", "b.js", "js");
+  const GoogleString combined =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl(Encode("", "jm", "0", "a.js", "js"),
+                      Encode("", "jm", "0", "b.js", "js")),
+             "js");
+
+  // The page rewrite minifies both scripts and combines the results.
+  Parse("minify_and_combine",
+        "<script src=\"a.js\"></script><script src=\"b.js\"></script>");
+  const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  EXPECT_STREQ("jc", record.filter_id);
+  // The chain is kept: the original size is that of the two files.
+  EXPECT_EQ(
+      static_cast<int64>(STATIC_STRLEN(kScriptA) + STATIC_STRLEN(kScriptB)),
+      record.original_size);
+  EXPECT_LT(record.optimized_size, record.original_size);
+  ExpectServed(0, 0, 0, 0);  // Nothing has been sent yet.
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  EXPECT_EQ(static_cast<int64>(content.size()), record.optimized_size);
+  ExpectServed(0, 0, record.original_size, record.optimized_size);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 2 * record.original_size, 2 * record.optimized_size);
+
+  // A minified input fetched by itself counts under the minifier.
+  const ResponseHeaders::SizeRecord record_a =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "a.js", "js"));
+  EXPECT_EQ(static_cast<int64>(STATIC_STRLEN(kScriptA)),
+            record_a.original_size);
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jm", "0", "a.js", "js"), &content));
+  ExpectServed(0, 0, 2 * record.original_size + record_a.original_size,
+               2 * record.optimized_size + record_a.optimized_size);
+}
+
+// The same combination built for a fetch instead: its inputs reach it through
+// the module's own fetches, which do not carry the size record, so its
+// original size is that of the minified inputs, not of the files they were
+// made from.  The saving is understated, and here, where the combined body
+// is larger than the minified inputs, the response is not counted at all.
+// The module's fetches of the two inputs add nothing either way.
+TEST_F(ServedSavingsCombineTest, CombinationBuiltOnAFetchIsUnderstated) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
   const GoogleString combined =
       Encode(kTestDomain, "jc", "0",
              MultiUrl(Encode("", "jm", "0", "a.js", "js"),
@@ -6964,42 +7020,24 @@ TEST_F(ServedSavingsCombineTest, MinifiedAndCombinedScriptsCountUnderCombiner) {
   GoogleString content;
   ASSERT_TRUE(FetchResourceUrl(combined, &content));
   const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  const ResponseHeaders::SizeRecord record_a =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "a.js", "js"));
+  const ResponseHeaders::SizeRecord record_b =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "b.js", "js"));
   EXPECT_STREQ("jc", record.filter_id);
-  EXPECT_EQ(static_cast<int64>(content.size()), record.optimized_size);
-  EXPECT_NE(record.original_size, record.optimized_size);
-  // Built on request: one response, the combination.
-  ExpectServed(0, 0, record.original_size, record.optimized_size);
-
-  // The minified inputs were stored with records of their own.
-  const ResponseHeaders::SizeRecord record_a = StoredRecord(minified_a);
-  const ResponseHeaders::SizeRecord record_b = StoredRecord(minified_b);
-  EXPECT_EQ(static_cast<int64>(STATIC_STRLEN(kScriptA)),
-            record_a.original_size);
-  EXPECT_EQ(static_cast<int64>(STATIC_STRLEN(kScriptB)),
-            record_b.original_size);
-  EXPECT_LT(record_a.optimized_size, record_a.original_size);
-  // When a combination is built for a fetch, its inputs reach it through
-  // fetches of their own, which do not carry the record: its original size
-  // is that of the minified inputs, not of the files they were made from.
-  // (A page rewrite hands the inputs over as objects and keeps the chain.)
   EXPECT_EQ(record_a.optimized_size + record_b.optimized_size,
             record.original_size);
-
-  // From the cache.
+  EXPECT_GT(record.optimized_size, record.original_size);
+  ExpectServed(0, 0, 0, 0);
   ASSERT_TRUE(FetchResourceUrl(combined, &content));
-  ExpectServed(0, 0, 2 * record.original_size, 2 * record.optimized_size);
-
-  // A minified input fetched by itself counts under the minifier.
-  ASSERT_TRUE(FetchResourceUrl(minified_a, &content));
-  ExpectServed(0, 0, 2 * record.original_size + record_a.original_size,
-               2 * record.optimized_size + record_a.optimized_size);
+  ExpectServed(0, 0, 0, 0);
 }
 
-// FINDING: a combination of scripts that were not minified is larger than
-// its inputs, because the combiner wraps each script in a string.  Its sizes
-// differ, so by the rule for combinations it is counted, as a negative
-// saving, although nothing was optimized.
-TEST_F(ServedSavingsCombineTest, CombinedOnlyScriptsAreLargerAndCounted) {
+// A combination of scripts that were not minified is larger than its inputs,
+// because the combiner wraps each script in a string.  Combining saves
+// requests, not bytes, and that overhead is not shown as a negative saving:
+// the response is not counted.
+TEST_F(ServedSavingsCombineTest, CombinedOnlyScriptsAreNotCounted) {
   options()->EnableFilter(RewriteOptions::kCombineJavascript);
   rewrite_driver()->AddFilters();
   SetUpScripts();
@@ -7014,7 +7052,9 @@ TEST_F(ServedSavingsCombineTest, CombinedOnlyScriptsAreLargerAndCounted) {
       static_cast<int64>(STATIC_STRLEN(kScriptA) + STATIC_STRLEN(kScriptB)),
       record.original_size);
   EXPECT_GT(record.optimized_size, record.original_size);
-  ExpectServed(0, 0, record.original_size, record.optimized_size);
+  ExpectServed(0, 0, 0, 0);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 0, 0);
 }
 
 // A combination of stylesheets that changes no size saves requests, not
