@@ -121,6 +121,11 @@ void AsyncFetch::HeadersComplete() {
   // The HTTP cache's internal client-entry stamp belongs to stored values
   // only and never to headers on their way to a client.
   DCHECK(!response_headers()->Has(HTTPValue::kClientEntryHeader));
+  // Nor does the size record of a rewritten output: a lookup hands over the
+  // stored headers with it, and whoever needs it reads it before this point.
+  if (response_headers()->HasSizeRecord()) {
+    response_headers()->ClearSizeRecord();
+  }
   if (headers_complete_) {
     LOG(DFATAL) << "AsyncFetch::HeadersComplete() called twice.";
   } else {

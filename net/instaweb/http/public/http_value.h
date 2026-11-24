@@ -20,7 +20,9 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_HTTP_VALUE_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_HTTP_VALUE_H_
 
+#include <atomic>
 #include <cstddef>  // for size_t
+#include <cstdint>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/mapped_shared_string.h"
@@ -95,6 +97,15 @@ class HTTPValue : public Writer {
 
   // True when this value carries the current kClientEntryHeader mark.
   bool IsCurrentClientEntry() const;
+
+  // For tests that pin what a lookup costs: while 'counter' is set, it is
+  // incremented each time stored headers are parsed out of a value (once per
+  // ExtractHeaders, Link, LinkMapped, IsFetchedInput and IsCurrentClientEntry
+  // that reaches the stored bytes).  Pass nullptr to stop.  The counter must
+  // outlive the time it is set.  Nothing sets one outside tests, and then a
+  // parse only reads a pointer that is never written.
+  static void set_header_parse_counter_for_testing(
+      std::atomic<int64_t>* counter);
 
   // Retrieves the contents, returning false if empty.  Note that the
   // contents are only guaranteed valid as long as the HTTPValue

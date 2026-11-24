@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 
-// Test helpers for a field of the serialized response-headers message that
-// this build does not define, as a newer release might write it.  The headers
-// are stored as a serialized HttpResponseHeaders message; tag 15 is the next
-// free one.  The helpers attach such a field to a ResponseHeaders object by
-// appending its bytes to the object's own binary form and reading that back,
-// and tell whether an object still carries it.
+// Test helpers for two kinds of field in the serialized response-headers
+// message.
+//
+// An unknown field: one this build does not define, as a newer release might
+// write it.  The headers are stored as a serialized HttpResponseHeaders
+// message; the helpers attach a field with a tag the message does not use
+// (99) by appending its bytes to an object's own binary form and reading
+// that back, and tell whether an object still carries it.  This is how a
+// build sees a field added after it was released.
+//
+// The size record: the field this build does define for the sizes of a
+// rewritten output (ResponseHeaders::SizeRecord).
 
 #ifndef TEST_PAGESPEED_KERNEL_HTTP_UNKNOWN_HEADERS_FIELD_H_
 #define TEST_PAGESPEED_KERNEL_HTTP_UNKNOWN_HEADERS_FIELD_H_
@@ -23,11 +29,12 @@ namespace net_instaweb {
 // The payload of the unknown field; it must not show up in any text form.
 inline const char kUnknownHeadersFieldPayload[] = "size-record";
 
-// The field on the wire.  Tag 15, wire type 2 (length-delimited): key byte
-// (15 << 3) | 2 = 0x7a, then the length (11) and the payload.
+// The field on the wire.  Tag 99, wire type 2 (length-delimited): the key
+// (99 << 3) | 2 = 794 as a varint is 0x9a 0x06, then the length (11) and the
+// payload.
 inline GoogleString UnknownHeadersFieldWire() {
   static const char kWire[] =
-      "\x7a\x0b"
+      "\x9a\x06\x0b"
       "size-record";
   return GoogleString(kWire, STATIC_STRLEN(kWire));
 }
@@ -53,6 +60,34 @@ inline void AttachUnknownField(ResponseHeaders* headers) {
   wire.append(UnknownHeadersFieldWire());
   GoogleMessageHandler handler;
   ASSERT_TRUE(headers->ReadFromBinary(wire, &handler));
+}
+
+// The two kinds of field a parameterized suite runs with: one this build does
+// not know, standing in for a field added by a later release, and the size
+// record, which this build defines.
+enum StoredFieldKind { kUnknownField, kSizeRecordField };
+
+// The size record the tests attach: distinct values in every field.
+inline ResponseHeaders::SizeRecord TestSizeRecord() {
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 123456;
+  record.optimized_size = 7890;
+  record.filter_id = "ic";
+  return record;
+}
+
+inline void AttachSizeRecord(ResponseHeaders* headers) {
+  headers->SetSizeRecord(TestSizeRecord());
+}
+
+// True if 'headers' carry exactly the record AttachSizeRecord sets.
+inline bool CarriesSizeRecord(const ResponseHeaders& headers) {
+  const ResponseHeaders::SizeRecord expected = TestSizeRecord();
+  ResponseHeaders::SizeRecord record;
+  return headers.GetSizeRecord(&record) &&
+         record.original_size == expected.original_size &&
+         record.optimized_size == expected.optimized_size &&
+         record.filter_id == expected.filter_id;
 }
 
 }  // namespace net_instaweb

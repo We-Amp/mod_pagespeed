@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
@@ -2712,13 +2713,54 @@ TEST_F(InPlaceRewriteContextTest,
                  headers.Lookup1(HttpAttributes::kXOriginalContentLength));
     // It is an ordinary output entry, not a recorded input.
     EXPECT_FALSE(value.IsFetchedInput());
+    // It carries the size record of that filter's output: the size of the
+    // input, the size of the optimized body and the filter's id.
+    ResponseHeaders::SizeRecord record;
+    ASSERT_TRUE(headers.GetSizeRecord(&record));
+    EXPECT_EQ(static_cast<int64>(cache_body_.size()), record.original_size);
+    EXPECT_EQ(static_cast<int64>(cache_body_.size() + 1 + strlen(c.filter_id)),
+              record.optimized_size);
+    EXPECT_STREQ(c.filter_id, record.filter_id);
+    // The response that streamed the original carried none.
+    EXPECT_FALSE(response_headers_.HasSizeRecord());
 
     // The second request for the original URL is answered with those bytes.
     ResetHeadersAndStats();
     FetchAndCheckResponse(*c.url, StrCat(cache_body_, ":", c.filter_id), true,
                           ttl_ms_, etag_, start_time_ms());
+    // And the optimized response served for the original URL carries none.
+    EXPECT_FALSE(response_headers_.HasSizeRecord());
     ResetHeadersAndStats();
   }
+}
+
+// With the first request held until the optimized bytes are ready, the
+// response is built from the nested filter's output.  That output's size
+// record goes into the stored entry and stays out of the response, on the
+// first request and on the ones answered from the cache after it.
+TEST_F(InPlaceRewriteContextTest, WaitForOptimizedResponseHasNoSizeRecord) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_FALSE(response_headers_.HasSizeRecord());
+
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(rewritten_jpg_url_, http_cache(), &value, &stored)
+                .status);
+  ResponseHeaders::SizeRecord record;
+  ASSERT_TRUE(stored.GetSizeRecord(&record));
+  EXPECT_EQ(4, record.original_size);   // "good"
+  EXPECT_EQ(7, record.optimized_size);  // "good:ic"
+  EXPECT_STREQ(RewriteOptions::kImageCompressionId, record.filter_id);
+
+  ResetHeadersAndStats();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_FALSE(response_headers_.HasSizeRecord());
 }
 
 }  // namespace net_instaweb

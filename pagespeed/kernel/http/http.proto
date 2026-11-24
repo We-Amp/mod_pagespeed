@@ -27,7 +27,19 @@ message NameValue {
   required string value = 2;
 };
 
-// NEXT ID: 15
+// The sizes of a rewritten output, stored with its headers.  Sizes are of
+// uncompressed bodies.
+// NEXT ID: 4
+message HttpSizeRecord {
+  // The input or inputs the output was made from.
+  optional int64 original_size = 1;
+  // The output body.
+  optional int64 optimized_size = 2;
+  // The id of the filter that wrote the output.
+  optional string filter_id = 3;
+};
+
+// NEXT ID: 16
 message HttpResponseHeaders {
   optional int32 status_code = 1;
   optional string reason_phrase = 2;
@@ -43,6 +55,9 @@ message HttpResponseHeaders {
   optional bool requires_proxy_revalidation = 14;
   repeated NameValue header = 9;
   optional bool is_implicitly_cacheable = 12;
+  // Kept with stored headers only; it is not a header attribute and never
+  // part of a response.  See ResponseHeaders::SizeRecord.
+  optional HttpSizeRecord size_record = 15;
 };
 
 // Contains everything in HttpRequest except url itself.

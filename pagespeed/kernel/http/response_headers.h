@@ -73,6 +73,29 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
 
   void Clear() override;
 
+  // The sizes of a rewritten output, kept with its stored headers: the
+  // uncompressed size of the input or inputs it was made from, the
+  // uncompressed size of the output body, and the id of the filter that
+  // wrote it.
+  //
+  // The record is a field of the stored headers message, not a header
+  // attribute.  It is carried by CopyFrom and by the binary form, reset by
+  // Clear(), and it is never part of the text form: WriteAsHttp and ToString
+  // do not show it.
+  struct SizeRecord {
+    int64 original_size = 0;
+    int64 optimized_size = 0;
+    GoogleString filter_id;
+  };
+  void SetSizeRecord(const SizeRecord& record);
+  // Returns false, leaving *record alone, when these headers carry no
+  // record.  Entries stored before the record existed have none, and neither
+  // has an input that was not rewritten: a caller must read that as "sizes
+  // not known", never as zero.
+  bool GetSizeRecord(SizeRecord* record) const;
+  bool HasSizeRecord() const;
+  void ClearSizeRecord();
+
   void CopyFrom(const ResponseHeaders& other);
 
   // Merge the new content_type with what is already in the headers.

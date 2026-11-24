@@ -186,6 +186,14 @@ class Resource : public RefCounted<Resource> {
     return val;
   }
 
+  // The size record of this resource, if it has one: see
+  // ResponseHeaders::SizeRecord.  A resource read back from the cache has the
+  // one stored with it; an output resource also has the one made when it was
+  // written.  Returns false when there is none.
+  virtual bool GetSizeRecord(ResponseHeaders::SizeRecord* record) const {
+    return response_headers_.GetSizeRecord(record);
+  }
+
   ResponseHeaders* response_headers() { return &response_headers_; }
   const ResponseHeaders* response_headers() const { return &response_headers_; }
   const ContentType* type() const { return type_; }
