@@ -824,6 +824,13 @@ TEST_F(ServerContextTest,
   EXPECT_EQ(4, record.original_size);   // " in "
   EXPECT_EQ(8, record.optimized_size);  // "contents"
   EXPECT_STREQ(RewriteOptions::kCssFilterId, record.filter_id);
+
+  // The response was an optimized stylesheet and is counted as one.
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_EQ(4, stats->css_served_original_bytes()->Get());
+  EXPECT_EQ(8, stats->css_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->served_savings_unmeasured_responses()->Get());
 }
 
 // An optimized resource that was written but is no longer in the HTTP cache is

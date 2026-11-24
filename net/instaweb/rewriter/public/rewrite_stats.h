@@ -49,6 +49,21 @@ class RewriteStats {
   // Variable tracking number of downstream cache purges that were
   // successful (200s).
   static const char kSuccessfulDownstreamCachePurges[];
+  // Sizes of optimized responses this server sent, one pair per type: the
+  // uncompressed size of what each response was made from, and the
+  // uncompressed size of the optimized body.  They grow each time such a
+  // response is sent, from the cache as well, unlike the totals the filters
+  // keep, which grow once when a resource is optimized.  The difference of a
+  // pair is what was saved; it can be negative.
+  static const char kImageServedOriginalBytes[];
+  static const char kImageServedOptimizedBytes[];
+  static const char kCssServedOriginalBytes[];
+  static const char kCssServedOptimizedBytes[];
+  static const char kJavascriptServedOriginalBytes[];
+  static const char kJavascriptServedOptimizedBytes[];
+  // Optimized responses sent from a cache entry that has no sizes with it,
+  // which the pairs above therefore leave out.
+  static const char kServedSavingsUnmeasuredResponses[];
 
   // When this module's shared statistics were initialised, in epoch
   // milliseconds -- the time base every counter in the shared set counts
@@ -199,6 +214,23 @@ class RewriteStats {
   Variable* successful_downstream_cache_purges() {
     return successful_downstream_cache_purges_;
   }
+  Variable* image_served_original_bytes() {
+    return image_served_original_bytes_;
+  }
+  Variable* image_served_optimized_bytes() {
+    return image_served_optimized_bytes_;
+  }
+  Variable* css_served_original_bytes() { return css_served_original_bytes_; }
+  Variable* css_served_optimized_bytes() { return css_served_optimized_bytes_; }
+  Variable* javascript_served_original_bytes() {
+    return javascript_served_original_bytes_;
+  }
+  Variable* javascript_served_optimized_bytes() {
+    return javascript_served_optimized_bytes_;
+  }
+  Variable* served_savings_unmeasured_responses() {
+    return served_savings_unmeasured_responses_;
+  }
 
   Histogram* beacon_timings_ms_histogram() {
     return beacon_timings_ms_histogram_;
@@ -277,6 +309,13 @@ class RewriteStats {
   Variable* daemon_record_declined_no_site_;
   Variable* downstream_cache_purge_attempts_;
   Variable* successful_downstream_cache_purges_;
+  Variable* image_served_original_bytes_;
+  Variable* image_served_optimized_bytes_;
+  Variable* css_served_original_bytes_;
+  Variable* css_served_optimized_bytes_;
+  Variable* javascript_served_original_bytes_;
+  Variable* javascript_served_optimized_bytes_;
+  Variable* served_savings_unmeasured_responses_;
 
   Histogram* beacon_timings_ms_histogram_;
   Histogram* beacon_lcp_ms_histogram_;

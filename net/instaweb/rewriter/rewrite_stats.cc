@@ -238,6 +238,20 @@ const char RewriteStats::kDownstreamCachePurgeAttempts[] =
     "downstream_cache_purge_attempts";
 const char RewriteStats::kSuccessfulDownstreamCachePurges[] =
     "successful_downstream_cache_purges";
+const char RewriteStats::kImageServedOriginalBytes[] =
+    "image_served_original_bytes";
+const char RewriteStats::kImageServedOptimizedBytes[] =
+    "image_served_optimized_bytes";
+const char RewriteStats::kCssServedOriginalBytes[] =
+    "css_served_original_bytes";
+const char RewriteStats::kCssServedOptimizedBytes[] =
+    "css_served_optimized_bytes";
+const char RewriteStats::kJavascriptServedOriginalBytes[] =
+    "javascript_served_original_bytes";
+const char RewriteStats::kJavascriptServedOptimizedBytes[] =
+    "javascript_served_optimized_bytes";
+const char RewriteStats::kServedSavingsUnmeasuredResponses[] =
+    "served_savings_unmeasured_responses";
 const char RewriteStats::kProcessStartMs[] = "process_start_ms";
 
 // In Apache, this is called in the root process to establish shared memory
@@ -331,6 +345,13 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kDaemonRecordDeclinedNoSite);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
   statistics->AddVariable(kSuccessfulDownstreamCachePurges);
+  statistics->AddVariable(kImageServedOriginalBytes);
+  statistics->AddVariable(kImageServedOptimizedBytes);
+  statistics->AddVariable(kCssServedOriginalBytes);
+  statistics->AddVariable(kCssServedOptimizedBytes);
+  statistics->AddVariable(kJavascriptServedOriginalBytes);
+  statistics->AddVariable(kJavascriptServedOptimizedBytes);
+  statistics->AddVariable(kServedSavingsUnmeasuredResponses);
   statistics->AddTimedVariable(kTotalFetchCount, Statistics::kDefaultGroup);
   statistics->AddTimedVariable(kTotalRewriteCount, Statistics::kDefaultGroup);
   statistics->AddTimedVariable(kRewritesExecuted, Statistics::kDefaultGroup);
@@ -417,6 +438,18 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kDownstreamCachePurgeAttempts)),
       successful_downstream_cache_purges_(
           stats->GetVariable(kSuccessfulDownstreamCachePurges)),
+      image_served_original_bytes_(
+          stats->GetVariable(kImageServedOriginalBytes)),
+      image_served_optimized_bytes_(
+          stats->GetVariable(kImageServedOptimizedBytes)),
+      css_served_original_bytes_(stats->GetVariable(kCssServedOriginalBytes)),
+      css_served_optimized_bytes_(stats->GetVariable(kCssServedOptimizedBytes)),
+      javascript_served_original_bytes_(
+          stats->GetVariable(kJavascriptServedOriginalBytes)),
+      javascript_served_optimized_bytes_(
+          stats->GetVariable(kJavascriptServedOptimizedBytes)),
+      served_savings_unmeasured_responses_(
+          stats->GetVariable(kServedSavingsUnmeasuredResponses)),
       beacon_timings_ms_histogram_(
           stats->GetHistogram(kBeaconTimingsMsHistogram)),
       beacon_lcp_ms_histogram_(stats->GetHistogram(kBeaconLcpMsHistogram)),
