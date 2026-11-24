@@ -7003,6 +7003,43 @@ TEST_F(ServedSavingsCombineTest, CombinationBuiltOnAFetchIsUnderstated) {
   ExpectServed(0, 0, record_a.original_size, record_a.optimized_size);
 }
 
+// The input of a rewrite can itself be an optimized output: here a minified
+// stylesheet requested under a cache-extension URL.  Cache extension has
+// nothing to do for it, so the minified stylesheet is sent in its place, as
+// "the original" of that rewrite.  What is sent is an optimized stylesheet,
+// but it is not counted: every such request is answered through the path
+// that sends the input of a failed rewrite, which passes no sizes on.  The
+// stored output keeps its size record, and a fetch of its own URL counts.
+// A known gap, kept as it is; this test pins it.
+TEST_F(ServedSavingsCombineTest, InputThatIsAnOptimizedOutput) {
+  const char kCss[] = ".a  {  color : red ;  }\n\n.b  {  color : blue ;  }\n";
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kExtendCacheCss);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCss, 100);
+  const GoogleString minified_url =
+      Encode(kTestDomain, "cf", "0", "a.css", "css");
+  const GoogleString url = Encode(kTestDomain, "ce", "0",
+                                  Encode("", "cf", "0", "a.css", "css"), "css");
+
+  GoogleString minified;
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_TRUE(FetchResourceUrl(url, &minified));
+    ExpectServed(0, 0, 0, 0);
+  }
+  const ResponseHeaders::SizeRecord record = StoredRecord(minified_url);
+  EXPECT_STREQ("cf", record.filter_id);
+  EXPECT_EQ(static_cast<int64>(STATIC_STRLEN(kCss)), record.original_size);
+  EXPECT_EQ(static_cast<int64>(minified.size()), record.optimized_size);
+  EXPECT_LT(record.optimized_size, record.original_size);
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(minified_url, &content));
+  EXPECT_EQ(minified, content);
+  ExpectServed(record.original_size, record.optimized_size, 0, 0);
+}
+
 // A combination of scripts that were not minified is larger than its inputs,
 // because the combiner wraps each script in a string.  Combining saves
 // requests, not bytes, and that overhead is not shown as a negative saving:

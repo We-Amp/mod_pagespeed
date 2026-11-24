@@ -26,6 +26,7 @@
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/logging_proto.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -990,6 +991,130 @@ TEST_F(CssServedSavingsFallbackTest, StoredCopyCountsSizesBeforeCompression) {
   }
   // The case this test is for was among them.
   EXPECT_TRUE(sent_gzip);
+}
+
+// A compressed copy that cannot be inflated is sent as the cache holds it,
+// with the headers that describe it.  The response is still the stored
+// optimized output, and it counts with the sizes stored with it.
+TEST_F(CssServedSavingsFallbackTest, CopyThatCannotBeInflatedCountsAsStored) {
+  GoogleString css;
+  GoogleString minified;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { color: red; }\n");
+    StrAppend(&minified, ".rule", IntegerToString(i), "{color:red}");
+  }
+  options()->set_http_cache_compression_level(6);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SeedCompressedInput("http://test.com/a.css", css);
+
+  const GoogleString own_url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  GoogleString decoded;
+  ASSERT_TRUE(FetchAcceptingGzip(own_url, &decoded));
+  EXPECT_EQ(minified, decoded);
+
+  // Replace the body of the stored output with bytes that start like gzip
+  // and are not, keeping the size record.
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(own_url, http_cache(), &value, &stored).status);
+  ASSERT_TRUE(stored.HasSizeRecord());
+  GoogleString broken("\x1f\x8b");
+  broken.append(40, 'x');
+  stored.Replace(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  stored.SetContentLength(broken.size());
+  stored.ComputeCaching();
+  http_cache()->Put(own_url, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                    &stored, broken, message_handler());
+  const Served before = CssServed();
+
+  RequestHeaders request_headers;
+  PopulateRequestHeaders(&request_headers);
+  request_headers.Replace(HttpAttributes::kAcceptEncoding,
+                          HttpAttributes::kGzip);
+  rewrite_driver()->SetRequestHeaders(request_headers);
+  GoogleString raw;
+  StringAsyncFetch async_fetch(rewrite_driver()->request_context(), &raw);
+  async_fetch.set_request_headers(&request_headers);
+  ResponseHeaders response;
+  async_fetch.set_response_headers(&response);
+  ASSERT_TRUE(rewrite_driver()->FetchResource(
+      Encode(kTestDomain, "cf", "1", "a.css", "css"), &async_fetch));
+  rewrite_driver()->WaitForShutDown();
+  ClearRewriteDriver();
+  ASSERT_TRUE(async_fetch.success());
+  EXPECT_EQ(broken, raw);
+  EXPECT_TRUE(response.IsGzipped());
+
+  const Served after = CssServed();
+  EXPECT_EQ(static_cast<int64>(css.size()), after.original - before.original);
+  EXPECT_EQ(static_cast<int64>(minified.size()),
+            after.optimized - before.optimized);
+}
+
+// When a rewrite is remembered as not applicable, its input is looked up in
+// the cache and sent in its place.  That entry is counted exactly when it
+// carries a size record, under the record's filter and with its sizes: this
+// is how an input that is itself an optimized output would count there, and
+// why an ordinary original, which has no record, does not.  The record is
+// planted here; no filter writes one for a plain input.
+TEST_F(CssServedSavingsFallbackTest, RememberedOriginalCountsOnlyWithARecord) {
+  GoogleString css;
+  for (int i = 0; i < 64; ++i) {
+    StrAppend(&css, ".rule", IntegerToString(i), " { color: red; }\n");
+  }
+  options()->set_css_parse_max_bytes(64);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  const GoogleString input_url = "http://test.com/a.css";
+  SeedCompressedInput(input_url, css);
+
+  const GoogleString url = Encode(kTestDomain, "cf", "0", "a.css", "css");
+  GoogleString decoded;
+  // The first request tries the rewrite; the ones after it are answered
+  // from the cache with the original.  None of them counts.
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_TRUE(FetchConsistent(url, false, &decoded));
+    EXPECT_EQ(css, decoded);
+  }
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+  Served served = CssServed();
+  EXPECT_EQ(0, served.original);
+  EXPECT_EQ(0, served.optimized);
+
+  // The same entry with a size record.
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(input_url, http_cache(), &value, &stored).status);
+  ASSERT_FALSE(stored.HasSizeRecord());
+  ResponseHeaders::SizeRecord record;
+  record.original_size = css.size() + 1000;
+  record.optimized_size = css.size();
+  record.filter_id = RewriteOptions::kCssFilterId;
+  stored.SetSizeRecord(record);
+  StringPiece stored_body;
+  ASSERT_TRUE(value.ExtractContents(&stored_body));
+  HTTPValue with_record;
+  with_record.SetHeaders(&stored);
+  with_record.Write(stored_body, message_handler());
+  http_cache()->PutFetchedInput(
+      input_url, rewrite_driver()->CacheFragment(),
+      RequestHeaders::Properties(),
+      rewrite_driver()->options()->ComputeHttpOptions(), &with_record,
+      message_handler());
+
+  ASSERT_TRUE(FetchConsistent(url, false, &decoded));
+  EXPECT_EQ(css, decoded);
+  EXPECT_EQ(1, ParseMaxBytesExceeded());
+  served = CssServed();
+  EXPECT_EQ(record.original_size, served.original);
+  EXPECT_EQ(record.optimized_size, served.optimized);
 }
 
 // A stylesheet built for a request that names another hash, with its URLs

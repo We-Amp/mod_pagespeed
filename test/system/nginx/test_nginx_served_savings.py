@@ -42,6 +42,7 @@ import os
 import re
 import signal
 import time
+import uuid
 from pathlib import Path
 from typing import Callable, Dict, List, Set, Tuple
 
@@ -83,14 +84,15 @@ RESOURCES = (
 )
 
 # (type, path under the test root) of resources optimized in place, under
-# their own URL. Each is requested with a query of its own, so that no other
-# test shares its cache entries.
+# their own URL. Every call of check_served_sizes_across requests them with a
+# query of its own (see there), so its cache entries are shared with no other
+# test and with no other call: nothing warmed earlier can go stale, and be
+# refreshed in the background, while a later call is measuring.
 IN_PLACE_RESOURCES = (
     ("image", "ipro/test_image_dont_reuse.png"),
     ("css", "ipro/cc200/example.css"),
     ("javascript", "normal.js"),
 )
-IN_PLACE_QUERY = "?served_sizes=1"
 
 RELOAD_TIMEOUT_S = 30.0
 
@@ -264,6 +266,7 @@ def check_served_sizes_across(
 
     # Warm the in-place half: request each resource under its own URL until
     # the optimized bytes come back.
+    in_place_query = f"?served_sizes={uuid.uuid4().hex}"
     in_place_urls: Dict[str, str] = {}
     in_place_originals: Dict[str, int] = {}
     in_place_optimized: Dict[str, int] = {}
@@ -271,7 +274,7 @@ def check_served_sizes_across(
         source = doc_root / test_root.strip("/") / path
         assert source.is_file(), f"{kind}: source file {source} not found"
         original_size = source.stat().st_size
-        url = f"{test_root}/{path}{IN_PLACE_QUERY}"
+        url = f"{test_root}/{path}{in_place_query}"
         response = client.fetch_until(
             url,
             lambda r, original_size=original_size: r.status == 200

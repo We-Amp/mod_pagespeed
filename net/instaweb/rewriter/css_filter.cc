@@ -309,6 +309,7 @@ bool CssFilter::Context::SendFallbackResponse(
             input_contents, GzipInflater::kGzip,
             limit < 0 ? static_cast<size_t>(-1) : static_cast<size_t>(limit),
             &inflate_writer)) {
+      // Served as stored; the record describes the stored bytes.
       return WriteWholeResponse(output_url_base, input_contents, async_fetch,
                                 handler, Driver(), size_record);
     }
@@ -319,8 +320,9 @@ bool CssFilter::Context::SendFallbackResponse(
   if (Driver()->ResolveCssUrls(
           css_base_gurl_to_use, css_trim_gurl_to_use.Spec(), text,
           &resolved_writer, handler) != RewriteDriver::kSuccess) {
-    // The stored bytes go out as they are, so the record describes them: its
-    // sizes are those before compression, also for a compressed copy.
+    // No URL needs correcting, or correcting failed.  Either way the stored
+    // bytes go out as they are, so the record describes them: its sizes are
+    // those before compression, also for a compressed copy.
     return WriteWholeResponse(output_url_base, input_contents, async_fetch,
                               handler, Driver(), size_record);
   }

@@ -3,7 +3,8 @@
   variables now grow as well when an image, stylesheet or script is sent
   optimized under its own URL (in-place optimization), and when a rewritten URL
   that names an outdated hash is answered with the current optimized content.
-  A response that carries the original bytes, because the optimized version
-  was not ready in time or the resource could not be improved, is not counted.
+  Responses that fall back to the unoptimized resource, because the optimized
+  version was not ready in time or the resource could not be improved, are not
+  counted.
   For a stylesheet whose URLs are corrected on the way out, the optimized size
   is that of the body sent.
