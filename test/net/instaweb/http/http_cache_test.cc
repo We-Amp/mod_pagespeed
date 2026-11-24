@@ -2407,4 +2407,14 @@ TEST_F(HTTPCacheHeaderParseCountTest, EntryInflatedOnRead) {
   EXPECT_EQ(1, ParsesForExtractHeaders(callback.get()));
 }
 
+// The cache generation is part of every key.  It was raised when rewritten
+// outputs began to carry the sizes they are stored with: entries of the
+// generation before it are not read any more, so every output found in the
+// cache was written with them.  Raising it again empties the cache again.
+TEST_F(HTTPCacheTest, KeysCarryTheCacheGeneration) {
+  EXPECT_STREQ("v5/www.test.com/http://www.test.com/",
+               http_cache_->CompositeKey(kUrl, kFragment));
+  EXPECT_STREQ("v5/http://www.test.com/", http_cache_->CompositeKey(kUrl, ""));
+}
+
 }  // namespace net_instaweb

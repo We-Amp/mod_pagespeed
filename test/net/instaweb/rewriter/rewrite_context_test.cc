@@ -6897,4 +6897,156 @@ TEST_F(RewriteContextTest, SizeRecordStoredButNeverServed) {
   EXPECT_TRUE(stored.HasSizeRecord());
 }
 
+// ============================================================================
+// Sizes of optimized responses sent, for combined outputs, with the real
+// combining and minifying filters.
+// ============================================================================
+
+class ServedSavingsCombineTest : public RewriteContextTest {
+ protected:
+  void SetUpScripts() {
+    SetResponseWithDefaultHeaders("a.js", kContentTypeJavascript, kScriptA,
+                                  100);
+    SetResponseWithDefaultHeaders("b.js", kContentTypeJavascript, kScriptB,
+                                  100);
+  }
+
+  // The size record stored with the entry for 'url'.
+  ResponseHeaders::SizeRecord StoredRecord(const GoogleString& url) {
+    HTTPValue value;
+    ResponseHeaders stored;
+    ResponseHeaders::SizeRecord record;
+    EXPECT_EQ(HTTPCache::kFound,
+              HttpBlockingFind(url, http_cache(), &value, &stored).status)
+        << url;
+    EXPECT_TRUE(stored.GetSizeRecord(&record)) << url;
+    return record;
+  }
+
+  void ExpectServed(int64 css_original, int64 css_optimized, int64 js_original,
+                    int64 js_optimized) {
+    RewriteStats* stats = server_context()->rewrite_stats();
+    EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+    EXPECT_EQ(0, stats->image_served_optimized_bytes()->Get());
+    EXPECT_EQ(css_original, stats->css_served_original_bytes()->Get());
+    EXPECT_EQ(css_optimized, stats->css_served_optimized_bytes()->Get());
+    EXPECT_EQ(js_original, stats->javascript_served_original_bytes()->Get());
+    EXPECT_EQ(js_optimized, stats->javascript_served_optimized_bytes()->Get());
+  }
+
+  static const char kScriptA[];
+  static const char kScriptB[];
+};
+
+// Long comments, so that minifying saves more than combining adds.
+const char ServedSavingsCombineTest::kScriptA[] =
+    "// The first script.  This comment is here to be removed by the\n"
+    "// minifier, and it is long enough that the minified script, even in\n"
+    "// the wrapping a combination puts around it, is smaller than this.\n"
+    "// More of the same follows, line after line, saying nothing at all.\n"
+    "// More of the same follows, line after line, saying nothing at all.\n"
+    "var  first_value  =  1 ;\n\n\n";
+const char ServedSavingsCombineTest::kScriptB[] =
+    "/* The second script.  This comment is here to be removed by the\n"
+    "   minifier, and it is long enough that the minified script, even in\n"
+    "   the wrapping a combination puts around it, is smaller than this.\n"
+    "   More of the same follows, line after line, saying nothing at all.\n"
+    "   More of the same follows, line after line, saying nothing at all. */\n"
+    "var  second_value  =  2 ;\n\n";
+
+// Scripts are minified first and combined after, so the URL that is served
+// names the combiner.  When that combination is built for a fetch, its inputs
+// reach it through the module's own fetches, which do not carry the size
+// record, so its original size is that of the minified inputs, not of the
+// files they were made from.  The saving is understated; with the wrapping
+// the combiner adds, the body is larger than the minified inputs and the
+// response is not counted at all, although it is far smaller than the two
+// files it began with.  The module's fetches of the two inputs add nothing.
+// TODO(#890): carry the size record through the module's own fetch of a
+// rewritten input, so that this response counts with the size of the
+// original files.
+TEST_F(ServedSavingsCombineTest, CombinationBuiltOnAFetchIsUnderstated) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
+  const GoogleString combined =
+      Encode(kTestDomain, "jc", "0",
+             MultiUrl(Encode("", "jm", "0", "a.js", "js"),
+                      Encode("", "jm", "0", "b.js", "js")),
+             "js");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  const ResponseHeaders::SizeRecord record_a =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "a.js", "js"));
+  const ResponseHeaders::SizeRecord record_b =
+      StoredRecord(Encode(kTestDomain, "jm", "0", "b.js", "js"));
+  EXPECT_STREQ("jc", record.filter_id);
+  EXPECT_EQ(record_a.optimized_size + record_b.optimized_size,
+            record.original_size);
+  EXPECT_GT(record.optimized_size, record.original_size);
+  ExpectServed(0, 0, 0, 0);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 0, 0);
+  EXPECT_LT(record.optimized_size, static_cast<int64>(STATIC_STRLEN(kScriptA) +
+                                                      STATIC_STRLEN(kScriptB)));
+
+  // A minified input fetched by itself counts under the minifier, with the
+  // size of the file it was made from.
+  EXPECT_EQ(static_cast<int64>(STATIC_STRLEN(kScriptA)),
+            record_a.original_size);
+  EXPECT_LT(record_a.optimized_size, record_a.original_size);
+  ASSERT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, "jm", "0", "a.js", "js"), &content));
+  ExpectServed(0, 0, record_a.original_size, record_a.optimized_size);
+}
+
+// A combination of scripts that were not minified is larger than its inputs,
+// because the combiner wraps each script in a string.  Combining saves
+// requests, not bytes, and that overhead is not shown as a negative saving:
+// the response is not counted.
+TEST_F(ServedSavingsCombineTest, CombinedOnlyScriptsAreNotCounted) {
+  options()->EnableFilter(RewriteOptions::kCombineJavascript);
+  rewrite_driver()->AddFilters();
+  SetUpScripts();
+  const GoogleString combined =
+      Encode(kTestDomain, "jc", "0", MultiUrl("a.js", "b.js"), "js");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  EXPECT_STREQ("jc", record.filter_id);
+  EXPECT_EQ(
+      static_cast<int64>(STATIC_STRLEN(kScriptA) + STATIC_STRLEN(kScriptB)),
+      record.original_size);
+  EXPECT_GT(record.optimized_size, record.original_size);
+  ExpectServed(0, 0, 0, 0);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 0, 0);
+}
+
+// A combination of stylesheets that changes no size saves requests, not
+// bytes: it is not counted.
+TEST_F(ServedSavingsCombineTest, CombinedOnlyStylesheetsOfTheSameSize) {
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss,
+                                ".a { color: red; }\n", 100);
+  SetResponseWithDefaultHeaders("b.css", kContentTypeCss,
+                                ".b { color: blue; }\n", 100);
+  const GoogleString combined =
+      Encode(kTestDomain, "cc", "0", MultiUrl("a.css", "b.css"), "css");
+
+  GoogleString content;
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  const ResponseHeaders::SizeRecord record = StoredRecord(combined);
+  EXPECT_STREQ("cc", record.filter_id);
+  EXPECT_EQ(record.original_size, record.optimized_size);
+  ExpectServed(0, 0, 0, 0);
+  ASSERT_TRUE(FetchResourceUrl(combined, &content));
+  ExpectServed(0, 0, 0, 0);
+}
+
 }  // namespace net_instaweb

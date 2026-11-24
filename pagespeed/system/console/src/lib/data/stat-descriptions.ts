@@ -643,6 +643,10 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Cumulative bytes removed from images that were successfully optimized, counting only rewrites that actually shrank. Pair it with the original-bytes counter for an average saving.",
   image_rewrite_total_original_bytes:
     "Cumulative original size of all successfully optimized images. Divide the bytes saved by this for the overall image compression ratio.",
+  image_served_original_bytes:
+    "Uncompressed bytes of the original images behind the optimized images sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+  image_served_optimized_bytes:
+    "Uncompressed bytes of the optimized images sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   image_rewrite_latency_total_ms:
     "Total milliseconds spent inside image optimization, successful and failed alike. Divide by the number of attempts for the average cost per image.",
   image_norewrites_high_resolution:
@@ -715,6 +719,10 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Net bytes removed from rewritten stylesheets. A rewrite that grew a stylesheet subtracts from it, so unlike most counters this one can go down as well as up.",
   css_filter_total_original_bytes:
     "Cumulative original size of all successfully optimized stylesheets, the denominator for the stylesheet saving ratio.",
+  css_served_original_bytes:
+    "Uncompressed bytes of the original stylesheets behind the optimized stylesheets sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+  css_served_optimized_bytes:
+    "Uncompressed bytes of the optimized stylesheets sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   css_file_count_reduction:
     "Stylesheet requests eliminated by combining several files into one. Directly reflects requests saved per page view.",
   css_combine_opportunities:
@@ -761,6 +769,10 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Cumulative bytes removed from scripts that actually shrank. Pair it with the original-bytes counter for the overall script compression ratio.",
   javascript_total_original_bytes:
     "Cumulative original size of the scripts that were successfully shrunk, the denominator for the script saving ratio.",
+  javascript_served_original_bytes:
+    "Uncompressed bytes of the original scripts behind the optimized scripts sent to clients, counted each time one is sent, from the cache as well. HEAD, range and conditional requests are excluded.",
+  javascript_served_optimized_bytes:
+    "Uncompressed bytes of the optimized scripts sent to clients, counted each time one is sent. Subtract it from the original bytes for the saving in delivery, which can be negative.",
   js_file_count_reduction:
     "Script requests eliminated by combining several script files into one. Directly reflects requests saved per page view.",
 
