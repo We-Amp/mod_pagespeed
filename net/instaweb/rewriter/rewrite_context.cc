@@ -961,9 +961,9 @@ class RewriteContext::FetchContext {
             StringPiece contents =
                 input_resource->ExtractUncompressedContents();
             // The original goes out: no size record, nothing is counted.
-            ok = rewrite_context_->SendFallbackResponse(
-                original_output_url_, contents, async_fetch_, handler_,
-                nullptr);
+            ok = rewrite_context_->SendFallbackResponse(original_output_url_,
+                                                        contents, async_fetch_,
+                                                        handler_, nullptr);
           } else {
             handler_->Message(kWarning,
                               "No output partitions for fallback fetch of %s",

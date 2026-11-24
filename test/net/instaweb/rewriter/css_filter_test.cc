@@ -923,7 +923,8 @@ TEST_F(CssServedSavingsFallbackTest, CorrectedUrlsCountTheBodySent) {
     EXPECT_GT(sent.size(), optimized.size());
     const Served now = CssServed();
     EXPECT_EQ(original_size, now.original - served.original);
-    EXPECT_EQ(static_cast<int64>(sent.size()), now.optimized - served.optimized);
+    EXPECT_EQ(static_cast<int64>(sent.size()),
+              now.optimized - served.optimized);
     served = now;
   }
 
