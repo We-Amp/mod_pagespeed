@@ -3092,7 +3092,7 @@ TEST_F(ResponseHeadersTest, ShareableForCookieRequest) {
 //
 // The headers are stored as a serialized HttpResponseHeaders message.  These
 // tests pin what happens to a field with a tag the message does not define
-// (15, the next free one), as a newer release might write it: which
+// (see unknown_headers_field.h), as a newer release might write it: which
 // operations carry it along, which drop it, and that it never shows up in the
 // text form that is sent to a client.
 // ============================================================================
@@ -3223,6 +3223,116 @@ TEST_F(ResponseHeadersTest, UnknownFieldAbsentFromHttpText) {
     EXPECT_EQ(GoogleString::npos,
               headers.Value(i).find(kUnknownHeadersFieldPayload));
   }
+}
+
+// ============================================================================
+// The size record: the sizes of a rewritten output, a field of the stored
+// headers message that this build defines.
+// ============================================================================
+
+// Headers without a record say so; a record that is set reads back as set.
+TEST_F(ResponseHeadersTest, SizeRecordSetAndGet) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 42;
+  EXPECT_FALSE(headers.HasSizeRecord());
+  EXPECT_FALSE(headers.GetSizeRecord(&record));
+  EXPECT_EQ(42, record.original_size);  // Left alone.
+
+  AttachSizeRecord(&headers);
+  EXPECT_TRUE(headers.HasSizeRecord());
+  ASSERT_TRUE(headers.GetSizeRecord(&record));
+  EXPECT_EQ(123456, record.original_size);
+  EXPECT_EQ(7890, record.optimized_size);
+  EXPECT_STREQ("ic", record.filter_id);
+  // Setting it does not disturb the caching fields or the attributes.
+  EXPECT_FALSE(headers.cache_fields_dirty());
+  EXPECT_EQ(3, headers.NumAttributes());
+
+  headers.ClearSizeRecord();
+  EXPECT_FALSE(headers.HasSizeRecord());
+  EXPECT_FALSE(headers.GetSizeRecord(&record));
+}
+
+// The record goes through the binary form, copies and attribute changes.
+TEST_F(ResponseHeadersTest, SizeRecordKeptByBinaryFormCopiesAndChanges) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  AttachSizeRecord(&headers);
+
+  ResponseHeaders reread;
+  ASSERT_TRUE(
+      reread.ReadFromBinary(SerializeHeaders(&headers), &message_handler_));
+  EXPECT_TRUE(CarriesSizeRecord(reread));
+
+  ResponseHeaders copy;
+  copy.CopyFrom(headers);
+  EXPECT_TRUE(CarriesSizeRecord(copy));
+  ResponseHeaders constructed(headers);
+  EXPECT_TRUE(CarriesSizeRecord(constructed));
+
+  headers.Add("X-Extra", "1");
+  headers.Replace(HttpAttributes::kCacheControl, "max-age=600");
+  headers.RemoveAll(HttpAttributes::kContentType);
+  headers.SetContentLength(42);
+  headers.ComputeCaching();
+  headers.Add(HttpAttributes::kConnection, "close");
+  EXPECT_TRUE(headers.Sanitize());
+  EXPECT_TRUE(CarriesSizeRecord(headers));
+}
+
+// Unlike a field the build does not know, the record is reset by Clear(): a
+// reused object cannot carry the sizes of what it held before.
+TEST_F(ResponseHeadersTest, SizeRecordResetByClear) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  AttachSizeRecord(&headers);
+  ASSERT_TRUE(headers.HasSizeRecord());
+
+  headers.Clear();
+  EXPECT_FALSE(headers.HasSizeRecord());
+  ResponseHeaders::SizeRecord record;
+  EXPECT_FALSE(headers.GetSizeRecord(&record));
+}
+
+// Reading or copying headers without a record leaves none behind, and an
+// entry written by a build without the field reads as "no record".
+TEST_F(ResponseHeadersTest, SizeRecordAbsentAfterReadOrCopyWithoutIt) {
+  ResponseHeaders plain;
+  FillPlainHeaders(&plain);
+  GoogleString plain_wire = SerializeHeaders(&plain);
+
+  ResponseHeaders reread;
+  FillPlainHeaders(&reread);
+  AttachSizeRecord(&reread);
+  ASSERT_TRUE(reread.ReadFromBinary(plain_wire, &message_handler_));
+  EXPECT_FALSE(reread.HasSizeRecord());
+
+  ResponseHeaders copied;
+  FillPlainHeaders(&copied);
+  AttachSizeRecord(&copied);
+  copied.CopyFrom(plain);
+  EXPECT_FALSE(copied.HasSizeRecord());
+}
+
+// The record is in the binary form only: the text form is the same with and
+// without it.
+TEST_F(ResponseHeadersTest, SizeRecordAbsentFromHttpText) {
+  ResponseHeaders headers;
+  FillPlainHeaders(&headers);
+  const GoogleString text_without = headers.ToString();
+  const GoogleString binary_without = SerializeHeaders(&headers);
+  AttachSizeRecord(&headers);
+  ASSERT_TRUE(headers.HasSizeRecord());
+  EXPECT_NE(binary_without, SerializeHeaders(&headers));
+
+  GoogleString text;
+  StringWriter writer(&text);
+  ASSERT_TRUE(headers.WriteAsHttp(&writer, &message_handler_));
+  EXPECT_EQ(text_without, text);
+  EXPECT_EQ(text_without, headers.ToString());
+  EXPECT_EQ(3, headers.NumAttributes());
 }
 
 }  // namespace net_instaweb

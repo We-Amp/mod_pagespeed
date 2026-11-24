@@ -1130,7 +1130,7 @@ TEST_F(DaemonIproRecorderTest, AResponseToACorsRequestIsRecordedWithGuardOff) {
 // --- a headers-message field this build does not know ----------------------
 
 // The stored headers are a serialized message, and a newer release may add a
-// field to it (tag 15 is the next free one).  Headers read back from such an
+// field to it.  Headers read back from such an
 // entry carry the field as bytes this build does not interpret.  What is
 // handed to the peer is built from the named attributes one by one, so the
 // field cannot travel with it: the peer is told exactly what it is told for
@@ -1159,6 +1159,30 @@ TEST_F(DaemonIproRecorderTest, AnUnknownHeadersFieldNeverReachesThePeer) {
   const GoogleString log = CallLog();
   EXPECT_EQ(GoogleString::npos, log.find(kUnknownHeadersFieldPayload)) << log;
   EXPECT_EQ(plain_log, log);
+}
+
+// The same for the size record, the field this build does define: headers
+// that carry it produce exactly the calls that headers without it produce.
+TEST_F(DaemonIproRecorderTest, TheSizeRecordNeverReachesThePeer) {
+  ResponseHeaders plain;
+  MakeOkHeaders(&plain);
+  const DaemonRecordOutcome plain_outcome = Run(&plain, kBody);
+  ASSERT_TRUE(plain_outcome.stored);
+  const GoogleString plain_log = CallLog();
+  ASSERT_FALSE(plain_log.empty());
+  remove(log_path_.c_str());
+
+  ResponseHeaders with_record;
+  MakeOkHeaders(&with_record);
+  AttachSizeRecord(&with_record);
+  ASSERT_TRUE(CarriesSizeRecord(with_record));
+
+  const DaemonRecordOutcome outcome = Run(&with_record, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(plain_outcome.verdict, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_TRUE(outcome.notified);
+  EXPECT_EQ(plain_log, CallLog());
 }
 
 }  // namespace

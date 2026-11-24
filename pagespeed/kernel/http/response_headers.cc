@@ -202,6 +202,14 @@ void ResponseHeaders::CopyFrom(const ResponseHeaders& other) {
   http_options_ = other.http_options_;
 }
 
+void ResponseHeaders::SetSizeRecord(const SizeRecord& record) {}
+
+bool ResponseHeaders::GetSizeRecord(SizeRecord* record) const { return false; }
+
+bool ResponseHeaders::HasSizeRecord() const { return false; }
+
+void ResponseHeaders::ClearSizeRecord() {}
+
 void ResponseHeaders::Clear() {
   Headers<HttpResponseHeaders>::Clear();
 

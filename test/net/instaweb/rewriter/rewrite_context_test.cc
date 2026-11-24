@@ -6735,4 +6735,155 @@ TEST_F(RewriteContextTest, HeaderParsesPerCacheHitFetch) {
   }
 }
 
+// ============================================================================
+// The size record: the sizes of an output, made when it is written and kept
+// with the stored copy only.
+// ============================================================================
+
+// Writing an output records the uncompressed size of its inputs, the size of
+// its body and its filter id.  The record is on the resource object and in
+// the stored entry, and not in the resource's own headers, which are what a
+// client is sent on the paths that serve a freshly written output.
+TEST_F(RewriteContextTest, SizeRecordMadeWhenAnOutputIsWritten) {
+  InitResources();
+  ResourcePtr input(CreateResource(kTestDomain, "a.css"));  // " a "
+  ASSERT_TRUE(input.get() != nullptr);
+  ASSERT_TRUE(ReadIfCached(input));
+  ASSERT_EQ(3, input->UncompressedContentsSize());
+
+  GoogleString failure_reason;
+  OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
+      kTestDomain, RewriteOptions::kCssFilterId, "first.css",
+      kRewrittenResource, &failure_reason));
+  ASSERT_TRUE(output.get() != nullptr) << failure_reason;
+  ResponseHeaders::SizeRecord record;
+  EXPECT_FALSE(output->GetSizeRecord(&record));
+
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(1, input), "a",
+                                      &kContentTypeCss, "", output.get()));
+  ASSERT_TRUE(output->GetSizeRecord(&record));
+  EXPECT_EQ(3, record.original_size);
+  EXPECT_EQ(1, record.optimized_size);
+  EXPECT_STREQ(RewriteOptions::kCssFilterId, record.filter_id);
+  EXPECT_FALSE(output->response_headers()->HasSizeRecord());
+  EXPECT_FALSE(output->UncompressedHeaders()->HasSizeRecord());
+
+  // The stored entry carries it.
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound, HttpBlockingFind(output->HttpCacheKey(),
+                                                http_cache(), &value, &stored)
+                                   .status);
+  ResponseHeaders::SizeRecord stored_record;
+  ASSERT_TRUE(stored.GetSizeRecord(&stored_record));
+  EXPECT_EQ(3, stored_record.original_size);
+  EXPECT_EQ(1, stored_record.optimized_size);
+  EXPECT_STREQ(RewriteOptions::kCssFilterId, stored_record.filter_id);
+}
+
+// An output made from an output that has a record starts from that record's
+// original size, so a chain of rewrites keeps the size of the files it began
+// with.  Inputs without a record count with their own uncompressed size.
+TEST_F(RewriteContextTest, SizeRecordOriginalChainsThroughARecordedInput) {
+  InitResources();
+  ResourcePtr a(CreateResource(kTestDomain, "a.css"));  // " a "
+  ResourcePtr b(CreateResource(kTestDomain, "b.css"));  // "b"
+  ASSERT_TRUE(ReadIfCached(a));
+  ASSERT_TRUE(ReadIfCached(b));
+
+  GoogleString failure_reason;
+  OutputResourcePtr first(rewrite_driver()->CreateOutputResourceWithPath(
+      kTestDomain, RewriteOptions::kCssFilterId, "first.css",
+      kRewrittenResource, &failure_reason));
+  ASSERT_TRUE(first.get() != nullptr) << failure_reason;
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(1, a), "a",
+                                      &kContentTypeCss, "", first.get()));
+
+  OutputResourcePtr second(rewrite_driver()->CreateOutputResourceWithPath(
+      kTestDomain, RewriteOptions::kCssCombinerId, "second.css",
+      kRewrittenResource, &failure_reason));
+  ASSERT_TRUE(second.get() != nullptr) << failure_reason;
+  ResourceVector inputs;
+  inputs.push_back(ResourcePtr(first));
+  inputs.push_back(b);
+  ASSERT_TRUE(rewrite_driver()->Write(inputs, "ab", &kContentTypeCss, "",
+                                      second.get()));
+  ResponseHeaders::SizeRecord record;
+  ASSERT_TRUE(second->GetSizeRecord(&record));
+  // 3 for the file the first output began with, not 1 for its body; plus 1.
+  EXPECT_EQ(4, record.original_size);
+  EXPECT_EQ(2, record.optimized_size);
+  EXPECT_STREQ(RewriteOptions::kCssCombinerId, record.filter_id);
+}
+
+// An output written from no inputs has no sizes to compare and no record.
+TEST_F(RewriteContextTest, NoSizeRecordWithoutInputs) {
+  InitResources();
+  rewrite_driver()->SetBaseUrlForFetch(kTestDomain);
+  GoogleString failure_reason;
+  OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
+      kTestDomain, RewriteOptions::kCssFilterId, "made_up.css",
+      kRewrittenResource, &failure_reason));
+  ASSERT_TRUE(output.get() != nullptr) << failure_reason;
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(), "x", &kContentTypeCss,
+                                      "", output.get()));
+  ResponseHeaders::SizeRecord record;
+  EXPECT_FALSE(output->GetSizeRecord(&record));
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound, HttpBlockingFind(output->HttpCacheKey(),
+                                                http_cache(), &value, &stored)
+                                   .status);
+  EXPECT_FALSE(stored.HasSizeRecord());
+}
+
+// Through a real rewrite: the entry stored for a rewritten URL carries the
+// record, and neither the response that builds it nor the responses answered
+// from the cache afterwards do.
+TEST_F(RewriteContextTest, SizeRecordStoredButNeverServed) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  const GoogleString url = Encode(kTestDomain, "tw", "0", "a.css", "css");
+  Variable* cached_fetches =
+      statistics()->GetVariable("resource_fetches_cached");
+
+  // Built on request.
+  GoogleString contents;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResourceUrl(url, &contents, &headers));
+  EXPECT_STREQ("a", contents);
+  EXPECT_EQ(0, cached_fetches->Get());
+  EXPECT_FALSE(headers.HasSizeRecord());
+
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(url, http_cache(), &value, &stored).status);
+  ResponseHeaders::SizeRecord record;
+  ASSERT_TRUE(stored.GetSizeRecord(&record));
+  EXPECT_EQ(3, record.original_size);   // " a "
+  EXPECT_EQ(1, record.optimized_size);  // "a"
+  EXPECT_STREQ("tw", record.filter_id);
+
+  // Answered from the cache.
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(url, &contents, &headers));
+  EXPECT_STREQ("a", contents);
+  EXPECT_EQ(1, cached_fetches->Get());
+  EXPECT_FALSE(headers.HasSizeRecord());
+
+  // Answered under another hash, from the stored output.
+  headers.Clear();
+  ASSERT_TRUE(FetchResourceUrl(Encode(kTestDomain, "tw", "1", "a.css", "css"),
+                               &contents, &headers));
+  EXPECT_STREQ("a", contents);
+  EXPECT_FALSE(headers.HasSizeRecord());
+
+  // The stored entry still has it after being served.
+  stored.Clear();
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(url, http_cache(), &value, &stored).status);
+  EXPECT_TRUE(stored.HasSizeRecord());
+}
+
 }  // namespace net_instaweb

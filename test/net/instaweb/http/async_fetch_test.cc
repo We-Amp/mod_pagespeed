@@ -216,4 +216,46 @@ TEST_F(AsyncFetchTest, ViaHandling) {
 
 }  // namespace
 
+// The size record belongs to stored headers.  Headers on their way out of a
+// fetch drop it when they are completed, whoever put it there: a lookup that
+// answers from the cache hands over the stored headers, record included, and
+// what leaves the fetch must not carry it.
+TEST_F(AsyncFetchTest, HeadersCompleteDropsSizeRecord) {
+  StringAsyncFetch fetch(request_context_);
+  ResponseHeaders* headers = fetch.response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, "text/css");
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "cf";
+  headers->SetSizeRecord(record);
+  ASSERT_TRUE(headers->HasSizeRecord());
+
+  fetch.HeadersComplete();
+  EXPECT_FALSE(headers->HasSizeRecord());
+  // Nothing else about the headers changes.
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_STREQ("text/css", headers->Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(1, headers->NumAttributes());
+  fetch.Done(true);
+}
+
+// The same when the headers are completed implicitly by the first write.
+TEST_F(AsyncFetchTest, FirstWriteDropsSizeRecord) {
+  StringAsyncFetch fetch(request_context_);
+  ResponseHeaders* headers = fetch.response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "jm";
+  headers->SetSizeRecord(record);
+
+  EXPECT_TRUE(fetch.Write("body", &handler_));
+  EXPECT_FALSE(headers->HasSizeRecord());
+  fetch.Done(true);
+  EXPECT_STREQ("body", fetch.buffer());
+}
+
 }  // namespace net_instaweb

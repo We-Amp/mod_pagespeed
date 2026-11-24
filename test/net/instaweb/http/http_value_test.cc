@@ -644,20 +644,37 @@ TEST_F(HTTPValueEncodeTest, EncodeInvalid) {
 }
 
 // ============================================================================
-// A field of the stored headers message that this build does not know (tag
-// 15, the next free one), as a newer release might write it.  These tests pin
-// that an HTTPValue hands it on unchanged through every way of getting the
-// headers in and out, and that the two marker lookups are not affected by it.
+// Fields of the stored headers message other than the named attributes.  Each
+// test runs twice: with a field this build does not know, as a newer release
+// might write it, and with the size record this build defines.  They pin that
+// an HTTPValue hands either on unchanged through every way of getting the
+// headers in and out, and that the two marker lookups are not affected.
 // ============================================================================
 
-class HTTPValueUnknownFieldTest : public HTTPValueTest {
+class HTTPValueStoredFieldTest
+    : public HTTPValueTest,
+      public testing::WithParamInterface<StoredFieldKind> {
  protected:
+  // Attaches the kind of field this instance tests.
+  void AttachField(ResponseHeaders* headers) {
+    if (GetParam() == kSizeRecordField) {
+      AttachSizeRecord(headers);
+    } else {
+      AttachUnknownField(headers);
+    }
+  }
+
+  bool CarriesField(ResponseHeaders* headers) {
+    return GetParam() == kSizeRecordField ? CarriesSizeRecord(*headers)
+                                          : CarriesUnknownField(headers);
+  }
+
   // The encoded form of a value whose stored headers carry the unknown field.
-  GoogleString BuildEncodedValueWithUnknownField(bool headers_first) {
+  GoogleString BuildEncodedValueWithField(bool headers_first) {
     HTTPValue value;
     ResponseHeaders headers;
     FillResponseHeaders(&headers);
-    AttachUnknownField(&headers);
+    AttachField(&headers);
     if (headers_first) {
       value.SetHeaders(&headers);
       value.Write("body", &message_handler_);
@@ -668,10 +685,10 @@ class HTTPValueUnknownFieldTest : public HTTPValueTest {
     return value.share().Value().as_string();
   }
 
-  void ExpectValueCarriesUnknownField(const HTTPValue& value) {
+  void ExpectValueCarriesField(const HTTPValue& value) {
     ResponseHeaders extracted;
     ASSERT_TRUE(value.ExtractHeaders(&extracted, &message_handler_));
-    EXPECT_TRUE(CarriesUnknownField(&extracted));
+    EXPECT_TRUE(CarriesField(&extracted));
     CheckResponseHeaders(extracted);
     StringPiece body;
     ASSERT_TRUE(value.ExtractContents(&body));
@@ -679,25 +696,27 @@ class HTTPValueUnknownFieldTest : public HTTPValueTest {
   }
 };
 
-TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersAndExtractHeaders) {
+TEST_P(HTTPValueStoredFieldTest, KeptBySetHeadersAndExtractHeaders) {
   for (bool headers_first : {true, false}) {
     SCOPED_TRACE(headers_first);
-    GoogleString encoded = BuildEncodedValueWithUnknownField(headers_first);
-    // The stored bytes hold the field as written.
-    EXPECT_NE(GoogleString::npos, encoded.find(UnknownHeadersFieldWire()));
+    GoogleString encoded = BuildEncodedValueWithField(headers_first);
+    if (GetParam() == kUnknownField) {
+      // The stored bytes hold the field as written.
+      EXPECT_NE(GoogleString::npos, encoded.find(UnknownHeadersFieldWire()));
+    }
 
     HTTPValue value;
     ResponseHeaders linked;
     SharedString storage(encoded);
     ASSERT_TRUE(value.Link(storage, &linked, &message_handler_));
     // Link() fills the caller's headers through the same extraction.
-    EXPECT_TRUE(CarriesUnknownField(&linked));
-    ExpectValueCarriesUnknownField(value);
+    EXPECT_TRUE(CarriesField(&linked));
+    ExpectValueCarriesField(value);
   }
 }
 
-TEST_F(HTTPValueUnknownFieldTest, KeptByLinkOfAnotherValue) {
-  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+TEST_P(HTTPValueStoredFieldTest, KeptByLinkOfAnotherValue) {
+  GoogleString encoded = BuildEncodedValueWithField(true);
   HTTPValue source;
   ResponseHeaders headers;
   SharedString storage(encoded);
@@ -705,11 +724,11 @@ TEST_F(HTTPValueUnknownFieldTest, KeptByLinkOfAnotherValue) {
 
   HTTPValue linked;
   linked.Link(&source);
-  ExpectValueCarriesUnknownField(linked);
+  ExpectValueCarriesField(linked);
 }
 
-TEST_F(HTTPValueUnknownFieldTest, KeptByLinkMapped) {
-  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+TEST_P(HTTPValueStoredFieldTest, KeptByLinkMapped) {
+  GoogleString encoded = BuildEncodedValueWithField(true);
   int releases = 0;
   {
     HTTPValue value;
@@ -717,21 +736,21 @@ TEST_F(HTTPValueUnknownFieldTest, KeptByLinkMapped) {
     ASSERT_TRUE(value.LinkMapped(MapBuffer(encoded, &releases), &linked,
                                  &message_handler_));
     ASSERT_TRUE(value.is_mapped());
-    EXPECT_TRUE(CarriesUnknownField(&linked));
-    ExpectValueCarriesUnknownField(value);
+    EXPECT_TRUE(CarriesField(&linked));
+    ExpectValueCarriesField(value);
 
     // A value that leaves the mapped view for owned storage keeps it too.
     HTTPValue owned;
     owned.Link(&value);
-    ExpectValueCarriesUnknownField(owned);
+    ExpectValueCarriesField(owned);
   }
   EXPECT_EQ(1, releases);
 }
 
 // A value rebuilt from extracted headers, the way the cache rebuilds one when
 // it changes headers on the way in or out, carries the field again.
-TEST_F(HTTPValueUnknownFieldTest, KeptWhenValueIsRebuiltFromExtractedHeaders) {
-  GoogleString encoded = BuildEncodedValueWithUnknownField(true);
+TEST_P(HTTPValueStoredFieldTest, KeptWhenValueIsRebuiltFromExtractedHeaders) {
+  GoogleString encoded = BuildEncodedValueWithField(true);
   HTTPValue source;
   ResponseHeaders extracted;
   SharedString storage(encoded);
@@ -744,23 +763,23 @@ TEST_F(HTTPValueUnknownFieldTest, KeptWhenValueIsRebuiltFromExtractedHeaders) {
   rebuilt.Write("body", &message_handler_);
   ResponseHeaders check;
   ASSERT_TRUE(rebuilt.ExtractHeaders(&check, &message_handler_));
-  EXPECT_TRUE(CarriesUnknownField(&check));
+  EXPECT_TRUE(CarriesField(&check));
   EXPECT_STREQ("1", check.Lookup1("X-Added"));
 }
 
 // Marking a value as a fetched input copies the headers first; the copy keeps
 // the field, and the two marker lookups answer as they do without it.
-TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersMarkingFetchedInput) {
+TEST_P(HTTPValueStoredFieldTest, KeptBySetHeadersMarkingFetchedInput) {
   ResponseHeaders headers;
   FillResponseHeaders(&headers);
-  AttachUnknownField(&headers);
+  AttachField(&headers);
 
   HTTPValue value;
   value.SetHeadersMarkingFetchedInput(headers);
   value.Write("body", &message_handler_);
   EXPECT_TRUE(value.IsFetchedInput());
   EXPECT_FALSE(value.IsCurrentClientEntry());
-  ExpectValueCarriesUnknownField(value);
+  ExpectValueCarriesField(value);
 
   HTTPValue unmarked;
   unmarked.SetHeaders(&headers);
@@ -770,8 +789,8 @@ TEST_F(HTTPValueUnknownFieldTest, KeptBySetHeadersMarkingFetchedInput) {
 }
 
 // Decode() produces the text of a response: the field is not in it.
-TEST_F(HTTPValueUnknownFieldTest, AbsentFromDecodedHttpText) {
-  GoogleString with_field = BuildEncodedValueWithUnknownField(true);
+TEST_P(HTTPValueStoredFieldTest, AbsentFromDecodedHttpText) {
+  GoogleString with_field = BuildEncodedValueWithField(true);
   GoogleString without_field = BuildEncodedValue();
   ASSERT_NE(with_field, without_field);
 
@@ -782,5 +801,8 @@ TEST_F(HTTPValueUnknownFieldTest, AbsentFromDecodedHttpText) {
   EXPECT_EQ(text_without, text_with);
   EXPECT_EQ(GoogleString::npos, text_with.find(kUnknownHeadersFieldPayload));
 }
+
+INSTANTIATE_TEST_SUITE_P(UnknownFieldAndSizeRecord, HTTPValueStoredFieldTest,
+                         testing::Values(kUnknownField, kSizeRecordField));
 
 }  // namespace net_instaweb
