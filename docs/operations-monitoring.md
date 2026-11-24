@@ -79,8 +79,9 @@ Counted: a `GET` answered with status 200 and the whole optimized body.
 
 Not counted, in either family:
 
-- `HEAD` and other methods; conditional requests answered with 304; any
-  response that is not a 200;
+- `HEAD` and other methods; responses that are not a 200, such as a 304 to a
+  conditional request (a conditional request answered with a 200 and the whole
+  body is counted);
 - requests with a `Range` header;
 - the module's own fetches, when it loads a resource from its own server to
   optimize it;
@@ -110,10 +111,11 @@ or reloads. Totals are not kept across a restart. The delivered counters leave
 zero with the first optimized responses sent, also when everything comes from
 the cache; the rewrite-time counters only when something is optimized anew.
 
-To keep a history across restarts, turn on statistics logging
-(`StatisticsLogging on`). The log is off by default, takes a sample every few
-minutes, and starts over when its file reaches its size limit
-(`StatisticsLoggingMaxFileSizeKb`), so it holds a limited history.
+To keep a history across restarts, turn on statistics logging. It needs two
+settings: `StatisticsLogging on`, and `LogDir` set to a directory the server
+can write to; without a `LogDir` nothing is logged. The log is off by default,
+takes a sample every few minutes, and starts over when its file reaches its
+size limit (`StatisticsLoggingMaxFileSizeKb`), so it holds a limited history.
 
 ### In the admin console
 
@@ -124,25 +126,41 @@ cache". The console never adds the two.
 
 - Right after a restart the card says that nothing was sent yet. It does not
   show 0%. For the first 15 minutes it shows sizes without percentages, marked
-  "warming up", and every figure states since when it counts.
+  "warming up". One line under the two families states since when the card
+  counts (the last restart or reload of the web server).
+- On a server without an optimizer the second family says that it stays empty.
 - A type that was sent larger than its originals shows a negative saving and
   reads "larger".
 - With statistics logging on, the card also shows the same figures over the
   history the log holds, restarts included, and states the span that history
-  covers.
+  covers. With logging off it names the two settings that turn it on.
 - The rewrite-time numbers are in their own card, **Saved at rewrite time**.
+- The chart at the bottom of the page draws three lines, each in bytes per
+  second: "Saved at rewrite time", "Saved by the optimizer's cache" and "Saved
+  in delivery by this server". The last one goes below zero while responses go
+  out larger than their originals.
 - **Optimizer cache serves** shows the optimizer's own statistics for the
   responses answered from its cache. They are measured in bytes sent and
   include compression, so they differ from the `ipro_daemon_served_*_bytes`
   variables above and restart with the optimizer, not with the web server.
 
+On the Overview page the first tile, **Saved in delivery by this server**, and
+the status sentence at the top state what the server's own rewriting saved in
+delivery, once an optimized response was sent; before that the tile says that
+none was sent yet. They cover the first family only: responses answered from
+the optimizer cache are not in that figure. The rewrite-time numbers per type
+are in the Module card on the same page.
+
 ### After upgrading
 
-The version that introduces the delivered counters starts with an empty
-optimization cache: entries written by earlier versions are not used. Every
-resource is fetched and optimized again once, the first time it is needed, so
-expect more origin fetches and more optimization work for a while after the
-upgrade, and unoptimized responses until then. Nothing needs to be done. The
-old entries age out within the configured cache size; to get the space back at
-once, clear the cache directory while the server is stopped. Servers of the old
-and the new version that share a cache do not read each other's entries.
+The version that introduces the delivered counters starts with the module's
+cache empty: entries written by earlier versions are not used. This applies to
+whichever cache the module uses, the file cache as well as memcached or Redis.
+The optimizer's cache is not affected. Every resource is fetched and optimized
+again once, the first time it is needed, so expect more origin fetches and more
+optimization work for a while after the upgrade, and unoptimized responses
+until then. Nothing needs to be done. The old entries are no longer read and
+are evicted as the cache fills; to get the space back at once, clear the
+module's cache (for the file cache: empty its directory while the server is
+stopped). Servers of the old and the new version that share a cache do not read
+each other's entries.

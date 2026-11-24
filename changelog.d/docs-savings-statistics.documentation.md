@@ -5,4 +5,5 @@
   response is sent). It covers when the optimizer-cache figures are in sizes
   after compression, which requests and responses are not counted, that the
   counters start from zero at a restart and how the admin console shows that,
-  and the empty cache after upgrading.
+  the two settings statistics logging needs, and that the module's cache starts
+  empty after upgrading.
