@@ -3,20 +3,22 @@
 # Copyright (c) 2026 We-Amp B.V.
 
 """nginx: the sizes of optimized responses are counted each time one is sent,
-from the cache as well, and across a reload of the server.
+from the cache as well, across a reload of the server and across a full stop
+and start with the cache kept.
 
 The statistics the filters keep (image_rewrite_total_original_bytes and its
 siblings) grow once, when a resource is optimized. After a reload they start
 from zero again and stay there while every optimized resource is answered
 from the cache. The *_served_*_bytes statistics count what was sent instead:
 this test warms the cache with one image, one stylesheet and one script,
-reloads nginx, fetches each rewritten URL several times with and without
+reloads nginx (and, in a second case, stops and starts it), fetches each
+rewritten URL several times with and without
 gzip, and checks that each fetch added exactly the size of the source file
 and the size of the optimized body, while the filters' own totals did not
 move.
 
-It states which path must answer: every fetch after the reload has to be a
-cache hit on the rewritten URL. If the first one is not (a cold cache would
+It states which path must answer: every fetch after the reload or restart has
+to be a cache hit on the rewritten URL. If the first one is not (a cold cache would
 rebuild the output instead), the test fails at once rather than measure a
 different path.
 
@@ -27,7 +29,9 @@ release that did not store sizes (that case is covered by a unit test that
 stores an entry without them).
 
 Environment: runs only on nginx and skips unless run_nginx_tests.sh exports
-PAGESPEED_NGINX_PID_FILE and PAGESPEED_DOC_ROOT.
+PAGESPEED_NGINX_PID_FILE and PAGESPEED_DOC_ROOT; the restart case also needs
+PAGESPEED_NGINX_BINARY, PAGESPEED_NGINX_CONFIG_FILE and
+PAGESPEED_NGINX_ERROR_LOG.
 """
 
 import os
@@ -161,19 +165,63 @@ def _reload_nginx(client: PageSpeedClient, probe_path: str) -> None:
     client.fetch_until(probe_path, lambda r: r.status == 200, timeout=RELOAD_TIMEOUT_S)
 
 
+def _restart_nginx(client: PageSpeedClient, probe_path: str) -> None:
+    """Stop nginx completely and start it again with its cache directory kept.
+
+    The start repeats the lane's own command line (run_nginx_tests.sh): the
+    prefix is the directory of the configuration file.
+    """
+    import subprocess
+
+    binary = os.environ.get("PAGESPEED_NGINX_BINARY", "")
+    conf = os.environ.get("PAGESPEED_NGINX_CONFIG_FILE", "")
+    error_log = os.environ.get("PAGESPEED_NGINX_ERROR_LOG", "")
+    if not (binary and conf and error_log and os.path.isfile(binary) and os.path.isfile(conf)):
+        pytest.skip(
+            "PAGESPEED_NGINX_BINARY / _CONFIG_FILE / _ERROR_LOG not set "
+            "(run via run_nginx_tests.sh)"
+        )
+    master = _nginx_master_pid()
+    os.kill(master, signal.SIGQUIT)
+    deadline = time.monotonic() + RELOAD_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if not any(pid == master or ppid == master for pid, ppid, _ in _ps()):
+            break
+        time.sleep(0.25)
+    else:
+        pytest.fail(f"nginx (master {master}) did not stop within {RELOAD_TIMEOUT_S:.0f}s")
+
+    started = subprocess.run(
+        [binary, "-p", os.path.dirname(conf), "-e", error_log, "-c", conf],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=120,
+    )
+    assert started.returncode == 0, f"nginx did not start again: {started.stdout[-2000:]}"
+    pid_file = os.environ.get("PAGESPEED_NGINX_PID_FILE", "")
+    deadline = time.monotonic() + RELOAD_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if os.path.isfile(pid_file) and open(pid_file).read().strip().isdigit():
+            break
+        time.sleep(0.25)
+    else:
+        pytest.fail("nginx wrote no pid file after it was started again")
+    assert _nginx_master_pid() != master
+    client.fetch_until(probe_path, lambda r: r.status == 200, timeout=RELOAD_TIMEOUT_S)
+
+
 def _delta(before: Dict[str, int], after: Dict[str, int], name: str) -> int:
     return after.get(name, 0) - before.get(name, 0)
 
 
-@pytest.mark.nginx_only
-@pytest.mark.requires_module
-@pytest.mark.requires_stats
-def test_served_sizes_are_counted_from_the_cache_across_a_reload(
+def _check_served_sizes_across(
+    bounce: Callable[[PageSpeedClient, str], None],
     client: PageSpeedClient,
     example_root: str,
     doc_root: Path,
     stats_snapshot: Callable[[], Dict[str, int]],
-):
+) -> None:
     first = stats_snapshot()
     missing = [name for name in SERVED_COUNTERS if name not in first]
     assert not missing, f"statistics missing from the server: {missing}"
@@ -200,7 +248,7 @@ def test_served_sizes_are_counted_from_the_cache_across_a_reload(
         optimized[kind] = len(body.body)
         assert optimized[kind] > 0
 
-    _reload_nginx(client, f"{example_root}/rewrite_css.html?PageSpeed=off")
+    bounce(client, f"{example_root}/rewrite_css.html?PageSpeed=off")
 
     watched = REWRITE_TIME_COUNTERS + SERVED_COUNTERS + (CACHE_HITS,)
     before = settled_stats(stats_snapshot, watched)
@@ -219,8 +267,8 @@ def test_served_sizes_are_counted_from_the_cache_across_a_reload(
             if _delta(before, after_probe, name) != 0
         }
         pytest.fail(
-            "the first fetch after the reload was not answered from the cache "
-            f"(the cache did not survive the reload?): counters moved {moved}"
+            "the first fetch after the reload or restart was not answered from "
+            f"the cache (the cache did not survive it?): counters moved {moved}"
         )
     assert _delta(before, after_probe, "image_served_original_bytes") == originals["image"]
     assert _delta(before, after_probe, "image_served_optimized_bytes") == len(probe.body)
@@ -267,6 +315,35 @@ def test_served_sizes_are_counted_from_the_cache_across_a_reload(
     for name in REWRITE_TIME_COUNTERS:
         assert _delta(before, end, name) == 0, f"{name} moved after the reload"
     assert _delta(before, end, "served_savings_unmeasured_responses") == 0
+
+
+@pytest.mark.nginx_only
+@pytest.mark.requires_module
+@pytest.mark.requires_stats
+def test_served_sizes_are_counted_from_the_cache_across_a_reload(
+    client: PageSpeedClient,
+    example_root: str,
+    doc_root: Path,
+    stats_snapshot: Callable[[], Dict[str, int]],
+):
+    _check_served_sizes_across(_reload_nginx, client, example_root, doc_root, stats_snapshot)
+
+
+@pytest.mark.nginx_only
+@pytest.mark.requires_module
+@pytest.mark.requires_stats
+def test_served_sizes_are_counted_from_the_cache_across_a_restart(
+    client: PageSpeedClient,
+    example_root: str,
+    doc_root: Path,
+    stats_snapshot: Callable[[], Dict[str, int]],
+):
+    """The same after nginx was stopped and started again with its cache kept.
+
+    A restart drops everything held in memory, statistics included, so the
+    counts start from zero and every answer comes from the cache on disk.
+    """
+    _check_served_sizes_across(_restart_nginx, client, example_root, doc_root, stats_snapshot)
 
 
 if __name__ == "__main__":
