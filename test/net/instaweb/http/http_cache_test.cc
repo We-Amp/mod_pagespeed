@@ -2311,4 +2311,68 @@ TEST_F(HTTPCacheUnknownFieldTest, KeptBySharedMemoryBackend) {
   }
 }
 
+// ============================================================================
+// How many times the stored headers are parsed for one lookup that finds its
+// entry, and for the ExtractHeaders a caller then does on the value.  These
+// numbers are a baseline: a change on the serving path that adds a parse
+// shows up here.
+// ============================================================================
+
+class HTTPCacheHeaderParseCountTest : public HTTPCacheTest {
+ protected:
+  // Stores a stylesheet under kUrl with the given cache compression level.
+  void PutStylesheet(int compression_level) {
+    http_cache_->SetCompressionLevel(compression_level);
+    ResponseHeaders headers;
+    InitHeaders(&headers, "max-age=300");
+    headers.Add(HttpAttributes::kContentType, "text/css");
+    headers.ComputeCaching();
+    Put(kUrl, kFragment, &headers, kCssText);
+  }
+
+  // Parses during one Find that must succeed.
+  int64 ParsesForFind(bool accepts_gzip, Callback* callback) {
+    callback->request_context()->SetAcceptsGzip(accepts_gzip);
+    const int64 before = HTTPValue::header_parse_count_for_testing();
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback);
+    const int64 after = HTTPValue::header_parse_count_for_testing();
+    EXPECT_TRUE(callback->called_);
+    EXPECT_EQ(kFoundResult, callback->result_);
+    return after - before;
+  }
+
+  int64 ParsesForExtractHeaders(Callback* callback) {
+    ResponseHeaders headers;
+    const int64 before = HTTPValue::header_parse_count_for_testing();
+    EXPECT_TRUE(
+        callback->http_value()->ExtractHeaders(&headers, &message_handler_));
+    return HTTPValue::header_parse_count_for_testing() - before;
+  }
+};
+
+// An entry served as it is stored: one parse for the lookup, one for each
+// ExtractHeaders the caller does afterwards.
+TEST_F(HTTPCacheHeaderParseCountTest, EntryServedAsStored) {
+  PutStylesheet(0);
+  std::unique_ptr<Callback> plain(NewCallback());
+  EXPECT_EQ(1, ParsesForFind(false, plain.get()));
+  EXPECT_EQ(1, ParsesForExtractHeaders(plain.get()));
+
+  PutStylesheet(9);
+  std::unique_ptr<Callback> gzipped(NewCallback());
+  EXPECT_EQ(1, ParsesForFind(true, gzipped.get()));
+  EXPECT_TRUE(gzipped->response_headers()->IsGzipped());
+  EXPECT_EQ(1, ParsesForExtractHeaders(gzipped.get()));
+}
+
+// A gzip-stored entry inflated for a client that does not accept gzip costs
+// more: the value is rebuilt, and the marker lookups parse again.
+TEST_F(HTTPCacheHeaderParseCountTest, EntryInflatedOnRead) {
+  PutStylesheet(9);
+  std::unique_ptr<Callback> callback(NewCallback());
+  EXPECT_EQ(5, ParsesForFind(false, callback.get()));
+  EXPECT_FALSE(callback->response_headers()->IsGzipped());
+  EXPECT_EQ(1, ParsesForExtractHeaders(callback.get()));
+}
+
 }  // namespace net_instaweb

@@ -32,6 +32,7 @@
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
+#include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/rate_controller.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -6706,6 +6707,32 @@ TEST_F(RewriteContextTest, HashMismatchFetchServesOptimizedBytes) {
                                &contents, &headers));
   EXPECT_STREQ("a", contents);
   EXPECT_EQ(1, cached_fetches->Get());
+}
+
+// How many times the stored headers are parsed to answer a fetch of a
+// rewritten URL from the cache.  A baseline: a change on this serving path
+// that adds a parse shows up here.
+TEST_F(RewriteContextTest, HeaderParsesPerCacheHitFetch) {
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  const GoogleString url = Encode(kTestDomain, "tw", "0", "a.css", "css");
+  Variable* cached_fetches =
+      statistics()->GetVariable("resource_fetches_cached");
+
+  // The first fetch builds the output and stores it.
+  GoogleString contents;
+  ASSERT_TRUE(FetchResourceUrl(url, &contents));
+  ASSERT_EQ(0, cached_fetches->Get());
+
+  for (int i = 0; i < 2; ++i) {
+    SCOPED_TRACE(i);
+    const int64 before = HTTPValue::header_parse_count_for_testing();
+    ASSERT_TRUE(FetchResourceUrl(url, &contents));
+    const int64 after = HTTPValue::header_parse_count_for_testing();
+    EXPECT_STREQ("a", contents);
+    EXPECT_EQ(i + 1, cached_fetches->Get());
+    EXPECT_EQ(3, after - before);
+  }
 }
 
 }  // namespace net_instaweb

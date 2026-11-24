@@ -19,6 +19,8 @@
 
 #include "net/instaweb/http/public/http_value.h"
 
+#include <atomic>
+#include <cstdint>
 #include <limits>
 
 #include "base/logging.h"
@@ -43,6 +45,9 @@ const char kBodyFirst = 'b';
 const int kStorageTypeOverhead = 1;
 const int kStorageSizeOverhead = 4;
 const int kStorageOverhead = kStorageTypeOverhead + kStorageSizeOverhead;
+
+// See HTTPValue::header_parse_count_for_testing().
+std::atomic<int64_t> header_parse_count{0};
 
 }  // namespace
 
@@ -228,6 +233,10 @@ void HTTPValue::SetHeadersMarkingFetchedInput(const ResponseHeaders& headers) {
   SetHeaders(&marked);
 }
 
+int64 HTTPValue::header_parse_count_for_testing() {
+  return header_parse_count.load(std::memory_order_relaxed);
+}
+
 bool HTTPValue::ExtractRawHeaders(ResponseHeaders* headers,
                                   MessageHandler* handler) const {
   bool ret = false;
@@ -248,6 +257,7 @@ bool HTTPValue::ExtractRawHeaders(ResponseHeaders* headers,
         ret = (type_id == kHeadersFirst);
       }
       if (ret) {
+        header_parse_count.fetch_add(1, std::memory_order_relaxed);
         ret = headers->ReadFromBinary(StringPiece(start, size), handler);
       }
     }

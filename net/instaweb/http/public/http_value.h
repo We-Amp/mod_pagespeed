@@ -96,6 +96,12 @@ class HTTPValue : public Writer {
   // True when this value carries the current kClientEntryHeader mark.
   bool IsCurrentClientEntry() const;
 
+  // The number of times this process has parsed stored headers out of a
+  // value: once per ExtractHeaders, Link, LinkMapped, IsFetchedInput and
+  // IsCurrentClientEntry that reaches the stored bytes.  For tests that pin
+  // what a lookup costs; nothing else reads it.
+  static int64 header_parse_count_for_testing();
+
   // Retrieves the contents, returning false if empty.  Note that the
   // contents are only guaranteed valid as long as the HTTPValue
   // object is in scope.
