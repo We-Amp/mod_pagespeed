@@ -258,4 +258,46 @@ TEST_F(AsyncFetchTest, FirstWriteDropsSizeRecord) {
   EXPECT_STREQ("body", fetch.buffer());
 }
 
+// Notes a size record handed to it.
+class RecordTakingAsyncFetch : public StringAsyncFetch {
+ public:
+  explicit RecordTakingAsyncFetch(const RequestContextPtr& ctx)
+      : StringAsyncFetch(ctx) {}
+
+  void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) override {
+    ++records_taken_;
+  }
+  int records_taken() const { return records_taken_; }
+
+ private:
+  int records_taken_ = 0;
+};
+
+// A size record handed to a fetch that has no use for it goes nowhere: not
+// onto the response headers, and not through a wrapping fetch to the fetch it
+// wraps.  Only a fetch written to take it does, when it is called directly.
+TEST_F(AsyncFetchTest, OwnOutputSizeRecordIsIgnoredUnlessTaken) {
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "cf";
+
+  StringAsyncFetch plain(request_context_);
+  plain.response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  plain.SetOwnOutputSizeRecord(record);
+  EXPECT_FALSE(plain.response_headers()->HasSizeRecord());
+  EXPECT_EQ(0, plain.response_headers()->NumAttributes());
+
+  RecordTakingAsyncFetch taking(request_context_);
+  taking.response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  TestSharedAsyncFetch wrapper(&taking);
+  wrapper.SetOwnOutputSizeRecord(record);
+  EXPECT_EQ(0, taking.records_taken());
+  EXPECT_FALSE(taking.response_headers()->HasSizeRecord());
+  taking.SetOwnOutputSizeRecord(record);
+  EXPECT_EQ(1, taking.records_taken());
+  EXPECT_FALSE(taking.response_headers()->HasSizeRecord());
+}
+
 }  // namespace net_instaweb

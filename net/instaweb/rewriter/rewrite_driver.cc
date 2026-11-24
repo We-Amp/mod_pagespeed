@@ -1265,8 +1265,17 @@ namespace {
 class FilterFetch : public SharedAsyncFetch {
  public:
   FilterFetch(RewriteDriver* driver, AsyncFetch* async_fetch)
-      : SharedAsyncFetch(async_fetch), driver_(driver) {}
+      : SharedAsyncFetch(async_fetch),
+        driver_(driver),
+        async_fetch_(async_fetch) {}
   ~FilterFetch() override {}
+
+  // This fetch passes the response through as it is, so the sizes of the
+  // output it is answered with hold for the fetch it wraps as well.
+  void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) override {
+    async_fetch_->SetOwnOutputSizeRecord(record);
+  }
 
   // Answers a conditional request for output_resource. Always completes
   // async_fetch with a 304, with or without caching headers, and never
@@ -1328,6 +1337,7 @@ class FilterFetch : public SharedAsyncFetch {
 
  private:
   RewriteDriver* driver_;
+  AsyncFetch* async_fetch_;
   bool not_modified_ = false;
 };
 
@@ -1447,6 +1457,11 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
       ResponseHeaders::SizeRecord size_record;
       const bool has_size_record =
           success && response_headers->GetSizeRecord(&size_record);
+      if (has_size_record && driver_->is_nested()) {
+        // The module's own fetch of this output, as the input of another
+        // rewrite: that rewrite starts from these sizes.
+        async_fetch_->SetOwnOutputSizeRecord(size_record);
+      }
       if (success) {
         // output_resource_->Link routes to HTTPValue::share(), which
         // collapses a mapped (Cyclone zero-copy) value to owned storage --
