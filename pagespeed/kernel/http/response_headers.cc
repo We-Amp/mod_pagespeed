@@ -202,13 +202,31 @@ void ResponseHeaders::CopyFrom(const ResponseHeaders& other) {
   http_options_ = other.http_options_;
 }
 
-void ResponseHeaders::SetSizeRecord(const SizeRecord& record) {}
+void ResponseHeaders::SetSizeRecord(const SizeRecord& record) {
+  HttpSizeRecord* stored = mutable_proto()->mutable_size_record();
+  stored->set_original_size(record.original_size);
+  stored->set_optimized_size(record.optimized_size);
+  stored->set_filter_id(record.filter_id);
+}
 
-bool ResponseHeaders::GetSizeRecord(SizeRecord* record) const { return false; }
+bool ResponseHeaders::GetSizeRecord(SizeRecord* record) const {
+  if (!proto()->has_size_record()) {
+    return false;
+  }
+  const HttpSizeRecord& stored = proto()->size_record();
+  record->original_size = stored.original_size();
+  record->optimized_size = stored.optimized_size();
+  record->filter_id = stored.filter_id();
+  return true;
+}
 
-bool ResponseHeaders::HasSizeRecord() const { return false; }
+bool ResponseHeaders::HasSizeRecord() const {
+  return proto()->has_size_record();
+}
 
-void ResponseHeaders::ClearSizeRecord() {}
+void ResponseHeaders::ClearSizeRecord() {
+  mutable_proto()->clear_size_record();
+}
 
 void ResponseHeaders::Clear() {
   Headers<HttpResponseHeaders>::Clear();
@@ -226,6 +244,7 @@ void ResponseHeaders::Clear() {
   proto->clear_reason_phrase();
   proto->clear_header();
   proto->clear_is_implicitly_cacheable();
+  proto->clear_size_record();
   cache_fields_dirty_ = false;
   force_cache_ttl_ms_ = -1;
   force_cached_ = false;

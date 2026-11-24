@@ -136,7 +136,20 @@ Writer* OutputResource::BeginWrite(MessageHandler* handler) {
 
 void OutputResource::EndWrite(MessageHandler* handler) {
   CHECK(!writing_complete_);
-  value_.SetHeaders(&response_headers_);
+  if (has_size_record_) {
+    // The record goes into the stored copy only.  SetHeaders would have
+    // brought the caching fields of response_headers_ up to date; callers
+    // rely on that.
+    if (response_headers_.cache_fields_dirty()) {
+      response_headers_.ComputeCaching();
+    }
+    ResponseHeaders stored_headers;
+    stored_headers.CopyFrom(response_headers_);
+    stored_headers.SetSizeRecord(size_record_);
+    value_.SetHeaders(&stored_headers);
+  } else {
+    value_.SetHeaders(&response_headers_);
+  }
   Hasher* hasher = server_context_->hasher();
   full_name_.set_hash(hasher->Hash(ExtractUncompressedContents()));
   full_name_.set_signature(ComputeSignature());

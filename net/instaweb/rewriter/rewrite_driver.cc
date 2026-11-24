@@ -1492,11 +1492,18 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         response_headers->CopyFrom(*output_resource_->UncompressedHeaders());
         ServerContext* server_context = driver_->server_context();
         HTTPCache* http_cache = server_context->http_cache();
+        // The entry stored here carries the output's size record; the
+        // headers go on to the client, so it comes off them again at once.
+        ResponseHeaders::SizeRecord size_record;
+        if (output_resource_->GetSizeRecord(&size_record)) {
+          response_headers->SetSizeRecord(size_record);
+        }
         http_cache->Put(canonical_url_, driver_->CacheFragment(),
                         RequestHeaders::Properties(),
                         (ResponseHeaders::GetVaryOption(
                             driver_->options()->respect_vary())),
                         response_headers, content, handler_);
+        response_headers->ClearSizeRecord();
         // Stamp the wire response only, after the unstamped
         // headers went into the cache above; external serving only (see
         // the is_nested() rationale on the cache-hit branch above).
@@ -3222,6 +3229,29 @@ bool RewriteDriver::Write(const ResourceVector& inputs,
   meta_data->SetStatusAndReason(HttpStatus::kOK);
   server_context_->ApplyInputCacheControl(inputs, meta_data);
   server_context_->AddOriginalContentLengthHeader(inputs, meta_data);
+
+  // Record the sizes with the stored copy of the output: the uncompressed
+  // size of what it was made from, the size of its body, and its filter.  An
+  // input that has a record of its own counts with the size it began with,
+  // so a chain of rewrites keeps the size of the original files.  As with the
+  // header above, nothing is recorded unless every input's size is known.
+  bool sizes_known = !inputs.empty();
+  ResponseHeaders::SizeRecord size_record;
+  for (const auto& input : inputs) {
+    ResponseHeaders::SizeRecord input_record;
+    if (input->GetSizeRecord(&input_record)) {
+      size_record.original_size += input_record.original_size;
+    } else if (input->loaded()) {
+      size_record.original_size += input->UncompressedContentsSize();
+    } else {
+      sizes_known = false;
+    }
+  }
+  if (sizes_known) {
+    size_record.optimized_size = contents.size();
+    output->filter_prefix().CopyToString(&size_record.filter_id);
+    output->set_size_record(size_record);
+  }
 
   // The URL for any resource we will write includes the hash of contents,
   // so it can can live, essentially, forever. So compute this hash,
