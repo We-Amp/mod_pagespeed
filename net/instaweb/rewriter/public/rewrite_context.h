@@ -467,10 +467,17 @@ class RewriteContext {
   // But contexts may need to specialize this to actually absolutify
   // subresources if the fetched resource is served on a different path
   // than the input resource.
-  virtual bool SendFallbackResponse(StringPiece output_url_base,
-                                    StringPiece contents,
-                                    AsyncFetch* async_fetch,
-                                    MessageHandler* handler);
+  //
+  // `size_record` is the size record of `contents` when they are an optimized
+  // output that has one (an output found in the cache under another hash, a
+  // resource optimized in place, an output just built), and null when they
+  // are original bytes.  An implementation hands it to WriteWholeResponse,
+  // which offers the response for counting; one that changes the body first
+  // passes a copy whose optimized size is that of the body it writes.
+  virtual bool SendFallbackResponse(
+      StringPiece output_url_base, StringPiece contents,
+      AsyncFetch* async_fetch, MessageHandler* handler,
+      const ResponseHeaders::SizeRecord* size_record);
 
   // Returns false, logging why, if the content type in async_fetch's response
   // headers is not one we would generate a pagespeed resource for. Every

@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/inline_style_text.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/url_segment_encoder.h"
 
 namespace Css {
@@ -296,9 +297,10 @@ class CssFilter::Context : public SingleRewriteContext {
 
   // Specialization to absolutify URLs in input resource in case of rewrite
   // fail or deadline exceeded.
-  bool SendFallbackResponse(StringPiece output_url_base,
-                            StringPiece input_contents, AsyncFetch* async_fetch,
-                            MessageHandler* handler) override;
+  bool SendFallbackResponse(
+      StringPiece output_url_base, StringPiece input_contents,
+      AsyncFetch* async_fetch, MessageHandler* handler,
+      const ResponseHeaders::SizeRecord* size_record) override;
 
   CssResourceSlotFactory* slot_factory() { return &slot_factory_; }
 

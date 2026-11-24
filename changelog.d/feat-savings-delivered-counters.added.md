@@ -10,5 +10,5 @@
   Limits: sizes are before compression. HEAD, range and conditional (304)
   requests are excluded. A response answered by a browser cache or by a cache
   in front of the server never reaches these counters. Combined stylesheets and
-  scripts are usually not counted yet; resources optimized in place under their
-  own URL and responses served by the optimizer cache are not counted yet.
+  scripts are usually not counted yet; responses served by the optimizer cache
+  are not counted yet.

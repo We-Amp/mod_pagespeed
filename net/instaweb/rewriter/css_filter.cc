@@ -272,10 +272,10 @@ void CssFilter::Context::GetCssTrimUrlToUse(
   }
 }
 
-bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
-                                              StringPiece input_contents,
-                                              AsyncFetch* async_fetch,
-                                              MessageHandler* handler) {
+bool CssFilter::Context::SendFallbackResponse(
+    StringPiece output_url_base, StringPiece input_contents,
+    AsyncFetch* async_fetch, MessageHandler* handler,
+    const ResponseHeaders::SizeRecord* size_record) {
   if (!IsFallbackContentTypeAllowed(output_url_base, async_fetch, handler)) {
     return false;
   }
@@ -310,7 +310,7 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
             limit < 0 ? static_cast<size_t>(-1) : static_cast<size_t>(limit),
             &inflate_writer)) {
       return WriteWholeResponse(output_url_base, input_contents, async_fetch,
-                                handler);
+                                handler, Driver(), size_record);
     }
     text = inflated;
   }
@@ -319,8 +319,10 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
   if (Driver()->ResolveCssUrls(
           css_base_gurl_to_use, css_trim_gurl_to_use.Spec(), text,
           &resolved_writer, handler) != RewriteDriver::kSuccess) {
+    // The stored bytes go out as they are, so the record describes them: its
+    // sizes are those before compression, also for a compressed copy.
     return WriteWholeResponse(output_url_base, input_contents, async_fetch,
-                              handler);
+                              handler, Driver(), size_record);
   }
   if (compressed) {
     headers->Remove(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
@@ -329,7 +331,16 @@ bool CssFilter::Context::SendFallbackResponse(StringPiece output_url_base,
   } else if (headers->Has(HttpAttributes::kContentLength)) {
     headers->SetContentLength(resolved.size());
   }
-  return WriteWholeResponse(output_url_base, resolved, async_fetch, handler);
+  // The corrected text is what goes out, uncompressed, so its length is the
+  // optimized size of this response; what it was made from is unchanged.
+  ResponseHeaders::SizeRecord sent_record;
+  if (size_record != nullptr) {
+    sent_record = *size_record;
+    sent_record.optimized_size = resolved.size();
+    size_record = &sent_record;
+  }
+  return WriteWholeResponse(output_url_base, resolved, async_fetch, handler,
+                            Driver(), size_record);
 }
 
 bool CssFilter::Context::PolicyPermitsRendering() const {
