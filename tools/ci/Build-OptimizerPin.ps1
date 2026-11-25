@@ -30,7 +30,7 @@
       - none of them is a reparse point (link or junction).
     A directory that fails the check is left in place; the build then goes to
     a fresh directory of its own. A new build is staged and published in one
-    rename. One build runs per host at a time; the lock waits at most 60
+    rename. One build runs per host at a time; the lock waits at most 15
     minutes. The work tree, the Bazel output root and the tool PATH are the
     same for every run on a host, so Bazel's caches (and the remote cache, when
     BAZEL_REMOTE_CACHE_URL names one) can hit.
@@ -42,8 +42,15 @@
     -ResultFile when given, and exported as PAGESPEED_OPTIMIZER_BUILD_DIR to
     later steps of a GitHub Actions job.
 
-    -Verify DIR only checks DIR against the pin (exit 0 when it checks out) and
-    builds nothing.
+    -Verify DIR only checks DIR against the pin (exit 0 when it checks out),
+    prints the checked hashes ("<sha256>  <name>"), and builds nothing; with
+    -CopyTo it also copies the build out and checks the copies against those
+    hashes.
+
+    The lane directory itself is checked on every run: it must be owned by
+    this account, SYSTEM or Administrators, and is given the owner-only ACL
+    again when another account may write to it; a lane directory owned by
+    anyone else is refused.
 
 .PARAMETER Pin
     The pin file (default: PAGESPEED_OPTIMIZER_PIN, else the test pin).
@@ -56,6 +63,12 @@
     A file the build directory is written to.
 .PARAMETER Verify
     Only check this build directory against the pin.
+.PARAMETER CopyTo
+    With -Verify: copy the checked build's files into this directory (emptied
+    first) and check each copy against the hashes the check computed, so what
+    is used is what was checked.
+.PARAMETER CheckLaneDir
+    Only check (create or repair) the lane directory itself, then stop.
 .PARAMETER PrintBuildConfig
     Only print the Bazel configurations the build uses, one per line.
 #>
@@ -65,6 +78,8 @@ param(
     [string]$LogFile = "",
     [string]$ResultFile = "",
     [string]$Verify = "",
+    [string]$CopyTo = "",
+    [switch]$CheckLaneDir,
     [switch]$PrintBuildConfig
 )
 
@@ -74,7 +89,10 @@ $ProgressPreference = "SilentlyContinue"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $OptimizerRepo = "https://github.com/We-Amp/pagespeed-optimizer.git"
 $LaneFiles = @('factory_worker.exe', 'optimizer-commit.txt', 'pagespeed.dll')
-$LockMinutes = 60
+# Minutes a run waits for another build on the same host. Below the CI
+# step's limit (25 minutes), so this wait's own error is what a stuck build
+# shows; a cold build of the pin took about 2 minutes on a build runner.
+$LockMinutes = 15
 $LockName = 'Global\pagespeed-optimizer-lane-build'
 # The optimizer's own Windows release build configurations: an optimized
 # worker, so the tests see release encode times, not a debug build's.
@@ -148,11 +166,13 @@ function Test-LaneBuild([string]$Dir, [string]$Commit, $OwnerSid) {
     if ($lines.Count -ne 1 -or $lines[0] -cne $Commit) { return "optimizer-commit.txt does not name $Commit" }
     $sums = @(Get-Content -LiteralPath (Join-Path $Dir 'SHA256SUMS') | Where-Object { $_ -ne '' })
     $listed = @()
+    $script:LaneHashes = @{}
     foreach ($line in $sums) {
         if ($line -cnotmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$') { return "SHA256SUMS has a malformed line" }
         $hash = $Matches[1]; $name = $Matches[2]
         if ($LaneFiles -cnotcontains $name) { return "SHA256SUMS lists $name" }
         if ((Get-Sha256Hex (Join-Path $Dir $name)) -cne $hash) { return "$name does not match SHA256SUMS" }
+        $script:LaneHashes[$name] = $hash
         $listed += $name
     }
     if ((($listed | Sort-Object) -join '|') -cne ($LaneFiles -join '|')) { return "SHA256SUMS does not list exactly $($LaneFiles -join ', ')" }
@@ -178,6 +198,35 @@ function Set-LaneAcl([string]$Path) {
     }
     $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($UsersSid, 'ReadAndExecute', $inherit, $none, 'Allow')))
     $item.SetAccessControl($sec)
+}
+
+# Creates the lane directory with the owner-only ACL, or checks an existing
+# one: a link, or an owner other than this account, SYSTEM or Administrators,
+# is refused (a throw); an ACL that lets another account write, or that
+# inherits from the parent, is replaced. A sound ACL is left as it is, since
+# re-applying it would walk the kept work tree.
+function Initialize-LaneDir([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) {
+        New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+        Set-LaneAcl $Dir
+        return
+    }
+    $item = Get-Item -LiteralPath $Dir -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "the lane directory $Dir is not a plain directory"
+    }
+    $acl = $item.GetAccessControl()
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($owner -ne $MySid -and $owner -ne $SystemSid -and $owner -ne $AdminsSid) {
+        throw "the lane directory $Dir is owned by $($owner.Value), not by this account, SYSTEM or Administrators"
+    }
+    $writer = Get-ForeignWriter $item $owner
+    if ($writer -or -not $acl.AreAccessRulesProtected) {
+        Write-Info "the lane directory's ACL lets another account write ($writer) or inherits; resetting it"
+        Set-LaneAcl $Dir
+        $writer = Get-ForeignWriter (Get-Item -LiteralPath $Dir -Force) $MySid
+        if ($writer) { throw "the lane directory $Dir is still writable by $writer" }
+    }
 }
 
 # The directory of the first command Name on PATH, or $null.
@@ -319,6 +368,9 @@ function Invoke-LaneBuild($BuildEnv, [string]$Commit, [string]$PinFile, [string]
         }
         # A kept work tree: its fixed path keeps Bazel's output base, and so
         # its local caches, from one pin to the next.
+        # git clean below also removes the tree's bazel-* junctions; git
+        # removes a junction without following it, so the output base they
+        # point into survives. Do not replace it with a recursive delete.
         if (-not (Test-Path -LiteralPath (Join-Path $src '.git'))) {
             New-Item -ItemType Directory -Force -Path $src | Out-Null
             if ((Invoke-Native 'git' @('-C', $src, 'init', '-q') $Log) -ne 0) { Write-Warn "git init failed"; return $false }
@@ -424,21 +476,45 @@ if ($Verify) {
         exit 1
     }
     Write-Info "the optimizer build for $short checks out"
+    $verified = $script:LaneHashes
+    if ($CopyTo) {
+        try {
+            if (Test-Path -LiteralPath $CopyTo) { Remove-Item -LiteralPath $CopyTo -Recurse -Force -ErrorAction Stop }
+            New-Item -ItemType Directory -Force -Path $CopyTo | Out-Null
+            foreach ($name in $LaneFiles) {
+                $copy = Join-Path $CopyTo $name
+                Copy-Item -LiteralPath (Join-Path $Verify $name) -Destination $copy -Force -ErrorAction Stop
+                Set-ItemProperty -LiteralPath $copy -Name IsReadOnly -Value $false
+                # Against the hashes taken during the check, not a new read
+                # of the build's SHA256SUMS.
+                if ((Get-Sha256Hex $copy) -cne $verified[$name]) {
+                    throw "the copy of $name does not match the checked build"
+                }
+            }
+        } catch {
+            Write-Host "::error::could not copy the checked optimizer build into $CopyTo`: $($_.Exception.Message)"
+            exit 1
+        }
+        Write-Info "copied the checked build into $CopyTo"
+    }
+    foreach ($name in $LaneFiles) { Write-Output "$($verified[$name])  $name" }
     exit 0
 }
 
 if (-not $LaneDir) { $LaneDir = if ($env:CI_OPTIMIZER_LANE_DIR) { $env:CI_OPTIMIZER_LANE_DIR } else { Join-Path $env:SystemDrive 'pagespeed_optimizer_lane' } }
 if (-not $LogFile) { $LogFile = Join-Path $LaneDir 'build.log' }
+if ($CheckLaneDir) {
+    try { Initialize-LaneDir $LaneDir } catch { Write-Host "::error::$($_.Exception.Message)"; exit 1 }
+    Write-Info "the lane directory checks out"
+    exit 0
+}
 Write-Info "Optimizer pin: $commit (from $Pin)"
 
 $result = $null
 $mutex = $null
 $held = $false
 try {
-    if (-not (Test-Path -LiteralPath $LaneDir)) {
-        New-Item -ItemType Directory -Force -Path $LaneDir | Out-Null
-        Set-LaneAcl $LaneDir
-    }
+    Initialize-LaneDir $LaneDir
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogFile) | Out-Null
     $buildEnv = Get-BuildEnv
     $key = "$short-$(Get-Recipe $buildEnv)"

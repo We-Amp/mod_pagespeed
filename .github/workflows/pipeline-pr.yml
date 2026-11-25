@@ -3662,9 +3662,12 @@ jobs:
       # optimizer-commit.txt, owner and ACL checked before every reuse); the
       # self-test of that check runs first. The step fails when the build
       # cannot be provided; nothing is skipped.
+      # The limit is above the lane's 15-minute lock wait plus a cold build
+      # (about 2 minutes measured), and with the tests' 35 minutes it fits
+      # the job's limit.
       - name: Optimizer lane
         if: ${{ steps.role.outputs.role == 'test' }}
-        timeout-minutes: 45
+        timeout-minutes: 25
         run: |
           $ErrorActionPreference = 'Stop'
           powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\Build-OptimizerPin_test.ps1

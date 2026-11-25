@@ -9,8 +9,8 @@
     start: takes factory_worker.exe and pagespeed.dll built from the optimizer
     commit the test pin names (test\system\optimizer-test-pin.json, or the pin
     file PAGESPEED_OPTIMIZER_PIN names): the build directory -BuildDir names,
-    checked with tools\ci\Build-OptimizerPin.ps1 -Verify, or, without
-    -BuildDir, the one Build-OptimizerPin.ps1 builds or reuses. With
+    or, without -BuildDir, the one Build-OptimizerPin.ps1 builds or reuses,
+    checked and copied out with Build-OptimizerPin.ps1 -Verify -CopyTo. With
     -FromRelease it fetches the optimizer release's Windows zip named by
     install\debian\optimizer-pin.json instead, through
     install\iis\fetch-optimizer-windows.ps1 (SHA256SUMS checked against the
@@ -175,42 +175,21 @@ if ($localCommit) {
     }
     $abiCommit = "$((Get-Content -LiteralPath (Join-Path $RepoRoot 'install\debian\optimizer-pin.json') -Raw | ConvertFrom-Json).optimizer_commit)"
 } else {
-    # The build from the test pin: the directory handed over, checked again,
-    # or the one the lane builds or reuses now.
+    # The build from the test pin: the directory handed over, or the one the
+    # lane builds or reuses now. Either way it is checked again and copied
+    # into the release directory in one call, which checks each copy against
+    # the hashes taken during that check (what runs is what was checked).
     $lane = Join-Path $RepoRoot "tools\ci\Build-OptimizerPin.ps1"
-    if ($BuildDir) {
-        & $lane -Verify $BuildDir
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::the optimizer build handed to this step does not check out; no worker was started"
-            exit 1
-        }
-    } else {
+    if (-not $BuildDir) {
         $BuildDir = & $lane | Select-Object -Last 1
         if ($LASTEXITCODE -ne 0 -or -not $BuildDir) {
             Write-Host "::error::no optimizer build at the test pin; the IIS system tests need the worker, so this is a failure, not a skip"
             exit 1
         }
     }
-    try {
-        if (Test-Path -LiteralPath $WorkerDir) { Remove-Item -LiteralPath $WorkerDir -Recurse -Force -ErrorAction Stop }
-        New-Item -ItemType Directory -Force -Path $WorkerDir | Out-Null
-        foreach ($name in @('factory_worker.exe', 'pagespeed.dll', 'optimizer-commit.txt')) {
-            Copy-Item -LiteralPath (Join-Path $BuildDir $name) -Destination (Join-Path $WorkerDir $name) -Force -ErrorAction Stop
-        }
-        # The copies are the job's own: the IIS worker processes read them
-        # and the stop action removes them.
-        Get-ChildItem -LiteralPath $WorkerDir -File | ForEach-Object { $_.IsReadOnly = $false }
-        # What runs is what was checked: each copy against the build's
-        # SHA256SUMS.
-        foreach ($line in @(Get-Content -LiteralPath (Join-Path $BuildDir 'SHA256SUMS') | Where-Object { $_ -ne '' })) {
-            if ($line -cnotmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$') { throw "malformed SHA256SUMS line" }
-            $copy = Join-Path $WorkerDir $Matches[2]
-            if ((Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Matches[1]) {
-                throw "the copy of $($Matches[2]) does not match the build's SHA256SUMS"
-            }
-        }
-    } catch {
-        Write-Host "::error::could not copy the pinned optimizer build into $WorkerDir`: $($_.Exception.Message)"
+    & $lane -Verify $BuildDir -CopyTo $WorkerDir | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "::error::the optimizer build does not check out or could not be copied; no worker was started"
         exit 1
     }
     $abiCommit = "$(Get-Content -LiteralPath (Join-Path $WorkerDir 'optimizer-commit.txt') -TotalCount 1)".Trim()

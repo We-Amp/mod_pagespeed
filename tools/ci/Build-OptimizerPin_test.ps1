@@ -11,8 +11,11 @@
 #   * a SHA256SUMS line for a file that is not part of the build;
 #   * an ACL that lets Users write;
 #   * the directory being a junction to a sound build;
-# that a pin without a full commit hash is refused, and that the build uses
-# the optimized release configuration (--config=opt).
+# that a pin without a full commit hash is refused, that -Verify prints the
+# hashes it checked and -CopyTo copies exactly the checked files (and nothing
+# from a build that does not check out), that the lane directory is created
+# with, or reset to, the owner-only ACL, and that the build uses the
+# optimized release configuration (--config=opt).
 #
 # Run:   powershell -NoProfile -File tools\ci\Build-OptimizerPin_test.ps1
 $ErrorActionPreference = 'Stop'
@@ -113,6 +116,37 @@ try {
     [IO.File]::WriteAllText($bad, '{"optimizer_commit": "main"}')
     $r = Invoke-Verify $good $bad
     if ($r.Code -ne 0 -and $r.Out -match 'full commit hash') { Pass 'a pin without a full commit hash is refused' } else { Fail "a pin without a full commit hash is refused: $($r.Out)" }
+    # -Verify prints the hashes it checked; -CopyTo copies the build out and
+    # checks the copies against those hashes.
+    $lines = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -Verify $good 2>$null | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^[0-9a-f]{64}  ' })
+    $want = @($names | ForEach-Object { "$(Get-Hex (Join-Path $good $_))  $_" })
+    if (($lines -join '|') -ceq ($want -join '|')) { Pass '-Verify prints the hashes it checked' } else { Fail "-Verify prints the hashes it checked: $($lines -join ' / ')" }
+    $dest = Join-Path $root 'copy'
+    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -Verify $good -CopyTo $dest 2>&1 | Out-String
+    $copied = @(Get-ChildItem -LiteralPath $dest -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name } | Sort-Object)
+    $same = ($copied -join '|') -ceq ($names -join '|')
+    if ($same) { foreach ($n in $names) { if ((Get-Hex (Join-Path $dest $n)) -cne (Get-Hex (Join-Path $good $n))) { $same = $false } } }
+    if ($LASTEXITCODE -eq 0 -and $same) { Pass '-CopyTo copies exactly the checked files' } else { Fail "-CopyTo copies exactly the checked files: $r" }
+    $dest2 = Join-Path $root 'copy-bad'
+    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -Verify (Join-Path $root 'tampered') -CopyTo $dest2 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -and -not (Test-Path -LiteralPath (Join-Path $dest2 'pagespeed.dll'))) { Pass '-CopyTo copies nothing from a build that does not check out' } else { Fail "-CopyTo copies nothing from a build that does not check out: $r" }
+
+    # The lane directory: created owner-only; an existing one that lets Users
+    # write, or inherits, is reset; a sound one is left alone.
+    $lane = Join-Path $root 'lane-new'
+    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -LaneDir $lane -CheckLaneDir 2>&1 | Out-String
+    $acl = Get-Acl -LiteralPath $lane
+    if ($LASTEXITCODE -eq 0 -and $acl.AreAccessRulesProtected) { Pass 'a new lane directory gets the owner-only ACL' } else { Fail "a new lane directory gets the owner-only ACL: $r" }
+    $lane = Join-Path $root 'lane-open'
+    New-Item -ItemType Directory -Force -Path $lane | Out-Null
+    & icacls.exe $lane /grant "*S-1-5-32-545:(OI)(CI)M" | Out-Null
+    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -LaneDir $lane -CheckLaneDir 2>&1 | Out-String
+    $acl = Get-Acl -LiteralPath $lane
+    $usersWrite = @($acl.Access | Where-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545' -and ([int64]$_.FileSystemRights -band 0x2) })
+    if ($LASTEXITCODE -eq 0 -and $acl.AreAccessRulesProtected -and $usersWrite.Count -eq 0) { Pass 'an existing lane directory that Users may write is reset' } else { Fail "an existing lane directory that Users may write is reset: $r" }
+    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Pin $pin -LaneDir $lane -CheckLaneDir 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -and $r -notmatch 'resetting') { Pass 'a sound lane directory is left as it is' } else { Fail "a sound lane directory is left as it is: $r" }
+
     # The build is the optimizer's optimized release configuration, not a
     # debug (fastbuild) build.
     $cfg = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $script -PrintBuildConfig 2>&1 | ForEach-Object { "$_".Trim() })
