@@ -503,6 +503,19 @@ pagespeed_cc_test(
     ],
 )
 
+# The HTML cache engine and live conformance cases parse and keep the
+# documented row shape.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_cases_test",
+    srcs = ["daemon_html_conformance_cases_test.cc"],
+    data = ["//test/system/daemon_html:conformance_cases.json"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@jsoncpp",
+    ],
+)
+
 # Every notification the in-place arms send, through the one builder: never
 # HTML, flags exactly from-module, never an agent request, never the llms.txt
 # mask, always the request's site.
