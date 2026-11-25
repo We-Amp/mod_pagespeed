@@ -131,6 +131,25 @@ are attested in the
 [pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer)
 repository; verify them with the commands of its `RELEASING.md`.
 
+### SLSA provenance
+
+A release that carries `multiple.intoto.jsonl` also has an SLSA build
+provenance statement, made by the SLSA project's generic generator, for every
+module file, `SHA256SUMS` and `manifest.json` (for an `nginxorg-v*` release:
+every file and `SHA256SUMS`). As above, the `pagespeed-optimizer` packages
+are covered in their own repository. Verify a file
+with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier):
+
+```
+slsa-verifier verify-artifact <file> \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/We-Amp/mod_pagespeed \
+  --source-tag module-v<version>
+```
+
+For an `nginxorg-v<version>-ngx<nginx version>` release, `--source-tag` is
+the module release it was built from, `module-v<version>`.
+
 ## Disclosure policy
 
 We follow coordinated disclosure. Once a vulnerability is reported:

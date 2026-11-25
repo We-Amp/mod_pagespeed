@@ -98,6 +98,17 @@ expect_bad bad-release-env-no-if 'rule release-env'
 expect_good good-adopt
 expect_bad bad-adopt-ungated 'adopt-shape'
 expect_bad bad-adopt-not-in-schema 'adopt-shape'
+expect_bad bad-adopt-provenance-unnamed 'adopt-shape'
+# slsa: the SLSA generic generator, by version tag, from a release lane, with
+# upload-assets false; its call job may hold the generator's write permissions.
+expect_good good-slsa
+expect_bad bad-slsa-sha-ref '(slsa)'
+expect_bad bad-slsa-other-builder '(slsa)'
+expect_bad bad-slsa-upload '(slsa)'
+expect_bad bad-slsa-not-release-lane '(slsa)'
+expect_bad bad-slsa-caller-not-release-lane '(slsa)'
+expect_bad bad-slsa-secret 'rule g'
+expect_bad bad-write-call-job 'rule f'
 expect_bad bad-adopt-download 'adopt-shape'
 expect_bad bad-adopt-pattern 'adopt-shape'
 expect_bad bad-adopt-uploads 'adopt-shape'

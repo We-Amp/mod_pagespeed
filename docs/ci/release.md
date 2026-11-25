@@ -20,11 +20,15 @@ The lane has two halves in one workflow.
   unit tests, the two CI gates and the two release gates on the Hyper-V
   class (installer upgrade, cPanel), and end in one run artifact with the asset
   set, `SHA256SUMS` and `manifest.json`. A dry run signs nothing, creates
-  nothing and uses no secret.
+  nothing and uses no secret, with one exception: a plain dry run (not a
+  candidate, not a rehearsal) also runs the `provenance` job, which records
+  the keyless SLSA provenance of its set as a run artifact only, so a dry run
+  proves the generator call; it reaches no release.
 - **Sign and release** (a real run only, `dry_run` false): in jobs of the
   protected `release` environment on hosted runners, sign the Windows
   binaries and the installer, sign `SHA256SUMS`, and create the GitHub
-  release. These are the only jobs that hold a secret or a write token.
+  release. These are the only jobs that hold a secret or a write token,
+  apart from the `provenance` call (below), whose upload job is never run.
 
 ## Tags and versions
 
@@ -532,9 +536,27 @@ It does everything a dry run does, and then, in this order:
    workflow cannot get more than its caller grants, but the job's if: keeps
    a dry run, a candidate and a rehearsal out, so none of them signs or
    attests anything.
-4. `create-release` creates a draft release for the tag with every asset,
-   `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`, downloads the draft's assets and checks them against
-   `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
+4. `provenance` (next to `sign-checksums`, after `validate`) calls the SLSA
+   project's generic generator
+   (`slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml`,
+   by version tag: the generator verifies its own ref and refuses a commit
+   SHA) with the attestation subjects that `validate` chose (its output
+   `provenance_subjects`, the `sha256sum` lines base64 encoded). The
+   generator signs an SLSA v1 provenance statement keyless and uploads it as
+   the run artifact `multiple.intoto.jsonl`, nothing else: `upload-assets` is
+   false, which the shape gate's slsa rule pins, so it never writes to a
+   release. Its jobs run on GitHub-hosted runners and declare `actions:
+   read`, `id-token: write` and, for the upload job that never runs,
+   `contents: write`; the call job grants exactly those, as both callers do.
+   It runs in a real run and in a plain dry run (which proves the call), but
+   not in a candidate or a rehearsal: the candidate seal refuses an artifact
+   it does not know, and a scheduled rehearsal signs nothing.
+5. `create-release` (which needs `provenance`) creates a draft release for
+   the tag with every asset, `SHA256SUMS.asc`, `SHA256SUMS.sigstore.json` and
+   `multiple.intoto.jsonl`, after checking that the statement is an SLSA
+   provenance and that each of its subjects is a file of the set with its
+   digest (`SHA256SUMS` included); it downloads the draft's assets and checks
+   them against `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
    release flagged as a pre-release and not as the latest one. The release
    is never promoted any further: nothing is published to a package
    repository and no other repository is notified.
@@ -648,7 +670,8 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
 | `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets`; in an adopting run applies the adoption rule above |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master; then, keyless, records the build provenance and SBOM attestations of the module's files and signs `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`), and verifies both as a user would |
-| `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
+| `provenance` | the SLSA generator's GitHub-hosted jobs, real run and plain dry run | the keyless SLSA provenance of the attestation subjects, as the run artifact `multiple.intoto.jsonl` (never uploaded to a release by the generator) |
+| `create-release` | hosted, environment `release`, real run only | checks the SLSA provenance against the set, creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
 is not provisioned. So
@@ -842,6 +865,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
 | `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`, and `pagespeed-lint-<version>-win-x64.zip`: signed in a real run, unsigned in a dry run | yes |
 | `release-signature` | `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json` (real run) | both are added to the release by `create-release` |
+| `multiple.intoto.jsonl` | the SLSA provenance of the attestation subjects (real run and plain dry run), uploaded by the SLSA generator | added to the release by `create-release` |
 | `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
 | `adopt-binding` | `adopt-binding.json`, what an adopting run took over and the candidate's job list and `SHA256SUMS` rows (adopting run only) | no |
 
@@ -1120,7 +1144,11 @@ release is made with the workflow token, so creating its tag starts no other
 workflow, and is never marked latest; `release.yml` passes only `module-v*`
 tags to the module lane. The asset set is checked by `release_manifest.py`
 with the profile `nginxorg`: one package per cell, nothing else, and the
-manifest also carries `nginx_version` and `nginx_sha256`.
+manifest also carries `nginx_version` and `nginx_sha256`. A real run also
+records the SLSA provenance of every file and `SHA256SUMS`
+(`multiple.intoto.jsonl`, the `provenance` job, the same generator call as
+the module lane's), which `create-release` checks against the set and adds
+to the release; a dry run of this lane does not record it.
 
 Every job runs on a GitHub-hosted runner.
 

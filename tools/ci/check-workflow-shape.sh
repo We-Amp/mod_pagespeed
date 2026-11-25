@@ -108,6 +108,19 @@
 #       `--add-host=bazel-remote-cache` elsewhere fails, except on a line
 #       marked `# predates remote-cache-docker-args.sh` (the fallback for a
 #       release tag cut before the helper existed).
+#   (slsa) the one reusable workflow from outside this repository: a job
+#       whose uses: names slsa-framework/slsa-github-generator must name
+#       exactly .github/workflows/generator_generic_slsa3.yml@v<X.Y.Z> (a
+#       version tag, not a commit: the generator checks its own ref and
+#       refuses anything else), sit in a file of SLSA_CALLERS (the release
+#       lanes) and set `upload-assets: false` in its with: block, so the
+#       provenance reaches a release only through the lane's own release
+#       job. Such a job is exempt from rule b and may hold the write
+#       permissions the generator's jobs declare (rule f): the generator's
+#       jobs run on GitHub-hosted runners, never on the fleet. It passes no
+#       secret (rule g: it is not a secret callee). The adopt-shape rule
+#       counts the artifact named by its provenance-name input as one it
+#       uploads.
 #
 # Rule (e) exclusions (same pattern as the public-tree hygiene gate, which
 # excludes its own rules file):
@@ -321,6 +334,10 @@ adopt_records() {
     /uses:[[:space:]]*actions\/download-artifact@/ { step="D" }
     /uses:[[:space:]]*actions\/upload-artifact@/ { step="U" }
     /^          (name|pattern):/ && step != "" { print step tab job tab val($0); next }
+    # A call of the SLSA generator uploads the artifact its provenance-name
+    # input names (the slsa rule; uses: before with:).
+    /^    uses:[[:space:]]*slsa-framework\/slsa-github-generator\// { slsa[job]=1; next }
+    /^      provenance-name:/ && slsa[job] { print "U" tab job tab val($0); next }
     /^      [a-z_]+_artifact:/ { print "D" tab job tab val($0) }
     END { for (i = 1; i <= n; i++) print "J" tab order[i] tab gated[order[i]] }
   ' "$1"
@@ -463,6 +480,20 @@ sign_secret_problems() { # workflow file
 # of this repository whose every job that reads a secret runs on a hosted label
 # (rule g checks that file too). The two fleet-hyperv gates get none.
 SECRET_CALLEES="pipeline-release-module.yml"
+
+# The (slsa) rule: the SLSA generic generator, by version tag, and the files
+# that may call it.
+SLSA_GENERATOR_RE='^slsa-framework/slsa-github-generator/\.github/workflows/generator_generic_slsa3\.yml@v[0-9]+\.[0-9]+\.[0-9]+$'
+SLSA_CALLERS="pipeline-release-module.yml nginx-org-rebuild.yml"
+is_slsa_call() { # a `uses:` value
+  printf '%s' "$1" | grep -qE "${SLSA_GENERATOR_RE}"
+}
+is_slsa_caller() { # a workflow file name
+  local c
+  for c in ${SLSA_CALLERS}; do [ "$1" = "${c}" ] && return 0; done
+  return 1
+}
+
 is_secret_callee() { # a `uses:` value
   local f c
   f="${1##*/}"; f="${f%%@*}"
@@ -761,6 +792,11 @@ EOF
         continue
       fi
       wruns="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${wjob}" '$1=="KEY" && $2==j && $3=="runs-on" {print $5}')"
+      wuses="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${wjob}" '$1=="KEY" && $2==j && $3=="uses" {print $5}')"
+      # The SLSA generator's jobs run on hosted runners (the slsa rule).
+      if [ -z "${wruns}" ] && is_slsa_call "${wuses}"; then
+        continue
+      fi
       if ! is_hosted_label "${wruns}"; then
         err "${wf}:${wline}: job '${wjob}' holds a write permission but does not run on a hosted label (rule f)"
       fi
@@ -831,6 +867,26 @@ EOF
 $(toplevel_secret_lines "${wf}")
 EOF
 
+  # (slsa) every workflow: a call of the SLSA generator names the generic
+  # generator by version tag, from a release lane, and never uploads itself.
+  while IFS="${TAB}" read -r kind job key lineno val; do
+    { [ "${kind}" = "KEY" ] && [ "${key}" = "uses" ]; } || continue
+    case "${val}" in
+      *slsa-framework/slsa-github-generator/*) ;;
+      *) continue ;;
+    esac
+    if ! is_slsa_call "${val}"; then
+      err "${wf}:${lineno}: job '${job}' uses '${val}'; only .github/workflows/generator_generic_slsa3.yml@v<X.Y.Z> of the SLSA generator is allowed, by version tag (slsa)"
+    elif ! is_slsa_caller "${base}"; then
+      err "${wf}:${lineno}: job '${job}' calls the SLSA generator, which only the release lanes (${SLSA_CALLERS}) may call (slsa)"
+    elif ! awk -v j="  ${job}:" '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($0 == j) } inj { print }' "${wf}" \
+         | grep -qE '^      upload-assets:[[:space:]]*false[[:space:]]*$'; then
+      err "${wf}:${lineno}: job '${job}' calls the SLSA generator without 'upload-assets: false'; the lane's release job attaches the provenance (slsa)"
+    fi
+  done <<EOF
+${records}
+EOF
+
   if printf '%s\n' "${triggers}" | grep -qvx 'workflow_call'; then
     # Caller workflow. (b) unless allowlisted.
     if ! is_allowlisted "${base}"; then
@@ -841,7 +897,9 @@ EOF
         has_steps="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="steps" {print "1"}')"
         jline="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="JOB" && $2==j {print $3}')"
         if [ -n "${uses_val}" ]; then
-          if ! printf '%s' "${uses_val}" | grep -qE '^We-Amp/mod_pagespeed/\.github/workflows/[A-Za-z0-9._-]+\.yml@(master|ci-dev)$'; then
+          # The SLSA generator is checked by the slsa rule.
+          if ! printf '%s' "${uses_val}" | grep -qE '^We-Amp/mod_pagespeed/\.github/workflows/[A-Za-z0-9._-]+\.yml@(master|ci-dev)$' \
+             && ! is_slsa_call "${uses_val}"; then
             err "${wf}:${jline}: caller job '${job}' uses '${uses_val}', not this repository's reusable workflow @master/@ci-dev (rule b)"
           fi
           if [ -n "${runson_val}" ] || [ -n "${has_steps}" ]; then

@@ -175,6 +175,9 @@ ALWAYS_RUNS = (
     "gate-cpanel-smoke-el9",
     "gate-cpanel-smoke-el8",
     "validate",
+    # skipped in a candidate run (it uploads no sealed artifact); in an
+    # adopting run it records the provenance of the adopted set
+    "provenance",
 )
 
 # Jobs of the `release` environment: skipped in a candidate run.

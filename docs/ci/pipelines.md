@@ -1270,6 +1270,16 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
+- **(slsa)** the one reusable workflow from outside this repository is the
+  SLSA project's generic provenance generator,
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v<X.Y.Z>`.
+  It is referenced by its version tag, not a commit (the generator verifies
+  its own ref and refuses a commit SHA), only from the release lanes
+  (`pipeline-release-module.yml`, `nginx-org-rebuild.yml`), and always with
+  `upload-assets: false`, so the provenance reaches a release only through
+  the lane's own `create-release` job. Its jobs run on GitHub-hosted
+  runners, so the call job may hold the permissions they declare (an
+  exception to (b) and (f)); it is passed no secret;
 - **(queue-route)** in `pipeline-pr.yml`: the `changes` job holds the step
   `Decide the runner route` right after `Decide the fleet scope`, in exactly
   its spec text, and publishes `route`; no other job defines a `route`
