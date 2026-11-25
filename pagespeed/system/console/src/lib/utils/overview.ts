@@ -602,7 +602,7 @@ export const SERVED_COUNTS_RELATION =
 
 /** The one line that relates the two savings figures, which are never added up. */
 export const SAVINGS_RELATION =
-  "Separate from the rewriting figure: these are responses served from the optimizer's cache.";
+  "Separate from this server's figure: these are responses served from the optimizer's cache.";
 
 /** The colour of the strip's rule and dot: "neutral" has none. */
 export type VerdictLevel = "ok" | "info" | "neutral";

@@ -89,8 +89,13 @@
   // The statistics log, for the delivered figures over recorded history: read
   // inside the poll, at most every five minutes (it gains a sample every few minutes).
   const LOG_REFETCH_MS = 5 * 60_000;
+  const HISTORY_NOTE =
+    "From the statistics log, which also covers the time before a restart. It holds a limited history, so the span is the one it covers now.";
   let logView = $state<GraphsView | null>(null);
   let logFetchedAt = 0;
+  // False until the first history read has answered, however it answered:
+  // only that first read's space is held on the card.
+  let logSettled = $state(false);
 
   async function readLog(): Promise<void> {
     if (Date.now() - logFetchedAt < LOG_REFETCH_MS) return;
@@ -104,6 +109,8 @@
       // other failure keeps what was read before.
       if (e instanceof Error && isStatisticsLogOff(e)) logView = { kind: "no-log" };
       else if (e instanceof Error && isGraphsAbsent(e)) logView = { kind: "absent", detail: "" };
+    } finally {
+      logSettled = true;
     }
   }
 
@@ -175,6 +182,11 @@
   let total = $derived(rows ? moduleSavingsTotal(rows) : null);
   let delivered = $derived(vars ? deliveredFamilies(vars) : null);
   let historyWindow = $derived(deliveredWindow(logView));
+  // The history's lines most likely repeat the types counted since the restart.
+  let reserveLines = $derived.by(() => {
+    const lines = (delivered ?? []).filter((f) => f.total.counted).map((f) => `${f.label}: ${windowLine(f)}`);
+    return lines.length > 0 ? lines : ["\u00a0"];
+  });
   let avoided = $derived(vars ? requestsAvoided(vars) : []);
   let hitRate = $derived(vars ? optimizedCopyHitRate(vars) : null);
   let reasons = $derived(reasonRows(vars, updatedAt ?? undefined, NOT_OPTIMIZED));
@@ -413,23 +425,43 @@
           {moduleSince?.text ?? "since restart"} (web server restart or reload)
           {#if moduleSince?.warming}<span class="badge badge-outline-warning" data-testid="warming-pill">warming up</span>{/if}
         </p>
-        {#if historyWindow.kind === "data"}
-          <div class="history" data-testid="savings-delivered-window" title="{formatIsoTitle(historyWindow.fromMs)} to {formatIsoTitle(historyWindow.toMs)}">
-            <h3 class="minor-title">Over {historyWindow.spanText} of recorded history</h3>
-            {#each historyWindow.families as family (family.key)}
-              {#if family.total.counted}
-                <p class="note num" data-testid="savings-delivered-window-{family.key}">{family.label}: {windowLine(family)}</p>
-              {/if}
-            {/each}
-            <p class="note">From the statistics log, which also covers the time before a restart. It holds a limited history, so the span is the one it covers now.</p>
-          </div>
-        {:else if historyWindow.kind === "no-log"}
-          <p class="note" data-testid="savings-delivered-no-log">
-            No recorded history: statistics logging is off or has not written yet. With <code>StatisticsLogging on</code>
-            and a log directory (<code>LogDir</code>), this card also shows these figures over the history the log holds,
-            restarts included.
-          </p>
-        {/if}
+        <!-- The history is read beside the poll, so it arrives after the card
+             paints. While that first read is in flight its space is held: an
+             invisible stand-in for the history (a heading, the lines the
+             figures above would give, the note) shares one grid cell with
+             whatever arrives, so the card does not grow when it does. Once the
+             read has answered, however it answered, the stand-in is gone and
+             what arrived (or nothing) takes its own height. The stand-in's
+             words are drawn by CSS from data-text, so they are not part of the
+             card's text. -->
+        <div class="history-slot" data-testid="savings-delivered-history-slot">
+          {#if !logSettled}
+            <div class="history history-reserve" aria-hidden="true" data-testid="savings-delivered-history-reserve">
+              <p class="minor-title" data-text="About 1 h 40 min of recorded history"></p>
+              {#each reserveLines as line, i (i)}
+                <p class="note num" data-text={line}></p>
+              {/each}
+              <p class="note" data-text={HISTORY_NOTE}></p>
+            </div>
+          {/if}
+          {#if historyWindow.kind === "data"}
+            <div class="history" data-testid="savings-delivered-window" title="{formatIsoTitle(historyWindow.fromMs)} to {formatIsoTitle(historyWindow.toMs)}">
+              <h3 class="minor-title">{historyWindow.spanText} of recorded history</h3>
+              {#each historyWindow.families as family (family.key)}
+                {#if family.total.counted}
+                  <p class="note num" data-testid="savings-delivered-window-{family.key}">{family.label}: {windowLine(family)}</p>
+                {/if}
+              {/each}
+              <p class="note">{HISTORY_NOTE}</p>
+            </div>
+          {:else if historyWindow.kind === "no-log"}
+            <p class="note" data-testid="savings-delivered-no-log">
+              No recorded history: statistics logging is off or has not written yet. With <code>StatisticsLogging on</code>
+              and a log directory (<code>LogDir</code>), this card also shows these figures over the history the log holds,
+              restarts included.
+            </p>
+          {/if}
+        </div>
         {#if avoided.length > 0}
           <p class="note" data-testid="savings-requests-avoided">
             Requests avoided (these save requests, not bytes): {avoided.map((a) => `${formatCount(a.count)} ${a.text}`).join(" · ")}
@@ -845,6 +877,20 @@
   }
   .history {
     margin-top: var(--ps-space-sm);
+  }
+  /* One cell for the reserved copy and the history that replaces it; the cell is as tall as the taller. */
+  .history-slot {
+    display: grid;
+  }
+  .history-slot > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+  }
+  .history-reserve {
+    visibility: hidden;
+  }
+  .history-reserve > p::before {
+    content: attr(data-text);
   }
   /* A grid item may shrink below its table, so the table's region scrolls instead of the page. */
   .family {

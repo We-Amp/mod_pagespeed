@@ -242,7 +242,7 @@ test.describe("Overview verdict and tiles", () => {
     );
     // The two figures are related in words, never added up.
     await expect(page.getByTestId("savings-relation")).toHaveText(
-      "Separate from the rewriting figure: these are responses served from the optimizer's cache.",
+      "Separate from this server's figure: these are responses served from the optimizer's cache.",
     );
     await expect(page.getByTestId("tile-rewriting").getByTestId("module-bytes-saved")).toContainText("12.3 MB");
     const main = await page.locator("main").innerText();

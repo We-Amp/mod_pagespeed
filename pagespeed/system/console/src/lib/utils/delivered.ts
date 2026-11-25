@@ -21,7 +21,7 @@
  */
 
 import { num } from "$lib/alerts";
-import { formatBytes, formatPercent, formatSpan } from "./format";
+import { formatBytes, formatHistorySpan, formatPercent } from "./format";
 import type { GraphsView } from "./graphs-view";
 
 export type DeliveredFamilyKey = "module" | "optimizer-cache";
@@ -267,7 +267,7 @@ export function deliveredWindow(view: GraphsView | null): DeliveredWindow {
   if (toMs <= fromMs) return { kind: "quiet" };
   const families = deliveredFamilies(growthAcross(series));
   if (!families.some((f) => f.total.counted)) return { kind: "quiet" };
-  return { kind: "data", fromMs, toMs, spanText: formatSpan((toMs - fromMs) / 1000), families };
+  return { kind: "data", fromMs, toMs, spanText: formatHistorySpan((toMs - fromMs) / 1000), families };
 }
 
 /** "CSS 47% smaller (1.01 MB → 538 KB) · Images 73% smaller (…)": the types that sent something. */
