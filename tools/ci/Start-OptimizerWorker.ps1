@@ -6,9 +6,16 @@
     Runs the pinned optimizer worker for the IIS system tests, and stops it.
 
 .DESCRIPTION
-    start: fetches the optimizer Windows zip named by install\debian\optimizer-pin.json
-    through install\iis\fetch-optimizer-windows.ps1 (SHA256SUMS checked against the
-    pin, the zip checked against SHA256SUMS), starts factory_worker.exe as a
+    start: takes factory_worker.exe and pagespeed.dll built from the optimizer
+    commit the test pin names (test\system\optimizer-test-pin.json, or the pin
+    file PAGESPEED_OPTIMIZER_PIN names): the build directory -BuildDir names,
+    or, without -BuildDir, the one Build-OptimizerPin.ps1 builds or reuses,
+    checked and copied out with Build-OptimizerPin.ps1 -Verify -CopyTo. With
+    -FromRelease it fetches the optimizer release's Windows zip named by
+    install\debian\optimizer-pin.json instead, through
+    install\iis\fetch-optimizer-windows.ps1 (SHA256SUMS checked against the
+    pin, the zip checked against SHA256SUMS). It logs the C API version the
+    client library reports (ps_version_minor), starts factory_worker.exe as a
     background process with a cache volume under -Root and the management API on
     127.0.0.1:<ApiPort> behind a token generated for this run, waits for
     /v1/health, and exports to later steps of the job (GITHUB_ENV) and to the calling
@@ -17,13 +24,22 @@
         PAGESPEED_OPTIMIZER_API_TOKEN   the run's token (masked in the log)
         PAGESPEED_OPTIMIZER_VOLUME      the volume path (DaemonVolumePath)
         PAGESPEED_OPTIMIZER_SOCKET      the pipe name (DaemonSocketPath)
-        PAGESPEED_OPTIMIZER_DIR         the unpacked release (setup_iis_full.ps1
-                                        copies pagespeed.dll next to the module)
+        PAGESPEED_OPTIMIZER_DIR         the worker and client library in use
+                                        (setup_iis_full.ps1 copies pagespeed.dll
+                                        next to the module)
     A fetch or start failure fails the step; nothing is skipped silently.
 
     stop: stops the worker this script started (the process is checked to still
     be a factory_worker.exe from -Root before it is signalled) and removes the
     pagespeed.dll that setup_iis_full.ps1 placed beside the IIS module.
+
+.PARAMETER BuildDir
+    A build directory of tools\ci\Build-OptimizerPin.ps1 for the pinned commit.
+    It is checked again before use; one that does not check out fails the step.
+
+.PARAMETER FromRelease
+    Use the released optimizer that install\debian\optimizer-pin.json names
+    instead of a build from the test pin.
 
 .PARAMETER LocalRelease
     Testing only: runs a locally built worker; refused under GitHub Actions.
@@ -37,6 +53,8 @@ param(
     [string]$Root = "C:\pagespeed_optimizer",
     [int]$ApiPort = 18765,
     [string]$Socket = "pagespeed-optimizer",
+    [string]$BuildDir,
+    [switch]$FromRelease,
     [string]$LocalRelease
 )
 
@@ -142,7 +160,7 @@ if ($localCommit) {
         Write-Host "::error::could not copy the locally built worker into $WorkerDir`: $($_.Exception.Message)"
         exit 1
     }
-} else {
+} elseif ($FromRelease) {
     $fetch = Join-Path $RepoRoot "install\iis\fetch-optimizer-windows.ps1"
     $rc = 1
     try {
@@ -155,8 +173,49 @@ if ($localCommit) {
         Write-Host "::error::could not fetch the pinned optimizer release for Windows (fetch-optimizer-windows.ps1 exit $rc); the IIS system tests need the worker, so this is a failure, not a skip"
         exit 1
     }
+    $abiCommit = "$((Get-Content -LiteralPath (Join-Path $RepoRoot 'install\debian\optimizer-pin.json') -Raw | ConvertFrom-Json).optimizer_commit)"
+} else {
+    # The build from the test pin: the directory handed over, or the one the
+    # lane builds or reuses now. Either way it is checked again and copied
+    # into the release directory in one call, which checks each copy against
+    # the hashes taken during that check (what runs is what was checked).
+    $lane = Join-Path $RepoRoot "tools\ci\Build-OptimizerPin.ps1"
+    if (-not $BuildDir) {
+        $BuildDir = & $lane | Select-Object -Last 1
+        if ($LASTEXITCODE -ne 0 -or -not $BuildDir) {
+            Write-Host "::error::no optimizer build at the test pin; the IIS system tests need the worker, so this is a failure, not a skip"
+            exit 1
+        }
+    }
+    & $lane -Verify $BuildDir -CopyTo $WorkerDir | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "::error::the optimizer build does not check out or could not be copied; no worker was started"
+        exit 1
+    }
+    $abiCommit = "$(Get-Content -LiteralPath (Join-Path $WorkerDir 'optimizer-commit.txt') -TotalCount 1)".Trim()
+    Write-Host "using the optimizer worker built from the test pin (optimizer commit $abiCommit)"
 }
+if ($localCommit) { $abiCommit = $localCommit }
 $worker = Join-Path $WorkerDir "factory_worker.exe"
+
+# The C API version the client library reports, so a run shows which library
+# it loaded.
+$python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1
+if (-not $python) {
+    Write-Host "::error::no usable python on PATH to read the client library's C API version"
+    exit 1
+}
+$abi = & {
+    $ErrorActionPreference = 'Continue'
+    "$(& $python.Source -I -c 'import ctypes,sys; l=ctypes.CDLL(sys.argv[1]); print(str(l.ps_version_major())+chr(46)+str(l.ps_version_minor()))' (Join-Path $WorkerDir 'pagespeed.dll') 2>$null)".Trim()
+}
+if ($abi -notmatch '^[0-9]+\.([0-9]+)$') {
+    Write-Host "::error::cannot read the C API version of $(Join-Path $WorkerDir 'pagespeed.dll')"
+    exit 1
+}
+$short = if ($abiCommit.Length -ge 12) { $abiCommit.Substring(0, 12) } else { $abiCommit }
+Write-Host "Optimizer client library at $short`: C API $abi (ps_version_minor $($Matches[1]))"
 
 # The volume directory: the IIS worker processes read the volume and record
 # into it, so they may modify what the worker creates there.

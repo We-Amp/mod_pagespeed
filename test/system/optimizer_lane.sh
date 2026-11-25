@@ -34,7 +34,8 @@
 #                                   resource limits for the build
 #
 # A build directory is named <commit12>-<recipe8>: the recipe hash covers
-# this script, the cmake requirements, the cache-library commit this module
+# this script, the build configuration (the optimizer's optimized release
+# configuration), the cmake requirements, the cache-library commit this module
 # links, the toolchain and the image tag, so a change to any of them builds
 # again instead of reusing an older build. Each directory carries SHA256SUMS
 # and optimizer-commit.txt, and is reused only when both check out and it
@@ -48,6 +49,9 @@ OPTIMIZER_LANE_SCRIPT="$PROJECT_ROOT/test/system/optimizer_lane.sh"
 OPTIMIZER_LANE_FILES="factory_worker libpagespeed.so optimizer-commit.txt"
 # Minutes a lane waits for another build on the same host.
 OPTIMIZER_LANE_LOCK_MINUTES=60
+# The optimizer's optimized release configuration (as its release build
+# uses), so the tests see release encode times, not a debug build's.
+OPTIMIZER_LANE_CONFIGS="--config=docker --config=opt"
 
 # Sets OPTIMIZER_LANE_COMMIT and OPTIMIZER_LANE_PIN from the pin file.
 optimizer_lane_commit() {
@@ -68,6 +72,7 @@ optimizer_lane_recipe() {
         /usr/bin/clang++-20 --version 2>/dev/null | head -1
         ldd --version 2>/dev/null | head -1
         echo "image=${PAGESPEED_OPTIMIZER_LANE_IMAGE:-}"
+        echo "configs=$OPTIMIZER_LANE_CONFIGS"
     } | sha256sum | cut -c1-8
 }
 
@@ -154,7 +159,7 @@ _optimizer_lane_build_locked() {
         work="$work-$(id -u)"
     fi
     local src="$work/src" pyuser="$work/py" broot="$work/bazel"
-    local cfg="--config=docker" path_extra="" env_extra=""
+    local cfg="$OPTIMIZER_LANE_CONFIGS" path_extra="" env_extra=""
     chmod -R u+w "$work" 2> /dev/null || true
     rm -rf "${src:?}" "${broot:?}"
     mkdir -p "$src"
@@ -164,6 +169,9 @@ _optimizer_lane_build_locked() {
         log_warn "cannot fetch the optimizer source at ${commit:0:12}"
         return 1
     fi
+    # The worker reports the commit in GIT_COMMIT; the source tree carries a
+    # placeholder.
+    printf '%s' "$commit" > "$src/GIT_COMMIT"
     if ! python3 -I "$PROJECT_ROOT/tools/ci/check_optimizer_pin_pair.py" "$OPTIMIZER_LANE_PIN" \
             "$src/MODULE.bazel" "$PROJECT_ROOT/bazel/repositories.bzl" > "$log" 2>&1; then
         log_warn "the pinned optimizer links another cache library than this module"
