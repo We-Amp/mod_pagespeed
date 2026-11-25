@@ -136,3 +136,8 @@ tailwind-v3
 # .original/.minified pairs the minifier tests run against.
 .*\.original
 .*\.minified
+# tools/ci/testdata/slsa-provenance: a provenance file of the SLSA generic
+# generator v2.1.0, copied from the slsa-verifier test data (third-party,
+# Apache-2.0; see the README.md next to it), read by the self-test of
+# tools/ci/check_slsa_provenance.py.
+generic-v2\.1\.0\.intoto\.jsonl

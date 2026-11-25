@@ -69,6 +69,21 @@ expect_bad bad-switch-push-widened 'switch-routed job'
 expect_bad bad-switch-push-other-event 'switch-routed job'
 expect_bad bad-guard-only-switch-drift 'fleet guard'
 expect_bad bad-write-fleet 'rule f'
+# slsa: the SLSA generic generator, by version tag, from a release lane, with
+# upload-assets false and no secret; its call job may hold the generator's
+# write permissions, a call of another workflow may not (rule f).
+expect_good good-slsa
+expect_bad bad-slsa-sha-ref '(slsa)'
+expect_bad bad-slsa-other-builder '(slsa)'
+expect_bad bad-slsa-upload '(slsa)'
+expect_bad bad-slsa-extra-permission '(slsa)'
+expect_bad bad-slsa-continue-on-error '(slsa)'
+expect_bad bad-slsa-secrets-block '(slsa)'
+expect_bad bad-slsa-extra-with '(slsa)'
+expect_bad bad-slsa-permissions-flow '(slsa)'
+expect_bad bad-slsa-not-release-lane '(slsa)'
+expect_bad bad-slsa-secret '(slsa)'
+expect_bad bad-write-call-job 'rule f'
 expect_bad bad-write-workflow 'rule f'
 expect_bad bad-no-top-perms 'no top-level permissions'
 expect_bad bad-write-quoted 'rule f'

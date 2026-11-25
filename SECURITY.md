@@ -70,7 +70,9 @@ the container images and the NuGet packages.
 
 Every release carries `SHA256SUMS`, a PGP signature of it (`SHA256SUMS.asc`)
 and, for the host packages, a Sigstore signature (`SHA256SUMS.sigstore.json`)
-with build provenance and SBOM attestations. The container images are signed
+with build provenance and SBOM attestations. The host and NuGet releases also
+carry SLSA build provenance (`multiple.intoto.jsonl`), which `slsa-verifier`
+checks. The container images are signed
 with keyless cosign. The commands are in [RELEASING.md](RELEASING.md) and in
 the [deployment guide](https://modpagespeed.com/docs/deployment/#verify-the-images).
 

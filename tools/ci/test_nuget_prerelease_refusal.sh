@@ -116,7 +116,7 @@ EXPECT_IF = {
     "sign-windows": "${{ !cancelled() && needs.ref-guard.outputs.real == 'true' && (needs.windows-release-build.result == 'success' || needs.windows-release-build-hosted.result == 'success') }}",
     "package": "${{ !cancelled() && needs.ref-guard.outputs.real == 'true' && needs.ci-release-gate.result == 'success' && needs.security-gates.result == 'success' && needs.sidecar-pack.result == 'success' && (needs.linux-release-tests.result == 'success' || needs.linux-release-tests-hosted.result == 'success') && (needs.windows-release-tests.result == 'success' || needs.windows-release-tests-hosted.result == 'success') && needs.sign-windows.result == 'success' && needs.macos-release-build.result == 'success' && needs.macos-release-tests.result == 'success' && needs.linux-arm64-release-build.result == 'success' && needs.linux-arm64-release-tests.result == 'success' }}",
     "sign-checksums": "${{ !cancelled() && needs.package.result == 'success' }}",
-    "attach-signature": "${{ !cancelled() && needs.sign-checksums.result == 'success' }}",
+    "attach-signature": "${{ !cancelled() && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' }}",
     "publish-nuget": "${{ !cancelled() && needs.package.result == 'success' && needs.attach-signature.result == 'success' }}",
     "promote-release": "${{ !cancelled() && needs.publish-nuget.result == 'success' && inputs.auto_promote == true }}",
 }

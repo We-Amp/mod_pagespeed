@@ -496,6 +496,8 @@ jobs:
         run: tools/ci/test_bisect_job.sh
       - name: Release checksum signature self-test
         run: tools/ci/test_release_checksums_sig.sh
+      - name: SLSA provenance check - self-test
+        run: python3 -I tools/ci/check_slsa_provenance.py --self-test
       # To remove these four NuGet tests: in one PR drop these entries and add
       # the scripts to ALLOW_UNREGISTERED in tools/ci/check_ci_rot.py, since a
       # pull request runs this list from main; delete the scripts in the next.

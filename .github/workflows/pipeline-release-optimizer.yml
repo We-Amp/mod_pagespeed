@@ -19,6 +19,8 @@
 #   SHA256SUMS                                 (lists the seven files above)
 #   SHA256SUMS.asc   (real runs; the release signing key, see docs/ci/release.md)
 #   SHA256SUMS.sigstore.json   (real runs; keyless cosign bundle on SHA256SUMS)
+#   multiple.intoto.jsonl      (real runs; SLSA provenance of the seven files
+#                               and SHA256SUMS, by the SLSA generator)
 # Real runs also record a build provenance attestation for the five packages,
 # the SBOM and the VEX file, and an SBOM attestation for each package, in the
 # GitHub attestation store (Sigstore, keyless; docs/ci/release.md).
@@ -859,6 +861,10 @@ jobs:
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The subjects of the SLSA provenance (the `provenance` job): the seven
+    # files and SHA256SUMS, as `sha256sum` lines, base64 encoded.
+    outputs:
+      provenance_subjects: ${{ steps.contract.outputs.provenance_subjects }}
     steps:
       - name: Checkout the apt helper
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -909,6 +915,7 @@ jobs:
       # 2.34 (the RHEL 9 / Debian 12 contract); a noble-built binary would
       # say 2.38.
       - name: Fail-closed asset contract validation
+        id: contract
         env:
           UBUNTU_MIRROR: ${{ vars.UBUNTU_MIRROR }}
           UPSTREAM: ${{ needs.version.outputs.upstream }}
@@ -963,6 +970,7 @@ jobs:
             fi
           done
           echo "asset contract: ok"
+          echo "provenance_subjects=$({ cat SHA256SUMS; sha256sum SHA256SUMS; } | base64 -w0)" >> "$GITHUB_OUTPUT"
           {
             echo "### Asset contract validated"
             echo ""
@@ -1114,10 +1122,40 @@ jobs:
 
   # Real runs only, inside the protected `release` environment (required
   # reviewer and tag policy: docs/ci/release.md). A dry run never gets here.
-  release:
-    name: Publish GitHub release
+  # SLSA build provenance (multiple.intoto.jsonl): the generic generator of
+  # the SLSA project signs, keyless, an in-toto statement whose subjects are
+  # the seven files and SHA256SUMS. Real runs only, and only after
+  # `sign-checksums`, so after the `release` environment's approval: a dry
+  # run or a rejected approval signs nothing, and unreleased binaries never
+  # reach the public transparency log. The generator only uploads the statement as a run
+  # artifact (`upload-assets: false`, pinned by the shape gate's slsa rule):
+  # it never touches a release; `release` checks it against the set
+  # (tools/ci/check_slsa_provenance.py --exact, from main) and publishes it
+  # with the assets. The generator keeps the artifact 5 days (v2.1.0): a
+  # `release` re-run after that needs `provenance` re-run too. The generator is referenced by its version tag, not a
+  # commit: it verifies its own ref and refuses a commit SHA. Its jobs run on
+  # GitHub-hosted runners and declare these permissions (the upload job's
+  # `contents: write` included, although `upload-assets: false` skips it); a
+  # called workflow cannot get more than its caller grants, so release.yml
+  # grants them.
+  provenance:
+    name: SLSA build provenance
     needs: [version, manifest, sign-checksums]
     if: ${{ !cancelled() && needs.manifest.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.manifest.outputs.provenance_subjects }}
+      provenance-name: multiple.intoto.jsonl
+      upload-assets: false
+
+  release:
+    name: Publish GitHub release
+    needs: [version, manifest, sign-checksums, provenance]
+    if: ${{ !cancelled() && needs.manifest.result == 'success' && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' && needs.version.outputs.dry_run == 'false' }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/pagespeed-optimizer/issues/687
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1159,13 +1197,31 @@ jobs:
           name: optimizer-release-signature
           path: dist
 
+      - name: Download the SLSA provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: multiple.intoto.jsonl
+          path: provenance
+
+      - name: Checkout main (provenance check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: provenance-tool
+          sparse-checkout: tools/ci/check_slsa_provenance.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The provenance covers exactly the set (the files SHA256SUMS lists and
+      # SHA256SUMS); then the statement joins the assets.
       - name: Re-verify SHA256SUMS across the job boundary
         run: |
           set -euo pipefail
-          cd dist
-          sha256sum -c SHA256SUMS
-          [ -s SHA256SUMS.asc ] || { echo "::error::SHA256SUMS.asc is missing"; exit 1; }
-          [ -s SHA256SUMS.sigstore.json ] || { echo "::error::SHA256SUMS.sigstore.json is missing"; exit 1; }
+          ( cd dist && sha256sum -c SHA256SUMS )
+          [ -s dist/SHA256SUMS.asc ] || { echo "::error::SHA256SUMS.asc is missing"; exit 1; }
+          [ -s dist/SHA256SUMS.sigstore.json ] || { echo "::error::SHA256SUMS.sigstore.json is missing"; exit 1; }
+          python3 -I provenance-tool/tools/ci/check_slsa_provenance.py verify provenance/multiple.intoto.jsonl dist --exact
+          cp provenance/multiple.intoto.jsonl dist/multiple.intoto.jsonl
 
       - name: Create release
         env:
@@ -1198,6 +1254,11 @@ jobs:
               gh attestation verify <package file> --repo We-Amp/pagespeed-optimizer \\
                 --cert-identity 'https://github.com/We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@refs/heads/main' \\
                 --source-ref refs/tags/optimizer-v<version>
+
+          multiple.intoto.jsonl is the SLSA build provenance of the packages, the SBOM, the VEX file and SHA256SUMS:
+
+              slsa-verifier verify-artifact <file> --provenance-path multiple.intoto.jsonl \\
+                --source-uri github.com/We-Amp/pagespeed-optimizer --source-tag optimizer-v<version>
 
           RELEASING.md in this repository lists all verification commands.
           NOTES

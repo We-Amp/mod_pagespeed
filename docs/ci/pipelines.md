@@ -869,6 +869,15 @@ job and fails the build when the shape breaks:
   is allowed only on a job with a hosted `runs-on`; in `pipeline-pr.yml` also
   only on a job whose `if:` keeps it off `merge_group`, so a job that can run
   on a merge group stays read-only;
+- **(slsa)** the one reusable workflow from outside this repository is the
+  SLSA project's generic provenance generator,
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v<X.Y.Z>`.
+  It is referenced by its version tag, not a commit (the generator verifies
+  its own ref and refuses a commit SHA), only from the release lanes
+  (`pipeline-release-optimizer.yml`, `pipeline-release-nuget.yml`), always
+  with `upload-assets: false` (the lane's own release job attaches the
+  provenance) and with no secrets. Its jobs run on GitHub-hosted runners, so
+  the call job may hold the permissions they declare (an exception to (f));
 - **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
   job holds the merge-queue guard step as the third of three fixed steps
   after the checkout step (after the push-ref and token-dispatch refusal

@@ -60,10 +60,14 @@ jobs:
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/optimizer-v')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'optimizer-v'))
+    # `actions: read` is what the SLSA generator's jobs (the lane's
+    # `provenance` job) declare; a called workflow cannot get more than its
+    # caller grants.
     permissions:
       contents: write
       id-token: write
       attestations: write
+      actions: read
     uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@main
     with:
       tag: ${{ inputs.tag || '' }}
@@ -78,10 +82,12 @@ jobs:
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
+    # `actions: read`: as above, for the lane's `provenance` job.
     permissions:
       contents: write
       id-token: write
       pull-requests: read
+      actions: read
     uses: We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-nuget.yml@main
     with:
       tag: ${{ inputs.tag || '' }}

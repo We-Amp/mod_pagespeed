@@ -141,9 +141,9 @@ releases for the same tag cannot race, and a release build always runs out.
 ### The release asset contract
 
 The lane builds and validates eight files (the manifest job checks them as a
-set), and a real run publishes ten: the eight, plus the two signatures that
-the `sign-checksums` job makes over `SHA256SUMS`. Exactly these, no more and
-no fewer:
+set), and a real run publishes eleven: the eight, the two signatures that
+the `sign-checksums` job makes over `SHA256SUMS`, and the SLSA provenance
+that the `provenance` job records. Exactly these, no more and no fewer:
 
 | Asset | Contents |
 |---|---|
@@ -157,6 +157,7 @@ no fewer:
 | `SHA256SUMS` | checksums for the other seven files |
 | `SHA256SUMS.asc` | PGP signature over `SHA256SUMS` (release signing key, `RELEASE-SIGNING-KEY.asc`) |
 | `SHA256SUMS.sigstore.json` | Sigstore signature over `SHA256SUMS` (keyless cosign bundle) |
+| `multiple.intoto.jsonl` | SLSA build provenance of the seven files and `SHA256SUMS` (the SLSA project's generic generator, keyless) |
 
 The serving-module packages download these assets by name and verify them
 against SHA256SUMS, so the set and the names are a contract. Asset names
@@ -171,7 +172,11 @@ set is exactly the eight files, all present and non-empty, that
 VEX file are well-formed, and that the package-internal versions are the
 derived tilde form. The release job re-verifies SHA256SUMS across the job
 boundary before publishing anything. The release job also refuses to publish
-without a non-empty `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`.
+without a non-empty `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`, and
+without an SLSA provenance whose subjects are exactly the set, each with its
+digest (`tools/ci/check_slsa_provenance.py`). A release tag must be on a
+commit whose `release.yml` grants `actions: read` to the lanes (the
+provenance job needs it; docs/ci/release.md, "SLSA provenance").
 
 Every real run also records a build provenance attestation for the five
 packages, the SBOM and the VEX file, and an SBOM attestation for each
@@ -205,7 +210,17 @@ gh attestation verify <package file> --repo We-Amp/pagespeed-optimizer \
   --cert-identity 'https://github.com/We-Amp/pagespeed-optimizer/.github/workflows/pipeline-release-optimizer.yml@refs/heads/main' \
   --source-ref refs/tags/optimizer-v<version> \
   --predicate-type https://spdx.dev/Document/v2.3
+
+# SLSA build provenance of a file (needs slsa-verifier)
+slsa-verifier verify-artifact <file> \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/We-Amp/pagespeed-optimizer \
+  --source-tag optimizer-v<version>
 ```
+
+A NuGet release (`v<version>`) carries `multiple.intoto.jsonl` for its
+packages, SBOM, VEX file and `SHA256SUMS` too; verify it the same way with
+`--source-tag v<version>`.
 
 Replace `<version>` with the release version. The Sigstore bundle is in the
 current bundle format: use cosign v2.4 or newer. The PGP check and the

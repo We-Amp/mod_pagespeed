@@ -8,8 +8,8 @@ one of two lanes, each a reusable workflow pinned to `main`:
 
 | Tag | Lane | Publishes |
 |---|---|---|
-| `optimizer-v<version>` | `pipeline-release-optimizer.yml` | a GitHub release with the host packages (deb and rpm for amd64 and arm64, a Windows x64 zip), the SBOM and VEX file, `SHA256SUMS`, `SHA256SUMS.asc` and `SHA256SUMS.sigstore.json`: ten assets, with build provenance and SBOM attestations |
-| `v<version>` | `pipeline-release-nuget.yml` | seven NuGet packages on nuget.org (WeAmp.PageSpeed, WeAmp.PageSpeed.AspNetCore, WeAmp.PageSpeed.NativeAssets.Linux / .Windows / .macOS, and the sidecar packages WeAmp.PageSpeed.Sidecar / WeAmp.PageSpeed.Sidecar.NativeAssets.Linux) and a draft GitHub release with the packages, SBOM, VEX, `SHA256SUMS` and `SHA256SUMS.asc` |
+| `optimizer-v<version>` | `pipeline-release-optimizer.yml` | a GitHub release with the host packages (deb and rpm for amd64 and arm64, a Windows x64 zip), the SBOM and VEX file, `SHA256SUMS`, `SHA256SUMS.asc`, `SHA256SUMS.sigstore.json` and the SLSA provenance `multiple.intoto.jsonl`: eleven assets, with build provenance and SBOM attestations |
+| `v<version>` | `pipeline-release-nuget.yml` | seven NuGet packages on nuget.org (WeAmp.PageSpeed, WeAmp.PageSpeed.AspNetCore, WeAmp.PageSpeed.NativeAssets.Linux / .Windows / .macOS, and the sidecar packages WeAmp.PageSpeed.Sidecar / WeAmp.PageSpeed.Sidecar.NativeAssets.Linux) and a draft GitHub release with the packages, SBOM, VEX, `SHA256SUMS`, `SHA256SUMS.asc` and the SLSA provenance `multiple.intoto.jsonl` |
 
 `optimizer-v*` never matches `v*`. `release-smoke.yml` runs
 `pipeline-release-smoke.yml` when a `v*` release is published: it installs
@@ -236,9 +236,12 @@ both. The script honours a different fingerprint only in its self-test.
 In the NuGet lane the draft already exists when the checksums are signed:
 `attach-signature` downloads every asset of the draft, checks that its
 `SHA256SUMS` is the signed file, that the draft holds exactly the files it
-lists and that they pass `sha256sum -c`, then adds `SHA256SUMS.asc`;
-`publish-nuget` waits for it. A draft with extra assets (for example one
-an operator created by hand) therefore fails this check.
+lists and that they pass `sha256sum -c`, checks that every subject of the
+SLSA provenance (below) is a file of the draft with its digest, then adds
+`SHA256SUMS.asc` and `multiple.intoto.jsonl`; `publish-nuget` waits for it.
+A draft with extra assets (for example one an operator created by hand)
+therefore fails this check; a stale signature or provenance from an earlier
+run is replaced.
 A new key changes the pin in the script, `RELEASE-SIGNING-KEY.asc` and this
 page together.
 
@@ -300,6 +303,56 @@ tag as the source ref. The tag form is always right: the `release`
 environment admits tag refs only, and the ref guard requires a dispatched tag
 to equal the input. `--repo` alone would accept any workflow in the
 repository, the NuGet lane included. The bundle needs cosign v2.4 or newer.
+
+### SLSA provenance (both lanes)
+
+Both lanes record an SLSA build provenance statement in real runs, in the
+job `provenance`: a call of the SLSA project's generic generator
+(`slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml`),
+referenced by its version tag, because the generator verifies its own ref
+and refuses a commit SHA. Its subjects are the `sha256sum` lines of the
+files `SHA256SUMS` lists and of `SHA256SUMS` itself, which the optimizer
+lane's `manifest` job and the NuGet lane's `package` job hand over as the
+output `provenance_subjects` (base64). The job runs only after a job behind
+the `release` environment's approval (`sign-checksums` in the optimizer
+lane, `package` in the NuGet lane), so a rejected approval signs nothing.
+The generator signs, keyless, an in-toto statement with an SLSA provenance
+v0.2 predicate and uploads it, as a Sigstore bundle, only as the run
+artifact `multiple.intoto.jsonl`: `upload-assets` is false, which the shape
+gate's slsa rule pins, so it never writes to a release. The optimizer
+lane's `release` job and the NuGet lane's `attach-signature` job run
+`tools/ci/check_slsa_provenance.py verify ... --exact` from `main` (its
+`--self-test`, against a real v2.1.0 bundle in
+`tools/ci/testdata/slsa-provenance/`, runs on every pull request): the file
+must be a Sigstore bundle (or a bare DSSE envelope) of an in-toto statement
+with an SLSA provenance predicate, every subject a file of the set with its
+digest, and the subjects exactly the files `SHA256SUMS` lists and
+`SHA256SUMS`. Then the job adds it to the release.
+
+The generator's jobs run on GitHub-hosted runners and declare `actions:
+read`, `id-token: write` and, for the upload job that never runs,
+`contents: write`; the call job grants exactly those, and `release.yml`
+grants `actions: read` to both lanes for it, because a called workflow
+cannot get more than its caller grants. A tag push runs `release.yml` from
+the tagged commit, but the lanes from `main`: a release tag must therefore
+be on a commit that has the `actions: read` grant, or the run fails at
+startup. A dry run skips the job, so it signs nothing; GitHub still
+resolves the call when the run starts (a permission the caller does not
+grant fails the run there).
+
+The generator keeps the artifact 5 days (its v2.1.0 setting). Re-running
+`release` or `attach-signature` after that fails at the download; re-run
+`provenance` first (whether a re-run attempt may upload an artifact of the
+same name again is not verified here).
+
+To verify a file (needs [slsa-verifier](https://github.com/slsa-framework/slsa-verifier)):
+
+```bash
+slsa-verifier verify-artifact <file> \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/We-Amp/pagespeed-optimizer \
+  --source-tag optimizer-v<version>     # v<version> for a NuGet release
+```
 
 ### SBOM, VEX and the grype gate (optimizer lane)
 
@@ -569,3 +622,4 @@ runners. Jobs pass files only as workflow artifacts:
 | `release-sbom-vex` | optimizer `security-gates` | optimizer `manifest` |
 | `optimizer-*`, `optimizer-release-dist` | optimizer builds, `manifest` | `manifest`, `sign-checksums`, `release` |
 | `optimizer-release-signature` (`SHA256SUMS.asc`, `SHA256SUMS.sigstore.json`) | `sign-checksums` | `release` |
+| `multiple.intoto.jsonl` (real run, both lanes) | `provenance` (the SLSA generator) | optimizer `release`, NuGet `attach-signature` |
