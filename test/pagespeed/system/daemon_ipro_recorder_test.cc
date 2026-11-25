@@ -1053,9 +1053,9 @@ TEST_F(DaemonIproRecorderTest, HtmlSeenAfterSomeBodyReleasesIt) {
   headers.Replace(HttpAttributes::kContentType, "application/xhtml+xml");
   headers.ComputeCaching();
   DaemonRecordOutcome outcome;
-  DaemonIproRecorder* recorder = new DaemonIproRecorder(
-      abi_.get(), &cache_token_, "/tmp/socket", request_,
-      kDefaultHttpOptionsForTests, &timer_, nullptr);
+  DaemonIproRecorder* recorder =
+      new DaemonIproRecorder(abi_.get(), &cache_token_, "/tmp/socket", request_,
+                             kDefaultHttpOptionsForTests, &timer_, nullptr);
   recorder->set_outcome_sink_for_testing(&outcome);
   recorder->Write("<html>", nullptr);
   EXPECT_EQ(6u, recorder->buffered_bytes_for_testing());
@@ -1103,9 +1103,9 @@ TEST_F(DaemonIproRecorderTest, HtmlWithoutASiteIsStillCountedAsSuch) {
   headers.ComputeCaching();
   ResponseHeaders preliminary;
   preliminary.CopyFrom(headers);
-  const DaemonRecordOutcome outcome = Run(&headers, "<html></html>", true,
-                                          nullptr, &preliminary, nullptr,
-                                          &rewrite_stats);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, "<html></html>", true, nullptr, &preliminary, nullptr,
+          &rewrite_stats);
   EXPECT_STREQ(daemon_record_reason::kNoSiteId, outcome.reason);
   EXPECT_EQ(1, rewrite_stats.daemon_record_declined_no_site()->Get());
   EXPECT_FALSE(outcome.stored);
