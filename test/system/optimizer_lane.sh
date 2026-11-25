@@ -146,8 +146,13 @@ _optimizer_lane_build_locked() {
     log_info "Building the optimizer worker at $key..."
     # Stable paths: Bazel action keys include PATH and the action
     # environment, so a per-run path would defeat the remote cache.
-    local work
-    work="${TMPDIR:-/tmp}/optimizer-lane-$(id -u)"
+    # The same path for every uid (container root on a rootless daemon and
+    # the runner's uid elsewhere must compute the same keys); a per-uid one
+    # only where another uid already holds it on a shared /tmp.
+    local work="${TMPDIR:-/tmp}/optimizer-lane"
+    if [ -e "$work" ] && [ "$(stat -c %u "$work")" != "$(id -u)" ]; then
+        work="$work-$(id -u)"
+    fi
     local src="$work/src" pyuser="$work/py" broot="$work/bazel"
     local cfg="--config=docker" path_extra="" env_extra=""
     chmod -R u+w "$work" 2> /dev/null || true
