@@ -19,9 +19,9 @@
 # bundle), records build provenance and SBOM attestations of the module's
 # files, creates the GitHub release as a draft, checks it and publishes it. Those jobs, and only those, run on hosted runners in
 # the protected `release` environment and hold the secrets or the write
-# token. The `provenance` job (a real run and a plain dry run) calls the SLSA
-# generator, whose jobs run on GitHub-hosted runners and sign keyless; it
-# uploads only a run artifact, which `create-release` adds to the release
+# token. In a real run the `provenance` job also calls the SLSA generator,
+# whose jobs run on GitHub-hosted runners and sign keyless; it uploads only a
+# run artifact, which `create-release` adds to the release
 # (multiple.intoto.jsonl). Nothing is published to a package repository and
 # no other repository is notified: the consumer pulls the release.
 #
@@ -4873,8 +4873,9 @@ jobs:
   # ---------------------------------------------------------------------
   # SLSA build provenance (multiple.intoto.jsonl): the generic generator of
   # the SLSA project signs, keyless, an in-toto statement whose subjects are
-  # the attestation subjects that `validate` chose. A real run and a plain
-  # dry run (to prove the call); never a candidate or a rehearsal. The
+  # the attestation subjects that `validate` chose. Real runs only, like
+  # `sign-checksums`: a dry run, a candidate and a rehearsal sign nothing, so
+  # unreleased files never reach the public transparency log. The
   # generator only uploads the statement as a run artifact
   # (`upload-assets: false`, pinned by the shape gate's slsa rule): it never
   # touches a release. `create-release` checks the statement against the set
@@ -4888,7 +4889,7 @@ jobs:
   provenance:
     name: SLSA build provenance
     needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     permissions:
       actions: read
       id-token: write

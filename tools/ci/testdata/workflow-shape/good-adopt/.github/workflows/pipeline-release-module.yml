@@ -92,7 +92,7 @@ jobs:
         run: echo sign
   provenance:
     needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     permissions:
       actions: read
       id-token: write

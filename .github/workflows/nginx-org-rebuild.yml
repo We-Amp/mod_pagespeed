@@ -740,9 +740,8 @@ jobs:
 
   # SLSA build provenance (multiple.intoto.jsonl) of the set, by the generic
   # generator of the SLSA project, as in the module release lane. Real runs
-  # only, like everything this lane signs (the module lane's dry run proves
-  # the same call; a dry run here runs at the module release's tag, so its
-  # statement would name the release's source ref). Keyless,
+  # only, like everything this lane signs: a dry run never reaches the public
+  # transparency log. Keyless,
   # uploaded only as a run artifact (`upload-assets: false`, pinned by the
   # shape gate's slsa rule): create-release checks it against the set and
   # adds it to the draft. The generator is referenced by its version tag (it

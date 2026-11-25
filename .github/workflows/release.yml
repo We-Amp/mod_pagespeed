@@ -17,9 +17,7 @@
 # always means auto (docs/ci/release.md).
 # The tag must exist and its commit must be on master; the lane's ref guard
 # refuses anything else. A dry run builds and validates; it signs, creates and
-# publishes nothing, except that a plain dry run (not a candidate) records the
-# keyless SLSA provenance of its set as a run artifact, which reaches no
-# release. A real run signs and creates the release, in jobs of the
+# publishes nothing. A real run signs and creates the release, in jobs of the
 # protected `release` environment on hosted runners.
 #
 # A candidate run is a dry run of a release tag that does not exist yet. It
