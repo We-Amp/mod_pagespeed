@@ -1068,6 +1068,29 @@ TEST_F(DaemonIproRecorderTest, HtmlSeenAfterSomeBodyReleasesIt) {
 
 // A resource is buffered exactly as before, whichever headers kind the seam
 // offers, and recorded.
+// Fail closed: headers that first said HTML decide the record even when the
+// final headers name a resource type.  Nothing was buffered, so recording on
+// the final type would store an empty or partial body as the original.
+TEST_F(DaemonIproRecorderTest,
+       HtmlAtTheHeadersStaysRefusedIfTheFinalTypeIsCss) {
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);  // Content-Type: text/css
+  ResponseHeaders preliminary;
+  preliminary.CopyFrom(headers);
+  preliminary.Replace(HttpAttributes::kContentType, "text/html");
+  preliminary.ComputeCaching();
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, &preliminary);
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+  EXPECT_STREQ(daemon_record_reason::kHtmlClassicChain, outcome.reason);
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_FALSE(outcome.notified);
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find("write_original")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("notify ")) << log;
+}
+
 TEST_F(DaemonIproRecorderTest, AResourceIsStillBufferedFromTheHeaders) {
   for (IproRecorder::HeadersKind kind :
        {IproRecorder::kPreliminaryHeaders, IproRecorder::kFullHeaders}) {
@@ -1165,6 +1188,41 @@ TEST_F(DaemonIproRecorderTest, ARequestWithoutASiteIsRecordedNowhere) {
     EXPECT_EQ(0, recording.calls()) << site;
   }
   EXPECT_EQ(4, rewrite_stats.daemon_record_declined_no_site()->Get());
+  EXPECT_EQ(GoogleString(), CallLog());
+}
+
+// The same, with headers offered first as every seam does: the only call
+// that reaches the peer is the pure content-type classifier, made at the
+// headers; nothing is written or sent.
+TEST_F(DaemonIproRecorderTest,
+       ARequestWithoutASiteOfferedHeadersOnlyClassifiesTheType) {
+  request_.site = "";
+  for (const char* content_type : {"text/css", "text/html"}) {
+    RecordingDaemonAbi recording(abi_.get());
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.Replace(HttpAttributes::kContentType, content_type);
+    headers.ComputeCaching();
+    ResponseHeaders preliminary;
+    preliminary.CopyFrom(headers);
+    DaemonRecordOutcome outcome;
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        &recording, &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    recorder->set_outcome_sink_for_testing(&outcome);
+    recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                      &preliminary);
+    EXPECT_EQ(1, recording.calls()) << content_type;
+    recorder->Write(kBody, nullptr);
+    recorder->DoneAndSetHeaders(&headers, true);
+    EXPECT_FALSE(outcome.gate_ran) << content_type;
+    EXPECT_STREQ(daemon_record_reason::kNoSiteId, outcome.reason)
+        << content_type;
+    EXPECT_FALSE(outcome.stored) << content_type;
+    EXPECT_FALSE(outcome.notified) << content_type;
+    EXPECT_EQ(1, recording.calls()) << content_type;
+    EXPECT_TRUE(recording.notifies().empty()) << content_type;
+  }
   EXPECT_EQ(GoogleString(), CallLog());
 }
 

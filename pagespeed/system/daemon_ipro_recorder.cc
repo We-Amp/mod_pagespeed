@@ -308,8 +308,10 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
       break;
     }
     // ---- the site -----------------------------------------------------
-    // First, before any call to the peer: an entry may be written, and a
-    // notification sent, only under the site that admitted the request.
+    // First, before any cache or notify call to the peer: an entry may be
+    // written, and a notification sent, only under the site that admitted
+    // the request.  (ConsiderResponseHeaders may already have asked the
+    // peer's pure content-type classifier, which touches no state.)
     if (!IsSiteId(request_.site)) {
       outcome.verdict = DaemonRecordVerdict::kRefuse;
       outcome.reason = daemon_record_reason::kNoSiteId;
