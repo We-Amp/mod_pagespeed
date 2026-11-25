@@ -913,6 +913,12 @@ def job_states(jobs, plans, listing, prefix=CALLER_PREFIX):
     for j, info in exp.items():
         if info["uses"]:
             names = sorted(n for n in entries if n == info["raw"] or n.startswith(info["raw"] + " / "))
+            if not names and j in REAL_RUN_ONLY:
+                # A skipped call is normally listed as one skipped job; a
+                # listing without it is read the same way (a real-run-only
+                # job that ran is still refused below, from its entries).
+                states[j] = "skipped"
+                continue
             if not names:
                 problems.append("check 5: job '%s' (%r) is missing from the listing" % (j, info["raw"]))
                 continue
@@ -1791,6 +1797,12 @@ def _verify_cases():
                         if e["name"].endswith("SLSA build provenance") else e for e in w["listing"]]
     case("refuse: the real pipeline file with the provenance call run in the candidate",
          real_file_provenance_ran, refused="job 'provenance' runs in a real run only")
+
+    def real_file_provenance_absent(w):
+        real_file(w)
+        w["listing"] = [e for e in w["listing"] if not e["name"].endswith("SLSA build provenance")]
+    case("accept: the real pipeline file with the provenance call absent from the candidate's listing",
+         real_file_provenance_absent, after=lambda w, b: (len(b["jobs"]) > 60, str(len(b["jobs"]))))
     case("refuse: this run's id is missing", kw(adopting_run=None), refused="this run's id")
 
     def ro(w, b):
