@@ -79,9 +79,10 @@ class TcpServerThreadForTesting : public ThreadSystem::Thread {
   // whatever the system picked. Updates actual_listening_port_.
   apr_socket_t* CreateAndBindSocket() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  // Static alternative of CreateAndBindSocket(), used in PickListenPortOnce.
+  // Static alternative of CreateAndBindSocket(), used in PickListenPortOnce,
+  // which binds without listening.
   static void CreateAndBindSocket(apr_pool_t* apr_pool, apr_socket_t** socket,
-                                  apr_port_t* port);
+                                  apr_port_t* port, bool listen);
 
   // Thread implementation.
   void Run() override;

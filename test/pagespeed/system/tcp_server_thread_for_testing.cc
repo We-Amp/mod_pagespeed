@@ -24,9 +24,10 @@
 #include <cstdlib>
 
 #include "apr_network_io.h"
+#include "apr_portable.h"
 #include "base/logging.h"
-#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/apache/apr_thread_compatible_pool.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -81,12 +82,14 @@ void TcpServerThreadForTesting::PickListenPortOnce(
   // A listen_port of 0 means the system will pick for us.
   *static_port_number = 0;
   // Looks like creating a socket and looking at its port is the easiest way
-  // to find an available port.
+  // to find an available port. The socket stays bound, without listening,
+  // until apr_terminate() destroys the pool's parent: a closed one would let
+  // another process, or the local end of any outgoing connection, take the
+  // port before a server thread binds it again. The servers share the port
+  // through SO_REUSEPORT.
   apr_pool_t* pool = AprCreateThreadCompatiblePool(nullptr);
   apr_socket_t* sock;
-  CreateAndBindSocket(pool, &sock, static_port_number);
-  apr_socket_close(sock);
-  apr_pool_destroy(pool);
+  CreateAndBindSocket(pool, &sock, static_port_number, /* listen= */ false);
   CHECK_NE(*static_port_number, 0);
 }
 
@@ -123,13 +126,20 @@ apr_port_t TcpServerThreadForTesting::GetListeningPort() {
 }
 
 /* static */ void TcpServerThreadForTesting::CreateAndBindSocket(
-    apr_pool_t* pool, apr_socket_t** socket, apr_port_t* port) {
+    apr_pool_t* pool, apr_socket_t** socket, apr_port_t* port, bool listen) {
   // Create TCP socket with SO_REUSEADDR.
   apr_status_t status =
       apr_socket_create(socket, APR_INET, SOCK_STREAM, APR_PROTO_TCP, pool);
   CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_socket_create";
   status = apr_socket_opt_set(*socket, APR_SO_REUSEADDR, 1);
   CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_socket_opt_set";
+  // Lets a server bind the port that PickListenPortOnce() keeps reserved.
+  apr_os_sock_t fd;
+  status = apr_os_sock_get(&fd, *socket);
+  CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_os_sock_get";
+  int one = 1;
+  CHECK_EQ(0, setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)))
+      << "CreateAndBindSocket SO_REUSEPORT";
 
   // port may be zero, in which case apr_socket_bind will pick a port for us.
   apr_sockaddr_t* sa;
@@ -140,8 +150,10 @@ apr_port_t TcpServerThreadForTesting::GetListeningPort() {
   // bind and listen.
   status = apr_socket_bind(*socket, sa);
   CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_socket_bind";
-  status = apr_socket_listen(*socket, 1 /* backlog */);
-  CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_socket_listen";
+  if (listen) {
+    status = apr_socket_listen(*socket, 1 /* backlog */);
+    CHECK_EQ(status, APR_SUCCESS) << "CreateAndBindSocket apr_socket_listen";
+  }
 
   // Now the socket is bound and listening, find the local port we're actually
   // using. If requested_listen_port_ is non-zero, they really should match.
@@ -158,7 +170,7 @@ apr_port_t TcpServerThreadForTesting::GetListeningPort() {
 apr_socket_t* TcpServerThreadForTesting::CreateAndBindSocket() {
   apr_socket_t* sock;
   apr_port_t port = requested_listen_port_;
-  CreateAndBindSocket(pool_, &sock, &port);
+  CreateAndBindSocket(pool_, &sock, &port, /* listen= */ true);
 
   actual_listening_port_ = port;
   ready_notify_->Broadcast();
