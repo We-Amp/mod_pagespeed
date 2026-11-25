@@ -175,13 +175,15 @@ ALWAYS_RUNS = (
     "gate-cpanel-smoke-el9",
     "gate-cpanel-smoke-el8",
     "validate",
-    # skipped in a candidate run (it uploads no sealed artifact); in an
-    # adopting run it records the provenance of the adopted set
-    "provenance",
 )
 
 # Jobs of the `release` environment: skipped in a candidate run.
 ENVIRONMENT_JOBS = ("windows-sign", "msi-sign", "sign-checksums", "create-release")
+
+# Jobs that only a real run has, outside the environment: skipped in a
+# candidate run like the environment jobs. `provenance` records the SLSA
+# provenance of the set, after `sign-checksums`.
+REAL_RUN_ONLY = ("provenance",)
 
 # Jobs that only a candidate run has.
 CANDIDATE_ONLY = ("candidate-seal",)
@@ -489,8 +491,8 @@ def parse_pipeline(text):
 
 def schema_doc():
     return {"adoptable": list(ADOPTABLE), "always_runs": list(ALWAYS_RUNS),
-            "environment": list(ENVIRONMENT_JOBS), "candidate_only": list(CANDIDATE_ONLY),
-            "reuploaded": list(REUPLOADED)}
+            "environment": list(ENVIRONMENT_JOBS), "real_run_only": list(REAL_RUN_ONLY),
+            "candidate_only": list(CANDIDATE_ONLY), "reuploaded": list(REUPLOADED)}
 
 
 def twin_of(job_id, jobs):
@@ -505,7 +507,8 @@ def schema_problems(jobs):
     """Problems with the job schema against a parsed pipeline file."""
     problems = []
     groups = (("adoptable", ADOPTABLE), ("always-runs", ALWAYS_RUNS),
-              ("environment", ENVIRONMENT_JOBS), ("candidate-only", CANDIDATE_ONLY))
+              ("environment", ENVIRONMENT_JOBS), ("real-run-only", REAL_RUN_ONLY),
+              ("candidate-only", CANDIDATE_ONLY))
     where = {}
     for label, group in groups:
         for j in group:
@@ -537,7 +540,7 @@ UPLOAD_USES_RE = re.compile(r"uses:\s*actions/upload-artifact@")
 ANCHOR_RE = re.compile(r"^([&*])([A-Za-z0-9_-]+)$")
 # Jobs that never produce a sealed artifact in a candidate run: `adopt`
 # re-uploads only in an adopting run, and the environment jobs are skipped.
-NOT_PRODUCERS = ("adopt",) + ENVIRONMENT_JOBS
+NOT_PRODUCERS = ("adopt",) + ENVIRONMENT_JOBS + REAL_RUN_ONLY
 
 
 def parse_uploads(text):
@@ -950,6 +953,10 @@ def job_states(jobs, plans, listing, prefix=CALLER_PREFIX):
         if j in ENVIRONMENT_JOBS:
             if st != "skipped":
                 problems.append("check 5: job '%s' of the release environment concluded %s, expected skipped" % (j, st))
+            continue
+        if j in REAL_RUN_ONLY:
+            if st != "skipped":
+                problems.append("check 5: job '%s' runs in a real run only but concluded %s, expected skipped" % (j, st))
             continue
         t = twin_of(j, jobs)
         if t is not None:
@@ -1766,7 +1773,7 @@ def _verify_cases():
         w["set_seal"](d)
         listing = []
         for j, info in expand_expected(jobs, plans).items():
-            if j in ENVIRONMENT_JOBS or (twin_of(j, jobs) and j.endswith("-hosted")):
+            if j in ENVIRONMENT_JOBS or j in REAL_RUN_ONLY or (twin_of(j, jobs) and j.endswith("-hosted")):
                 listing.append(_job(info["raw"], "skipped"))
             elif info["uses"]:
                 listing.append(_job(info["raw"] + " / inner"))
@@ -1777,6 +1784,13 @@ def _verify_cases():
         w.update(pipeline=text, listing=listing)
     case("accept: the real pipeline file, every job and matrix leg expanded, fleet legs ran and hosted twins skipped",
          real_file, after=lambda w, b: (len(b["jobs"]) > 60, str(len(b["jobs"]))))
+
+    def real_file_provenance_ran(w):
+        real_file(w)
+        w["listing"] = [dict(e, name=e["name"] + " / generator", conclusion="success")
+                        if e["name"].endswith("SLSA build provenance") else e for e in w["listing"]]
+    case("refuse: the real pipeline file with the provenance call run in the candidate",
+         real_file_provenance_ran, refused="job 'provenance' runs in a real run only")
     case("refuse: this run's id is missing", kw(adopting_run=None), refused="this run's id")
 
     def ro(w, b):
@@ -2232,8 +2246,9 @@ def self_test():
     except (OSError, PipelineError) as e:
         real_jobs, probs = {}, [str(e)]
     check("every job of the real pipeline file is in exactly one schema group", not probs, "; ".join(probs))
-    check("the schema prints as the four groups and the re-uploaded set",
-          sorted(schema_doc()) == ["adoptable", "always_runs", "candidate_only", "environment", "reuploaded"]
+    check("the schema prints as the five groups and the re-uploaded set",
+          sorted(schema_doc()) == ["adoptable", "always_runs", "candidate_only", "environment", "real_run_only",
+                                   "reuploaded"]
           and set(REUPLOADED) <= set(SEALED))
 
     named = parse_pipeline("jobs:\n  s:\n    name: \"Sign it${{ needs.adopt.outputs.adopted == 'true' && "

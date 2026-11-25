@@ -4873,13 +4873,16 @@ jobs:
   # ---------------------------------------------------------------------
   # SLSA build provenance (multiple.intoto.jsonl): the generic generator of
   # the SLSA project signs, keyless, an in-toto statement whose subjects are
-  # the attestation subjects that `validate` chose. Real runs only, like
-  # `sign-checksums`: a dry run, a candidate and a rehearsal sign nothing, so
-  # unreleased files never reach the public transparency log. The
+  # the attestation subjects that `validate` chose. Real runs only, and only
+  # after `sign-checksums`, so after the `release` environment's approval: a
+  # dry run, a candidate, a rehearsal and a rejected approval sign nothing,
+  # and unreleased files never reach the public transparency log. The
   # generator only uploads the statement as a run artifact
   # (`upload-assets: false`, pinned by the shape gate's slsa rule): it never
   # touches a release. `create-release` checks the statement against the set
-  # and adds it to the draft. The generator is referenced by its version tag,
+  # (tools/ci/check_slsa_provenance.py) and adds it to the draft. The
+  # artifact is kept as long as the generator keeps it (5 days in v2.1.0): a
+  # `create-release` re-run after that needs `provenance` re-run too. The generator is referenced by its version tag,
   # not a commit: it verifies its own ref and refuses a commit SHA. Its jobs
   # run on GitHub-hosted runners. The permissions are the ones its jobs
   # declare (a called workflow cannot get more than its caller grants, and
@@ -4888,8 +4891,8 @@ jobs:
   # ---------------------------------------------------------------------
   provenance:
     name: SLSA build provenance
-    needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    needs: [version, validate, sign-checksums]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     permissions:
       actions: read
       id-token: write
@@ -4975,14 +4978,9 @@ jobs:
           [ "$(jq -r .prerelease dist/manifest.json)" = "$IS_PRERELEASE" ] || { echo "::error::the manifest and the version disagree on the pre-release state"; exit 1; }
           [ -s signature/SHA256SUMS.asc ] || { echo "::error::no signature"; exit 1; }
           [ -s signature/SHA256SUMS.sigstore.json ] || { echo "::error::no Sigstore bundle"; exit 1; }
-          [ -s provenance/multiple.intoto.jsonl ] || { echo "::error::no SLSA provenance"; exit 1; }
-          jq -r '.payload' provenance/multiple.intoto.jsonl | base64 -d > provenance/statement.json
-          jq -e '.predicateType | startswith("https://slsa.dev/provenance/")' provenance/statement.json >/dev/null \
-            || { echo "::error::the provenance is not a SLSA provenance statement"; exit 1; }
-          jq -r '.subject[] | "\(.digest.sha256)  \(.name)"' provenance/statement.json > provenance/subjects.sha256
-          [ -s provenance/subjects.sha256 ] || { echo "::error::the provenance has no subject"; exit 1; }
-          (cd dist && sha256sum -c ../provenance/subjects.sha256)
-          grep -qE '  SHA256SUMS$' provenance/subjects.sha256 || { echo "::error::SHA256SUMS is not a subject of the provenance"; exit 1; }
+          # One way by design: the pinned optimizer packages are in the set but
+          # not subjects (the optimizer's own release attests them).
+          python3 -I tooling/tools/ci/check_slsa_provenance.py verify provenance/multiple.intoto.jsonl dist
           cp signature/SHA256SUMS.asc dist/SHA256SUMS.asc
           cp signature/SHA256SUMS.sigstore.json dist/SHA256SUMS.sigstore.json
           cp provenance/multiple.intoto.jsonl dist/multiple.intoto.jsonl

@@ -430,9 +430,10 @@ use them.
 from its own artifact listing, checks each zip against the API digest and the
 files against `adopt-binding.json`, and records the new id and digest.
 `binding-hash` prints, and optionally checks, the hash of `adopt-binding.json`.
-`schema --print` lists which jobs an adopting run skips, which always run and
-which belong to the environment; a self-test fails when a job of the pipeline
-file is in none of those groups.
+`schema --print` lists which jobs an adopting run skips, which always run,
+which belong to the environment and which run in a real run only (outside the
+environment: `provenance`); a self-test fails when a job of the pipeline file
+is in none of those groups.
 
 `seal` accepts `--plan JOB=JSON` for each plan job (`nginx-x64-plan`,
 `nginx-arm64-plan`) and records them as `plans` in the seal. The key is
@@ -534,32 +535,43 @@ It does everything a dry run does, and then, in this order:
    workflow cannot get more than its caller grants, but the job's if: keeps
    a dry run, a candidate and a rehearsal out, so none of them signs or
    attests anything.
-4. `provenance` (next to `sign-checksums`, after `validate`) calls the SLSA
-   project's generic generator
+4. `provenance` (after `sign-checksums`, so after the environment's
+   approval) calls the SLSA project's generic generator
    (`slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml`,
    by version tag: the generator verifies its own ref and refuses a commit
    SHA) with the attestation subjects that `validate` chose (its output
    `provenance_subjects`, the `sha256sum` lines base64 encoded). The
-   generator signs an SLSA v1 provenance statement keyless and uploads it as
-   the run artifact `multiple.intoto.jsonl`, nothing else: `upload-assets` is
-   false, which the shape gate's slsa rule pins, so it never writes to a
-   release. Its jobs run on GitHub-hosted runners and declare `actions:
-   read`, `id-token: write` and, for the upload job that never runs,
+   generator signs, keyless, an in-toto statement with an SLSA provenance
+   v0.2 predicate and uploads it, as a Sigstore bundle, in the run artifact
+   `multiple.intoto.jsonl`, nothing else: `upload-assets` is false, which
+   the shape gate's slsa rule pins, so it never writes to a release. Its
+   jobs run on GitHub-hosted runners and declare `actions: read`,
+   `id-token: write` and, for the upload job that never runs,
    `contents: write`; the call job grants exactly those, as both callers do.
-   Its if: is the one of `sign-checksums`: a dry run, a candidate and a
-   rehearsal sign nothing (the candidate seal would also refuse an artifact
-   it does not know). GitHub still resolves the call when a dry run starts
-   (a permission the caller does not grant fails the run there), then skips
-   it.
+   Its if: is the one of `sign-checksums` plus that job's success: a dry
+   run, a candidate, a rehearsal and a rejected approval sign nothing (the
+   candidate seal would also refuse an artifact it does not know;
+   `release_adopt.py` lists the job as real-run-only, so an adopting run
+   expects it skipped in the candidate). GitHub still resolves the call when
+   a dry run starts (a permission the caller does not grant fails the run
+   there), then skips it. The generator keeps the artifact 5 days (its
+   v2.1.0 setting): a `create-release` re-run after that fails at the
+   download and needs `provenance` re-run first (whether a re-run attempt
+   may upload an artifact of the same name again is not verified here).
 5. `create-release` (which needs `provenance`) creates a draft release for
    the tag with every asset, `SHA256SUMS.asc`, `SHA256SUMS.sigstore.json` and
-   `multiple.intoto.jsonl`, after checking that the statement is an SLSA
-   provenance and that each of its subjects is a file of the set with its
-   digest (`SHA256SUMS` included); it downloads the draft's assets and checks
-   them against `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
-   release flagged as a pre-release and not as the latest one. The release
-   is never promoted any further: nothing is published to a package
-   repository and no other repository is notified.
+   `multiple.intoto.jsonl`, after `tools/ci/check_slsa_provenance.py` (from
+   master; `--self-test` runs in the CI tooling job against a real v2.1.0
+   bundle) has checked that the file is a Sigstore bundle (or a bare DSSE
+   envelope) of an in-toto statement with an SLSA provenance predicate and
+   that each of its subjects is a file of the set with its digest
+   (`SHA256SUMS` included). The check is one way here: the pinned optimizer
+   packages are in the set but not subjects. It then downloads the draft's
+   assets and checks them against `SHA256SUMS`, then publishes it. A
+   pre-release tag (`-rc.1`) produces a release flagged as a pre-release and
+   not as the latest one. The release is never promoted any further: nothing
+   is published to a package repository and no other repository is
+   notified.
 
 Before the first real run, someone with admin rights enters the following.
 
@@ -670,7 +682,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
 | `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets`; in an adopting run applies the adoption rule above |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master; then, keyless, records the build provenance and SBOM attestations of the module's files and signs `SHA256SUMS` with cosign (`SHA256SUMS.sigstore.json`), and verifies both as a user would |
-| `provenance` | the SLSA generator's GitHub-hosted jobs, real run only | the keyless SLSA provenance of the attestation subjects, as the run artifact `multiple.intoto.jsonl` (never uploaded to a release by the generator) |
+| `provenance` | the SLSA generator's GitHub-hosted jobs, real run only, after `sign-checksums` | the keyless SLSA provenance of the attestation subjects, as the run artifact `multiple.intoto.jsonl` (never uploaded to a release by the generator) |
 | `create-release` | hosted, environment `release`, real run only | checks the SLSA provenance against the set, creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
@@ -1146,9 +1158,11 @@ tags to the module lane. The asset set is checked by `release_manifest.py`
 with the profile `nginxorg`: one package per cell, nothing else, and the
 manifest also carries `nginx_version` and `nginx_sha256`. A real run also
 records the SLSA provenance of every file and `SHA256SUMS`
-(`multiple.intoto.jsonl`, the `provenance` job, the same generator call as
-the module lane's), which `create-release` checks against the set and adds
-to the release; a dry run of this lane does not record it.
+(`multiple.intoto.jsonl`, the `provenance` job after `sign-checksums`, the
+same generator call as the module lane's), which `create-release` checks
+against the set with `tools/ci/check_slsa_provenance.py --exact` (the
+subjects are exactly the files and `SHA256SUMS`) and adds to the release; a
+dry run of this lane does not record it.
 
 Every job runs on a GitHub-hosted runner.
 
@@ -1176,6 +1190,7 @@ the version check before anything is published.
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
 | `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
+| `tools/ci/check_slsa_provenance.py` | the SLSA provenance against the set before `create-release` attaches it: a Sigstore bundle or DSSE envelope of an SLSA provenance statement, every subject a file of the set with its digest, `--exact` for a statement that covers the whole set (`--self-test`, against the real v2.1.0 bundle in `tools/ci/testdata/slsa-provenance/`) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |
