@@ -109,7 +109,10 @@ function Probe-Request([string]$Case, [int]$P, [string]$Target, [string]$Method 
 
 function Setup {
     $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
-    & cmd.exe /c "`"$appcmd`" delete backup pipeprobe-before >nul 2>&1"
+    # Never replace a backup an earlier run left: it holds the clean state.
+    if (Test-Path "$env:windir\system32\inetsrv\backup\pipeprobe-before") {
+        throw "the IIS backup pipeprobe-before exists from an earlier run; restore and delete it first"
+    }
     & $appcmd add backup "pipeprobe-before" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "taking the IIS configuration backup failed" }
     New-Item -ItemType Directory -Force "$Root\log", "$Root\bin", $FrebDir | Out-Null
@@ -183,7 +186,11 @@ function Setup {
     Add-WebConfigurationProperty -PSPath $Apphost -Filter "system.webServer/modules" -Name "." -Value @{ name = "PipeProbeG" }
     $mods = @(Get-WebConfiguration "system.webServer/modules/add" -PSPath $Apphost | ForEach-Object { $_.name })
     Write-Output ("SETUP | module order (tail) | {0}" -f (($mods | Select-Object -Last 6) -join ","))
-    foreach ($s in @($Main, $Same, $Other)) { Remove-Item -Recurse -Force ("C:\ProgramData\We-Amp\PageSpeed\cache\{0}.ROOT" -f (Get-Website -Name $s).id) -ErrorAction SilentlyContinue }
+    # The probe sites' ids, so teardown can remove their module caches: a
+    # later site that reuses an id must not inherit the probe's entries.
+    $ids = @(foreach ($s in @($Main, $Same, $Other)) { (Get-Website -Name $s).id })
+    Set-Content -LiteralPath "$Root\site-ids.txt" -Value $ids -Encoding ASCII
+    foreach ($id in $ids) { Remove-Item -Recurse -Force ("C:\ProgramData\We-Amp\PageSpeed\cache\{0}.ROOT" -f $id) -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
@@ -201,6 +208,12 @@ function Teardown {
     if ($LASTEXITCODE -ne 0) { throw "restoring the IIS configuration backup failed" }
     & $appcmd delete backup "pipeprobe-before" | Out-Null
     Start-Sleep -Seconds 2
+    if (Test-Path "$Root\site-ids.txt") {
+        foreach ($id in (Get-Content -LiteralPath "$Root\site-ids.txt")) {
+            if ($id -match '^\d+$') { Remove-Item -Recurse -Force ("C:\ProgramData\We-Amp\PageSpeed\cache\{0}.ROOT" -f $id) -ErrorAction SilentlyContinue }
+        }
+        Remove-Item -Force "$Root\site-ids.txt"
+    }
     Remove-Item -Recurse -Force "$Root\www", "$Root\log", $FrebDir -ErrorAction SilentlyContinue
     Write-Output ("TEARDOWN | done | configuration restored; probe sites left: {0}" -f @(Get-Website | Where-Object { $_.name -like "probe-*" }).Count)
 }

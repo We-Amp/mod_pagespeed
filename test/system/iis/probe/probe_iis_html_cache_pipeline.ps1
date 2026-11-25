@@ -21,16 +21,18 @@
 #
 # Exit codes: 0 the matrix ran; 2 precondition not met; 1 anything else.
 #
-# Run as Administrator on the Hyper-V host. The guest Administrator
-# credential is -Credential, or else the runner environment's
-# CI_IIS_VM_ADMIN_PASSWORD (docs/ci/runner-environment.md); it is never
-# printed. The guest is changed only for the run: use a lab guest, never
-# one a CI gate restores. Windows PowerShell 5.1 compatible; ASCII only.
+# Run as Administrator on the Hyper-V host, against a lab guest. -VMName
+# and -Credential (the guest Administrator) are required; the credential is
+# never printed. The guest is changed for the run, so the script refuses
+# the guest a CI gate restores (CI_IIS_VM_NAME, docs/ci/runner-environment.md),
+# and refuses a guest that still holds the configuration backup of an
+# earlier run that did not finish. Windows PowerShell 5.1 compatible;
+# ASCII only.
 
 [CmdletBinding()]
 param(
-    [string]$VMName = $env:CI_IIS_VM_NAME,
-    [System.Management.Automation.PSCredential]$Credential = $null,
+    [Parameter(Mandatory = $true)][string]$VMName,
+    [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credential,
     [string]$WorkDir = (Join-Path $env:TEMP "iis-pipeline-probe"),
     [int]$Port = 8201,
     [string]$OutFile = ""
@@ -43,11 +45,9 @@ function Say([string]$Line) {
     if ($OutFile) { Add-Content -LiteralPath $OutFile -Value $Line -Encoding ASCII }
 }
 
-if (-not $VMName) { Say "PRECONDITION | no -VMName and no CI_IIS_VM_NAME"; exit 2 }
-if (-not $Credential) {
-    if (-not $env:CI_IIS_VM_ADMIN_PASSWORD) { Say "PRECONDITION | no -Credential and no CI_IIS_VM_ADMIN_PASSWORD"; exit 2 }
-    $Credential = New-Object System.Management.Automation.PSCredential("Administrator",
-        (ConvertTo-SecureString $env:CI_IIS_VM_ADMIN_PASSWORD -AsPlainText -Force))
+if ($env:CI_IIS_VM_NAME -and $VMName -eq $env:CI_IIS_VM_NAME) {
+    Say "PRECONDITION | -VMName names the guest a CI gate restores; use a lab guest"
+    exit 2
 }
 
 & (Join-Path $PSScriptRoot "build_iis_pipeline_probe.ps1") -OutDir $WorkDir
@@ -59,6 +59,11 @@ $exitCode = 0
 try {
     $pre = Invoke-Command -Session $session -ScriptBlock {
         if (-not (Test-Path "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll")) { return "module not installed" }
+        # A backup left by an earlier run that did not finish holds the
+        # clean configuration; never replace it.
+        if (Test-Path "$env:windir\system32\inetsrv\backup\pipeprobe-before") {
+            return "an earlier run left the IIS backup pipeprobe-before: restore it (appcmd restore backup pipeprobe-before), delete it, then run again"
+        }
         foreach ($f in @("Web-Dyn-Compression", "Web-Stat-Compression", "Web-Http-Tracing", "Web-Asp-Net45")) {
             $w = Get-WindowsFeature -Name $f
             if ($w -eq $null -or -not $w.Installed) { return "feature $f not installed" }
