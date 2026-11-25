@@ -46,6 +46,7 @@
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/header_util.h"
 #include "pagespeed/apache/html_flush_window.h"
+#include "pagespeed/apache/in_place_record_brigade.h"
 #include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/apache/instaweb_handler.h"
 // clang-format off
@@ -862,18 +863,11 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
   IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
   CHECK(recorder != nullptr);
 
-  bool first = true;
-
-  // Iterate through all buckets, saving content in the recorder and passing
-  // the buckets along when there is a flush.  Abort early if we hit EOS or the
-  // recorder fails.
-  for (apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
-       !(bucket == APR_BRIGADE_SENTINEL(bb) || APR_BUCKET_IS_EOS(bucket) ||
-         recorder->failed());
-       bucket = APR_BUCKET_NEXT(bucket)) {
-    if (!APR_BUCKET_IS_METADATA(bucket)) {
-      if (first) {
-        first = false;
+  // Feed the body to the recorder.  The walk stops at EOS, or as soon as the
+  // recorder no longer wants the body -- a response it will not record, HTML
+  // above all, is not read at all, so its FILE buckets stay FILE buckets.
+  const apr_status_t return_code =
+      FeedBrigadeToInPlaceRecorder(bb, recorder, [request, recorder]() {
         ResponseHeaders response_headers(recorder->http_options());
         ApacheRequestToResponseHeaders(*request, &response_headers, nullptr);
 
@@ -899,46 +893,11 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
 
         recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
                                           &response_headers);
-      }
-
-      if (recorder->failed()) {
-        break;
-      }
-
-      // Content bucket.
-      const char* buf = nullptr;
-      size_t bytes = 0;
-      // Note: Each call to apr_bucket_read() on a FILE bucket will pull in
-      // some of the file into a HEAP bucket. Since we do not pass those
-      // buckets to the next filter until the end of this function, we are
-      // basically buffering up the entire size of the file into memory.
-      //
-      // Apache documentation says not to do this because of the memory issues:
-      //   http://httpd.apache.org/docs/developer/output-filters.html#filtering
-      // ... but since our whole point here is to load the resource into
-      // memory, it seems reasonable.
-      //
-      // TODO(sligocki): Should we do an APR_NONBLOCK_READ? mod_content_length
-      // seems to do that, but has to deal with APR_STATUS_IS_EAGAIN() and
-      // splitting the brigade, etc.
-      apr_status_t return_code =
-          apr_bucket_read(bucket, &buf, &bytes, APR_BLOCK_READ);
-      if (return_code != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, return_code, request,
-                      "Reading bucket failed (rcode=%d)", return_code);
-        recorder->Fail();
-        return return_code;
-      }
-      StringPiece contents(buf, bytes);
-      recorder->Write(contents, recorder->handler());
-    } else if (APR_BUCKET_IS_FLUSH(bucket)) {
-      recorder->Flush(recorder->handler());
-    } else if (AP_BUCKET_IS_ERROR(bucket)) {
-      // The handler or an earlier filter ended the response abnormally (for
-      // example a proxied backend that failed mid-transfer).  What has been
-      // buffered is not the whole response and must never be recorded.
-      recorder->Fail();
-    }
+      });
+  if (return_code != APR_SUCCESS) {
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, return_code, request,
+                  "Reading bucket failed (rcode=%d)", return_code);
+    return return_code;
   }
 
   // instaweb_in_place_check_headers_filter cleans up the recorder.

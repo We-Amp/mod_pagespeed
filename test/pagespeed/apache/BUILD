@@ -48,6 +48,7 @@ pagespeed_cc_test(
         "daemon_seam_test.cc",
         "header_util_test.cc",
         "in_place_not_modified_vary_fetch_test.cc",
+        "in_place_record_brigade_test.cc",
         "inplace_url_agreement_note_test.cc",
         "instaweb_context_test.cc",
         "log_message_handler_test.cc",

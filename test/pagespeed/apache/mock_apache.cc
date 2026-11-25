@@ -407,4 +407,24 @@ void ap_hook_optional_fn_retrieve(ap_HOOK_optional_fn_retrieve_t* pf,
   // Do nothing - mock for testing.
 }
 
+static apr_status_t error_bucket_read(apr_bucket* bucket, const char** str,
+                                      apr_size_t* len, apr_read_type_e block) {
+  *str = nullptr;
+  *len = 0;
+  return APR_SUCCESS;
+}
+
+// httpd's ERROR bucket type, for code that tests AP_BUCKET_IS_ERROR: that
+// macro compares a bucket's type with this object's address, so a test can
+// make an ERROR bucket by giving a metadata bucket this type.
+const apr_bucket_type_t ap_bucket_type_error = {
+    "ERROR",
+    5,
+    apr_bucket_type_t::APR_BUCKET_METADATA,
+    apr_bucket_destroy_noop,
+    error_bucket_read,
+    apr_bucket_setaside_notimpl,
+    apr_bucket_split_notimpl,
+    apr_bucket_simple_copy};
+
 }  // extern "C"
