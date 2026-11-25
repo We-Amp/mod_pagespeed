@@ -133,7 +133,7 @@ test.describe("Table semantics", () => {
   test("Savings: each table has a name and each row a type or host as its header", async ({ page }) => {
     await mockAdmin(page, "pagespeed_global_admin", rigWholeServerReplies());
     await openConsole(page, "pagespeed_global_admin", "#/savings");
-    await expect(page.getByRole("table", { name: "Module rewrites, by type" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "Saved at rewrite time, by type" })).toBeVisible();
     const optimizer = page.getByRole("table", { name: "Optimizer cache serves, by type" });
     await expect(optimizer).toBeVisible();
     await expect(optimizer.getByRole("rowheader", { name: "CSS" })).toBeVisible();

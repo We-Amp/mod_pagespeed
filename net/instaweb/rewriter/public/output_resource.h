@@ -147,6 +147,23 @@ class OutputResource : public Resource {
   // resource during the HTML rewriter.
   bool IsWritten() const { return writing_complete_; }
 
+  // The size record of this output: made when it is written, and attached to
+  // the copy of the headers that is stored with it (see EndWrite), never to
+  // response_headers(), which are what a client is sent when a freshly
+  // written output is served.  An output linked from the cache answers with
+  // the record stored in the entry it was read from.
+  void set_size_record(const ResponseHeaders::SizeRecord& record) {
+    size_record_ = record;
+    has_size_record_ = true;
+  }
+  bool GetSizeRecord(ResponseHeaders::SizeRecord* record) const override {
+    if (has_size_record_) {
+      *record = size_record_;
+      return true;
+    }
+    return Resource::GetSizeRecord(record);
+  }
+
   // Sets the type of the output resource, and thus also its suffix.
   void SetType(const ContentType* type) override;
 
@@ -233,6 +250,9 @@ class OutputResource : public Resource {
   GoogleString DumpFileName() const;
 
   bool writing_complete_;
+
+  bool has_size_record_ = false;
+  ResponseHeaders::SizeRecord size_record_;
 
   // TODO(jmarantz): We have a complicated semantic for CachedResult
   // ownership as we transition from rewriting inline while html parsing

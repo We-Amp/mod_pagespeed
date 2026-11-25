@@ -53,6 +53,7 @@
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "net/instaweb/rewriter/public/served_savings.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -661,7 +662,20 @@ class RewriteContext::ResourceReconstructCallback
 
   ~ResourceReconstructCallback() override {}
 
+  // The nested driver answers with one of the module's own outputs and says
+  // what its sizes are.  Kept until the response is complete.
+  void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) override {
+    size_record_ = record;
+    has_size_record_ = true;
+  }
+
   void HandleDone(bool success) override {
+    if (success && has_size_record_) {
+      // The rewrite this resource is an input of starts from the size of
+      // the files the output was made from, not from the output's own size.
+      resource_->set_size_record(size_record_);
+    }
     // Compute the final post-write state of the object, including the hash.
     // Also takes care of dropping creation lock.
     resource_->EndWrite(driver_->message_handler());
@@ -685,6 +699,8 @@ class RewriteContext::ResourceReconstructCallback
   RewriteDriver* driver_;
   ResourceCallbackUtils delegate_;
   OutputResourcePtr resource_;
+  bool has_size_record_ = false;
+  ResponseHeaders::SizeRecord size_record_;
   ResourceReconstructCallback(const ResourceReconstructCallback&) = delete;
   ResourceReconstructCallback& operator=(const ResourceReconstructCallback&) =
       delete;
@@ -856,8 +872,9 @@ class RewriteContext::FetchContext {
     handler_->Message(kInfo,
                       "Deadline exceeded for rewrite of resource %s with %s.",
                       input->UrlForDebug().c_str(), rewrite_context_->id());
+    // The original goes out: no size record, nothing is counted.
     FetchFallbackDoneImpl(input->ExtractUncompressedContents(),
-                          input->UncompressedHeaders());
+                          input->UncompressedHeaders(), nullptr);
   }
 
   // Note that the callback is called from the RewriteThread.
@@ -903,17 +920,30 @@ class RewriteContext::FetchContext {
               response_headers);
         }
         StringPiece contents = output_resource_->ExtractUncompressedContents();
-        ok = RewriteContext::WriteWholeResponse(original_output_url_, contents,
-                                                async_fetch_, handler_);
+        // The output that was just built is what goes out: an optimized
+        // response, counted with the sizes recorded when it was written.
+        ResponseHeaders::SizeRecord size_record;
+        const bool has_size_record =
+            output_resource_->GetSizeRecord(&size_record);
+        ok = RewriteContext::WriteWholeResponse(
+            original_output_url_, contents, async_fetch_, handler_,
+            rewrite_context_->Driver(),
+            has_size_record ? &size_record : nullptr);
       } else if (rewrite_context_->FailOnHashMismatch() &&
                  !rewrite_context_->fetch_left_out_inputs_) {
         FailForHashMismatch();
         return;
       } else {
         // Our rewrite produced a different hash than what was requested;
-        // we better not give it an ultra-long TTL.
+        // we better not give it an ultra-long TTL.  It is the output that
+        // was just built all the same: an optimized response, counted with
+        // the sizes recorded when it was written.
         StringPiece contents = output_resource_->ExtractUncompressedContents();
-        FetchFallbackDone(contents, output_resource_->UncompressedHeaders());
+        ResponseHeaders::SizeRecord size_record;
+        const bool has_size_record =
+            output_resource_->GetSizeRecord(&size_record);
+        FetchFallbackDone(contents, output_resource_->UncompressedHeaders(),
+                          has_size_record ? &size_record : nullptr);
         return;
       }
     } else {
@@ -945,8 +975,10 @@ class RewriteContext::FetchContext {
             AdjustCacheControl();
             StringPiece contents =
                 input_resource->ExtractUncompressedContents();
-            ok = rewrite_context_->SendFallbackResponse(
-                original_output_url_, contents, async_fetch_, handler_);
+            // The original goes out: no size record, nothing is counted.
+            ok = rewrite_context_->SendFallbackResponse(original_output_url_,
+                                                        contents, async_fetch_,
+                                                        handler_, nullptr);
           } else {
             handler_->Message(kWarning,
                               "No output partitions for fallback fetch of %s",
@@ -985,21 +1017,29 @@ class RewriteContext::FetchContext {
   // to serve --- either a version with a different hash, or that we should
   // serve the original. In this case, we serve it out, but with shorter headers
   // than usual.
+  //
+  // Whether the bytes are optimized is a property of each call, not of the
+  // rewrite: `size_record` is the size record of `contents` when they are an
+  // optimized output that has one, and null when they are original bytes or
+  // an output without one.  Only a response with a record can be counted as
+  // an optimized response sent (see ServedSavings).
   void FetchFallbackDone(const StringPiece& contents,
-                         const ResponseHeaders* headers) {
+                         const ResponseHeaders* headers,
+                         const ResponseHeaders::SizeRecord* size_record) {
     CancelDeadlineAlarm();
     if (detached_) {
       rewrite_context_->Driver()->DetachedFetchComplete();
       return;
     }
 
-    FetchFallbackDoneImpl(contents, headers);
+    FetchFallbackDoneImpl(contents, headers, size_record);
   }
 
   // Backend for FetchFallbackCacheDone, but can be also invoked
   // for main rewrite when background rewrite is detached.
   void FetchFallbackDoneImpl(const StringPiece& contents,
-                             const ResponseHeaders* headers) {
+                             const ResponseHeaders* headers,
+                             const ResponseHeaders::SizeRecord* size_record) {
     async_fetch_->response_headers()->CopyFrom(*headers);
     if (rewrite_context_->num_output_partitions() != 1) {
       LOG(WARNING) << "FetchFallbackDoneImpl: expected 1 output partition, got "
@@ -1032,7 +1072,7 @@ class RewriteContext::FetchContext {
     }
 
     bool ok = rewrite_context_->SendFallbackResponse(
-        original_output_url_, contents, async_fetch_, handler_);
+        original_output_url_, contents, async_fetch_, handler_, size_record);
 
     // Like FetchDone, we success false if not a 200.
     ok &= headers->status_code() == HttpStatus::kOK;
@@ -3432,8 +3472,15 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
   if (usable) {
     DCHECK(!response_headers->IsGzipped() ||
            Driver()->request_context()->accepts_gzip());
-    // We want to serve the found result, with short cache lifetime.
-    fetch_->FetchFallbackDone(contents, response_headers);
+    // We want to serve the found result, with short cache lifetime.  An
+    // optimized output was stored with its size record; the original input
+    // has none, which is what tells the two apart when the response is
+    // offered for counting.  The record is read here, from the stored
+    // headers, because it is dropped from the response's own copy.
+    ResponseHeaders::SizeRecord size_record;
+    const bool has_size_record = response_headers->GetSizeRecord(&size_record);
+    fetch_->FetchFallbackDone(contents, response_headers,
+                              has_size_record ? &size_record : nullptr);
   } else {
     StartFetchReconstruction();
   }
@@ -3630,21 +3677,40 @@ bool RewriteContext::IsFallbackContentTypeAllowed(StringPiece output_url_base,
   return true;
 }
 
-bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
-                                          StringPiece contents,
-                                          AsyncFetch* async_fetch,
-                                          MessageHandler* handler) {
+bool RewriteContext::SendFallbackResponse(
+    StringPiece output_url_base, StringPiece contents, AsyncFetch* async_fetch,
+    MessageHandler* handler, const ResponseHeaders::SizeRecord* size_record) {
   if (!IsFallbackContentTypeAllowed(output_url_base, async_fetch, handler)) {
     return false;
   }
-  return WriteWholeResponse(output_url_base, contents, async_fetch, handler);
+  // `contents` goes out as it is.  When it is the cache's compressed copy the
+  // record still holds the sizes before compression, on both sides.
+  return WriteWholeResponse(output_url_base, contents, async_fetch, handler,
+                            Driver(), size_record);
 }
 
-bool RewriteContext::WriteWholeResponse(StringPiece url, StringPiece contents,
-                                        AsyncFetch* async_fetch,
-                                        MessageHandler* handler) {
-  return CompleteWholeResponseHeaders(url, contents, async_fetch, handler) &&
-         async_fetch->Write(contents, handler);
+bool RewriteContext::WriteWholeResponse(
+    StringPiece url, StringPiece contents, AsyncFetch* async_fetch,
+    MessageHandler* handler, const RewriteDriver* driver,
+    const ResponseHeaders::SizeRecord* size_record) {
+  if (!CompleteWholeResponseHeaders(url, contents, async_fetch, handler) ||
+      !async_fetch->Write(contents, handler)) {
+    return false;
+  }
+  if (driver != nullptr && size_record != nullptr) {
+    if (driver->is_nested()) {
+      // The module's own fetch of this output, as the input of another
+      // rewrite: that rewrite starts from these sizes.
+      async_fetch->SetOwnOutputSizeRecord(*size_record);
+    }
+    ServedSavings::Response served;
+    served.nested_driver = driver->is_nested();
+    served.request_headers = async_fetch->request_headers();
+    served.status_code = async_fetch->response_headers()->status_code();
+    served.size_record = size_record;
+    ServedSavings::Record(served, driver->server_context()->rewrite_stats());
+  }
+  return true;
 }
 
 bool RewriteContext::CompleteWholeResponseHeaders(StringPiece url,

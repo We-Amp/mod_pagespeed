@@ -93,6 +93,19 @@ class AsyncFetch : public Writer {
     return Write(mmap_sp, handler);
   }
 
+  // Hands this fetch the size record of the rewritten output it is being
+  // answered with (see ResponseHeaders::SizeRecord).  Only the module makes
+  // this call, and only when it answers its own fetch of one of its outputs
+  // inside the server, for use as the input of another rewrite.  Response
+  // headers never carry a record past HeadersComplete(), and nothing that
+  // reads a response from the network calls this, so a record cannot arrive
+  // from outside the server.
+  //
+  // The default ignores it.  A wrapping fetch does not pass it on unless it
+  // is written to: one that changes the body would make the record wrong.
+  virtual void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) {}
+
   // Copy-free serve of an owned, refcounted cache value.  'content' MUST
   // point into the bytes kept alive by 'storage'.  Unlike WriteMapped this
   // path carries owned heap storage with refcount lifetime only -- never

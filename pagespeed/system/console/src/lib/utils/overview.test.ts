@@ -594,6 +594,58 @@ describe("overviewVerdict", () => {
     expect(v.lead).toBeNull();
   });
 
+  describe("with the delivered sizes", () => {
+    const rewriteTime = {
+      css_filter_total_bytes_saved: 0,
+      css_filter_total_original_bytes: 0,
+      javascript_total_bytes_saved: 0,
+      javascript_total_original_bytes: 0,
+      image_rewrite_total_bytes_saved: 0,
+      image_rewrite_total_original_bytes: 0,
+    };
+    const sentZero = {
+      image_served_original_bytes: 0,
+      image_served_optimized_bytes: 0,
+      css_served_original_bytes: 0,
+      css_served_optimized_bytes: 0,
+      javascript_served_original_bytes: 0,
+      javascript_served_optimized_bytes: 0,
+    };
+    const at = (vars: Record<string, number>, patch: Partial<VerdictInput> = {}) =>
+      overviewVerdict(input({ module: { summary: moduleSummary(vars), startMs: NOW - 2 * HOUR }, optimizer: moduleOnly, ...patch }));
+
+    it("a warm cache: nothing optimized anew, yet the sentence states what was saved in delivery", () => {
+      const warm = { ...rewriteTime, ...sentZero, image_served_original_bytes: 4_000_000, image_served_optimized_bytes: 1_000_000 };
+      // No page flushed and no rewrite counted: the optimized responses sent are the traffic.
+      expect(moduleSummary(warm)).toMatchObject({ active: true, bytesSaved: 0 });
+      expect(moduleSummary(warm).delivered).toMatchObject({ saved: 3_000_000, counted: true });
+      expect(at(warm).text).toBe("Working. 2.86 MB saved in delivery by this server since the web server started 2 h ago.");
+      expect(at(warm, { wholeServer: false }).text).toBe(
+        "Working. This site: 2.86 MB saved in delivery by this server since the web server started 2 h ago.",
+      );
+      expect(at(warm).text).not.toContain("Nothing saved");
+    });
+
+    it("nothing sent yet falls back to the rewrite-time figure, never a delivered zero", () => {
+      const fresh = { ...sentZero, css_filter_total_bytes_saved: 2048, css_filter_total_original_bytes: 8192, num_flushes: 4 };
+      expect(moduleSummary(fresh).delivered).toMatchObject({ counted: false, percent: null });
+      expect(at(fresh).text).toBe("Working. 2.00 KB saved by rewriting since the web server started 2 h ago.");
+    });
+
+    it("optimized responses that were larger are said so, not shown as a saving", () => {
+      const larger = { ...rewriteTime, ...sentZero, css_served_original_bytes: 1000, css_served_optimized_bytes: 1512, num_flushes: 4 };
+      expect(at(larger).text).toBe(
+        "Working. This server's optimized responses were sent 512 B larger than their originals since the web server started 2 h ago.",
+      );
+      expect(at(larger, { wholeServer: false }).text).toContain("This site: this server's optimized responses were sent 512 B larger");
+    });
+
+    it("a module that does not report the sizes keeps the rewrite-time sentence", () => {
+      expect(moduleSummary({ num_flushes: 3 }).delivered).toBeNull();
+      expect(active.delivered).toBeNull();
+    });
+  });
+
   it("whole server, optimizer running but nothing served yet: the module's figure leads", () => {
     const v = overviewVerdict(input({ optimizer: optimizer({ serves: null }) }));
     expect(v).toMatchObject({ text: "Working. 281 KB saved by rewriting since the web server started 1 d ago.", lead: "module" });

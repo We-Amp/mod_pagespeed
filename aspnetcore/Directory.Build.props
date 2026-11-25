@@ -49,7 +49,9 @@
          README is NU5039. PackThinReadme=false ⇒ no readme (NM-3). -->
     <PackageReadmeFile Condition="'$(PackThinReadme)' != 'false'">README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
-    <PackageReleaseNotes>2.9.2 (engine 2.9.2, bundled nginx 1.30.7): the package follows the mod_pagespeed 2.9.2 release and carries the native pair of that release. Security: the bundled nginx is updated to 1.30.7, nginx's security release of 2026-11-18 (CVE-2026-125283, CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425, CVE-2026-120967, CVE-2026-123640, CVE-2026-118899); update recommended. Full notes: https://modpagespeed.com/docs/release-notes/
+    <PackageReleaseNotes>2.10.0 (engine 2.10.0, bundled nginx 1.30.7): the package follows the mod_pagespeed 2.10.0 release and carries the native pair of that release. Security: the native engine carries the security fixes of mod_pagespeed 2.10.0; update recommended. Fixes and changes in the native engine: see the full notes. Full notes: https://modpagespeed.com/docs/release-notes/
+
+2.9.2 (engine 2.9.2, bundled nginx 1.30.7): the package follows the mod_pagespeed 2.9.2 release and carries the native pair of that release. Security: the bundled nginx is updated to 1.30.7, nginx's security release of 2026-11-18 (CVE-2026-125283, CVE-2026-123007, CVE-2026-123633, CVE-2026-121810, CVE-2026-123634, CVE-2026-113425, CVE-2026-120967, CVE-2026-123640, CVE-2026-118899); update recommended. Full notes: https://modpagespeed.com/docs/release-notes/
 
 2.9.0 (engine 2.9.0, bundled nginx 1.30.6): the package follows the mod_pagespeed 2.9.0 release and carries the native pair of that release. Security: the native engine carries the security fixes of mod_pagespeed 2.9.0; update recommended. Fixes and changes in the native engine: see the full notes. Full notes: https://modpagespeed.com/docs/release-notes/
 

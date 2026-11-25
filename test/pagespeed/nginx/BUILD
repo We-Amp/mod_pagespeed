@@ -52,6 +52,21 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pins: what the native fetcher records as the original content
+# length (the response's Content-Length header, before any decoding; nothing
+# for a response without one) and the marker it puts in every User-Agent.
+pagespeed_cc_test(
+    name = "ngx_fetch_original_length_pin_test",
+    srcs = ["ngx_fetch_original_length_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Loading a spooled request body: bounded in size, read errors and failed
 # allocations reported rather than written through.
 pagespeed_cc_test(

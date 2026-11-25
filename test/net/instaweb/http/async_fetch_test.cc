@@ -216,4 +216,88 @@ TEST_F(AsyncFetchTest, ViaHandling) {
 
 }  // namespace
 
+// The size record belongs to stored headers.  Headers on their way out of a
+// fetch drop it when they are completed, whoever put it there: a lookup that
+// answers from the cache hands over the stored headers, record included, and
+// what leaves the fetch must not carry it.
+TEST_F(AsyncFetchTest, HeadersCompleteDropsSizeRecord) {
+  StringAsyncFetch fetch(request_context_);
+  ResponseHeaders* headers = fetch.response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, "text/css");
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "cf";
+  headers->SetSizeRecord(record);
+  ASSERT_TRUE(headers->HasSizeRecord());
+
+  fetch.HeadersComplete();
+  EXPECT_FALSE(headers->HasSizeRecord());
+  // Nothing else about the headers changes.
+  EXPECT_EQ(HttpStatus::kOK, headers->status_code());
+  EXPECT_STREQ("text/css", headers->Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(1, headers->NumAttributes());
+  fetch.Done(true);
+}
+
+// The same when the headers are completed implicitly by the first write.
+TEST_F(AsyncFetchTest, FirstWriteDropsSizeRecord) {
+  StringAsyncFetch fetch(request_context_);
+  ResponseHeaders* headers = fetch.response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "jm";
+  headers->SetSizeRecord(record);
+
+  EXPECT_TRUE(fetch.Write("body", &handler_));
+  EXPECT_FALSE(headers->HasSizeRecord());
+  fetch.Done(true);
+  EXPECT_STREQ("body", fetch.buffer());
+}
+
+// Notes a size record handed to it.
+class RecordTakingAsyncFetch : public StringAsyncFetch {
+ public:
+  explicit RecordTakingAsyncFetch(const RequestContextPtr& ctx)
+      : StringAsyncFetch(ctx) {}
+
+  void SetOwnOutputSizeRecord(
+      const ResponseHeaders::SizeRecord& record) override {
+    ++records_taken_;
+  }
+  int records_taken() const { return records_taken_; }
+
+ private:
+  int records_taken_ = 0;
+};
+
+// A size record handed to a fetch that has no use for it goes nowhere: not
+// onto the response headers, and not through a wrapping fetch to the fetch it
+// wraps.  Only a fetch written to take it does, when it is called directly.
+TEST_F(AsyncFetchTest, OwnOutputSizeRecordIsIgnoredUnlessTaken) {
+  ResponseHeaders::SizeRecord record;
+  record.original_size = 300;
+  record.optimized_size = 100;
+  record.filter_id = "cf";
+
+  StringAsyncFetch plain(request_context_);
+  plain.response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  plain.SetOwnOutputSizeRecord(record);
+  EXPECT_FALSE(plain.response_headers()->HasSizeRecord());
+  EXPECT_EQ(0, plain.response_headers()->NumAttributes());
+
+  RecordTakingAsyncFetch taking(request_context_);
+  taking.response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  TestSharedAsyncFetch wrapper(&taking);
+  wrapper.SetOwnOutputSizeRecord(record);
+  EXPECT_EQ(0, taking.records_taken());
+  EXPECT_FALSE(taking.response_headers()->HasSizeRecord());
+  taking.SetOwnOutputSizeRecord(record);
+  EXPECT_EQ(1, taking.records_taken());
+  EXPECT_FALSE(taking.response_headers()->HasSizeRecord());
+}
+
 }  // namespace net_instaweb

@@ -898,7 +898,16 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     }
   }
 
-  RecordDaemonServeCounters(server_context_->rewrite_stats(), decision);
+  // The sizes of an optimized response are counted by the same call, for a
+  // GET that was answered with the whole body.
+  DaemonServeSent sent;
+  sent.get_request =
+      request_->method_number == M_GET && request_->header_only == 0;
+  sent.body_sent = sent.get_request && !decision.not_modified;
+  sent.body_size = decision.body.size();
+  sent.range_request = !RequestHeader("Range").empty();
+  sent.user_agent = serve_request.user_agent;
+  RecordDaemonServeCounters(server_context_->rewrite_stats(), decision, sent);
 
   // A FALLBACK HIT IS SERVED -- and now it is also ANSWERED.  The serve
   // recorded nothing, so without this call nothing would ever ask the worker

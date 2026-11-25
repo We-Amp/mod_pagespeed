@@ -101,12 +101,14 @@ describe("the console's vocabulary", () => {
   });
 
   it("names the module's savings figure one way", () => {
-    expect(TERMS.savedByRewriting).toBe("Saved by rewriting");
-    for (const retired of [/bytes saved by rewriting/i, /bytes saved by optimization/i, /module rewrite savings/i]) {
+    expect(TERMS.savedByRewriting).toBe("Saved at rewrite time");
+    // The delivered figure of the server's own rewriting says whose it is where no family heading does.
+    expect(TERMS.savedInDeliveryOwn).toBe("Saved in delivery by this server");
+    for (const retired of [/Saved by rewriting/, /bytes saved by rewriting/i, /bytes saved by optimization/i, /module rewrite savings/i]) {
       expect(uses(retired), String(retired)).toEqual([]);
     }
     // Spelled out in the glossary only; a page imports it.
-    expect(uses(/Saved by rewriting/)).toEqual([`lib/data/terms.ts: ${TERMS.savedByRewriting}`]);
+    expect(uses(/Saved at rewrite time/)).toEqual([`lib/data/terms.ts: ${TERMS.savedByRewriting}`]);
   });
 
   it("names the optimizer's savings figure one way", () => {

@@ -3,7 +3,19 @@
 
 import { describe, expect, it } from "vitest";
 import { ApiError } from "$lib/api/client";
-import { graphsView, intervalLabel, isGraphsAbsent, perVhostConsoleHref } from "./graphs-view";
+import { graphsView, intervalLabel, isGraphsAbsent, isStatisticsLogOff, perVhostConsoleHref } from "./graphs-view";
+
+describe("isStatisticsLogOff", () => {
+  it("is the module's own 404 while it writes no statistics log, and no other refusal", () => {
+    // What the client makes of the module's answer: the status and the body's reason.
+    expect(isStatisticsLogOff(new ApiError(404, "console_logger must be enabled to use '?json' query parameter."))).toBe(true);
+    expect(isGraphsAbsent(new ApiError(404, "console_logger must be enabled to use '?json' query parameter."))).toBe(true);
+    expect(isStatisticsLogOff(new ApiError(404, "Unknown admin page: graphs"))).toBe(false);
+    expect(isStatisticsLogOff(new ApiError(404, "Not Found"))).toBe(false);
+    expect(isStatisticsLogOff(new ApiError(501, "console_logger must be enabled"))).toBe(false);
+    expect(isStatisticsLogOff(new Error("console_logger must be enabled"))).toBe(false);
+  });
+});
 
 describe("graphsView", () => {
   it("an error body means the server has no graphs endpoint here", () => {

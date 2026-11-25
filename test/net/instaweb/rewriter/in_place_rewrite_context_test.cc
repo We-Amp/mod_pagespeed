@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
@@ -28,6 +29,7 @@
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
+#include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/fake_filter.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
@@ -35,6 +37,7 @@
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -2657,5 +2660,509 @@ TEST_F(InPlaceCorsGuardTest, GuardOffServesOptimizedCopy) {
 }
 
 }  // namespace
+
+// In-place optimization does not store its result under the resource's own
+// URL.  The optimized bytes are written by a nested rewrite of the type's own
+// filter, as that filter's ordinary output: an image under the image filter's
+// id, a stylesheet under the CSS filter's, a script under the JavaScript
+// minifier's.  That hidden output is what a later request for the original
+// URL is answered from, so anything recorded with a filter's output when it
+// is written is also there for in-place serving, keyed by the same filter id.
+TEST_F(InPlaceRewriteContextTest,
+       OptimizedBytesAreStoredAsTheTypesFilterOutput) {
+  Init();
+  const struct {
+    const GoogleString* url;
+    const char* hidden_output_url;
+    const char* filter_id;
+    const char* content_type;
+    const char* first_serve_etag;
+  } kCases[] = {
+      {&cache_png_url_,
+       "http://www.example.com/cacheable.png.pagespeed.ic.0.png",
+       RewriteOptions::kImageCompressionId, kContentTypePng.mime_type(),
+       original_etag_},
+      {&cache_css_url_,
+       "http://www.example.com/cacheable.css.pagespeed.cf.0.css",
+       RewriteOptions::kCssFilterId, kContentTypeCss.mime_type(), nullptr},
+      {&cache_js_url_, "http://www.example.com/cacheable.js.pagespeed.jm.0.js",
+       RewriteOptions::kJavascriptMinId, kContentTypeJavascript.mime_type(),
+       nullptr},
+  };
+  for (const auto& c : kCases) {
+    SCOPED_TRACE(c.hidden_output_url);
+    // Nothing is stored for the filter's output before the first request.
+    EXPECT_EQ(HTTPCache::kNotFound,
+              HttpBlockingFindStatus(c.hidden_output_url, http_cache()).status);
+
+    // The first request streams the original bytes and optimizes behind it.
+    FetchAndCheckResponse(*c.url, cache_body_, true, kInjectedSMaxAgeMs,
+                          c.first_serve_etag, start_time_ms());
+
+    HTTPValue value;
+    ResponseHeaders headers;
+    ASSERT_EQ(
+        HTTPCache::kFound,
+        HttpBlockingFind(c.hidden_output_url, http_cache(), &value, &headers)
+            .status);
+    StringPiece contents;
+    ASSERT_TRUE(value.ExtractContents(&contents));
+    EXPECT_EQ(StrCat(cache_body_, ":", c.filter_id), contents);
+    EXPECT_STREQ(c.content_type, headers.Lookup1(HttpAttributes::kContentType));
+    EXPECT_FALSE(headers.IsGzipped());
+    // The stored headers carry the size of the input as the original length.
+    EXPECT_STREQ(IntegerToString(static_cast<int>(cache_body_.size())),
+                 headers.Lookup1(HttpAttributes::kXOriginalContentLength));
+    // It is an ordinary output entry, not a recorded input.
+    EXPECT_FALSE(value.IsFetchedInput());
+    // It carries the size record of that filter's output: the size of the
+    // input, the size of the optimized body and the filter's id.
+    ResponseHeaders::SizeRecord record;
+    ASSERT_TRUE(headers.GetSizeRecord(&record));
+    EXPECT_EQ(static_cast<int64>(cache_body_.size()), record.original_size);
+    EXPECT_EQ(static_cast<int64>(cache_body_.size() + 1 + strlen(c.filter_id)),
+              record.optimized_size);
+    EXPECT_STREQ(c.filter_id, record.filter_id);
+    // The response that streamed the original carried none.
+    EXPECT_FALSE(response_headers_.HasSizeRecord());
+
+    // The second request for the original URL is answered with those bytes.
+    ResetHeadersAndStats();
+    FetchAndCheckResponse(*c.url, StrCat(cache_body_, ":", c.filter_id), true,
+                          ttl_ms_, etag_, start_time_ms());
+    // And the optimized response served for the original URL carries none.
+    EXPECT_FALSE(response_headers_.HasSizeRecord());
+    ResetHeadersAndStats();
+  }
+}
+
+// With the first request held until the optimized bytes are ready, the
+// response is built from the nested filter's output.  That output's size
+// record goes into the stored entry and stays out of the response, on the
+// first request and on the ones answered from the cache after it.
+TEST_F(InPlaceRewriteContextTest, WaitForOptimizedResponseHasNoSizeRecord) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_FALSE(response_headers_.HasSizeRecord());
+
+  HTTPValue value;
+  ResponseHeaders stored;
+  ASSERT_EQ(HTTPCache::kFound,
+            HttpBlockingFind(rewritten_jpg_url_, http_cache(), &value, &stored)
+                .status);
+  ResponseHeaders::SizeRecord record;
+  ASSERT_TRUE(stored.GetSizeRecord(&record));
+  EXPECT_EQ(4, record.original_size);   // "good"
+  EXPECT_EQ(7, record.optimized_size);  // "good:ic"
+  EXPECT_STREQ(RewriteOptions::kImageCompressionId, record.filter_id);
+
+  ResetHeadersAndStats();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_FALSE(response_headers_.HasSizeRecord());
+}
+
+// ============================================================================
+// Sizes of optimized responses sent (the *_served_*_bytes statistics), for
+// fetches of the rewritten URL of each type.
+// ============================================================================
+
+class ServedSavingsFetchTest : public InPlaceRewriteContextTest {
+ protected:
+  struct Sizes {
+    int64 image_original, image_optimized;
+    int64 css_original, css_optimized;
+    int64 js_original, js_optimized;
+  };
+
+  Sizes Served() {
+    RewriteStats* stats = server_context()->rewrite_stats();
+    return Sizes{stats->image_served_original_bytes()->Get(),
+                 stats->image_served_optimized_bytes()->Get(),
+                 stats->css_served_original_bytes()->Get(),
+                 stats->css_served_optimized_bytes()->Get(),
+                 stats->javascript_served_original_bytes()->Get(),
+                 stats->javascript_served_optimized_bytes()->Get()};
+  }
+
+  void ExpectServed(const Sizes& expected) {
+    const Sizes actual = Served();
+    EXPECT_EQ(expected.image_original, actual.image_original);
+    EXPECT_EQ(expected.image_optimized, actual.image_optimized);
+    EXPECT_EQ(expected.css_original, actual.css_original);
+    EXPECT_EQ(expected.css_optimized, actual.css_optimized);
+    EXPECT_EQ(expected.js_original, actual.js_original);
+    EXPECT_EQ(expected.js_optimized, actual.js_optimized);
+  }
+
+  // Fetches 'url' with 'request_headers' and returns the body.
+  GoogleString Fetch(const GoogleString& url, RequestHeaders* request_headers) {
+    GoogleString contents;
+    ResponseHeaders response_headers;
+    EXPECT_TRUE(
+        FetchResourceUrl(url, request_headers, &contents, &response_headers))
+        << url;
+    return contents;
+  }
+
+  GoogleString Fetch(const GoogleString& url) {
+    RequestHeaders request_headers;
+    return Fetch(url, &request_headers);
+  }
+
+  int64 CachedFetches() {
+    return server_context()->rewrite_stats()->cached_resource_fetches()->Get();
+  }
+
+  const GoogleString rewritten_png_url_ =
+      "http://www.example.com/cacheable.png.pagespeed.ic.0.png";
+  const GoogleString rewritten_js_url_ =
+      "http://www.example.com/cacheable.js.pagespeed.jm.0.js";
+};
+
+// A rewritten URL built on request and then answered from the cache: each
+// response adds the size of the input and the size of the optimized body to
+// its own type, and to no other.  The sizes are "good" (4) and "good:xx" (7).
+TEST_F(ServedSavingsFetchTest, EachOptimizedResponseAddsItsSizes) {
+  Init();
+  // Built on request: nothing is in the cache for it yet.
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  EXPECT_EQ(0, CachedFetches());
+  ExpectServed({4, 7, 0, 0, 0, 0});
+  // From the cache, twice.
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  EXPECT_EQ(2, CachedFetches());
+  ExpectServed({12, 21, 0, 0, 0, 0});
+
+  EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
+  EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
+  EXPECT_EQ(3, CachedFetches());
+  ExpectServed({12, 21, 8, 14, 0, 0});
+
+  EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
+  EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
+  EXPECT_EQ(4, CachedFetches());
+  ExpectServed({12, 21, 8, 14, 8, 14});
+
+  // The totals the filters keep per rewrite are another matter: each filter
+  // ran once however often its output was sent.
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  EXPECT_EQ(1, css_filter_->num_rewrites());
+  EXPECT_EQ(1, js_filter_->num_rewrites());
+}
+
+// Requests that are answered from the cache without a whole body going to a
+// visitor add nothing.
+TEST_F(ServedSavingsFetchTest, RequestsThatDoNotCount) {
+  Init();
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders head;
+  head.set_method(RequestHeaders::kHead);
+  EXPECT_STREQ("", Fetch(rewritten_png_url_, &head));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders ranged;
+  ranged.Add("Range", "bytes=0-2");
+  Fetch(rewritten_png_url_, &ranged);
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders module_fetch;
+  module_fetch.Add(
+      HttpAttributes::kUserAgent,
+      StrCat("Fetcher (", kModPagespeedSubrequestUserAgent, "/2.0-0)"));
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_, &module_fetch));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  // A conditional request is answered with a 304 and no body.
+  RequestHeaders conditional;
+  conditional.Add(HttpAttributes::kIfModifiedSince,
+                  "Fri, 01 Jan 2016 00:00:00 GMT");
+  GoogleString contents;
+  ResponseHeaders response_headers;
+  EXPECT_TRUE(FetchResourceUrl(rewritten_png_url_, &conditional, &contents,
+                               &response_headers));
+  EXPECT_EQ(HttpStatus::kNotModified, response_headers.status_code());
+  EXPECT_STREQ("", contents);
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  // An ordinary request still counts afterwards.
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  ExpectServed({8, 14, 0, 0, 0, 0});
+}
+
+// An entry without a size record is served as it is and not counted, an
+// image with an X-Original-Content-Length header included.  The cache was
+// emptied when the record was introduced, so such an entry is an output
+// written without knowing the size of what it was made from, or a fault.
+TEST_F(ServedSavingsFetchTest, EntriesWithoutASizeRecordAreNotCounted) {
+  Init();
+  // Store each output, then store it again without its record.
+  for (const GoogleString* url :
+       {&rewritten_png_url_, &rewritten_css_url_, &rewritten_js_url_}) {
+    Fetch(*url);
+    HTTPValue value;
+    ResponseHeaders stored;
+    ASSERT_EQ(HTTPCache::kFound,
+              HttpBlockingFind(*url, http_cache(), &value, &stored).status);
+    ASSERT_TRUE(stored.HasSizeRecord());
+    ASSERT_TRUE(stored.Has(HttpAttributes::kXOriginalContentLength));
+    stored.ClearSizeRecord();
+    StringPiece contents;
+    ASSERT_TRUE(value.ExtractContents(&contents));
+    GoogleString body = contents.as_string();
+    http_cache()->Put(*url, rewrite_driver()->CacheFragment(),
+                      RequestHeaders::Properties(),
+                      ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                      &stored, body, message_handler());
+  }
+  ClearStats();
+
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  EXPECT_STREQ("good:cf", Fetch(rewritten_css_url_));
+  EXPECT_STREQ("good:jm", Fetch(rewritten_js_url_));
+  EXPECT_EQ(3, CachedFetches());
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->image_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->css_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->css_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->javascript_served_original_bytes()->Get());
+  EXPECT_EQ(0, stats->javascript_served_optimized_bytes()->Get());
+  EXPECT_TRUE(statistics()->FindVariable(
+                  "served_savings_unmeasured_responses") == nullptr);
+}
+
+// ============================================================================
+// The same statistics for responses that leave through the fallback path:
+// resources optimized in place under their own URL, and rewritten URLs
+// answered with an output found under another hash.  What is sent decides,
+// per response: optimized bytes count, the original bytes do not.
+// ============================================================================
+
+class ServedSavingsFallbackTest : public ServedSavingsFetchTest {
+ protected:
+  // Fetches 'url' the way a server does for a request it hands over, with
+  // 'request_headers' when given, and returns the body.  With 'past_deadline'
+  // the filters finish only after the rewrite deadline has passed.
+  GoogleString FetchThroughDriver(const GoogleString& url,
+                                  const RequestHeaders* request_headers,
+                                  bool past_deadline) {
+    js_filter_->set_exceed_deadline(past_deadline);
+    img_filter_->set_exceed_deadline(past_deadline);
+    css_filter_->set_exceed_deadline(past_deadline);
+    response_headers_.Clear();
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    NotifyingFetch fetch(request_context, options(), url, &sync,
+                         &response_headers_);
+    if (request_headers != nullptr) {
+      fetch.request_headers()->CopyFrom(*request_headers);
+    }
+    rewrite_driver()->FetchResource(url, &fetch);
+    if (past_deadline) {
+      rewrite_driver()->BoundedWaitFor(RewriteDriver::kWaitForCompletion,
+                                       rewrite_driver()->rewrite_deadline_ms());
+    }
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();  // Lets cache writes finish.
+    EXPECT_TRUE(fetch.done()) << url;
+    GoogleString body = fetch.content().as_string();
+    ClearRewriteDriver();
+    return body;
+  }
+
+  GoogleString InPlace(const GoogleString& url) {
+    return FetchThroughDriver(url, nullptr, false);
+  }
+
+  const GoogleString wrong_hash_png_url_ =
+      "http://www.example.com/cacheable.png.pagespeed.ic.1.png";
+};
+
+// A resource requested under its own URL: the first response streams the
+// original and adds nothing; once the optimized bytes are in the cache every
+// response adds the size of the original and the size of what was sent, to
+// its own type and to no other.
+TEST_F(ServedSavingsFallbackTest, InPlaceResponsesAddTheirSizes) {
+  Init();
+  EXPECT_STREQ("good", InPlace(cache_png_url_));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+  EXPECT_STREQ("good:ic", InPlace(cache_png_url_));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+  EXPECT_STREQ("good:ic", InPlace(cache_png_url_));
+  ExpectServed({8, 14, 0, 0, 0, 0});
+
+  EXPECT_STREQ("good", InPlace(cache_css_url_));
+  ExpectServed({8, 14, 0, 0, 0, 0});
+  EXPECT_STREQ("good:cf", InPlace(cache_css_url_));
+  EXPECT_STREQ("good:cf", InPlace(cache_css_url_));
+  ExpectServed({8, 14, 8, 14, 0, 0});
+
+  EXPECT_STREQ("good", InPlace(cache_js_url_));
+  ExpectServed({8, 14, 8, 14, 0, 0});
+  EXPECT_STREQ("good:jm", InPlace(cache_js_url_));
+  EXPECT_STREQ("good:jm", InPlace(cache_js_url_));
+  ExpectServed({8, 14, 8, 14, 8, 14});
+
+  // None of these was a cache hit on a rewritten URL, and each filter ran
+  // once.
+  EXPECT_EQ(0, CachedFetches());
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  EXPECT_EQ(1, css_filter_->num_rewrites());
+  EXPECT_EQ(1, js_filter_->num_rewrites());
+}
+
+// When the first request waits for the optimized bytes, the response is built
+// from the output that in-place optimization makes out of the nested filter's
+// output.  That output takes over the nested size record, so the very first
+// response counts, with the sizes the nested filter recorded; so do the ones
+// answered from the cache after it.
+TEST_F(ServedSavingsFallbackTest, WaitForOptimizedResponseAddsItsSizes) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  EXPECT_STREQ("good:ic", InPlace(cache_jpg_url_));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+  EXPECT_STREQ("good:ic", InPlace(cache_jpg_url_));
+  ExpectServed({8, 14, 0, 0, 0, 0});
+
+  EXPECT_STREQ("good:cf", InPlace(cache_css_url_));
+  ExpectServed({8, 14, 4, 7, 0, 0});
+  EXPECT_STREQ("good:jm", InPlace(cache_js_url_));
+  ExpectServed({8, 14, 4, 7, 4, 7});
+}
+
+// A request that waits for the optimized bytes and runs into the rewrite
+// deadline is answered with the original, which adds nothing.  The rewrite
+// finishes behind it, and the next response is the optimized one.
+TEST_F(ServedSavingsFallbackTest, WaitForOptimizedPastDeadlineSendsOriginal) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  EXPECT_STREQ("good", FetchThroughDriver(cache_jpg_url_, nullptr, true));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  EXPECT_STREQ("good:ic", InPlace(cache_jpg_url_));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+}
+
+// A resource the filter does not improve is served as it is, on the first
+// request and from the cache afterwards, waiting for the optimized bytes or
+// not: nothing is added.
+TEST_F(ServedSavingsFallbackTest, InPlaceOriginalIsNotCounted) {
+  Init();
+  img_filter_->set_enabled(false);
+  EXPECT_STREQ("good", InPlace(cache_png_url_));
+  EXPECT_STREQ("good", InPlace(cache_png_url_));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+}
+
+TEST_F(ServedSavingsFallbackTest, WaitForOptimizedOriginalIsNotCounted) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  img_filter_->set_enabled(false);
+  EXPECT_STREQ("good", InPlace(cache_jpg_url_));
+  EXPECT_STREQ("good", InPlace(cache_jpg_url_));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+}
+
+// Requests for a resource optimized in place that do not send a whole body
+// to a visitor add nothing.
+TEST_F(ServedSavingsFallbackTest, InPlaceRequestsThatDoNotCount) {
+  Init();
+  EXPECT_STREQ("good", InPlace(cache_png_url_));
+  EXPECT_STREQ("good:ic", InPlace(cache_png_url_));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders head;
+  head.set_method(RequestHeaders::kHead);
+  EXPECT_STREQ("", FetchThroughDriver(cache_png_url_, &head, false));
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders ranged;
+  ranged.Add("Range", "bytes=0-2");
+  FetchThroughDriver(cache_png_url_, &ranged, false);
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  RequestHeaders module_fetch;
+  module_fetch.Add(
+      HttpAttributes::kUserAgent,
+      StrCat("Fetcher (", kModPagespeedSubrequestUserAgent, "/2.0-0)"));
+  FetchThroughDriver(cache_png_url_, &module_fetch, false);
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  // A conditional request naming the optimized response is answered with a
+  // 304 and no body.
+  RequestHeaders conditional;
+  conditional.Add(HttpAttributes::kIfNoneMatch, etag_);
+  EXPECT_STREQ("", FetchThroughDriver(cache_png_url_, &conditional, false));
+  EXPECT_EQ(HttpStatus::kNotModified, response_headers_.status_code());
+  ExpectServed({4, 7, 0, 0, 0, 0});
+
+  // An ordinary request still counts afterwards.
+  EXPECT_STREQ("good:ic", InPlace(cache_png_url_));
+  ExpectServed({8, 14, 0, 0, 0, 0});
+}
+
+// A rewritten URL naming a hash that is not the one the rewrite produces is
+// answered with the optimized bytes: built on request when nothing is known
+// yet, and from the output stored under the right hash afterwards.  Both
+// responses count, and neither is a cache hit on the requested URL.
+TEST_F(ServedSavingsFallbackTest, OtherHashResponsesAddTheirSizes) {
+  Init();
+  // Built on request.
+  EXPECT_STREQ("good:ic", Fetch(wrong_hash_png_url_));
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  ExpectServed({4, 7, 0, 0, 0, 0});
+  // From the output stored under the right hash.
+  EXPECT_STREQ("good:ic", Fetch(wrong_hash_png_url_));
+  EXPECT_STREQ("good:ic", Fetch(wrong_hash_png_url_));
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  ExpectServed({12, 21, 0, 0, 0, 0});
+  EXPECT_EQ(0, CachedFetches());
+
+  // The requests that do not count on other paths do not count here.
+  RequestHeaders head;
+  head.set_method(RequestHeaders::kHead);
+  EXPECT_STREQ("", Fetch(wrong_hash_png_url_, &head));
+  RequestHeaders ranged;
+  ranged.Add("Range", "bytes=0-2");
+  Fetch(wrong_hash_png_url_, &ranged);
+  RequestHeaders module_fetch;
+  module_fetch.Add(
+      HttpAttributes::kUserAgent,
+      StrCat("Fetcher (", kModPagespeedSubrequestUserAgent, "/2.0-0)"));
+  EXPECT_STREQ("good:ic", Fetch(wrong_hash_png_url_, &module_fetch));
+  ExpectServed({12, 21, 0, 0, 0, 0});
+}
+
+// A fetch of a rewritten URL whose rewrite does not finish before the
+// deadline is answered with the original, which adds nothing; the same URL
+// fetched again is answered with the optimized bytes from the cache.
+TEST_F(ServedSavingsFallbackTest, PastDeadlineSendsOriginalUncounted) {
+  Init();
+  EXPECT_STREQ("good", FetchThroughDriver(rewritten_png_url_, nullptr, true));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+  EXPECT_STREQ("good:ic", Fetch(rewritten_png_url_));
+  EXPECT_EQ(1, CachedFetches());
+  ExpectServed({4, 7, 0, 0, 0, 0});
+}
+
+// A rewritten URL whose rewrite fails is answered with the original, when it
+// is first asked for and from the cache once the failure is remembered:
+// nothing is added.
+TEST_F(ServedSavingsFallbackTest, FailedRewriteSendsOriginalUncounted) {
+  Init();
+  img_filter_->set_enabled(false);
+  EXPECT_STREQ("good", Fetch(rewritten_png_url_));
+  EXPECT_STREQ("good", Fetch(rewritten_png_url_));
+  ExpectServed({0, 0, 0, 0, 0, 0});
+}
 
 }  // namespace net_instaweb

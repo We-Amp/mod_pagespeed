@@ -67,6 +67,15 @@ export function isGraphsAbsent(error: Error): boolean {
   return error instanceof ApiError && (error.status === 404 || error.status === 501);
 }
 
+/**
+ * The module's own refusal of the graphs read while it writes no statistics
+ * log (the default): a 404 whose reason names the logger. Any other 404 means
+ * there is no graphs endpoint here.
+ */
+export function isStatisticsLogOff(error: Error): boolean {
+  return error instanceof ApiError && error.status === 404 && /console_logger must be enabled/.test(error.message);
+}
+
 /** The typical time between samples, for "per <interval>" labels. */
 export function intervalLabel(timestamps: readonly number[]): string | null {
   const gaps: number[] = [];

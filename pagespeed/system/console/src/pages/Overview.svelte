@@ -39,6 +39,7 @@
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import ScopeChip from "$lib/ScopeChip.svelte";
   import { formatBytes, formatCount, formatDuration, formatPercent, formatSignedBytes } from "$lib/utils/format";
+  import { sizesText, smallerText } from "$lib/utils/delivered";
   import { moduleSavingsByType, optimizedCopyHitRate, servedOptimizedText } from "$lib/utils/savings";
   import { TERMS } from "$lib/data/terms";
   import { serveSavingsView } from "$lib/utils/serve-savings";
@@ -414,20 +415,41 @@
       <RefreshNotice error={serverDown ? null : moduleError} />
       <div class="stat-tiles" data-testid="overview-tiles">
         <section class="card stat-tile" data-testid="tile-rewriting" aria-labelledby="tile-rewriting-label">
-          <h2 class="stat-tile-label" id="tile-rewriting-label">{TERMS.savedByRewriting}</h2>
-          <div data-testid="module-bytes-saved">
-            <p class="stat-tile-value" data-testid={optimizerLeads ? undefined : "overview-lead-figure"}>
-              {formatBytes(summary.bytesSaved)}
-            </p>
-            <p class="stat-tile-context">
-              {#if summary.savedPercent !== null && summary.originalBytes !== null}
-                {moduleBase.warming
-                  ? `of ${formatBytes(summary.originalBytes)} so far,`
-                  : `${formatPercent(summary.savedPercent, summary.bytesSaved ?? 0)} of ${formatBytes(summary.originalBytes)}`}
-              {/if}
-              {@render since(moduleBase, "since-module")}
-            </p>
-          </div>
+          {#if summary.delivered !== null}
+            <!-- What visitors received from this server's own rewriting: the sizes of the optimized responses sent,
+                 from the cache as well. Responses answered from the optimizer cache are not in it. -->
+            <h2 class="stat-tile-label" id="tile-rewriting-label">{TERMS.savedInDeliveryOwn}</h2>
+            <div data-testid="module-bytes-saved">
+              <p class="stat-tile-value" data-testid={optimizerLeads ? undefined : "overview-lead-figure"}>
+                {summary.delivered.counted ? formatSignedBytes(summary.delivered.saved) : "—"}
+              </p>
+              <p class="stat-tile-context">
+                {#if !summary.delivered.counted}
+                  no optimized response sent yet
+                {:else if moduleBase.warming}
+                  {sizesText(summary.delivered)} so far,
+                {:else}
+                  {smallerText(summary.delivered)} · {sizesText(summary.delivered)}
+                {/if}
+                {@render since(moduleBase, "since-module")}
+              </p>
+            </div>
+          {:else}
+            <h2 class="stat-tile-label" id="tile-rewriting-label">{TERMS.savedByRewriting}</h2>
+            <div data-testid="module-bytes-saved">
+              <p class="stat-tile-value" data-testid={optimizerLeads ? undefined : "overview-lead-figure"}>
+                {formatBytes(summary.bytesSaved)}
+              </p>
+              <p class="stat-tile-context">
+                {#if summary.savedPercent !== null && summary.originalBytes !== null}
+                  {moduleBase.warming
+                    ? `of ${formatBytes(summary.originalBytes)} so far,`
+                    : `${formatPercent(summary.savedPercent, summary.bytesSaved ?? 0)} of ${formatBytes(summary.originalBytes)}`}
+                {/if}
+                {@render since(moduleBase, "since-module")}
+              </p>
+            </div>
+          {/if}
           <a class="stat-tile-link" href="#/savings">Savings</a>
         </section>
 

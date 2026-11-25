@@ -484,6 +484,13 @@ void InPlaceRewriteContext::Harvest() {
         // RewriteContext::FetchContext::FetchDone
         output_resource_->response_headers()->CopyFrom(
             *(nested_resource->UncompressedHeaders()));
+        // The bytes are the nested filter's output, so its size record is
+        // this output's too.  It stays off the headers, which are served.
+        output_resource_->response_headers()->ClearSizeRecord();
+        ResponseHeaders::SizeRecord size_record;
+        if (nested_resource->GetSizeRecord(&size_record)) {
+          output_resource_->set_size_record(size_record);
+        }
         Writer* writer =
             output_resource_->BeginWrite(Driver()->message_handler());
         writer->Write(nested_resource->ExtractUncompressedContents(),

@@ -782,6 +782,56 @@ TEST_F(ServerContextTest, QueryOptionsWithInvalidUrl) {
 
 TEST_F(ServerContextTest, TestNamed) { TestNamed(); }
 
+// The same path for the size record of the output: the entry stored again
+// carries it, and neither the response nor the resource's own headers do.
+TEST_F(ServerContextTest,
+       WrittenOutputServedOutsideTheCacheKeepsItsSizeRecord) {
+  SetResponseWithDefaultHeaders("in.css", kContentTypeCss, " in ", 100);
+  ResourcePtr input(CreateResource(kTestDomain, "in.css"));
+  ASSERT_TRUE(input.get() != nullptr);
+  ASSERT_TRUE(ReadIfCached(input));
+
+  GoogleString failure_reason;
+  OutputResourcePtr output(rewrite_driver()->CreateOutputResourceWithPath(
+      kUrlPrefix, RewriteOptions::kCssFilterId, "I.name", kRewrittenResource,
+      &failure_reason));
+  ASSERT_TRUE(output.get() != nullptr);
+  ASSERT_TRUE(rewrite_driver()->Write(ResourceVector(1, input), "contents",
+                                      &kContentTypeCss, "utf-8", output.get()));
+  ASSERT_TRUE(output->IsWritten());
+  lru_cache()->Clear();
+  HTTPValue stored;
+  ResponseHeaders stored_headers;
+  ASSERT_EQ(kNotFoundResult,
+            HttpBlockingFind(output->HttpCacheKey(), http_cache(), &stored,
+                             &stored_headers));
+
+  StringAsyncFetch fetch(CreateRequestContext());
+  ResponseHeaders served;
+  fetch.set_response_headers(&served);
+  EXPECT_TRUE(rewrite_driver()->FetchOutputResource(output, nullptr, &fetch));
+  rewrite_driver()->WaitForCompletion();
+  ASSERT_TRUE(fetch.done());
+  EXPECT_TRUE(fetch.success());
+  EXPECT_EQ("contents", fetch.buffer());
+  EXPECT_FALSE(served.HasSizeRecord());
+  EXPECT_FALSE(output->response_headers()->HasSizeRecord());
+
+  ASSERT_EQ(kFoundResult, HttpBlockingFind(output->HttpCacheKey(), http_cache(),
+                                           &stored, &stored_headers));
+  ResponseHeaders::SizeRecord record;
+  ASSERT_TRUE(stored_headers.GetSizeRecord(&record));
+  EXPECT_EQ(4, record.original_size);   // " in "
+  EXPECT_EQ(8, record.optimized_size);  // "contents"
+  EXPECT_STREQ(RewriteOptions::kCssFilterId, record.filter_id);
+
+  // The response was an optimized stylesheet and is counted as one.
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_EQ(4, stats->css_served_original_bytes()->Get());
+  EXPECT_EQ(8, stats->css_served_optimized_bytes()->Get());
+  EXPECT_EQ(0, stats->image_served_original_bytes()->Get());
+}
+
 // An optimized resource that was written but is no longer in the HTTP cache is
 // served from the written copy and stored again.  The cache's internal stamp
 // goes on the stored copy only, never on the response the client gets.

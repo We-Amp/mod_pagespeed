@@ -3,8 +3,8 @@
   "@id": "https://we-amp.com/vex/pagespeed-1.1",
   "author": "We-Amp B.V.",
   "role": "vendor",
-  "timestamp": "2026-11-14T12:00:00Z",
-  "version": 9,
+  "timestamp": "2026-11-23T12:00:00Z",
+  "version": 10,
   "statements": [
     {
       "vulnerability": {
@@ -225,6 +225,28 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Expires: 2027-01-13. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. The advisory concerns the Nuxt dev server serving files from a parent directory, which the fixture never starts: it is only ever built with `nuxt generate`, never `nuxt dev`. No fix exists on the 3.x line (the advisory's 3.x range has no patched release; the fix is @nuxt/schema 4.6.4, a major update of the fixture). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-96x6-fvhx-49hg",
+        "aliases": ["CVE-2026-128075"]
+      },
+      "timestamp": "2026-11-23T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/nuxt@3.21.11" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Expires: 2027-02-22. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. The advisory is about a production server sending the message and data of an unhandled server-rendering error (for example a failed $fetch with its URL and upstream body) to the client. With no server at runtime no request is ever rendered, and the one build-time render covers only app.vue, which has no plugins, no route middleware, makes no $fetch and reads no runtime config, so no request or adversary can influence what is rendered or put error details into the generated output. No fix exists on the 3.x line (fixed in nuxt 4.6.4, a major update of the fixture). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-f3x9-2chm-73c8",
+        "aliases": ["CVE-2026-128071"]
+      },
+      "timestamp": "2026-11-23T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/nuxt@3.21.11" }, { "@id": "pkg:npm/%40nuxt/nitro-server@3.21.11" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2027-02-22. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. The advisory is about the Nitro server matching route rules against paths with an encoded slash (%2F) left encoded, so a request can reach a catch-all page route without the route rules for the path it resolves to. The fixture's nuxt.config.ts defines no routeRules, it has no pages/ directory and so no catch-all or multi-segment route, and with no server at runtime no request path is matched against any rule. No fix exists on the 3.x line (fixed in nuxt and @nuxt/nitro-server 4.6.4, a major update of the fixture). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
     }
   ]
 }

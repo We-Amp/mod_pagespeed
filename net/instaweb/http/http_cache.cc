@@ -49,7 +49,10 @@ namespace {
 // metadata cache.
 // 4: in-place store decisions use the stricter of the origin's and the
 // server's caching headers.
-const int kHttpCacheVersion = 4;
+// 5: rewritten outputs are stored with a size record (see
+// ResponseHeaders::SizeRecord); starting empty means every output found in
+// the cache was written with one.
+const int kHttpCacheVersion = 5;
 
 // Maximum size of response content in bytes. -1 indicates that there is no size
 // limit.

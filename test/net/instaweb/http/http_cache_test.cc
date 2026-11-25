@@ -21,24 +21,31 @@
 
 #include "net/instaweb/http/public/http_cache.h"
 
+#include <atomic>
 #include <cstddef>  // for size_t
+#include <cstdint>
 #include <memory>
 
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/inflating_fetch.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/md5_hasher.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
+#include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
@@ -47,6 +54,7 @@
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/http/unknown_headers_field.h"
 
 namespace {
 // Set the cache size large enough so nothing gets evicted during this test.
@@ -1944,6 +1952,469 @@ TEST_F(HTTPCacheZeroCopyTest, FlagOnGzippedEntryInflatedToOwned) {
   ASSERT_TRUE(value->ExtractContents(&contents));
   EXPECT_STREQ(kCssText, contents);
   EXPECT_FALSE(mapped_backend_.ContainsPointer(contents.data()));
+}
+
+// ============================================================================
+// Fields of the stored headers message other than the named attributes.  Each
+// test runs twice: with a field this build does not know, as a newer release
+// might write it, and with the size record this build defines.  They pin,
+// path by path, that the cache keeps either in the entry it stores and in
+// what a lookup hands back: every path that copies, rebuilds, compresses or
+// inflates a value copies the headers message whole.
+// ============================================================================
+
+namespace {
+
+// Remembers the bytes of the last value handed to the backend.
+class LastPutCache : public CacheInterface {
+ public:
+  explicit LastPutCache(CacheInterface* delegate) : delegate_(delegate) {}
+  ~LastPutCache() override {}
+
+  void Get(const GoogleString& key, Callback* callback) override {
+    delegate_->Get(key, callback);
+  }
+  void Put(const GoogleString& key, const SharedString& value) override {
+    ++num_puts_;
+    last_put_ = value.Value().as_string();
+    delegate_->Put(key, value);
+  }
+  void Delete(const GoogleString& key) override { delegate_->Delete(key); }
+  GoogleString Name() const override {
+    return StrCat("LastPut(", delegate_->Name(), ")");
+  }
+  bool IsBlocking() const override { return delegate_->IsBlocking(); }
+  bool IsHealthy() const override { return delegate_->IsHealthy(); }
+  void ShutDown() override { delegate_->ShutDown(); }
+
+  int num_puts() const { return num_puts_; }
+  const GoogleString& last_put() const { return last_put_; }
+
+ private:
+  CacheInterface* delegate_;
+  int num_puts_ = 0;
+  GoogleString last_put_;
+};
+
+}  // namespace
+
+class HTTPCacheStoredFieldTest
+    : public HTTPCacheTest,
+      public testing::WithParamInterface<StoredFieldKind> {
+ protected:
+  // Attaches the kind of field this instance tests.
+  void AttachField(ResponseHeaders* headers) {
+    if (GetParam() == kSizeRecordField) {
+      AttachSizeRecord(headers);
+    } else {
+      AttachUnknownField(headers);
+    }
+  }
+
+  bool CarriesField(ResponseHeaders* headers) {
+    return GetParam() == kSizeRecordField ? CarriesSizeRecord(*headers)
+                                          : CarriesUnknownField(headers);
+  }
+
+  bool ValueCarriesField(const HTTPValue& value) {
+    ResponseHeaders headers;
+    return value.ExtractHeaders(&headers, &message_handler_) &&
+           CarriesField(&headers);
+  }
+
+  HTTPCacheStoredFieldTest() : last_put_cache_(&lru_cache_) {
+    http_cache_ = std::make_unique<HTTPCache>(&last_put_cache_, &mock_timer_,
+                                              &mock_hasher_, &simple_stats_);
+  }
+
+  // Cacheable stylesheet headers carrying the unknown field.
+  void InitCssHeadersWithField(ResponseHeaders* headers) {
+    InitHeaders(headers, "max-age=300");
+    headers->Add(HttpAttributes::kContentType, "text/css");
+    headers->ComputeCaching();
+    AttachField(headers);
+    ASSERT_TRUE(CarriesField(headers));
+  }
+
+  // A value with those headers; 'gzipped' compresses the body first.
+  void BuildValueWithField(bool gzipped, HTTPValue* value) {
+    ResponseHeaders headers;
+    InitCssHeadersWithField(&headers);
+    GoogleString body = kCssText;
+    if (gzipped) {
+      body.clear();
+      StringWriter writer(&body);
+      ASSERT_TRUE(GzipInflater::Deflate(
+          kCssText, GzipInflater::InflateType::kGzip, &writer));
+      headers.Add(HttpAttributes::kContentEncoding, "gzip");
+      headers.ComputeCaching();
+    }
+    value->SetHeaders(&headers);
+    value->Write(body, &message_handler_);
+    ASSERT_TRUE(ValueCarriesField(*value));
+  }
+
+  void PutValue(HTTPValue* value) {
+    http_cache_->Put(kUrl, kFragment, RequestHeaders::Properties(),
+                     kDefaultHttpOptionsForTests, value, &message_handler_);
+  }
+
+  // The headers of the entry as the backend received it, markers included.
+  bool StoredEntryIsGzipped() {
+    HTTPValue stored;
+    ResponseHeaders headers;
+    SharedString bytes(last_put_cache_.last_put());
+    EXPECT_TRUE(stored.Link(bytes, &headers, &message_handler_));
+    return headers.IsGzipped();
+  }
+
+  bool StoredEntryCarriesField() {
+    HTTPValue stored;
+    ResponseHeaders headers;
+    SharedString bytes(last_put_cache_.last_put());
+    return stored.Link(bytes, &headers, &message_handler_) &&
+           CarriesField(&headers);
+  }
+
+  // Looks the entry up and checks the field on both things a caller gets:
+  // the callback's headers and the callback's value.
+  void ExpectFoundWithField(bool accepts_gzip, bool expect_gzipped) {
+    std::unique_ptr<Callback> callback(NewCallback());
+    callback->request_context()->SetAcceptsGzip(accepts_gzip);
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    ASSERT_TRUE(callback->called_);
+    ASSERT_EQ(kFoundResult, callback->result_);
+    EXPECT_EQ(expect_gzipped, callback->response_headers()->IsGzipped());
+    EXPECT_TRUE(CarriesField(callback->response_headers()));
+    EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+    // The stored markers stay out of the headers a caller sees, as always.
+    EXPECT_FALSE(
+        callback->response_headers()->Has(HTTPValue::kClientEntryHeader));
+    StringPiece contents;
+    ASSERT_TRUE(callback->http_value()->ExtractContents(&contents));
+    if (!expect_gzipped) {
+      EXPECT_STREQ(kCssText, contents);
+    }
+  }
+
+  LastPutCache last_put_cache_;
+};
+
+// Put of a value, cache compression off: the value is rebuilt from extracted
+// headers (stamped as a client entry); the stored entry keeps the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptByPutOfValueUncompressed) {
+  http_cache_->SetCompressionLevel(0);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+  ASSERT_EQ(1, last_put_cache_.num_puts());
+  EXPECT_FALSE(StoredEntryIsGzipped());
+  EXPECT_TRUE(StoredEntryCarriesField());
+  // The caller's value is untouched.
+  EXPECT_TRUE(ValueCarriesField(value));
+
+  ExpectFoundWithField(false, false);
+  ExpectFoundWithField(true, false);
+}
+
+// Put of a value, cache compression on, compressible type: the entry is
+// stored gzip-compressed and keeps the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptByPutOfValueThroughGzipStore) {
+  http_cache_->SetCompressionLevel(9);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+  ASSERT_EQ(1, last_put_cache_.num_puts());
+  EXPECT_TRUE(StoredEntryIsGzipped());
+  EXPECT_TRUE(StoredEntryCarriesField());
+
+  // A client that accepts gzip gets the stored copy as it is.
+  ExpectFoundWithField(true, true);
+}
+
+// A gzip-stored entry looked up for a client that does not accept gzip is
+// inflated into a new value: the callback's headers and value keep the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptByInflateOnRead) {
+  http_cache_->SetCompressionLevel(9);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+  ASSERT_TRUE(StoredEntryIsGzipped());
+
+  ExpectFoundWithField(false, false);
+}
+
+// Put of an already gzip-compressed value with cache compression off: the
+// entry is stored inflated and keeps the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptByPutOfGzipValueThroughUnzipStore) {
+  http_cache_->SetCompressionLevel(0);
+  HTTPValue value;
+  BuildValueWithField(true, &value);
+  PutValue(&value);
+  ASSERT_EQ(1, last_put_cache_.num_puts());
+  EXPECT_FALSE(StoredEntryIsGzipped());
+  EXPECT_TRUE(StoredEntryCarriesField());
+
+  ExpectFoundWithField(false, false);
+  ExpectFoundWithField(true, false);
+}
+
+// Put of a fetched input: the marked copy keeps the field as well.
+TEST_P(HTTPCacheStoredFieldTest, KeptByPutFetchedInput) {
+  for (int compression_level : {0, 9}) {
+    SCOPED_TRACE(compression_level);
+    http_cache_->SetCompressionLevel(compression_level);
+    HTTPValue value;
+    BuildValueWithField(false, &value);
+    http_cache_->PutFetchedInput(kUrl, kFragment, RequestHeaders::Properties(),
+                                 kDefaultHttpOptionsForTests, &value,
+                                 &message_handler_);
+    EXPECT_EQ(compression_level != 0, StoredEntryIsGzipped());
+    EXPECT_TRUE(StoredEntryCarriesField());
+
+    std::unique_ptr<Callback> callback(NewCallback());
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    ASSERT_EQ(kFoundResult, callback->result_);
+    EXPECT_TRUE(callback->http_value()->IsFetchedInput());
+    EXPECT_TRUE(CarriesField(callback->response_headers()));
+    EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+  }
+}
+
+// Put of headers and content: the stored value is built from a copy of the
+// caller's headers that gets the client-entry stamp.  The copy keeps the
+// field, with and without cache compression, and the caller's headers are
+// left as they were.
+TEST_P(HTTPCacheStoredFieldTest, KeptByPutOfHeadersAndContent) {
+  for (int compression_level : {0, 9}) {
+    SCOPED_TRACE(compression_level);
+    http_cache_->SetCompressionLevel(compression_level);
+    ResponseHeaders headers;
+    InitCssHeadersWithField(&headers);
+    int puts_before = last_put_cache_.num_puts();
+    Put(kUrl, kFragment, &headers, kCssText);
+    ASSERT_EQ(puts_before + 1, last_put_cache_.num_puts());
+    EXPECT_EQ(compression_level != 0, StoredEntryIsGzipped());
+    EXPECT_TRUE(StoredEntryCarriesField());
+    EXPECT_TRUE(CarriesField(&headers));
+    EXPECT_FALSE(headers.Has(HTTPValue::kClientEntryHeader));
+    EXPECT_FALSE(headers.IsGzipped());
+
+    std::unique_ptr<Callback> callback(NewCallback());
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    ASSERT_EQ(kFoundResult, callback->result_);
+    EXPECT_TRUE(callback->http_value()->IsCurrentClientEntry());
+    EXPECT_TRUE(CarriesField(callback->response_headers()));
+    EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+  }
+}
+
+// A lookup that extends the lifetime of an entry rebuilds the value from the
+// changed headers; the rebuilt value keeps the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptWhenLifetimeIsOverriddenOnRead) {
+  http_cache_->SetCompressionLevel(0);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+
+  std::unique_ptr<Callback> callback(NewCallback());
+  callback->override_cache_ttl_ms_ = 400 * 1000;
+  http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+  ASSERT_EQ(kFoundResult, callback->result_);
+  EXPECT_STREQ("max-age=400", callback->response_headers()->Lookup1(
+                                  HttpAttributes::kCacheControl));
+  EXPECT_TRUE(CarriesField(callback->response_headers()));
+  EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+}
+
+// A stale entry is offered as a fallback value: linked as stored for a client
+// that accepts gzip, inflated into a copy for one that does not.  Both keep
+// the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptInStaleFallbackValue) {
+  http_cache_->SetCompressionLevel(9);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+  ASSERT_TRUE(StoredEntryIsGzipped());
+  mock_timer_.AdvanceMs(310 * Timer::kSecondMs);  // Makes the entry stale.
+
+  for (bool accepts_gzip : {true, false}) {
+    SCOPED_TRACE(accepts_gzip);
+    std::unique_ptr<Callback> callback(NewCallback());
+    callback->request_context()->SetAcceptsGzip(accepts_gzip);
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    ASSERT_TRUE(callback->called_);
+    ASSERT_EQ(kNotFoundResult, callback->result_);
+    ASSERT_FALSE(callback->fallback_http_value()->Empty());
+    ResponseHeaders fallback_headers;
+    ASSERT_TRUE(callback->fallback_http_value()->ExtractHeaders(
+        &fallback_headers, &message_handler_));
+    EXPECT_EQ(accepts_gzip, fallback_headers.IsGzipped());
+    EXPECT_TRUE(CarriesField(&fallback_headers));
+  }
+}
+
+// The same with the backend delivering memory-mapped views and zero-copy
+// serving on: the headers extracted from the borrowed bytes keep the field.
+TEST_P(HTTPCacheStoredFieldTest, KeptByZeroCopyMappedRead) {
+  MappedBackendCache mapped_backend(&last_put_cache_);
+  http_cache_ = std::make_unique<HTTPCache>(&mapped_backend, &mock_timer_,
+                                            &mock_hasher_, &simple_stats_);
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  http_cache_->SetCompressionLevel(0);
+  HTTPValue value;
+  BuildValueWithField(false, &value);
+  PutValue(&value);
+  EXPECT_TRUE(StoredEntryCarriesField());
+
+  {
+    std::unique_ptr<Callback> callback(NewCallback());
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    ASSERT_TRUE(callback->called_);
+    ASSERT_EQ(kFoundResult, callback->result_);
+    ASSERT_TRUE(callback->http_value()->is_mapped());
+    EXPECT_EQ(1, mapped_backend.mapped_hits());
+    EXPECT_TRUE(CarriesField(callback->response_headers()));
+    EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+  }
+  // The cache must not outlive the backend it points at.
+  http_cache_.reset();
+}
+
+// The same with a shared-memory cache as the backend: the entry is copied
+// into and out of shared-memory blocks, and the field comes back with it.
+TEST_P(HTTPCacheStoredFieldTest, KeptBySharedMemoryBackend) {
+  const char kSegment[] = "http_cache_unknown_field";
+  const int kSectors = 2;
+  const int kEntriesPerSector = 64;
+  const int kBlocksPerSector = 2000;
+  InProcessSharedMem shm_runtime(thread_system_.get());
+  MD5Hasher hasher;
+  {
+    SharedMemCache<512> shm_cache(&shm_runtime, kSegment, &mock_timer_, &hasher,
+                                  kSectors, kEntriesPerSector, kBlocksPerSector,
+                                  &message_handler_);
+    ASSERT_TRUE(shm_cache.Initialize());
+    LastPutCache last_put(&shm_cache);
+    http_cache_ = std::make_unique<HTTPCache>(&last_put, &mock_timer_,
+                                              &mock_hasher_, &simple_stats_);
+    for (int compression_level : {0, 9}) {
+      SCOPED_TRACE(compression_level);
+      http_cache_->SetCompressionLevel(compression_level);
+      HTTPValue value;
+      BuildValueWithField(false, &value);
+      PutValue(&value);
+      if (GetParam() == kUnknownField) {
+        ASSERT_TRUE(last_put.last_put().find(UnknownHeadersFieldWire()) !=
+                    GoogleString::npos);
+      }
+
+      for (bool accepts_gzip : {true, false}) {
+        SCOPED_TRACE(accepts_gzip);
+        std::unique_ptr<Callback> callback(NewCallback());
+        callback->request_context()->SetAcceptsGzip(accepts_gzip);
+        http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+        ASSERT_TRUE(callback->called_);
+        ASSERT_EQ(kFoundResult, callback->result_);
+        EXPECT_TRUE(CarriesField(callback->response_headers()));
+        EXPECT_TRUE(ValueCarriesField(*callback->http_value()));
+        StringPiece contents;
+        ASSERT_TRUE(callback->http_value()->ExtractContents(&contents));
+        if (!callback->response_headers()->IsGzipped()) {
+          EXPECT_STREQ(kCssText, contents);
+        }
+      }
+    }
+    http_cache_.reset();
+    SharedMemCache<512>::GlobalCleanup(&shm_runtime, kSegment,
+                                       &message_handler_);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(UnknownFieldAndSizeRecord, HTTPCacheStoredFieldTest,
+                         testing::Values(kUnknownField, kSizeRecordField));
+
+// ============================================================================
+// How many times the stored headers are parsed for one lookup that finds its
+// entry, and for the ExtractHeaders a caller then does on the value.  These
+// numbers are a baseline: a change on the serving path that adds a parse
+// shows up here.
+// ============================================================================
+
+class HTTPCacheHeaderParseCountTest : public HTTPCacheTest {
+ protected:
+  HTTPCacheHeaderParseCountTest() {
+    HTTPValue::set_header_parse_counter_for_testing(&header_parses_);
+  }
+  ~HTTPCacheHeaderParseCountTest() override {
+    HTTPValue::set_header_parse_counter_for_testing(nullptr);
+  }
+
+  // Stores a stylesheet under kUrl with the given cache compression level.
+  void PutStylesheet(int compression_level) {
+    http_cache_->SetCompressionLevel(compression_level);
+    ResponseHeaders headers;
+    InitHeaders(&headers, "max-age=300");
+    headers.Add(HttpAttributes::kContentType, "text/css");
+    headers.ComputeCaching();
+    Put(kUrl, kFragment, &headers, kCssText);
+  }
+
+  // Parses during one Find that must succeed.
+  int64 ParsesForFind(bool accepts_gzip, Callback* callback) {
+    callback->request_context()->SetAcceptsGzip(accepts_gzip);
+    const int64 before = header_parses_.load();
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback);
+    const int64 after = header_parses_.load();
+    EXPECT_TRUE(callback->called_);
+    EXPECT_EQ(kFoundResult, callback->result_);
+    return after - before;
+  }
+
+  int64 ParsesForExtractHeaders(Callback* callback) {
+    ResponseHeaders headers;
+    const int64 before = header_parses_.load();
+    EXPECT_TRUE(
+        callback->http_value()->ExtractHeaders(&headers, &message_handler_));
+    return header_parses_.load() - before;
+  }
+
+  std::atomic<int64_t> header_parses_{0};
+};
+
+// An entry served as it is stored: one parse for the lookup, one for each
+// ExtractHeaders the caller does afterwards.
+TEST_F(HTTPCacheHeaderParseCountTest, EntryServedAsStored) {
+  PutStylesheet(0);
+  std::unique_ptr<Callback> plain(NewCallback());
+  EXPECT_EQ(1, ParsesForFind(false, plain.get()));
+  EXPECT_EQ(1, ParsesForExtractHeaders(plain.get()));
+
+  PutStylesheet(9);
+  std::unique_ptr<Callback> gzipped(NewCallback());
+  EXPECT_EQ(1, ParsesForFind(true, gzipped.get()));
+  EXPECT_TRUE(gzipped->response_headers()->IsGzipped());
+  EXPECT_EQ(1, ParsesForExtractHeaders(gzipped.get()));
+}
+
+// A gzip-stored entry inflated for a client that does not accept gzip costs
+// more: the value is rebuilt, and the marker lookups parse again.
+TEST_F(HTTPCacheHeaderParseCountTest, EntryInflatedOnRead) {
+  PutStylesheet(9);
+  std::unique_ptr<Callback> callback(NewCallback());
+  EXPECT_EQ(5, ParsesForFind(false, callback.get()));
+  EXPECT_FALSE(callback->response_headers()->IsGzipped());
+  EXPECT_EQ(1, ParsesForExtractHeaders(callback.get()));
+}
+
+// The cache generation is part of every key.  It was raised when rewritten
+// outputs began to carry the sizes they are stored with: entries of the
+// generation before it are not read any more, so every output found in the
+// cache was written with them.  Raising it again empties the cache again.
+TEST_F(HTTPCacheTest, KeysCarryTheCacheGeneration) {
+  EXPECT_STREQ("v5/www.test.com/http://www.test.com/",
+               http_cache_->CompositeKey(kUrl, kFragment));
+  EXPECT_STREQ("v5/http://www.test.com/", http_cache_->CompositeKey(kUrl, ""));
 }
 
 }  // namespace net_instaweb

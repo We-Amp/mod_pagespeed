@@ -350,9 +350,15 @@ class RewriteContext {
   // is replaced with a bodiless 500 instead, so a response never declares a
   // length or coding its body does not have. Returns whether `contents` was
   // written.
-  static bool WriteWholeResponse(StringPiece url, StringPiece contents,
-                                 AsyncFetch* async_fetch,
-                                 MessageHandler* handler);
+  //
+  // A caller that serves an optimized output passes its driver and the
+  // output's size record: once the body is written, the response is offered
+  // to ServedSavings, which decides whether it counts.  Without them nothing
+  // is counted, which is right for original bytes served on these paths.
+  static bool WriteWholeResponse(
+      StringPiece url, StringPiece contents, AsyncFetch* async_fetch,
+      MessageHandler* handler, const RewriteDriver* driver = nullptr,
+      const ResponseHeaders::SizeRecord* size_record = nullptr);
 
   // The header half of WriteWholeResponse, for callers that write `contents`
   // themselves: on success the headers are complete and the caller writes
@@ -461,10 +467,17 @@ class RewriteContext {
   // But contexts may need to specialize this to actually absolutify
   // subresources if the fetched resource is served on a different path
   // than the input resource.
-  virtual bool SendFallbackResponse(StringPiece output_url_base,
-                                    StringPiece contents,
-                                    AsyncFetch* async_fetch,
-                                    MessageHandler* handler);
+  //
+  // `size_record` is the size record of `contents` when they are an optimized
+  // output that has one (an output found in the cache under another hash, a
+  // resource optimized in place, an output just built), and null when they
+  // are original bytes.  An implementation hands it to WriteWholeResponse,
+  // which offers the response for counting; one that changes the body first
+  // passes a copy whose optimized size is that of the body it writes.
+  virtual bool SendFallbackResponse(
+      StringPiece output_url_base, StringPiece contents,
+      AsyncFetch* async_fetch, MessageHandler* handler,
+      const ResponseHeaders::SizeRecord* size_record);
 
   // Returns false, logging why, if the content type in async_fetch's response
   // headers is not one we would generate a pagespeed resource for. Every
