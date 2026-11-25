@@ -153,6 +153,34 @@ TEST_F(RestampApplyTest, RestampWritesBackWithTheNewTimestamp) {
   EXPECT_EQ(2000u, read->metadata.cache_inserted_at);
 }
 
+TEST_F(RestampApplyTest, RestampKeepsTheContentBinding) {
+  // The write-back carries the stashed entry's metadata with only the
+  // freshness fields refreshed, so the origin_html_hash stamp the entry was
+  // stored with is still on it afterwards.
+  AlternateMetadata stored = RestampedMeta(0x01, 1000);
+  for (size_t i = 0; i < stored.origin_html_hash.size(); ++i) {
+    stored.origin_html_hash[i] = static_cast<std::byte>(0xA0 + i);
+  }
+  auto wh =
+      cache_->WriteAlternate(kUrl, "", "", Id(0x01), kBody.size(), stored);
+  ASSERT_TRUE(wh.has_value());
+  ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(kBody))).has_value());
+  ASSERT_TRUE(wh->close_sync().has_value());
+
+  auto stale = cache_->ReadAlternate(kUrl, "", "", Id(0x01));
+  ASSERT_TRUE(stale.has_value());
+  AlternateMetadata updated = stale->metadata;
+  updated.cache_inserted_at = 2000;
+  stale->release();
+  EXPECT_EQ(RestampAction::kWrittenBack,
+            Apply(RestampVerdict::kRestamp, 0x01, updated, kBody));
+
+  auto read = cache_->ReadAlternate(kUrl, "", "", Id(0x01));
+  ASSERT_TRUE(read.has_value());
+  EXPECT_EQ(2000u, read->metadata.cache_inserted_at);
+  EXPECT_EQ(read->metadata.origin_html_hash, stored.origin_html_hash);
+}
+
 TEST_F(RestampApplyTest, RestampHonoursThePurgeFence) {
   // Entry purged mid-revalidation: the write-back must not resurrect it.
   EXPECT_EQ(RestampAction::kEntryGone, Apply(RestampVerdict::kRestamp, 0x01,

@@ -152,8 +152,97 @@ parse never consumes a prefix of a sidecar payload. That constraint is the
 reason the C surface needs no separate payload accessor — and therefore it may
 not be relaxed without either giving the class one or breaking every consumer
 that reads it the documented way. It costs the class one spare version value
-(2); a class that needs a third takes a new id, which is cheaper than the
-alternative.
+(2), which PS_API 1.13 spends on the paired form below; a class that needs a
+third takes a new id, which is cheaper than the alternative.
+
+**Pairing (PS_API 1.13).** `ps_cache_write_headers_sidecar_site` can bind a
+block to the durable original it belongs to, by that original's
+`origin_html_hash` stamp, and stores it as payload format 2: format 1 with the
+32-byte hash after the version byte. A reader that knows only format 1 reads a
+paired block as absent, which is the safe answer. `ps_headers_sidecar_read`
+parses either format into an owned block, and `ps_header_block_pairing` tells
+a block that belongs to the stored original from one that does not. Unpaired
+is a window by design, not a fault: a re-store writes the new block before the
+new original. A paired block may carry no field.
+
+The site-scoped HTML store surface (PS_API 1.13) carries three more
+constraints of this kind.
+
+**`ps_cache_remove_site` is not fenced against the optimizer.** A derivation
+already in flight for the key can write its Markdown copy after the removal
+returns. That copy is bound to the removed original's hash, so it is not served
+unless the original is stored again with identical bytes, and in that case
+serving it is correct.
+
+**The withheld marker is never readable as a page.** `PS_SENTINEL_MARKDOWN_WITHHELD`
+is sentinel-shaped, so no selection read returns it, and no exact-id reader of
+another class asks for it; the generic sentinel write refuses it. A durable
+original written for the key removes the key's marker in the same call. The id
+is reserved for the optimizer's own writer and may never be reused.
+
+**The per-site purge epoch is a max-merge, clamped to the present, and it
+lives outside the volume.** It is one file per site,
+`<volume_path>.purge-epoch.<site>` (64 lowercase hex), holding one
+fixed-width record: `pspe1 ` plus 20 zero-padded decimal digits plus `\n`,
+27 bytes. The file is updated in place, never renamed or replaced:
+
+- A writer opens it, creating it 0660 if absent. The setgid cache directory
+  gives it the cache group.
+- It takes an exclusive advisory lock on one byte far past the record:
+  `fcntl(F_SETLK)` on POSIX, `LockFileEx` on Windows. On Windows, byte-range
+  locks are mandatory, so a lock on the record's own bytes would block its
+  own reads and writes. The wait is bounded at about 2 seconds and then the
+  write is `PS_ERR_IO`.
+- It reads the record and, only for a larger value, writes the whole record
+  at offset 0 and flushes it.
+- Readers take a shared lock on the same byte. A process-wide mutex covers
+  threads, since POSIX record locks belong to the process.
+
+Because no directory entry changes after the first write, any user of the
+cache group can update the file, also in the sticky cache directory where a
+rename over another user's file would be refused. A power-loss tear of the
+first write (or of a repair) leaves a record that does not parse; a tear of
+an overwrite leaves a well-formed record that is never below the previous
+value, since both are zero-padded to one width and the new one is larger.
+The epoch never decreases: a stored value in the future (such a tear, or a
+write made while the clock ran fast) is returned as it is and kept by every
+later write, so it over-fences until the clock passes it, by design; lowering
+it would un-purge entries stored under the fast clock. A value more than 5
+seconds in the future is refused on write.
+
+Three guarantees a caller builds on:
+
+- a lower value never replaces a higher one, across threads, processes and
+  users of the cache group;
+- a missing file reads 0, and any other read result than `PS_OK`
+  (`PS_ERR_CORRUPTED`, `PS_ERR_IO`, anything) means "treat the whole site as
+  purged", with the out-parameter left untouched. The next write replaces a
+  corrupted record with the larger of its value and the current time;
+- the record cannot be reclaimed. It is outside the volume because the
+  volume's reclamation (per-stripe logs, full directory buckets, chain
+  carry-forward) has no ordering against the entries the epoch fences, so a
+  record inside it could vanish while older entries survive.
+
+It is deliberately NOT keyed by the volume generation. A recreated volume
+holds no entry from before, and the epoch only fences entries stored at or
+before it, so an epoch that outlives a recreate can only fence more than
+needed until the next store (fail closed), and a missing one fences nothing
+the new volume holds. Keying by generation would instead lose the epoch on
+any generation change that is not a recreate.
+
+**Removal is per process for the RAM tier.** `ps_cache_remove_site` (like
+`ps_cache_remove`) removes the key from the volume and evicts this process's
+RAM-tier copies of it, so no later read in this process returns them.
+Another process's RAM tier is its own: a peer can keep answering from a copy
+it already holds. A caller whose correctness depends on a removal (a purge)
+must therefore fence its peers itself, for example with the purge epoch
+above, rather than rely on the removal reaching them.
+
+**Legacy sidecar readers fail closed on the paired format.** The C++
+`ParseHeadersSidecar` (fields only, used by the in-tree replay paths) reads a
+format-2 block as absent, because it cannot check the pairing; a replay that
+needs a block then falls through. Pairing-aware readers use
+`ParseHeadersSidecarBlock` (and `ps_headers_sidecar_read` through the C API).
 
 The HTML cacheability report entry points (`ps_html_store_classify`,
 `ps_html_decision_format`, `ps_html_store_reason_name`, PS_API 1.12) are pure

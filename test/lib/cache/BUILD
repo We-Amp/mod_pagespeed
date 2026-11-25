@@ -116,6 +116,22 @@ gtest_test(
 )
 
 gtest_test(
+    name = "site_html_store_test",
+    size = "large",  # same volume/temp-dir shape as cache_test
+    srcs = ["site_html_store_test.cc"],
+    deps = [
+        "//lib/cache:headers_sidecar",
+        "//lib/cache:pagespeed_cache",
+        "//lib/cache:site_purge_epoch",
+        "//lib/classify:alternate_id",
+        "//lib/classify:alternate_metadata",
+        "//lib/classify:capability_mask",
+        "//test/test_util:temp_dir",
+        "@cyclone",
+    ],
+)
+
+gtest_test(
     name = "headers_sidecar_store_test",
     size = "large",  # same volume/temp-dir shape as cache_test
     srcs = ["headers_sidecar_store_test.cc"],

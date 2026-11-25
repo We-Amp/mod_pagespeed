@@ -49,6 +49,12 @@ static_assert(kHeadersSidecarFormatVersion > 0 &&
                   kHeadersSidecarFormatVersion < 3,
               "the sidecar payload format version must stay outside the "
               "entry-metadata version range");
+static_assert(kHeadersSidecarPairedFormatVersion > 0 &&
+                  kHeadersSidecarPairedFormatVersion < 3 &&
+                  kHeadersSidecarPairedFormatVersion !=
+                      kHeadersSidecarFormatVersion,
+              "the paired sidecar format version must stay outside the "
+              "entry-metadata version range and differ from format 1");
 
 namespace {
 
@@ -377,14 +383,15 @@ SidecarClassification ClassifyForHeadersSidecar(
   return result;
 }
 
-std::optional<std::vector<HeaderField>> ParseHeadersSidecar(
-    std::string_view payload) {
-  if (payload.size() < 3) return std::nullopt;
-  if (static_cast<unsigned char>(payload[0]) != kHeadersSidecarFormatVersion) {
-    return std::nullopt;
-  }
-  const size_t count = ReadBigEndian16(payload, 1);
-  size_t offset = 3;
+namespace {
+
+// The field list of a payload of either format, starting at the 2-byte count
+// at `offset`.
+std::optional<std::vector<HeaderField>> ParseSidecarFields(
+    std::string_view payload, size_t offset) {
+  if (payload.size() < offset + 2) return std::nullopt;
+  const size_t count = ReadBigEndian16(payload, offset);
+  offset += 2;
   std::vector<HeaderField> fields;
   fields.reserve(count);
   for (size_t i = 0; i < count; ++i) {
@@ -402,6 +409,67 @@ std::optional<std::vector<HeaderField>> ParseHeadersSidecar(
   // Bytes left over mean this is not the block it claims to be.
   if (offset != payload.size()) return std::nullopt;
   return fields;
+}
+
+}  // namespace
+
+std::optional<HeadersSidecarBlock> ParseHeadersSidecarBlock(
+    std::string_view payload) {
+  if (payload.empty()) return std::nullopt;
+  const auto version = static_cast<unsigned char>(payload[0]);
+  HeadersSidecarBlock block;
+  size_t fields_at = 1;
+  if (version == kHeadersSidecarPairedFormatVersion) {
+    if (payload.size() < 1 + kHeadersSidecarPairingHashBytes) {
+      return std::nullopt;
+    }
+    std::array<std::byte, kHeadersSidecarPairingHashBytes> hash{};
+    bool all_zero = true;
+    for (size_t i = 0; i < kHeadersSidecarPairingHashBytes; ++i) {
+      hash[i] = static_cast<std::byte>(payload[1 + i]);
+      if (hash[i] != std::byte{0}) all_zero = false;
+    }
+    // All-zero is the reserved "no binding" value everywhere a content hash
+    // is stamped; a writer never pairs with it, so a block carrying it is not
+    // one this class wrote.
+    if (all_zero) return std::nullopt;
+    block.pairing_hash = hash;
+    fields_at += kHeadersSidecarPairingHashBytes;
+  } else if (version != kHeadersSidecarFormatVersion) {
+    return std::nullopt;
+  }
+  auto fields = ParseSidecarFields(payload, fields_at);
+  if (!fields.has_value()) return std::nullopt;
+  block.fields = std::move(*fields);
+  return block;
+}
+
+std::optional<std::vector<HeaderField>> ParseHeadersSidecar(
+    std::string_view payload) {
+  auto block = ParseHeadersSidecarBlock(payload);
+  // Fields only, so this reader cannot check a pairing: a paired block is
+  // absent to it (fail closed), and the caller's miss path runs.
+  if (!block.has_value() || block->pairing_hash.has_value()) {
+    return std::nullopt;
+  }
+  return std::move(block->fields);
+}
+
+std::string PairHeadersSidecarPayload(
+    std::string_view format1_payload,
+    std::span<const std::byte, kHeadersSidecarPairingHashBytes> hash) {
+  std::string out;
+  out.reserve(1 + kHeadersSidecarPairingHashBytes +
+              (format1_payload.empty() ? 2 : format1_payload.size() - 1));
+  out.push_back(static_cast<char>(kHeadersSidecarPairedFormatVersion));
+  for (std::byte b : hash) out.push_back(static_cast<char>(b));
+  if (format1_payload.empty()) {
+    AppendBigEndian16(&out, 0);
+  } else {
+    // Everything after format 1's version byte: the count and the fields.
+    out.append(format1_payload.substr(1));
+  }
+  return out;
 }
 
 }  // namespace pagespeed

@@ -9,6 +9,7 @@
 #include "lib/pagespeed/pagespeed.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -1024,6 +1025,16 @@ static_assert(kWriteParamsSizeV1_1 == 48,
 static_assert(sizeof(ps_write_params_t) >= kWriteParamsSizeV1_1,
               "ps_write_params_t may only grow");
 
+// The size ps_write_params_t had from PS_API 1.2 through 1.12, ending with the
+// _reserved tail. A caller built against those headers passes exactly this
+// much, and gets the 1.13 origin_html_hash as NULL (unbound).
+constexpr size_t kWriteParamsSizeV1_2 =
+    offsetof(ps_write_params_t, origin_html_hash);
+static_assert(sizeof(void*) != 8 || kWriteParamsSizeV1_2 == 80,
+              "ps_write_params_t's 1.2 size is part of the shipped ABI: 80 "
+              "bytes on LP64. origin_html_hash is appended after it.");
+static_assert(kWriteParamsSizeV1_2 > kWriteParamsSizeV1_1);
+
 // Snap a caller-declared struct_size DOWN to the largest published size that
 // does not exceed it.
 //
@@ -1057,7 +1068,7 @@ size_t ClampToPublishedSize(size_t declared, const size_t* ladder,
 // apart on the one piece of this API that is a live overread if it is wrong.
 // Returns false when struct_size names no shape this library ever published.
 bool CopyWriteParams(const ps_write_params_t* params, ps_write_params_t* out) {
-  const size_t kPublishedSizes[] = {kWriteParamsSizeV1_1,
+  const size_t kPublishedSizes[] = {kWriteParamsSizeV1_1, kWriteParamsSizeV1_2,
                                     sizeof(ps_write_params_t)};
   const size_t usable = ClampToPublishedSize(
       params->struct_size, kPublishedSizes,
@@ -1087,6 +1098,12 @@ AlternateMetadata MetadataFromParams(const ps_write_params_t& p) {
   meta.cache_inserted_at = p.cache_inserted_at != 0
                                ? p.cache_inserted_at
                                : static_cast<uint32_t>(std::time(nullptr));
+  // 1.13: the content binding. NULL leaves the stamp all-zero (unbound), and
+  // 32 zero bytes are the same value.
+  if (p.origin_html_hash != nullptr) {
+    std::memcpy(meta.origin_html_hash.data(), p.origin_html_hash,
+                AlternateMetadata::kHashSize);
+  }
   return meta;
 }
 
@@ -1474,6 +1491,178 @@ extern "C" ps_error_t ps_cache_write_headers_sidecar(
   }
 }
 
+// ---- Site-scoped headers sidecar (PS_API 1.13) ----
+
+namespace {
+
+constexpr size_t kSidecarWriteParamsSizeV1_13 =
+    offsetof(ps_sidecar_write_params_t, origin_html_hash) +
+    sizeof(const uint8_t*);
+static_assert(kSidecarWriteParamsSizeV1_13 == sizeof(ps_sidecar_write_params_t),
+              "ps_sidecar_write_params_t's 1.13 size is the whole struct; when "
+              "a field is appended keep this at the 1.13 size and read the new "
+              "field only when struct_size covers it.");
+
+}  // namespace
+
+extern "C" ps_error_t ps_cache_write_headers_sidecar_site(
+    ps_cache_t* cache, const ps_sidecar_write_params_t* params,
+    const char* const* names, const char* const* values, size_t count,
+    int* out_verdict, int* out_stored) {
+  ClearLastError();
+  if (cache == nullptr || params == nullptr) return PS_ERR_INVALID_ARG;
+  if (params->struct_size < kSidecarWriteParamsSizeV1_13) {
+    SetLastError(
+        "ps_cache_write_headers_sidecar_site: params->struct_size is smaller "
+        "than the 1.13 ps_sidecar_write_params_t");
+    return PS_ERR_INVALID_ARG;
+  }
+  ps_sidecar_write_params_t p;
+  std::memset(&p, 0, sizeof(p));
+  std::memcpy(&p, params, sizeof(p));
+
+  ps_error_t err = ValidateUrlHostname(p.url, p.hostname);
+  if (err != PS_OK) return err;
+  std::string_view site_view;
+  err = ParseSiteArg(p.site, &site_view);
+  if (err != PS_OK) return err;
+
+  std::span<const std::byte> pairing;
+  if (p.origin_html_hash != nullptr) {
+    pairing = std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(p.origin_html_hash),
+        AlternateMetadata::kHashSize);
+    if (std::all_of(pairing.begin(), pairing.end(),
+                    [](std::byte b) { return b == std::byte{0}; })) {
+      SetLastError(
+          "ps_cache_write_headers_sidecar_site: origin_html_hash is all zero, "
+          "the unbound value; pass NULL for an unpaired block");
+      return PS_ERR_INVALID_ARG;
+    }
+  }
+
+  std::vector<HeaderField> fields;
+  if (!CollectHeaderFields(names, values, count, &fields)) {
+    SetLastError(
+        "ps_cache_write_headers_sidecar_site: names/values must be non-NULL "
+        "arrays of non-NULL strings when count is non-zero");
+    return PS_ERR_INVALID_ARG;
+  }
+
+  try {
+    auto result = cache->cache->WriteHeadersSidecar(
+        p.url, p.hostname, p.scheme != nullptr ? p.scheme : "", fields,
+        site_view, pairing);
+    if (!result.has_value()) {
+      SetLastError("WriteHeadersSidecar failed");
+      return MapError(result.error());
+    }
+    if (out_verdict != nullptr) {
+      *out_verdict = static_cast<int>(result->verdict);
+    }
+    if (out_stored != nullptr) *out_stored = result->stored ? 1 : 0;
+    return PS_OK;
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_ERR_INTERNAL;
+  } catch (...) {
+    SetLastError("Unknown exception in ps_cache_write_headers_sidecar_site");
+    return PS_ERR_INTERNAL;
+  }
+}
+
+// The parsed block owns its bytes: the payload is copied out of the read
+// result, so the block holds no lease on the volume and outlives the read.
+struct ps_header_block_s {
+  std::vector<std::string> names;
+  std::vector<std::string> values;
+  bool paired = false;
+  std::array<uint8_t, AlternateMetadata::kHashSize> pairing_hash{};
+};
+
+extern "C" ps_error_t ps_headers_sidecar_read(
+    ps_cache_t* cache, const char* url, const char* hostname,
+    const char* scheme, const char* site, ps_header_block_t** out) {
+  ClearLastError();
+  if (out != nullptr) *out = nullptr;
+  if (cache == nullptr || out == nullptr) return PS_ERR_INVALID_ARG;
+  ps_error_t err = ValidateUrlHostname(url, hostname);
+  if (err != PS_OK) return err;
+  std::string_view site_view;
+  err = ParseSiteArg(site, &site_view);
+  if (err != PS_OK) return err;
+
+  try {
+    auto read = cache->cache->ReadHeadersSidecar(
+        url, hostname, scheme != nullptr ? scheme : "", site_view);
+    if (!read.has_value()) return MapError(read.error());
+    const std::string payload(
+        pagespeed::PageSpeedCache::HeadersSidecarPayload(*read));
+    read->release();
+    auto parsed = pagespeed::ParseHeadersSidecarBlock(payload);
+    // ReadHeadersSidecar already refuses a block it cannot parse; this is
+    // the same check on the bytes now owned.
+    if (!parsed.has_value()) return PS_ERR_NOT_FOUND;
+    auto block = std::make_unique<ps_header_block_s>();
+    block->names.reserve(parsed->fields.size());
+    block->values.reserve(parsed->fields.size());
+    for (const HeaderField& f : parsed->fields) {
+      block->names.emplace_back(f.name);
+      block->values.emplace_back(f.value);
+    }
+    if (parsed->pairing_hash.has_value()) {
+      block->paired = true;
+      std::memcpy(block->pairing_hash.data(), parsed->pairing_hash->data(),
+                  block->pairing_hash.size());
+    }
+    *out = block.release();
+    return PS_OK;
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_ERR_INTERNAL;
+  } catch (...) {
+    SetLastError("Unknown exception in ps_headers_sidecar_read");
+    return PS_ERR_INTERNAL;
+  }
+}
+
+extern "C" size_t ps_header_block_count(const ps_header_block_t* block) {
+  return block == nullptr ? 0 : block->names.size();
+}
+
+extern "C" ps_error_t ps_header_block_get(const ps_header_block_t* block,
+                                          size_t index, const char** out_name,
+                                          size_t* out_name_len,
+                                          const char** out_value,
+                                          size_t* out_value_len) {
+  if (block == nullptr || index >= block->names.size()) {
+    return PS_ERR_INVALID_ARG;
+  }
+  if (out_name != nullptr) *out_name = block->names[index].c_str();
+  if (out_name_len != nullptr) *out_name_len = block->names[index].size();
+  if (out_value != nullptr) *out_value = block->values[index].c_str();
+  if (out_value_len != nullptr) *out_value_len = block->values[index].size();
+  return PS_OK;
+}
+
+extern "C" const uint8_t* ps_header_block_pairing_hash(
+    const ps_header_block_t* block) {
+  if (block == nullptr || !block->paired) return nullptr;
+  return block->pairing_hash.data();
+}
+
+extern "C" int ps_header_block_pairing(const ps_header_block_t* block,
+                                       const uint8_t* entry_hash) {
+  if (block == nullptr) return -1;
+  if (!block->paired || entry_hash == nullptr) return PS_SIDECAR_UNPAIRED;
+  return std::memcmp(block->pairing_hash.data(), entry_hash,
+                     block->pairing_hash.size()) == 0
+             ? PS_SIDECAR_PAIRED
+             : PS_SIDECAR_UNPAIRED;
+}
+
+extern "C" void ps_header_block_free(ps_header_block_t* block) { delete block; }
+
 extern "C" ps_error_t ps_cache_write_sentinel(
     ps_cache_t* cache, const char* url, const char* hostname,
     const char* scheme, uint8_t sentinel_id, uint64_t content_length,
@@ -1662,6 +1851,108 @@ extern "C" ps_error_t ps_cache_remove(ps_cache_t* cache, const char* url,
   }
 }
 
+// ---- Site-scoped removal and the per-site purge epoch (PS_API 1.13) ----
+
+extern "C" ps_error_t ps_cache_remove_site(ps_cache_t* cache, const char* url,
+                                           const char* hostname,
+                                           const char* scheme,
+                                           const char* site) {
+  ClearLastError();
+  if (cache == nullptr) return PS_ERR_INVALID_ARG;
+  ps_error_t err = ValidateUrlHostname(url, hostname);
+  if (err != PS_OK) return err;
+  std::string_view site_view;
+  err = ParseSiteArg(site, &site_view);
+  if (err != PS_OK) return err;
+
+  try {
+    auto result = cache->cache->Remove(
+        url, hostname, scheme != nullptr ? scheme : "", site_view);
+    if (!result.has_value()) return MapError(result.error());
+    return PS_OK;
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_ERR_INTERNAL;
+  } catch (...) {
+    SetLastError("Unknown exception in ps_cache_remove_site");
+    return PS_ERR_INTERNAL;
+  }
+}
+
+namespace {
+
+// The epoch entry points take a site and nothing else, and the unsited
+// keyspace has no epoch: NULL and "" are refused here, unlike ParseSiteArg.
+ps_error_t ParseEpochSiteArg(const char* site, std::string_view* out) {
+  if (site == nullptr || site[0] == '\0') {
+    SetLastError("site must be PS_SITE_ID_CHARS lowercase hex");
+    return PS_ERR_INVALID_ARG;
+  }
+  return ParseSiteArg(site, out);
+}
+
+}  // namespace
+
+extern "C" ps_error_t ps_cache_write_site_purge_epoch(ps_cache_t* cache,
+                                                      const char* site,
+                                                      uint64_t epoch_s) {
+  ClearLastError();
+  if (cache == nullptr) return PS_ERR_INVALID_ARG;
+  std::string_view site_view;
+  ps_error_t err = ParseEpochSiteArg(site, &site_view);
+  if (err != PS_OK) return err;
+  try {
+    const auto now = static_cast<uint64_t>(std::time(nullptr));
+    auto result = cache->cache->WriteSitePurgeEpoch(site_view, epoch_s, now);
+    if (!result.has_value()) {
+      if (result.error() == cyclone::CacheError::InvalidArgument) {
+        SetLastError(
+            "purge epoch is later than the current time plus the allowed "
+            "skew; pass min(observed, now)");
+      } else {
+        SetLastError("the purge epoch file could not be read or written");
+      }
+      return MapError(result.error());
+    }
+    return PS_OK;
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_ERR_INTERNAL;
+  } catch (...) {
+    SetLastError("Unknown exception in ps_cache_write_site_purge_epoch");
+    return PS_ERR_INTERNAL;
+  }
+}
+
+extern "C" ps_error_t ps_cache_read_site_purge_epoch(ps_cache_t* cache,
+                                                     const char* site,
+                                                     uint64_t* out_epoch_s) {
+  ClearLastError();
+  if (cache == nullptr || out_epoch_s == nullptr) return PS_ERR_INVALID_ARG;
+  std::string_view site_view;
+  ps_error_t err = ParseEpochSiteArg(site, &site_view);
+  if (err != PS_OK) return err;
+  try {
+    auto result = cache->cache->ReadSitePurgeEpoch(site_view);
+    if (!result.has_value()) {
+      if (result.error() == cyclone::CacheError::Corrupted) {
+        SetLastError(
+            "the purge epoch file is unreadable; treat every entry of the "
+            "site as purged");
+      }
+      return MapError(result.error());
+    }
+    *out_epoch_s = *result;
+    return PS_OK;
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_ERR_INTERNAL;
+  } catch (...) {
+    SetLastError("Unknown exception in ps_cache_read_site_purge_epoch");
+    return PS_ERR_INTERNAL;
+  }
+}
+
 extern "C" ps_error_t ps_cache_list_alternates(
     ps_cache_t* cache, const char* url, const char* hostname,
     const char* scheme, ps_alternate_info_t** out_alternates,
@@ -1840,6 +2131,19 @@ static_assert(PS_FLAG_ORIGIN_HEADERS_NOT_REPRODUCIBLE ==
 static_assert((PS_FLAG_ORIGIN_HEADERS_NOT_REPRODUCIBLE &
                (PS_FLAG_NEEDS_REVALIDATION | PS_FLAG_WORKER_PROCESSED |
                 PS_FLAG_ORIGIN_VARIES_ACCEPT)) == 0);
+// 1.13 publishes the two headers-sidecar bits a front end stamps and reads
+// back; the same two-layer argument applies.
+static_assert(PS_FLAG_HEADERS_CLASSIFIED ==
+              AlternateMetadata::kFlagHeadersClassified);
+static_assert(PS_FLAG_HEADERS_SIDECAR_REQUIRED ==
+              AlternateMetadata::kFlagHeadersSidecarRequired);
+static_assert(PS_SENTINEL_MARKDOWN_WITHHELD ==
+              static_cast<int>(SentinelId::kAgentMarkdownWithheld));
+static_assert(pagespeed::IsSentinel(PS_SENTINEL_MARKDOWN_WITHHELD),
+              "the withheld marker must never be selectable");
+static_assert(
+    !pagespeed::IsEmbedderWritableSentinel(PS_SENTINEL_MARKDOWN_WITHHELD),
+    "ps_cache_write_sentinel must refuse the withheld marker");
 
 // Copy the caller's prefix of an input struct into a zeroed local of this
 // build's shape. Absent fields read as zero; fields this build does not know

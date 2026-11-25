@@ -16,13 +16,14 @@ internal struct NativeCacheConfig
     [FieldOffset(40)] public nuint MaxMetadataSize;
 }
 
-// Mirrors ps_write_params_t as of PS_API 1.2. The struct carries origin-state
+// Mirrors ps_write_params_t as of PS_API 1.13. The struct carries origin-state
 // fields (ETag, insertion time, max-age / s-maxage, Last-Modified, Cache-Control
-// flags). The 1.1 prefix is still valid via the StructSize contract.
+// flags) and, from 1.13, the origin_html_hash content binding (left zero:
+// unbound). The 1.1 prefix is still valid via the StructSize contract.
 //
 // This now uses ps_write_params_init_sized (passing sizeof(NativeWriteParams))
 // instead of ps_write_params_init, which clears only the 48-byte 1.1 prefix.
-[StructLayout(LayoutKind.Explicit, Size = 80)]
+[StructLayout(LayoutKind.Explicit, Size = 88)]
 internal struct NativeWriteParams
 {
     [FieldOffset(0)]  public nuint StructSize;
@@ -39,6 +40,7 @@ internal struct NativeWriteParams
     [FieldOffset(68)] public uint OriginLastModified;
     [FieldOffset(72)] public ushort OriginCcFlags; // PS_CC_ORIGIN_* bitfield
     // Bytes 74-79 are reserved padding — no need to declare.
+    [FieldOffset(80)] public IntPtr OriginHtmlHash; // const uint8_t[32] or 0
 }
 
 // Mirrors ps_cache_control_t. Parse ONE Cache-Control response header line

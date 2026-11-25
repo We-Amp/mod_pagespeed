@@ -821,11 +821,20 @@ class PageSpeedCache {
     size_t fields = 0;         // header lines in the stored block
     size_t payload_bytes = 0;  // stored block size
   };
+  //
+  // PAIRING.  A non-empty `pairing_hash` (exactly kHeadersSidecarPairingHashBytes
+  // bytes, not all-zero — anything else is InvalidArgument) binds the block to
+  // the durable original written with that origin_html_hash stamp, in payload
+  // format 2 (lib/cache/headers_sidecar.h).  A paired block is written even
+  // when it carries no field, because "nothing to carry" is then something a
+  // reader can prove for that original rather than infer from a miss.  A
+  // refusal writes nothing, paired or not.
   [[nodiscard]] std::expected<HeadersSidecarWrite, cyclone::CacheError>
   WriteHeadersSidecar(std::string_view url, std::string_view hostname,
                       std::string_view scheme,
                       std::span<const HeaderField> headers,
-                      std::string_view site = {});
+                      std::string_view site = {},
+                      std::span<const std::byte> pairing_hash = {});
 
   // Read the header sidecar by EXACT ID.  Like the durable original, it is
   // never selectable — a block of headers is not a representation and must
@@ -840,7 +849,9 @@ class PageSpeedCache {
   // The returned ReadResult holds the RAW blob: this class carries a payload
   // format version, NOT an entry-metadata prefix, so the parsed `metadata` of
   // the result is meaningless and `content()` is not the accessor to use.
-  // Pass ReadHeadersSidecarPayload(result) to ParseHeadersSidecar.
+  // Pass HeadersSidecarPayload(result) to ParseHeadersSidecarBlock (either
+  // format) or ParseHeadersSidecar (format 1 only; a paired block reads as
+  // absent there).
   [[nodiscard]] std::expected<ReadResult, cyclone::CacheError>
   ReadHeadersSidecar(std::string_view url, std::string_view hostname,
                      std::string_view scheme, std::string_view site = {});
@@ -1013,6 +1024,30 @@ class PageSpeedCache {
   void SetBusyReadObserver(std::function<void(bool retry_hit)> observer) {
     busy_read_observer_ = std::move(observer);
   }
+
+  // ---- Per-site purge epoch ----
+  //
+  // The time, in Unix seconds, of the last global purge one site's front end
+  // observed.  Kept in a small file beside this cache's volume, not in the
+  // volume (whose reclamation has no ordering against the entries the epoch
+  // fences); see lib/cache/site_purge_epoch.h for the path, the format, the
+  // locking and why it is not keyed by the volume generation.
+  //
+  // WRITE is a max-merge across threads and processes: a value at or below
+  // the stored one is a successful no-op.  A value later than `now_seconds`
+  // + kSitePurgeEpochSkewSeconds is InvalidArgument.  IoError when the file
+  // cannot be used or its lock is not free within about 2 seconds.
+  //
+  // READ is 0 when the site has no epoch file.  ANY error (Corrupted for a
+  // file that does not hold a whole record, IoError, anything) means the
+  // caller must treat every entry of the site as purged; it is never 0.
+  //
+  // `site` must be a site id (64 lowercase hex); anything else, empty
+  // included, is InvalidArgument.
+  [[nodiscard]] std::expected<void, cyclone::CacheError> WriteSitePurgeEpoch(
+      std::string_view site, uint64_t epoch_seconds, uint64_t now_seconds);
+  [[nodiscard]] std::expected<uint64_t, cyclone::CacheError> ReadSitePurgeEpoch(
+      std::string_view site);
 
   // Remove all alternates for a URL.
   [[nodiscard]] std::expected<void, cyclone::CacheError> Remove(

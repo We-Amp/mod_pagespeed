@@ -4,6 +4,7 @@
 #ifndef PAGESPEED_LIB_CACHE_HEADERS_SIDECAR_H_
 #define PAGESPEED_LIB_CACHE_HEADERS_SIDECAR_H_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -185,8 +186,55 @@ inline constexpr size_t kMaxHeadersSidecarValueBytes = 65535;
 // reason the byte is spent.
 //
 // The returned views point INTO `payload`, which must outlive them.
+//
+// Format 1 only: a paired (format 2) block is nullopt here, because a
+// fields-only reader cannot check that the block belongs to the entry it is
+// about to serve.  Use ParseHeadersSidecarBlock to read either format.
 std::optional<std::vector<HeaderField>> ParseHeadersSidecar(
     std::string_view payload);
+
+// ---- Pairing (payload format 2) ----
+//
+// A sidecar written beside a durable original can carry the 32-byte hash of
+// that original's bytes (the original's origin_html_hash stamp).  The stamp is
+// what lets a reader tell the two apart from a block that belongs to some
+// OTHER write of the key: a re-store writes the new block before the new
+// original, so for a moment the block is the new one and the original the old
+// one, and a block whose write succeeded beside an original whose write
+// failed stays that way.  Both read as unpaired, never as a matching pair.
+//
+// Format 2 is format 1 with the hash inserted after the version byte:
+//
+//   [1B  format version]                    == kHeadersSidecarPairedFormatVersion
+//   [32B pairing hash]                      never all-zero
+//   [2B  field count, big-endian]           then the fields, as in format 1
+//
+// A paired block may hold zero fields: "this response carries nothing beyond
+// the entry metadata" is then a recorded, provable fact rather than the
+// absence of an entry.
+inline constexpr size_t kHeadersSidecarPairingHashBytes = 32;
+
+struct HeadersSidecarBlock {
+  std::vector<HeaderField> fields;  // views into the parsed payload
+  // Present only for a format-2 payload.
+  std::optional<std::array<std::byte, kHeadersSidecarPairingHashBytes>>
+      pairing_hash;
+};
+
+// Parse a stored sidecar payload of either format.  Same miss rules as
+// ParseHeadersSidecar, plus: a format-2 payload shorter than its hash, or
+// carrying an all-zero hash, is not this class.
+std::optional<HeadersSidecarBlock> ParseHeadersSidecarBlock(
+    std::string_view payload);
+
+// Re-encode a format-1 payload as format 2 bound to `hash`.  An empty
+// `format1_payload` (a swap-eligible response with nothing to carry) becomes a
+// paired block with zero fields.  The caller guarantees `hash` is not
+// all-zero and that a non-empty `format1_payload` came from
+// ClassifyForHeadersSidecar.
+std::string PairHeadersSidecarPayload(
+    std::string_view format1_payload,
+    std::span<const std::byte, kHeadersSidecarPairingHashBytes> hash);
 
 }  // namespace pagespeed
 

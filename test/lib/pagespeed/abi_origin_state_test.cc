@@ -388,7 +388,7 @@ TEST_F(AbiOriginStateTest, AStructSizeBetweenPublishedShapesIsSnappedDown) {
 
   for (size_t declared : {kOldSize + 1, kOldSize + 4,
                           offsetof(ps_write_params_t, origin_etag) + 4,
-                          sizeof(ps_write_params_t) - 1}) {
+                          offsetof(ps_write_params_t, origin_html_hash) - 1}) {
     SCOPED_TRACE(declared);
     ps_write_params_t params;
     // Poison the tail: if the clamp were not applied, these bytes would be
@@ -414,6 +414,40 @@ TEST_F(AbiOriginStateTest, AStructSizeBetweenPublishedShapesIsSnappedDown) {
     // Everything above the 1.1 rung was discarded rather than half-read.
     EXPECT_EQ(ps_read_origin_etag(r), nullptr);
     EXPECT_EQ(ps_read_origin_max_age(r), 0u);
+    ps_read_free(r);
+  }
+}
+
+TEST_F(AbiOriginStateTest, AStructSizeInsideTheHashFieldSnapsToThe12Shape) {
+  // Between the 1.2..1.12 size and the 1.13 one, the caller has the origin
+  // state but not a whole origin_html_hash pointer: the 1.2 rung is read and
+  // the partial pointer is not.
+  OpenCache();
+  const size_t k12Size = offsetof(ps_write_params_t, origin_html_hash);
+  for (size_t declared : {k12Size + 1, sizeof(ps_write_params_t) - 1}) {
+    SCOPED_TRACE(declared);
+    ps_write_params_t params;
+    std::memset(&params, 0x7F, sizeof(params));
+    std::memset(&params, 0, k12Size);
+    params.struct_size = declared;
+    params.alternate_id = 0x08;
+    params.content_length = 2;
+    params.full_mask = 0x08;
+    params.content_type = PS_CONTENT_HTML;
+    params.origin_max_age = 42;
+
+    const std::string url = "/rung12-" + std::to_string(declared) + ".html";
+    ps_write_handle_t* wh = nullptr;
+    ASSERT_EQ(ps_cache_write_begin(cache_, url.c_str(), "example.com", "https",
+                                   &params, &wh),
+              PS_OK);
+    ASSERT_EQ(ps_write_data(wh, "hi", 2), PS_OK);
+    ASSERT_EQ(ps_write_close(wh), PS_OK);
+
+    ps_read_result_t* r = Read(url.c_str(), 0x08);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(ps_read_origin_max_age(r), 42u);
+    EXPECT_EQ(ps_read_origin_html_hash(r), nullptr);
     ps_read_free(r);
   }
 }

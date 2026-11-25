@@ -17,6 +17,7 @@
 inline int chmod(const char*, int) { return 0; }
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -25,6 +26,7 @@ inline int chmod(const char*, int) { return 0; }
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -37,6 +39,7 @@ inline int chmod(const char*, int) { return 0; }
 #include <vector>
 
 #include "lib/base/message_handler.h"
+#include "lib/cache/site_purge_epoch.h"
 #include "lib/classify/option_context.h"
 // The storage layer's on-disk format major (VolumeHeader::kFormatVersionMajor)
 // is what the volume filename's fingerprint encodes, and the sweep below has
@@ -833,6 +836,29 @@ PageSpeedCache::WriteOriginalAlternate(std::string_view url,
   UnlinkSupersededAlternate(key, static_cast<AlternateId>(id), url,
                             "Durable original", &originals_unlink_failed_);
 
+  // A re-store of the original clears the key's withheld marker in the same
+  // call.  (On a chain the storage layer retains across a wrap, removing one
+  // alternate can drop the whole entry; that only costs a re-store and is
+  // fail-closed.)  The marker records that the Markdown copy of ONE original was
+  // permanently refused; a new original — even one with the same bytes,
+  // since refusals such as a hash mismatch or a size cap are about the copy
+  // that was read, not about the page — gets a fresh derivation.  Removed
+  // here, before the new original exists, so no reader can see the new
+  // original beside the old marker.  A failed removal only costs the page
+  // its Markdown copy until the next store; it never serves anything.
+  {
+    const auto marker =
+        static_cast<cyclone::AlternateId>(SentinelId::kAgentMarkdownWithheld);
+    cache_->evict_from_ram_cache(key, marker);
+    auto removed = cache_->remove_alternate_sync(key, marker);
+    if (!removed.has_value() && UnlinkLeftEntryLinked(removed.error()) &&
+        handler_ != nullptr) {
+      handler_->Warning("Withheld marker removal failed for %.*s (%s)",
+                        static_cast<int>(url.size()), url.data(),
+                        make_error_code(removed.error()).message().c_str());
+    }
+  }
+
   uint64_t total_length = serialized.size() + content_length;
   auto result = cache_->write_alternate_sync(key, id, total_length);
   if (!result) {
@@ -974,7 +1000,16 @@ PageSpeedCache::WriteHeadersSidecar(std::string_view url,
                                     std::string_view hostname,
                                     std::string_view scheme,
                                     std::span<const HeaderField> headers,
-                                    std::string_view site) {
+                                    std::string_view site,
+                                    std::span<const std::byte> pairing_hash) {
+  const bool paired = !pairing_hash.empty();
+  if (paired) {
+    if (pairing_hash.size() != kHeadersSidecarPairingHashBytes ||
+        std::all_of(pairing_hash.begin(), pairing_hash.end(),
+                    [](std::byte b) { return b == std::byte{0}; })) {
+      return std::unexpected(cyclone::CacheError::InvalidArgument);
+    }
+  }
   std::shared_lock lock(reset_mutex_);
   if (!cache_) {
     return std::unexpected(cyclone::CacheError::NotInitialized);
@@ -1010,11 +1045,18 @@ PageSpeedCache::WriteHeadersSidecar(std::string_view url,
     return outcome;
   }
 
-  if (classification.payload.empty()) {
+  if (classification.payload.empty() && !paired) {
     // Swap-eligible with nothing to carry: every header this response sent is
     // already reproduced by the entry metadata.  Not a fall-through, and not
-    // an entry.
+    // an entry.  (A paired write stores the empty block: the pairing is the
+    // fact being recorded.)
     return outcome;
+  }
+  if (paired) {
+    classification.payload = PairHeadersSidecarPayload(
+        classification.payload,
+        std::span<const std::byte, kHeadersSidecarPairingHashBytes>(
+            pairing_hash.data(), kHeadersSidecarPairingHashBytes));
   }
 
   auto key = ComposeKey(url, hostname, scheme, site);
@@ -1139,7 +1181,7 @@ PageSpeedCache::ReadHeadersSidecarByKey(const cyclone::CacheKey& key) {
   // parse as this format is not this class — a peer speaking a version this
   // build does not have, or a slot someone else wrote — and the caller gets
   // the class or it gets nothing.
-  if (!ParseHeadersSidecar(HeadersSidecarPayload(*result)).has_value()) {
+  if (!ParseHeadersSidecarBlock(HeadersSidecarPayload(*result)).has_value()) {
     return std::unexpected(cyclone::CacheError::NotFound);
   }
   return result;
@@ -1156,6 +1198,65 @@ std::string_view PageSpeedCache::HeadersSidecarPayload(
   auto blob = result.handle.content();
   return std::string_view(reinterpret_cast<const char*>(blob.data()),
                           blob.size());
+}
+
+namespace {
+
+cyclone::CacheError FromEpochError(SitePurgeEpochError e) {
+  switch (e) {
+    case SitePurgeEpochError::kInvalidArgument:
+      return cyclone::CacheError::InvalidArgument;
+    case SitePurgeEpochError::kCorrupted:
+      return cyclone::CacheError::Corrupted;
+    case SitePurgeEpochError::kIo:
+      break;
+  }
+  return cyclone::CacheError::IoError;
+}
+
+}  // namespace
+
+std::expected<uint64_t, cyclone::CacheError> PageSpeedCache::ReadSitePurgeEpoch(
+    std::string_view site) {
+  auto read = ReadSitePurgeEpochFile(config_.volume_path, site);
+  if (!read.has_value()) {
+    // Rate-limited: a caller may read on every tick, and one line a minute
+    // says as much as one per read.
+    static std::atomic<int64_t> last_warning_s{0};
+    const auto now_s = static_cast<int64_t>(std::time(nullptr));
+    int64_t last = last_warning_s.load(std::memory_order_relaxed);
+    if (handler_ != nullptr &&
+        read.error() != SitePurgeEpochError::kInvalidArgument &&
+        now_s - last >= 60 &&
+        last_warning_s.compare_exchange_strong(last, now_s,
+                                               std::memory_order_relaxed)) {
+      handler_->Warning(
+          "Purge epoch file for a site of %s could not be read (%s); every "
+          "entry of that site counts as purged until it can",
+          config_.volume_path.c_str(),
+          read.error() == SitePurgeEpochError::kCorrupted ? "unparseable"
+                                                          : "I/O error");
+    }
+    return std::unexpected(FromEpochError(read.error()));
+  }
+  return *read;
+}
+
+std::expected<void, cyclone::CacheError> PageSpeedCache::WriteSitePurgeEpoch(
+    std::string_view site, uint64_t epoch_seconds, uint64_t now_seconds) {
+  auto written = WriteSitePurgeEpochFile(config_.volume_path, site,
+                                         epoch_seconds, now_seconds);
+  if (!written.has_value()) {
+    if (handler_ != nullptr) {
+      handler_->Warning("Purge epoch %" PRIu64 " not written for %s (%s)",
+                        epoch_seconds, config_.volume_path.c_str(),
+                        written.error() == SitePurgeEpochError::kInvalidArgument
+                            ? "invalid site or a time in the future"
+                            : "file error");
+    }
+    return std::unexpected(FromEpochError(written.error()));
+  }
+  return {};
 }
 
 std::expected<void, cyclone::CacheError> PageSpeedCache::Remove(

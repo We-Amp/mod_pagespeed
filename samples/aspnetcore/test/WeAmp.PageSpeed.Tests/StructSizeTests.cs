@@ -21,11 +21,12 @@ public class StructSizeTests
     }
 
     [Fact]
-    public void NativeWriteParams_Is80Bytes()
+    public void NativeWriteParams_Is88Bytes()
     {
         // Full ps_write_params_t since #772 (the mirror carried only the 48-byte
-        // 1.1 prefix before the write path learned origin_cc_flags).
-        Assert.Equal(80, Marshal.SizeOf<NativeWriteParams>());
+        // 1.1 prefix before the write path learned origin_cc_flags); 88 since
+        // PS_API 1.13 appended origin_html_hash.
+        Assert.Equal(88, Marshal.SizeOf<NativeWriteParams>());
     }
 
     [Fact]
@@ -102,6 +103,7 @@ public class StructSizeTests
         Assert.Equal(28, (int)Marshal.OffsetOf<NativeWriteParams>(nameof(NativeWriteParams.ContentType)));
         Assert.Equal(32, (int)Marshal.OffsetOf<NativeWriteParams>(nameof(NativeWriteParams.Flags)));
         Assert.Equal(40, (int)Marshal.OffsetOf<NativeWriteParams>(nameof(NativeWriteParams.OriginCt)));
+        Assert.Equal(80, (int)Marshal.OffsetOf<NativeWriteParams>(nameof(NativeWriteParams.OriginHtmlHash)));
     }
 
     [Fact]

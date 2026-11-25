@@ -168,3 +168,18 @@ PAGESPEED_1.12 {
     ps_cache_read_alternate_site;
     ps_cache_write_original_site;
 } PAGESPEED_1.11;
+
+PAGESPEED_1.13 {
+  global:
+    /* site-scoped HTML store: sidecar, removal, purge epoch */
+    ps_cache_write_headers_sidecar_site;
+    ps_headers_sidecar_read;
+    ps_header_block_count;
+    ps_header_block_get;
+    ps_header_block_pairing_hash;
+    ps_header_block_pairing;
+    ps_header_block_free;
+    ps_cache_remove_site;
+    ps_cache_write_site_purge_epoch;
+    ps_cache_read_site_purge_epoch;
+} PAGESPEED_1.12;

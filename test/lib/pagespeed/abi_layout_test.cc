@@ -60,9 +60,9 @@ static_assert(offsetof(ps_notify_params_t, notify_flags) == 80);
 
 // ---------------------------------------------------------------------------
 // ps_write_params_t -- 1.1 prefix through origin_ct, origin state appended
-// at 1.2.
+// at 1.2, origin_html_hash appended at 1.13 after the 1.2 _reserved tail.
 // ---------------------------------------------------------------------------
-static_assert(sizeof(ps_write_params_t) == 80);
+static_assert(sizeof(ps_write_params_t) == 88);
 static_assert(offsetof(ps_write_params_t, struct_size) == 0);
 static_assert(offsetof(ps_write_params_t, alternate_id) == 8);
 static_assert(offsetof(ps_write_params_t, content_length) == 16);
@@ -77,6 +77,19 @@ static_assert(offsetof(ps_write_params_t, origin_max_age) == 60);
 static_assert(offsetof(ps_write_params_t, origin_s_maxage) == 64);
 static_assert(offsetof(ps_write_params_t, origin_last_modified) == 68);
 static_assert(offsetof(ps_write_params_t, origin_cc_flags) == 72);
+// --- appended at 1.13; nothing above may move ---
+static_assert(offsetof(ps_write_params_t, origin_html_hash) == 80);
+
+// ---------------------------------------------------------------------------
+// ps_sidecar_write_params_t -- added whole at 1.13.
+// ---------------------------------------------------------------------------
+static_assert(sizeof(ps_sidecar_write_params_t) == 48);
+static_assert(offsetof(ps_sidecar_write_params_t, struct_size) == 0);
+static_assert(offsetof(ps_sidecar_write_params_t, url) == 8);
+static_assert(offsetof(ps_sidecar_write_params_t, hostname) == 16);
+static_assert(offsetof(ps_sidecar_write_params_t, scheme) == 24);
+static_assert(offsetof(ps_sidecar_write_params_t, site) == 32);
+static_assert(offsetof(ps_sidecar_write_params_t, origin_html_hash) == 40);
 
 // ---------------------------------------------------------------------------
 // ps_cache_config_t -- mirrored field-by-field by the .NET binding.

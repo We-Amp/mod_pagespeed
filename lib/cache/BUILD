@@ -55,6 +55,13 @@ cc_library(
 )
 
 cc_library(
+    name = "site_purge_epoch",
+    srcs = ["site_purge_epoch.cc"],
+    hdrs = ["site_purge_epoch.h"],
+    visibility = ["//:internal"],
+)
+
+cc_library(
     name = "origin_cache_control",
     srcs = ["origin_cache_control.cc"],
     hdrs = ["origin_cache_control.h"],
@@ -93,6 +100,7 @@ cc_library(
     visibility = ["//:internal"],
     deps = [
         ":headers_sidecar",
+        ":site_purge_epoch",
         "//lib/base:atomic_file_writer",
         "//lib/base:message_handler",
         "//lib/base:posix_compat",

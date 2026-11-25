@@ -95,6 +95,22 @@ enum class SentinelId : uint8_t {
                              // capability advertisement: it appears in
                              // diagnostics listings exactly as the other
   // sentinel classes do, named by the registry below.
+  kAgentMarkdownWithheld = 0xCC,  // RESERVED: the record that the Markdown
+                                  // copy of a page was permanently refused for
+                                  // one parent hash and deriver version, so a
+                                  // serve answers "withheld" instead of asking
+                                  // for the copy again.  A DISTINCT record and
+                                  // never a readable kAgentMarkdown entry: it
+                                  // is sentinel-shaped, and PageSpeedSelector
+                                  // skips every sentinel except kAgentMarkdown,
+                                  // so no selection read can return it, and no
+                                  // exact-id reader of another class asks for
+                                  // it.  A durable original written for the
+                                  // key (WriteOriginalAlternate) removes it in
+                                  // the same call.  The id and its payload
+                                  // format version are reserved here; the
+                                  // writer lands with the worker change that
+                                  // produces it.
 };
 
 // Payload shape of an entry class, i.e. how a reader of that class knows what
@@ -123,11 +139,18 @@ enum class SentinelPayload : uint8_t {
 // Payload format version of each kVersionedPayload class.  Reserved with the
 // id: a reader that finds a byte it does not recognise here stops rather than
 // guessing, which is the whole reason the byte is spent.
-inline constexpr uint8_t kHeadersSidecarFormatVersion = 1;   // kHeadersSidecar
+inline constexpr uint8_t kHeadersSidecarFormatVersion = 1;  // kHeadersSidecar
+// The paired form of the same class: format 1 preceded by the 32-byte hash of
+// the durable original the block was recorded with, so a reader can tell a
+// block that belongs to the stored original from one that does not.  A build
+// that knows only format 1 reads it as absent, which is the safe answer.
+inline constexpr uint8_t kHeadersSidecarPairedFormatVersion = 2;
 inline constexpr uint8_t kNegativeVerdictFormatVersion = 1;  // kNegativeVerdict
 // Payload format version of the kDeclineTombstone class.  v2 added the
 // quality-search generation byte that the payload carries after this one.
 inline constexpr uint8_t kDeclineTombstoneFormatVersion = 2;
+inline constexpr uint8_t kAgentMarkdownWithheldFormatVersion =
+    1;  // kAgentMarkdownWithheld
 
 // WHO may write an entry class through the generic sentinel write surface —
 // a different question from whether the class exists.
@@ -213,6 +236,9 @@ inline constexpr SentinelRegistryEntry kSentinelRegistry[] = {
     {static_cast<AlternateId>(SentinelId::kDeclineTombstone),
      "decline_tombstone", SentinelPayload::kVersionedPayload,
      SentinelWriter::kDedicated},
+    {static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld),
+     "agent_markdown_withheld", SentinelPayload::kVersionedPayload,
+     SentinelWriter::kReserved},
 };
 
 inline constexpr size_t kSentinelRegistrySize =
@@ -285,6 +311,14 @@ static_assert(
     IsSentinel(static_cast<AlternateId>(SentinelId::kNegativeVerdict)));
 static_assert(
     IsSentinel(static_cast<AlternateId>(SentinelId::kDeclineTombstone)));
+// The withheld marker MUST be sentinel-shaped: PageSpeedSelector skips every
+// sentinel except kAgentMarkdown and would score any other byte as a content
+// variant, so a non-sentinel id here could be served as a page.
+static_assert(
+    IsSentinel(static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld)),
+    "the withheld marker must never be selectable");
+static_assert(static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld) !=
+              static_cast<AlternateId>(SentinelId::kAgentMarkdown));
 
 // Registry invariants, checked at compile time rather than trusted:
 //   - every row is a sentinel id (viewport bits = 3);
@@ -303,7 +337,7 @@ static_assert([] {
   }
   return true;
 }());
-static_assert(kSentinelRegistrySize == 12,
+static_assert(kSentinelRegistrySize == 13,
               "a SentinelId enumerator was added or removed without updating "
               "kSentinelRegistry");
 
@@ -385,6 +419,10 @@ static_assert(!IsEmbedderWritableSentinel(
 // it refuses the other classes with writer-side invariants.
 static_assert(!IsEmbedderWritableSentinel(
     static_cast<AlternateId>(SentinelId::kDeclineTombstone)));
+// The withheld marker is reserved: nothing may write it through the embedder
+// surface, now or once its worker writer exists.
+static_assert(!IsEmbedderWritableSentinel(
+    static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld)));
 static_assert(IsEmbedderWritableSentinel(0xFC));
 
 static_assert(IsRegisteredSentinel(

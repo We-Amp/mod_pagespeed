@@ -19,7 +19,9 @@
 
 #include "lib/cache/headers_sidecar.h"
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <string>
 #include <string_view>
@@ -510,7 +512,7 @@ TEST(HeadersSidecarTest, AnUnknownFormatVersionStopsTheReaderRatherThanGuess) {
   std::string payload = Classify(fields).payload;
   ASSERT_FALSE(payload.empty());
   ASSERT_TRUE(ParseHeadersSidecar(payload).has_value());
-  payload[0] = static_cast<char>(kHeadersSidecarFormatVersion + 1);
+  payload[0] = static_cast<char>(kHeadersSidecarPairedFormatVersion + 1);
   EXPECT_FALSE(ParseHeadersSidecar(payload).has_value());
   payload[0] = 0;
   EXPECT_FALSE(ParseHeadersSidecar(payload).has_value());
@@ -550,6 +552,84 @@ TEST(HeadersSidecarTest, ThePayloadStartsWithItsFormatVersion) {
   ASSERT_FALSE(payload.empty());
   EXPECT_EQ(static_cast<unsigned char>(payload[0]),
             kHeadersSidecarFormatVersion);
+}
+
+// ---------------------------------------------------------------- pairing
+// (payload format 2)
+
+std::array<std::byte, kHeadersSidecarPairingHashBytes> TestHash(uint8_t seed) {
+  std::array<std::byte, kHeadersSidecarPairingHashBytes> h{};
+  for (size_t i = 0; i < h.size(); ++i) {
+    h[i] = static_cast<std::byte>(seed + i);
+  }
+  return h;
+}
+
+TEST(HeadersSidecarTest, APairedBlockRoundTripsItsFieldsAndItsHash) {
+  const Fields fields = {{"Referrer-Policy", "  no-referrer "},
+                         {"X-Content-Type-Options", "nosniff"}};
+  const std::string format1 = Classify(fields).payload;
+  ASSERT_FALSE(format1.empty());
+  const auto hash = TestHash(7);
+  const std::string paired = PairHeadersSidecarPayload(format1, hash);
+
+  EXPECT_EQ(static_cast<unsigned char>(paired[0]),
+            kHeadersSidecarPairedFormatVersion);
+  EXPECT_EQ(paired.size(), format1.size() + kHeadersSidecarPairingHashBytes);
+  auto block = ParseHeadersSidecarBlock(paired);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block->pairing_hash.has_value());
+  EXPECT_EQ(*block->pairing_hash, hash);
+  ASSERT_EQ(block->fields.size(), 2u);
+  EXPECT_EQ(block->fields[0].name, "Referrer-Policy");
+  EXPECT_EQ(block->fields[0].value, "  no-referrer ");
+  EXPECT_EQ(block->fields[1].name, "X-Content-Type-Options");
+  // The fields-only reader cannot check a pairing, so it reads a paired
+  // block as absent (fail closed); format 1 still parses there.
+  EXPECT_FALSE(ParseHeadersSidecar(paired).has_value());
+  EXPECT_TRUE(ParseHeadersSidecar(format1).has_value());
+}
+
+TEST(HeadersSidecarTest, AFormat1BlockParsesWithNoPairingHash) {
+  const std::string format1 =
+      Classify(Fields{{"Referrer-Policy", "no-referrer"}}).payload;
+  auto block = ParseHeadersSidecarBlock(format1);
+  ASSERT_TRUE(block.has_value());
+  EXPECT_FALSE(block->pairing_hash.has_value());
+  EXPECT_EQ(block->fields.size(), 1u);
+}
+
+TEST(HeadersSidecarTest, APairedBlockMayCarryNoField) {
+  const auto hash = TestHash(1);
+  const std::string paired = PairHeadersSidecarPayload("", hash);
+  EXPECT_EQ(paired.size(), 1 + kHeadersSidecarPairingHashBytes + 2);
+  auto block = ParseHeadersSidecarBlock(paired);
+  ASSERT_TRUE(block.has_value());
+  EXPECT_TRUE(block->fields.empty());
+  ASSERT_TRUE(block->pairing_hash.has_value());
+  EXPECT_EQ(*block->pairing_hash, hash);
+}
+
+TEST(HeadersSidecarTest, AMalformedPairedBlockIsAMiss) {
+  const std::string format1 =
+      Classify(Fields{{"Referrer-Policy", "no-referrer"}}).payload;
+  const std::string paired = PairHeadersSidecarPayload(format1, TestHash(3));
+  for (size_t cut = 1; cut < paired.size(); ++cut) {
+    EXPECT_FALSE(ParseHeadersSidecarBlock(paired.substr(0, cut)).has_value())
+        << "truncated to " << cut;
+  }
+  EXPECT_FALSE(ParseHeadersSidecarBlock(paired + "x").has_value());
+  // An all-zero hash is the unbound value; no writer pairs with it.
+  std::string zero = paired;
+  for (size_t i = 1; i <= kHeadersSidecarPairingHashBytes; ++i) zero[i] = 0;
+  EXPECT_FALSE(ParseHeadersSidecarBlock(zero).has_value());
+  EXPECT_FALSE(ParseHeadersSidecar(zero).has_value());
+}
+
+TEST(HeadersSidecarTest, ThePairedFormatStaysOutsideTheMetadataRange) {
+  EXPECT_EQ(kHeadersSidecarPairedFormatVersion, 2);
+  EXPECT_NE(kHeadersSidecarPairedFormatVersion, kHeadersSidecarFormatVersion);
+  EXPECT_LT(kHeadersSidecarPairedFormatVersion, 3);
 }
 
 }  // namespace

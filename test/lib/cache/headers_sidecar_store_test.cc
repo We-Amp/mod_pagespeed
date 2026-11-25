@@ -441,7 +441,7 @@ TEST_F(HeadersSidecarStoreTest, APayloadFromAFutureVersionReadsAsAMiss) {
           std::vector<HeaderField>{{"Referrer-Policy", "no-referrer"}})
           .payload;
   ASSERT_FALSE(payload.empty());
-  payload[0] = static_cast<char>(kHeadersSidecarFormatVersion + 1);
+  payload[0] = static_cast<char>(kHeadersSidecarPairedFormatVersion + 1);
   auto wh = cache_->WriteSentinel(kUrl, kHost, kScheme,
                                   SentinelId::kHeadersSidecar, payload.size());
   ASSERT_TRUE(wh.has_value());

@@ -53,6 +53,13 @@ extern "C" {
  * and `notify_flags` fields of ps_notify_params_t, and
  * ps_cache_read_best_site, ps_cache_read_alternate_site and
  * ps_cache_write_original_site; and the `scheme` field of ps_html_config_t.
+ * 1.13 adds the site-scoped HTML store surface: the `origin_html_hash` field
+ * of ps_write_params_t, ps_cache_write_headers_sidecar_site with its
+ * ps_sidecar_write_params_t, ps_headers_sidecar_read and the
+ * ps_header_block_* accessors, ps_cache_remove_site,
+ * ps_cache_write_site_purge_epoch and ps_cache_read_site_purge_epoch, and
+ * publishes PS_SENTINEL_MARKDOWN_WITHHELD, PS_FLAG_HEADERS_CLASSIFIED and
+ * PS_FLAG_HEADERS_SIDECAR_REQUIRED.
  *
  * A published constant is ABI surface too (see ABI.md), so a minor that adds
  * only one still moves the number: it is what a consumer compiles against to
@@ -66,7 +73,7 @@ extern "C" {
  * checked-in record of the current surface and is what the gate compares
  * against. */
 #define PS_API_VERSION_MAJOR 1
-#define PS_API_VERSION_MINOR 12
+#define PS_API_VERSION_MINOR 13
 #define PS_API_VERSION_PATCH 0
 
 PS_EXPORT int ps_version_major(void);
@@ -181,6 +188,18 @@ PS_EXPORT int ps_normalize_hostname(const char* hostname, char* out_buf,
  * at the bytes behind it. */
 #define PS_SENTINEL_HEADERS_SIDECAR 0x6C
 
+/* The withheld marker: the record that the Markdown copy of a page was
+ * permanently refused for one stored original, so a serve path answers
+ * "withheld" and stops asking for it. It is never a Markdown entry and never
+ * readable as one: the id is sentinel-shaped, so ps_cache_read_best (any mask,
+ * any agent flag) never returns it, and only a reader that asks for this id
+ * gets it. Listed so a serve path can read it by id, with
+ * ps_cache_read_alternate_site(..., PS_SENTINEL_MARKDOWN_WITHHELD, &r); NOT
+ * writable through ps_cache_write_sentinel. A durable original written for
+ * the key (ps_cache_write_original, ps_cache_write_original_site) removes the
+ * key's marker in the same call. Available from PS_API 1.13. */
+#define PS_SENTINEL_MARKDOWN_WITHHELD 0xCC
+
 /* ---------- flags ---------- */
 
 /* Stored-variant flag bits (ps_write_params_t::flags, ps_read_flags). */
@@ -250,6 +269,29 @@ PS_EXPORT int ps_normalize_hostname(const char* hostname, char* out_buf,
  *
  * Available from PS_API 1.8. */
 #define PS_FLAG_ORIGIN_HEADERS_NOT_REPRODUCIBLE 0x08
+
+/* The writer ran the response through the headers-sidecar gate when it
+ * recorded the entry. Together with PS_FLAG_HEADERS_SIDECAR_REQUIRED it puts
+ * an entry in one of three states: neither bit (recorded without the gate;
+ * serve as before), CLASSIFIED alone (headers checked, nothing to carry), and
+ * CLASSIFIED plus SIDECAR_REQUIRED (a non-empty sidecar was stored for the
+ * key; a serve path must read and replay it, and must treat a sidecar it
+ * cannot read as a miss).
+ *
+ * STAMPED BY THE WRITER at record time. The optimizer copies both bits into
+ * every variant it derives from the entry, except the Markdown copy. Both
+ * bits feed the weak ETag of a hit, like every flag bit.
+ *
+ * The optimizer never sets either bit on an HTML durable original: it copies
+ * a front end's own recording into PS_SENTINEL_ORIGINAL only for images. So a
+ * PS_SENTINEL_ORIGINAL of HTML content type carrying
+ * PS_FLAG_HEADERS_CLASSIFIED was written by a front end's own HTML store.
+ * SIDECAR_REQUIRED is meaningful only together with CLASSIFIED.
+ *
+ * Available from PS_API 1.13 (the bits themselves are older; 1.13 publishes
+ * them). */
+#define PS_FLAG_HEADERS_CLASSIFIED 0x10
+#define PS_FLAG_HEADERS_SIDECAR_REQUIRED 0x20
 
 /* ---------- origin Cache-Control flags ---------- */
 
@@ -771,6 +813,15 @@ typedef struct {
   /* Reserved; must be zero. Present so the struct's size is the same on every
    * compiler rather than whatever tail padding each one chooses. */
   uint8_t _reserved[6];
+
+  /* --- appended at PS_API 1.13 --- */
+
+  /* The SHA-256 (32 bytes) of the bytes being stored, stamped on the entry as
+   * its content binding and read back with ps_read_origin_html_hash. NULL, or
+   * 32 zero bytes, means unbound — the pre-1.13 behaviour. Copied during the
+   * call. A headers sidecar written with the same hash
+   * (ps_cache_write_headers_sidecar_site) is paired with this entry. */
+  const uint8_t* origin_html_hash;
 } ps_write_params_t;
 
 /* Zero `size` bytes at `params` and stamp struct_size = size.
@@ -1087,6 +1138,113 @@ PS_EXPORT PS_NODISCARD ps_error_t ps_cache_write_headers_sidecar(
     const char* scheme, const char* const* names, const char* const* values,
     size_t count, int* out_verdict, int* out_stored);
 
+/* ---------- site-scoped headers sidecar (PS_API 1.13) ---------- */
+
+/* Where a sited sidecar goes, and what it is paired with.
+ *
+ * struct_size convention: zero the struct and set struct_size to
+ * sizeof(ps_sidecar_write_params_t) as your build sees it; fields are
+ * append-only. A struct_size below the 1.13 size is PS_ERR_INVALID_ARG.
+ *
+ * `site` is NULL or "" for the unsited keyspace, or PS_SITE_ID_CHARS lowercase
+ * hex characters (see ps_cache_read_best_site). `origin_html_hash` is the
+ * 32-byte stamp of the durable original this block belongs to (the
+ * `origin_html_hash` that original was written with), or NULL for an unpaired
+ * block. 32 zero bytes are refused: zero is the "unbound" value, and a block
+ * paired with it could never be told apart from one paired with nothing. */
+typedef struct {
+  size_t struct_size;
+  const char* url;
+  const char* hostname;
+  const char* scheme;
+  const char* site;
+  const uint8_t* origin_html_hash;
+} ps_sidecar_write_params_t;
+
+/* ps_cache_write_headers_sidecar in the keyspace of one site, optionally
+ * paired with a durable original. Available from PS_API 1.13.
+ *
+ * Everything ps_cache_write_headers_sidecar says holds here — the gate, the
+ * verdicts, a refusal being PS_OK with `*out_stored` 0, the replacement
+ * window — with one addition: a PAIRED write (non-NULL `origin_html_hash`)
+ * stores a block even when the response has nothing for it to carry, so that
+ * "this original needs no extra headers" is a fact a reader can prove rather
+ * than infer from a miss. `*out_stored` is then 1.
+ *
+ * ORDER, for a writer that stores both: write the sidecar FIRST and the
+ * durable original second. Between the two a reader finds the new block
+ * beside the old original, and pairing makes that visible
+ * (PS_SIDECAR_UNPAIRED) instead of replaying the new block's headers with the
+ * old bytes. A sidecar write that succeeds before a failed original write
+ * stays unpaired until the next store.
+ *
+ * PS_ERR_INVALID_ARG for a NULL cache or params, a struct_size below the 1.13
+ * size, a NULL url or hostname, a malformed site, an all-zero hash, or a holed
+ * header array; neither out-param is written then. */
+PS_EXPORT PS_NODISCARD ps_error_t ps_cache_write_headers_sidecar_site(
+    ps_cache_t* cache, const ps_sidecar_write_params_t* params,
+    const char* const* names, const char* const* values, size_t count,
+    int* out_verdict, int* out_stored);
+
+/* A stored headers sidecar, parsed and owned: it holds its own copy of the
+ * block, so it stays valid after the cache read that produced it, and needs
+ * nothing else freed. Free it with ps_header_block_free. */
+typedef struct ps_header_block_s ps_header_block_t;
+
+/* Read the headers sidecar of a URL in one site's keyspace (`site` as for
+ * ps_cache_read_best_site). Available from PS_API 1.13.
+ *
+ * PS_OK with `*out` set when a block this build can parse is stored, paired
+ * or not. PS_ERR_NOT_FOUND when there is none — including a block in a format
+ * this build does not know, which a reader must treat as absent. That case is
+ * "sidecar missing"; a block that is present but belongs to a different
+ * original is "sidecar unpaired", which ps_header_block_pairing answers.
+ * Other errors are cache failures. `*out` is NULL on every non-PS_OK return. */
+PS_EXPORT PS_NODISCARD ps_error_t ps_headers_sidecar_read(
+    ps_cache_t* cache, const char* url, const char* hostname,
+    const char* scheme, const char* site, ps_header_block_t** out);
+
+/* The number of header lines in the block; 0 for NULL. A paired block may
+ * hold none. */
+PS_EXPORT size_t ps_header_block_count(const ps_header_block_t* block);
+
+/* Header line `index` (0 <= index < count), as stored: name and value
+ * verbatim, each NUL-terminated (a stored value never contains NUL, CR or
+ * LF), with their lengths. The pointers stay valid until the block is freed.
+ * Any out-pointer may be NULL. PS_ERR_INVALID_ARG for a NULL block or an
+ * index out of range; nothing is written then. */
+PS_EXPORT PS_NODISCARD ps_error_t ps_header_block_get(
+    const ps_header_block_t* block, size_t index, const char** out_name,
+    size_t* out_name_len, const char** out_value, size_t* out_value_len);
+
+/* The block's pairing hash (32 bytes), or NULL when the block is unpaired
+ * (written without one, or by a build before 1.13) or `block` is NULL. Valid
+ * until the block is freed. */
+PS_EXPORT const uint8_t* ps_header_block_pairing_hash(
+    const ps_header_block_t* block);
+
+/* What ps_header_block_pairing returns. */
+#define PS_SIDECAR_UNPAIRED 0
+#define PS_SIDECAR_PAIRED 1
+
+/* Whether the block belongs to the durable original whose stamp is
+ * `entry_hash` (32 bytes, from ps_read_origin_html_hash on that original).
+ * PS_SIDECAR_PAIRED only when the block carries a pairing hash and it equals
+ * `entry_hash` byte for byte; PS_SIDECAR_UNPAIRED otherwise, including an
+ * unpaired block and a NULL `entry_hash` (an unbound original), because
+ * neither can prove the two belong together. -1 for a NULL block.
+ *
+ * Unpaired is a normal state, not a fault: every re-store passes through it
+ * (new sidecar before new original), and it lasts until the original's write
+ * commits. A serve path falls through on it, the same as on a missing block,
+ * but counts it apart from one: a missing block where one is required is a
+ * fault, an unpaired one is the expected window. */
+PS_EXPORT int ps_header_block_pairing(const ps_header_block_t* block,
+                                      const uint8_t* entry_hash);
+
+/* Free a block from ps_headers_sidecar_read. No-op for NULL. */
+PS_EXPORT void ps_header_block_free(ps_header_block_t* block);
+
 /* ---------- HTML cacheability policy ---------- */
 
 /* The `mode` ps_html_store_classify takes. Any other value is a malformed call.
@@ -1255,6 +1413,78 @@ PS_EXPORT PS_NODISCARD ps_error_t ps_cache_remove(ps_cache_t* cache,
                                                   const char* url,
                                                   const char* hostname,
                                                   const char* scheme);
+
+/* ps_cache_remove in the keyspace of one site (`site` as for
+ * ps_cache_read_best_site): the whole key — the durable original, its
+ * sidecar, the withheld marker, the content-hash record, the Markdown copy
+ * and every variant — in that site only. Available from PS_API 1.13.
+ *
+ * PS_OK when the key was removed; PS_ERR_NOT_FOUND when nothing was stored
+ * under it, which a caller removing an entry may treat as success.
+ *
+ * PER PROCESS for the RAM tier: this process's RAM copies of the key are
+ * evicted with it, but another process that already holds a copy in its own
+ * RAM tier can keep answering from it. A purge must fence peer processes
+ * itself (for example with the per-site purge epoch below); a removal is
+ * not a cross-process invalidation.
+ *
+ * NOT FENCED against the optimizer: a derivation already in flight for the
+ * key can still write its result after this returns. Such a copy is bound to
+ * the removed original's hash, so it is not served unless an original with
+ * the same bytes is stored again — and then serving it is correct. */
+PS_EXPORT PS_NODISCARD ps_error_t ps_cache_remove_site(ps_cache_t* cache,
+                                                       const char* url,
+                                                       const char* hostname,
+                                                       const char* scheme,
+                                                       const char* site);
+
+/* ---------- per-site purge epoch (PS_API 1.13) ---------- */
+
+/* The time (Unix seconds) of the last global purge a site's front end
+ * observed: an entry the front end stored at or before the epoch counts as
+ * purged. `site` must be PS_SITE_ID_CHARS lowercase hex; NULL and "" are
+ * PS_ERR_INVALID_ARG.
+ *
+ * WHERE IT LIVES: one small file per site beside the cache volume,
+ * `<volume_path>.purge-epoch.<site>`, where `volume_path` is the path this
+ * cache was opened with. It is NOT in the volume, so the volume's own
+ * reclamation cannot drop it, and a wipe of a front end's own caches leaves
+ * it. ps_cache_remove and ps_cache_remove_site never touch it. It is created
+ * 0660 and updated in place (never renamed or replaced), so every user of the
+ * cache group can update it once it exists; the volume's directory must let
+ * them create it the first time.
+ *
+ * WRITE IS A MAX-MERGE. Under an OS advisory lock the current value is read,
+ * and only a larger value is written, as one fixed-width record at the start
+ * of the file, then flushed, so racing writers — threads or processes — end
+ * at the largest value. A value at or below the stored epoch is a successful
+ * no-op. A value later than the current time plus 5 seconds is
+ * PS_ERR_INVALID_ARG, so a clock step or a file touched with a future time
+ * cannot become a permanent epoch: pass min(observed, now). PS_ERR_IO when
+ * the file cannot be opened or written, or its lock is not free within about
+ * 2 seconds.
+ *
+ * READ gives PS_OK and 0 when the site has no epoch file. ANY OTHER RESULT
+ * THAN PS_OK — PS_ERR_CORRUPTED for a file that does not hold a whole record
+ * (the first write was torn by a power loss, or the file is foreign),
+ * PS_ERR_IO, anything —
+ * means the caller must treat every entry of the site as purged; the
+ * out-parameter is left untouched then and must not be used. The next write
+ * replaces a corrupted record with the larger of its value and the current
+ * time.
+ *
+ * THE EPOCH NEVER DECREASES. A stored value in the future (a power-loss tear
+ * of an overwrite, which never reads below the previous value, or a write
+ * made while the clock ran fast) is a valid value: it is returned as it is
+ * and over-fences until the clock passes it, by design.
+ *
+ * The file is not tied to the volume's generation: a recreated volume holds
+ * no entry from before, so an epoch that outlives the recreate can only
+ * fence more than needed, never un-purge an entry. */
+PS_EXPORT PS_NODISCARD ps_error_t ps_cache_write_site_purge_epoch(
+    ps_cache_t* cache, const char* site, uint64_t epoch_s);
+PS_EXPORT PS_NODISCARD ps_error_t ps_cache_read_site_purge_epoch(
+    ps_cache_t* cache, const char* site, uint64_t* out_epoch_s);
 
 /* ---------- cache alternate listing ---------- */
 

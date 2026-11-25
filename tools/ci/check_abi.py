@@ -81,6 +81,7 @@ DOTNET_MIRRORS = {
             "Flags": "flags",
             "OriginCt": "origin_ct",
             "OriginCcFlags": "origin_cc_flags",
+            "OriginHtmlHash": "origin_html_hash",
         },
     },
     "NativeCacheConfig": {

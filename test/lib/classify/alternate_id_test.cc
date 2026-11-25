@@ -44,6 +44,7 @@ TEST(AlternateIdTest, EverySentinelIdIsRegisteredExactlyOnce) {
       SentinelId::kLlmsTxtMeta,
       SentinelId::kNegativeVerdict,
       SentinelId::kDeclineTombstone,
+      SentinelId::kAgentMarkdownWithheld,
   };
   for (SentinelId id : ids) {
     auto byte = static_cast<AlternateId>(id);

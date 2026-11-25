@@ -1321,10 +1321,13 @@ std::vector<std::string> HtmlTransformFilter::ReadHeaderCsps(
   if (cache == nullptr) return out;
   auto read = cache->ReadHeadersSidecar(url, hostname, scheme, site);
   if (!read.has_value()) return out;
-  auto fields =
-      ParseHeadersSidecar(PageSpeedCache::HeadersSidecarPayload(*read));
-  if (!fields.has_value()) return out;
-  for (const HeaderField& field : *fields) {
+  // Either format: this reader gathers restrictions, so missing a CSP is the
+  // unsafe direction, and a paired block's policy applies whether or not it
+  // is paired with the bytes being rewritten.
+  auto block =
+      ParseHeadersSidecarBlock(PageSpeedCache::HeadersSidecarPayload(*read));
+  if (!block.has_value()) return out;
+  for (const HeaderField& field : block->fields) {
     // Enforcing policy only; Report-Only is not an exact match and is not
     // in the sidecar allowlist anyway.
     if (net_instaweb::StringCaseEqual(field.name, "Content-Security-Policy")) {
