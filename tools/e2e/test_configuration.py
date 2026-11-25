@@ -223,10 +223,52 @@ class TestHtmlTransformations:
     """HTML feature toggles."""
 
     def test_disable_html_applied(self, restore_config):
+        # The legacy key still works: true is html_mode off.
         api = restore_config
         api.patch_config(disable_html=True)
         cfg = api.get_config()
         assert cfg["disable_html"] is True
+        assert cfg["html_mode"] == "off"
+        api.patch_config(disable_html=False)
+        cfg = api.get_config()
+        assert cfg["disable_html"] is False
+        assert cfg["html_mode"] == "full"
+
+    def test_html_mode_default_is_full(self, worker_api):
+        cfg = worker_api.get_config()
+        assert cfg["html_mode"] == "full"
+        assert cfg["disable_html"] is False
+
+    @pytest.mark.parametrize(
+        "mode,disable_html",
+        [
+            ("off", True),
+            ("markdown-static", False),
+            ("markdown-rendered", False),
+            ("full", False),
+        ],
+    )
+    def test_html_mode_applied(self, restore_config, mode, disable_html):
+        api = restore_config
+        result = api.patch_config(html_mode=mode)
+        assert result["applied"]["html_mode"] == mode
+        cfg = api.get_config()
+        assert cfg["html_mode"] == mode
+        assert cfg["disable_html"] is disable_html
+
+    def test_html_mode_unknown_value_rejected(self, restore_config):
+        api = restore_config
+        result = api.patch_config(html_mode="markdown")
+        assert "html_mode" in result["rejected"]
+        assert api.get_config()["html_mode"] == "full"
+
+    def test_html_mode_wins_over_disable_html(self, restore_config):
+        api = restore_config
+        result = api.patch_config(html_mode="markdown-static", disable_html=True)
+        assert result["applied"]["html_mode"] == "markdown-static"
+        assert "disable_html" not in result["applied"]
+        assert result["warnings"]
+        assert api.get_config()["html_mode"] == "markdown-static"
 
     def test_disable_lazy_load_applied(self, restore_config):
         api = restore_config

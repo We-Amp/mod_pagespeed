@@ -39,6 +39,7 @@ function makeConfig(
     quality_verify: true,
     target_ssimulacra2: 70,
     ssimulacra2_tolerance: 5,
+    html_mode: 'full',
     disable_html: false,
     disable_css: false,
     disable_js: false,

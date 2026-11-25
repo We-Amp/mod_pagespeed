@@ -116,6 +116,7 @@ const CONFIG_KEY_TYPES: Record<string, 'number' | 'boolean' | 'string'> = {
   quality_verify: 'boolean',
   target_ssimulacra2: 'number',
   ssimulacra2_tolerance: 'number',
+  html_mode: 'string',
   disable_html: 'boolean',
   disable_css: 'boolean',
   disable_js: 'boolean',

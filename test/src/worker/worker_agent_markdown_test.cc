@@ -161,6 +161,141 @@ TEST_F(WorkerTest, ContentHashIdempotency_OptimizedIdentityDoesNotSelfPurge) {
       << "Variant set must survive a no-change reprocess";
 }
 
+// A markdown-* html_mode writes no optimized HTML variant for the front
+// sender, while the page is still read and the content hash the Markdown copy
+// binds to is still written.  `mode` full is the positive control: the same
+// page and config do write the variant.
+class HtmlModeVariantTest : public WorkerTest {
+ protected:
+  static constexpr const char* kCacheUrl = "/mode.html";
+
+  static CacheNotification PageNotification() {
+    CacheNotification notification;
+    notification.url = "http://example.com/mode.html";
+    notification.scheme = "https";
+    notification.content_type = ContentType::kHtml;
+    notification.capability_mask = CapabilityMask().Encode();
+    return notification;
+  }
+
+  WorkerConfig ModeConfig(HtmlMode mode) {
+    WorkerConfig config = MakeAgentOptimizeConfig(socket_path_, cache_path_);
+    config.unsafe_force_async_css = true;
+    config.html_mode = mode;
+    return config;
+  }
+
+  void Run(HtmlMode mode, bool expect_variant) {
+    NullMessageHandler handler;
+    Worker worker(ModeConfig(mode), &handler);
+    ASSERT_TRUE(worker.Initialize());
+    CacheOriginal(worker.cache(), kCacheUrl, kAgentHtml);
+    std::thread worker_thread([&worker]() { worker.Run(); });
+    WorkerStopper stopper(worker, worker_thread);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    SendNotification(PageNotification());
+    ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(
+        worker, 1, kWorkerStallBudget));
+
+    EXPECT_FALSE(
+        ReadSentinel(worker.cache(), kCacheUrl, SentinelId::kContentHash)
+            .empty())
+        << HtmlModeName(mode) << ": the page was not read";
+    // The analysis that renders the agent copy was still queued.
+    EXPECT_TRUE(worker.TestBrowserManager()->TestDequeue().has_value())
+        << HtmlModeName(mode) << ": no analysis was queued";
+    // The identity slot holds the raw origin until the worker replaces it
+    // with its own output, so "a variant" is an entry the worker wrote.
+    auto slot =
+        ReadVariantWithMeta(worker.cache(), kCacheUrl, CapabilityMask());
+    ASSERT_TRUE(slot.has_value()) << HtmlModeName(mode);
+    const bool has_variant =
+        (slot->metadata.flags & AlternateMetadata::kFlagWorkerProcessed) != 0;
+    EXPECT_EQ(has_variant, expect_variant) << HtmlModeName(mode);
+    EXPECT_EQ(worker.stats().html_processed.load(), expect_variant ? 1u : 0u)
+        << HtmlModeName(mode);
+    EXPECT_EQ(worker.stats().variants_written.load() > 0, expect_variant)
+        << HtmlModeName(mode);
+    if (!expect_variant) {
+      // The raw entry carries its source-binding stamp (the derived ETag for
+      // a validator-less origin), with its bytes unchanged.
+      static constexpr std::array<std::byte, 32> kZeroHash{};
+      EXPECT_NE(slot->metadata.origin_html_hash, kZeroHash)
+          << HtmlModeName(mode) << ": raw entry not stamped";
+      EXPECT_EQ(slot->content, kAgentHtml) << HtmlModeName(mode);
+    }
+  }
+};
+
+// A markdown-* html_mode writes no optimized HTML variant for the front
+// sender, while the page is still read, its content hash written, its raw
+// entry stamped and its analysis queued.  Full is the positive control: the
+// same page and config do write the variant.
+TEST_F(HtmlModeVariantTest, FullWritesTheHtmlVariant) {
+  Run(HtmlMode::kFull, /*expect_variant=*/true);
+}
+
+TEST_F(HtmlModeVariantTest, MarkdownStaticWritesNoHtmlVariant) {
+  Run(HtmlMode::kMarkdownStatic, /*expect_variant=*/false);
+}
+
+TEST_F(HtmlModeVariantTest, MarkdownRenderedWritesNoHtmlVariant) {
+  Run(HtmlMode::kMarkdownRendered, /*expect_variant=*/false);
+}
+
+// In a markdown-* mode no variant marks the page processed, so a repeat for
+// an unchanged page is skipped by its origin hash; a changed origin is not.
+TEST_F(HtmlModeVariantTest, MarkdownRepeatSkippedUntilTheOriginChanges) {
+  NullMessageHandler handler;
+  Worker worker(ModeConfig(HtmlMode::kMarkdownStatic), &handler);
+  ASSERT_TRUE(worker.Initialize());
+  CacheOriginal(worker.cache(), kCacheUrl, kAgentHtml);
+  std::thread worker_thread([&worker]() { worker.Run(); });
+  WorkerStopper stopper(worker, worker_thread);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  SendNotification(PageNotification());
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 1,
+                                                           kWorkerStallBudget));
+  ASSERT_TRUE(worker.TestBrowserManager()->TestDequeue().has_value());
+  const std::string first_hash =
+      ReadSentinel(worker.cache(), kCacheUrl, SentinelId::kContentHash);
+  ASSERT_EQ(first_hash.size(), 32u);
+
+  // Same bytes, repeated: skipped before the scan and the analysis lookup.
+  const uint64_t skipped_before =
+      worker.stats().notifications_skipped_dedup.load();
+  for (int i = 0; i < 3; ++i) {
+    SendNotification(PageNotification());
+    ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(
+        worker, 2 + i, kWorkerStallBudget));
+  }
+  EXPECT_EQ(worker.stats().notifications_skipped_dedup.load(),
+            skipped_before + 3);
+  EXPECT_FALSE(worker.TestBrowserManager()->TestDequeue().has_value())
+      << "an unchanged page was queued again";
+
+  // A changed origin is processed: the content hash moves to the new bytes
+  // and the page is queued again.
+  const std::string changed =
+      "<html><head><style>body { margin: 1px; }</style></head>"
+      "<body><h1>Changed</h1></body></html>";
+  CacheOriginal(worker.cache(), kCacheUrl, changed);
+  SendNotification(PageNotification());
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 5,
+                                                           kWorkerStallBudget));
+  EXPECT_EQ(worker.stats().notifications_skipped_dedup.load(),
+            skipped_before + 3)
+      << "a changed origin was skipped";
+  const std::string second_hash =
+      ReadSentinel(worker.cache(), kCacheUrl, SentinelId::kContentHash);
+  EXPECT_EQ(second_hash.size(), 32u);
+  EXPECT_NE(second_hash, first_hash);
+  EXPECT_TRUE(worker.TestBrowserManager()->TestDequeue().has_value())
+      << "the changed page was not queued";
+}
+
 TEST_F(WorkerTest, ContentHashIdempotency_RealOriginChangeStillPurges) {
   // A GENUINE origin change (raw bytes at slot 0x08 differ from the bound
   // sentinel) must still purge exactly once and rebuild — the fix must not

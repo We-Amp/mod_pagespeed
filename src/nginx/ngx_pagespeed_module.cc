@@ -78,6 +78,7 @@ extern "C" {
 #include "src/proto/notification_sender.h"
 #include "src/proto/worker_ipc.h"
 #include "src/worker/async_css_loader.h"
+#include "src/worker/html_mode.h"
 #include "src/worker/serve_stats.h"
 
 using pagespeed::AcceptMarkdownPreference;
@@ -150,7 +151,10 @@ static constexpr time_t kGenerationCheckIntervalSec = 1;
 // Keep in sync with src/worker/shared_config.h — same fields and defaults.
 struct SharedConfig {
   std::string socket_path = "/run/pagespeed-optimizer/notify.sock";
-  bool disable_html = false;
+  // The worker's HTML mode, resolved from the html_mode and legacy
+  // disable_html keys by the same rule (ResolveHtmlMode) as the optimizer's
+  // own parser.
+  pagespeed::HtmlMode html_mode = pagespeed::kDefaultHtmlMode;
   // Serve-side markdown gate.  Since 2.1 this is
   // the operator's agent_optimize flag as published by the worker; the wire
   // key keeps its historical name.
@@ -283,6 +287,8 @@ static SharedConfig ReadSharedConfig(std::string_view cache_path,
   // Parse key=value lines (same logic as ParseSharedConfig in
   // src/worker/shared_config.cc).
   int version = -1;
+  std::optional<pagespeed::HtmlMode> html_mode;
+  std::optional<bool> disable_html;
   std::string_view sv(content);
   size_t pos = 0;
   while (pos < sv.size()) {
@@ -333,7 +339,11 @@ static SharedConfig ReadSharedConfig(std::string_view cache_path,
         config.socket_path = std::string(value);
       }
     } else if (key == "disable_html") {
-      config.disable_html = (value == "true" || value == "1");
+      disable_html = (value == "true" || value == "1");
+    } else if (key == "html_mode") {
+      if (auto mode = pagespeed::ParseHtmlMode(value)) {
+        html_mode = mode;
+      }
     } else if (key == "agent_optimize_entitled") {
       config.agent_optimize_entitled = (value == "true" || value == "1");
     } else if (key == "agent_optimize_llms_txt_enabled") {
@@ -386,15 +396,15 @@ static SharedConfig ReadSharedConfig(std::string_view cache_path,
     }
     // Unknown keys silently ignored.
   }
+  config.html_mode = pagespeed::ResolveHtmlMode(html_mode, disable_html);
 
-  ngx_log_error(
-      NGX_LOG_NOTICE, log, 0,
-      "pagespeed: shared config loaded from %s "
-      "(socket=%s, disable_html=%s, agent_optimize=%s, cache_mode=%s)",
-      conf_path.c_str(), config.socket_path.c_str(),
-      config.disable_html ? "true" : "false",
-      config.agent_optimize_entitled ? "true" : "false",
-      config.cache_mode.empty() ? "safe" : config.cache_mode.c_str());
+  ngx_log_error(NGX_LOG_NOTICE, log, 0,
+                "pagespeed: shared config loaded from %s "
+                "(socket=%s, html_mode=%s, agent_optimize=%s, cache_mode=%s)",
+                conf_path.c_str(), config.socket_path.c_str(),
+                std::string(pagespeed::HtmlModeName(config.html_mode)).c_str(),
+                config.agent_optimize_entitled ? "true" : "false",
+                config.cache_mode.empty() ? "safe" : config.cache_mode.c_str());
 
   return config;
 }
@@ -3826,14 +3836,15 @@ static void ngx_http_pagespeed_record_response(ngx_http_request_t* r,
   // Skip for no-transform: original is cached but must not be optimized.
   // `origin_varies_accept` is never set now (a `Vary: Accept` response is not
   // stored at all); it stays in the condition for the marker's readers.
-  // Skip HTML notifications when disable_html is set in shared config.
+  // Skip HTML notifications when the worker's html_mode is off.
   // Skip for non-2xx responses: error pages (4xx/5xx) should not trigger
   // worker optimization.  Without this, bots hitting non-existent URLs
   // cause a flood of notifications for cached error pages (see Issue 1
   // in docs/staging-fixes-plan.md).
   bool skip_notification =
       ctx->no_transform || ctx->origin_varies_accept ||
-      (ct == ContentType::kHtml && g_shared_config.disable_html) ||
+      (ct == ContentType::kHtml &&
+       !pagespeed::HtmlModeNotifiesHtmlStore(g_shared_config.html_mode)) ||
       r->headers_out.status < 200 || r->headers_out.status >= 300 ||
       ngx_http_pagespeed_withhold_html_notify(ct, host_vouched);
   if (!g_shared_config.socket_path.empty() && !skip_notification) {
@@ -7007,8 +7018,14 @@ static ngx_int_t ngx_http_pagespeed_handler(ngx_http_request_t* r) {
           ((meta.content_type == ContentType::kHtml ||
             meta.content_type == ContentType::kCss) &&
            (meta.flags & pagespeed::AlternateMetadata::kFlagNeedsRevalidation));
+      // Off never re-notifies for HTML; a markdown-* mode writes no HTML
+      // variant, so it re-notifies only for an agent request (the demand
+      // signal for the Markdown copy).
       bool html_disabled = (meta.content_type == ContentType::kHtml &&
-                            g_shared_config.disable_html);
+                            !pagespeed::HtmlModeRenotifiesHtmlHit(
+                                g_shared_config.html_mode,
+                                ctx->agent_wants_markdown &&
+                                    g_shared_config.agent_optimize_entitled));
       // The kAgentMarkdown variant is worker-written, terminal, and
       // intentionally never matches the client mask (0x7C carries sentinel
       // viewport bits), so it would otherwise spuriously fire a fallback re-

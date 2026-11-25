@@ -237,7 +237,7 @@ TEST_F(WorkerTest, DisableHtmlSkipsProcessing) {
   config.socket_path = socket_path_;
   config.cache_path = cache_path_;
   config.cache_size_bytes = static_cast<uint64_t>(10 * 1024 * 1024);
-  config.disable_html = true;
+  config.html_mode = HtmlMode::kOff;  // the old disable_html=true
 
   Worker worker(config, nullptr);
   ASSERT_TRUE(worker.Initialize());
@@ -264,7 +264,7 @@ TEST_F(WorkerTest, DisableHtmlSkipsProcessing) {
   // No variant should be written
   CapabilityMask mask = CapabilityMask::Decode(0x00000001);
   std::string variant = ReadVariant(worker.cache(), url, mask);
-  EXPECT_TRUE(variant.empty()) << "HTML variant written despite disable_html";
+  EXPECT_TRUE(variant.empty()) << "HTML variant written despite html_mode off";
 
   worker.Shutdown();
   worker_thread.join();
@@ -1759,14 +1759,14 @@ TEST_F(WorkerTest, ContentTypeOtherNotification) {
 // =============================================================================
 
 TEST_F(WorkerTest, HtmlDisabledSkipsProcessing) {
-  // With disable_html and a non-null handler, the HTML disable branch
+  // With html_mode off and a non-null handler, the HTML disable branch
   // (worker.cc ~1486-1491) is exercised including the Info log call.
   // Verifies notifications_received increments but html_processed does not.
   WorkerConfig config;
   config.socket_path = socket_path_;
   config.cache_path = cache_path_;
   config.cache_size_bytes = static_cast<uint64_t>(10 * 1024 * 1024);
-  config.disable_html = true;
+  config.html_mode = HtmlMode::kOff;
 
   NullMessageHandler handler;
   Worker worker(config, &handler);
@@ -2189,6 +2189,49 @@ TEST_F(WorkerTest, ModuleNotificationAskingForPageWorkIsRefused) {
   EXPECT_EQ(worker.stats().notifications_rejected_module_render.load(), 4u);
   EXPECT_FALSE(worker.TestBrowserManager()->TestDequeue().has_value())
       << "no analysis was queued";
+}
+
+TEST_F(WorkerTest, DefaultHtmlModeIsFullAndRefusesModuleHtml) {
+  // No html_mode anywhere: the mode is full (today's behaviour), and a
+  // module HTML frame is refused even when vouched.
+  WorkerConfig config = SiteAnalysisConfig(socket_path_, cache_path_);
+  ASSERT_EQ(config.html_mode, HtmlMode::kFull);
+  Worker worker(config, nullptr);
+  ASSERT_TRUE(worker.Initialize());
+  std::thread worker_thread([&worker]() { worker.Run(); });
+  WorkerStopper stopper(worker, worker_thread);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  CacheNotification html = ModuleCss("http://example.com/p.html", kSiteOne);
+  html.content_type = ContentType::kHtml;
+  html.host_vouched = true;
+  SendNotification(html);
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 1,
+                                                           kWorkerStallBudget));
+  EXPECT_EQ(worker.stats().notifications_rejected_module_render.load(), 1u);
+  EXPECT_FALSE(worker.TestBrowserManager()->TestDequeue().has_value());
+}
+
+TEST_F(WorkerTest, MarkdownHtmlModeStillRefusesModuleHtml) {
+  // Module HTML stays refused in every html_mode until the worker gains a
+  // handler for it; a markdown-* mode changes only what the front sender's
+  // pages produce.
+  WorkerConfig config = SiteAnalysisConfig(socket_path_, cache_path_);
+  config.html_mode = HtmlMode::kMarkdownStatic;
+  Worker worker(config, nullptr);
+  ASSERT_TRUE(worker.Initialize());
+  std::thread worker_thread([&worker]() { worker.Run(); });
+  WorkerStopper stopper(worker, worker_thread);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  CacheNotification html = ModuleCss("http://example.com/p.html", kSiteOne);
+  html.content_type = ContentType::kHtml;
+  html.host_vouched = true;
+  SendNotification(html);
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 1,
+                                                           kWorkerStallBudget));
+  EXPECT_EQ(worker.stats().notifications_rejected_module_render.load(), 1u);
+  EXPECT_FALSE(worker.TestBrowserManager()->TestDequeue().has_value());
 }
 
 TEST_F(WorkerTest, TwoSitesOnOneUrlGetIndependentVariants) {

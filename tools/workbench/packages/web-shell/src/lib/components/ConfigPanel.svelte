@@ -23,6 +23,7 @@
     IMAGE_FEATURE_TOGGLES,
     LEARNED_QUALITY_TOGGLES,
     HTML_FEATURE_TOGGLES,
+    HTML_MODE_SELECT,
     CSS_FEATURE_TOGGLES,
     JS_FEATURE_TOGGLES,
     COMPRESSION_FIELDS,
@@ -637,6 +638,28 @@
             <h3 class="toggle-group-heading">
               HTML Transforms ({HTML_FEATURE_TOGGLES.length})
             </h3>
+            <div class="number-field">
+              <span class="number-label">
+                {HTML_MODE_SELECT.label}
+                {#if isFieldChanged(HTML_MODE_SELECT.key)}
+                  <span class="changed-dot" title="Modified"></span>
+                {/if}
+                {#if HTML_MODE_SELECT.tooltip}
+                  <HelpIcon tooltip={HTML_MODE_SELECT.tooltip} />
+                {/if}
+              </span>
+              <select
+                class="ps-select"
+                bind:value={config[HTML_MODE_SELECT.key]}
+                disabled={!connected}
+                aria-label={HTML_MODE_SELECT.label}
+                onchange={handleSliderChange}
+              >
+                {#each HTML_MODE_SELECT.options as opt}
+                  <option value={opt.value}>{opt.label}</option>
+                {/each}
+              </select>
+            </div>
             {#each HTML_FEATURE_TOGGLES as field}
               <FeatureToggle
                 label={field.label}

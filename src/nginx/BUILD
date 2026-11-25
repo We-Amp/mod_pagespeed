@@ -257,6 +257,7 @@ cc_library(
         "//src/proto:notification_sender",
         "//src/proto:worker_ipc",
         "//src/worker:async_css_loader",
+        "//src/worker:html_mode",
         "//src/worker:serve_stats",
         "@nginx",
     ],

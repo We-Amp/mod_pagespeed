@@ -63,7 +63,7 @@ class SharedConfigTest : public ::testing::Test {
 TEST_F(SharedConfigTest, ParseEmptyContent) {
   auto config = ParseSharedConfig("");
   EXPECT_EQ(config.socket_path, "/run/pagespeed-optimizer/notify.sock");
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
 }
 
 TEST_F(SharedConfigTest, ParseValidContent) {
@@ -73,7 +73,7 @@ TEST_F(SharedConfigTest, ParseValidContent) {
       "socket_path=/run/pagespeed/worker.sock\n"
       "disable_html=true\n");
   EXPECT_EQ(config.socket_path, "/run/pagespeed/worker.sock");
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
 }
 
 TEST_F(SharedConfigTest, ParseAgentOptimizeLlmsTxtEnabled) {
@@ -320,7 +320,7 @@ TEST_F(SharedConfigTest, ParseEmptyLinesSkipped) {
       "disable_html=true\n"
       "\n");
   EXPECT_EQ(config.socket_path, "/custom/path.sock");
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
 }
 
 TEST_F(SharedConfigTest, ParseNoEqualsSign) {
@@ -339,7 +339,7 @@ TEST_F(SharedConfigTest, ParseUnknownKeys) {
       "baz=quux\n");
   EXPECT_EQ(config.socket_path, "/known.sock");
   // Unknown keys don't corrupt defaults.
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
 }
 
 TEST_F(SharedConfigTest, ParseVersionOne) {
@@ -357,7 +357,7 @@ TEST_F(SharedConfigTest, ParseVersionTwo) {
       "cache_mode=aggressive\n");
   EXPECT_EQ(config.socket_path, "/run/pagespeed-optimizer/notify.sock");
   EXPECT_TRUE(config.cache_mode.empty());
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
 }
 
 TEST_F(SharedConfigTest, ParseVersionZero) {
@@ -373,7 +373,7 @@ TEST_F(SharedConfigTest, ParseMissingVersion) {
       "socket_path=/no-version.sock\n"
       "disable_html=true\n");
   EXPECT_EQ(config.socket_path, "/no-version.sock");
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
 }
 
 TEST_F(SharedConfigTest, ParseEmptyValue) {
@@ -396,26 +396,139 @@ TEST_F(SharedConfigTest, ParseValueWithEquals) {
 TEST_F(SharedConfigTest, ParseDisableHtmlTrue) {
   {
     auto config = ParseSharedConfig("disable_html=true\n");
-    EXPECT_TRUE(config.disable_html);
+    EXPECT_EQ(config.html_mode, HtmlMode::kOff);
   }
   {
     auto config = ParseSharedConfig("disable_html=1\n");
-    EXPECT_TRUE(config.disable_html);
+    EXPECT_EQ(config.html_mode, HtmlMode::kOff);
   }
 }
 
 TEST_F(SharedConfigTest, ParseDisableHtmlFalse) {
   {
     auto config = ParseSharedConfig("disable_html=false\n");
-    EXPECT_FALSE(config.disable_html);
+    EXPECT_EQ(config.html_mode, HtmlMode::kFull);
   }
   {
     auto config = ParseSharedConfig("disable_html=0\n");
-    EXPECT_FALSE(config.disable_html);
+    EXPECT_EQ(config.html_mode, HtmlMode::kFull);
   }
   {
     auto config = ParseSharedConfig("disable_html=\n");
-    EXPECT_FALSE(config.disable_html);
+    EXPECT_EQ(config.html_mode, HtmlMode::kFull);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// html_mode and the legacy disable_html key
+// ---------------------------------------------------------------------------
+
+TEST_F(SharedConfigTest, ParseHtmlModeValues) {
+  EXPECT_EQ(ParseSharedConfig("html_mode=off\n").html_mode, HtmlMode::kOff);
+  EXPECT_EQ(ParseSharedConfig("html_mode=markdown-static\n").html_mode,
+            HtmlMode::kMarkdownStatic);
+  EXPECT_EQ(ParseSharedConfig("html_mode=markdown-rendered\n").html_mode,
+            HtmlMode::kMarkdownRendered);
+  EXPECT_EQ(ParseSharedConfig("html_mode=full\n").html_mode, HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("html_mode=off\r\n").html_mode, HtmlMode::kOff);
+}
+
+TEST_F(SharedConfigTest, NoHtmlKeyIsFull) {
+  // A file without either key (an older writer, or none at all) is full,
+  // which is the behaviour before html_mode existed.
+  EXPECT_EQ(ParseSharedConfig("version=1\nsocket_path=/s.sock\n").html_mode,
+            HtmlMode::kFull);
+  EXPECT_EQ(SharedConfig{}.html_mode, HtmlMode::kFull);
+}
+
+TEST_F(SharedConfigTest, HtmlModeWinsOverDisableHtmlInEitherOrder) {
+  EXPECT_EQ(ParseSharedConfig("html_mode=markdown-static\ndisable_html=true\n")
+                .html_mode,
+            HtmlMode::kMarkdownStatic);
+  EXPECT_EQ(ParseSharedConfig("disable_html=true\nhtml_mode=markdown-static\n")
+                .html_mode,
+            HtmlMode::kMarkdownStatic);
+  EXPECT_EQ(ParseSharedConfig("disable_html=true\nhtml_mode=full\n").html_mode,
+            HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("html_mode=off\ndisable_html=false\n").html_mode,
+            HtmlMode::kOff);
+}
+
+TEST_F(SharedConfigTest, UnknownHtmlModeFallsBackToDisableHtml) {
+  // A value this build does not know (a newer writer's) is not "given": the
+  // disable_html that writer also emits decides.
+  EXPECT_EQ(ParseSharedConfig("html_mode=markdown-future\ndisable_html=true\n")
+                .html_mode,
+            HtmlMode::kOff);
+  EXPECT_EQ(ParseSharedConfig("html_mode=markdown-future\ndisable_html=false\n")
+                .html_mode,
+            HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("html_mode=Full\n").html_mode, HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("html_mode=\ndisable_html=1\n").html_mode,
+            HtmlMode::kOff);
+}
+
+TEST_F(SharedConfigTest, WriterEmitsHtmlModeAndDerivedDisableHtml) {
+  struct Case {
+    HtmlMode mode;
+    const char* html_mode_line;
+    const char* disable_html_line;
+  };
+  const Case cases[] = {
+      {HtmlMode::kOff, "\nhtml_mode=off\n", "\ndisable_html=true\n"},
+      {HtmlMode::kMarkdownStatic, "\nhtml_mode=markdown-static\n",
+       "\ndisable_html=false\n"},
+      {HtmlMode::kMarkdownRendered, "\nhtml_mode=markdown-rendered\n",
+       "\ndisable_html=false\n"},
+      {HtmlMode::kFull, "\nhtml_mode=full\n", "\ndisable_html=false\n"},
+  };
+  for (const Case& c : cases) {
+    std::string path = (tmp_dir_ / "mode.conf").string();
+    SharedConfig config;
+    config.html_mode = c.mode;
+    ASSERT_TRUE(WriteSharedConfigFile(path, config, 1));
+    std::ifstream f(path);
+    std::string raw((std::istreambuf_iterator<char>(f)),
+                    std::istreambuf_iterator<char>());
+    EXPECT_NE(raw.find(c.html_mode_line), std::string::npos) << raw;
+    EXPECT_NE(raw.find(c.disable_html_line), std::string::npos) << raw;
+    // No schema bump: html_mode is an optional key.
+    EXPECT_NE(raw.find("\nversion=1\n"), std::string::npos) << raw;
+    EXPECT_EQ(ReadSharedConfigFile(path).html_mode, c.mode);
+  }
+}
+
+TEST_F(SharedConfigTest, ReaderWithoutHtmlModeKeepsWorkingOnNewFile) {
+  // A reader that predates html_mode ignores the key (unknown keys are
+  // skipped by contract) and acts on disable_html alone.  Model it by
+  // dropping the html_mode line from a new file: off stays off, and every
+  // other mode reads as full, which is what that reader did before.
+  for (HtmlMode mode : {HtmlMode::kOff, HtmlMode::kMarkdownStatic,
+                        HtmlMode::kMarkdownRendered, HtmlMode::kFull}) {
+    std::string path = (tmp_dir_ / "old-reader.conf").string();
+    SharedConfig config;
+    config.socket_path = "/run/old-reader.sock";
+    config.html_mode = mode;
+    config.agent_optimize_entitled = true;
+    ASSERT_TRUE(WriteSharedConfigFile(path, config, 1));
+    std::ifstream f(path);
+    std::string raw((std::istreambuf_iterator<char>(f)),
+                    std::istreambuf_iterator<char>());
+    const std::string line =
+        "html_mode=" + std::string(HtmlModeName(mode)) + "\n";
+    const size_t at = raw.find("\n" + line);
+    ASSERT_NE(at, std::string::npos) << raw;
+    raw.erase(at + 1, line.size());
+    ASSERT_EQ(raw.find("html_mode="), std::string::npos) << raw;
+    ResetSharedConfigVersionSkewForTesting();
+    const SharedConfig old_view = ParseSharedConfig(raw);
+    EXPECT_FALSE(SharedConfigVersionSkewState().mismatch);
+    EXPECT_EQ(old_view.html_mode,
+              mode == HtmlMode::kOff ? HtmlMode::kOff : HtmlMode::kFull)
+        << HtmlModeName(mode);
+    // The rest of the file is read unchanged.
+    EXPECT_EQ(old_view.socket_path, "/run/old-reader.sock");
+    EXPECT_TRUE(old_view.agent_optimize_entitled);
   }
 }
 
@@ -439,7 +552,7 @@ TEST_F(SharedConfigTest, WriteAndReadRoundTrip) {
   std::string path = (tmp_dir_ / "pagespeed-shared.conf").string();
   SharedConfig original;
   original.socket_path = "/run/test.sock";
-  original.disable_html = true;
+  original.html_mode = HtmlMode::kOff;
   original.agent_optimize_entitled = true;
   original.cache_mode = "aggressive";
 
@@ -447,7 +560,7 @@ TEST_F(SharedConfigTest, WriteAndReadRoundTrip) {
 
   auto loaded = ReadSharedConfigFile(path);
   EXPECT_EQ(loaded.socket_path, original.socket_path);
-  EXPECT_EQ(loaded.disable_html, original.disable_html);
+  EXPECT_EQ(loaded.html_mode, original.html_mode);
   EXPECT_EQ(loaded.agent_optimize_entitled, original.agent_optimize_entitled);
   EXPECT_EQ(loaded.cache_mode, original.cache_mode);
   EXPECT_EQ(loaded, original);
@@ -595,14 +708,14 @@ TEST_F(SharedConfigTest, WriteDefaultPid) {
 TEST_F(SharedConfigTest, ReadMissingFile) {
   auto config = ReadSharedConfigFile((tmp_dir_ / "nonexistent.conf").string());
   EXPECT_EQ(config.socket_path, "/run/pagespeed-optimizer/notify.sock");
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
 }
 
 TEST_F(SharedConfigTest, ReadEmptyFile) {
   std::string path = WriteRawFile("empty.conf", "");
   auto config = ReadSharedConfigFile(path);
   EXPECT_EQ(config.socket_path, "/run/pagespeed-optimizer/notify.sock");
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
 }
 
 // ---------------------------------------------------------------------------
@@ -741,16 +854,18 @@ TEST_F(SharedConfigTest, WriteCacheModeEmpty) {
 
 TEST_F(SharedConfigTest, ParseDisableHtmlCaseSensitive) {
   // Only "true" and "1" are truthy; other values are falsy.
-  EXPECT_FALSE(ParseSharedConfig("disable_html=True\n").disable_html);
-  EXPECT_FALSE(ParseSharedConfig("disable_html=TRUE\n").disable_html);
-  EXPECT_FALSE(ParseSharedConfig("disable_html=yes\n").disable_html);
+  EXPECT_EQ(ParseSharedConfig("disable_html=True\n").html_mode,
+            HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("disable_html=TRUE\n").html_mode,
+            HtmlMode::kFull);
+  EXPECT_EQ(ParseSharedConfig("disable_html=yes\n").html_mode, HtmlMode::kFull);
 }
 
 TEST_F(SharedConfigTest, OperatorEquals) {
   SharedConfig a;
   a.socket_path = "/a.sock";
   a.cache_mode = "safe";
-  a.disable_html = true;
+  a.html_mode = HtmlMode::kOff;
 
   SharedConfig b = a;
   EXPECT_EQ(a, b);
@@ -815,7 +930,7 @@ TEST_F(SharedConfigTest, WriterEmitsNoLicenseKeys) {
   SharedConfig config;
   config.agent_optimize_entitled = true;
   config.agent_optimize_llms_txt_enabled = true;
-  config.disable_html = true;
+  config.html_mode = HtmlMode::kOff;
   ASSERT_TRUE(WriteSharedConfigFile(path, config, 1));
   std::ifstream f(path);
   std::string raw((std::istreambuf_iterator<char>(f)),
@@ -851,7 +966,7 @@ TEST_F(SharedConfigTest, LegacyLicenseKeysAreIgnoredOnRead) {
       "agent_optimize_entitled=true\n");
   SharedConfig expected;
   expected.socket_path = "/run/legacy.sock";
-  expected.disable_html = true;
+  expected.html_mode = HtmlMode::kOff;
   expected.agent_optimize_entitled = true;
   EXPECT_EQ(config, expected);
   // Same schema version on both sides: the daemon deliberately did NOT bump
@@ -919,7 +1034,7 @@ TEST_F(SharedConfigSkewTest, UnreadableVersionFallsBackToDefaultsAndIsLoud) {
   const SharedConfig defaults;
   EXPECT_EQ(config.socket_path, defaults.socket_path);
   EXPECT_EQ(config.cache_mode, defaults.cache_mode);
-  EXPECT_EQ(config.disable_html, defaults.disable_html);
+  EXPECT_EQ(config.html_mode, defaults.html_mode);
   EXPECT_EQ(config, defaults) << "nothing from an unreadable schema may leak "
                                  "into the returned configuration";
 
@@ -955,7 +1070,7 @@ TEST_F(SharedConfigSkewTest, MatchingVersionIsSilent) {
       "disable_html=true\n");
 
   EXPECT_EQ(config.socket_path, "/matched.sock");
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
   EXPECT_TRUE(handler_.messages().empty())
       << "a version this build reads must not be reported as skew";
   EXPECT_FALSE(SharedConfigVersionSkewState().mismatch);

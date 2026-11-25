@@ -66,7 +66,7 @@ class ApiHandlersIntegrationTest : public ::testing::Test {
     cfg->webp_quality = 75;
     cfg->avif_quality = 60;
     // A per-test cache path: PATCH /v1/config persists pagespeed.json (and,
-    // when disable_html or cache_mode change, pagespeed-shared.conf) into
+    // when html_mode or cache_mode change, pagespeed-shared.conf) into
     // parent_path(cache_path), with an fsync.  Sharing one fixed /tmp path
     // let one test's fsync'd write collide with the next test's read of
     // the same file; with a fresh directory each case writes only its own.
@@ -370,7 +370,7 @@ TEST_F(ApiHandlersIntegrationTest,
             std::string::npos);
   EXPECT_FALSE(j["applied"].contains("license_key"));
   EXPECT_TRUE(j["applied"].contains("disable_html"));
-  EXPECT_TRUE(config()->disable_html);
+  EXPECT_EQ(config()->html_mode, HtmlMode::kOff);
 
   // The shared config this PATCH rewrote carries no license key of any kind.
   std::ifstream f(SharedConfigFilePath(config()->cache_path));
@@ -672,6 +672,7 @@ TEST_F(ApiHandlersIntegrationTest, ConfigGetEndpoint) {
   EXPECT_EQ(j["webp_quality"], 75);
   EXPECT_EQ(j["avif_quality"], 60);
   EXPECT_EQ(j["disable_html"], false);
+  EXPECT_EQ(j["html_mode"], "full");
 }
 
 TEST_F(ApiHandlersIntegrationTest, ConfigPatchAppliesFields) {
@@ -809,7 +810,7 @@ TEST_F(ApiHandlersIntegrationTest, ConfigPatchPreservesWebBotAuthSharedFields) {
   ASSERT_TRUE(j["applied"].contains("disable_html"));
 
   SharedConfig out = ReadSharedConfigFile(shared_path);
-  EXPECT_TRUE(out.disable_html);  // the PATCH took effect
+  EXPECT_EQ(out.html_mode, HtmlMode::kOff);  // the PATCH took effect
   // ... and the fields this handler does not own survived.
   EXPECT_TRUE(out.web_bot_auth);
   EXPECT_EQ(out.web_bot_auth_verified_bots, "kid1=crawler");
@@ -1802,8 +1803,70 @@ TEST_F(ApiHandlersPersisterTest, ConfigPatchSavesBothFilesBeforeAnswering) {
   ASSERT_TRUE(f.is_open());
   json saved = json::parse(f);
   EXPECT_EQ(saved["jpeg_quality"], 77);
-  EXPECT_TRUE(
-      ReadSharedConfigFile(SharedConfigFilePath(cache_path)).disable_html);
+  EXPECT_EQ(ReadSharedConfigFile(SharedConfigFilePath(cache_path)).html_mode,
+            HtmlMode::kOff);
+}
+
+TEST_F(ApiHandlersPersisterTest, ConfigPatchHtmlModeRoundTrip) {
+  pagespeed::test::TempDir tmp;
+  const std::string cache_path = tmp.path() + "/cache.vol";
+  MutateConfig([&](WorkerConfig& c) { c.cache_path = cache_path; });
+  auto read_shared_raw = [&]() {
+    std::ifstream f(SharedConfigFilePath(cache_path));
+    return std::string((std::istreambuf_iterator<char>(f)),
+                       std::istreambuf_iterator<char>());
+  };
+
+  // html_mode applies, persists to both files, and GET reports it with the
+  // derived disable_html.
+  std::string resp =
+      SendRequest(PatchRequest(R"({"html_mode": "markdown-static"})"));
+  EXPECT_NE(resp.find("200 OK"), std::string::npos) << resp;
+  json j = ParseJsonBody(resp);
+  EXPECT_EQ(j["applied"]["html_mode"], "markdown-static") << resp;
+  EXPECT_EQ(j["config"]["html_mode"], "markdown-static") << resp;
+  EXPECT_EQ(j["config"]["disable_html"], false) << resp;
+  EXPECT_EQ(config()->html_mode, HtmlMode::kMarkdownStatic);
+  {
+    std::ifstream f(ConfigFilePath(cache_path));
+    ASSERT_TRUE(f.is_open());
+    json saved = json::parse(f);
+    EXPECT_EQ(saved["html_mode"], "markdown-static");
+    EXPECT_EQ(saved["disable_html"], false);
+  }
+  std::string raw = read_shared_raw();
+  EXPECT_NE(raw.find("\nhtml_mode=markdown-static\n"), std::string::npos)
+      << raw;
+  EXPECT_NE(raw.find("\ndisable_html=false\n"), std::string::npos) << raw;
+  json got = ParseJsonBody(
+      SendRequest("GET /v1/config HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+  EXPECT_EQ(got["html_mode"], "markdown-static");
+  EXPECT_EQ(got["disable_html"], false);
+
+  // An unknown value is rejected and changes nothing.
+  resp = SendRequest(PatchRequest(R"({"html_mode": "markdown"})"));
+  EXPECT_NE(resp.find("200 OK"), std::string::npos) << resp;
+  j = ParseJsonBody(resp);
+  EXPECT_TRUE(j["rejected"].contains("html_mode")) << resp;
+  EXPECT_EQ(config()->html_mode, HtmlMode::kMarkdownStatic);
+
+  // The legacy key still works and rewrites the shared file: true is off.
+  resp = SendRequest(PatchRequest(R"({"disable_html": true})"));
+  EXPECT_NE(resp.find("200 OK"), std::string::npos) << resp;
+  EXPECT_EQ(config()->html_mode, HtmlMode::kOff);
+  raw = read_shared_raw();
+  EXPECT_NE(raw.find("\nhtml_mode=off\n"), std::string::npos) << raw;
+  EXPECT_NE(raw.find("\ndisable_html=true\n"), std::string::npos) << raw;
+
+  // Both in one body, disagreeing: html_mode wins, with a warning.
+  resp = SendRequest(
+      PatchRequest(R"({"disable_html": true, "html_mode": "full"})"));
+  EXPECT_NE(resp.find("200 OK"), std::string::npos) << resp;
+  j = ParseJsonBody(resp);
+  EXPECT_EQ(config()->html_mode, HtmlMode::kFull);
+  EXPECT_FALSE(j["warnings"].empty()) << resp;
+  EXPECT_EQ(ReadSharedConfigFile(SharedConfigFilePath(cache_path)).html_mode,
+            HtmlMode::kFull);
 }
 
 TEST_F(ApiHandlersPersisterTest, ConfigPatchWithNothingAppliedDoesNoDiskWork) {

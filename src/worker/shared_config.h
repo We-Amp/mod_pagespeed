@@ -16,6 +16,8 @@ typedef int pid_t;
 #include <string>
 #include <string_view>
 
+#include "src/worker/html_mode.h"
+
 namespace pagespeed {
 
 class MessageHandler;
@@ -99,7 +101,13 @@ struct SharedConfig {
   // Reader-side fallback when no shared config was read; matches the
   // daemon's compiled default (WorkerConfig::socket_path).
   std::string socket_path = "/run/pagespeed-optimizer/notify.sock";
-  bool disable_html = false;
+  // The worker's HTML mode.  On the wire as two keys: html_mode (optional,
+  // added without a schema bump, see kSharedConfigVersion) and the legacy
+  // disable_html, which the writer derives as "mode is off" so a reader that
+  // predates html_mode keeps working.  The parser applies the precedence rule
+  // of ResolveHtmlMode: a valid html_mode wins, whatever the line order;
+  // otherwise disable_html decides; with neither, full.
+  HtmlMode html_mode = kDefaultHtmlMode;
   // agent_optimize: the SERVE-side toggle nginx reads to gate
   // the same-URL markdown variant.  Since 2.1 this is simply the
   // operator's agent_optimize flag — there is no token entitlement behind it.

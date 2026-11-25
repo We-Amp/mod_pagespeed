@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -27,6 +28,7 @@
 #include "src/worker/cache_dir.h"
 #include "src/worker/config_file.h"
 #include "src/worker/cpu_budget.h"
+#include "src/worker/html_mode.h"
 #include "src/worker/http_server.h"
 #include "src/worker/shared_config.h"
 #include "src/worker/syscall_selftest.h"
@@ -111,6 +113,8 @@ void PrintUsage(const char* program) {
          "(default: 30000)\n"
       << "  --shutdown-timeout MS      Graceful shutdown timeout "
          "in ms (default: 5000)\n"
+      << "  --html-mode MODE           What the worker does with HTML: "
+         "off, markdown-static, markdown-rendered or full (default: full)\n"
       << "  --disable-html             Disable HTML optimization\n"
       << "  --disable-css              Disable CSS minification\n"
       << "  --disable-js               Disable JS minification\n"
@@ -688,6 +692,8 @@ static int WorkerMain(int argc,  // NOLINT(bugprone-exception-escape)
   }
 
   // Pass 2: Full CLI parsing. CLI flags override config file values.
+  std::optional<pagespeed::HtmlMode> cli_html_mode;
+  bool cli_disable_html = false;
   try {
     for (int i = 1; i < argc; ++i) {
       std::string arg = argv[i];
@@ -752,8 +758,24 @@ static int WorkerMain(int argc,  // NOLINT(bugprone-exception-escape)
           std::cerr << "Error: --shutdown-timeout must be >= 0\n";
           return 1;
         }
-      } else if (arg == "--disable-html") {
-        config.disable_html = true;
+      } else if (arg == "--disable-html" || arg == "--html-mode") {
+        // One branch for both spellings (see the C1061 note above).  Resolved
+        // after the loop: --html-mode wins over --disable-html in either
+        // order, and either overrides the config file.
+        if (arg == "--disable-html") {
+          cli_disable_html = true;
+        } else if (i + 1 < argc) {
+          cli_html_mode = pagespeed::ParseHtmlMode(argv[++i]);
+          if (!cli_html_mode.has_value()) {
+            std::cerr << "Unknown --html-mode: " << argv[i] << " (use "
+                      << pagespeed::kHtmlModeValues << ")\n";
+            return 1;
+          }
+        } else {
+          std::cerr << "--html-mode needs a value ("
+                    << pagespeed::kHtmlModeValues << ")\n";
+          return 1;
+        }
       } else if (arg == "--disable-css") {
         config.disable_css = true;
       } else if (arg == "--disable-js") {
@@ -1176,6 +1198,11 @@ static int WorkerMain(int argc,  // NOLINT(bugprone-exception-escape)
     std::cerr << "Value out of range: " << e.what() << "\n";
     PrintUsage(argv[0]);
     return 1;
+  }
+  if (cli_html_mode.has_value() || cli_disable_html) {
+    config.html_mode = pagespeed::ResolveHtmlMode(
+        cli_html_mode,
+        cli_disable_html ? std::optional<bool>(true) : std::optional<bool>());
   }
 
   // Final cache-path resolution (normally already settled in pass 1):

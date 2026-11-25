@@ -13,6 +13,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -35,6 +36,7 @@
 #include "src/worker/browser_analysis_manager.h"
 #include "src/worker/cascade_layer_order.h"
 #include "src/worker/config_persister.h"
+#include "src/worker/html_mode.h"
 #include "src/worker/image_transcoder.h"
 #include "src/worker/serve_stats.h"
 #include "src/worker/subresource_gate.h"
@@ -493,8 +495,13 @@ struct WorkerConfig {
   // "aggressive" (long TTLs, public).
   std::string cache_mode = "safe";
 
+  // HTML mode (src/worker/html_mode.h): off, markdown-static,
+  // markdown-rendered or full.  Replaces the old disable_html boolean, which
+  // every input surface still accepts (true = off, false = full) and every
+  // writer still emits, derived, for readers that predate html_mode.
+  HtmlMode html_mode = kDefaultHtmlMode;
+
   // Content-type toggles
-  bool disable_html = false;
   bool disable_css = false;
   bool disable_js = false;
   bool disable_image = false;
@@ -1317,7 +1324,7 @@ class Worker {
   // config_ at startup; runtime reads go through live_config_.
   // Hot-reloadable fields: quality settings (jpeg_quality, webp_quality,
   // avif_quality, savedata_*), viewport widths, content toggles
-  // (disable_html, etc.), SSIMULACRA2 thresholds.
+  // (html_mode, disable_css, etc.), SSIMULACRA2 thresholds.
   // Uses AtomicSharedPtr for portable RCU semantics.
   AtomicSharedPtr<const WorkerConfig> live_config_;
 
@@ -1605,6 +1612,25 @@ class Worker {
   // monotonicity — issue #652 review), then rotate the maps on overflow.
   // REQUIRES purge_gen_mutex_ held by the caller.
   void BumpPurgeGenerationLocked(const std::string& gen_key);
+
+  // html_mode markdown-*: the last full pass per URL (internal key), with the
+  // origin hash it saw.  A repeat notification for the same hash within
+  // kMarkdownPassRetrySecs skips the scan and analysis lookup (see the HTML
+  // branch); a different hash, or a missing content-hash record, always
+  // processes.  The window lets a copy that failed to build be retried.
+  // markdown_pass_mutex_ is always taken alone.
+  struct MarkdownPass {
+    std::array<std::byte, 32> origin_hash;
+    std::chrono::steady_clock::time_point at;
+  };
+  static constexpr int kMarkdownPassRetrySecs = 600;
+  static constexpr size_t kMaxMarkdownPassEntries = 4096;
+  bool MarkdownModePassIsCurrent(const CacheNotification& notification,
+                                 const std::array<std::byte, 32>& origin_hash);
+  void RecordMarkdownModePass(const CacheNotification& notification,
+                              const std::array<std::byte, 32>& origin_hash);
+  mutable std::mutex markdown_pass_mutex_;
+  std::unordered_map<std::string, MarkdownPass> markdown_pass_last_;
 
   // Outcome of RecheckRecordedOriginal.
   enum class OriginRecheck : uint8_t {

@@ -15,6 +15,7 @@ import {
   IMAGE_FEATURE_TOGGLES,
   LEARNED_QUALITY_TOGGLES,
   HTML_FEATURE_TOGGLES,
+  HTML_MODE_SELECT,
   CSS_FEATURE_TOGGLES,
   JS_FEATURE_TOGGLES,
   COMPRESSION_FIELDS,
@@ -53,6 +54,7 @@ function makeConfig(
     quality_verify: true,
     target_ssimulacra2: 70,
     ssimulacra2_tolerance: 5,
+    html_mode: 'full',
     disable_html: false,
     disable_css: false,
     disable_js: false,
@@ -329,8 +331,19 @@ describe('field metadata', () => {
     expect(LEARNED_QUALITY_TOGGLES).toHaveLength(4);
   });
 
-  it('HTML_FEATURE_TOGGLES has 7 toggles', () => {
-    expect(HTML_FEATURE_TOGGLES).toHaveLength(7);
+  it('HTML_FEATURE_TOGGLES has 6 toggles', () => {
+    expect(HTML_FEATURE_TOGGLES).toHaveLength(6);
+  });
+
+  it('HTML processing is the html_mode select, not a disable_html toggle', () => {
+    expect(HTML_FEATURE_TOGGLES.map((t) => t.key)).not.toContain('disable_html');
+    expect(HTML_MODE_SELECT.key).toBe('html_mode');
+    expect(HTML_MODE_SELECT.options.map((o) => o.value)).toEqual([
+      'full',
+      'markdown-static',
+      'markdown-rendered',
+      'off',
+    ]);
   });
 
   it('CSS_FEATURE_TOGGLES has 2 toggles', () => {

@@ -1359,7 +1359,7 @@ static int WriteSharedConfigFor(const WorkerConfig& updated) {
   // socket_path is non-reloadable so it is not checked for a change, but it
   // is always written to the file since nginx needs the current value.
   shared.socket_path = updated.socket_path;
-  shared.disable_html = updated.disable_html;
+  shared.html_mode = updated.html_mode;
   // agent_optimize: the serve-side toggle is the operator flag.
   // agent_optimize is a startup flag (not PATCH-able), so this carries it
   // forward unchanged.
@@ -1452,7 +1452,8 @@ static ConfigPatchState PrepareConfigPatch(ApiContext& ctx,
   }
 
   st.persist = !st.applied.empty() && !updated->cache_path.empty();
-  st.shared_dirty = st.persist && (st.applied.contains("disable_html") ||
+  st.shared_dirty = st.persist && (st.applied.contains("html_mode") ||
+                                   st.applied.contains("disable_html") ||
                                    st.applied.contains("cache_mode"));
   st.updated = std::move(updated);
   return st;

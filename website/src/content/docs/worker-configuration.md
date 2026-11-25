@@ -393,6 +393,12 @@ for changes.
 | `disable_html`         | Whether HTML optimization is disabled (`true`/`false`)                                                                                      | `--disable-html` |
 | `cache_dir_generation` | Cache-directory generation N (skew = loud handshake failure; nginx turns its cache off, see [the check](#cache-directory-generation-check)) | (compiled in)    |
 
+:::next-release{after="2.10.0"}
+| Key         | Description                                                                                                                                                                  | Worker flag        |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `html_mode` | `off`, `markdown-static`, `markdown-rendered` or `full` (absent = `full`). Wins over `disable_html`, which is still written (`true` exactly when the mode is `off`) for older readers | `--html-mode MODE` |
+:::
+
 The file is written atomically at mode 0640 `pagespeed:pagespeed`: readable
 by the worker and its group-`pagespeed` peers, not by the world.
 
@@ -594,6 +600,27 @@ factory_worker --shutdown-timeout 10000  # 10 seconds
 
 On SIGTERM or SIGINT the worker stops accepting new connections and waits up to
 this long for active connections to drain before force-closing them.
+
+:::next-release{after="2.10.0"}
+#### --html-mode {#--html-mode}
+
+- **Syntax:** `--html-mode MODE`
+- **Default:** `full`
+
+What the worker does with HTML: off, markdown-static, markdown-rendered or full (default: full)
+
+`off` ignores HTML notifications, like `--disable-html`. `full` is today's
+behaviour: optimized HTML variants, plus the Markdown copy for agents when
+`--agent-optimize` is on. `markdown-static` and `markdown-rendered` write no
+optimized HTML variant; the Markdown copy for agents is the only output derived
+from a page. On pages the nginx front stores, the two `markdown-*` modes
+currently build the agent copy the same way. HTML variants stored under `full`
+keep being served after a switch until the page changes or is refreshed; purge
+after switching to drop them at once. When both `--html-mode` and `--disable-html` are given,
+`--html-mode` wins. The same setting is `html_mode` in `pagespeed.json` and
+`PATCH /v1/config`, where the legacy `disable_html` (`true` = `off`, `false` =
+`full`) is still accepted and still reported.
+:::
 
 #### --disable-html {#--disable-html}
 

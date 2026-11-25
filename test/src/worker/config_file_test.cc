@@ -254,7 +254,7 @@ TEST_F(ConfigFileTest, PersistableIncludesHotReloadable) {
   WorkerConfig config;
   config.jpeg_quality = 92;
   config.svg_mode = SvgMode::kAuto;
-  config.disable_html = true;
+  config.html_mode = HtmlMode::kOff;
   auto j = ConfigToJsonPersistable(config);
   EXPECT_EQ(j["jpeg_quality"], 92);
   EXPECT_EQ(j["svg_mode"], "auto");
@@ -295,11 +295,140 @@ TEST_F(ConfigFileTest, ApplyClampsToBounds) {
 
 TEST_F(ConfigFileTest, ApplyBooleanField) {
   WorkerConfig config;
-  EXPECT_FALSE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
   json body = {{"disable_html", true}};
   auto result = ApplyConfigJson(body, &config);
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
   EXPECT_EQ(result.applied["disable_html"], true);
+}
+
+// --- html_mode and the legacy disable_html key ---
+
+TEST_F(ConfigFileTest, DefaultHtmlModeIsFull) {
+  WorkerConfig config;
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
+  auto j = ConfigToJsonPersistable(config);
+  EXPECT_EQ(j["html_mode"], "full");
+  EXPECT_EQ(j["disable_html"], false);
+}
+
+TEST_F(ConfigFileTest, ApplyHtmlModeValues) {
+  for (const char* name :
+       {"off", "markdown-static", "markdown-rendered", "full"}) {
+    WorkerConfig config;
+    auto result = ApplyConfigJson(json{{"html_mode", name}}, &config);
+    EXPECT_EQ(HtmlModeName(config.html_mode), name);
+    EXPECT_EQ(result.applied["html_mode"], name);
+    EXPECT_TRUE(result.rejected.empty()) << result.rejected.dump();
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.dump();
+  }
+}
+
+TEST_F(ConfigFileTest, ApplyHtmlModeRejectsUnknownValueAndType) {
+  WorkerConfig config;
+  config.html_mode = HtmlMode::kMarkdownStatic;
+  for (const json& bad : {json("Full"), json("markdown"), json(""), json(3),
+                          json(true), json(nullptr)}) {
+    auto result = ApplyConfigJson(json{{"html_mode", bad}}, &config);
+    EXPECT_TRUE(result.rejected.contains("html_mode")) << bad.dump();
+    EXPECT_FALSE(result.applied.contains("html_mode")) << bad.dump();
+    EXPECT_EQ(config.html_mode, HtmlMode::kMarkdownStatic) << bad.dump();
+  }
+}
+
+TEST_F(ConfigFileTest, ApplyLegacyDisableHtmlMapsToOffAndFull) {
+  WorkerConfig config;
+  config.html_mode = HtmlMode::kMarkdownRendered;
+  auto r1 = ApplyConfigJson(json{{"disable_html", true}}, &config);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
+  EXPECT_EQ(r1.applied["disable_html"], true);
+  // false is full, also from a markdown-* mode (the legacy key cannot say
+  // anything else).
+  config.html_mode = HtmlMode::kMarkdownStatic;
+  auto r2 = ApplyConfigJson(json{{"disable_html", false}}, &config);
+  EXPECT_EQ(config.html_mode, HtmlMode::kFull);
+  EXPECT_EQ(r2.applied["disable_html"], false);
+}
+
+TEST_F(ConfigFileTest, ApplyHtmlModeWinsOverDisableHtml) {
+  // Conflicting: html_mode wins, disable_html is ignored with a warning.
+  WorkerConfig config;
+  auto r = ApplyConfigJson(
+      json{{"disable_html", true}, {"html_mode", "markdown-static"}}, &config);
+  EXPECT_EQ(config.html_mode, HtmlMode::kMarkdownStatic);
+  EXPECT_EQ(r.applied["html_mode"], "markdown-static");
+  EXPECT_FALSE(r.applied.contains("disable_html"));
+  ASSERT_EQ(r.warnings.size(), 1u) << r.warnings.dump();
+  EXPECT_NE(r.warnings[0].get<std::string>().find("disable_html"),
+            std::string::npos);
+
+  WorkerConfig c2;
+  c2.html_mode = HtmlMode::kOff;
+  auto r2 =
+      ApplyConfigJson(json{{"html_mode", "full"}, {"disable_html", true}}, &c2);
+  EXPECT_EQ(c2.html_mode, HtmlMode::kFull);
+  EXPECT_EQ(r2.warnings.size(), 1u) << r2.warnings.dump();
+}
+
+TEST_F(ConfigFileTest, ApplyHtmlModeWithAgreeingDisableHtmlIsQuiet) {
+  // Every writer emits both keys; agreeing values apply without a warning.
+  for (HtmlMode mode : {HtmlMode::kOff, HtmlMode::kMarkdownStatic,
+                        HtmlMode::kMarkdownRendered, HtmlMode::kFull}) {
+    WorkerConfig config;
+    auto r =
+        ApplyConfigJson(json{{"html_mode", std::string(HtmlModeName(mode))},
+                             {"disable_html", HtmlModeDisablesHtml(mode)}},
+                        &config);
+    EXPECT_EQ(config.html_mode, mode);
+    EXPECT_TRUE(r.applied.contains("html_mode"));
+    EXPECT_TRUE(r.applied.contains("disable_html"));
+    EXPECT_TRUE(r.warnings.empty()) << r.warnings.dump();
+    EXPECT_TRUE(r.rejected.empty()) << r.rejected.dump();
+  }
+}
+
+TEST_F(ConfigFileTest, ApplyRejectedHtmlModeLeavesDisableHtmlInCharge) {
+  WorkerConfig config;
+  auto r = ApplyConfigJson(
+      json{{"html_mode", "markdown-future"}, {"disable_html", true}}, &config);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
+  EXPECT_TRUE(r.rejected.contains("html_mode"));
+  EXPECT_EQ(r.applied["disable_html"], true);
+}
+
+TEST_F(ConfigFileTest, PersistableHtmlModeRoundTrip) {
+  for (HtmlMode mode : {HtmlMode::kOff, HtmlMode::kMarkdownStatic,
+                        HtmlMode::kMarkdownRendered, HtmlMode::kFull}) {
+    WorkerConfig original;
+    original.html_mode = mode;
+    auto j = ConfigToJsonPersistable(original);
+    EXPECT_EQ(j["html_mode"], std::string(HtmlModeName(mode)));
+    EXPECT_EQ(j["disable_html"], mode == HtmlMode::kOff);
+    WorkerConfig restored;
+    auto r = ApplyConfigJson(j, &restored);
+    EXPECT_EQ(restored.html_mode, mode);
+    EXPECT_TRUE(r.warnings.empty()) << r.warnings.dump();
+  }
+}
+
+TEST_F(ConfigFileTest, OlderReaderOfNewFileKeepsWorking) {
+  // A worker that predates html_mode rejects the key as unknown (not fatal)
+  // and applies disable_html.  Model it by dropping the key: off stays off
+  // and every other mode reads as full, as it did before the mode existed.
+  for (HtmlMode mode : {HtmlMode::kOff, HtmlMode::kMarkdownStatic,
+                        HtmlMode::kMarkdownRendered, HtmlMode::kFull}) {
+    WorkerConfig original;
+    original.html_mode = mode;
+    original.jpeg_quality = 77;
+    auto j = ConfigToJsonPersistable(original);
+    j.erase("html_mode");
+    WorkerConfig older;
+    auto r = ApplyConfigJson(j, &older);
+    EXPECT_EQ(older.html_mode,
+              mode == HtmlMode::kOff ? HtmlMode::kOff : HtmlMode::kFull);
+    EXPECT_EQ(older.jpeg_quality, 77);
+    EXPECT_TRUE(r.applied.contains("disable_html"));
+  }
 }
 
 TEST_F(ConfigFileTest, ApplyFloatField) {
@@ -729,7 +858,7 @@ TEST_F(ConfigFileTest, FullRoundTrip) {
   original.cache_mode = "aggressive";
 
   // Content-type toggles (defaults: all false)
-  original.disable_html = true;
+  original.html_mode = HtmlMode::kOff;
   original.disable_css = true;
   original.disable_js = true;
   original.disable_image = true;
@@ -777,7 +906,7 @@ TEST_F(ConfigFileTest, FullRoundTrip) {
 
   // Guard: if a new field is added to ConfigToJsonPersistable without updating
   // this test, this assertion will fail.
-  EXPECT_EQ(persistable.size(), 59u);
+  EXPECT_EQ(persistable.size(), 60u);
 
   std::string path = (tmp_dir_ / "pagespeed.json").string();
   ASSERT_TRUE(WriteConfigFile(path, persistable));
@@ -837,7 +966,7 @@ TEST_F(ConfigFileTest, FullRoundTrip) {
   EXPECT_EQ(restored.cache_mode, "aggressive");
 
   // Content-type toggles
-  EXPECT_EQ(restored.disable_html, true);
+  EXPECT_EQ(restored.html_mode, HtmlMode::kOff);
   EXPECT_EQ(restored.disable_css, true);
   EXPECT_EQ(restored.disable_js, true);
   EXPECT_EQ(restored.disable_image, true);
@@ -1255,7 +1384,7 @@ TEST_F(ConfigFileTest, ApplyMultipleFieldsMixedResults) {
   };
   auto result = ApplyConfigJson(body, &config);
   EXPECT_EQ(config.jpeg_quality, 90);
-  EXPECT_TRUE(config.disable_html);
+  EXPECT_EQ(config.html_mode, HtmlMode::kOff);
   EXPECT_TRUE(result.applied.contains("jpeg_quality"));
   EXPECT_TRUE(result.applied.contains("disable_html"));
   EXPECT_TRUE(result.rejected.contains("cache_path"));

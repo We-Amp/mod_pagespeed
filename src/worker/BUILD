@@ -511,11 +511,21 @@ cc_library(
     hdrs = ["config_file.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":html_mode",
         ":json_dump",
         ":worker_types",
         "//lib/base:atomic_file_writer",
         "@nlohmann_json//:json",
     ],
+)
+
+# The worker's HTML mode (off, markdown-static, markdown-rendered, full) and
+# its mapping from the legacy disable_html boolean.  Header-only, no deps: the
+# nginx module's inline shared-config reader uses it too.
+cc_library(
+    name = "html_mode",
+    hdrs = ["html_mode.h"],
+    visibility = ["//visibility:public"],
 )
 
 # Shared config file (worker-written, nginx-read key=value config)
@@ -525,6 +535,7 @@ cc_library(
     hdrs = ["shared_config.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":html_mode",
         "//lib/base:atomic_file_writer",
         "//lib/base:message_handler",
         "//lib/base:posix_compat",
@@ -619,6 +630,7 @@ cc_library(
     deps = [
         ":browser_analysis_manager",
         ":config_persister",
+        ":html_mode",
         ":image_transcoder",
         ":serve_stats",
         ":webbotauth_warmer",
@@ -729,6 +741,7 @@ cc_library(
         ":font_url_extractor",
         ":host_aliases",
         ":html_css_injector",
+        ":html_mode",
         ":html_scanner",
         ":html_transform_filter",
         ":http_server",
@@ -818,6 +831,7 @@ cc_binary(
         ":cache_dir",
         ":config_file",
         ":cpu_budget",
+        ":html_mode",
         ":http_server",
         ":shared_config",
         ":syscall_selftest",

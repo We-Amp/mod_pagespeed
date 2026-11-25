@@ -321,8 +321,13 @@ every ~1 second for changes.
 
 **Fields read by nginx:**
 - `socket_path` — Unix socket for worker notifications
-- `disable_html` — Whether HTML optimization is disabled (`true`/`false`);
-  when `true`, nginx sets `pagespeed_critical_css off` behavior
+- `html_mode` (with the legacy `disable_html` as fallback, resolved by
+  `ResolveHtmlMode` in `src/worker/html_mode.h`, the same rule as the
+  optimizer's reader) — `off` sends no HTML notification and never re-notifies
+  on an HTML hit (the old `disable_html=true`); `full` is the old
+  `disable_html=false`; a `markdown-*` mode still sends the store notification
+  but re-notifies on an HTML variant miss only for an agent request, since no
+  HTML variant is ever written in that mode
 - `cache_dir_generation` — the optimizer's compiled-in cache-directory
   generation, compared with the module's own (`kCacheDirGeneration`, shared,
   not copied) by `src/nginx/cache_generation_check.h`. Mismatch = pass-through

@@ -192,7 +192,8 @@ the worker side and shared with nginx automatically via `pagespeed-shared.conf`
 | `--max-buffer-size BYTES` | `1048576` | Max per-client buffer (1MB) |
 | `--connection-timeout MS` | `30000` | Idle connection timeout |
 | `--shutdown-timeout MS` | `5000` | Graceful shutdown timeout |
-| `--disable-html` | `false` | Disable HTML optimization |
+| `--html-mode MODE` | `full` | HTML handling: `off`, `markdown-static`, `markdown-rendered` or `full` |
+| `--disable-html` | `false` | Disable HTML optimization (same as `--html-mode off`) |
 | `--disable-css` | `false` | Disable CSS minification |
 | `--disable-js` | `false` | Disable JS minification |
 | `--disable-image` | `false` | Disable image transcoding |

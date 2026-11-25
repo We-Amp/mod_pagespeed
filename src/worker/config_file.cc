@@ -11,10 +11,12 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 #include "lib/base/atomic_file_writer.h"
 #include "nlohmann/json.hpp"
+#include "src/worker/html_mode.h"
 #include "src/worker/json_dump.h"
 #include "src/worker/worker.h"
 
@@ -101,7 +103,10 @@ json ConfigToJsonPersistable(const WorkerConfig& c) {
   j["savedata_score_reduction"] = c.savedata_score_reduction;
   j["enable_warmup"] = c.enable_warmup;
   j["cache_mode"] = c.cache_mode;
-  j["disable_html"] = c.disable_html;
+  j["html_mode"] = std::string(HtmlModeName(c.html_mode));
+  // Derived, for a reader (an older worker loading this file, an older
+  // console) that predates html_mode.  On load html_mode wins.
+  j["disable_html"] = HtmlModeDisablesHtml(c.html_mode);
   j["disable_css"] = c.disable_css;
   j["disable_js"] = c.disable_js;
   j["disable_image"] = c.disable_image;
@@ -180,6 +185,15 @@ ConfigApplyResult ApplyConfigJson(const json& body, WorkerConfig* config) {
     }
     return clamped;
   };
+
+  // html_mode wins over disable_html when both are given, whatever their
+  // order, so the explicit mode is found before the loop.  An html_mode that
+  // is rejected (wrong type, unknown value) does not count as given, and
+  // disable_html then applies as before.
+  std::optional<HtmlMode> explicit_html_mode;
+  if (auto it = body.find("html_mode"); it != body.end() && it->is_string()) {
+    explicit_html_mode = ParseHtmlMode(it->get<std::string>());
+  }
 
   for (auto& [key, value] : body.items()) {
     if (IsNonReloadable(key)) {
@@ -295,9 +309,27 @@ ConfigApplyResult ApplyConfigJson(const json& body, WorkerConfig* config) {
       } else {
         rejected[key] = "Must be 'safe' or 'aggressive'";
       }
+    } else if (key == "html_mode" && value.is_string()) {
+      if (explicit_html_mode.has_value()) {
+        config->html_mode = *explicit_html_mode;
+        applied[key] = std::string(HtmlModeName(*explicit_html_mode));
+      } else {
+        rejected[key] = "Must be one of: " + std::string(kHtmlModeValues);
+      }
     } else if (key == "disable_html" && value.is_boolean()) {
-      config->disable_html = value.get<bool>();
-      applied[key] = config->disable_html;
+      // The legacy form: true = off, false = full.
+      const bool disable = value.get<bool>();
+      if (!explicit_html_mode.has_value()) {
+        config->html_mode = HtmlModeFromDisableHtml(disable);
+        applied[key] = disable;
+      } else if (disable == HtmlModeDisablesHtml(*explicit_html_mode)) {
+        // Agrees with html_mode (what every writer of this file emits).
+        applied[key] = disable;
+      } else {
+        warnings.push_back(
+            "disable_html: ignored because html_mode is also set and takes "
+            "precedence");
+      }
     } else if (key == "disable_css" && value.is_boolean()) {
       config->disable_css = value.get<bool>();
       applied[key] = config->disable_css;

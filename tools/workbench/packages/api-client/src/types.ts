@@ -146,6 +146,9 @@ export interface StatsResponse {
 
 // ---- GET /v1/config  &  PATCH /v1/config ----------------------------------
 
+/** What the worker does with HTML (replaces the boolean `disable_html`). */
+export type HtmlMode = 'off' | 'markdown-static' | 'markdown-rendered' | 'full';
+
 export interface ConfigResponse {
   jpeg_quality: number;
   webp_quality: number;
@@ -164,6 +167,8 @@ export interface ConfigResponse {
   quality_verify: boolean;
   target_ssimulacra2: number;
   ssimulacra2_tolerance: number;
+  html_mode: HtmlMode;
+  /** Legacy form of `html_mode`: true exactly when `html_mode` is `off`. */
   disable_html: boolean;
   disable_css: boolean;
   disable_js: boolean;

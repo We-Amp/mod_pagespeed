@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -120,6 +121,10 @@ std::string SharedConfigFilePath(const std::string& cache_path) {
 SharedConfig ParseSharedConfig(std::string_view content) {
   SharedConfig config;
   int version = -1;
+  // Resolved after the loop, so html_mode wins over disable_html whatever
+  // order the lines come in.
+  std::optional<HtmlMode> html_mode;
+  std::optional<bool> disable_html;
 
   size_t pos = 0;
   while (pos < content.size()) {
@@ -181,7 +186,13 @@ SharedConfig ParseSharedConfig(std::string_view content) {
         config.socket_path = std::string(value);
       }
     } else if (key == "disable_html") {
-      config.disable_html = (value == "true" || value == "1");
+      disable_html = (value == "true" || value == "1");
+    } else if (key == "html_mode") {
+      // An unknown value (say, one a newer writer added) is ignored, so the
+      // disable_html that writer also emitted decides instead.
+      if (auto mode = ParseHtmlMode(value)) {
+        html_mode = mode;
+      }
     } else if (key == "agent_optimize_entitled") {
       config.agent_optimize_entitled = (value == "true" || value == "1");
     } else if (key == "agent_optimize_llms_txt_enabled") {
@@ -241,6 +252,7 @@ SharedConfig ParseSharedConfig(std::string_view content) {
     // Unknown keys silently ignored.
   }
 
+  config.html_mode = ResolveHtmlMode(html_mode, disable_html);
   return config;
 }
 
@@ -311,8 +323,13 @@ bool WriteSharedConfigFile(const std::string& path, const SharedConfig& config,
   // license_key / license_valid / license_checked_once are deliberately NOT
   // written since 2.1: there is no license state.  A 2.0-era
   // reader keeps its defaults for the missing keys (see kSharedConfigVersion).
+  // html_mode, plus the disable_html an older reader understands.  Those
+  // readers ignore the unknown html_mode key and see every markdown-* mode as
+  // full, which is what they did before the mode existed.
+  content += "html_mode=" + std::string(HtmlModeName(config.html_mode)) + "\n";
   content +=
-      "disable_html=" + std::string(config.disable_html ? "true" : "false") +
+      "disable_html=" +
+      std::string(HtmlModeDisablesHtml(config.html_mode) ? "true" : "false") +
       "\n";
   content += "agent_optimize_entitled=" +
              std::string(config.agent_optimize_entitled ? "true" : "false") +

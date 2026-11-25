@@ -243,6 +243,13 @@ gtest_test(
 )
 
 gtest_test(
+    name = "html_mode_test",
+    deps = [
+        "//src/worker:html_mode",
+    ],
+)
+
+gtest_test(
     name = "shared_config_test",
     deps = [
         "//lib/base:message_handler",

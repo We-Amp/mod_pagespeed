@@ -41,7 +41,7 @@ const BALANCED: ConfigPreset = {
     proactive_savedata_variants: false,
     proactive_density_variants: false,
     cache_mode: 'safe',
-    disable_html: false,
+    html_mode: 'full',
     disable_css: false,
     disable_js: false,
     disable_image: false,
@@ -246,7 +246,6 @@ export const LEARNED_QUALITY_TOGGLES: ToggleFieldMeta[] = [
 ];
 
 export const HTML_FEATURE_TOGGLES: ToggleFieldMeta[] = [
-  { key: 'disable_html', label: 'HTML Processing', description: 'Process and optimize HTML responses', invertDisplay: true },
   { key: 'disable_lazy_load', label: 'Lazy Loading', description: 'Add loading="lazy" to offscreen images', invertDisplay: true },
   { key: 'disable_image_dimensions', label: 'Image Dimensions', description: 'Add width/height to prevent CLS', invertDisplay: true },
   { key: 'disable_lcp_preload', label: 'LCP Preload', description: 'Inject <link rel=preload> for LCP image', invertDisplay: true },
@@ -340,6 +339,18 @@ export const CACHE_MODE_SELECT: SelectFieldMeta = {
     { value: 'aggressive', label: 'Aggressive — long TTLs, public' },
   ],
   tooltip: 'Safe mode uses short cache TTLs with must-revalidate for quick recovery from misconfigurations. Aggressive mode uses long TTLs for maximum cache efficiency.',
+};
+
+export const HTML_MODE_SELECT: SelectFieldMeta = {
+  key: 'html_mode',
+  label: 'HTML Mode',
+  options: [
+    { value: 'full', label: 'Full — optimize HTML' },
+    { value: 'markdown-static', label: 'Markdown only — static' },
+    { value: 'markdown-rendered', label: 'Markdown only — rendered' },
+    { value: 'off', label: 'Off — no HTML processing' },
+  ],
+  tooltip: 'Full optimizes HTML responses (and builds the Markdown copy for agents when agent optimization is on). The Markdown-only modes write no optimized HTML. Off disables HTML processing; it replaces the old HTML Processing switch.',
 };
 
 export const SVG_MODE_FIELD: SelectFieldMeta = {

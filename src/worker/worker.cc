@@ -1515,7 +1515,7 @@ bool Worker::Initialize() {
     // compiled with, so a peer built against a different N fails the
     // handshake loudly instead of cold-starting in a silent split-brain.
     shared.cache_dir_generation = kCacheDirGeneration;
-    shared.disable_html = config_.disable_html;
+    shared.html_mode = config_.html_mode;
     // agent_optimize: the serve-side
     // toggle nginx reads to gate the markdown variant is simply the operator's
     // opt-in flag.  The wire key keeps its historical name.
@@ -4748,6 +4748,41 @@ Worker::CombinedCssResult Worker::BuildCombinedCss(
   return out;
 }
 
+bool Worker::MarkdownModePassIsCurrent(
+    const CacheNotification& notification,
+    const std::array<std::byte, 32>& origin_hash) {
+  const std::string key =
+      ComposeInternalKey(notification.url, notification.hostname,
+                         notification.scheme, notification.site);
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(markdown_pass_mutex_);
+  auto it = markdown_pass_last_.find(key);
+  return it != markdown_pass_last_.end() &&
+         it->second.origin_hash == origin_hash &&
+         now - it->second.at < std::chrono::seconds(kMarkdownPassRetrySecs);
+}
+
+void Worker::RecordMarkdownModePass(
+    const CacheNotification& notification,
+    const std::array<std::byte, 32>& origin_hash) {
+  const std::string key =
+      ComposeInternalKey(notification.url, notification.hostname,
+                         notification.scheme, notification.site);
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(markdown_pass_mutex_);
+  if (markdown_pass_last_.size() >= kMaxMarkdownPassEntries &&
+      !markdown_pass_last_.contains(key)) {
+    // Sweep only expired records.  When every record is live the pass is
+    // simply not recorded: the next request processes again, which is the
+    // behaviour without this bound, never a skip it cannot justify.
+    std::erase_if(markdown_pass_last_, [now](const auto& kv) {
+      return now - kv.second.at >= std::chrono::seconds(kMarkdownPassRetrySecs);
+    });
+    if (markdown_pass_last_.size() >= kMaxMarkdownPassEntries) return;
+  }
+  markdown_pass_last_[key] = MarkdownPass{origin_hash, now};
+}
+
 Worker::OriginRecheck Worker::RecheckRecordedOriginal(
     const CacheNotification& notification) {
   const auto cfg = live_config_.load();
@@ -5397,8 +5432,8 @@ void Worker::HandleNotification(const CacheNotification& notification,
         text_cooldown_expiry_.erase(ck);
       };
 
-      if (cfg->disable_html) {
-        LogInfo("HTML processing disabled, skipping %s",
+      if (cfg->html_mode == HtmlMode::kOff) {
+        LogInfo("HTML processing disabled (html_mode off), skipping %s",
                 notification.url.c_str());
         clear_tentative_cooldown();
         return;
@@ -5558,6 +5593,9 @@ void Worker::HandleNotification(const CacheNotification& notification,
       };
 
       std::optional<std::array<std::byte, 32>> agent_origin_html_hash;
+      // Whether this pass found the content-hash record missing or different
+      // (an origin change, a first pass, or a purge in between).
+      bool agent_content_changed = true;
       if (cfg->browser_analysis.agent_optimize) {
         // Issue B: the read slot (0x08) FLIPS between the raw origin body
         // (written by nginx) and the worker's OWN optimized output (written
@@ -5617,6 +5655,7 @@ void Worker::HandleNotification(const CacheNotification& notification,
             content_changed = false;
           }
         }
+        agent_content_changed = content_changed;
         // Only purge on a GENUINE origin change, which can only be observed
         // when the read slot is raw (worker-processed reads never carry a new
         // origin).  Gating on !worker_processed_identity is the belt-and-braces
@@ -5678,6 +5717,26 @@ void Worker::HandleNotification(const CacheNotification& notification,
                 notification.url.c_str());
           }
         }
+      }
+
+      // A markdown-* mode writes no HTML variant, so the processed-variant
+      // dedup above never marks the page and every agent request that misses
+      // the Markdown copy would repeat the scan, the stylesheet reads and the
+      // analysis lookup below.  Skip a page this worker already passed with
+      // the same origin hash recently.  The skip needs the content-hash
+      // record to be present and equal to this read's hash, so an origin
+      // change, a purge or a refresh (all of which leave the record missing
+      // or different) is always processed.
+      if (!HtmlModeWritesHtmlVariant(cfg->html_mode) &&
+          agent_origin_html_hash.has_value() && !agent_content_changed &&
+          MarkdownModePassIsCurrent(notification, *agent_origin_html_hash)) {
+        LogInfo("html_mode %s: %s unchanged since its last pass, skipping",
+                std::string(HtmlModeName(cfg->html_mode)).c_str(),
+                notification.url.c_str());
+        stats_.notifications_skipped_dedup.fetch_add(1,
+                                                     std::memory_order_relaxed);
+        clear_tentative_cooldown();
+        return;
       }
 
       // Scan HTML to collect elements, stylesheet links, inline CSS.
@@ -5760,6 +5819,24 @@ void Worker::HandleNotification(const CacheNotification& notification,
               /*original_html=*/html_content, agent_origin_html_hash,
               /*force_agent_render=*/true);
         }
+      }
+
+      // A markdown-* mode writes no optimized HTML variant, for any sender:
+      // what runs above (the content hash the Markdown copy binds to, and the
+      // analysis that renders it) is all this notification is for.  The raw
+      // entry still gets its source-binding stamp (identical bytes, no
+      // worker-processed flag), as an unchanged page does in full, so a
+      // validator-less origin keeps its derived ETag.
+      if (!HtmlModeWritesHtmlVariant(cfg->html_mode)) {
+        stamp_unchanged_html();
+        if (agent_origin_html_hash.has_value()) {
+          RecordMarkdownModePass(notification, *agent_origin_html_hash);
+        }
+        LogInfo("html_mode %s: no HTML variant for %s",
+                std::string(HtmlModeName(cfg->html_mode)).c_str(),
+                notification.url.c_str());
+        clear_tentative_cooldown();
+        return;
       }
 
       std::string& combined_css = combined.css;

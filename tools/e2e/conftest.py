@@ -416,7 +416,8 @@ DEFAULT_CONFIG = {
     "proactive_viewport_variants": True,
     "proactive_savedata_variants": True,
     "proactive_density_variants": True,
-    "disable_html": False,
+    "html_mode": "full",
+    "disable_html": False,  # legacy form, derived from html_mode
     "disable_lazy_load": False,
     "disable_image_dimensions": False,
     "disable_lcp_preload": False,
