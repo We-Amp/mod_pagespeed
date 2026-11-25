@@ -105,6 +105,7 @@ pagespeed_cc_test(
     size = "large",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
+        "//net/instaweb/http",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/util",
