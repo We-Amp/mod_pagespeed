@@ -102,6 +102,11 @@ Environment Variables:
   PAGESPEED_DAEMON_LANE   0 (default) leaves the optimizer worker lane out;
                           1 provides it when it can; require fails the run
                           when it cannot be provided
+  PAGESPEED_OPTIMIZER_PIN pin file naming the optimizer commit the lane
+                          builds (default: test/system/optimizer-test-pin.json)
+  PAGESPEED_DAEMON_ARTIFACT_DIR
+                          where built workers are kept, one directory per
+                          pinned commit (default: ~/.cache/pagespeed-daemon-lane)
   PAGESPEED_SECONDARY_LANE
                           0 (default) leaves the secondary-port servers out;
                           1 provides them when it can; require fails the run
@@ -221,16 +226,17 @@ NGINX_WORKER_PROCESSES="${NGINX_WORKER_PROCESSES:-2}"
 # Lane fixture "daemon_arm": the optimizer worker running next to nginx, with
 # in-place daemon serving configured on the plain daemon.example.com server
 # and on rulepacks.example.com (the same two hosts the Apache lane arms). The
-# worker is the one the release pin names (install/debian/optimizer-pin.json),
-# built from its public source at that commit with the toolchain already in
-# the dev container, and kept in $DAEMON_ARTIFACT_DIR keyed by the pinned
-# commit.
+# worker and client library are built from the optimizer commit the test pin
+# names (test/system/optimizer-test-pin.json; PAGESPEED_OPTIMIZER_PIN names
+# another pin file), with the toolchain already in the dev container, and
+# kept per pinned commit (test/system/optimizer_lane.sh).
 #
 # PAGESPEED_DAEMON_LANE: 0 (default) leaves the lane out, so the cases that
 # need it skip; 1 provides it when it can and skips otherwise; require
 # provides it or fails the run. The build is minutes long on a cold cache.
 DAEMON_LANE="${PAGESPEED_DAEMON_LANE:-0}"
-DAEMON_PIN_FILE="$PROJECT_ROOT/install/debian/optimizer-pin.json"
+# shellcheck source=test/system/optimizer_lane.sh
+source "$SCRIPT_DIR/optimizer_lane.sh"
 DAEMON_STATE_DIR="$NGINX_CONFIG_DIR/daemon"
 DAEMON_SOCKET="$DAEMON_STATE_DIR/notify.sock"
 DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
@@ -1585,48 +1591,8 @@ stop_nginx() {
 # worker and its client library. Failing to provide it is not an error for the
 # rest of the suite: the cases that need it skip with the standard reason.
 build_daemon_worker() {
-    local commit
-    commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$DAEMON_PIN_FILE")" || return 1
-    if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
-        log_warn "optimizer pin does not name a full commit hash"
-        return 1
-    fi
-    DAEMON_ARTIFACT_DIR="${PAGESPEED_DAEMON_ARTIFACT_DIR:-${HOME:-/tmp}/.cache/pagespeed-daemon-lane}/${commit:0:12}"
-    if [ -x "$DAEMON_ARTIFACT_DIR/factory_worker" ] && [ -f "$DAEMON_ARTIFACT_DIR/libpagespeed.so" ]; then
-        log_info "Optimizer worker for ${commit:0:12} already built"
-        return 0
-    fi
-    log_info "Building the optimizer worker at ${commit:0:12} (first run on this host)..."
-    local src="$DAEMON_ARTIFACT_DIR.src" cfg="--config=docker"
-    rm -rf "${src:?}"
-    mkdir -p "$src" "$DAEMON_ARTIFACT_DIR" "$NGINX_CONFIG_DIR"
-    git -C "$src" init -q \
-        && git -C "$src" fetch -q --depth 1 https://github.com/We-Amp/pagespeed-optimizer.git "$commit" \
-        && git -C "$src" checkout -q --detach FETCH_HEAD || { log_warn "cannot fetch the optimizer source"; return 1; }
-    # Share the CI build cache where the host provides one.
-    if getent hosts bazel-remote-cache > /dev/null 2>&1; then
-        cfg="$cfg --config=remote-cache"
-    fi
-    # The bundled image codec is configured by CMake, which some dev images
-    # do not carry; a hash-pinned user-level install keeps the image unchanged.
-    if ! command -v cmake > /dev/null 2>&1; then
-        pip3 install --user -q --require-hashes -r "$PROJECT_ROOT/tools/daemon-lane-requirements.txt" > /dev/null 2>&1 \
-            || { log_warn "cannot install cmake"; return 1; }
-    fi
-    (
-        cd "$src"
-        export PATH="$HOME/.local/bin:$PATH" CC=/usr/bin/clang-20 CXX=/usr/bin/clang++-20
-        # The sandbox does not pass HOME on, so say where the user-level cmake
-        # installed above lives.
-        bazel build $cfg --action_env=CC --action_env=CXX \
-            --action_env=PYTHONUSERBASE="$HOME/.local" \
-            //src/worker:factory_worker //lib/pagespeed:libpagespeed.so \
-            > "$NGINX_CONFIG_DIR/daemon_build.log" 2>&1
-    ) || { log_warn "optimizer worker build failed; see $NGINX_CONFIG_DIR/daemon_build.log"; tail -20 "$NGINX_CONFIG_DIR/daemon_build.log" || true; return 1; }
-    cp -L "$src/bazel-bin/src/worker/factory_worker" "$src/bazel-bin/lib/pagespeed/libpagespeed.so" "$DAEMON_ARTIFACT_DIR/" || return 1
-    # Stop the build's own bazel server before its directory goes away.
-    (cd "$src" && bazel shutdown > /dev/null 2>&1) || true
-    rm -rf "${src:?}"
+    optimizer_lane_build "$NGINX_CONFIG_DIR/daemon_build.log" || return 1
+    optimizer_lane_report_abi || return 1
 }
 
 # The lane could not be provided: an error in require mode, a skip otherwise.

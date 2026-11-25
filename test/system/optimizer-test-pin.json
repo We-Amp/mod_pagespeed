@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "The optimizer commit the Apache and nginx system-test lanes build their",
+    "worker and client library (libpagespeed.so) from, when the daemon lane",
+    "is on (test/system/optimizer_lane.sh). Any commit on the optimizer's",
+    "main branch may be pinned here: tests on this branch are written",
+    "against it. Bumping it is a change of optimizer_commit alone.",
+    "It must link the same cache-library commit as this module",
+    "(bazel/repositories.bzl CYCLONE_COMMIT), or the lane's web server",
+    "refuses the worker's volume; tools/ci/check_optimizer_pin_pair.py",
+    "checks it in the pull request tier and before each lane build.",
+    "This is not the release pin: packages and the release lane use",
+    "install/debian/optimizer-pin.json. Set PAGESPEED_OPTIMIZER_PIN to that",
+    "file to run the lanes against the released optimizer instead."
+  ],
+  "optimizer_commit": "997cc2e55bfb1dc121f980b07b186a9dd2731862"
+}
