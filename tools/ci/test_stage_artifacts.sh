@@ -41,6 +41,7 @@ echo hubmod > "$ROOT/hub/$SHA/linux-x64/ngx_pagespeed_module.so"
 echo 1.2.3 > "$ROOT/hub/$SHA/linux-x64/nginx-version"
 echo brotli > "$ROOT/hub/$SHA/linux-x64/ngx_http_brotli_filter_module.so"
 printf '#!/bin/sh\n' > "$ROOT/hub/$SHA/linux-x64/seed_test_cache"
+echo lib > "$ROOT/hub/$SHA/linux-x64/libpagespeed.so"
 
 # Shared runner dir holds a PARTIAL bundle (a Release-shaped set / a Build in progress).
 echo partial > "$ROOT/src/.ci-artifacts/factory_worker"
@@ -55,6 +56,7 @@ mkdir -p "$ROOT/co"
 [ "$(cat "$ROOT/co/.ci-artifacts/factory_worker")" = hubworker ] || fail "1: installed worker is not the hub copy"
 [ -f "$ROOT/co/.ci-artifacts/ngx_pagespeed_module.so" ] || fail "1: module not installed"
 [ -x "$ROOT/co/.ci-artifacts/seed_test_cache" ] || fail "1: seed_test_cache not installed executable"
+[ "$(cat "$ROOT/co/.ci-artifacts/libpagespeed.so")" = lib ] || fail "1: libpagespeed.so not installed"
 pass "1: partial local bundle replaced by a complete hub bundle"
 [ -f "$ROOT/src/.ci-artifacts/build-all.log" ] && [ "$(cat "$ROOT/src/.ci-artifacts/factory_worker")" = partial ] \
   || fail "2: shared runner dir was modified"
@@ -86,4 +88,17 @@ set -e
 [ "$rc" -ne 0 ] || fail "4: bundle without seed_test_cache was accepted"
 grep -q "seed_test_cache absent" "$ROOT/out3.log" || fail "4: no seed_test_cache error"
 pass "4: bundle without seed_test_cache fails with a clear error"
+
+# The same for the C API library the compliance module stand-in loads.
+printf '#!/bin/sh\n' > "$ROOT/hub/$SHA/linux-x64/seed_test_cache"
+rm -f "$ROOT/hub/$SHA/linux-x64/libpagespeed.so"; rm -rf "$ROOT/co/.ci-artifacts"
+set +e
+(cd "$ROOT/co" && PATH="$ROOT/bin:$PATH" FAKE_ROOT="$ROOT" RUNNER_TEMP="$ROOT/run/tmp" GITHUB_SHA="$SHA" \
+  CI_HUB_SSH=hub CI_HUB_ARTIFACTS_ROOT="$ROOT/hub" CI_ARTIFACTS_PLATFORM=linux-x64 \
+  bash "$ROOT/tools/ci/stage-artifacts.sh" "$ROOT/src" >"$ROOT/out4.log" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "5: bundle without libpagespeed.so was accepted"
+grep -q "libpagespeed.so absent" "$ROOT/out4.log" || fail "5: no libpagespeed.so error"
+pass "5: bundle without libpagespeed.so fails with a clear error"
 echo "ALL PASS"

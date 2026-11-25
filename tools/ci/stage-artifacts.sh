@@ -7,7 +7,7 @@
 # Usage: tools/ci/stage-artifacts.sh <source-dir>
 #
 # Copies factory_worker, ngx_pagespeed_module.so, the brotli module, the
-# seed_test_cache test tool, and libc++ runtime libs from
+# seed_test_cache test tool, libpagespeed.so, and libc++ runtime libs from
 # <source-dir>/.ci-artifacts/ to .ci-artifacts/ in
 # the current directory (which should be the repo checkout root).
 set -euo pipefail
@@ -227,6 +227,16 @@ if [ -f "${BUNDLE_DIR}/seed_test_cache" ]; then
   install -m 755 "${BUNDLE_DIR}/seed_test_cache" .ci-artifacts/
 else
   echo "::error::seed_test_cache absent from ${BUNDLE_DIR}/ -- Dockerfile.prebuilt cannot be built (the producing Build job must ship //tools:seed_test_cache in the bundle)." >&2
+  exit 1
+fi
+
+# The C API library: Dockerfile.prebuilt COPYs it for the HTTP-compliance
+# module stand-in (tools/http-compliance/module_standin.py). Every Linux
+# producer already ships it, so a bundle without it fails here, with the remedy.
+if [ -f "${BUNDLE_DIR}/libpagespeed.so" ]; then
+  install -m 644 "${BUNDLE_DIR}/libpagespeed.so" .ci-artifacts/
+else
+  echo "::error::libpagespeed.so absent from ${BUNDLE_DIR}/ -- Dockerfile.prebuilt cannot be built (the producing Build job must ship //lib/pagespeed:libpagespeed.so in the bundle)." >&2
   exit 1
 fi
 

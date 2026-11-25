@@ -37,6 +37,9 @@ The Docker Compose stack runs three services on a shared volume:
 - **origin** (:8081) -- Programmable Python HTTP server (`compliance_origin.py`)
 - **worker** -- PageSpeed factory worker
 - **nginx** (:8080, :8083) -- Nginx with pagespeed module (system under test)
+- **module-worker** -- a second worker on its own volume with no network; the
+  module stand-in (`module_standin.py`, run with `docker compose exec`) stores
+  pages in it through `libpagespeed.so` the way a web-server module does
 
 Set `COMPLIANCE_NO_LIFECYCLE=1` to skip Docker build/up/down (for CI or external management).
 
@@ -60,6 +63,7 @@ Set `COMPLIANCE_NO_LIFECYCLE=1` to skip Docker build/up/down (for CI or external
 | `test_host_forwarding.py` | Host header forwarding to origin |
 | `test_pagespeed_specific.py` | PageSpeed-specific behaviors (X-PageSpeed header, etc.) |
 | `test_headers_sidecar.py` | Response-header sidecar: unreproducible origin headers / nonce CSP / Vary: Origin never cached; HIT, coalesced stale, stale-if-error and 304-revalidated serves carry the MISS's security headers; a removed stored block (`seed_test_cache --remove_alternate 0x6c` in the nginx container) is a MISS then re-recorded; counters in the shared serve-stats file |
+| `test_daemon_html.py` | Pages a web-server module stores itself: a stand-in stores the page, its paired header block and its stamp through the C API in one site and notifies `module-worker`; the Markdown copy is derived with no network and no HTML variant in both `markdown-*` modes, is bound to the stamp (entity tag, serve verdict) and unbound by a changed page; below-floor and hash-mismatch pages are withheld; unvouched shapes are refused by the library, and `full`/`off`, non-HTML-store, `no-transform` and missing pages are refused and counted by the worker. On the nginx front, `disable_html=false` is `full` and `markdown-static` runs no HTML pass |
 
 ## Adding New Tests
 

@@ -131,7 +131,15 @@ keep being served after a switch until the page changes or is refreshed; purge
 after switching to drop them at once. When both `--html-mode` and `--disable-html` are given,
 `--html-mode` wins. The same setting is `html_mode` in `pagespeed.json` and
 `PATCH /v1/config`, where the legacy `disable_html` (`true` = `off`, `false` =
-`full`) is still accepted and still reported.
+`full`) is still accepted and still reported. Restoring a configuration saved by
+an older console, which carries only `disable_html`, therefore sets `off` or
+`full`; set `--html-mode` again after restoring one.
+
+For pages a web-server module stores itself, both `markdown-*` modes derive the
+Markdown copy from the stored page alone, with `--agent-optimize` on: no browser
+runs and no request leaves the worker. `off` and `full` refuse those pages.
+When upgrading, restart the optimizer before reloading the web server: an older
+optimizer refuses the module's notifications for stored pages.
 
 ## --disable-html
 

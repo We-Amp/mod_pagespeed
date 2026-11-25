@@ -4,6 +4,9 @@
 #   origin  - Programmable compliance origin server
 #   worker  - PageSpeed factory worker daemon
 #   nginx   - Nginx with pagespeed module (system under test)
+# and one on its own volume, with no network at all:
+#   module-worker - a second worker, fed by a stand-in for the web-server
+#                   module's HTML store (module_standin.py, test_daemon_html.py)
 #
 # Usage:
 #   docker compose -f tools/http-compliance/docker-compose.yml up -d
@@ -33,6 +36,12 @@ services:
       context: ../../
       dockerfile: tools/e2e/Dockerfile.e2e
     entrypoint: ["/entrypoint-compliance-worker.sh"]
+    environment:
+      # The management API over a unix socket in the shared volume, so the
+      # html_mode tests can PATCH /v1/config from inside the container. The
+      # nginx container shares the volume and can reach the socket too; that
+      # is accepted for this test-only stack, which publishes no API port.
+      - PAGESPEED_API_SOCKET=/shared/api.sock
     volumes:
       - shared:/shared
       - ./entrypoint-compliance-worker.sh:/entrypoint-compliance-worker.sh:ro
@@ -55,5 +64,24 @@ services:
       - origin
       - worker
 
+  # A worker for pages a web-server module stores itself. The module stand-in
+  # (module_standin.py, run with `exec` in this container) writes through
+  # libpagespeed.so into this worker's volume and notifies it. No network:
+  # the Markdown copy of such a page is derived from the stored bytes alone.
+  module-worker:
+    build:
+      context: ../../
+      dockerfile: tools/e2e/Dockerfile.e2e
+    entrypoint: ["/entrypoint-compliance-worker.sh"]
+    network_mode: none
+    environment:
+      - PAGESPEED_AGENT_OPTIMIZE=true
+      - PAGESPEED_API_SOCKET=/shared/api.sock
+    volumes:
+      - module-shared:/shared
+      - ./entrypoint-compliance-worker.sh:/entrypoint-compliance-worker.sh:ro
+      - ./module_standin.py:/app/module_standin.py:ro
+
 volumes:
   shared:
+  module-shared:

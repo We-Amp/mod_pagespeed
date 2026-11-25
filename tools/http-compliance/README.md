@@ -30,6 +30,7 @@ interact with body modification.
 | `test_method_handling.py` | POST/PUT/DELETE bypass | 8 |
 | `test_pagespeed_specific.py` | X-PageSpeed, body integrity, magic bytes | 20 |
 | `test_headers_sidecar.py` | Origin headers a cache hit cannot reproduce are not cached; cache hits carry the origin's security headers | 12 |
+| `test_daemon_html.py` | Module-stored HTML through the C API (module stand-in) and `html_mode` on the front | 16 |
 
 ### 2. Hurl (declarative)
 
@@ -85,13 +86,15 @@ cd tools/http-compliance && pytest test_conditional_requests.py -v -k "etag_304"
 
 ### Docker Compose Stack
 
-Same pattern as E2E tests: 3 services sharing a named volume.
+Same pattern as E2E tests: 3 services sharing a named volume, plus a
+fourth worker on its own volume for the module stand-in.
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
 | origin | python:3.12-slim | 8081 | Programmable compliance origin |
 | worker | pagespeed2-dev build | — | Factory worker daemon |
 | nginx | pagespeed2-dev build | 8080 | Nginx with pagespeed module |
+| module-worker | pagespeed2-dev build | — (no network) | Worker fed by the module stand-in (`module_standin.py`) |
 
 ### Compliance Origin (`compliance_origin.py`)
 

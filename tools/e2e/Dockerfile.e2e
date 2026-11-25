@@ -75,6 +75,7 @@ RUN --mount=type=ssh \
        --config=docker --config=opt \
        //src/nginx:ngx_pagespeed_module.so \
        //src/worker:factory_worker \
+       //lib/pagespeed:libpagespeed.so \
        //tools:seed_test_cache
 
 # ---- Runtime image ----
@@ -101,6 +102,11 @@ COPY --from=builder /workspace/bazel-bin/src/nginx/ngx_pagespeed_module.so \
 # alternate behind the running server's back (test_headers_sidecar.py).
 COPY --from=builder /workspace/bazel-bin/tools/seed_test_cache \
      /usr/local/bin/seed_test_cache
+# The C API library: the compliance suite's module stand-in loads it with
+# ctypes to store pages the way a web-server module does
+# (tools/http-compliance/module_standin.py).
+COPY --from=builder /workspace/bazel-bin/lib/pagespeed/libpagespeed.so \
+     /usr/local/lib/libpagespeed.so
 COPY --from=builder /tmp/ngx_http_brotli_filter_module.so \
      /usr/lib/nginx/modules/ngx_http_brotli_filter_module.so
 

@@ -304,6 +304,19 @@ be weakened quietly: `ps_html_store_write_params` is the only place the
 insert time is computed (capture start, floored, moved back by the inbound
 `Age`), and a 304 is answered only for a copy the same call would serve.
 
+**The Markdown copy is bound to the stored original's stamp.** The worker
+writes the copy (`0x7C`) with the stamp of the original it was derived from as
+its `origin_html_hash`, and with the SHA-256 of its own bytes.
+`ps_html_stored_facts_from_reads` sets `PS_HTML_FACTS_BINDING_LIVE` only when
+the copy's recorded parent equals the original's stamp and that stamp is not
+all zero, and only then fills `markdown_hash`. An original stored again with
+other bytes therefore unbinds the copy at once, in every process, without a
+removal: the copy gets no entity tag, no 304 and no serve (reason
+`binding_stale`) until the worker derives it again. An original stored again
+with identical bytes keeps the copy bound, which is correct, because the copy
+was derived from exactly those bytes. A copy written without its own hash (by
+an older worker) can bind but carries no entity tag.
+
 `PS_NOTIFY_FLAG_HTML_STORED` (0x8, PS_API 1.14) was added to the wire's flags byte
 without a version bump: a worker that predates it refuses the frames that
 carry it, and only those, which is why a front end sends it only to a worker

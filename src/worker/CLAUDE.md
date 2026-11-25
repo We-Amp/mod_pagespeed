@@ -821,6 +821,29 @@ counts as `alternates.writes_fenced` and does NOT touch `errors`. Only genuine
 cache/mmap failures count as `alternates.write_failures` + `errors`. This ends
 the prior `write_failures == content_hash_stale == errors` dashboard lockstep.
 
+### Module-stored HTML counters
+
+A web-server module that stores HTML pages itself (C API 1.13 sited writes,
+1.14 store params) notifies the worker with `FROM_MODULE | HOST_VOUCHED |
+HTML_STORED`. `HandleModuleHtmlNotification` derives the Markdown copy from
+the stored bytes, with no browser and no fetch, and only in a `markdown-*`
+`html_mode` with `--agent-optimize` on. These counters are in `/v1/stats`
+JSON (`STATS`) only; none has a Prometheus metric.
+
+| Counter | Description |
+|---------|-------------|
+| `notifications.rejected_module_render` | Module frames refused: HTML in the event loop (not the stored-page flag set, a sentinel mask, `html_mode` `off` or `full`, `agent_optimize` off), and on the thread pool before any byte is copied (no stored page, not `kHtml` with a `text/html` type, no `PS_FLAG_HEADERS_CLASSIFIED`, `no-transform`, no content hash). Also non-HTML module frames that carry an agent request, the vouched bit or the llms.txt mask. A module frame with no site is counted in `notifications.rejected_empty_site` instead, before any of these checks |
+| `agent_markdown.module_derived` | Markdown copies written from module-stored pages, bound to the page's `0x0C` stamp and stamped with their own content hash (the entity tag input) |
+| `agent_markdown.module_withheld` | Permanent refusals recorded as a withheld marker (`0xCC`): `below_floor`, `too_large`, `encoded`, `hash_mismatch`, `extract_failed` |
+| `agent_markdown.module_withheld_skips` | Frames that found a current marker for the content and did no derivation |
+| `agent_markdown.below_floor` | Copies not kept because the body after front matter has fewer than 200 non-whitespace bytes, on both the module path and the browser render path |
+
+The library refuses the frame shapes a module must never send
+(`PS_ERR_INVALID_ARG` from `ps_notify_worker_ex`: HTML or an agent request
+from the module without both `HOST_VOUCHED` and `HTML_STORED`), so those never
+reach the worker or its counters. `tools/http-compliance/test_daemon_html.py`
+drives this path end to end through `libpagespeed.so` with a module stand-in.
+
 ## SVG Auto-Vectorization
 
 Automatic raster-to-SVG detection and conversion for logos, icons, and flat

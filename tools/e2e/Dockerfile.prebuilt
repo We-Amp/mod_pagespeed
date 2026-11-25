@@ -10,6 +10,7 @@
 #   .ci-artifacts/ngx_http_brotli_filter_module.so
 #   .ci-artifacts/nginx-version
 #   .ci-artifacts/seed_test_cache
+#   .ci-artifacts/libpagespeed.so
 # (libc++/libc++abi/libunwind are statically linked into factory_worker and
 # ngx_pagespeed_module.so since v2.0.2 — no separate shared libs needed.)
 #
@@ -54,6 +55,9 @@ COPY .ci-artifacts/factory_worker /usr/local/bin/factory_worker
 # bazel-bin; here it rides the CI artifact bundle instead.
 COPY .ci-artifacts/seed_test_cache /usr/local/bin/seed_test_cache
 RUN chmod +x /usr/local/bin/factory_worker /usr/local/bin/seed_test_cache
+# The C API library, for the compliance suite's module stand-in
+# (tools/http-compliance/module_standin.py), which loads it with ctypes.
+COPY .ci-artifacts/libpagespeed.so /usr/local/lib/libpagespeed.so
 COPY .ci-artifacts/ngx_pagespeed_module.so /usr/lib/nginx/modules/ngx_pagespeed_module.so
 
 # Copy pre-built brotli module (staged by stage-artifacts.sh; see Dockerfile.brotli)
