@@ -744,9 +744,10 @@ jobs:
           echo "CTR=${CTR}" >> "$GITHUB_ENV"
           echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
 
-      # The pull request Apache system tests leave the daemon lane out, so
-      # the daemon-serving cases skip there. Here the lane is required: a
-      # worker that cannot be built or started fails the run.
+      # The daemon lane is required here: a worker that cannot be built (from
+      # the optimizer commit test/system/optimizer-test-pin.json names) or
+      # started fails the run. The pull request tier requires it on build
+      # runners and leaves it out on hosted ones.
       - name: Run the Apache system tests with the daemon lane required
         run: |
           docker exec -i -e BZL_FLAGS -e PAGESPEED_DAEMON_LANE=require "${CTR}" bash -s <<'EOS'
