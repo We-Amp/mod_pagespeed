@@ -1170,8 +1170,7 @@ TEST_F(DaemonIproRecorderTest, WantsTheBodyOnlyWhileItMayStillRecord) {
         abi_.get(), &cache_token_, "/tmp/socket", request_,
         kDefaultHttpOptionsForTests, &timer_, nullptr);
     // Exactly the cap is still kept; the byte past it is not.
-    recorder->Write(GoogleString(kDaemonOriginalContentCapBytes, 'x'),
-                    nullptr);
+    recorder->Write(GoogleString(kDaemonOriginalContentCapBytes, 'x'), nullptr);
     EXPECT_TRUE(recorder->wants_body());
     recorder->Write("x", nullptr);
     EXPECT_FALSE(recorder->wants_body());

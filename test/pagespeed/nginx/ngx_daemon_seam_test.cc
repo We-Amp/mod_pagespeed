@@ -782,7 +782,8 @@ TEST_F(NgxDaemonSeamTest, TheDaemonCompletionRunsOffTheEventThread) {
       << "the inline completion is gone";
 }
 
-TEST_F(NgxDaemonSeamTest, TheDaemonRecorderForcesTheBodyIntoMemoryOnlyIfWanted) {
+TEST_F(NgxDaemonSeamTest,
+       TheDaemonRecorderForcesTheBodyIntoMemoryOnlyIfWanted) {
   // nginx's copy filter reads filter_need_in_memory before this module's
   // body filter runs, so setting it for a response the recorder has already
   // declined (HTML, decided at the headers) would read a static page into
@@ -794,13 +795,13 @@ TEST_F(NgxDaemonSeamTest, TheDaemonRecorderForcesTheBodyIntoMemoryOnlyIfWanted) 
   ASSERT_NE(GoogleString::npos, make)
       << "the daemon recorder is no longer built here; this pin needs "
          "updating";
-  const size_t branch_end = cc.find("}elseif(server_context->daemon_health()",
-                                    make);
+  const size_t branch_end =
+      cc.find("}elseif(server_context->daemon_health()", make);
   ASSERT_NE(GoogleString::npos, branch_end);
   const GoogleString branch = cc.substr(make, branch_end - make);
-  const size_t offer =
-      branch.find("recorder->ConsiderResponseHeaders(IproRecorder::"
-                  "kPreliminaryHeaders,&response_headers);");
+  const size_t offer = branch.find(
+      "recorder->ConsiderResponseHeaders(IproRecorder::"
+      "kPreliminaryHeaders,&response_headers);");
   ASSERT_NE(GoogleString::npos, offer);
   const size_t gated =
       branch.find("if(recorder->wants_body()){r->filter_need_in_memory=1;}");
@@ -860,7 +861,8 @@ TEST_F(NgxDaemonSeamTest, AnUnwantedBodyIsNeitherReadNorQueued) {
   // The helper finishes with the final headers and disengages the context.
   const size_t helper = cc.find("staticvoidps_finish_recorder_inline(");
   ASSERT_NE(GoogleString::npos, helper);
-  const size_t helper_end = cc.find("ngx_int_tps_in_place_body_filter(", helper);
+  const size_t helper_end =
+      cc.find("ngx_int_tps_in_place_body_filter(", helper);
   ASSERT_NE(GoogleString::npos, helper_end);
   const GoogleString helper_body = cc.substr(helper, helper_end - helper);
   EXPECT_NE(GoogleString::npos,

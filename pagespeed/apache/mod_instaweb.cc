@@ -866,8 +866,8 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
   // Feed the body to the recorder.  The walk stops at EOS, or as soon as the
   // recorder no longer wants the body -- a response it will not record, HTML
   // above all, is not read at all, so its FILE buckets stay FILE buckets.
-  const apr_status_t return_code = FeedBrigadeToInPlaceRecorder(
-      bb, recorder, [request, recorder]() {
+  const apr_status_t return_code =
+      FeedBrigadeToInPlaceRecorder(bb, recorder, [request, recorder]() {
         ResponseHeaders response_headers(recorder->http_options());
         ApacheRequestToResponseHeaders(*request, &response_headers, nullptr);
 

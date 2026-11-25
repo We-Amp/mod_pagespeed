@@ -26,9 +26,9 @@
 
 #include <cstring>
 
-#include "apr_buckets.h"     // NOLINT
-#include "apr_file_io.h"     // NOLINT
-#include "apr_pools.h"       // NOLINT
+#include "apr_buckets.h"  // NOLINT
+#include "apr_file_io.h"  // NOLINT
+#include "apr_pools.h"    // NOLINT
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -114,17 +114,16 @@ class InPlaceRecordBrigadeTest : public testing::Test {
   void AppendFileBucket() {
     GoogleString path = StrCat(GTestTempDir(), "/in_place_record_XXXXXX");
     apr_file_t* file = nullptr;
-    ASSERT_EQ(APR_SUCCESS,
-              apr_file_mktemp(&file, &path[0],
-                              APR_FOPEN_CREATE | APR_FOPEN_READ |
-                                  APR_FOPEN_WRITE | APR_FOPEN_EXCL |
-                                  APR_FOPEN_DELONCLOSE,
-                              pool_));
+    ASSERT_EQ(
+        APR_SUCCESS,
+        apr_file_mktemp(&file, &path[0],
+                        APR_FOPEN_CREATE | APR_FOPEN_READ | APR_FOPEN_WRITE |
+                            APR_FOPEN_EXCL | APR_FOPEN_DELONCLOSE,
+                        pool_));
     apr_size_t len = strlen(kFileBody);
     ASSERT_EQ(APR_SUCCESS, apr_file_write(file, kFileBody, &len));
     APR_BRIGADE_INSERT_TAIL(
-        bb_, apr_bucket_file_create(file, 0, strlen(kFileBody), pool_,
-                                    alloc_));
+        bb_, apr_bucket_file_create(file, 0, strlen(kFileBody), pool_, alloc_));
   }
 
   void AppendHeap(const char* text) {
