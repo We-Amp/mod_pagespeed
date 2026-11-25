@@ -44,15 +44,18 @@ const StringSet kEngineOps = {
     "purge_url",       "purge_global",    "flush_file",
     "wipe_file_cache", "create_engine",   "advance_clock",
     "make_visible",    "disable_recheck", "budget"};
-const StringSet kPoints = {"after_send", "after_commit", "after_recheck"};
+const StringSet kPoints = {"before_send", "after_send", "after_commit",
+                           "after_recheck"};
 const StringSet kResponseKeys = {"status",      "origin", "store_delta",
                                  "final_delta", "module", "body_ref",
                                  "aborted"};
-const StringSet kEngineExpectKeys = {
-    "calls",        "calls_exclude",  "port_calls",      "stored",
-    "removed",      "notify",         "counters",        "serve",
-    "log_lines",    "admin_response", "purge_set_added", "volume_epoch_s",
-    "budget_in_use"};
+const StringSet kEngineExpectKeys = {"calls",           "calls_exclude",
+                                     "port_calls",      "stored",
+                                     "removed",         "notify",
+                                     "counters",        "serve",
+                                     "log_lines",       "admin_response",
+                                     "purge_set_added", "volume_epoch_s",
+                                     "budget_in_use",   "port_calls_exclude"};
 const StringSet kServeKinds = {"fall_through", "final"};
 const StringSet kModes = {"off", "report-only", "serve-variants"};
 const StringSet kLiveKeys = {"mode",  "agent_optimize", "worker",
@@ -85,7 +88,8 @@ const StringSet kLiveExpectKeys = {"status",         "content_type",
                                    "sidecar_absent", "body_ref",
                                    "body_bytes",     "length_matches_body",
                                    "origin_saw",     "origin_saw_absent",
-                                   "counter_delta",  "differential"};
+                                   "counter_delta",  "differential",
+                                   "headers_only"};
 
 class Checker {
  public:
@@ -453,11 +457,10 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsMalformedRows) {
   // Bad mode, unknown knob, unresolved body, empty steps.
   EXPECT_EQ(4u, c.errors().size());
 
-  EXPECT_FALSE(LabelIsPublicSafe("store: S5 private"));
-  EXPECT_FALSE(LabelIsPublicSafe("see ADR text"));
-  EXPECT_FALSE(LabelIsPublicSafe("per constraint 3"));
-  EXPECT_FALSE(LabelIsPublicSafe("from MOD-1"));
-  EXPECT_FALSE(LabelIsPublicSafe("a K-S event"));
+  EXPECT_FALSE(LabelIsPublicSafe("store: rule S99"));
+  EXPECT_FALSE(LabelIsPublicSafe("per constraint 99"));
+  EXPECT_FALSE(LabelIsPublicSafe("tracked as XYZ-99"));
+  EXPECT_FALSE(LabelIsPublicSafe("an X-Y event"));
   EXPECT_TRUE(LabelIsPublicSafe("validator: 304 set (RFC 9110 15.4.5)"));
 }
 

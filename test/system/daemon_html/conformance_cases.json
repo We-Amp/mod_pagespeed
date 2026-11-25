@@ -18,20 +18,31 @@
     "host_names, budget_bytes, sites), library (overrides of minor, set_bound,",
     "html_mode, agent_entitled for the fake library), volume (entries present",
     "before the first step: kind original | sidecar | markdown | withheld | epoch),",
-    "verdicts (results the fake library returns, consumed in order per fn), and",
+    "verdicts (results the fake library returns, consumed in order per fn; a",
+    "store verdict may carry the reason detail, such as request for a request",
+    "no-store), and",
     "steps. A step has kind (capture | serve | poll_tick | stats_tick |",
     "admin_purge), optional pre (ops run before it), request, response (capture:",
     "status, origin, store_delta, final_delta, module, body_ref, aborted), during",
-    "(capture only: [{point after_send | after_commit | after_recheck, do: [ops]}])",
+    "(capture only: [{point before_send | after_send | after_commit |",
+    "after_recheck, do: [ops]}]; before_send is after capture_start and before the",
+    "origin request goes out)",
     "and expect. pre and do ops are one-key objects: purge_url, purge_global,",
     "flush_file, wipe_file_cache, create_engine, advance_clock, make_visible,",
-    "disable_recheck, budget. expect keys: calls (library calls made, in order,",
-    "with a subset of their arguments; dotted names address struct fields),",
-    "calls_exclude (fns never called in the step), port_calls, stored, removed,",
+    "disable_recheck, budget. expect keys: calls (an ordered subsequence of the",
+    "library calls made in the step: other calls may come between, and each",
+    "listed call is matched on the subset of arguments given; dotted names",
+    "address struct fields), calls_exclude (fns never called in the step),",
+    "port_calls and port_calls_exclude (port methods called or never called),",
+    "stored, removed,",
     "notify ([] = none), counters (deltas), serve {kind fall_through | final,",
-    "status, reason, headers_exact, body_bytes}, log_lines, admin_response,",
+    "status, reason, headers_exact (the complete header set the port is asked to",
+    "emit: no other line), body_bytes}, log_lines, admin_response,",
     "purge_set_added, volume_epoch_s, budget_in_use. An absent key is not",
-    "asserted.",
+    "asserted. A volume original with paired true has a stamp equal to the",
+    "pairing hash of the volume's sidecar entry for the same url; with no sidecar",
+    "entry it needs no header block. A header value $len:<body> is the byte",
+    "length of that entry of bodies.",
     "",
     "live body: mode, agent_optimize, vhost (knobs: header_add, header_always,",
     "header_early, expires, auth, alias, default_vhost, in_place,",
@@ -39,10 +50,16 @@
     "poll_interval_s, chained_module_origin), origin {status, headers, body_ref,",
     "echo_conditionals}, and steps [{request {method, path, host, headers}, pre,",
     "process, background, expect}]. live pre ops: purge_url {url, form PURGE |",
-    "query}, purge_global {via admin | flush_file}, wait_markdown, sleep_s,",
+    "query}, purge_global {via admin | flush_file}, wait_markdown {timeout_s,",
+    "expect_ready (default true; false = the copy must NOT become servable",
+    "within the timeout)}, sleep_s,",
     "origin_set, hold_origin, release_origin, set_mode. live expect keys: status,",
     "content_type, headers_exact (name -> {count, value | contains}),",
-    "headers_absent, stored, stored_lifetime_s, sidecar_absent, body_ref,",
+    "headers_only (no header beyond headers_exact and the server core's",
+    "transport lines Date, Server, Connection, Keep-Alive, Transfer-Encoding),",
+    "headers_absent, stored (an original entry for the request URL is present",
+    "in the volume after the step, read by exact id), stored_lifetime_s,",
+    "sidecar_absent, body_ref,",
     "body_bytes, length_matches_body, origin_saw, origin_saw_absent,",
     "counter_delta, differential {against: modes, allow_vary_accept}. The request",
     "header value $markdown_etag is replaced by the ETag of the last Markdown 200.",
@@ -52,9 +69,183 @@
   "bodies": {
     "page": "<!doctype html><html><head><title>Fixture page</title></head><body><main><h1>Fixture page</h1><p>This fixture page carries enough plain text for a Markdown copy to be derived from it. It has a heading, two paragraphs and a short list, so the extracted body is well above any minimum size a deriver applies.</p><p>Version one.</p><ul><li>First item</li><li>Second item</li></ul></main></body></html>",
     "page_v2": "<!doctype html><html><head><title>Fixture page</title></head><body><main><h1>Fixture page</h1><p>This fixture page carries enough plain text for a Markdown copy to be derived from it. It has a heading, two paragraphs and a short list, so the extracted body is well above any minimum size a deriver applies.</p><p>Version two.</p><ul><li>First item</li><li>Second item</li></ul></main></body></html>",
+    "page_md": "# Fixture page\n\nThis fixture page carries enough plain text for a Markdown copy to be derived from it. It has a heading, two paragraphs and a short list, so the extracted body is well above any minimum size a deriver applies.\n\nVersion one.\n\n- First item\n- Second item\n",
     "page_v3": "<!doctype html><html><head><title>Fixture page</title></head><body><main><h1>Fixture page</h1><p>This fixture page carries enough plain text for a Markdown copy to be derived from it. It has a heading, two paragraphs and a short list, so the extracted body is well above any minimum size a deriver applies.</p><p>Version three.</p></main></body></html>"
   },
   "rows": [
+    {
+      "id": "race-url-before-send",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "removed": [{"url": "https://www.example.test/page"}],
+              "counters": {"daemon_html_purge_race_refused": 1}
+            },
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_url": {"url": "https://www.example.test/page", "at_ms": 1790000000400}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.present": false}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "race-url-before-send-no-recheck",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ],
+              "calls_exclude": ["ps_cache_remove_site"]
+            },
+            "pre": [{"disable_recheck": {}}],
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_url": {"url": "https://www.example.test/page", "at_ms": 1790000000400}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
     {
       "id": "race-url-after-send",
       "runners": ["engine"],
@@ -126,7 +317,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -217,7 +407,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -301,7 +490,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -392,7 +580,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -481,7 +668,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -572,7 +758,179 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "race-global-before-send",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "removed": [{"url": "https://www.example.test/page"}],
+              "counters": {"daemon_html_purge_race_refused": 1}
+            },
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_global": {"at_ms": 1790000000400, "source": "admin"}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.present": false}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "race-global-before-send-no-recheck",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ],
+              "calls_exclude": ["ps_cache_remove_site"]
+            },
+            "pre": [{"disable_recheck": {}}],
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_global": {"at_ms": 1790000000400, "source": "admin"}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -656,7 +1014,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -747,7 +1104,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -831,7 +1187,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -922,7 +1277,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1011,7 +1365,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1102,7 +1455,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1111,6 +1463,184 @@
               "counters": {"daemon_markdown_served": 0}
             },
             "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "race-epoch-before-send",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ]
+            },
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_global": {"at_ms": 1790000000400, "source": "other_process"}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}, {"make_visible": {}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "race-epoch-before-send-no-recheck",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ],
+              "calls_exclude": ["ps_cache_remove_site"]
+            },
+            "pre": [{"disable_recheck": {}}],
+            "during": [
+              {
+                "point": "before_send",
+                "do": [{"purge_global": {"at_ms": 1790000000400, "source": "other_process"}}]
+              }
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}],
+              "serve": {"kind": "fall_through"},
+              "counters": {"daemon_markdown_served": 0}
+            },
+            "pre": [{"advance_clock": {"ms": 1000}}, {"make_visible": {}}]
           }
         ]
       }
@@ -1191,7 +1721,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1282,7 +1811,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1371,7 +1899,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1462,7 +1989,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1551,7 +2077,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1642,7 +2167,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1718,7 +2242,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": false}}]},
@@ -1801,7 +2324,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}]},
@@ -1895,7 +2417,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -1913,7 +2434,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2011,7 +2531,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2029,7 +2548,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2113,7 +2631,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2166,7 +2683,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2185,8 +2701,27 @@
       "runners": ["engine"],
       "why": "purge: global purge persisted per site",
       "engine": {
-        "volume": [{"kind": "epoch", "site": "default", "epoch_s": 1789999990}],
-        "verdicts": [],
+        "volume": [
+          {"kind": "epoch", "site": "default", "epoch_s": 1789999990},
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999970,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
         "steps": [
           {
             "kind": "poll_tick",
@@ -2195,6 +2730,20 @@
               "calls": [{"fn": "ps_cache_write_site_purge_epoch", "args": {"epoch_s": 1789999950}}],
               "volume_epoch_s": 1789999990
             }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}]},
+            "pre": [{"advance_clock": {"ms": 1000}}]
           }
         ]
       }
@@ -2234,7 +2783,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -2357,7 +2905,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": false}}]},
@@ -2852,6 +3399,67 @@
                 }
               ],
               "stored": [{"kind": "original", "url": "https://www.example.test/page"}]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-origin-vary-accept-kept",
+      "runners": ["engine"],
+      "why": "store: only the module's own lines are subtracted",
+      "engine": {
+        "config": {"agent_optimize": true},
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "vary",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "vary",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["Vary", "Accept"]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [["Vary", "Accept"]],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"view": "store", "headers_include": ["Vary: Accept"]}
+                }
+              ],
+              "calls_exclude": ["ps_cache_write_original_site"],
+              "stored": []
             }
           }
         ]
@@ -3381,6 +3989,177 @@
       }
     },
     {
+      "id": "store-host-regex-name",
+      "runners": ["engine"],
+      "why": "host validation: exact configured name only",
+      "engine": {
+        "config": {"host_names": ["~^www\\.example\\.test$"]},
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_write_original_site"], "notify": []}
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-host-host-case",
+      "runners": ["engine"],
+      "why": "host validation: exact configured name only",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "WWW.Example.Test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"stored": [{"kind": "original", "url": "https://www.example.test/page"}]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-host-explicit-port",
+      "runners": ["engine"],
+      "why": "host validation: exact configured name only",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test:443",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"stored": [{"kind": "original", "url": "https://www.example.test/page"}]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-host-trailing-dot",
+      "runners": ["engine"],
+      "why": "host validation: exact configured name only",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test.",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_write_original_site"], "notify": []}
+          }
+        ]
+      }
+    },
+    {
       "id": "store-report-only-writes-nothing",
       "runners": ["engine"],
       "why": "mode: report-only never writes",
@@ -3500,7 +4279,7 @@
               "body_ref": "page"
             },
             "expect": {
-              "calls_exclude": ["ps_cache_write_original_site"],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
               "counters": {"daemon_html_restore_skipped": 1}
             }
           }
@@ -3571,7 +4350,7 @@
               "body_ref": "page"
             },
             "expect": {
-              "calls_exclude": ["ps_cache_write_original_site"],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
               "counters": {"daemon_html_restore_skipped": 1}
             }
           }
@@ -3642,7 +4421,7 @@
               "body_ref": "page"
             },
             "expect": {
-              "calls_exclude": ["ps_cache_write_original_site"],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
               "counters": {"daemon_html_restore_skipped": 1}
             }
           }
@@ -3712,7 +4491,7 @@
               "body_ref": "page"
             },
             "expect": {
-              "calls_exclude": ["ps_cache_write_original_site"],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
               "counters": {"daemon_html_restore_skipped": 1}
             }
           }
@@ -3996,7 +4775,79 @@
             },
             "expect": {
               "calls": [{"fn": "ps_cache_write_original_site"}],
-              "counters": {"daemon_html_restore_skipped": 0}
+              "counters": {"daemon_html_restore_skipped": 0},
+              "notify": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "restore-exactly-half-lifetime",
+      "runners": ["engine"],
+      "why": "store: re-store skipped only for an unchanged fresh entry",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999850,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "headers": [["X-Frame-Options", "DENY"]]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_cache_write_original_site"}],
+              "counters": {"daemon_html_restore_skipped": 0},
+              "notify": []
             }
           }
         ]
@@ -4136,7 +4987,8 @@
             },
             "expect": {
               "calls": [{"fn": "ps_cache_write_original_site"}],
-              "counters": {"daemon_html_restore_skipped": 0}
+              "counters": {"daemon_html_restore_skipped": 0},
+              "notify": []
             }
           }
         ]
@@ -4273,11 +5125,12 @@
               "store_delta": [],
               "final_delta": [],
               "module": [],
-              "body_ref": "page"
+              "body_ref": "page_v2"
             },
             "expect": {
-              "calls_exclude": ["ps_cache_write_original_site"],
-              "counters": {"daemon_html_restore_skipped": 1}
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
+              "counters": {"daemon_html_restore_skipped": 1},
+              "notify": []
             }
           }
         ]
@@ -4288,6 +5141,7 @@
       "runners": ["engine"],
       "why": "freshness: steady traffic keeps the copy servable",
       "engine": {
+        "volume": [{"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}],
         "verdicts": [
           {
             "fn": "ps_html_store_classify",
@@ -4405,11 +5259,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.stored_at": 1790000000}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.stored_at": 1790000000,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true
+                  }
+                }
+              ],
               "serve": {"kind": "final", "status": 200}
             },
             "pre": [{"advance_clock": {"ms": 500}}]
@@ -4449,11 +5311,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.stored_at": 1790000003}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.stored_at": 1790000003,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true
+                  }
+                }
+              ],
               "serve": {"kind": "final", "status": 200}
             },
             "pre": [{"advance_clock": {"ms": 500}}]
@@ -4493,11 +5363,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.stored_at": 1790000006}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.stored_at": 1790000006,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true
+                  }
+                }
+              ],
               "serve": {"kind": "final", "status": 200}
             },
             "pre": [{"advance_clock": {"ms": 500}}]
@@ -4537,11 +5415,19 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"stored.stored_at": 1790000009}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.stored_at": 1790000009,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true
+                  }
+                }
+              ],
               "serve": {"kind": "final", "status": 200}
             },
             "pre": [{"advance_clock": {"ms": 500}}]
@@ -4993,6 +5879,317 @@
               "calls": [{"fn": "ps_cache_remove_site", "args": {"url": "https://www.example.test/page"}}],
               "counters": {"daemon_html_removed_on_refusal": 1}
             }
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-request-no-store",
+      "runners": ["engine"],
+      "why": "store: a request no-store never removes",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "no_store",
+            "lifetime_s": 0,
+            "detail": "request"
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "no_store",
+            "lifetime_s": 0,
+            "detail": "request"
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "cache_control": "no-store"
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_cache_remove_site"],
+              "counters": {"daemon_html_removed_on_refusal": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-on-200-no-lifetime",
+      "runners": ["engine"],
+      "why": "store: only listed response refusals remove",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "no_lifetime",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_remove_site"]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-on-200-personalisation-signal",
+      "runners": ["engine"],
+      "why": "store: only listed response refusals remove",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "personalisation_signal",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_remove_site"]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-on-200-nonce-csp",
+      "runners": ["engine"],
+      "why": "store: only listed response refusals remove",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "nonce_csp",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_remove_site"]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-on-200-content-type",
+      "runners": ["engine"],
+      "why": "store: only listed response refusals remove",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "content_type",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_remove_site"]}
           }
         ]
       }
@@ -5531,6 +6728,67 @@
             },
             "response": {
               "status": 206,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {"calls_exclude": ["ps_cache_remove_site"]}
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-remove-on-301",
+      "runners": ["engine"],
+      "why": "store: these statuses never remove",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "status",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "status",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 301,
               "origin": [
                 ["Content-Type", "text/html; charset=utf-8"],
                 ["Cache-Control", "max-age=300"],
@@ -6788,7 +8046,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -6840,7 +8097,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -6853,6 +8109,98 @@
               ],
               "serve": {"kind": "fall_through", "reason": "binding_stale"}
             }
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-lost-copy-notify-empty-volume",
+      "runners": ["engine"],
+      "why": "notify: lost Markdown copy",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"notify": []}
+          }
+        ]
+      }
+    },
+    {
+      "id": "lost-copy-notify-limited",
+      "runners": ["engine"],
+      "why": "notify: lost Markdown copy",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "flags": ["headers_classified"]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"notify": [{"agent_request": true}]}
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"notify": [], "counters": {"daemon_html_notify_limited": 1}},
+            "pre": [{"advance_clock": {"ms": 3000}}]
           }
         ]
       }
@@ -6892,7 +8240,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -6936,7 +8283,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -6979,7 +8325,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -7022,7 +8367,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -7065,7 +8409,6 @@
               "path": "/page",
               "url_agreed": false,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -7108,7 +8451,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"notify": []}
@@ -7166,7 +8508,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7228,7 +8569,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7290,7 +8630,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7352,7 +8691,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7414,7 +8752,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7451,7 +8788,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"serve": {"kind": "fall_through"}, "calls_exclude": ["ps_html_serve_classify"]}
@@ -7470,7 +8806,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"calls": [{"fn": "ps_html_serve_classify"}], "serve": {"kind": "final"}}
@@ -7504,7 +8839,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"serve": {"kind": "final"}}
@@ -7523,7 +8857,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"serve": {"kind": "fall_through"}, "calls_exclude": ["ps_html_serve_classify"]}
@@ -7551,15 +8884,17 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
             "fn": "ps_html_serve_classify",
             "action": "serve_markdown",
             "reason": "fresh",
-            "wants_markdown": true
-          }
+            "wants_markdown": true,
+            "age_s": 300
+          },
+          {"fn": "ps_html_markdown_etag", "etag": "W/\"psm-0123456789abcdef\""}
         ],
         "steps": [
           {
@@ -7571,7 +8906,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7580,12 +8914,12 @@
                 "status": 200,
                 "headers_exact": {
                   "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                  "Content-Length": {"count": 1},
+                  "Content-Length": {"count": 1, "value": "$len:page_md"},
                   "Cache-Control": {"count": 1, "value": "private"},
                   "Vary": {"count": 1, "value": "Accept"},
                   "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                  "Age": {"count": 1},
-                  "ETag": {"count": 1}
+                  "Age": {"count": 1, "value": "300"},
+                  "ETag": {"count": 1, "value": "W/\"psm-0123456789abcdef\""}
                 }
               },
               "port_calls": ["MarkNoCompress", "ClearAndEmitAllowlisted"],
@@ -7635,7 +8969,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7663,7 +8996,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7683,7 +9016,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -7722,7 +9054,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7743,7 +9075,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "if_none_match": "W/\"psm-0123456789abcdef\""
             },
@@ -7779,7 +9110,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7799,7 +9130,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "if_none_match": "W/\"psm-0123456789abcdef\""
             },
@@ -7823,7 +9153,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7843,7 +9173,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"serve": {"kind": "fall_through"}}
@@ -7866,7 +9195,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7886,7 +9215,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/html;q=0.5", "text/markdown"]
             },
             "expect": {
@@ -7894,6 +9222,463 @@
                 {
                   "fn": "ps_html_serve_classify",
                   "args": {"request.accept": "text/html;q=0.5, text/markdown"}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-cookie",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "cookie": true
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.cookie": true}}],
+              "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-authorization",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "authorization": true
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.authorization": true}}],
+              "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-authenticated-user",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "authenticated_user": true
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.authenticated_user": true}}],
+              "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-cache-control",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "cache_control": "no-cache"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.cache_control": "no-cache"}}],
+              "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-pragma",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "cookie_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "pragma": "no-cache"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.pragma": "no-cache"}}],
+              "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-passes-cookie",
+      "runners": ["engine"],
+      "why": "store: request facts passed exactly",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "cookie": true
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_store_classify", "args": {"request.cookie": true, "view": "store"}}]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-passes-authorization",
+      "runners": ["engine"],
+      "why": "store: request facts passed exactly",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "authorization": true
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"request.authorization": true, "view": "store"}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-passes-authenticated-user",
+      "runners": ["engine"],
+      "why": "store: request facts passed exactly",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "authenticated_user": true
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"request.authenticated_user": true, "view": "store"}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-passes-no-store",
+      "runners": ["engine"],
+      "why": "store: request facts passed exactly",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "cache_control": "no-store"
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"request.no_store": true, "view": "store"}
                 }
               ]
             }
@@ -7916,7 +9701,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7936,7 +9721,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "range": true
             },
@@ -7963,7 +9747,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -7983,7 +9767,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "if_range": true
             },
@@ -8010,7 +9793,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -8030,7 +9813,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "origin": true
             },
@@ -8057,7 +9839,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -8078,7 +9860,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"],
               "if_none_match": "W/\"psm-0123456789abcdef\"",
               "conditionals_stripped": true
@@ -8111,7 +9892,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -8131,7 +9912,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8163,7 +9943,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [],
         "steps": [
@@ -8176,7 +9956,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": false,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8203,7 +9982,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [],
         "steps": [
@@ -8216,7 +9995,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8243,7 +10021,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [],
         "steps": [
@@ -8256,7 +10034,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8282,7 +10059,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [],
         "steps": [
@@ -8295,7 +10072,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8321,7 +10097,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [{"fn": "ps_wants_agent_markdown", "value": false}],
         "steps": [
@@ -8334,7 +10110,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/html"]
             },
             "expect": {
@@ -8360,7 +10135,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [],
         "steps": [
@@ -8373,7 +10148,6 @@
               "path": "/page",
               "url_agreed": false,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8414,7 +10188,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {
@@ -8461,7 +10234,7 @@
             "paired": true,
             "cc_flags": []
           },
-          {"kind": "markdown", "url": "https://www.example.test/page"}
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
         ],
         "verdicts": [
           {
@@ -8481,10 +10254,13 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
-            "expect": {"counters": {"daemon_markdown_served_without_preference": 1}}
+            "expect": {
+              "counters": {"daemon_markdown_served_without_preference": 1},
+              "serve": {"kind": "fall_through"},
+              "port_calls_exclude": ["ClearAndEmitAllowlisted"]
+            }
           }
         ]
       }
@@ -8524,7 +10300,6 @@
               "path": "/page",
               "url_agreed": true,
               "options_enabled_and_allowed": true,
-              "capture_start_ms": 1790000000000,
               "accept": ["text/markdown"]
             },
             "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}]},
@@ -8575,6 +10350,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": ["X-T"]
             }
           }
@@ -8621,7 +10397,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -8705,7 +10482,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -8873,7 +10651,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -8970,7 +10749,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -9020,7 +10800,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -9137,7 +10918,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           },
           {
@@ -9164,6 +10946,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_ref": "page_v2"
             }
           }
@@ -9279,6 +11062,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
             }
           }
@@ -9325,6 +11109,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0
             }
           }
@@ -9370,6 +11155,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
             }
           }
@@ -9901,12 +11687,49 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"purge_url": {"url": "/page", "form": "PURGE"}}],
-            "expect": {"status": 200}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"purge_url": {"url": "/page", "form": "PURGE"}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -9934,12 +11757,49 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"purge_url": {"url": "/page", "form": "query"}}],
-            "expect": {"status": 200}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"purge_url": {"url": "/page", "form": "query"}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -9967,15 +11827,49 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [
-              {"wait_markdown": {"timeout_s": 30}},
-              {"purge_url": {"url": "https://WWW.Example.Test:443/page", "form": "PURGE"}}
-            ],
-            "expect": {"status": 200}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"purge_url": {"url": "https://WWW.Example.Test:443/page", "form": "PURGE"}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10022,7 +11916,9 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true,
+              "stored": true
             }
           }
         ]
@@ -10051,16 +11947,53 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [
-              {"wait_markdown": {"timeout_s": 30}},
-              {"purge_global": {"via": "admin"}},
-              {"sleep_s": {"s": 6}}
-            ],
-            "expect": {"status": 200}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"purge_global": {"via": "admin"}}, {"sleep_s": {"s": 6}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_markdown_fallthrough_purged": 1}
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html"}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10088,16 +12021,53 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [
-              {"wait_markdown": {"timeout_s": 30}},
-              {"purge_global": {"via": "flush_file"}},
-              {"sleep_s": {"s": 6}}
-            ],
-            "expect": {"status": 200}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"purge_global": {"via": "flush_file"}}, {"sleep_s": {"s": 6}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_markdown_fallthrough_purged": 1}
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html"}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10219,18 +12189,45 @@
             "background": true
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [
               {"purge_url": {"url": "/page", "form": "PURGE"}},
               {"release_origin": {}},
-              {"sleep_s": {"s": 6}}
+              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}}
             ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_html_purge_race_refused": 1}
+            }
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 6}}],
             "expect": {"status": 200, "content_type": "text/html"}
           },
           {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 30}}],
-            "expect": {"status": 200, "content_type": "text/html"}
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10261,14 +12258,44 @@
             "background": true
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [
               {"purge_url": {"url": "/page", "form": "PURGE"}},
               {"release_origin": {}},
+              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}},
               {"sleep_s": {"s": 4}}
             ],
             "process": "b",
             "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 3}}],
+            "process": "b",
+            "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10297,14 +12324,41 @@
             "background": true
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"purge_global": {"via": "admin"}}, {"release_origin": {}}, {"sleep_s": {"s": 6}}],
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"purge_global": {"via": "admin"}},
+              {"release_origin": {}},
+              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}}
+            ],
             "expect": {"status": 200, "content_type": "text/html"}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 30}}],
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 6}}],
             "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10335,10 +12389,44 @@
             "background": true
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"purge_global": {"via": "admin"}}, {"release_origin": {}}, {"sleep_s": {"s": 4}}],
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"purge_global": {"via": "admin"}},
+              {"release_origin": {}},
+              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}},
+              {"sleep_s": {"s": 4}}
+            ],
             "process": "b",
             "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 3}}],
+            "process": "b",
+            "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
           }
         ]
       }
@@ -10587,6 +12675,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -10642,6 +12731,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -10697,6 +12787,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -10756,6 +12847,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -10811,6 +12903,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -10866,6 +12959,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -10925,6 +13019,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -10980,6 +13075,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11035,6 +13131,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11094,6 +13191,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11149,6 +13247,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11204,6 +13303,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11263,6 +13363,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11318,6 +13419,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11373,6 +13475,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11432,6 +13535,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11487,6 +13591,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11542,6 +13647,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11601,6 +13707,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11656,6 +13763,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11711,6 +13819,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11770,6 +13879,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11825,6 +13935,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -11880,6 +13991,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -11939,6 +14051,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": [
                 "CDN-Cache-Control",
                 "Content-Language",
@@ -11994,6 +14107,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "body_bytes": 0,
               "headers_absent": [
                 "CDN-Cache-Control",
@@ -12049,6 +14163,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "CDN-Cache-Control",
@@ -12107,6 +14222,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": ["Content-Language"]
             }
           }
@@ -12158,6 +14274,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "headers_absent": ["Content-Encoding"]
             }
           }
@@ -12204,6 +14321,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": [
                 "Age",
                 "Content-Encoding",
@@ -12304,6 +14422,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "length_matches_body": true
             }
           }
@@ -12346,7 +14465,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           },
           {
@@ -12413,7 +14533,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           },
           {
@@ -12435,7 +14556,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           },
           {
@@ -12483,7 +14605,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
@@ -12758,6 +14881,7 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"],
               "origin_saw_absent": ["If-None-Match"]
             }
@@ -12810,6 +14934,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
+              "headers_only": true,
               "origin_saw_absent": ["If-None-Match"]
             }
           }
@@ -12947,7 +15072,189 @@
                 "Cache-Control": {"count": 1, "value": "private"},
                 "Vary": {"count": 1, "value": "Accept"}
               },
+              "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-markdown-request-cookie-gets-html",
+      "runners": ["live"],
+      "why": "serve: request facts reach the verdict",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Cookie", "a=1"]]
+            },
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-markdown-request-authorization-gets-html",
+      "runners": ["live"],
+      "why": "serve: request facts reach the verdict",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Authorization", "Basic dTpw"]]
+            },
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-markdown-request-client-no-cache-gets-html",
+      "runners": ["live"],
+      "why": "serve: request facts reach the verdict",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Cache-Control", "no-cache"]]
+            },
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-no-cache-origin-never-markdown",
+      "runners": ["live"],
+      "why": "freshness: no-cache beside a lifetime needs validation (RFC 9111 5.2.2.4)",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "no-cache, max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 10, "expect_ready": false}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 5}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-strip-mixed-list",
+      "runners": ["live"],
+      "why": "validator: module tags never reach the origin",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page",
+          "echo_conditionals": true
+        },
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["If-None-Match", "\"v1\", W/\"psm-0123456789abcdef\""]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw_absent": ["If-None-Match", "If-Modified-Since"]
             }
           }
         ]
@@ -12993,7 +15300,8 @@
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
-              }
+              },
+              "headers_only": true
             }
           }
         ]
