@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+# probe_iis_html_cache_pipeline.ps1 - Records, on a real IIS, the pipeline
+# facts the HTML cache depends on: where other modules' response headers
+# (customHeaders, clientCache) appear relative to the PageSpeed module's
+# send notification, whether a module can remove them from its own answer,
+# where static and dynamic compression run and how one response opts out,
+# whether writes after a PENDING send re-enter the send notification, what
+# the more-data flag looks like for a streamed origin, how a worker process
+# reads its sites' bindings under application pool isolation, how a web
+# garden spreads requests, how the kernel and output caches interact with a
+# module answer, and how IIS cooks unusual request-path forms.
+#
+# Builds iis_pipeline_probe.cc on this host, copies it into a guest that has
+# IIS and the PageSpeed module installed (over PowerShell Direct), installs
+# four registrations beside the PageSpeed module, drives the request matrix in the
+# guest and prints its records, then restores the guest's IIS configuration
+# from the backup it took first. Every result line is INFO; the probe
+# records behaviour and does not judge it.
+#
+# Exit codes: 0 the matrix ran; 2 precondition not met; 1 anything else.
+#
+# Run as Administrator on the Hyper-V host. The guest Administrator
+# credential is -Credential, or else the runner environment's
+# CI_IIS_VM_ADMIN_PASSWORD (docs/ci/runner-environment.md); it is never
+# printed. The guest is changed only for the run: use a lab guest, never
+# one a CI gate restores. Windows PowerShell 5.1 compatible; ASCII only.
+
+[CmdletBinding()]
+param(
+    [string]$VMName = $env:CI_IIS_VM_NAME,
+    [System.Management.Automation.PSCredential]$Credential = $null,
+    [string]$WorkDir = (Join-Path $env:TEMP "iis-pipeline-probe"),
+    [int]$Port = 8201,
+    [string]$OutFile = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+function Say([string]$Line) {
+    Write-Host $Line
+    if ($OutFile) { Add-Content -LiteralPath $OutFile -Value $Line -Encoding ASCII }
+}
+
+if (-not $VMName) { Say "PRECONDITION | no -VMName and no CI_IIS_VM_NAME"; exit 2 }
+if (-not $Credential) {
+    if (-not $env:CI_IIS_VM_ADMIN_PASSWORD) { Say "PRECONDITION | no -Credential and no CI_IIS_VM_ADMIN_PASSWORD"; exit 2 }
+    $Credential = New-Object System.Management.Automation.PSCredential("Administrator",
+        (ConvertTo-SecureString $env:CI_IIS_VM_ADMIN_PASSWORD -AsPlainText -Force))
+}
+
+& (Join-Path $PSScriptRoot "build_iis_pipeline_probe.ps1") -OutDir $WorkDir
+$dll = Join-Path $WorkDir "iis_pipeline_probe.dll"
+$guestScript = Join-Path $PSScriptRoot "guest_iis_pipeline_probe.ps1"
+
+$session = New-PSSession -VMName $VMName -Credential $Credential
+$exitCode = 0
+try {
+    $pre = Invoke-Command -Session $session -ScriptBlock {
+        if (-not (Test-Path "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll")) { return "module not installed" }
+        foreach ($f in @("Web-Dyn-Compression", "Web-Stat-Compression", "Web-Http-Tracing", "Web-Asp-Net45")) {
+            $w = Get-WindowsFeature -Name $f
+            if ($w -eq $null -or -not $w.Installed) { return "feature $f not installed" }
+        }
+        New-Item -ItemType Directory -Force "C:\pipeprobe\bin" | Out-Null
+        "ok"
+    }
+    if ("$pre" -ne "ok") { Say "PRECONDITION | $pre"; exit 2 }
+    Copy-Item -ToSession $session -Path $dll -Destination "C:\pipeprobe\bin\iis_pipeline_probe.dll" -Force
+    Copy-Item -ToSession $session -Path $guestScript -Destination "C:\pipeprobe\bin\guest_iis_pipeline_probe.ps1" -Force
+    $version = Invoke-Command -Session $session -ScriptBlock { (Get-Item "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll").VersionInfo.FileVersion }
+    Say "SETUP | module version | $version"
+    try {
+        foreach ($phase in @("setup", "run")) {
+            $lines = Invoke-Command -Session $session -ArgumentList $phase, $Port -ScriptBlock {
+                param($Phase, $Port)
+                & "C:\pipeprobe\bin\guest_iis_pipeline_probe.ps1" -Phase $Phase -Port $Port
+            }
+            foreach ($l in $lines) { Say "$l" }
+        }
+    } finally {
+        $lines = Invoke-Command -Session $session -ArgumentList $Port -ScriptBlock {
+            param($Port)
+            & "C:\pipeprobe\bin\guest_iis_pipeline_probe.ps1" -Phase teardown -Port $Port
+            Remove-Item -Recurse -Force "C:\pipeprobe" -ErrorAction SilentlyContinue
+        }
+        foreach ($l in $lines) { Say "$l" }
+    }
+} catch {
+    Say ("ERROR | {0}" -f $_.Exception.Message)
+    $exitCode = 1
+} finally {
+    Remove-PSSession $session
+}
+exit $exitCode
