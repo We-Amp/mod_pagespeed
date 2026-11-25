@@ -3,6 +3,10 @@
 
 load("//bazel:test.bzl", "gtest_test")
 
+# Read by the HTML cache policy cases check, which matches its Accept rows
+# against this file.
+exports_files(["testdata/accept_markdown_vectors.txt"])
+
 gtest_test(
     name = "alternate_id_test",
     deps = [

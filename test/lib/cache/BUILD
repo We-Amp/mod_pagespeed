@@ -1,7 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//bazel:test.bzl", "gtest_test")
+
+# The shared HTML cache policy cases and their hash pin. A policy runner
+# depends on this target to read the file.
+cc_library(
+    name = "daemon_html_policy_cases",
+    testonly = True,
+    hdrs = ["daemon_html_policy_cases.h"],
+    data = ["daemon_html_policy_cases.json"],
+    visibility = ["//visibility:public"],
+)
+
+gtest_test(
+    name = "daemon_html_policy_cases_test",
+    data = ["//test/lib/classify:testdata/accept_markdown_vectors.txt"],
+    deps = [
+        ":daemon_html_policy_cases",
+        "@nlohmann_json//:json",
+    ],
+)
 
 gtest_test(
     name = "cache_control_header_test",
