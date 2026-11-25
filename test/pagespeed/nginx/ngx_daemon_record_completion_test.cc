@@ -299,11 +299,12 @@ TEST_F(NgxDaemonRecordCompletionTest, TheClassicDefaultFollowsFailed) {
   EXPECT_EQ(RecordStep::kQueueClassic, NextRecordStep(recorder, false, true));
 }
 
-// The mixed load row: many responses the recorder will not record (HTML)
-// finishing alongside resource recordings.  Driven through the same steps
-// the body filter takes, the HTML ones reserve nothing, so every resource
+// The step choice under a mixed load: many responses the recorder will not
+// record (HTML) finishing alongside resource recordings.  Driven through the
+// steps the body filter takes (the filter itself is pinned by source in
+// ngx_daemon_seam_test), the HTML ones reserve nothing, so every resource
 // recording up to the item cap still finds room and none is dropped.
-TEST_F(NgxDaemonRecordCompletionTest, UnrecordedResponsesNeverStarveTheQueue) {
+TEST_F(NgxDaemonRecordCompletionTest, UnwantedBodiesReserveNoQueueRoom) {
   const int64 kResourceBytes = 64 * 1024;
   const int64 kHtmlBytes = 200 * 1024;
   int queued = 0;

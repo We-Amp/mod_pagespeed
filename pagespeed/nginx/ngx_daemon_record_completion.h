@@ -172,9 +172,8 @@ enum class RecordStep {
   // Finish the recorder now, on the event thread, taking no queue room.
   // Taken whenever the recorder no longer wants the body (HTML decided at
   // the headers, a body past the cap, a failed recording) -- before the
-  // body filter reads any buffer into memory for it -- and for a classic
-  // recording that ends failed.  DoneAndSetHeaders does no blocking I/O in
-  // any of those states.
+  // body filter reads any buffer into memory for it.  DoneAndSetHeaders
+  // does no blocking I/O in any of those states.
   kFinishInline,
   // A complete daemon recording: its finish goes to the daemon record pool.
   kQueueDaemon,

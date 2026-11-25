@@ -206,6 +206,8 @@ RecordStep NextRecordStep(const IproRecorder& recorder, bool daemon_recorder,
   if (daemon_recorder) {
     return RecordStep::kQueueDaemon;
   }
+  // Defensive: a recorder that keeps the wants_body() contract has already
+  // taken the first branch when it failed.
   return recorder.failed() ? RecordStep::kFinishInline
                            : RecordStep::kQueueClassic;
 }

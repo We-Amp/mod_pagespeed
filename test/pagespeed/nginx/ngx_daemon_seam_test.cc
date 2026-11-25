@@ -782,6 +782,39 @@ TEST_F(NgxDaemonSeamTest, TheDaemonCompletionRunsOffTheEventThread) {
       << "the inline completion is gone";
 }
 
+TEST_F(NgxDaemonSeamTest, TheDaemonRecorderForcesTheBodyIntoMemoryOnlyIfWanted) {
+  // nginx's copy filter reads filter_need_in_memory before this module's
+  // body filter runs, so setting it for a response the recorder has already
+  // declined (HTML, decided at the headers) would read a static page into
+  // memory and lose sendfile.  The headers are offered first, the flag is
+  // set only for a recorder that still wants the body, and it is never
+  // cleared (another filter may have set it).
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t make = cc.find("recorder=MakeDaemonIproRecorderIfOpen(");
+  ASSERT_NE(GoogleString::npos, make)
+      << "the daemon recorder is no longer built here; this pin needs "
+         "updating";
+  const size_t branch_end = cc.find("}elseif(server_context->daemon_health()",
+                                    make);
+  ASSERT_NE(GoogleString::npos, branch_end);
+  const GoogleString branch = cc.substr(make, branch_end - make);
+  const size_t offer =
+      branch.find("recorder->ConsiderResponseHeaders(IproRecorder::"
+                  "kPreliminaryHeaders,&response_headers);");
+  ASSERT_NE(GoogleString::npos, offer);
+  const size_t gated =
+      branch.find("if(recorder->wants_body()){r->filter_need_in_memory=1;}");
+  ASSERT_NE(GoogleString::npos, gated)
+      << "the in-memory flag is not gated on the recorder wanting the body";
+  EXPECT_LT(offer, gated) << "the flag is decided before the headers";
+  const char kGate[] = "if(recorder->wants_body()){";
+  EXPECT_EQ(gated + sizeof(kGate) - 1,
+            branch.find("r->filter_need_in_memory=1;"))
+      << "the in-memory flag is also set outside the wants_body() test";
+  EXPECT_EQ(GoogleString::npos, branch.find("filter_need_in_memory=0"))
+      << "the flag is cleared; another filter may have set it";
+}
+
 TEST_F(NgxDaemonSeamTest, AnUnwantedBodyIsNeitherReadNorQueued) {
   // A recorder that no longer wants the body -- HTML decided at the
   // headers, above all -- is finished before the body filter reads any

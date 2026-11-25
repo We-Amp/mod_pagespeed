@@ -4538,12 +4538,19 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
         ctx->recorder = recorder;
         ctx->daemon_recorder = true;
         ctx->record_body_bytes = 0;
-        r->filter_need_in_memory = 1;
         ps_give_origin_caching_headers(ctx, recorder);
         ResponseHeaders response_headers;
         copy_response_headers_from_ngx(r, &response_headers);
         recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
                                           &response_headers);
+        // The body is forced into memory (nginx's copy filter, ahead of this
+        // module, reads the flag) only for a recorder that still wants it,
+        // decided from the headers just offered: a pass-through HTML page is
+        // never recorded, so it keeps sendfile.  Never cleared here: another
+        // filter may have set it for its own reasons.
+        if (recorder->wants_body()) {
+          r->filter_need_in_memory = 1;
+        }
       } else if (server_context->daemon_health() == DaemonHealth::kReady &&
                  g_daemon_record_sequence != nullptr &&
                  ShouldPostDaemonOpenAttempt()) {
@@ -4661,7 +4668,9 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // recorder must not force the response body into memory.
     if (ctx->recorder != nullptr) {
       ctx->record_body_bytes = 0;
-      // set in memory flag for in_place_body_filter
+      // set in memory flag for in_place_body_filter.  Unlike the daemon
+      // branch this cannot wait for wants_body(): the backend's headers do
+      // not exist yet, so the recorder has decided nothing.
       r->filter_need_in_memory = 1;
     }
 
@@ -4704,7 +4713,9 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   // headers, above all -- is finished now, before any buffer is read into
   // memory for it and without a completion-queue reservation, so a page
   // that is never recorded cannot use up the queue budget that resource
-  // recordings need.  The response passes on untouched.
+  // recordings need.  The response passes on untouched.  Finished with the
+  // real headers at the first body buffer, so a page refused for having no
+  // site is counted as such even if the client aborts later.
   if (NextRecordStep(*ctx->recorder, ctx->daemon_recorder,
                      false /* last_buf */) == RecordStep::kFinishInline) {
     bool last_buf = false;
