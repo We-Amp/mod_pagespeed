@@ -4675,6 +4675,19 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
   return ps_decline_request(r);
 }
 
+// Finishes the request's recorder here, on the event thread, with the final
+// headers: the path for a recorder in a state whose DoneAndSetHeaders does
+// no I/O (see RecordStep::kFinishInline), so it takes no queue slot.
+static void ps_finish_recorder_inline(ngx_http_request_t* r,
+                                      ps_request_ctx_t* ctx, bool complete) {
+  ResponseHeaders response_headers;
+  copy_response_headers_from_ngx(r, &response_headers);
+  // Deletes the recorder.
+  ctx->recorder->DoneAndSetHeaders(&response_headers, complete);
+  ctx->recorder = nullptr;
+  ctx->daemon_recorder = false;
+}
+
 // If we've decided that we should record this response for future optimization
 // with IPRO, then log the bytes as they come through
 ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
@@ -4686,6 +4699,23 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
 
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                  "ps in place body filter: %V", &r->uri);
+
+  // A recorder that no longer wants the body -- HTML, decided at the
+  // headers, above all -- is finished now, before any buffer is read into
+  // memory for it and without a completion-queue reservation, so a page
+  // that is never recorded cannot use up the queue budget that resource
+  // recordings need.  The response passes on untouched.
+  if (NextRecordStep(*ctx->recorder, ctx->daemon_recorder,
+                     false /* last_buf */) == RecordStep::kFinishInline) {
+    bool last_buf = false;
+    for (ngx_chain_t* cl = in; cl != nullptr; cl = cl->next) {
+      if (cl->buf->last_buf) {
+        last_buf = true;
+      }
+    }
+    ps_finish_recorder_inline(r, ctx, last_buf);
+    return ngx_http_next_body_filter(r, in);
+  }
 
   // Convert any file-based buffers to memory buffers for IPRO recording.
   for (ngx_chain_t* cl = in; cl != nullptr; cl = cl->next) {
@@ -4711,8 +4741,10 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
       recorder->Flush(recorder->handler());
     }
 
-    if (cl->buf->last_buf || recorder->failed()) {
-      if (ctx->daemon_recorder) {
+    const RecordStep step =
+        NextRecordStep(*recorder, ctx->daemon_recorder, cl->buf->last_buf);
+    if (step != RecordStep::kFeed) {
+      if (step == RecordStep::kQueueDaemon) {
         // DoneAndSetHeaders opens the volume write and may notify the
         // daemon: blocking work, so it runs on the record arm's own pool,
         // not here.  The closure owns the recorder and the copied final
@@ -4754,7 +4786,7 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
         }
         ctx->recorder = nullptr;
         ctx->daemon_recorder = false;
-      } else if (cl->buf->last_buf && !recorder->failed()) {
+      } else if (step == RecordStep::kQueueClassic) {
         // A complete classic recording ends in the HTTP cache write, which
         // may compress the body and wait on cache locks: it runs on the
         // classic record pool, not here.  The closure owns the recorder and
@@ -4788,15 +4820,13 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
         }
         ctx->recorder = nullptr;
       } else {
-        // Incomplete or failed: DoneAndSetHeaders does no I/O on this path
+        // The recorder stopped wanting the body part-way (a failure, or a
+        // body past the cap): DoneAndSetHeaders does no I/O on this path
         // (it counts the failure), so it stays inline and takes no queue
         // slot.
-        ResponseHeaders response_headers;
-        copy_response_headers_from_ngx(r, &response_headers);
-        ctx->recorder->DoneAndSetHeaders(
-            &response_headers,
+        ps_finish_recorder_inline(
+            r, ctx,
             cl->buf->last_buf /* response is complete if last_buf is set */);
-        ctx->recorder = nullptr;
       }
       break;
     }

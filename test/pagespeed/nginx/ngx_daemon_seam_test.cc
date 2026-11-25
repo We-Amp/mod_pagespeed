@@ -777,10 +777,66 @@ TEST_F(NgxDaemonSeamTest, TheDaemonCompletionRunsOffTheEventThread) {
   EXPECT_NE(GoogleString::npos,
             body.find("ctx->recorder=nullptr;ctx->daemon_recorder=false;"))
       << "the context still points at a recorder the closure owns";
-  // The classic completion stays inline.
+  // The failed and unwanted-body completions stay inline.
+  EXPECT_NE(GoogleString::npos, body.find("ps_finish_recorder_inline(r,ctx,"))
+      << "the inline completion is gone";
+}
+
+TEST_F(NgxDaemonSeamTest, AnUnwantedBodyIsNeitherReadNorQueued) {
+  // A recorder that no longer wants the body -- HTML decided at the
+  // headers, above all -- is finished before the body filter reads any
+  // buffer into memory or feeds the recorder, and without a queue
+  // reservation, so such responses cannot drop resource recordings.
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t fn = cc.find("ps_in_place_body_filter(ngx_http_request_t*r");
+  ASSERT_NE(GoogleString::npos, fn)
+      << "the in-place body filter was renamed; this pin needs updating";
+  const size_t fn_end = cc.find("voidps_in_place_filter_init(", fn);
+  ASSERT_NE(GoogleString::npos, fn_end)
+      << "the filter init moved; this pin needs updating";
+  const GoogleString body = cc.substr(fn, fn_end - fn);
+  const size_t early = body.find(
+      "if(NextRecordStep(*ctx->recorder,ctx->daemon_recorder,false/*last_buf*/"
+      ")==RecordStep::kFinishInline){");
+  ASSERT_NE(GoogleString::npos, early)
+      << "the body filter no longer asks first whether the recorder wants "
+         "the body";
+  const size_t early_end =
+      body.find("returnngx_http_next_body_filter(r,in);}", early);
+  ASSERT_NE(GoogleString::npos, early_end);
+  const GoogleString early_arm = body.substr(early, early_end - early);
   EXPECT_NE(GoogleString::npos,
-            body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,"))
-      << "the classic recorder's inline completion is gone";
+            early_arm.find("ps_finish_recorder_inline(r,ctx,last_buf);"));
+  EXPECT_EQ(GoogleString::npos, early_arm.find("TryQueueDaemonCompletion("));
+  EXPECT_EQ(GoogleString::npos, early_arm.find("ps_read_file_buffer("));
+  const size_t read = body.find("ps_read_file_buffer(r,cl->buf)");
+  ASSERT_NE(GoogleString::npos, read);
+  EXPECT_LT(early_end, read)
+      << "a file buffer is read into memory before the recorder is asked";
+  const size_t write = body.find("recorder->Write(contents,");
+  ASSERT_NE(GoogleString::npos, write);
+  EXPECT_LT(early_end, write);
+  // Mid-response the same question picks the inline arm, not a queue.
+  EXPECT_NE(GoogleString::npos,
+            body.find("constRecordStepstep=NextRecordStep(*recorder,ctx->"
+                      "daemon_recorder,cl->buf->last_buf);"));
+  EXPECT_NE(GoogleString::npos,
+            body.find("if(step==RecordStep::kQueueDaemon){"))
+      << "the daemon hand-off is no longer limited to a wanted body";
+
+  // The helper finishes with the final headers and disengages the context.
+  const size_t helper = cc.find("staticvoidps_finish_recorder_inline(");
+  ASSERT_NE(GoogleString::npos, helper);
+  const size_t helper_end = cc.find("ngx_int_tps_in_place_body_filter(", helper);
+  ASSERT_NE(GoogleString::npos, helper_end);
+  const GoogleString helper_body = cc.substr(helper, helper_end - helper);
+  EXPECT_NE(GoogleString::npos,
+            helper_body.find("copy_response_headers_from_ngx(r,&response_"
+                             "headers);"));
+  EXPECT_NE(GoogleString::npos,
+            helper_body.find("ctx->recorder->DoneAndSetHeaders(&response_"
+                             "headers,complete);ctx->recorder=nullptr;ctx->"
+                             "daemon_recorder=false;"));
 }
 
 TEST_F(NgxDaemonSeamTest, TheSmaxageRewriteSkipsTheDaemonSubstrate) {

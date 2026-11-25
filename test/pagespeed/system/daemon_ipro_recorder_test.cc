@@ -1114,6 +1114,96 @@ TEST_F(DaemonIproRecorderTest, AResourceIsStillBufferedFromTheHeaders) {
   }
 }
 
+// wants_body() is what the seams read to stop per-byte work.  True for a
+// resource the whole way through; false, without failing, for HTML from the
+// headers and for a body past the cap; false for a failed recording.
+TEST_F(DaemonIproRecorderTest, WantsTheBodyOnlyWhileItMayStillRecord) {
+  {
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    ResponseHeaders at_headers;
+    at_headers.CopyFrom(headers);
+    DaemonRecordOutcome outcome;
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        abi_.get(), &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    recorder->set_outcome_sink_for_testing(&outcome);
+    EXPECT_TRUE(recorder->wants_body());
+    recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                      &at_headers);
+    EXPECT_TRUE(recorder->wants_body());
+    recorder->Write(kBody, nullptr);
+    EXPECT_TRUE(recorder->wants_body());
+    recorder->DoneAndSetHeaders(&headers, true);
+    EXPECT_TRUE(outcome.stored);
+  }
+  for (IproRecorder::HeadersKind kind :
+       {IproRecorder::kPreliminaryHeaders, IproRecorder::kFullHeaders}) {
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.Replace(HttpAttributes::kContentType, "text/html");
+    headers.ComputeCaching();
+    DaemonRecordOutcome outcome;
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        abi_.get(), &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    recorder->set_outcome_sink_for_testing(&outcome);
+    recorder->ConsiderResponseHeaders(kind, &headers);
+    EXPECT_FALSE(recorder->wants_body()) << kind;
+    EXPECT_FALSE(recorder->failed()) << kind;
+    // Sticky: a later offer of other headers does not bring it back.
+    ResponseHeaders css;
+    MakeOkHeaders(&css);
+    recorder->ConsiderResponseHeaders(kind, &css);
+    EXPECT_FALSE(recorder->wants_body()) << kind;
+    // Finished early and as incomplete, as a seam that stops feeding it
+    // does: the outcome is the same as at the end of a whole body.
+    recorder->DoneAndSetHeaders(&headers, false);
+    EXPECT_STREQ(daemon_record_reason::kHtmlClassicChain, outcome.reason)
+        << kind;
+    EXPECT_FALSE(outcome.stored) << kind;
+  }
+  {
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        abi_.get(), &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    // Exactly the cap is still kept; the byte past it is not.
+    recorder->Write(GoogleString(kDaemonOriginalContentCapBytes, 'x'),
+                    nullptr);
+    EXPECT_TRUE(recorder->wants_body());
+    recorder->Write("x", nullptr);
+    EXPECT_FALSE(recorder->wants_body());
+    EXPECT_FALSE(recorder->failed());
+    EXPECT_EQ(0u, recorder->buffered_bytes_for_testing());
+    recorder->DoneAndSetHeaders(&headers, true);
+  }
+  {
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    headers.Add(HttpAttributes::kContentEncoding, "gzip");
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        abi_.get(), &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                      &headers);
+    EXPECT_TRUE(recorder->failed());
+    EXPECT_FALSE(recorder->wants_body());
+    recorder->DoneAndSetHeaders(&headers, true);
+  }
+  {
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        abi_.get(), &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr);
+    recorder->Fail();
+    EXPECT_FALSE(recorder->wants_body());
+    recorder->DoneAndSetHeaders(&headers, true);
+  }
+}
+
 // The site is still judged first for HTML, and still counted.
 TEST_F(DaemonIproRecorderTest, HtmlWithoutASiteIsStillCountedAsSuch) {
   SimpleStats stats(thread_system_.get());

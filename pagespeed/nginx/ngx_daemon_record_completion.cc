@@ -195,6 +195,21 @@ void ResetDaemonCompletionQueueForTesting() {
   queue.last_recheck_ms.store(0, std::memory_order_relaxed);
 }
 
+RecordStep NextRecordStep(const IproRecorder& recorder, bool daemon_recorder,
+                          bool last_buf) {
+  if (!recorder.wants_body()) {
+    return RecordStep::kFinishInline;
+  }
+  if (!last_buf) {
+    return RecordStep::kFeed;
+  }
+  if (daemon_recorder) {
+    return RecordStep::kQueueDaemon;
+  }
+  return recorder.failed() ? RecordStep::kFinishInline
+                           : RecordStep::kQueueClassic;
+}
+
 DaemonRecordCompletion::DaemonRecordCompletion(IproRecorder* recorder,
                                                ResponseHeaders* headers,
                                                bool complete, int64 body_bytes)
