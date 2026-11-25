@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "mod_pagespeed-2.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/mod_pagespeed-2.1-2026-11-23T13:32:49Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/mod_pagespeed-2.1-2026-11-25T12:44:07Z",
   "creationInfo": {
-    "created": "2026-11-23T13:32:49Z",
+    "created": "2026-11-25T12:44:07Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -574,9 +574,9 @@
     {
       "SPDXID": "SPDXRef-Package-crossbeam-epoch",
       "name": "crossbeam-epoch",
-      "versionInfo": "0.9.18",
+      "versionInfo": "0.9.20",
       "supplier": "Organization: The Crossbeam Project Developers",
-      "downloadLocation": "https://crates.io/crates/crossbeam-epoch/0.9.18",
+      "downloadLocation": "https://crates.io/crates/crossbeam-epoch/0.9.20",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT OR Apache-2.0",
       "licenseDeclared": "MIT OR Apache-2.0",
@@ -585,7 +585,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:cargo/crossbeam-epoch@0.9.18"
+          "referenceLocator": "pkg:cargo/crossbeam-epoch@0.9.20"
         }
       ]
     },

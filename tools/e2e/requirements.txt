@@ -1,5 +1,5 @@
 pytest==9.1.1
 requests==2.34.2
-brotli==1.2.0
+brotli==1.2.1
 pytest-playwright==0.10.0
 playwright==1.64.0

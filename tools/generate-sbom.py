@@ -168,7 +168,7 @@ RUST_DEPS = [
     ),
     (
         "crossbeam-epoch",
-        "0.9.18",
+        "0.9.20",
         "MIT OR Apache-2.0",
         "The Crossbeam Project Developers",
         "https://crates.io/crates/crossbeam-epoch",

@@ -1,7 +1,7 @@
-lightgbm>=4.0
+lightgbm>=4.6.0
 numpy>=1.24
 pandas>=2.0
-scikit-learn>=1.3
+scikit-learn>=1.5.0
 scipy>=1.11
 optuna>=3.3
 tl2cgen>=0.4

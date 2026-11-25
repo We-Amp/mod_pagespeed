@@ -47,7 +47,13 @@
     "js-yaml": "^4.3.1",
     "brace-expansion": "5.0.12",
     "devalue": "5.9.3",
-    "lighthouse": "13.5.0"
+    "lighthouse": "13.5.0",
+    "@tailwindcss/typography": {
+      "postcss-selector-parser": "6.1.6"
+    },
+    "satori": {
+      "fflate": "0.7.5"
+    }
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
