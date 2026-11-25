@@ -589,11 +589,12 @@ private:
 			kKeySize,
 			BCRYPT_USE_SYSTEM_PREFERRED_RNG);
 		if (status != 0) {
-			uint64_t seed = static_cast<uint64_t>(timer()->NowUs());
-			memcpy(key, &seed, sizeof(seed));
-			for (int i = sizeof(seed); i < kKeySize; i++) {
-				key[i] = static_cast<char>(seed ^ (seed >> (i % 8)));
-			}
+			// Fail closed, as the system factory does when /dev/urandom is
+			// unavailable: never derive the key from a predictable source.
+			message_handler()->Message(kError,
+				"BCryptGenRandom failed (NTSTATUS 0x%08lx); cannot seed the "
+				"nonce generator", static_cast<unsigned long>(status));
+			CHECK(false) << "BCryptGenRandom failed; cannot seed the nonce generator";
 		}
 		return new HashedNonceGenerator(
 			hasher(),
