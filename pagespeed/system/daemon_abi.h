@@ -422,6 +422,11 @@ inline constexpr size_t kPsSiteIdChars = 64;
 // module that carries HTML, an agent request, no site, or the vouched bit.
 inline constexpr uint32_t kPsNotifyFlagHostVouched = 0x1u;
 inline constexpr uint32_t kPsNotifyFlagFromModule = 0x2u;
+// Published at 1.14: "the module's HTML store wrote a present entry for this
+// URL in this volume generation".  Legal only with kPsNotifyFlagFromModule,
+// kPsNotifyFlagHostVouched and HTML; nothing in this module sends it unless
+// the HTML serve set is bound.
+inline constexpr uint32_t kPsNotifyFlagHtmlStored = 0x8u;
 
 // Content types, as the peer numbers them.
 enum PsContentType {
@@ -432,11 +437,25 @@ enum PsContentType {
   kPsContentOther = 4,
 };
 
-// Origin Cache-Control directives, as the peer's parser reports them.  Only
-// the bits the record arm acts on are named; the rest ride through to the
-// entry unread, which is the point of storing the whole field.
+// Origin Cache-Control directives, as the peer's parser reports them
+// (PS_CC_ORIGIN_*), every bit the peer publishes.  The record arm acts on
+// no-store and header-present; the rest ride through to the entry unread,
+// which is the point of storing the whole field, and are named so that a
+// reader of a stored entry's flags never spells one as a literal.
+inline constexpr uint16_t kPsCcOriginNoCache = 0x0001u;
+inline constexpr uint16_t kPsCcOriginMustRevalidate = 0x0002u;
 inline constexpr uint16_t kPsCcOriginNoStore = 0x0004u;
+inline constexpr uint16_t kPsCcOriginPrivate = 0x0008u;
+inline constexpr uint16_t kPsCcOriginPublic = 0x0010u;
+inline constexpr uint16_t kPsCcOriginImmutable = 0x0020u;
+inline constexpr uint16_t kPsCcOriginSMaxagePresent = 0x0040u;
+inline constexpr uint16_t kPsCcOriginProxyRevalidate = 0x0080u;
 inline constexpr uint16_t kPsCcOriginNoTransform = 0x0100u;
+inline constexpr uint16_t kPsCcOriginPrivateQualified = 0x0400u;
+inline constexpr uint16_t kPsCcOriginPrivateBare = 0x0800u;
+inline constexpr uint16_t kPsCcOriginNoCacheQualified = 0x1000u;
+inline constexpr uint16_t kPsCcOriginNoCacheBare = 0x2000u;
+inline constexpr uint16_t kPsCcOriginSMaxageRepeated = 0x4000u;
 // The bit the peer's parser stamps when the origin sent a `Cache-Control`
 // line at all, whatever it said.  At serve time it means "the lifetime on
 // this entry is the origin's statement, not silence", which is what
@@ -485,6 +504,13 @@ struct PsWriteParams {
   uint32_t origin_last_modified;
   uint16_t origin_cc_flags;
   uint8_t reserved_[6];
+  // 1.13: the SHA-256 of the stored bytes, the entry's content binding, or
+  // nullptr for an unbound entry.  A peer older than 1.13 snaps the declared
+  // size down to the 1.12 shape and never reads it, which is the unbound
+  // entry this module wrote before -- so the field costs nothing against an
+  // older library.  Set only by the HTML store, and only when the HTML serve
+  // set is bound (DaemonAbi::HasHtmlServeSet).
+  const uint8_t* origin_html_hash;
 };
 
 struct PsCacheControl {
@@ -638,10 +664,12 @@ inline constexpr size_t kPsCacheControlBufferBytes = 256;
 // an enum -- so the same numbers must hold there, and a model-dependent type
 // entering one of these structs on Win64 would fail exactly here.
 #if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
-static_assert(sizeof(PsWriteParams) == 80,
+static_assert(sizeof(PsWriteParams) == 88,
               "the cache-write parameter layout no longer matches the "
               "published one; a mismatched size is silently truncated by the "
               "peer, not rejected");
+static_assert(offsetof(PsWriteParams, origin_html_hash) == 80,
+              "the content binding is not where the peer reads it");
 static_assert(sizeof(PsCacheControl) == 24,
               "the Cache-Control state layout no longer matches the published "
               "one");
@@ -672,6 +700,188 @@ static_assert(sizeof(PsCacheControlInput) == 40,
               "the Cache-Control input layout no longer matches the published "
               "one; a mis-sized struct is a downstream lifetime built from "
               "fields the peer read out of the wrong offsets");
+#endif
+
+// ---------------------------------------------------------------------------
+// The HTML serve set: C API 1.13 (site-scoped sidecar, removal, purge epoch)
+// and 1.14 (serve verdict, store parameters, stored facts, Markdown entity
+// tag, weak If-None-Match, the worker's HTML mode).
+//
+// BOUND OPTIONALLY AND AS ONE SET, and the floor does not move.  A library
+// below 1.14, or one that lacks any entry point of the set, still loads and
+// still records and serves exactly as before; the HTML cache then stays
+// report-only.  That keeps every 1.12 deployment working while the module
+// and the optimizer are upgraded in either order.  A partial set is treated
+// as no set: serving Markdown needs every piece (the verdict, the facts, the
+// sidecar pairing and the purge fence), and a cache that could store but not
+// fence a purge is the one combination that serves wrong bytes.
+//
+// The values are hand-copied, like every mirror in this file, and checked
+// against the optimizer's own header at the test pin by
+// tools/ci/check_daemon_abi_mirrors.py.
+// ---------------------------------------------------------------------------
+
+// The minor that publishes the whole set.
+inline constexpr int kHtmlServeSetMinor = 14;
+
+// Sentinel-shaped alternate ids the HTML cache reads by exact id.  The
+// content-hash record (0x3C) and the Markdown copy (0x7C) are the
+// optimizer's; the withheld marker (0xCC, published at 1.13) is its record
+// that a copy was permanently refused for one stored page.  None is ever
+// returned by a selection read.
+inline constexpr uint8_t kPsSentinelContentHash = 0x3C;
+inline constexpr uint8_t kPsSentinelAgentMarkdown = 0x7C;
+inline constexpr uint8_t kPsSentinelMarkdownWithheld = 0xCC;
+
+// Stored-entry flags published at 1.13.  CLASSIFIED: the writer ran the
+// response through the headers-sidecar gate; with SIDECAR_REQUIRED a
+// non-empty sidecar was stored and a serve must replay it or fall through.
+inline constexpr uint8_t kPsFlagHeadersClassified = 0x10;
+inline constexpr uint8_t kPsFlagHeadersSidecarRequired = 0x20;
+
+// What HeaderBlockPairing answers.
+inline constexpr int kPsSidecarUnpaired = 0;
+inline constexpr int kPsSidecarPaired = 1;
+
+// The HTML cache mode both classifiers take (ps_html_cache_mode_t).
+inline constexpr int kPsHtmlCacheOff = 0;
+inline constexpr int kPsHtmlCacheReportOnly = 1;
+inline constexpr int kPsHtmlCacheServeVariants = 2;
+inline constexpr int kPsHtmlCacheServeCachedHtml = 3;
+
+// ps_html_store_classify's actions.  Only STORE and STORE_NO_NOTIFY store.
+inline constexpr int kPsHtmlStoreActionRefuse = 0;
+inline constexpr int kPsHtmlStoreActionStore = 1;
+inline constexpr int kPsHtmlStoreActionStoreNoNotify = 2;
+inline constexpr int kPsHtmlStoreActionWouldStore = 3;
+inline constexpr int kPsHtmlStoreActionWouldStoreNoNotify = 4;
+
+// ps_html_serve_classify's actions.  VALIDATE is returned only in the
+// serve-cached-html mode; a caller with no validation step falls through.
+inline constexpr int kPsHtmlServeActionFallThrough = 0;
+inline constexpr int kPsHtmlServeActionServeHtml = 1;
+inline constexpr int kPsHtmlServeActionServeMarkdown = 2;
+inline constexpr int kPsHtmlServeActionValidate = 3;
+
+// PsHtmlServeRequest::request_flags.
+inline constexpr uint32_t kPsHtmlServeRequestHasAuthorization = 1u;
+inline constexpr uint32_t kPsHtmlServeRequestAuthenticatedUser = 2u;
+inline constexpr uint32_t kPsHtmlServeRequestHasCookie = 4u;
+inline constexpr uint32_t kPsHtmlServeRequestHasRange = 8u;
+inline constexpr uint32_t kPsHtmlServeRequestHasIfRange = 16u;
+inline constexpr uint32_t kPsHtmlServeRequestHasOrigin = 32u;
+
+// PsHtmlStoredFacts::flags.  PURGED is the caller's to set; nothing the
+// library reads can know it.
+inline constexpr uint32_t kPsHtmlFactsPresent = 0x1u;
+inline constexpr uint32_t kPsHtmlFactsNeedsValidation = 0x2u;
+inline constexpr uint32_t kPsHtmlFactsExplicitShared = 0x4u;
+inline constexpr uint32_t kPsHtmlFactsHeadersNotReproducible = 0x8u;
+inline constexpr uint32_t kPsHtmlFactsSidecarRequired = 0x10u;
+inline constexpr uint32_t kPsHtmlFactsSidecarPresent = 0x20u;
+inline constexpr uint32_t kPsHtmlFactsPurged = 0x40u;
+inline constexpr uint32_t kPsHtmlFactsValidatedThisRequest = 0x80u;
+inline constexpr uint32_t kPsHtmlFactsVariantPresent = 0x100u;
+inline constexpr uint32_t kPsHtmlFactsBindingLive = 0x200u;
+inline constexpr uint32_t kPsHtmlFactsNoTransform = 0x400u;
+inline constexpr uint32_t kPsHtmlFactsWithheld = 0x800u;
+
+// PsHtmlStoredFacts::withheld_reason, with kPsHtmlFactsWithheld.
+inline constexpr int kPsHtmlWithheldBelowFloor = 1;
+inline constexpr int kPsHtmlWithheldTooLarge = 2;
+inline constexpr int kPsHtmlWithheldEncoded = 3;
+inline constexpr int kPsHtmlWithheldHashMismatch = 4;
+inline constexpr int kPsHtmlWithheldExtractFailed = 5;
+
+// The length of the binding and Markdown content hashes.
+inline constexpr size_t kPsHtmlHashBytes = 32;
+
+// Characters of a Markdown entity tag, W/"psm-" plus 16 hex digits and the
+// closing quote, not counting the NUL.
+inline constexpr size_t kPsHtmlMarkdownEtagChars = 24;
+
+// The worker's HTML mode as ReadSharedConfigHtmlMode reports it.  Only the
+// two MARKDOWN values mean the worker derives a copy of a page this module
+// stored.
+inline constexpr int kPsHtmlModeOff = 0;
+inline constexpr int kPsHtmlModeMarkdownStatic = 1;
+inline constexpr int kPsHtmlModeMarkdownRendered = 2;
+inline constexpr int kPsHtmlModeFull = 3;
+
+// Layout-compatible mirrors of the set's parameter structs, under the same
+// rules as the ones above: copied field for field, never tidied, and
+// struct_size stamped by this module (the peer has no initializer for them).
+// A request or facts struct smaller than its 1.14 size is a malformed call to
+// the peer; the verdict is written only as far as its struct_size reaches.
+struct PsSidecarWriteParams {
+  size_t struct_size;
+  const char* url;
+  const char* hostname;
+  const char* scheme;
+  const char* site;
+  // The stamp of the durable original this block belongs to, or nullptr for
+  // an unpaired block.  Never 32 zero bytes: the peer refuses them.
+  const uint8_t* origin_html_hash;
+};
+
+struct PsHtmlServeRequest {
+  size_t struct_size;
+  int mode;
+  const char* method;
+  const char* accept;
+  const char* cache_control;
+  const char* pragma;
+  // The client's If-None-Match as it arrived, before this module removed its
+  // own entity tags from the request to the origin.
+  const char* if_none_match;
+  uint32_t request_flags;
+  uint32_t now_seconds;
+};
+
+struct PsHtmlStoredFacts {
+  size_t struct_size;
+  uint32_t flags;
+  uint32_t stored_at;
+  uint32_t age_at_store;
+  uint32_t lifetime_s;
+  uint32_t render_ttl_s;
+  int withheld_reason;
+  uint8_t binding_hash[kPsHtmlHashBytes];
+  uint8_t markdown_hash[kPsHtmlHashBytes];
+};
+
+struct PsHtmlServeVerdict {
+  size_t struct_size;
+  int action;
+  int reason;
+  int enforce;
+  int wants_markdown;
+  uint32_t age_s;
+  int not_modified;
+  char etag[kPsHtmlMarkdownEtagChars + 8];
+};
+
+#if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
+static_assert(sizeof(PsSidecarWriteParams) == 48,
+              "the sidecar write parameter layout no longer matches the "
+              "published one");
+static_assert(offsetof(PsSidecarWriteParams, origin_html_hash) == 40,
+              "the sidecar's pairing hash is not where the peer reads it");
+static_assert(sizeof(PsHtmlServeRequest) == 64,
+              "the serve request layout no longer matches the published one; "
+              "a request short of it is a malformed call to the peer");
+static_assert(offsetof(PsHtmlServeRequest, if_none_match) == 48,
+              "the serve request layout no longer matches the published one");
+static_assert(offsetof(PsHtmlServeRequest, now_seconds) == 60,
+              "the serve request layout no longer matches the published one");
+static_assert(sizeof(PsHtmlStoredFacts) == 96,
+              "the stored-facts layout no longer matches the published one");
+static_assert(offsetof(PsHtmlStoredFacts, binding_hash) == 32,
+              "the stored-facts layout no longer matches the published one");
+static_assert(sizeof(PsHtmlServeVerdict) == 64,
+              "the serve verdict layout no longer matches the published one");
+static_assert(offsetof(PsHtmlServeVerdict, etag) == 32,
+              "the serve verdict layout no longer matches the published one");
 #endif
 
 // Bytes handed to the daemon's cache-configuration initializer.
@@ -780,6 +990,163 @@ class DaemonAbi {
   virtual const char* HtmlStoreReasonName(int /*reason*/) const {
     return nullptr;
   }
+
+  // ---------------------------------------------------------------------
+  // The HTML serve set (C API 1.13 + 1.14; see the constants above).
+  //
+  // True only when the library reports minor kHtmlServeSetMinor or later
+  // AND exports every entry point of the set, which here includes the two
+  // 1.2 readers the serve gate needs (ps_wants_agent_markdown,
+  // ps_read_shared_config_agent_entitled).  When false, no entry point of
+  // the set is bound -- not even the ones the library does export -- and
+  // every method below answers its fail-closed value without reaching the
+  // library: -1 for the int-returning policy calls, kPsErrInvalidArg for the
+  // cache calls (never kPsErrNotFound, which a remover treats as success),
+  // nullptr, 0 or "HTML preferred" elsewhere.  The HTML cache stays
+  // report-only then; the caller logs HtmlServeSetUnavailableReason once.
+  // Not pure, so a stand-in for an older library says so by saying nothing.
+  virtual bool HasHtmlServeSet() const { return false; }
+
+  // Why HasHtmlServeSet() is false, as one clause for an operator's log
+  // ("the optimizer library reports C API 1.13; the HTML serve set needs
+  // 1.14", or the first entry point it lacks).  Empty when the set is bound.
+  virtual GoogleString HtmlServeSetUnavailableReason() const {
+    return "the optimizer library binding does not provide the HTML serve "
+           "set";
+  }
+
+  // ps_html_serve_classify: 0 with *out written up to out->struct_size, or
+  // -1 for a malformed call (or an unbound set).
+  virtual int HtmlServeClassify(const PsHtmlServeRequest* /*request*/,
+                                const PsHtmlStoredFacts* /*facts*/,
+                                PsHtmlServeVerdict* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_serve_reason_name: a static string, or nullptr for a reason
+  // outside the set (which a caller treats as a fall-through).
+  virtual const char* HtmlServeReasonName(int /*reason*/) const {
+    return nullptr;
+  }
+
+  // ps_html_store_write_params: fills `params` (initialized with
+  // WriteParamsInit) for the durable-original write of one HTML page.  The
+  // ONE place the insert time is computed: `capture_start_ms` floored to
+  // seconds and moved back by the inbound Age lines as received.  0, or -1
+  // when the call is malformed or the Age is refused -- and then nothing
+  // may be stored.  origin_html_hash is the caller's to set.
+  virtual int HtmlStoreWriteParams(
+      int /*action*/, uint32_t /*lifetime_s*/, uint32_t /*store_flags*/,
+      uint16_t /*cc_flags*/, int /*sidecar_stored*/,
+      int64_t /*capture_start_ms*/, const char* const* /*age_lines*/,
+      size_t /*age_count*/, uint64_t /*content_length*/,
+      const char* /*origin_content_type*/, PsWriteParams* /*params*/) const {
+    return -1;
+  }
+
+  // ps_html_stored_facts_from_reads, over three exact-id read results (each
+  // nullptr when that read missed): the original (kPsSentinelOriginal), the
+  // Markdown copy (kPsSentinelAgentMarkdown) and the withheld marker
+  // (kPsSentinelMarkdownWithheld).  kPsHtmlFactsPurged is the caller's to
+  // add.  0, or -1 for a malformed call.
+  virtual int HtmlStoredFactsFromReads(const void* /*original*/,
+                                       const void* /*markdown*/,
+                                       const void* /*withheld_marker*/,
+                                       int /*sidecar_present*/,
+                                       PsHtmlStoredFacts* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_markdown_etag: 0; -1 for a bad argument; -3 when `capacity` is
+  // too small (*out_len is then the length needed).
+  virtual int HtmlMarkdownEtag(const uint8_t* /*binding_hash*/,
+                               const uint8_t* /*markdown_hash*/,
+                               char* /*buf*/, size_t /*capacity*/,
+                               size_t* /*out_len*/) const {
+    return -1;
+  }
+
+  // ps_if_none_match_matches_weak: 1 match, 0 no match, -1 bad etag.
+  virtual int IfNoneMatchMatchesWeak(const char* /*if_none_match*/,
+                                     const char* /*etag*/) const {
+    return -1;
+  }
+
+  // ps_cache_write_headers_sidecar_site.  Write the sidecar BEFORE the
+  // durable original it pairs with; see the peer's header.
+  virtual int CacheWriteHeadersSidecarSite(
+      void* /*cache*/, const PsSidecarWriteParams* /*params*/,
+      const char* const* /*names*/, const char* const* /*values*/,
+      size_t /*count*/, int* /*out_verdict*/, int* /*out_stored*/) const {
+    return kPsErrInvalidArg;
+  }
+
+  // ps_headers_sidecar_read: kPsOk with *out_block set to a block the caller
+  // frees with HeaderBlockFree; kPsErrNotFound when there is none (also for
+  // a block in a format the library does not know).  *out_block is nullptr
+  // on every other return.
+  virtual int HeadersSidecarRead(void* /*cache*/, const char* /*url*/,
+                                 const char* /*hostname*/,
+                                 const char* /*scheme*/, const char* /*site*/,
+                                 void** out_block) const {
+    if (out_block != nullptr) *out_block = nullptr;
+    return kPsErrInvalidArg;
+  }
+
+  // The ps_header_block_* accessors over a block from HeadersSidecarRead.
+  virtual size_t HeaderBlockCount(const void* /*block*/) const { return 0; }
+  virtual int HeaderBlockGet(const void* /*block*/, size_t /*index*/,
+                             const char** /*out_name*/,
+                             size_t* /*out_name_len*/,
+                             const char** /*out_value*/,
+                             size_t* /*out_value_len*/) const {
+    return kPsErrInvalidArg;
+  }
+  virtual const uint8_t* HeaderBlockPairingHash(const void* /*block*/) const {
+    return nullptr;
+  }
+  // kPsSidecarPaired, kPsSidecarUnpaired, or -1 for a null block.
+  virtual int HeaderBlockPairing(const void* /*block*/,
+                                 const uint8_t* /*entry_hash*/) const {
+    return -1;
+  }
+  virtual void HeaderBlockFree(void* /*block*/) const {}
+
+  // ps_cache_remove_site: the whole key in one site.  kPsErrNotFound means
+  // nothing was stored, which a remover treats as success.
+  virtual int CacheRemoveSite(void* /*cache*/, const char* /*url*/,
+                              const char* /*hostname*/,
+                              const char* /*scheme*/,
+                              const char* /*site*/) const {
+    return kPsErrInvalidArg;
+  }
+
+  // The per-site purge epoch (a max-merge file beside the volume).  ANY
+  // non-kPsOk read means every entry of the site counts as purged, and
+  // *out_epoch_s is then left untouched.
+  virtual int CacheWriteSitePurgeEpoch(void* /*cache*/, const char* /*site*/,
+                                       uint64_t /*epoch_s*/) const {
+    return kPsErrInvalidArg;
+  }
+  virtual int CacheReadSitePurgeEpoch(void* /*cache*/, const char* /*site*/,
+                                      uint64_t* /*out_epoch_s*/) const {
+    return kPsErrInvalidArg;
+  }
+
+  // The worker's published state, read from a file under the cache path:
+  // call these on a timer, never per request.  ps_read_shared_config_html_mode
+  // gives a kPsHtmlMode* value; ps_read_shared_config_agent_entitled gives 1
+  // when agent-optimize is on and 0 when off.  Both -1 for a bad argument.
+  virtual int ReadSharedConfigHtmlMode(const char* /*cache_path*/) const {
+    return -1;
+  }
+  virtual int ReadSharedConfigAgentEntitled(const char* /*cache_path*/) const {
+    return -1;
+  }
+
+  // ps_wants_agent_markdown: 1 when `accept` (every line joined with ", ")
+  // ranks text/markdown at least as high as text/html, else 0.
+  virtual int WantsAgentMarkdown(const char* /*accept*/) const { return 0; }
 
   // Returns kPsOk and stores an opaque cache handle in *out_cache, or an
   // error code.  A successful open must be matched with CacheClose.
