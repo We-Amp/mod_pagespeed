@@ -85,6 +85,19 @@ class IproRecorder : public Writer {
   virtual void Fail() = 0;
   virtual bool failed() const = 0;
 
+  // Whether the rest of the body is still of any use to this recorder.
+  // False once it has decided not to record the response: it failed, or it
+  // decided from what it has seen so far (the headers, the size).  A seam
+  // reads this to stop doing per-byte work -- reading buffers into memory,
+  // walking them, reserving room for them -- for a response that will not
+  // be recorded.  It changes nothing: failed() keeps its own meaning, and
+  // DoneAndSetHeaders must still be called exactly once.
+  //
+  // Once false it stays false, and DoneAndSetHeaders then does no blocking
+  // I/O (there is nothing to store), so a seam may finish the recorder
+  // inline, at any point, whether or not the whole body has passed.
+  virtual bool wants_body() const { return !failed(); }
+
   virtual MessageHandler* handler() = 0;
   virtual const HttpOptions& http_options() const = 0;
 

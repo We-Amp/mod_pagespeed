@@ -164,6 +164,30 @@ void SetDaemonNowMsForTesting(DaemonNowMsFn fn);
 // live traffic.
 void ResetDaemonCompletionQueueForTesting();
 
+// What the in-place body filter does with its recorder at one buffer.
+enum class RecordStep {
+  // The response is not over and the recorder still wants the body: read
+  // the next buffer into memory and feed it.
+  kFeed,
+  // Finish the recorder now, on the event thread, taking no queue room.
+  // Taken whenever the recorder no longer wants the body (HTML decided at
+  // the headers, a body past the cap, a failed recording) -- before the
+  // body filter reads any buffer into memory for it.  DoneAndSetHeaders
+  // does no blocking I/O in any of those states.
+  kFinishInline,
+  // A complete daemon recording: its finish goes to the daemon record pool.
+  kQueueDaemon,
+  // A complete classic recording: its finish goes to the classic pool.
+  kQueueClassic,
+};
+
+// The step for `recorder` at a buffer whose last_buf flag is `last_buf`;
+// `daemon_recorder` says which substrate built it.  Read-only.  Called with
+// `last_buf` false before the filter touches a chain, so a recorder that no
+// longer wants the body is finished without its buffers being read.
+RecordStep NextRecordStep(const IproRecorder& recorder, bool daemon_recorder,
+                          bool last_buf);
+
 // One recorder's finish, carried to the pool.  Owns the final response
 // headers (the recorder does not take them) and, until it runs, the
 // recorder.  The pool deletes the closure after Run() or Cancel(), and the

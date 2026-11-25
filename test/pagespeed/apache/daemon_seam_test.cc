@@ -127,6 +127,24 @@ TEST_F(DaemonSeamTest, TheInPlaceHandlerAsksTheGate) {
          "so the substrate would record for ever and hand nothing back";
 }
 
+TEST_F(DaemonSeamTest, TheInPlaceFilterWalksTheBodyThroughTheTestedWalk) {
+  // The walk that stops reading buckets once the recorder no longer wants
+  // the body is unit-tested against real APR buckets; this pins that the
+  // recording filter is the one that uses it, rather than a loop of its own.
+  const GoogleString source = ReadSource("pagespeed/apache/mod_instaweb.cc");
+  const size_t filter = source.find("apr_status_t instaweb_in_place_filter(");
+  ASSERT_NE(GoogleString::npos, filter)
+      << "the in-place recording filter has been renamed; this pin needs "
+         "updating";
+  const size_t end = source.find("\n}\n", filter);
+  ASSERT_NE(GoogleString::npos, end);
+  const GoogleString body = source.substr(filter, end - filter);
+  EXPECT_NE(GoogleString::npos, body.find("FeedBrigadeToInPlaceRecorder("))
+      << "the recording filter no longer feeds the body through the walk";
+  EXPECT_EQ(GoogleString::npos, body.find("apr_bucket_read("))
+      << "the recording filter reads buckets itself again";
+}
+
 TEST_F(DaemonSeamTest, ASubrequestTakesNoInPlacePath) {
   // An httpd subrequest, such as a mod_include include, reaches this seam
   // with the INCLUDING page's URL (MakeRequestUrl chases request->main), so

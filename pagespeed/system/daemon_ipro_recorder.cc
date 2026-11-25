@@ -109,7 +109,7 @@ int64 DaemonIproRecorder::num_constructed() { return num_constructed_.value(); }
 
 bool DaemonIproRecorder::Write(const StringPiece& contents,
                                MessageHandler* /*handler*/) {
-  if (failure_ || over_cap_ || html_at_headers_) {
+  if (!wants_body()) {
     // Already decided; keep taking the bytes so the response still reaches
     // the client, but stop growing a buffer nothing will use.
     return true;

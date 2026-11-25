@@ -83,6 +83,20 @@ int FakeRecorder::calls = 0;
 ResponseHeaders* FakeRecorder::last_headers = nullptr;
 bool FakeRecorder::last_complete = false;
 
+// A recorder whose wants_body() and failed() answers are scripted, for the
+// body filter's step choice.
+class ScriptedRecorder : public FakeRecorder {
+ public:
+  ScriptedRecorder(bool wants_body, bool failed)
+      : wants_body_(wants_body), failed_(failed) {}
+  bool wants_body() const override { return wants_body_; }
+  bool failed() const override { return failed_; }
+
+ private:
+  const bool wants_body_;
+  const bool failed_;
+};
+
 class NgxDaemonRecordCompletionTest : public testing::Test {
  protected:
   NgxDaemonRecordCompletionTest()
@@ -245,6 +259,78 @@ TEST_F(NgxDaemonRecordCompletionTest, PooledCompletionFinishesOnceAndReleases) {
   EXPECT_EQ(1, FakeRecorder::calls);
   EXPECT_TRUE(
       TryQueueDaemonCompletion(kDaemonCompletionQueueMaxBytes, dropped_));
+}
+
+// A recorder that does not want the body is finished inline wherever the
+// filter is -- before the chain is read, mid-response and at the end -- on
+// either substrate.  That is what keeps its buffers from being read into
+// memory and its finish out of the completion queue.
+TEST_F(NgxDaemonRecordCompletionTest, AnUnwantedBodyIsAlwaysFinishedInline) {
+  for (bool daemon : {true, false}) {
+    for (bool failed : {true, false}) {
+      ScriptedRecorder recorder(false /* wants_body */, failed);
+      EXPECT_EQ(RecordStep::kFinishInline,
+                NextRecordStep(recorder, daemon, false))
+          << daemon << failed;
+      EXPECT_EQ(RecordStep::kFinishInline,
+                NextRecordStep(recorder, daemon, true))
+          << daemon << failed;
+    }
+  }
+}
+
+// A recorder that wants the body takes the paths it always took: fed until
+// the last buffer, then queued on its substrate's pool.
+TEST_F(NgxDaemonRecordCompletionTest, AWantedBodyIsFedThenQueued) {
+  ScriptedRecorder recorder(true /* wants_body */, false /* failed */);
+  EXPECT_EQ(RecordStep::kFeed, NextRecordStep(recorder, true, false));
+  EXPECT_EQ(RecordStep::kFeed, NextRecordStep(recorder, false, false));
+  EXPECT_EQ(RecordStep::kQueueDaemon, NextRecordStep(recorder, true, true));
+  EXPECT_EQ(RecordStep::kQueueClassic, NextRecordStep(recorder, false, true));
+}
+
+// The interface's default, which the classic recorder uses: wants_body() is
+// !failed(), so a classic recording is fed, queued or finished exactly as
+// it was before the accessor existed.
+TEST_F(NgxDaemonRecordCompletionTest, TheClassicDefaultFollowsFailed) {
+  FakeRecorder recorder;  // failed() is false
+  EXPECT_TRUE(recorder.wants_body());
+  EXPECT_EQ(RecordStep::kFeed, NextRecordStep(recorder, false, false));
+  EXPECT_EQ(RecordStep::kQueueClassic, NextRecordStep(recorder, false, true));
+}
+
+// The step choice under a mixed load: many responses the recorder will not
+// record (HTML) finishing alongside resource recordings.  Driven through the
+// steps the body filter takes (the filter itself is pinned by source in
+// ngx_daemon_seam_test), the HTML ones reserve nothing, so every resource
+// recording up to the item cap still finds room and none is dropped.
+TEST_F(NgxDaemonRecordCompletionTest, UnwantedBodiesReserveNoQueueRoom) {
+  const int64 kResourceBytes = 64 * 1024;
+  const int64 kHtmlBytes = 200 * 1024;
+  int queued = 0;
+  for (int i = 0; i < 4 * kDaemonCompletionQueueMaxItems; ++i) {
+    // Three HTML pages per resource, all in flight at once: nothing is
+    // released while the loop runs, which is the worst case for the caps.
+    const bool html = (i % 4) != 0;
+    IproRecorder* recorder =
+        new ScriptedRecorder(!html /* wants_body */, false /* failed */);
+    const int64 body_bytes = html ? kHtmlBytes : kResourceBytes;
+    switch (NextRecordStep(*recorder, true /* daemon */, true /* last_buf */)) {
+      case RecordStep::kFinishInline:
+        recorder->DoneAndSetHeaders(nullptr, true);
+        break;
+      case RecordStep::kQueueDaemon:
+        ASSERT_TRUE(TryQueueDaemonCompletion(body_bytes, dropped_)) << i;
+        ++queued;
+        recorder->DoneAndSetHeaders(nullptr, true);
+        break;
+      default:
+        FAIL() << "unexpected step at " << i;
+    }
+  }
+  EXPECT_EQ(kDaemonCompletionQueueMaxItems, queued);
+  EXPECT_EQ(0, dropped_->Get());
+  EXPECT_EQ(4 * kDaemonCompletionQueueMaxItems, FakeRecorder::calls);
 }
 
 TEST_F(NgxDaemonRecordCompletionTest, NullVariableAccepted) {

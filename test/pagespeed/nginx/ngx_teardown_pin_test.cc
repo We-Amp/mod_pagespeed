@@ -297,8 +297,8 @@ TEST(NgxTeardownPinTest, BodyPinsAreAllocatedWithoutThrowing) {
 TEST(NgxTeardownPinTest, ClassicRecordingFinishesOffTheEventThread) {
   // A complete classic recording ends in the HTTP cache write, which can
   // compress and wait on cache locks. The body filter must hand it to the
-  // classic record pool; the only inline call left with response headers is
-  // the incomplete or failed one, which does no I/O.
+  // classic record pool; the only inline finishes left are for a recorder
+  // that no longer wants the body or ended failed, which do no I/O.
   const GoogleString cc = ReadStrippedSource("pagespeed/nginx/ngx_pagespeed.cc");
   const size_t fn = cc.find(
       "ngx_int_tps_in_place_body_filter(ngx_http_request_t*r,ngx_chain_t*in){");
@@ -307,20 +307,33 @@ TEST(NgxTeardownPinTest, ClassicRecordingFinishesOffTheEventThread) {
   const size_t close = MatchingBrace(cc, open);
   ASSERT_NE(GoogleString::npos, close);
   const GoogleString body = cc.substr(open, close - open);
-  const size_t gate =
-      body.find("elseif(cl->buf->last_buf&&!recorder->failed()){");
+  const size_t gate = body.find("elseif(step==RecordStep::kQueueClassic){");
   ASSERT_NE(GoogleString::npos, gate) << "classic hand-off arm is gone";
   const size_t handoff = body.find(
       "g_classic_record_sequence->Add(newDaemonRecordCompletion(", gate);
   EXPECT_NE(GoogleString::npos, handoff);
+  // Two inline finishes: the early one, taken only when the recorder no
+  // longer wants the body, and the one after the hand-off arms.
+  const size_t early = body.find(
+      "if(NextRecordStep(*ctx->recorder,ctx->daemon_recorder,false/*last_buf*/"
+      ")==RecordStep::kFinishInline){");
+  ASSERT_NE(GoogleString::npos, early)
+      << "the early inline finish is no longer gated on the recorder not "
+         "wanting the body";
+  const size_t first_inline = body.find("ps_finish_recorder_inline(r,ctx,");
+  ASSERT_NE(GoogleString::npos, first_inline);
+  EXPECT_GT(first_inline, early);
+  EXPECT_LT(first_inline, gate);
   const size_t inline_call =
-      body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,");
+      body.find("ps_finish_recorder_inline(r,ctx,", first_inline + 1);
   ASSERT_NE(GoogleString::npos, inline_call);
   EXPECT_GT(inline_call, handoff)
       << "a complete classic recording finishes inline again";
   EXPECT_EQ(GoogleString::npos,
-            body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,",
-                      inline_call + 1));
+            body.find("ps_finish_recorder_inline(r,ctx,", inline_call + 1));
+  EXPECT_EQ(GoogleString::npos, body.find("->DoneAndSetHeaders(&"))
+      << "the body filter finishes a recorder with headers outside the "
+         "inline helper";
   // The request declined to nginx when its recorder was created, which
   // released the driver: the body filter must not reach through it.
   EXPECT_EQ(GoogleString::npos, body.find("ctx->driver->"))
