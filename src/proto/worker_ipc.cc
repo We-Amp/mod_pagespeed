@@ -100,6 +100,11 @@ std::vector<char> CacheNotification::Serialize() const {
   if (site_len != 0 && !IsSiteId(site)) {
     return {};
   }
+  if (!HtmlStoredShapeValid(html_stored, from_module, host_vouched,
+                            site_len != 0,
+                            content_type == ContentType::kHtml)) {
+    return {};
+  }
 
   // total_length covers everything after itself: version + fields.
   size_t total_size = 1 +         // version
@@ -184,6 +189,7 @@ std::vector<char> CacheNotification::Serialize() const {
   if (host_vouched) flags |= kNotifyFlagHostVouched;
   if (from_module) flags |= kNotifyFlagFromModule;
   if (legacy_ex_caller) flags |= kNotifyFlagLegacyExCaller;
+  if (html_stored) flags |= kNotifyFlagHtmlStored;
   *ptr = static_cast<char>(flags);
 
   return result;
@@ -356,6 +362,15 @@ bool CacheNotification::Deserialize(std::string_view data,
   notification->host_vouched = (flags & kNotifyFlagHostVouched) != 0;
   notification->from_module = (flags & kNotifyFlagFromModule) != 0;
   notification->legacy_ex_caller = (flags & kNotifyFlagLegacyExCaller) != 0;
+  notification->html_stored = (flags & kNotifyFlagHtmlStored) != 0;
+  // Fail closed: the stored-page bit means nothing outside its one shape, so
+  // a frame that carries it in any other is refused whole.
+  if (!HtmlStoredShapeValid(
+          notification->html_stored, notification->from_module,
+          notification->host_vouched, !notification->site.empty(),
+          notification->content_type == ContentType::kHtml)) {
+    return reject(IpcRejectReason::kMalformed, version);
+  }
 
   // Both or neither, checked on the way in as well as on the way out: a sender
   // that never emits a half context does not make a receiver that would accept

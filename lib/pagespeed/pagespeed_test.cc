@@ -12,6 +12,7 @@
 #include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -19,8 +20,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <expected>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
+#include <set>
+#include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -28,9 +35,13 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "lib/cache/html_withheld_marker.h"
 #include "lib/pagespeed/pagespeed_internal.h"
+#include "nlohmann/json.hpp"
+#include "src/worker/html_mode.h"
 #include "src/worker/serve_stats.h"
 #include "src/worker/shared_config.h"
+#include "test/lib/cache/daemon_html_policy_cases.h"
 #include "test/test_util/temp_dir.h"
 
 // ================================================================
@@ -5269,9 +5280,9 @@ TEST(PageSpeedCApi, HtmlStoreClassifyModes) {
                                         "<p>hi</p>", PS_HTML_CACHE_OFF);
   EXPECT_EQ(off.action, PS_HTML_STORE_ACTION_REFUSE);
   EXPECT_STREQ(ps_html_store_reason_name(off.reason), "mode");
-  // The values that would act are not accepted, and report-only never
-  // answers with one.
-  for (int mode : {-1, 2, 3, 4}) {
+  // Values outside the enumerated set are malformed, and report-only never
+  // answers with an action that writes.
+  for (int mode : {-1, 4, 5}) {
     EXPECT_EQ(
         ClassifyStore(kStorableHeaders, "GET", "/", 0, 200, "<p>hi</p>", mode)
             .action,
@@ -5280,6 +5291,19 @@ TEST(PageSpeedCApi, HtmlStoreClassifyModes) {
   }
   EXPECT_NE(ClassifyStore(kStorableHeaders).action, 1);
   EXPECT_NE(ClassifyStore(kStorableHeaders).action, 2);
+  // The serve modes (PS_API 1.14) store exactly what report-only reports it
+  // would, with the same reason and lifetime.
+  const StoreResult report = ClassifyStore(kStorableHeaders);
+  EXPECT_EQ(report.action, PS_HTML_STORE_ACTION_WOULD_STORE);
+  for (int mode :
+       {PS_HTML_CACHE_SERVE_VARIANTS, PS_HTML_CACHE_SERVE_CACHED_HTML}) {
+    const StoreResult serve =
+        ClassifyStore(kStorableHeaders, "GET", "/", 0, 200, "<p>hi</p>", mode);
+    EXPECT_EQ(serve.action, PS_HTML_STORE_ACTION_STORE) << mode;
+    EXPECT_EQ(serve.reason, report.reason) << mode;
+    EXPECT_EQ(serve.lifetime_s, report.lifetime_s) << mode;
+    EXPECT_EQ(serve.flags, report.flags) << mode;
+  }
 }
 
 TEST(PageSpeedCApi, HtmlStoreClassifyShortPrefixIsRefused) {
@@ -5299,7 +5323,7 @@ TEST(PageSpeedCApi, HtmlStoreClassifyShortPrefixIsRefused) {
   EXPECT_STREQ(detail, "body_prefix");
 }
 
-TEST(PageSpeedCApi, HtmlDecisionFormatRefusesServeFacts) {
+TEST(PageSpeedCApi, HtmlDecisionFormatRefusesServeFactsOnStoreSideLines) {
   char buf[256];
   size_t len = 99;
   const char* action_key[] = {"action"};
@@ -5307,25 +5331,189 @@ TEST(PageSpeedCApi, HtmlDecisionFormatRefusesServeFacts) {
   EXPECT_EQ(ps_html_decision_format(action_key, would_serve, 1, buf,
                                     sizeof(buf), &len),
             -2);
-  const char* mode_key[] = {"mode"};
-  const char* serving[] = {"serve-variants"};
-  EXPECT_EQ(
-      ps_html_decision_format(mode_key, serving, 1, buf, sizeof(buf), &len),
-      -2);
   const char* reason_key[] = {"reason"};
   const char* fresh[] = {"fresh"};
   EXPECT_EQ(
       ps_html_decision_format(reason_key, fresh, 1, buf, sizeof(buf), &len),
       -2);
   const char* request_key[] = {"request"};
-  const char* markdown[] = {"accept_markdown"};
+  const char* no_cache[] = {"no_cache"};
   EXPECT_EQ(
-      ps_html_decision_format(request_key, markdown, 1, buf, sizeof(buf), &len),
+      ps_html_decision_format(request_key, no_cache, 1, buf, sizeof(buf), &len),
       -2);
   const char* age_key[] = {"age_s"};
   const char* age[] = {"1"};
   EXPECT_EQ(ps_html_decision_format(age_key, age, 1, buf, sizeof(buf), &len),
             -2);
+  // A report-only line keeps to the store side whatever else it carries.
+  const char* ro_keys[] = {"mode", "reason"};
+  const char* ro_fresh[] = {"report-only", "fresh"};
+  EXPECT_EQ(
+      ps_html_decision_format(ro_keys, ro_fresh, 2, buf, sizeof(buf), &len),
+      -2);
+  const char* ro_unpaired[] = {"report-only", "sidecar_unpaired"};
+  EXPECT_EQ(
+      ps_html_decision_format(ro_keys, ro_unpaired, 2, buf, sizeof(buf), &len),
+      -2);
+
+  // Mode off is a store-side line too: no serve action, serve reason or serve
+  // key gets through it.
+  struct Pair {
+    const char* key;
+    const char* value;
+  };
+  const Pair serve_facts[] = {{"action", "would_serve"},
+                              {"action", "served_markdown"},
+                              {"action", "served_html"},
+                              {"action", "serve_markdown"},
+                              {"action", "validate"},
+                              {"action", "stored"},
+                              {"reason", "fresh"},
+                              {"reason", "withheld"},
+                              {"reason", "skew"},
+                              {"reason", "binding_stale"},
+                              {"reason", "sidecar_unpaired"},
+                              {"reason", "transport_conflict"},
+                              {"request", "no_cache"},
+                              {"variant", "markdown"},
+                              {"binding", "live"},
+                              {"age_s", "1"}};
+  for (const Pair& f : serve_facts) {
+    const char* keys[] = {"mode", f.key};
+    const char* values[] = {"off", f.value};
+    len = 99;
+    EXPECT_EQ(ps_html_decision_format(keys, values, 2, buf, sizeof(buf), &len),
+              -2)
+        << f.key << "=" << f.value;
+    EXPECT_EQ(len, 0u) << f.key << "=" << f.value;
+  }
+
+  // A serve-mode line is admitted whole, but only within the grammar: an
+  // action or reason outside the closed sets is still refused.
+  for (const char* mode : {"serve-variants", "serve-cached-html"}) {
+    const Pair unknown[] = {{"action", "serve_everything"},
+                            {"action", "served"},
+                            {"action", "SERVED_MARKDOWN"},
+                            {"reason", "not_a_reason"},
+                            {"reason", "fresh:x"},
+                            {"reason", "Fresh"},
+                            {"variant", "html"},
+                            {"binding", "maybe"}};
+    for (const Pair& f : unknown) {
+      const char* keys[] = {"mode", f.key};
+      const char* values[] = {mode, f.value};
+      len = 99;
+      EXPECT_EQ(
+          ps_html_decision_format(keys, values, 2, buf, sizeof(buf), &len), -2)
+          << mode << " " << f.key << "=" << f.value;
+      EXPECT_EQ(len, 0u);
+    }
+  }
+}
+
+// PS_API 1.14: what report-only lines may now carry, and serve-side lines.
+TEST(PageSpeedCApi, HtmlDecisionFormatAdmitsTheSurface113Adds) {
+  char buf[512];
+  size_t len = 0;
+  // A report-only line records that the request asked for Markdown, a
+  // front-end store refusal, and the names the server added.
+  const char* ro_keys[] = {"mode", "action", "reason", "request",
+                           "vhost_added"};
+  for (const char* reason : {"url_disagree", "budget", "purge_race"}) {
+    const char* ro_values[] = {"report-only", "refuse", reason,
+                               "accept_markdown", "x-frame-options,x-t"};
+    ASSERT_EQ(
+        ps_html_decision_format(ro_keys, ro_values, 5, buf, sizeof(buf), &len),
+        0)
+        << reason;
+  }
+  EXPECT_EQ(std::string(buf),
+            "{\"mode\":\"report-only\",\"action\":\"refuse\","
+            "\"reason\":\"purge_race\",\"request\":\"accept_markdown\","
+            "\"vhost_added\":\"x-frame-options,x-t\"}");
+  // vhost_added carries names only.
+  const char* va_key[] = {"vhost_added"};
+  const char* va_value[] = {"x-t: 1"};
+  EXPECT_EQ(
+      ps_html_decision_format(va_key, va_value, 1, buf, sizeof(buf), &len), -2);
+
+  // A serve-side line, from mode 2 up.
+  const char* serve_keys[] = {"ts_ms",   "host",   "path",    "mode",
+                              "action",  "reason", "request", "variant",
+                              "binding", "age_s"};
+  for (const char* mode : {"serve-variants", "serve-cached-html"}) {
+    for (const char* reason :
+         {"fresh", "withheld", "skew", "range", "cors", "method",
+          "no_transform", "sidecar_unpaired", "transport_conflict",
+          "url_disagree", "budget", "purge_race", "parent_stale"}) {
+      const char* serve_values[] = {"1700000000000",
+                                    "a.example",
+                                    "/p",
+                                    mode,
+                                    "served_markdown",
+                                    reason,
+                                    "accept_markdown",
+                                    "markdown",
+                                    "live",
+                                    "12"};
+      EXPECT_EQ(ps_html_decision_format(serve_keys, serve_values, 10, buf,
+                                        sizeof(buf), &len),
+                0)
+          << mode << " " << reason;
+    }
+  }
+  // The serve line still obeys the grammar.
+  const char* bad_values[] = {"1700000000000",
+                              "a.example",
+                              "/p?q",
+                              "serve-variants",
+                              "served_markdown",
+                              "fresh",
+                              "accept_markdown",
+                              "markdown",
+                              "live",
+                              "12"};
+  EXPECT_EQ(ps_html_decision_format(serve_keys, bad_values, 10, buf,
+                                    sizeof(buf), &len),
+            -2);
+}
+
+// Lines a 1.12 caller formats come out byte for byte as they did at 1.12.
+TEST(PageSpeedCApi, HtmlDecisionFormat112LinesAreByteStable) {
+  struct Case {
+    std::vector<const char*> keys;
+    std::vector<const char*> values;
+    const char* line;
+  };
+  const Case cases[] = {
+      {{"ts_ms", "host", "path", "mode", "action", "reason", "status", "size",
+        "lifetime_s", "validators", "cc", "sidecar", "request", "before"},
+       {"1700000000000", "a.example", "/index.html", "report-only",
+        "would_store", "none", "200", "1234", "300", "etag",
+        "public,max-age=300", "eligible_empty", "none", "cbf29ce484222325"},
+       "{\"ts_ms\":1700000000000,\"host\":\"a.example\",\"path\":"
+       "\"/index.html\",\"mode\":\"report-only\",\"action\":"
+       "\"would_store\",\"reason\":\"none\",\"status\":200,\"size\":1234,"
+       "\"lifetime_s\":300,\"validators\":\"etag\",\"cc\":"
+       "\"public,max-age=300\",\"sidecar\":\"eligible_empty\",\"request\":"
+       "\"none\",\"before\":\"cbf29ce484222325\"}"},
+      {{"host", "mode", "action", "reason", "vary"},
+       {"b.example", "report-only", "refuse", "vary:accept", "Accept"},
+       "{\"host\":\"b.example\",\"mode\":\"report-only\",\"action\":"
+       "\"refuse\",\"reason\":\"vary:accept\",\"vary\":\"Accept\"}"},
+      {{"mode", "action", "reason", "personalisation"},
+       {"report-only", "refuse", "personalisation_signal", "meta_csrf_token"},
+       "{\"mode\":\"report-only\",\"action\":\"refuse\",\"reason\":"
+       "\"personalisation_signal\",\"personalisation\":\"meta_csrf_token\"}"},
+  };
+  for (const Case& c : cases) {
+    char buf[1024];
+    size_t len = 0;
+    ASSERT_EQ(ps_html_decision_format(c.keys.data(), c.values.data(),
+                                      c.keys.size(), buf, sizeof(buf), &len),
+              0);
+    EXPECT_EQ(std::string(buf), c.line);
+  }
 }
 
 TEST(PageSpeedCApi, HtmlStoreReasonNames) {
@@ -5334,6 +5522,1230 @@ TEST(PageSpeedCApi, HtmlStoreReasonNames) {
   EXPECT_STREQ(ps_html_store_reason_name(20), "mode");
   EXPECT_EQ(ps_html_store_reason_name(21), nullptr);
   EXPECT_EQ(ps_html_store_reason_name(-1), nullptr);
+}
+
+// ================================================================
+// HTML serve policy (PS_API 1.14)
+// ================================================================
+//
+// The policy runner below is the proof of the library's HTML cache policy:
+// every row of the shared policy-case file runs against the real library,
+// and a row the runner cannot run is a failure, never a skip. The file's
+// hash pin is checked before any row runs. The row format is documented in
+// the file's own "about" block: an expect key that is absent is not
+// asserted, and every key that is present is.
+// The direct tests after it cover what a case file cannot state: the struct
+// size rules, the accept vectors read from their own file, and the frames a
+// notification actually puts on the wire.
+
+namespace {
+
+std::string ReadFileNoCr(std::string_view path) {
+  std::ifstream in(std::string(path), std::ios::binary);
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  std::string contents = buffer.str();
+  contents.erase(std::remove(contents.begin(), contents.end(), '\r'),
+                 contents.end());
+  return contents;
+}
+
+// Every mismatch names the row.
+struct RowRun {
+  std::vector<std::string> failures;
+  void Fail(const std::string& what) { failures.push_back(what); }
+};
+
+int ModeValue(const nlohmann::json& v) {
+  if (v.is_number_integer()) return v.get<int>();
+  const std::string m = v.get<std::string>();
+  if (m == "off") return PS_HTML_CACHE_OFF;
+  if (m == "report-only") return PS_HTML_CACHE_REPORT_ONLY;
+  if (m == "serve-variants") return PS_HTML_CACHE_SERVE_VARIANTS;
+  if (m == "serve-cached-html") return PS_HTML_CACHE_SERVE_CACHED_HTML;
+  return -100;
+}
+
+bool HexToBytes(const std::string& hex, uint8_t* out, size_t n) {
+  if (hex.size() != 2 * n) return false;
+  for (size_t i = 0; i < n; ++i) {
+    unsigned v = 0;
+    if (std::sscanf(hex.c_str() + 2 * i, "%2x", &v) != 1) return false;
+    out[i] = static_cast<uint8_t>(v);
+  }
+  return true;
+}
+
+using BitTable = std::vector<std::pair<std::string, uint32_t>>;
+
+// Names to bits. An unknown name is a failure, so a typo in a row cannot
+// pass silently.
+bool Bits(const nlohmann::json& names, const BitTable& table, uint32_t* out,
+          RowRun* run) {
+  *out = 0;
+  for (const auto& n : names) {
+    const std::string name = n.get<std::string>();
+    bool found = false;
+    for (const auto& [k, bit] : table) {
+      if (name == k) {
+        *out |= bit;
+        found = true;
+      }
+    }
+    if (!found) {
+      run->Fail("unknown flag name " + name);
+      return false;
+    }
+  }
+  return true;
+}
+
+const BitTable kStoreRequestBits = {
+    {"authorization", PS_HTML_STORE_REQUEST_HAS_AUTHORIZATION},
+    {"authenticated_user", PS_HTML_STORE_REQUEST_AUTHENTICATED_USER},
+    {"cookie", PS_HTML_STORE_REQUEST_HAS_COOKIE},
+    {"no_store", PS_HTML_STORE_REQUEST_NO_STORE}};
+const BitTable kStoreFlagBits = {
+    {"lifetime_explicit", PS_HTML_STORE_FLAG_LIFETIME_EXPLICIT},
+    {"needs_validation", PS_HTML_STORE_FLAG_NEEDS_VALIDATION},
+    {"has_validators", PS_HTML_STORE_FLAG_HAS_VALIDATORS},
+    {"explicit_shared", PS_HTML_STORE_FLAG_EXPLICIT_SHARED}};
+const BitTable kCcBits = {
+    {"no_cache", PS_CC_ORIGIN_NO_CACHE},
+    {"must_revalidate", PS_CC_ORIGIN_MUST_REVALIDATE},
+    {"no_store", PS_CC_ORIGIN_NO_STORE},
+    {"private", PS_CC_ORIGIN_PRIVATE},
+    {"public", PS_CC_ORIGIN_PUBLIC},
+    {"immutable", PS_CC_ORIGIN_IMMUTABLE},
+    {"s_maxage_present", PS_CC_ORIGIN_S_MAXAGE_PRESENT},
+    {"proxy_revalidate", PS_CC_ORIGIN_PROXY_REVALIDATE},
+    {"no_transform", PS_CC_ORIGIN_NO_TRANSFORM},
+    {"header_present", PS_CC_ORIGIN_HEADER_PRESENT},
+    {"private_qualified", PS_CC_ORIGIN_PRIVATE_QUALIFIED},
+    {"private_bare", PS_CC_ORIGIN_PRIVATE_BARE},
+    {"no_cache_qualified", PS_CC_ORIGIN_NO_CACHE_QUALIFIED},
+    {"no_cache_bare", PS_CC_ORIGIN_NO_CACHE_BARE},
+    {"s_maxage_repeated", PS_CC_ORIGIN_S_MAXAGE_REPEATED}};
+const BitTable kNotifyBits = {{"host_vouched", PS_NOTIFY_FLAG_HOST_VOUCHED},
+                              {"from_module", PS_NOTIFY_FLAG_FROM_MODULE},
+                              {"html_stored", PS_NOTIFY_FLAG_HTML_STORED}};
+// The stored-facts booleans of a serve row, by the struct's own names.
+const BitTable kFactBits = {
+    {"present", PS_HTML_FACTS_PRESENT},
+    {"needs_validation", PS_HTML_FACTS_NEEDS_VALIDATION},
+    {"explicit_shared", PS_HTML_FACTS_EXPLICIT_SHARED},
+    {"headers_not_reproducible", PS_HTML_FACTS_HEADERS_NOT_REPRODUCIBLE},
+    {"sidecar_required", PS_HTML_FACTS_SIDECAR_REQUIRED},
+    {"sidecar_present", PS_HTML_FACTS_SIDECAR_PRESENT},
+    {"purged", PS_HTML_FACTS_PURGED},
+    {"validated_this_request", PS_HTML_FACTS_VALIDATED_THIS_REQUEST},
+    {"variant_present", PS_HTML_FACTS_VARIANT_PRESENT},
+    {"binding_live", PS_HTML_FACTS_BINDING_LIVE},
+    {"withheld", PS_HTML_FACTS_WITHHELD}};
+
+const char* ServeActionName(int action) {
+  switch (action) {
+    case PS_HTML_SERVE_ACTION_FALL_THROUGH:
+      return "fall_through";
+    case PS_HTML_SERVE_ACTION_SERVE_HTML:
+      return "serve_html";
+    case PS_HTML_SERVE_ACTION_SERVE_MARKDOWN:
+      return "serve_markdown";
+    case PS_HTML_SERVE_ACTION_VALIDATE:
+      return "validate";
+    default:
+      return "malformed";
+  }
+}
+
+const char* StoreActionName(int action) {
+  switch (action) {
+    case PS_HTML_STORE_ACTION_REFUSE:
+      return "refuse";
+    case PS_HTML_STORE_ACTION_STORE:
+      return "store";
+    case PS_HTML_STORE_ACTION_STORE_NO_NOTIFY:
+      return "store_no_notify";
+    case PS_HTML_STORE_ACTION_WOULD_STORE:
+      return "would_store";
+    case PS_HTML_STORE_ACTION_WOULD_STORE_NO_NOTIFY:
+      return "would_store_no_notify";
+    default:
+      return "malformed";
+  }
+}
+
+int WithheldReasonValue(const std::string& name) {
+  for (uint8_t r = 1; r <= pagespeed::kHtmlWithheldReasonMax; ++r) {
+    if (pagespeed::HtmlWithheldReasonName(
+            static_cast<pagespeed::HtmlWithheldReason>(r)) == name) {
+      return r;
+    }
+  }
+  return 0;
+}
+
+template <typename T>
+void ExpectField(const nlohmann::json& expect, const char* key, T actual,
+                 RowRun* run) {
+  if (!expect.contains(key)) return;
+  const T wanted = expect[key].get<T>();
+  if (wanted != actual) {
+    std::ostringstream msg;
+    msg << key << ": expected " << expect[key].dump() << ", got " << actual;
+    run->Fail(msg.str());
+  }
+}
+
+// Every named bit of `expect[key]` must be set in `actual`.
+void ExpectBitsSet(const nlohmann::json& expect, const char* key,
+                   const BitTable& table, uint32_t actual, RowRun* run) {
+  if (!expect.contains(key)) return;
+  uint32_t wanted = 0;
+  if (!Bits(expect[key], table, &wanted, run)) return;
+  if ((actual & wanted) != wanted) {
+    std::ostringstream msg;
+    msg << key << ": expected bits 0x" << std::hex << wanted << " in 0x"
+        << actual;
+    run->Fail(msg.str());
+  }
+}
+
+// The strings a serve request points at, owned for the call.
+struct ServeRequestStrings {
+  std::string accept;
+  bool has_accept = false;
+};
+
+bool BuildServeRequest(int mode, const nlohmann::json& r,
+                       ServeRequestStrings* strings,
+                       ps_html_serve_request_t* out, RowRun* run) {
+  *out = ps_html_serve_request_t{};
+  out->struct_size = sizeof(*out);
+  out->mode = mode;
+  const auto str = [&r](const char* key) -> const char* {
+    if (!r.contains(key) || r[key].is_null()) return nullptr;
+    return r[key].get_ref<const std::string&>().c_str();
+  };
+  out->method = str("method");
+  if (r.contains("accept")) {
+    strings->has_accept = true;
+    for (size_t i = 0; i < r["accept"].size(); ++i) {
+      if (i != 0) strings->accept += ", ";
+      strings->accept += r["accept"][i].get<std::string>();
+    }
+    out->accept = strings->accept.c_str();
+  }
+  out->cache_control = str("cache_control");
+  out->pragma = str("pragma");
+  out->if_none_match = str("if_none_match");
+  const auto present = [&r](const char* key) {
+    return r.contains(key) && !r[key].is_null() &&
+           (!r[key].is_boolean() || r[key].get<bool>());
+  };
+  if (present("authorization")) {
+    out->request_flags |= PS_HTML_SERVE_REQUEST_HAS_AUTHORIZATION;
+  }
+  if (present("authenticated_user")) {
+    out->request_flags |= PS_HTML_SERVE_REQUEST_AUTHENTICATED_USER;
+  }
+  if (present("cookie")) out->request_flags |= PS_HTML_SERVE_REQUEST_HAS_COOKIE;
+  if (present("range")) out->request_flags |= PS_HTML_SERVE_REQUEST_HAS_RANGE;
+  if (present("if_range")) {
+    out->request_flags |= PS_HTML_SERVE_REQUEST_HAS_IF_RANGE;
+  }
+  if (present("origin")) out->request_flags |= PS_HTML_SERVE_REQUEST_HAS_ORIGIN;
+  if (!r.contains("now_s")) {
+    run->Fail("request without now_s");
+    return false;
+  }
+  out->now_seconds = r["now_s"].get<uint32_t>();
+  return true;
+}
+
+bool BuildStoredFacts(const nlohmann::json& s, ps_html_stored_facts_t* out,
+                      RowRun* run) {
+  *out = ps_html_stored_facts_t{};
+  out->struct_size = sizeof(*out);
+  for (const auto& [name, bit] : kFactBits) {
+    if (s.contains(name) && s[name].get<bool>()) out->flags |= bit;
+  }
+  uint32_t cc = 0;
+  if (!Bits(s.value("cc_flags", nlohmann::json::array()), kCcBits, &cc, run)) {
+    return false;
+  }
+  // The stored entry's no-transform reaches the facts as their own bit.
+  if ((cc & PS_CC_ORIGIN_NO_TRANSFORM) != 0) {
+    out->flags |= PS_HTML_FACTS_NO_TRANSFORM;
+  }
+  out->stored_at = s.value("stored_at", 0u);
+  out->age_at_store = s.value("age_at_store", 0u);
+  out->lifetime_s = s.value("lifetime_s", 0u);
+  out->render_ttl_s = s.value("render_ttl_s", 0u);
+  if (!HexToBytes(s.value("binding_hash", std::string(64, '0')),
+                  out->binding_hash, PS_HTML_HASH_BYTES) ||
+      !HexToBytes(s.value("markdown_hash", std::string(64, '0')),
+                  out->markdown_hash, PS_HTML_HASH_BYTES)) {
+    run->Fail("bad hash field");
+    return false;
+  }
+  return true;
+}
+
+// Runs one serve verdict and checks `expect`, the about block's `outcome`
+// included, plus the invariants every row holds.
+void CheckServeVerdict(const ps_html_serve_request_t& request,
+                       const ps_html_stored_facts_t& facts,
+                       const nlohmann::json& expect, RowRun* run) {
+  ps_html_serve_verdict_t v{};
+  v.struct_size = sizeof(v);
+  const int rc = ps_html_serve_classify(&request, &facts, &v);
+  const std::string action = rc == 0 ? ServeActionName(v.action) : "malformed";
+  ExpectField<std::string>(expect, "action", action, run);
+  if (rc != 0) return;
+  const char* reason = ps_html_serve_reason_name(v.reason);
+  ExpectField<std::string>(expect, "reason", reason ? reason : "<none>", run);
+  ExpectField<bool>(expect, "enforce", v.enforce != 0, run);
+  ExpectField<bool>(expect, "wants_markdown", v.wants_markdown != 0, run);
+  ExpectField<uint32_t>(expect, "age_s", v.age_s, run);
+
+  // The outcome, composed from the library's own calls as the file defines
+  // it, and checked against the verdict's not_modified so the two agree.
+  std::string outcome = "fall_through";
+  if (v.action == PS_HTML_SERVE_ACTION_SERVE_MARKDOWN) {
+    outcome = "markdown_200";
+    char tag[PS_HTML_MARKDOWN_ETAG_CHARS + 1];
+    size_t len = 0;
+    if (request.if_none_match != nullptr &&
+        ps_html_markdown_etag(facts.binding_hash, facts.markdown_hash, tag,
+                              sizeof(tag), &len) == 0 &&
+        ps_if_none_match_matches_weak(request.if_none_match, tag) == 1) {
+      outcome = "markdown_304";
+    }
+    if ((outcome == "markdown_304") != (v.not_modified != 0)) {
+      run->Fail("not_modified disagrees with the composed outcome");
+    }
+  }
+  ExpectField<std::string>(expect, "outcome", outcome, run);
+
+  if (v.not_modified != 0 && v.action != PS_HTML_SERVE_ACTION_SERVE_MARKDOWN) {
+    run->Fail("a 304 for a copy that is not served");
+  }
+  if (v.action == PS_HTML_SERVE_ACTION_SERVE_MARKDOWN &&
+      v.wants_markdown == 0) {
+    run->Fail("Markdown served without a preference for it");
+  }
+  if ((request.mode == PS_HTML_CACHE_OFF ||
+       request.mode == PS_HTML_CACHE_REPORT_ONLY) &&
+      (v.enforce != 0 || v.action != PS_HTML_SERVE_ACTION_FALL_THROUGH)) {
+    run->Fail("a mode that does not serve served");
+  }
+}
+
+void RunServeRow(const nlohmann::json& in, const nlohmann::json& expect,
+                 RowRun* run) {
+  ServeRequestStrings strings;
+  ps_html_serve_request_t request;
+  ps_html_stored_facts_t facts;
+  if (!BuildServeRequest(ModeValue(in.at("mode")), in.at("request"), &strings,
+                         &request, run) ||
+      !BuildStoredFacts(in.at("stored"), &facts, run)) {
+    return;
+  }
+  CheckServeVerdict(request, facts, expect, run);
+}
+
+void RunStoreRow(const nlohmann::json& in, const nlohmann::json& expect,
+                 RowRun* run) {
+  std::vector<const char*> names;
+  std::vector<const char*> values;
+  for (const auto& h : in.at("headers")) {
+    names.push_back(h.at(0).get_ref<const std::string&>().c_str());
+    values.push_back(h.at(1).get_ref<const std::string&>().c_str());
+  }
+  uint32_t request_flags = 0;
+  if (!Bits(in.value("request", nlohmann::json::array()), kStoreRequestBits,
+            &request_flags, run)) {
+    return;
+  }
+  const std::string& body = in.at("body").get_ref<const std::string&>();
+  const std::string& method = in.at("method").get_ref<const std::string&>();
+  const std::string& path = in.at("url_path").get_ref<const std::string&>();
+  int reason = -1;
+  int sidecar = 0;
+  uint32_t lifetime = 0;
+  uint32_t flags = 0;
+  uint16_t cc = 0;
+  size_t detail_len = 0;
+  char detail[160] = {};
+  const int mode = ModeValue(in.at("mode"));
+  const int action = ps_html_store_classify(
+      mode, method.c_str(), path.c_str(), request_flags,
+      in.at("status").get<int>(), names.empty() ? nullptr : names.data(),
+      values.empty() ? nullptr : values.data(), names.size(),
+      in.value("body_bytes", static_cast<uint64_t>(body.size())),
+      in.value("body_complete", true) ? 1 : 0, body.data(), body.size(),
+      in.value("max_body_bytes", uint64_t{5} * 1024 * 1024),
+      in.value("now_s", 0u), &reason, &lifetime, &flags, &cc, &sidecar, detail,
+      sizeof(detail), &detail_len);
+  ExpectField<std::string>(expect, "action", StoreActionName(action), run);
+  if (action < 0) return;
+  const char* name = ps_html_store_reason_name(reason);
+  ExpectField<std::string>(expect, "reason", name ? name : "<none>", run);
+  ExpectField<std::string>(expect, "detail", std::string(detail), run);
+  ExpectField<uint32_t>(expect, "lifetime_s", lifetime, run);
+  ExpectBitsSet(expect, "flags", kStoreFlagBits, flags, run);
+  ExpectBitsSet(expect, "cc_flags", kCcBits, cc, run);
+  if (mode == PS_HTML_CACHE_REPORT_ONLY &&
+      (action == PS_HTML_STORE_ACTION_STORE ||
+       action == PS_HTML_STORE_ACTION_STORE_NO_NOTIFY)) {
+    run->Fail("report-only returned an action that writes");
+  }
+}
+
+// The deriver's withheld record, at its reserved id. It is not writable
+// through the C API, so the test writes it through the cache directly, as
+// the worker will.
+constexpr uint8_t kTestWithheldMarkerId = PS_SENTINEL_MARKDOWN_WITHHELD;
+constexpr char kPolicySite[] =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+bool WriteBytes(std::expected<pagespeed::WriteResult, cyclone::CacheError> wh,
+                std::string_view bytes) {
+  if (!wh.has_value()) return false;
+  if (!wh
+           ->write_sync(std::span<const std::byte>(
+               reinterpret_cast<const std::byte*>(bytes.data()), bytes.size()))
+           .has_value()) {
+    return false;
+  }
+  return wh->close_sync().has_value();
+}
+
+// A facts row: writes the HTML entry (through ps_html_store_write_params),
+// its Markdown copy, a withheld record and a header block into a real
+// temporary volume, reads them back by exact id in one site, and builds the
+// facts from those reads.
+void RunFactsRow(const nlohmann::json& in, const nlohmann::json& expect,
+                 RowRun* run) {
+  const std::string dir = pagespeed::test::MakeTempDir();
+  const std::string volume = dir + "/facts.vol";
+  ps_cache_config_t config;
+  ps_cache_config_init(&config);
+  config.volume_path = volume.c_str();
+  config.volume_size = static_cast<uint64_t>(10 * 1024 * 1024);
+  ps_cache_t* cache = nullptr;
+  if (ps_cache_open(&config, &cache) != PS_OK) {
+    run->Fail("cache open failed");
+    std::filesystem::remove_all(dir);
+    return;
+  }
+  const char* kUrl = "/facts.html";
+  const char* kHost = "facts.example";
+  const char* kScheme = "https";
+  const std::string site = kPolicySite;
+  const std::string body = "<html><body>a page for facts</body></html>";
+  const nlohmann::json& vol = in.at("volume");
+
+  const bool has_original =
+      vol.contains("original") && !vol["original"].is_null();
+  const bool has_markdown =
+      vol.contains("markdown") && !vol["markdown"].is_null();
+  const bool has_marker =
+      vol.contains("withheld_marker") && !vol["withheld_marker"].is_null();
+  const bool has_sidecar = vol.value("sidecar", false);
+
+  if (has_original) {
+    const nlohmann::json& o = vol["original"];
+    uint32_t cc = 0;
+    if (!Bits(o.value("cc_flags", nlohmann::json::array()), kCcBits, &cc,
+              run)) {
+      ps_cache_close(cache);
+      std::filesystem::remove_all(dir);
+      return;
+    }
+    // What the classifier reports for these directives: shared by public,
+    // or by an s-maxage that is then the lifetime.
+    const uint32_t store_flags =
+        PS_HTML_STORE_FLAG_LIFETIME_EXPLICIT |
+        ((cc & (PS_CC_ORIGIN_PUBLIC | PS_CC_ORIGIN_S_MAXAGE_PRESENT)) != 0
+             ? PS_HTML_STORE_FLAG_EXPLICIT_SHARED
+             : 0u);
+    const bool sidecar_required =
+        has_sidecar || o.value("sidecar_required", false);
+    const int action = (cc & PS_CC_ORIGIN_NO_TRANSFORM) != 0
+                           ? PS_HTML_STORE_ACTION_STORE_NO_NOTIFY
+                           : PS_HTML_STORE_ACTION_STORE;
+    ps_write_params_t params;
+    ps_write_params_init_auto(&params);
+    if (ps_html_store_write_params(
+            action, o.at("lifetime_s").get<uint32_t>(), store_flags,
+            static_cast<uint16_t>(cc | PS_CC_ORIGIN_HEADER_PRESENT),
+            sidecar_required ? 1 : 0,
+            int64_t{o.at("stored_at").get<uint32_t>()} * 1000, nullptr, 0,
+            body.size(), "text/html; charset=utf-8", &params) != 0) {
+      run->Fail("ps_html_store_write_params refused the row");
+    }
+    // The metadata the C write builds from these params, plus the content
+    // hash a module stamps on the entry it stores.
+    pagespeed::AlternateMetadata meta;
+    meta.full_mask = params.full_mask;
+    meta.content_type =
+        static_cast<pagespeed::ContentType>(params.content_type);
+    meta.flags = params.flags;
+    meta.origin_content_type = params.origin_ct;
+    meta.origin_max_age = params.origin_max_age;
+    meta.origin_s_maxage = params.origin_s_maxage;
+    meta.origin_cc_flags = params.origin_cc_flags;
+    meta.cache_inserted_at = params.cache_inserted_at;
+    if (o.contains("origin_html_hash") && !o["origin_html_hash"].is_null()) {
+      HexToBytes(o["origin_html_hash"].get<std::string>(),
+                 reinterpret_cast<uint8_t*>(meta.origin_html_hash.data()),
+                 PS_HTML_HASH_BYTES);
+    }
+    if (!WriteBytes(cache->cache->WriteOriginalAlternate(
+                        kUrl, kHost, kScheme, body.size(), meta, site),
+                    body)) {
+      run->Fail("original write failed");
+    }
+  }
+  if (has_markdown) {
+    const nlohmann::json& m = vol["markdown"];
+    pagespeed::AlternateMetadata meta;
+    meta.full_mask = 0x7C;
+    meta.content_type = pagespeed::ContentType::kOther;
+    meta.origin_content_type = "text/markdown; charset=utf-8";
+    meta.flags = pagespeed::AlternateMetadata::kFlagWorkerProcessed;
+    if (m.contains("origin_html_hash") && !m["origin_html_hash"].is_null()) {
+      HexToBytes(m["origin_html_hash"].get<std::string>(),
+                 reinterpret_cast<uint8_t*>(meta.origin_html_hash.data()),
+                 PS_HTML_HASH_BYTES);
+    }
+    const std::string copy = "# a page for facts\n";
+    if (!WriteBytes(cache->cache->WriteAgentAlternate(kUrl, kHost, kScheme,
+                                                      copy.size(), meta, site),
+                    copy)) {
+      run->Fail("markdown write failed");
+    }
+  }
+  if (has_marker) {
+    const nlohmann::json& k = vol["withheld_marker"];
+    pagespeed::HtmlWithheldMarker marker;
+    const int reason = WithheldReasonValue(k.at("reason").get<std::string>());
+    if (reason == 0) run->Fail("unknown withheld reason");
+    marker.reason = static_cast<pagespeed::HtmlWithheldReason>(reason);
+    const std::string version = k.at("deriver_version").get<std::string>();
+    if (version != "current" && version != "previous") {
+      run->Fail("unknown deriver_version " + version);
+    }
+    marker.deriver_version = version == "current"
+                                 ? pagespeed::kHtmlMarkdownDeriverVersion
+                                 : pagespeed::kHtmlMarkdownDeriverVersion - 1;
+    HexToBytes(k.at("parent_hash").get<std::string>(),
+               marker.parent_hash.data(), PS_HTML_HASH_BYTES);
+    const std::string payload = pagespeed::EncodeHtmlWithheldMarker(marker);
+    if (!WriteBytes(
+            cache->cache->WriteSentinel(
+                kUrl, kHost, kScheme,
+                static_cast<pagespeed::SentinelId>(kTestWithheldMarkerId),
+                payload.size(), site),
+            payload)) {
+      run->Fail("marker write failed");
+    }
+  }
+  if (has_sidecar) {
+    // A version byte and one header line; only its presence matters here.
+    const std::string block = std::string(1, '\x01') + "X-Policy: case\r\n";
+    if (!WriteBytes(
+            cache->cache->WriteSentinel(kUrl, kHost, kScheme,
+                                        pagespeed::SentinelId::kHeadersSidecar,
+                                        block.size(), site),
+            block)) {
+      run->Fail("sidecar write failed");
+    }
+  }
+
+  // Read back by exact id, in the site, as a front end does.
+  const auto read = [&](uint8_t id) -> ps_read_result_t* {
+    ps_read_result_t* r = nullptr;
+    if (ps_cache_read_alternate_site(cache, kUrl, kHost, kScheme, site.c_str(),
+                                     id, &r) != PS_OK) {
+      return nullptr;
+    }
+    return r;
+  };
+  ps_read_result_t* original = read(PS_SENTINEL_ORIGINAL);
+  ps_read_result_t* markdown = read(0x7C);
+  ps_read_result_t* marker = read(kTestWithheldMarkerId);
+  ps_read_result_t* sidecar = read(PS_SENTINEL_HEADERS_SIDECAR);
+  if (has_original && original == nullptr) run->Fail("original did not read");
+  if (has_markdown && markdown == nullptr) run->Fail("markdown did not read");
+  if (has_marker && marker == nullptr) run->Fail("marker did not read");
+  if (has_sidecar && sidecar == nullptr) run->Fail("sidecar did not read");
+
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = sizeof(facts);
+  if (ps_html_stored_facts_from_reads(original, markdown, marker,
+                                      sidecar != nullptr ? 1 : 0,
+                                      &facts) != 0) {
+    run->Fail("ps_html_stored_facts_from_reads failed");
+  }
+  const auto flag = [&facts](uint32_t bit) { return (facts.flags & bit) != 0; };
+  ExpectField<bool>(expect, "present", flag(PS_HTML_FACTS_PRESENT), run);
+  ExpectField<bool>(expect, "variant_present",
+                    flag(PS_HTML_FACTS_VARIANT_PRESENT), run);
+  ExpectField<bool>(expect, "binding_live", flag(PS_HTML_FACTS_BINDING_LIVE),
+                    run);
+  ExpectField<bool>(expect, "withheld", flag(PS_HTML_FACTS_WITHHELD), run);
+  ExpectField<bool>(expect, "explicit_shared",
+                    flag(PS_HTML_FACTS_EXPLICIT_SHARED), run);
+  ExpectField<bool>(expect, "sidecar_present",
+                    flag(PS_HTML_FACTS_SIDECAR_PRESENT), run);
+  if (flag(PS_HTML_FACTS_WITHHELD) && flag(PS_HTML_FACTS_BINDING_LIVE)) {
+    run->Fail("a withheld copy called live");
+  }
+  if (flag(PS_HTML_FACTS_WITHHELD) &&
+      facts.withheld_reason !=
+          WithheldReasonValue(
+              vol["withheld_marker"].at("reason").get<std::string>())) {
+    run->Fail("withheld_reason is not the marker's");
+  }
+  if (expect.contains("serve")) {
+    const nlohmann::json req = {{"method", "GET"},
+                                {"accept", {"text/markdown"}},
+                                {"now_s", in.at("now_s")}};
+    ServeRequestStrings strings;
+    ps_html_serve_request_t request;
+    if (BuildServeRequest(PS_HTML_CACHE_SERVE_VARIANTS, req, &strings, &request,
+                          run)) {
+      CheckServeVerdict(request, facts, expect["serve"], run);
+    }
+  }
+  ps_read_free(original);
+  ps_read_free(markdown);
+  ps_read_free(marker);
+  ps_read_free(sidecar);
+  ps_cache_close(cache);
+  std::filesystem::remove_all(dir);
+}
+
+void RunEtagRow(const nlohmann::json& in, const nlohmann::json& expect,
+                RowRun* run) {
+  uint8_t b[PS_HTML_HASH_BYTES];
+  uint8_t m[PS_HTML_HASH_BYTES];
+  if (!HexToBytes(in.at("binding_hash").get<std::string>(), b, sizeof(b)) ||
+      !HexToBytes(in.at("markdown_hash").get<std::string>(), m, sizeof(m))) {
+    run->Fail("bad hash field");
+    return;
+  }
+  char buf[64] = {};
+  size_t len = 0;
+  const int rc = ps_html_markdown_etag(b, m, buf, sizeof(buf), &len);
+  if (rc != 0) {
+    run->Fail("ps_html_markdown_etag returned " + std::to_string(rc));
+    return;
+  }
+  ExpectField<std::string>(expect, "etag", std::string(buf), run);
+  if (len != PS_HTML_MARKDOWN_ETAG_CHARS) run->Fail("etag length");
+}
+
+void RunInmRow(const nlohmann::json& in, const nlohmann::json& expect,
+               RowRun* run) {
+  const auto str = [&in](const char* key) -> const char* {
+    if (!in.contains(key) || in[key].is_null()) return nullptr;
+    return in[key].get_ref<const std::string&>().c_str();
+  };
+  const int rc =
+      ps_if_none_match_matches_weak(str("if_none_match"), str("etag"));
+  if (rc < 0) {
+    run->Fail("ps_if_none_match_matches_weak refused the call");
+    return;
+  }
+  ExpectField<bool>(expect, "match", rc == 1, run);
+}
+
+// A write_params row: the insert time from a capture start and the inbound
+// Age lines, for a plain storable page.
+void RunWriteParamsRow(const nlohmann::json& in, const nlohmann::json& expect,
+                       RowRun* run) {
+  const nlohmann::json age = in.value("age", nlohmann::json::array());
+  std::vector<std::string> lines;
+  lines.reserve(age.size());
+  for (const auto& l : age) lines.push_back(l.get<std::string>());
+  std::vector<const char*> ptrs;
+  ptrs.reserve(lines.size());
+  for (const std::string& l : lines) ptrs.push_back(l.c_str());
+  ps_write_params_t params;
+  ps_write_params_init_auto(&params);
+  const int rc = ps_html_store_write_params(
+      PS_HTML_STORE_ACTION_STORE, 300, PS_HTML_STORE_FLAG_LIFETIME_EXPLICIT,
+      PS_CC_ORIGIN_HEADER_PRESENT, 0, in.at("capture_start_ms").get<int64_t>(),
+      ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(), 1, "text/html",
+      &params);
+  ExpectField<bool>(expect, "valid", rc == 0, run);
+  if (rc != 0) return;
+  ExpectField<uint32_t>(expect, "inserted_at_s", params.cache_inserted_at, run);
+  // The entry records no age beside the insert time: Age is counted once.
+  ExpectField<uint32_t>(expect, "age_at_store", 0u, run);
+}
+
+// The argument check runs before any connection is tried, so a socket nobody
+// listens on tells the two apart: a refusal is PS_ERR_INVALID_ARG, anything
+// else passed the check.
+void RunNotifyRow(const nlohmann::json& in, const nlohmann::json& expect,
+                  RowRun* run) {
+  const std::string dir = pagespeed::test::MakeTempDir();
+  const std::string socket_path = dir + "/nobody.sock";
+  ps_notify_params_t p;
+  ps_notify_params_init_auto(&p);
+  p.url = "/n.html";
+  p.hostname = "n.example";
+  p.scheme = "https";
+  const std::string content = in.at("content").get<std::string>();
+  p.content_type = content == "html"    ? PS_CONTENT_HTML
+                   : content == "css"   ? PS_CONTENT_CSS
+                   : content == "js"    ? PS_CONTENT_JS
+                   : content == "image" ? PS_CONTENT_IMAGE
+                                        : PS_CONTENT_OTHER;
+  p.mask = in.value("mask", std::string()) == "llms_txt" ? 0xFFFFFFFDu : 0x08u;
+  p.agent_request = in.value("agent_request", false) ? 1 : 0;
+  std::string site;
+  if (in.contains("site") && !in["site"].is_null()) {
+    site = in["site"].get<std::string>();
+    p.site = site.c_str();
+  }
+  uint32_t flags = 0;
+  bool ok = true;
+  for (const auto& f : in.value("flags", nlohmann::json::array())) {
+    const std::string name = f.get<std::string>();
+    if (name.rfind("reserved_0x", 0) == 0) {
+      flags |= static_cast<uint32_t>(std::stoul(name.substr(11), nullptr, 16));
+      continue;
+    }
+    uint32_t bit = 0;
+    if (!Bits(nlohmann::json::array({name}), kNotifyBits, &bit, run)) {
+      ok = false;
+      break;
+    }
+    flags |= bit;
+  }
+  if (ok) {
+    p.notify_flags = flags;
+    const ps_error_t rc = ps_notify_worker_ex(socket_path.c_str(), &p);
+    ExpectField<bool>(expect, "valid", rc != PS_ERR_INVALID_ARG, run);
+  }
+  std::filesystem::remove_all(dir);
+}
+
+}  // namespace
+
+TEST(PageSpeedCApiPolicy, EveryPolicyCaseHoldsWithNoSkips) {
+  const std::string contents = pagespeed::test::ReadDaemonHtmlPolicyCases();
+  ASSERT_FALSE(contents.empty())
+      << "cannot read " << pagespeed::test::kDaemonHtmlPolicyCasesPath;
+  // The pin first: a runner never asserts a file other than the reviewed one.
+  ASSERT_EQ(pagespeed::test::PolicyCasesFnv1a64(contents),
+            pagespeed::test::kDaemonHtmlPolicyCasesFnv1a64);
+  const nlohmann::json doc = nlohmann::json::parse(contents);
+  const nlohmann::json& rows = doc.at("rows");
+  ASSERT_GT(rows.size(), 0u);
+
+  size_t ran = 0;
+  size_t skipped = 0;
+  std::map<std::string, size_t> per_call;
+  for (const nlohmann::json& row : rows) {
+    const std::string id = row.at("id").get<std::string>();
+    bool for_policy = false;
+    for (const auto& r : row.at("runners")) for_policy |= r == "policy";
+    if (!for_policy) {
+      ADD_FAILURE() << id << ": not a policy row";
+      ++skipped;
+      continue;
+    }
+    const nlohmann::json& body = row.at("policy");
+    const std::string call = body.at("call").get<std::string>();
+    const nlohmann::json& input = body.at("input");
+    const nlohmann::json& expect = body.at("expect");
+    RowRun run;
+    if (call == "store") {
+      RunStoreRow(input, expect, &run);
+    } else if (call == "serve") {
+      RunServeRow(input, expect, &run);
+    } else if (call == "facts") {
+      RunFactsRow(input, expect, &run);
+    } else if (call == "etag") {
+      RunEtagRow(input, expect, &run);
+    } else if (call == "inm") {
+      RunInmRow(input, expect, &run);
+    } else if (call == "notify") {
+      RunNotifyRow(input, expect, &run);
+    } else if (call == "write_params") {
+      RunWriteParamsRow(input, expect, &run);
+    } else {
+      ADD_FAILURE() << id << ": unknown call " << call;
+      ++skipped;
+      continue;
+    }
+    ++ran;
+    ++per_call[call];
+    for (const std::string& f : run.failures) ADD_FAILURE() << id << ": " << f;
+  }
+  EXPECT_EQ(skipped, 0u);
+  EXPECT_EQ(ran, rows.size());
+  std::printf("policy runner: %zu rows ran, %zu skipped", ran, skipped);
+  for (const auto& [call, n] : per_call) {
+    std::printf(", %s %zu", call.c_str(), n);
+  }
+  std::printf("\n");
+}
+
+// The 42 shared accept vectors, read from their own file, through the serve
+// verdict: what the serve classifier calls a Markdown preference is exactly
+// what ps_wants_agent_markdown calls one.
+TEST(PageSpeedCApiPolicy, AcceptVectorsThroughServeClassify) {
+  const std::string contents =
+      ReadFileNoCr("test/lib/classify/testdata/accept_markdown_vectors.txt");
+  ASSERT_FALSE(contents.empty());
+  std::istringstream lines(contents);
+  std::string line;
+  int count = 0;
+  while (std::getline(lines, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    std::istringstream fields(line);
+    int id = 0;
+    std::string verdict;
+    fields >> id >> verdict;
+    std::string accept;
+    bool any = false;
+    for (size_t at = line.find('<'); at != std::string::npos;
+         at = line.find('<', at + 1)) {
+      const size_t end = line.find('>', at);
+      ASSERT_NE(end, std::string::npos) << id;
+      if (any) accept += ", ";
+      accept += line.substr(at + 1, end - at - 1);
+      any = true;
+      at = end;
+    }
+    ps_html_serve_request_t request{};
+    request.struct_size = sizeof(request);
+    request.mode = PS_HTML_CACHE_SERVE_VARIANTS;
+    request.method = "GET";
+    request.accept = any ? accept.c_str() : nullptr;
+    request.now_seconds = 1000;
+    ps_html_stored_facts_t facts{};
+    facts.struct_size = sizeof(facts);
+    facts.flags = PS_HTML_FACTS_PRESENT | PS_HTML_FACTS_VARIANT_PRESENT |
+                  PS_HTML_FACTS_BINDING_LIVE;
+    facts.stored_at = 900;
+    facts.lifetime_s = 300;
+    ps_html_serve_verdict_t v{};
+    v.struct_size = sizeof(v);
+    ASSERT_EQ(ps_html_serve_classify(&request, &facts, &v), 0) << id;
+    const bool md = verdict == "MD";
+    EXPECT_EQ(v.wants_markdown != 0, md) << "vector " << id;
+    EXPECT_EQ(v.action, md ? PS_HTML_SERVE_ACTION_SERVE_MARKDOWN
+                           : PS_HTML_SERVE_ACTION_FALL_THROUGH)
+        << "vector " << id;
+    EXPECT_EQ(v.wants_markdown != 0,
+              ps_wants_agent_markdown(any ? accept.c_str() : nullptr) != 0)
+        << "vector " << id;
+    ++count;
+  }
+  EXPECT_EQ(count, 42);
+}
+
+TEST(PageSpeedCApiPolicy, ServeClassifyMalformedCallsWriteNothing) {
+  ps_html_serve_request_t request{};
+  request.struct_size = sizeof(request);
+  request.mode = PS_HTML_CACHE_SERVE_VARIANTS;
+  request.method = "GET";
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = sizeof(facts);
+  ps_html_serve_verdict_t v;
+  std::memset(&v, 0x5A, sizeof(v));
+  v.struct_size = sizeof(v);
+  const auto untouched = [&v]() {
+    return v.action == 0x5A5A5A5A && v.reason == 0x5A5A5A5A;
+  };
+  EXPECT_EQ(ps_html_serve_classify(nullptr, &facts, &v), -1);
+  EXPECT_EQ(ps_html_serve_classify(&request, nullptr, &v), -1);
+  EXPECT_EQ(ps_html_serve_classify(&request, &facts, nullptr), -1);
+  ps_html_serve_request_t short_request = request;
+  short_request.struct_size = sizeof(request) - 1;
+  EXPECT_EQ(ps_html_serve_classify(&short_request, &facts, &v), -1);
+  ps_html_stored_facts_t short_facts = facts;
+  short_facts.struct_size = 32;
+  EXPECT_EQ(ps_html_serve_classify(&request, &short_facts, &v), -1);
+  ps_html_serve_request_t no_method = request;
+  no_method.method = nullptr;
+  EXPECT_EQ(ps_html_serve_classify(&no_method, &facts, &v), -1);
+  for (int mode : {-1, 4, 1000}) {
+    ps_html_serve_request_t bad_mode = request;
+    bad_mode.mode = mode;
+    EXPECT_EQ(ps_html_serve_classify(&bad_mode, &facts, &v), -1) << mode;
+  }
+  EXPECT_TRUE(untouched());
+  // A request or facts struct LARGER than this library's is read only as far
+  // as the library knows it.
+  struct Wider {
+    ps_html_serve_request_t request;
+    uint64_t tail;
+  } wider{};
+  wider.request = request;
+  wider.request.struct_size = sizeof(wider);
+  wider.tail = ~uint64_t{0};
+  EXPECT_EQ(ps_html_serve_classify(&wider.request, &facts, &v), 0);
+  EXPECT_EQ(v.reason, 10);  // absent
+  EXPECT_STREQ(ps_html_serve_reason_name(v.reason), "absent");
+}
+
+TEST(PageSpeedCApiPolicy, ServeVerdictWritesOnlyTheCallersPrefix) {
+  ps_html_serve_request_t request{};
+  request.struct_size = sizeof(request);
+  request.mode = PS_HTML_CACHE_SERVE_VARIANTS;
+  request.method = "GET";
+  request.accept = "text/markdown";
+  request.now_seconds = 1000;
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = sizeof(facts);
+  facts.flags = PS_HTML_FACTS_PRESENT | PS_HTML_FACTS_VARIANT_PRESENT |
+                PS_HTML_FACTS_BINDING_LIVE;
+  facts.stored_at = 990;
+  facts.lifetime_s = 60;
+  std::memset(facts.binding_hash, 0x11, sizeof(facts.binding_hash));
+  std::memset(facts.markdown_hash, 0xAA, sizeof(facts.markdown_hash));
+  // A caller whose verdict struct ends before the entity tag.
+  unsigned char buf[sizeof(ps_html_serve_verdict_t)];
+  std::memset(buf, 0x5A, sizeof(buf));
+  auto* v = reinterpret_cast<ps_html_serve_verdict_t*>(buf);
+  v->struct_size = offsetof(ps_html_serve_verdict_t, etag);
+  ASSERT_EQ(ps_html_serve_classify(&request, &facts, v), 0);
+  EXPECT_EQ(v->action, PS_HTML_SERVE_ACTION_SERVE_MARKDOWN);
+  EXPECT_EQ(v->struct_size, offsetof(ps_html_serve_verdict_t, etag));
+  for (size_t i = offsetof(ps_html_serve_verdict_t, etag); i < sizeof(buf);
+       ++i) {
+    EXPECT_EQ(buf[i], 0x5A) << i;
+  }
+}
+
+TEST(PageSpeedCApiPolicy, ServeReasonNamesAreAClosedSet) {
+  const char* const names[] = {"fresh",
+                               "mode",
+                               "auth_request",
+                               "cookie_request",
+                               "client_no_cache",
+                               "needs_validation",
+                               "stale",
+                               "headers_not_reproducible",
+                               "sidecar_missing",
+                               "purged",
+                               "absent",
+                               "binding_stale",
+                               "parent_stale",
+                               "method",
+                               "range",
+                               "cors",
+                               "no_transform",
+                               "withheld",
+                               "skew"};
+  for (int i = 0; i < static_cast<int>(std::size(names)); ++i) {
+    EXPECT_STREQ(ps_html_serve_reason_name(i), names[i]) << i;
+  }
+  EXPECT_EQ(ps_html_serve_reason_name(static_cast<int>(std::size(names))),
+            nullptr);
+  EXPECT_EQ(ps_html_serve_reason_name(-1), nullptr);
+}
+
+namespace {
+
+int WriteParamsWithAge(std::vector<const char*> age, int64_t capture_ms,
+                       ps_write_params_t* p) {
+  ps_write_params_init_auto(p);
+  return ps_html_store_write_params(
+      PS_HTML_STORE_ACTION_STORE, 300, PS_HTML_STORE_FLAG_LIFETIME_EXPLICIT,
+      PS_CC_ORIGIN_HEADER_PRESENT, 0, capture_ms,
+      age.empty() ? nullptr : age.data(), age.size(), 1, "text/html", p);
+}
+
+}  // namespace
+
+TEST(PageSpeedCApiPolicy, StoreWriteParamsComputesTheInsertTimeOnce) {
+  ps_write_params_t p;
+  ps_write_params_init_auto(&p);
+  const char* age[] = {"30"};
+  ASSERT_EQ(ps_html_store_write_params(PS_HTML_STORE_ACTION_STORE, 300,
+                                       PS_HTML_STORE_FLAG_LIFETIME_EXPLICIT,
+                                       PS_CC_ORIGIN_HEADER_PRESENT, 1,
+                                       int64_t{1700000000999}, age, 1, 1234,
+                                       "text/html; charset=utf-8", &p),
+            0);
+  EXPECT_EQ(p.alternate_id, PS_SENTINEL_ORIGINAL);
+  EXPECT_EQ(p.full_mask, static_cast<uint32_t>(PS_SENTINEL_ORIGINAL));
+  EXPECT_EQ(p.content_type, PS_CONTENT_HTML);
+  EXPECT_EQ(p.content_length, 1234u);
+  // Floored to the second, then moved back by the Age.
+  EXPECT_EQ(p.cache_inserted_at, 1700000000u - 30u);
+  EXPECT_EQ(p.origin_max_age, 300u);
+  EXPECT_EQ(p.origin_s_maxage, 0u);
+  EXPECT_EQ(p.flags, 0x10 | 0x20);
+  EXPECT_STREQ(p.origin_ct, "text/html; charset=utf-8");
+
+  // Only a storing action, a real capture time and a usable struct.
+  for (int action :
+       {PS_HTML_STORE_ACTION_WOULD_STORE, PS_HTML_STORE_ACTION_REFUSE}) {
+    ps_write_params_init_auto(&p);
+    EXPECT_EQ(
+        ps_html_store_write_params(action, 300, 0, 0, 0, int64_t{1700000000000},
+                                   nullptr, 0, 1, "text/html", &p),
+        -1);
+  }
+  for (int64_t ms : {int64_t{0}, int64_t{999}, int64_t{-5000}}) {
+    EXPECT_EQ(WriteParamsWithAge({}, ms, &p), -1) << ms;
+  }
+  EXPECT_EQ(ps_html_store_write_params(PS_HTML_STORE_ACTION_STORE, 300, 0, 0, 0,
+                                       int64_t{1700000000000}, nullptr, 0, 1,
+                                       nullptr, &p),
+            -1);
+  EXPECT_EQ(ps_html_store_write_params(PS_HTML_STORE_ACTION_STORE, 300, 0, 0, 0,
+                                       int64_t{1700000000000}, nullptr, 0, 1,
+                                       "text/html", nullptr),
+            -1);
+  EXPECT_EQ(ps_html_store_write_params(PS_HTML_STORE_ACTION_STORE, 300, 0, 0, 0,
+                                       int64_t{1700000000000}, nullptr, 1, 1,
+                                       "text/html", &p),
+            -1);
+  ps_write_params_t legacy;
+  ps_write_params_init(&legacy);  // the 1.1 prefix: no origin state
+  legacy.content_length = 77;
+  EXPECT_EQ(ps_html_store_write_params(PS_HTML_STORE_ACTION_STORE, 300, 0, 0, 0,
+                                       int64_t{1700000000000}, nullptr, 0, 1,
+                                       "text/html", &legacy),
+            -1);
+  EXPECT_EQ(legacy.content_length, 77u);  // nothing written
+
+  // Shared through s-maxage keeps the value; shared through public does not
+  // need it.
+  ps_write_params_init_auto(&p);
+  ASSERT_EQ(ps_html_store_write_params(
+                PS_HTML_STORE_ACTION_STORE_NO_NOTIFY, 120,
+                PS_HTML_STORE_FLAG_EXPLICIT_SHARED,
+                PS_CC_ORIGIN_HEADER_PRESENT | PS_CC_ORIGIN_S_MAXAGE_PRESENT, 0,
+                int64_t{1700000000000}, nullptr, 0, 1, "text/html", &p),
+            0);
+  EXPECT_EQ(p.origin_s_maxage, 120u);
+  EXPECT_EQ(p.flags, 0x10);
+  ps_write_params_init_auto(&p);
+  ASSERT_EQ(
+      ps_html_store_write_params(
+          PS_HTML_STORE_ACTION_STORE, 120, PS_HTML_STORE_FLAG_EXPLICIT_SHARED,
+          PS_CC_ORIGIN_HEADER_PRESENT | PS_CC_ORIGIN_PUBLIC, 0,
+          int64_t{1700000000000}, nullptr, 0, 1, "text/html", &p),
+      0);
+  EXPECT_EQ(p.origin_s_maxage, 0u);
+}
+
+// An Age the library cannot trust is never ignored: the page is not stored,
+// so it can never pass as fresher than the upstream said it was.
+TEST(PageSpeedCApiPolicy, StoreWriteParamsRefusesAnAgeItCannotTrust) {
+  ps_write_params_t p;
+  constexpr int64_t kCaptureMs = int64_t{1700000000500};
+  const std::string at_capture = std::to_string(1700000000);
+  const std::string past_capture = std::to_string(1700000001);
+  for (const std::vector<const char*>& age :
+       std::vector<std::vector<const char*>>{{at_capture.c_str()},
+                                             {past_capture.c_str()},
+                                             {"4294967295"},
+                                             {"2147483648"},
+                                             {"99999999999999999999"},
+                                             {"-5"},
+                                             {"1.5"},
+                                             {"abc"},
+                                             {""},
+                                             {"20", "40"},
+                                             {"20, 40"},
+                                             {"20", nullptr}}) {
+    p.content_length = 77;
+    EXPECT_EQ(WriteParamsWithAge(age, kCaptureMs, &p), -1)
+        << (age[0] != nullptr ? age[0] : "null");
+  }
+  // Trusted forms.
+  ASSERT_EQ(WriteParamsWithAge({" 20 ", "20"}, kCaptureMs, &p), 0);
+  EXPECT_EQ(p.cache_inserted_at, 1700000000u - 20u);
+  ASSERT_EQ(WriteParamsWithAge({"0"}, kCaptureMs, &p), 0);
+  EXPECT_EQ(p.cache_inserted_at, 1700000000u);
+  ASSERT_EQ(WriteParamsWithAge({"1699999999"}, kCaptureMs, &p), 0);
+  EXPECT_EQ(p.cache_inserted_at, 1u);
+}
+
+// If-None-Match `*` only as the whole field, and only for a copy that has a
+// tag of its own.
+TEST(PageSpeedCApiPolicy, StarConfirmsOnlyAWholeFieldAndATaggedCopy) {
+  const char* tag = "W/\"psm-0123456789abcdef\"";
+  EXPECT_EQ(ps_if_none_match_matches_weak("*", tag), 1);
+  EXPECT_EQ(ps_if_none_match_matches_weak("  *\t", tag), 1);
+  EXPECT_EQ(ps_if_none_match_matches_weak("\"a\", *", tag), 0);
+  EXPECT_EQ(ps_if_none_match_matches_weak("*, \"a\"", tag), 0);
+  EXPECT_EQ(ps_if_none_match_matches_weak("*, *", tag), 0);
+  EXPECT_EQ(ps_if_none_match_matches_weak("**", tag), 0);
+
+  ps_html_serve_request_t request{};
+  request.struct_size = sizeof(request);
+  request.mode = PS_HTML_CACHE_SERVE_VARIANTS;
+  request.method = "GET";
+  request.accept = "text/markdown";
+  request.if_none_match = "*";
+  request.now_seconds = 1000;
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = sizeof(facts);
+  facts.flags = PS_HTML_FACTS_PRESENT | PS_HTML_FACTS_VARIANT_PRESENT |
+                PS_HTML_FACTS_BINDING_LIVE;
+  facts.stored_at = 990;
+  facts.lifetime_s = 60;
+  std::memset(facts.binding_hash, 0x11, sizeof(facts.binding_hash));
+  std::memset(facts.markdown_hash, 0xAA, sizeof(facts.markdown_hash));
+  ps_html_serve_verdict_t v{};
+  v.struct_size = sizeof(v);
+  ASSERT_EQ(ps_html_serve_classify(&request, &facts, &v), 0);
+  EXPECT_EQ(v.action, PS_HTML_SERVE_ACTION_SERVE_MARKDOWN);
+  EXPECT_EQ(v.not_modified, 1);
+  // No copy hash: no tag, so neither `*` nor any tag gets a 304.
+  std::memset(facts.markdown_hash, 0, sizeof(facts.markdown_hash));
+  ASSERT_EQ(ps_html_serve_classify(&request, &facts, &v), 0);
+  EXPECT_EQ(v.action, PS_HTML_SERVE_ACTION_SERVE_MARKDOWN);
+  EXPECT_EQ(v.not_modified, 0);
+  EXPECT_STREQ(v.etag, "");
+  // Not servable: never 304, `*` included.
+  std::memset(facts.markdown_hash, 0xAA, sizeof(facts.markdown_hash));
+  facts.flags &= ~PS_HTML_FACTS_BINDING_LIVE;
+  ASSERT_EQ(ps_html_serve_classify(&request, &facts, &v), 0);
+  EXPECT_EQ(v.action, PS_HTML_SERVE_ACTION_FALL_THROUGH);
+  EXPECT_EQ(v.not_modified, 0);
+}
+
+// A verdict struct that ends inside the tag gets NUL bytes there, never a
+// partial tag.
+TEST(PageSpeedCApiPolicy, AShortVerdictNeverHoldsAPartialTag) {
+  ps_html_serve_request_t request{};
+  request.struct_size = sizeof(request);
+  request.mode = PS_HTML_CACHE_SERVE_VARIANTS;
+  request.method = "GET";
+  request.accept = "text/markdown";
+  request.now_seconds = 1000;
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = sizeof(facts);
+  facts.flags = PS_HTML_FACTS_PRESENT | PS_HTML_FACTS_VARIANT_PRESENT |
+                PS_HTML_FACTS_BINDING_LIVE;
+  facts.stored_at = 990;
+  facts.lifetime_s = 60;
+  std::memset(facts.binding_hash, 0x11, sizeof(facts.binding_hash));
+  std::memset(facts.markdown_hash, 0xAA, sizeof(facts.markdown_hash));
+  unsigned char buf[sizeof(ps_html_serve_verdict_t)];
+  std::memset(buf, 0x5A, sizeof(buf));
+  auto* v = reinterpret_cast<ps_html_serve_verdict_t*>(buf);
+  const size_t cut = offsetof(ps_html_serve_verdict_t, etag) + 10;
+  v->struct_size = cut;
+  ASSERT_EQ(ps_html_serve_classify(&request, &facts, v), 0);
+  EXPECT_EQ(v->action, PS_HTML_SERVE_ACTION_SERVE_MARKDOWN);
+  for (size_t i = offsetof(ps_html_serve_verdict_t, etag); i < cut; ++i) {
+    EXPECT_EQ(buf[i], 0) << i;
+  }
+  for (size_t i = cut; i < sizeof(buf); ++i) EXPECT_EQ(buf[i], 0x5A) << i;
+}
+
+TEST(PageSpeedCApiPolicy, StoredFactsRefuseAShortStructAndReadAbsent) {
+  ps_html_stored_facts_t facts{};
+  facts.struct_size = 16;
+  EXPECT_EQ(
+      ps_html_stored_facts_from_reads(nullptr, nullptr, nullptr, 0, &facts),
+      -1);
+  EXPECT_EQ(
+      ps_html_stored_facts_from_reads(nullptr, nullptr, nullptr, 0, nullptr),
+      -1);
+  std::memset(&facts, 0x5A, sizeof(facts));
+  facts.struct_size = sizeof(facts);
+  ASSERT_EQ(
+      ps_html_stored_facts_from_reads(nullptr, nullptr, nullptr, 1, &facts), 0);
+  EXPECT_EQ(facts.flags, 0u);
+  EXPECT_EQ(facts.stored_at, 0u);
+  EXPECT_EQ(facts.binding_hash[0], 0);
+}
+
+TEST(PageSpeedCApiPolicy, MarkdownEtagShapeAndBuffer) {
+  uint8_t b[PS_HTML_HASH_BYTES];
+  uint8_t m[PS_HTML_HASH_BYTES];
+  std::memset(b, 0x11, sizeof(b));
+  std::memset(m, 0xAA, sizeof(m));
+  char buf[PS_HTML_MARKDOWN_ETAG_CHARS + 1];
+  size_t len = 0;
+  ASSERT_EQ(ps_html_markdown_etag(b, m, buf, sizeof(buf), &len), 0);
+  EXPECT_EQ(len, size_t{PS_HTML_MARKDOWN_ETAG_CHARS});
+  EXPECT_EQ(std::string(buf).substr(0, 7), "W/\"psm-");
+  EXPECT_EQ(buf[23], '"');
+  // Either hash changing changes the tag.
+  char other[PS_HTML_MARKDOWN_ETAG_CHARS + 1];
+  m[31] ^= 1;
+  ASSERT_EQ(ps_html_markdown_etag(b, m, other, sizeof(other), &len), 0);
+  EXPECT_STRNE(buf, other);
+  char tiny[8] = "zzzzzzz";
+  EXPECT_EQ(ps_html_markdown_etag(b, m, tiny, sizeof(tiny), &len), -3);
+  EXPECT_EQ(len, size_t{PS_HTML_MARKDOWN_ETAG_CHARS});
+  EXPECT_STREQ(tiny, "");
+  EXPECT_EQ(ps_html_markdown_etag(b, m, nullptr, 0, &len), -3);
+  EXPECT_EQ(ps_html_markdown_etag(nullptr, m, buf, sizeof(buf), &len), -1);
+  EXPECT_EQ(ps_html_markdown_etag(b, nullptr, buf, sizeof(buf), &len), -1);
+  EXPECT_EQ(ps_html_markdown_etag(b, m, buf, sizeof(buf), nullptr), -1);
+  EXPECT_EQ(ps_html_markdown_etag(b, m, nullptr, 4, &len), -1);
+}
+
+// The reader resolves the two keys exactly as the worker does
+// (ResolveHtmlMode): a valid html_mode wins whatever the line order,
+// otherwise disable_html decides, with neither the default.
+TEST(PageSpeedCApiPolicy, HtmlModeReaderFollowsTheWorkersPrecedence) {
+  EXPECT_EQ(ps_read_shared_config_html_mode(nullptr), -1);
+  const std::string dir = pagespeed::test::MakeTempDir();
+  const std::string cache_path = dir + "/cache.vol";
+  const std::string conf = pagespeed::SharedConfigFilePath(cache_path);
+  // No shared config: the worker's default.
+  EXPECT_EQ(ps_read_shared_config_html_mode(cache_path.c_str()),
+            PS_HTML_MODE_FULL);
+  // Every mode the worker writes reads back as itself.
+  for (pagespeed::HtmlMode mode :
+       {pagespeed::HtmlMode::kOff, pagespeed::HtmlMode::kMarkdownStatic,
+        pagespeed::HtmlMode::kMarkdownRendered, pagespeed::HtmlMode::kFull}) {
+    pagespeed::SharedConfig sc;
+    sc.html_mode = mode;
+    ASSERT_TRUE(pagespeed::WriteSharedConfigFile(conf, sc));
+    EXPECT_EQ(ps_read_shared_config_html_mode(cache_path.c_str()),
+              static_cast<int>(mode))
+        << pagespeed::HtmlModeName(mode);
+  }
+  // Hand-written files, for the precedence rule.
+  struct Case {
+    const char* lines;
+    int want;
+  };
+  const Case cases[] = {
+      {"disable_html=true\n", PS_HTML_MODE_OFF},
+      {"disable_html=false\n", PS_HTML_MODE_FULL},
+      {"", PS_HTML_MODE_FULL},
+      {"html_mode=markdown-static\n", PS_HTML_MODE_MARKDOWN_STATIC},
+      {"html_mode=markdown-static\ndisable_html=true\n",
+       PS_HTML_MODE_MARKDOWN_STATIC},
+      {"disable_html=true\nhtml_mode=markdown-rendered\n",
+       PS_HTML_MODE_MARKDOWN_RENDERED},
+      {"html_mode=Markdown-Static\ndisable_html=true\n", PS_HTML_MODE_OFF},
+      {"html_mode=bogus\n", PS_HTML_MODE_FULL},
+      {"html_mode=off\ndisable_html=false\n", PS_HTML_MODE_OFF},
+  };
+  for (const Case& c : cases) {
+    {
+      std::ofstream out(conf, std::ios::binary | std::ios::trunc);
+      out << "version=1\n" << c.lines;
+    }
+    EXPECT_EQ(ps_read_shared_config_html_mode(cache_path.c_str()), c.want)
+        << c.lines;
+  }
+  std::filesystem::remove_all(dir);
 }
 
 TEST(PageSpeedCApi, HtmlDecisionFormatRoundTrip) {

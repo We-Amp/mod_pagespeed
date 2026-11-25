@@ -33,6 +33,7 @@ cc_library(
         "//lib/cache:freshness",
         "//lib/cache:html_cache_decision",
         "//lib/cache:html_cache_policy",
+        "//lib/cache:html_withheld_marker",
         "//lib/cache:origin_cache_control",
         "//lib/cache:pagespeed_cache",
         "//lib/cache:vary_storability",
@@ -57,9 +58,12 @@ cc_library(
         "//src/worker:critical_css_extractor",
         "//src/worker:html_css_injector",
         "//src/worker:html_scanner",
+        "//src/worker:html_mode",
         "//src/worker:html_transform_filter",
         "//src/worker:serve_stats",
         "//src/worker:shared_config",
+        # The bundled SHA-256, for the Markdown entity tag (PS_API 1.13).
+        "@cyclone",
     ],
     alwayslink = True,
 )
@@ -137,10 +141,15 @@ gtest_test(
         "@platforms//os:windows": [],
         "//conditions:default": ["-Wno-error=unused-parameter"],
     }),
+    data = ["//test/lib/classify:testdata/accept_markdown_vectors.txt"],
     deps = [
         ":pagespeed_api",
+        "//lib/cache:html_withheld_marker",
+        "//src/worker:html_mode",
+        "//test/lib/cache:daemon_html_policy_cases",
         "//src/worker:serve_stats",
         "//src/worker:shared_config",
         "//test/test_util:temp_dir",
+        "@nlohmann_json//:json",
     ],
 )

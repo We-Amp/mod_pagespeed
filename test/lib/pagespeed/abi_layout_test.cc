@@ -231,6 +231,44 @@ static_assert(offsetof(ps_cache_control_t, s_maxage) == 12);
 static_assert(offsetof(ps_cache_control_t, cc_flags) == 16);
 
 // ---------------------------------------------------------------------------
+// HTML serve policy structs (new at 1.14). Each carries struct_size; fields
+// are appended only. The two hash arrays of the facts struct and the entity
+// tag buffer of the verdict are fixed-size, so no pointer crosses the
+// boundary in either direction for them.
+// ---------------------------------------------------------------------------
+static_assert(sizeof(ps_html_serve_request_t) == 64);
+static_assert(offsetof(ps_html_serve_request_t, struct_size) == 0);
+static_assert(offsetof(ps_html_serve_request_t, mode) == 8);
+static_assert(offsetof(ps_html_serve_request_t, method) == 16);
+static_assert(offsetof(ps_html_serve_request_t, accept) == 24);
+static_assert(offsetof(ps_html_serve_request_t, cache_control) == 32);
+static_assert(offsetof(ps_html_serve_request_t, pragma) == 40);
+static_assert(offsetof(ps_html_serve_request_t, if_none_match) == 48);
+static_assert(offsetof(ps_html_serve_request_t, request_flags) == 56);
+static_assert(offsetof(ps_html_serve_request_t, now_seconds) == 60);
+
+static_assert(sizeof(ps_html_stored_facts_t) == 96);
+static_assert(offsetof(ps_html_stored_facts_t, struct_size) == 0);
+static_assert(offsetof(ps_html_stored_facts_t, flags) == 8);
+static_assert(offsetof(ps_html_stored_facts_t, stored_at) == 12);
+static_assert(offsetof(ps_html_stored_facts_t, age_at_store) == 16);
+static_assert(offsetof(ps_html_stored_facts_t, lifetime_s) == 20);
+static_assert(offsetof(ps_html_stored_facts_t, render_ttl_s) == 24);
+static_assert(offsetof(ps_html_stored_facts_t, withheld_reason) == 28);
+static_assert(offsetof(ps_html_stored_facts_t, binding_hash) == 32);
+static_assert(offsetof(ps_html_stored_facts_t, markdown_hash) == 64);
+
+static_assert(sizeof(ps_html_serve_verdict_t) == 64);
+static_assert(offsetof(ps_html_serve_verdict_t, struct_size) == 0);
+static_assert(offsetof(ps_html_serve_verdict_t, action) == 8);
+static_assert(offsetof(ps_html_serve_verdict_t, reason) == 12);
+static_assert(offsetof(ps_html_serve_verdict_t, enforce) == 16);
+static_assert(offsetof(ps_html_serve_verdict_t, wants_markdown) == 20);
+static_assert(offsetof(ps_html_serve_verdict_t, age_s) == 24);
+static_assert(offsetof(ps_html_serve_verdict_t, not_modified) == 28);
+static_assert(offsetof(ps_html_serve_verdict_t, etag) == 32);
+
+// ---------------------------------------------------------------------------
 // The version triple itself is part of the contract: the gate reads it from
 // the header, and the library reports it at runtime. They must agree, or a
 // consumer's runtime feature check answers a different question than its

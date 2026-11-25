@@ -27,6 +27,12 @@ void HtmlCachePolicyFuzzOne(std::string_view blob);
 // seeds cover.
 HtmlStoreVerdict ClassifyHtmlCachePolicyFuzzBlob(std::string_view blob);
 
+// The serve verdicts the harness computes for a blob's serve request (both
+// serve modes; a live copy, a no-transform parent, a withheld copy), for
+// tests that check what the seeds cover.
+std::vector<HtmlServeVerdict> ServeHtmlCachePolicyFuzzBlob(
+    std::string_view blob);
+
 // The response header lines a blob carries, as the harness parses them, for a
 // test that asks the existing gates about the same headers.
 std::vector<std::pair<std::string, std::string>> HtmlCachePolicyFuzzBlobHeaders(

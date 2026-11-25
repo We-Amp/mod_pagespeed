@@ -16,11 +16,13 @@
 namespace pagespeed {
 namespace {
 
-constexpr std::array<std::string_view, 19> kKeys = {
+// Append only: a new key goes at the end so every line that does not carry
+// it stays byte-identical.
+constexpr std::array<std::string_view, 20> kKeys = {
     "ts_ms",  "host",    "path",    "mode",       "action",
     "reason", "status",  "size",    "lifetime_s", "validators",
     "cc",     "vary",    "sidecar", "request",    "personalisation",
-    "before", "variant", "binding", "age_s"};
+    "before", "variant", "binding", "age_s",      "vhost_added"};
 
 // Keys whose value is a count, written as a JSON number.
 bool IsNumericKey(std::string_view key) {
@@ -141,9 +143,21 @@ bool IsReportOnlyAction(std::string_view v) {
          v == "refuse";
 }
 
-// Reason codes a front end records that are not policy verdicts.
-constexpr std::array<std::string_view, 4> kFrontEndReasons = {
-    "validated", "validation_failed", "sidecar_write_failed", "invalidated"};
+// Reason codes a front end records that are not policy verdicts.  The last
+// five are decided by the front end's own engine, not by the policy: a purge
+// that raced the capture, the byte budget, a header block that does not
+// belong to the stored entry, a URL the server and the module read
+// differently, and a transport header a later stage added to a response the
+// engine owns.
+constexpr std::array<std::string_view, 9> kFrontEndReasons = {
+    "validated",        "validation_failed", "sidecar_write_failed",
+    "invalidated",      "purge_race",        "budget",
+    "sidecar_unpaired", "url_disagree",      "transport_conflict"};
+
+// The front-end reasons a store-side line may carry: the ones that refuse or
+// fail a store.
+constexpr std::array<std::string_view, 4> kStoreSideFrontEndReasons = {
+    "sidecar_write_failed", "purge_race", "budget", "url_disagree"};
 
 bool IsBareReason(std::string_view v) {
   for (uint8_t i = 0; i < kHtmlStoreReasonCount; ++i) {
@@ -281,6 +295,7 @@ bool ValueFits(std::string_view key, std::string_view value) {
   if (key == "before") return IsHash(value);
   if (key == "variant") return value == "0x7C" || value == "markdown";
   if (key == "binding") return value == "live" || value == "stale";
+  if (key == "vhost_added") return IsVaryList(value);
   return false;
 }
 
@@ -337,6 +352,47 @@ bool HtmlCacheDecisionIsStoreSide(
       const std::string_view bare =
           field.value.substr(0, field.value.find(':'));
       bool known = bare == "sidecar_write_failed";
+      for (uint8_t i = 0; i < kHtmlStoreReasonCount; ++i) {
+        known = known ||
+                HtmlStoreReasonName(static_cast<HtmlStoreReason>(i)) == bare;
+      }
+      if (!known) return false;
+    }
+  }
+  return true;
+}
+
+bool HtmlCacheDecisionCApiAdmits(
+    std::span<const HtmlCacheDecisionField> fields) {
+  for (const HtmlCacheDecisionField& field : fields) {
+    if (field.key == "mode" && (field.value == "serve-variants" ||
+                                field.value == "serve-cached-html")) {
+      // A mode that serves: the formatter's own grammar is the whole gate.
+      return true;
+    }
+  }
+  for (const HtmlCacheDecisionField& field : fields) {
+    if (field.key == "variant" || field.key == "binding" ||
+        field.key == "age_s") {
+      return false;
+    }
+    if (field.key == "mode" && field.value != "off" &&
+        field.value != "report-only") {
+      return false;
+    }
+    if (field.key == "action" && !IsReportOnlyAction(field.value)) {
+      return false;
+    }
+    // Report-only knows whether the request asked for Markdown; only a serve
+    // path knows about client no-cache.
+    if (field.key == "request" &&
+        field.value.find("no_cache") != std::string_view::npos) {
+      return false;
+    }
+    if (field.key == "reason") {
+      const std::string_view bare =
+          field.value.substr(0, field.value.find(':'));
+      bool known = IsMember(bare, kStoreSideFrontEndReasons);
       for (uint8_t i = 0; i < kHtmlStoreReasonCount; ++i) {
         known = known ||
                 HtmlStoreReasonName(static_cast<HtmlStoreReason>(i)) == bare;

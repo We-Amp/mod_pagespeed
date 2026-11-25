@@ -41,7 +41,7 @@ TEST(HtmlCacheDecisionTest, KeysAreTheClosedCanonicalSet) {
       "ts_ms",  "host",    "path",    "mode",       "action",
       "reason", "status",  "size",    "lifetime_s", "validators",
       "cc",     "vary",    "sidecar", "request",    "personalisation",
-      "before", "variant", "binding", "age_s"};
+      "before", "variant", "binding", "age_s",      "vhost_added"};
   const auto keys = HtmlCacheDecisionKeys();
   ASSERT_EQ(keys.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) EXPECT_EQ(keys[i], expected[i]);
@@ -102,7 +102,8 @@ TEST(HtmlCacheDecisionTest, EveryKeyRoundTrips) {
                       {"before", "cbf29ce484222325"},
                       {"variant", "0x7C"},
                       {"binding", "live"},
-                      {"age_s", "7"}};
+                      {"age_s", "7"},
+                      {"vhost_added", "x-frame-options"}};
   ASSERT_EQ(all.size(), HtmlCacheDecisionKeys().size());
   const std::string line = Format(all).value();
   EXPECT_EQ(line.front(), '{');
@@ -571,6 +572,66 @@ TEST(HtmlCacheDecisionTest, DedupKey) {
       {"reason", "vary:accept"}, {"sidecar", "eligible_empty"},
       {"before", "ffff"}};
   EXPECT_NE(HtmlCacheDecisionDedupKey(f), HtmlCacheDecisionDedupKey(changed));
+}
+
+TEST(HtmlCacheDecisionTest, VhostAddedIsNamesOnlyAndLast) {
+  EXPECT_TRUE(HtmlCacheDecisionValueFits("vhost_added", "x-t"));
+  EXPECT_TRUE(HtmlCacheDecisionValueFits(
+      "vhost_added", "x-frame-options, strict-transport-security"));
+  EXPECT_FALSE(HtmlCacheDecisionValueFits("vhost_added", "x-t: 1"));
+  EXPECT_FALSE(HtmlCacheDecisionValueFits("vhost_added", "x t"));
+  EXPECT_FALSE(HtmlCacheDecisionValueFits("vhost_added", ""));
+  EXPECT_EQ(Format({{"vhost_added", "x-t"}, {"age_s", "1"}}).value(),
+            "{\"age_s\":1,\"vhost_added\":\"x-t\"}");
+}
+
+TEST(HtmlCacheDecisionTest, FrontEndEngineReasonsFit) {
+  for (std::string_view reason :
+       {"purge_race", "budget", "sidecar_unpaired", "url_disagree",
+        "transport_conflict", "method", "range", "cors", "withheld", "skew",
+        "no_transform"}) {
+    EXPECT_TRUE(HtmlCacheDecisionValueFits("reason", reason)) << reason;
+  }
+}
+
+TEST(HtmlCacheDecisionTest, CApiGateAdmitsServeLinesAndKeepsReportLinesNarrow) {
+  const auto admits = [](const Fields& f) {
+    return HtmlCacheDecisionCApiAdmits(f);
+  };
+  // Every store-side line the old gate admitted is still admitted.
+  EXPECT_TRUE(admits({{"mode", "off"}, {"action", "refuse"}}));
+  EXPECT_TRUE(admits({{"reason", "headers:x-request-id"}}));
+  EXPECT_TRUE(admits({{"request", "authorization,cookie"}}));
+  // Report-only may now say the request asked for Markdown, and carry a
+  // front-end store refusal.
+  EXPECT_TRUE(
+      admits({{"mode", "report-only"}, {"request", "accept_markdown"}}));
+  EXPECT_TRUE(admits({{"mode", "report-only"}, {"reason", "url_disagree"}}));
+  EXPECT_TRUE(admits({{"reason", "budget"}}));
+  EXPECT_TRUE(admits({{"reason", "purge_race"}}));
+  EXPECT_TRUE(admits({{"vhost_added", "x-t"}}));
+  // Report-only still states no serve fact.
+  EXPECT_FALSE(admits({{"mode", "report-only"}, {"reason", "fresh"}}));
+  EXPECT_FALSE(admits({{"reason", "sidecar_unpaired"}}));
+  EXPECT_FALSE(admits({{"reason", "transport_conflict"}}));
+  EXPECT_FALSE(admits({{"request", "no_cache"}}));
+  EXPECT_FALSE(admits({{"action", "would_serve"}}));
+  EXPECT_FALSE(admits({{"age_s", "1"}}));
+  EXPECT_FALSE(admits({{"variant", "markdown"}}));
+  // A serve mode admits the serve side.
+  for (std::string_view mode : {"serve-variants", "serve-cached-html"}) {
+    EXPECT_TRUE(admits({{"mode", mode},
+                        {"action", "served_markdown"},
+                        {"reason", "sidecar_unpaired"},
+                        {"request", "no_cache,accept_markdown"},
+                        {"variant", "markdown"},
+                        {"binding", "stale"},
+                        {"age_s", "3"}}))
+        << mode;
+  }
+  // The C++ store-side gate itself is unchanged.
+  EXPECT_FALSE(
+      HtmlCacheDecisionIsStoreSide(Fields{{"request", "accept_markdown"}}));
 }
 
 }  // namespace

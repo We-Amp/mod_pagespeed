@@ -264,3 +264,10 @@ gtest_test(
         "@cyclone",
     ],
 )
+
+gtest_test(
+    name = "html_withheld_marker_test",
+    deps = [
+        "//lib/cache:html_withheld_marker",
+    ],
+)

@@ -32,6 +32,7 @@
 #include "lib/cache/headers_sidecar.h"
 #include "lib/cache/html_cache_decision.h"
 #include "lib/cache/html_cache_policy.h"
+#include "lib/cache/html_withheld_marker.h"
 #include "lib/cache/origin_cache_control.h"
 #include "lib/cache/vary_storability.h"
 #include "lib/classify/alternate_id.h"
@@ -48,6 +49,7 @@
 #include "lib/html/html_parse.h"
 #include "lib/html/html_writer_filter.h"
 #include "lib/pagespeed/pagespeed_internal.h"
+#include "sha256.hpp"
 #include "src/product_version/build_commit.h"
 #include "src/product_version/version.h"
 #include "src/proto/notification_sender.h"
@@ -55,6 +57,7 @@
 #include "src/worker/async_css_loader.h"
 #include "src/worker/critical_css_extractor.h"
 #include "src/worker/html_css_injector.h"
+#include "src/worker/html_mode.h"
 #include "src/worker/html_scanner.h"
 #include "src/worker/html_transform_filter.h"
 #include "src/worker/serve_stats.h"
@@ -655,6 +658,36 @@ extern "C" uint64_t ps_read_shared_config_volume_size(const char* cache_path) {
     return 0;
   } catch (...) {
     return 0;
+  }
+}
+
+static_assert(PS_HTML_MODE_OFF == static_cast<int>(pagespeed::HtmlMode::kOff),
+              "the published HTML mode values are the worker's");
+static_assert(PS_HTML_MODE_MARKDOWN_STATIC ==
+                  static_cast<int>(pagespeed::HtmlMode::kMarkdownStatic),
+              "the published HTML mode values are the worker's");
+static_assert(PS_HTML_MODE_MARKDOWN_RENDERED ==
+                  static_cast<int>(pagespeed::HtmlMode::kMarkdownRendered),
+              "the published HTML mode values are the worker's");
+static_assert(PS_HTML_MODE_FULL == static_cast<int>(pagespeed::HtmlMode::kFull),
+              "the published HTML mode values are the worker's");
+
+extern "C" int ps_read_shared_config_html_mode(const char* cache_path) {
+  ClearLastError();
+  if (cache_path == nullptr) return -1;
+  try {
+    std::string path = pagespeed::SharedConfigFilePath(cache_path);
+    if (path.empty()) return PS_HTML_MODE_FULL;
+    // The shared-config reader applies the worker's own precedence rule
+    // (ResolveHtmlMode): a valid html_mode wins, otherwise disable_html
+    // decides, and a missing or unreadable file reads as the default, full.
+    const pagespeed::SharedConfig sc = pagespeed::ReadSharedConfigFile(path);
+    return static_cast<int>(sc.html_mode);
+  } catch (const std::exception& e) {
+    SetLastError(e.what());
+    return PS_HTML_MODE_FULL;
+  } catch (...) {
+    return PS_HTML_MODE_FULL;
   }
 }
 
@@ -1340,7 +1373,9 @@ extern "C" int ps_html_store_classify(
     uint32_t* out_flags, uint16_t* out_cc_flags, int* out_sidecar,
     char* detail_buf, size_t detail_capacity, size_t* out_detail_len) {
   try {
-    if (mode != PS_HTML_CACHE_OFF && mode != PS_HTML_CACHE_REPORT_ONLY) {
+    if (mode != PS_HTML_CACHE_OFF && mode != PS_HTML_CACHE_REPORT_ONLY &&
+        mode != PS_HTML_CACHE_SERVE_VARIANTS &&
+        mode != PS_HTML_CACHE_SERVE_CACHED_HTML) {
       return -1;
     }
     if (method == nullptr || url_path == nullptr || out_reason == nullptr ||
@@ -1424,7 +1459,7 @@ extern "C" int ps_html_decision_format(const char* const* keys,
       }
     }
     *out_len = 0;
-    if (!pagespeed::HtmlCacheDecisionIsStoreSide(fields)) return -2;
+    if (!pagespeed::HtmlCacheDecisionCApiAdmits(fields)) return -2;
     const std::optional<std::string> line =
         pagespeed::FormatHtmlCacheDecisionLine(fields);
     if (!line.has_value()) return -2;
@@ -1448,6 +1483,472 @@ extern "C" const char* ps_html_store_reason_name(int reason) {
   return pagespeed::HtmlStoreReasonName(
              static_cast<pagespeed::HtmlStoreReason>(reason))
       .data();
+}
+
+// ---- HTML serve policy (PS_API 1.14) ----
+//
+// Thin adapters again: the C structs become the C++ request and facts, and
+// the verdict comes back through the out struct.  Nothing here holds state or
+// touches the last-error message.
+
+namespace {
+
+// The PS_API 1.14 sizes: the end of the last field, rounded up to the
+// struct's alignment.  Pinned so that a later append keeps accepting callers
+// built against 1.14 (the >= rule), and so that the sizes are stated, not
+// assumed: they are also pinned in the ABI golden.
+template <typename T>
+constexpr size_t RoundUpToAlign(size_t n) {
+  return (n + alignof(T) - 1) / alignof(T) * alignof(T);
+}
+constexpr size_t kServeRequestSizeV1_13 =
+    RoundUpToAlign<ps_html_serve_request_t>(
+        offsetof(ps_html_serve_request_t, now_seconds) + sizeof(uint32_t));
+constexpr size_t kStoredFactsSizeV1_13 = RoundUpToAlign<ps_html_stored_facts_t>(
+    offsetof(ps_html_stored_facts_t, markdown_hash) + PS_HTML_HASH_BYTES);
+static_assert(kServeRequestSizeV1_13 == sizeof(ps_html_serve_request_t),
+              "ps_html_serve_request_t grew: keep this constant at its 1.14 "
+              "value and relax to the >= form");
+static_assert(kStoredFactsSizeV1_13 == sizeof(ps_html_stored_facts_t),
+              "ps_html_stored_facts_t grew: keep this constant at its 1.14 "
+              "value and relax to the >= form");
+static_assert(sizeof(void*) != 8 || sizeof(ps_html_serve_request_t) == 64,
+              "ps_html_serve_request_t is 64 bytes on 64-bit targets");
+static_assert(sizeof(ps_html_stored_facts_t) == 96 || sizeof(size_t) != 8,
+              "ps_html_stored_facts_t is 96 bytes on 64-bit targets");
+static_assert(sizeof(ps_html_serve_verdict_t) == 64 || sizeof(size_t) != 8,
+              "ps_html_serve_verdict_t is 64 bytes on 64-bit targets");
+
+static_assert(PS_HTML_HASH_BYTES == pagespeed::kHtmlParentHashBytes,
+              "the published hash length and the marker's must agree");
+static_assert(PS_HTML_WITHHELD_BELOW_FLOOR ==
+                  static_cast<int>(pagespeed::HtmlWithheldReason::kBelowFloor),
+              "withheld reason values are shared with the stored marker");
+static_assert(
+    PS_HTML_WITHHELD_EXTRACT_FAILED ==
+        static_cast<int>(pagespeed::HtmlWithheldReason::kExtractFailed),
+    "withheld reason values are shared with the stored marker");
+static_assert(PS_HTML_SERVE_ACTION_SERVE_MARKDOWN ==
+                  static_cast<int>(pagespeed::HtmlServeAction::kServeMarkdown),
+              "serve action values are the policy's");
+static_assert(PS_HTML_SERVE_ACTION_VALIDATE ==
+                  static_cast<int>(pagespeed::HtmlServeAction::kValidate),
+              "serve action values are the policy's");
+static_assert(PS_HTML_STORE_ACTION_STORE ==
+                  static_cast<int>(pagespeed::HtmlStoreAction::kStore),
+              "store action values are the policy's");
+static_assert(PS_HTML_STORE_ACTION_STORE_NO_NOTIFY ==
+                  static_cast<int>(pagespeed::HtmlStoreAction::kStoreNoNotify),
+              "store action values are the policy's");
+
+// The copy's default lifetime bound, for a caller that leaves render_ttl_s 0.
+// Inside the policy 0 is a real bound (it refuses every copy), so the
+// translation is made here, where 0 means "not supplied".
+constexpr uint32_t kDefaultRenderTtlSeconds = 86400;
+
+bool IsHtmlContentType(std::string_view ct) {
+  constexpr std::string_view kHtml = "text/html";
+  if (ct.size() < kHtml.size()) return false;
+  for (size_t i = 0; i < kHtml.size(); ++i) {
+    char c = ct[i];
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c | 0x20);
+    if (c != kHtml[i]) return false;
+  }
+  if (ct.size() == kHtml.size()) return true;
+  const char next = ct[kHtml.size()];
+  return next == ';' || next == ' ' || next == '\t';
+}
+
+bool AllZeroBytes(const uint8_t* p, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    if (p[i] != 0) return false;
+  }
+  return true;
+}
+
+// The Markdown entity tag into `out` (PS_HTML_MARKDOWN_ETAG_CHARS bytes plus
+// a NUL).  Both hashes are known to be non-zero.
+void MakeMarkdownEtag(const uint8_t* binding_hash, const uint8_t* markdown_hash,
+                      char* out) {
+  std::array<std::byte, 2 * PS_HTML_HASH_BYTES> input{};
+  std::memcpy(input.data(), binding_hash, PS_HTML_HASH_BYTES);
+  std::memcpy(input.data() + PS_HTML_HASH_BYTES, markdown_hash,
+              PS_HTML_HASH_BYTES);
+  const auto digest = cyclone::crypto::SHA256::hash(
+      std::span<const std::byte>(input.data(), input.size()));
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::memcpy(out, "W/\"psm-", 7);
+  for (size_t i = 0; i < 8; ++i) {
+    const auto b = static_cast<uint8_t>(digest[i]);
+    out[7 + 2 * i] = kHex[b >> 4];
+    out[8 + 2 * i] = kHex[b & 0x0F];
+  }
+  out[23] = '"';
+  out[24] = '\0';
+}
+
+// RFC 9110 section 8.8.3: entity-tag = [ "W/" ] DQUOTE *etagc DQUOTE, with
+// etagc = %x21 / %x23-7E / obs-text.  Consumes one tag from the front of `s`
+// and returns its opaque-tag (the quotes included), or nullopt.
+std::optional<std::string_view> TakeEntityTag(std::string_view* s) {
+  std::string_view v = *s;
+  if (v.substr(0, 2) == "W/") v.remove_prefix(2);
+  if (v.empty() || v.front() != '"') return std::nullopt;
+  size_t i = 1;
+  while (i < v.size() && v[i] != '"') {
+    const auto u = static_cast<unsigned char>(v[i]);
+    if (u < 0x21 || u == 0x7F) return std::nullopt;
+    ++i;
+  }
+  if (i >= v.size()) return std::nullopt;
+  const std::string_view opaque = v.substr(0, i + 1);
+  *s = v.substr(i + 1);
+  return opaque;
+}
+
+std::string_view TrimOwsView(std::string_view s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) {
+    s.remove_prefix(1);
+  }
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) {
+    s.remove_suffix(1);
+  }
+  return s;
+}
+
+// -1 malformed etag, 0 no match, 1 match.
+int IfNoneMatchMatchesWeak(std::string_view inm, std::string_view etag) {
+  std::string_view tag_view = etag;
+  const std::optional<std::string_view> wanted = TakeEntityTag(&tag_view);
+  if (!wanted.has_value() || !tag_view.empty()) return -1;
+  // RFC 9110 section 13.1.2: the field is "*" or a list of entity-tags. `*`
+  // matches any current representation; the caller asks only about a copy it
+  // would send, so that is this one.
+  if (TrimOwsView(inm) == "*") return 1;
+  // RFC 9110 section 5.6.1: empty list members are allowed and ignored.
+  bool matched = false;
+  std::string_view rest = inm;
+  while (true) {
+    rest = TrimOwsView(rest);
+    if (rest.empty()) break;
+    if (rest.front() == ',') {
+      rest.remove_prefix(1);
+      continue;
+    }
+    // `*` is a list of its own (RFC 9110 section 13.1.2: "*" /
+    // #entity-tag), handled above; inside a list it is malformed.
+    if (rest.front() == '*') return 0;
+    const std::optional<std::string_view> tag = TakeEntityTag(&rest);
+    if (!tag.has_value())
+      return 0;  // a list that does not parse matches nothing
+    if (*tag == *wanted) matched = true;
+    rest = TrimOwsView(rest);
+    if (!rest.empty() && rest.front() != ',') return 0;
+  }
+  return matched ? 1 : 0;
+}
+
+}  // namespace
+
+extern "C" int ps_html_serve_classify(const ps_html_serve_request_t* request,
+                                      const ps_html_stored_facts_t* facts,
+                                      ps_html_serve_verdict_t* out) {
+  try {
+    if (request == nullptr || facts == nullptr || out == nullptr) return -1;
+    if (request->struct_size < kServeRequestSizeV1_13 ||
+        facts->struct_size < kStoredFactsSizeV1_13 ||
+        out->struct_size < sizeof(size_t)) {
+      return -1;
+    }
+    if (request->mode < PS_HTML_CACHE_OFF ||
+        request->mode > PS_HTML_CACHE_SERVE_CACHED_HTML) {
+      return -1;
+    }
+    if (request->method == nullptr) return -1;
+
+    const std::string_view method(request->method);
+    pagespeed::HtmlServeRequest r;
+    r.mode = static_cast<pagespeed::HtmlCacheMode>(request->mode);
+    r.wants_markdown = request->accept != nullptr &&
+                       pagespeed::WantsAgentMarkdown(request->accept);
+    r.method_cacheable = method == "GET" || method == "HEAD";
+    const uint32_t rf = request->request_flags;
+    r.has_range = (rf & (PS_HTML_SERVE_REQUEST_HAS_RANGE |
+                         PS_HTML_SERVE_REQUEST_HAS_IF_RANGE)) != 0;
+    r.has_origin = (rf & PS_HTML_SERVE_REQUEST_HAS_ORIGIN) != 0;
+    r.has_authorization = (rf & PS_HTML_SERVE_REQUEST_HAS_AUTHORIZATION) != 0;
+    r.authenticated_user = (rf & PS_HTML_SERVE_REQUEST_AUTHENTICATED_USER) != 0;
+    r.has_cookie = (rf & PS_HTML_SERVE_REQUEST_HAS_COOKIE) != 0;
+    if (request->cache_control != nullptr) {
+      pagespeed::ApplyHtmlRequestCacheControl(request->cache_control, &r);
+    }
+    if (request->pragma != nullptr) {
+      // RFC 9111 section 5.4: Pragma: no-cache, consulted only when the
+      // request carries no Cache-Control at all (the policy applies that).
+      std::string_view rest(request->pragma);
+      while (!rest.empty()) {
+        const size_t comma = rest.find(',');
+        std::string_view item = TrimOwsView(rest.substr(0, comma));
+        if (item.size() == 8) {
+          std::string lower(item);
+          for (char& c : lower) {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c | 0x20);
+          }
+          if (lower == "no-cache") r.pragma_no_cache = true;
+        }
+        if (comma == std::string_view::npos) break;
+        rest.remove_prefix(comma + 1);
+      }
+    }
+    r.now_seconds = request->now_seconds;
+
+    const uint32_t ff = facts->flags;
+    pagespeed::StoredHtmlFacts f;
+    f.present = (ff & PS_HTML_FACTS_PRESENT) != 0;
+    f.stored_at = facts->stored_at;
+    f.age_at_store = facts->age_at_store;
+    f.lifetime_s = facts->lifetime_s;
+    f.needs_validation = (ff & PS_HTML_FACTS_NEEDS_VALIDATION) != 0;
+    f.explicit_shared = (ff & PS_HTML_FACTS_EXPLICIT_SHARED) != 0;
+    f.headers_not_reproducible =
+        (ff & PS_HTML_FACTS_HEADERS_NOT_REPRODUCIBLE) != 0;
+    f.sidecar_required = (ff & PS_HTML_FACTS_SIDECAR_REQUIRED) != 0;
+    f.sidecar_present = (ff & PS_HTML_FACTS_SIDECAR_PRESENT) != 0;
+    f.purged = (ff & PS_HTML_FACTS_PURGED) != 0;
+    f.validated_this_request = (ff & PS_HTML_FACTS_VALIDATED_THIS_REQUEST) != 0;
+    f.variant_present = (ff & PS_HTML_FACTS_VARIANT_PRESENT) != 0;
+    f.binding_live = (ff & PS_HTML_FACTS_BINDING_LIVE) != 0;
+    f.no_transform = (ff & PS_HTML_FACTS_NO_TRANSFORM) != 0;
+    f.withheld = (ff & PS_HTML_FACTS_WITHHELD) != 0;
+    f.render_ttl_s = facts->render_ttl_s == 0 ? kDefaultRenderTtlSeconds
+                                              : facts->render_ttl_s;
+
+    const pagespeed::HtmlServeVerdict v = pagespeed::ClassifyHtmlForServe(r, f);
+
+    ps_html_serve_verdict_t result{};
+    result.struct_size = out->struct_size;
+    result.action = static_cast<int>(v.action);
+    result.reason = static_cast<int>(v.reason);
+    result.enforce = v.enforce ? 1 : 0;
+    result.wants_markdown = r.wants_markdown ? 1 : 0;
+    result.age_s = v.age_s;
+    if (v.action == pagespeed::HtmlServeAction::kServeMarkdown &&
+        !AllZeroBytes(facts->binding_hash, PS_HTML_HASH_BYTES) &&
+        !AllZeroBytes(facts->markdown_hash, PS_HTML_HASH_BYTES)) {
+      MakeMarkdownEtag(facts->binding_hash, facts->markdown_hash, result.etag);
+      if (request->if_none_match != nullptr &&
+          IfNoneMatchMatchesWeak(request->if_none_match, result.etag) == 1) {
+        result.not_modified = 1;
+      }
+    }
+    // The tag is written whole or not at all: a caller whose struct ends
+    // inside it gets only NUL bytes there, never a cut-off tag.
+    if (out->struct_size <
+        offsetof(ps_html_serve_verdict_t, etag) + sizeof(result.etag)) {
+      std::memset(result.etag, 0, sizeof(result.etag));
+    }
+    std::memcpy(out, &result, std::min(out->struct_size, sizeof(result)));
+    return 0;
+  } catch (...) {
+    return -1;
+  }
+}
+
+extern "C" const char* ps_html_serve_reason_name(int reason) {
+  if (reason < 0 || reason >= pagespeed::kHtmlServeReasonCount) return nullptr;
+  return pagespeed::HtmlServeReasonName(
+             static_cast<pagespeed::HtmlServeReason>(reason))
+      .data();
+}
+
+namespace {
+
+// The inbound Age, by the rules on ps_html_store_write_params: nullopt when
+// it must refuse the store, 0 when there is none.
+std::optional<uint32_t> InboundAgeSeconds(const char* const* lines,
+                                          size_t count) {
+  std::optional<uint32_t> age;
+  for (size_t i = 0; i < count; ++i) {
+    if (lines[i] == nullptr) return std::nullopt;
+    const std::string_view v = TrimOwsView(lines[i]);
+    if (v.empty() || v.size() > 10) return std::nullopt;
+    uint64_t n = 0;
+    for (char c : v) {
+      if (c < '0' || c > '9') return std::nullopt;
+      n = n * 10 + static_cast<uint64_t>(c - '0');
+    }
+    if (n > 2147483647u) return std::nullopt;
+    if (age.has_value() && *age != n) return std::nullopt;
+    age = static_cast<uint32_t>(n);
+  }
+  return age.value_or(0);
+}
+
+}  // namespace
+
+extern "C" int ps_html_store_write_params(
+    int action, uint32_t lifetime_s, uint32_t store_flags, uint16_t cc_flags,
+    int sidecar_stored, int64_t capture_start_ms, const char* const* age_lines,
+    size_t age_count, uint64_t content_length, const char* origin_content_type,
+    ps_write_params_t* params) {
+  if (action != PS_HTML_STORE_ACTION_STORE &&
+      action != PS_HTML_STORE_ACTION_STORE_NO_NOTIFY) {
+    return -1;
+  }
+  if (capture_start_ms < 1000 || params == nullptr ||
+      origin_content_type == nullptr ||
+      (age_lines == nullptr && age_count != 0)) {
+    return -1;
+  }
+  const int64_t capture_s = capture_start_ms / 1000;  // floored: ms >= 1000
+  if (capture_s > static_cast<int64_t>(UINT32_MAX)) return -1;
+  const std::optional<uint32_t> age = InboundAgeSeconds(age_lines, age_count);
+  // An Age at or above the capture time says the page is older than the
+  // epoch: a value no origin produces, so nothing is stored.
+  if (!age.has_value() || static_cast<int64_t>(*age) >= capture_s) return -1;
+  // The origin-state fields arrived at 1.2; a struct without them cannot
+  // carry a page this policy may serve.
+  constexpr size_t kWithOriginState =
+      offsetof(ps_write_params_t, origin_cc_flags) + sizeof(uint16_t);
+  if (params->struct_size < kWithOriginState) return -1;
+
+  params->alternate_id = PS_SENTINEL_ORIGINAL;
+  params->content_length = content_length;
+  params->full_mask = PS_SENTINEL_ORIGINAL;
+  params->content_type = PS_CONTENT_HTML;
+  uint8_t flags = PS_FLAG_HEADERS_CLASSIFIED;
+  if (sidecar_stored != 0) flags |= PS_FLAG_HEADERS_SIDECAR_REQUIRED;
+  params->flags = flags;
+  params->origin_ct = origin_content_type;
+  params->origin_etag = nullptr;
+  // Age < capture_s, so the result is at least 1: never the 0 the write
+  // path reads as "not supplied".
+  params->cache_inserted_at = static_cast<uint32_t>(capture_s - *age);
+  // The lifetime the policy computed (s-maxage, else max-age, else Expires
+  // minus Date) is what a later serve compares against, so it is what is
+  // stored; s-maxage is kept only when it is what made the page shareable.
+  params->origin_max_age = lifetime_s;
+  const bool shared_by_s_maxage =
+      (store_flags & PS_HTML_STORE_FLAG_EXPLICIT_SHARED) != 0 &&
+      (cc_flags & PS_CC_ORIGIN_PUBLIC) == 0;
+  params->origin_s_maxage = shared_by_s_maxage ? lifetime_s : 0;
+  params->origin_last_modified = 0;
+  params->origin_cc_flags = cc_flags;
+  return 0;
+}
+
+extern "C" int ps_html_stored_facts_from_reads(
+    const ps_read_result_t* original, const ps_read_result_t* markdown,
+    const ps_read_result_t* withheld_marker, int sidecar_present,
+    ps_html_stored_facts_t* out) {
+  try {
+    if (out == nullptr || out->struct_size < kStoredFactsSizeV1_13) return -1;
+    ps_html_stored_facts_t facts{};
+    facts.struct_size = out->struct_size;
+
+    const AlternateMetadata* meta =
+        original != nullptr ? &original->result.metadata : nullptr;
+    const bool is_html_store =
+        meta != nullptr && IsHtmlContentType(meta->origin_content_type) &&
+        (meta->flags & AlternateMetadata::kFlagHeadersClassified) != 0;
+    if (is_html_store) {
+      uint32_t flags = PS_HTML_FACTS_PRESENT;
+      facts.stored_at = meta->cache_inserted_at;
+      facts.age_at_store = 0;  // the insert time is already Age-adjusted
+      facts.lifetime_s = meta->origin_max_age;
+      const uint16_t cc = meta->origin_cc_flags;
+      if (facts.lifetime_s == 0 ||
+          (cc & (PS_CC_ORIGIN_NO_CACHE | PS_CC_ORIGIN_NO_CACHE_BARE |
+                 PS_CC_ORIGIN_NO_CACHE_QUALIFIED)) != 0) {
+        flags |= PS_HTML_FACTS_NEEDS_VALIDATION;
+      }
+      if (pagespeed::HtmlExplicitlyShared(cc, meta->origin_s_maxage)) {
+        flags |= PS_HTML_FACTS_EXPLICIT_SHARED;
+      }
+      if ((meta->flags &
+           AlternateMetadata::kFlagOriginHeadersNotReproducible) != 0) {
+        flags |= PS_HTML_FACTS_HEADERS_NOT_REPRODUCIBLE;
+      }
+      if ((meta->flags & AlternateMetadata::kFlagHeadersSidecarRequired) != 0) {
+        flags |= PS_HTML_FACTS_SIDECAR_REQUIRED;
+      }
+      if (sidecar_present != 0) flags |= PS_HTML_FACTS_SIDECAR_PRESENT;
+      if ((cc & PS_CC_ORIGIN_NO_TRANSFORM) != 0) {
+        flags |= PS_HTML_FACTS_NO_TRANSFORM;
+      }
+      std::memcpy(facts.binding_hash, meta->origin_html_hash.data(),
+                  PS_HTML_HASH_BYTES);
+      const bool bound = !AllZeroBytes(facts.binding_hash, PS_HTML_HASH_BYTES);
+
+      if (markdown != nullptr) flags |= PS_HTML_FACTS_VARIANT_PRESENT;
+      // The withheld record first: a copy that may not be served is never
+      // called live, whatever else is stored beside it.
+      bool withheld = false;
+      if (withheld_marker != nullptr && bound) {
+        const std::span<const std::byte> payload =
+            withheld_marker->result.content();
+        const std::span<const uint8_t> bytes(
+            reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+        if (pagespeed::HtmlWithheldMarkerApplies(
+                bytes, std::span<const uint8_t>(facts.binding_hash,
+                                                PS_HTML_HASH_BYTES))) {
+          withheld = true;
+          flags |= PS_HTML_FACTS_WITHHELD;
+          facts.withheld_reason = static_cast<int>(
+              pagespeed::DecodeHtmlWithheldMarker(bytes)->reason);
+        }
+      }
+      if (!withheld && markdown != nullptr && bound) {
+        const auto& copy_hash = markdown->result.metadata.origin_html_hash;
+        if (std::memcmp(copy_hash.data(), facts.binding_hash,
+                        PS_HTML_HASH_BYTES) == 0) {
+          flags |= PS_HTML_FACTS_BINDING_LIVE;
+        }
+      }
+      facts.flags = flags;
+    }
+    std::memcpy(out, &facts, std::min(out->struct_size, sizeof(facts)));
+    return 0;
+  } catch (...) {
+    return -1;
+  }
+}
+
+extern "C" int ps_html_markdown_etag(const uint8_t* binding_hash,
+                                     const uint8_t* markdown_hash, char* buf,
+                                     size_t capacity, size_t* out_len) {
+  if (binding_hash == nullptr || markdown_hash == nullptr ||
+      out_len == nullptr || (buf == nullptr && capacity != 0)) {
+    return -1;
+  }
+  if (AllZeroBytes(binding_hash, PS_HTML_HASH_BYTES) ||
+      AllZeroBytes(markdown_hash, PS_HTML_HASH_BYTES)) {
+    return -1;
+  }
+  *out_len = PS_HTML_MARKDOWN_ETAG_CHARS;
+  if (capacity < PS_HTML_MARKDOWN_ETAG_CHARS + 1) {
+    if (capacity != 0) buf[0] = '\0';
+    return -3;
+  }
+  MakeMarkdownEtag(binding_hash, markdown_hash, buf);
+  return 0;
+}
+
+extern "C" int ps_if_none_match_matches_weak(const char* if_none_match,
+                                             const char* etag) {
+  if (etag == nullptr) return -1;
+  try {
+    if (if_none_match == nullptr) {
+      // Still refuse a malformed etag, so the answer does not depend on
+      // whether the client sent the field.
+      std::string_view tag(etag);
+      const std::optional<std::string_view> t = TakeEntityTag(&tag);
+      return (t.has_value() && tag.empty()) ? 0 : -1;
+    }
+    return IfNoneMatchMatchesWeak(if_none_match, etag);
+  } catch (...) {
+    return -1;
+  }
 }
 
 extern "C" ps_error_t ps_cache_write_headers_sidecar(
@@ -2464,6 +2965,8 @@ static_assert(PS_NOTIFY_FLAG_HOST_VOUCHED == pagespeed::kNotifyFlagHostVouched,
               "the published flag and the wire bit must agree");
 static_assert(PS_NOTIFY_FLAG_FROM_MODULE == pagespeed::kNotifyFlagFromModule,
               "the published flag and the wire bit must agree");
+static_assert(PS_NOTIFY_FLAG_HTML_STORED == pagespeed::kNotifyFlagHtmlStored,
+              "the published flag and the wire bit must agree");
 
 namespace {
 
@@ -2480,8 +2983,9 @@ static_assert(sizeof(void*) != 8 || kNotifyParamsSiteSize == 88,
 
 // The flags a caller may set. Bit 0x4 is the library's own (the wire's
 // legacy-caller bit); every other bit is reserved.
-constexpr uint32_t kCallerNotifyFlags =
-    PS_NOTIFY_FLAG_HOST_VOUCHED | PS_NOTIFY_FLAG_FROM_MODULE;
+constexpr uint32_t kCallerNotifyFlags = PS_NOTIFY_FLAG_HOST_VOUCHED |
+                                        PS_NOTIFY_FLAG_FROM_MODULE |
+                                        PS_NOTIFY_FLAG_HTML_STORED;
 
 // Once per process: a caller of ps_notify_worker_ex whose parameters predate
 // the site fields. The notification is still sent, unsited and unvouched,
@@ -2586,19 +3090,39 @@ extern "C" ps_error_t ps_notify_worker_ex(const char* socket_path,
     return PS_ERR_INVALID_ARG;
   }
   const bool agent_request = has_agent_request && params->agent_request != 0;
-  if ((flags & PS_NOTIFY_FLAG_FROM_MODULE) != 0) {
-    // The module's notifications name a site, never ask for page rendering,
-    // and never vouch for a host.
+  const bool from_module = (flags & PS_NOTIFY_FLAG_FROM_MODULE) != 0;
+  const bool vouched = (flags & PS_NOTIFY_FLAG_HOST_VOUCHED) != 0;
+  const bool html_stored = (flags & PS_NOTIFY_FLAG_HTML_STORED) != 0;
+  const bool is_html = params->content_type == PS_CONTENT_HTML;
+  // The HTML-stored flag names a page the module's HTML store wrote, so it
+  // means nothing on any other notification.
+  if (html_stored && (!from_module || !is_html)) {
+    SetLastError(
+        "the HTML-stored flag is valid only on an HTML notification from the "
+        "module");
+    return PS_ERR_INVALID_ARG;
+  }
+  if (from_module) {
+    // The module's notifications name a site and never ask for llms.txt.
     if (site_empty) {
       SetLastError("a notification from the module must carry a site");
       return PS_ERR_INVALID_ARG;
     }
-    if (params->content_type == PS_CONTENT_HTML || agent_request ||
-        params->mask == pagespeed::kLlmsTxtSentinel ||
-        (flags & PS_NOTIFY_FLAG_HOST_VOUCHED) != 0) {
+    if (params->mask == pagespeed::kLlmsTxtSentinel) {
       SetLastError(
-          "a notification from the module may not carry HTML, an agent "
-          "request, the llms.txt mask or the host-vouched flag");
+          "a notification from the module may not carry the "
+          "llms.txt mask");
+      return PS_ERR_INVALID_ARG;
+    }
+    // HTML, and with it an agent request, only for a page the module stored
+    // itself, for a host it vouched for. Every other module notification
+    // keeps the rule it had before: no HTML, no agent request, no vouching.
+    const bool stored_page = is_html && vouched && html_stored;
+    if (!stored_page && (is_html || agent_request || vouched)) {
+      SetLastError(
+          "a notification from the module may carry HTML or an agent request "
+          "only with both the host-vouched and the HTML-stored flags, and "
+          "may carry the host-vouched flag only then");
       return PS_ERR_INVALID_ARG;
     }
   }
@@ -2614,6 +3138,7 @@ extern "C" ps_error_t ps_notify_worker_ex(const char* socket_path,
     if (!site_empty) notif.site = site;
     notif.host_vouched = (flags & PS_NOTIFY_FLAG_HOST_VOUCHED) != 0;
     notif.from_module = (flags & PS_NOTIFY_FLAG_FROM_MODULE) != 0;
+    notif.html_stored = html_stored;
     notif.legacy_ex_caller = legacy_caller;
     if (context != nullptr) {
       notif.option_context.assign(context, context_length);

@@ -84,6 +84,13 @@ cc_library(
 )
 
 cc_library(
+    name = "html_withheld_marker",
+    srcs = ["html_withheld_marker.cc"],
+    hdrs = ["html_withheld_marker.h"],
+    visibility = ["//:internal"],
+)
+
+cc_library(
     name = "html_cache_decision",
     srcs = ["html_cache_decision.cc"],
     hdrs = ["html_cache_decision.h"],
@@ -136,6 +143,7 @@ cc_binary(
         ":origin_cache_control",
         ":vary_storability",
         "//lib/classify:alternate_metadata",
+        "//lib/classify:capability_mask",
     ],
 )
 
@@ -155,5 +163,6 @@ cc_library(
         ":origin_cache_control",
         ":vary_storability",
         "//lib/classify:alternate_metadata",
+        "//lib/classify:capability_mask",
     ],
 )

@@ -144,7 +144,17 @@ namespace pagespeed {
 //      `enforce` false: report-only stores nothing, so it has no would-serve
 //      answer to give.  `kServeVariants` and `kServeCachedHtml` report with
 //      `enforce` true.
+//   1a. Request shape.  Only GET and HEAD are answered from the cache
+//      (kMethod; RFC 9111 section 4: a cache answers a request whose method
+//      it stored the response for, and HEAD from a stored GET, RFC 9110
+//      section 9.3.2).  A request with Range or If-Range (kRange: the cache
+//      holds no partial content and assembles none) or with Origin (kCors:
+//      a cross-origin request expects CORS response headers the stored entry
+//      was never asked for) falls through.
 //   2. Absent entry.  Nothing stored, nothing to serve.
+//   2a. Skew.  An entry stored more than kHtmlServeSkewSeconds after the
+//      request's time is not served (kSkew).  Its age cannot be computed, and
+//      counting it as age 0 would make a clock step look like freshness.
 //   3. Credentials.  A request with Authorization or an authenticated user is
 //      never answered from the cache (RFC 9111 §3.5).
 //   4. Cookie request.  A request with a Cookie header is answered only from
@@ -177,7 +187,14 @@ namespace pagespeed {
 //      matches the live content, and the copy is within its own lifetime
 //      (age below the smaller of the parent's lifetime and the copy's
 //      render lifetime; for a parent the origin confirmed this request, only
-//      the render lifetime bounds it).  A Markdown request on a parent that
+//      the render lifetime bounds it).  The bound is the PARENT's age: the
+//      copy is not separately limited by its own age, because the binding
+//      hash already covers a content change.  A parent stored with
+//      `no-transform` (RFC 9111 section 5.2.2.6), or asked for by a request
+//      carrying `no-transform` (section 5.2.1.6), never has its copy served
+//      (kNoTransform), and a parent whose copy the deriver withheld for this
+//      content (`withheld`) falls through with kWithheld; both are checked
+//      before the copy itself.  A Markdown request on a parent that
 //      is not fresh is its own outcome, `kParentStale` (validated first in
 //      `kServeCachedHtml`, a fall-through in `kServeVariants`), not the HTML
 //      request's stale or needs-validation reason, so the Markdown path is
@@ -344,13 +361,29 @@ enum class HtmlServeReason : uint8_t {
   kAbsent,
   kBindingStale,
   kParentStale,
+  // Appended (C API 1.14).  The numeric values are ABI: append only.
+  kMethod,
+  kRange,
+  kCors,
+  kNoTransform,
+  kWithheld,
+  kSkew,
 };
 
-inline constexpr uint8_t kHtmlServeReasonCount = 13;
+inline constexpr uint8_t kHtmlServeReasonCount = 19;
+
+// How far in the future an entry's stored_at may lie before serve rule 2a
+// refuses it.  Covers clock disagreement between the processes that write and
+// read one volume.
+inline constexpr uint32_t kHtmlServeSkewSeconds = 5;
 
 struct HtmlServeRequest {
   HtmlCacheMode mode = HtmlCacheMode::kOff;
   bool wants_markdown = false;  // Accept resolved to text/markdown by caller
+  // Rule 1a.  `method_cacheable` is true for GET and HEAD.
+  bool method_cacheable = true;
+  bool has_range = false;  // Range or If-Range present
+  bool has_origin = false;
   bool has_authorization = false;
   bool authenticated_user = false;
   bool has_cookie = false;
@@ -359,6 +392,9 @@ struct HtmlServeRequest {
   bool pragma_no_cache = false;  // counts only when has_cache_control is false
   int64_t max_age = -1;          // request max-age, -1 when absent
   int64_t min_fresh = -1;        // request min-fresh, -1 when absent
+  // The request's Cache-Control carried no-transform (RFC 9111 section
+  // 5.2.1.6): the Markdown copy is a transformation, so it is not served.
+  bool request_no_transform = false;
   uint32_t now_seconds = 0;
 };
 
@@ -382,7 +418,22 @@ struct StoredHtmlFacts {
   bool variant_present = false;   // a Markdown copy exists
   bool binding_live = false;      // the copy's parent hash equals live content
   uint32_t render_ttl_s = 86400;  // the copy's own lifetime bound
+  // The parent was stored with Cache-Control: no-transform (rule 9).
+  bool no_transform = false;
+  // The deriver refused to build a copy for this parent's content (rule 9).
+  bool withheld = false;
 };
+
+// Fold a request's Cache-Control value (every line joined with ", ") into
+// `request`: `no-cache` sets cache_control_no_cache, `no-transform` sets
+// request_no_transform, `max-age` and `min-fresh` set their fields, and
+// has_cache_control is set.  Directive names
+// are matched case-insensitively (RFC 9111 section 5.2).  A `max-age` or
+// `min-fresh` whose argument is not delta-seconds counts as max-age=0 (only
+// an entry of age 0 still answers) rather than guessing; a value too large for the field
+// saturates (RFC 9111 section 1.2.2).  Other directives are ignored.
+void ApplyHtmlRequestCacheControl(std::string_view cache_control,
+                                  HtmlServeRequest* request);
 
 struct HtmlServeVerdict {
   HtmlServeAction action = HtmlServeAction::kFallThrough;

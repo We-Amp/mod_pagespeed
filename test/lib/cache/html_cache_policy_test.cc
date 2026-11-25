@@ -1068,14 +1068,25 @@ TEST(HtmlCachePolicyTest, NamesAreAClosedSet) {
       HtmlStoreReasonName(static_cast<HtmlStoreReason>(kHtmlStoreReasonCount)),
       "unknown");
 
-  const char* const serve_reasons[] = {
-      "fresh",           "mode",
-      "auth_request",    "cookie_request",
-      "client_no_cache", "needs_validation",
-      "stale",           "headers_not_reproducible",
-      "sidecar_missing", "purged",
-      "absent",          "binding_stale",
-      "parent_stale"};
+  const char* const serve_reasons[] = {"fresh",
+                                       "mode",
+                                       "auth_request",
+                                       "cookie_request",
+                                       "client_no_cache",
+                                       "needs_validation",
+                                       "stale",
+                                       "headers_not_reproducible",
+                                       "sidecar_missing",
+                                       "purged",
+                                       "absent",
+                                       "binding_stale",
+                                       "parent_stale",
+                                       "method",
+                                       "range",
+                                       "cors",
+                                       "no_transform",
+                                       "withheld",
+                                       "skew"};
   ASSERT_EQ(sizeof(serve_reasons) / sizeof(serve_reasons[0]),
             size_t{kHtmlServeReasonCount});
   for (uint8_t i = 0; i < kHtmlServeReasonCount; ++i) {
@@ -1448,14 +1459,20 @@ TEST(HtmlCachePolicyTest, ServeAgeArithmetic) {
   EXPECT_EQ(v.age_s, 100u);
   EXPECT_EQ(v.action, HtmlServeAction::kValidate);
 
-  // A clock that stepped back is not negative age.
+  // A clock that stepped back a little is not negative age.
   HtmlServeRequest back = Req(HtmlCacheMode::kServeCachedHtml);
-  back.now_seconds = kStoredAt - 500;
+  back.now_seconds = kStoredAt - kHtmlServeSkewSeconds;
   v = ClassifyHtmlForServe(back, Fresh());
   EXPECT_EQ(v.age_s, 0u);
   EXPECT_EQ(v.action, HtmlServeAction::kServeHtml);
   v = ClassifyHtmlForServe(back, f);
   EXPECT_EQ(v.age_s, 40u);
+  // Further than the skew bound, the entry's age cannot be known and it is
+  // not served.
+  back.now_seconds = kStoredAt - 500;
+  v = ClassifyHtmlForServe(back, Fresh());
+  EXPECT_EQ(v.action, HtmlServeAction::kFallThrough);
+  EXPECT_EQ(v.reason, HtmlServeReason::kSkew);
 
   // Saturates rather than wrapping.
   StoredHtmlFacts huge = Fresh();
@@ -2058,6 +2075,106 @@ TEST(HtmlCachePolicyTest, StoredFieldsAgreeWithTheStoreVerdict) {
     EXPECT_EQ(v.explicit_shared, HtmlExplicitlyShared(cc.cc_flags, cc.s_maxage))
         << line;
   }
+}
+
+// ---- C API 1.14 serve rules -----------------------------------------------
+
+HtmlServeRequest FreshMarkdownRequest() {
+  HtmlServeRequest r;
+  r.mode = HtmlCacheMode::kServeVariants;
+  r.wants_markdown = true;
+  r.now_seconds = 1000;
+  return r;
+}
+
+StoredHtmlFacts LiveCopy() {
+  StoredHtmlFacts f;
+  f.present = true;
+  f.stored_at = 900;
+  f.lifetime_s = 300;
+  f.variant_present = true;
+  f.binding_live = true;
+  return f;
+}
+
+TEST(HtmlServePolicy113Test, RequestShapeFallsThroughBeforeTheEntry) {
+  StoredHtmlFacts absent;
+  HtmlServeRequest r = FreshMarkdownRequest();
+  r.method_cacheable = false;
+  EXPECT_EQ(ClassifyHtmlForServe(r, absent).reason, HtmlServeReason::kMethod);
+  r = FreshMarkdownRequest();
+  r.has_range = true;
+  EXPECT_EQ(ClassifyHtmlForServe(r, LiveCopy()).reason,
+            HtmlServeReason::kRange);
+  r = FreshMarkdownRequest();
+  r.has_origin = true;
+  EXPECT_EQ(ClassifyHtmlForServe(r, LiveCopy()).reason, HtmlServeReason::kCors);
+  // In a mode that does not serve, the mode is the reason.
+  r.mode = HtmlCacheMode::kReportOnly;
+  EXPECT_EQ(ClassifyHtmlForServe(r, LiveCopy()).reason, HtmlServeReason::kMode);
+}
+
+TEST(HtmlServePolicy113Test, FutureDatedEntryIsSkew) {
+  StoredHtmlFacts f = LiveCopy();
+  f.stored_at = 1000 + kHtmlServeSkewSeconds + 1;
+  EXPECT_EQ(ClassifyHtmlForServe(FreshMarkdownRequest(), f).reason,
+            HtmlServeReason::kSkew);
+  f.stored_at = 1000 + kHtmlServeSkewSeconds;
+  EXPECT_EQ(ClassifyHtmlForServe(FreshMarkdownRequest(), f).action,
+            HtmlServeAction::kServeMarkdown);
+}
+
+TEST(HtmlServePolicy113Test, NoTransformAndWithheldNeverServeTheCopy) {
+  StoredHtmlFacts f = LiveCopy();
+  f.no_transform = true;
+  EXPECT_EQ(ClassifyHtmlForServe(FreshMarkdownRequest(), f).reason,
+            HtmlServeReason::kNoTransform);
+  f = LiveCopy();
+  f.withheld = true;
+  EXPECT_EQ(ClassifyHtmlForServe(FreshMarkdownRequest(), f).reason,
+            HtmlServeReason::kWithheld);
+  // A request that asks for no transformation is not given the copy.
+  HtmlServeRequest no_transform = FreshMarkdownRequest();
+  ApplyHtmlRequestCacheControl("No-Transform", &no_transform);
+  EXPECT_TRUE(no_transform.request_no_transform);
+  EXPECT_EQ(ClassifyHtmlForServe(no_transform, LiveCopy()).reason,
+            HtmlServeReason::kNoTransform);
+  // Neither touches HTML serving.
+  HtmlServeRequest html = FreshMarkdownRequest();
+  html.wants_markdown = false;
+  html.mode = HtmlCacheMode::kServeCachedHtml;
+  f.no_transform = true;
+  EXPECT_EQ(ClassifyHtmlForServe(html, f).action, HtmlServeAction::kServeHtml);
+}
+
+TEST(HtmlServePolicy113Test, RequestCacheControlParsing) {
+  const auto parse = [](std::string_view cc) {
+    HtmlServeRequest r;
+    ApplyHtmlRequestCacheControl(cc, &r);
+    return r;
+  };
+  HtmlServeRequest r = parse("No-Cache");
+  EXPECT_TRUE(r.has_cache_control);
+  EXPECT_TRUE(r.cache_control_no_cache);
+  r = parse("max-age=60, min-fresh=\"10\"");
+  EXPECT_EQ(r.max_age, 60);
+  EXPECT_EQ(r.min_fresh, 10);
+  EXPECT_FALSE(r.cache_control_no_cache);
+  r = parse("max-age=60, max-age=30");
+  EXPECT_EQ(r.max_age, 30);
+  r = parse("max-age=abc");
+  EXPECT_EQ(r.max_age, 0);
+  r = parse("min-fresh=");
+  EXPECT_EQ(r.max_age, 0);
+  r = parse("max-age=99999999999999999999");
+  EXPECT_EQ(r.max_age, INT32_MAX);
+  r = parse("max-stale=100, no-store");
+  EXPECT_EQ(r.max_age, -1);
+  EXPECT_EQ(r.min_fresh, -1);
+  EXPECT_TRUE(r.has_cache_control);
+  r = parse("");
+  EXPECT_TRUE(r.has_cache_control);
+  EXPECT_FALSE(r.cache_control_no_cache);
 }
 
 }  // namespace

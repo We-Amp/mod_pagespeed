@@ -347,7 +347,37 @@ TEST_F(AbiSiteNotifyTest, EveryRefusalRuleSendsNothing) {
     p.notify_flags = 0x4u;  // the library's own bit
     refused.push_back(p);
   }
-  for (uint32_t bit = 3; bit < 32; ++bit) {
+  {
+    ps_notify_params_t p = ModuleParams();
+    p.notify_flags |= PS_NOTIFY_FLAG_HTML_STORED;  // stored, but not HTML
+    refused.push_back(p);
+  }
+  {
+    ps_notify_params_t p = ModuleParams();
+    p.content_type = PS_CONTENT_HTML;  // HTML, stored, but not vouched
+    p.notify_flags |= PS_NOTIFY_FLAG_HTML_STORED;
+    refused.push_back(p);
+  }
+  {
+    ps_notify_params_t p = ModuleParams();
+    p.content_type = PS_CONTENT_HTML;  // HTML, vouched, but not stored
+    p.notify_flags |= PS_NOTIFY_FLAG_HOST_VOUCHED;
+    refused.push_back(p);
+  }
+  {
+    ps_notify_params_t p = ModuleParams();
+    p.notify_flags = PS_NOTIFY_FLAG_HOST_VOUCHED | PS_NOTIFY_FLAG_HTML_STORED;
+    p.content_type = PS_CONTENT_HTML;  // stored, but not from the module
+    refused.push_back(p);
+  }
+  {
+    ps_notify_params_t p = ModuleParams();
+    p.content_type = PS_CONTENT_HTML;  // a stored page, with the llms.txt mask
+    p.notify_flags |= PS_NOTIFY_FLAG_HOST_VOUCHED | PS_NOTIFY_FLAG_HTML_STORED;
+    p.mask = 0xFFFFFFFDu;
+    refused.push_back(p);
+  }
+  for (uint32_t bit = 4; bit < 32; ++bit) {
     ps_notify_params_t p = ModuleParams();
     p.notify_flags |= (1u << bit);  // reserved
     refused.push_back(p);
@@ -384,6 +414,26 @@ TEST_F(AbiSiteNotifyTest, EveryRefusalRuleSendsNothing) {
   EXPECT_TRUE(frames[0].site.empty());
   EXPECT_TRUE(frames[0].host_vouched);
   EXPECT_FALSE(frames[0].from_module);
+}
+
+// PS_API 1.14: a page the module stored itself, for a host it vouched for,
+// may be named in an HTML notification, with an agent request; the frame
+// carries all three flags.
+TEST_F(AbiSiteNotifyTest, AStoredPageNotificationCarriesTheStoredFlag) {
+  ps_notify_params_t p = ModuleParams();
+  p.content_type = PS_CONTENT_HTML;
+  p.agent_request = 1;
+  p.notify_flags = PS_NOTIFY_FLAG_FROM_MODULE | PS_NOTIFY_FLAG_HOST_VOUCHED |
+                   PS_NOTIFY_FLAG_HTML_STORED;
+  ASSERT_EQ(PS_OK, ps_notify_worker_ex(socket_path_.c_str(), &p));
+  const auto frames = listener_->Frames();
+  ASSERT_EQ(1u, frames.size());
+  EXPECT_EQ(kSiteA, frames[0].site);
+  EXPECT_TRUE(frames[0].from_module);
+  EXPECT_TRUE(frames[0].host_vouched);
+  EXPECT_TRUE(frames[0].html_stored);
+  EXPECT_TRUE(frames[0].agent_request);
+  EXPECT_EQ(frames[0].content_type, pagespeed::ContentType::kHtml);
 }
 
 TEST_F(AbiSiteNotifyTest, ACallerPredatingTheSiteFieldsIsSentUnsitedOnce) {

@@ -286,6 +286,29 @@ never carrying a header value or a cookie whatever it was handed. Widening a
 grammar (a new action or reason name) is a MINOR change; narrowing one is
 observable and is treated as a contract change.
 
+The HTML serve policy (PS_API 1.14: `ps_html_serve_classify`,
+`ps_html_serve_reason_name`, `ps_html_store_write_params`,
+`ps_html_stored_facts_from_reads`, `ps_html_markdown_etag`,
+`ps_if_none_match_matches_weak`, `ps_read_shared_config_html_mode`) keeps
+the same rules and adds three structs.
+`ps_html_serve_request_t`, `ps_html_stored_facts_t` and
+`ps_html_serve_verdict_t` carry `struct_size`, are pinned in the golden, and
+grow by appending only. An input struct smaller than its 1.14 size is a
+malformed call; the verdict is written only as far as the caller's
+`struct_size` reaches. The facts carry their two content hashes as fixed
+arrays, so no pointer into a read result outlives the call. The serve reasons
+and actions, the `PS_HTML_FACTS_*` bits and the `PS_HTML_WITHHELD_*` values
+are ABI the same way the store reasons are: append only, and a caller treats
+an unknown reason as a fall-through. Two contracts are stated so they cannot
+be weakened quietly: `ps_html_store_write_params` is the only place the
+insert time is computed (capture start, floored, moved back by the inbound
+`Age`), and a 304 is answered only for a copy the same call would serve.
+
+`PS_NOTIFY_FLAG_HTML_STORED` (0x8, PS_API 1.14) was added to the wire's flags byte
+without a version bump: a worker that predates it refuses the frames that
+carry it, and only those, which is why a front end sends it only to a worker
+that publishes a Markdown HTML mode.
+
 ## The gate
 
 `tools/ci/check_abi.py`, run by the `abi-compat` CI job. It is checkout-only:

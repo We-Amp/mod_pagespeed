@@ -31,7 +31,8 @@
 // `:status`, `:authorization`, `:authenticated`, `:cookie`, `:no-store`,
 // `:req-max-age`, `:req-min-fresh`, `:incomplete`, `:body-bytes` and `:now`
 // set the request, status, body facts and receipt time that a header block
-// cannot carry.
+// cannot carry.  `:req-accept`, `:req-cache-control`, `:req-range`,
+// `:req-origin` and `:serve-method` set the request the serve verdict sees.
 //
 // WHAT RUNS.  (1) ClassifyHtmlForStore over the parsed request, headers and
 // body prefix.  (2) FormatHtmlCacheDecisionLine over the header lines taken
@@ -39,7 +40,10 @@
 // and then over a canonical field set built from the store verdict the way a
 // front end would build it.  (3) ParseHttpDateSeconds over every header
 // value.  (4) ClassifyHtmlForServe, in every mode, over facts derived from
-// the store verdict.
+// the store verdict.  (5) ClassifyHtmlForServe over the blob's serve request
+// (Accept, Cache-Control, Range, Origin, method) against a live copy, a
+// no-transform parent and a withheld copy, and a serve-side decision line
+// built from each verdict.
 //
 // ORACLES.  Crash-free, with the sanitizer as the memory-safety backstop, and
 // these invariants, each of which aborts on violation:
@@ -59,7 +63,12 @@
 //   * a stale entry is never served, in any mode, an entry that cannot meet
 //     the request's min-fresh is never served, and report-only never
 //     enforces, never returns a storing action and never returns a serve
-//     action.
+//     action;
+//   * a request with Range, If-Range or Origin, or a method other than GET
+//     or HEAD, is never served; Markdown is never served to a request that
+//     did not prefer it, for a no-transform parent or for a withheld copy;
+//   * a serve-side decision line built from a serve verdict always formats
+//     and the C API's gate admits it.
 
 #include "lib/cache/html_cache_policy_fuzz.h"
 
@@ -83,6 +92,7 @@
 #include "lib/cache/origin_cache_control.h"
 #include "lib/cache/vary_storability.h"
 #include "lib/classify/alternate_metadata.h"
+#include "lib/classify/capability_mask.h"
 
 namespace pagespeed::fuzz {
 namespace {
@@ -120,6 +130,12 @@ struct ParsedBlob {
   uint64_t body_bytes = 0;
   bool body_bytes_given = false;
   uint32_t now = 784111777;
+  // The serve request.
+  std::optional<std::string> req_accept;
+  std::optional<std::string> req_cache_control;
+  bool req_range = false;
+  bool req_origin = false;
+  std::string serve_method = "GET";
 };
 
 uint64_t ParseUnsigned(std::string_view v) {
@@ -184,6 +200,16 @@ ParsedBlob ParseBlob(std::string_view blob) {
       parsed.body_bytes_given = true;
     } else if (name == ":now") {
       parsed.now = static_cast<uint32_t>(ParseUnsigned(value));
+    } else if (name == ":req-accept") {
+      parsed.req_accept = std::string(value);
+    } else if (name == ":req-cache-control") {
+      parsed.req_cache_control = std::string(value);
+    } else if (name == ":req-range") {
+      parsed.req_range = true;
+    } else if (name == ":req-origin") {
+      parsed.req_origin = true;
+    } else if (name == ":serve-method") {
+      parsed.serve_method = std::string(value);
     }
   }
   return parsed;
@@ -355,6 +381,84 @@ void CheckServe(const ParsedBlob& parsed, const HtmlStoreVerdict& v) {
   }
 }
 
+void CheckLine(const std::optional<std::string>& line);
+
+// The serve verdicts for the blob's own serve request: against a live copy,
+// a no-transform parent and a withheld copy, in both serve modes.
+std::vector<HtmlServeVerdict> ServeRequestVerdicts(const ParsedBlob& parsed) {
+  HtmlServeRequest request;
+  request.wants_markdown =
+      parsed.req_accept.has_value() && WantsAgentMarkdown(*parsed.req_accept);
+  request.method_cacheable =
+      parsed.serve_method == "GET" || parsed.serve_method == "HEAD";
+  request.has_range = parsed.req_range;
+  request.has_origin = parsed.req_origin;
+  request.has_cookie = parsed.cookie;
+  request.has_authorization = parsed.authorization;
+  if (parsed.req_cache_control.has_value()) {
+    ApplyHtmlRequestCacheControl(*parsed.req_cache_control, &request);
+  }
+  request.now_seconds = parsed.now;
+  StoredHtmlFacts live;
+  live.present = true;
+  live.stored_at = parsed.now;
+  live.lifetime_s = 300;
+  live.variant_present = true;
+  live.binding_live = true;
+  std::vector<HtmlServeVerdict> out;
+  for (HtmlCacheMode mode :
+       {HtmlCacheMode::kServeVariants, HtmlCacheMode::kServeCachedHtml}) {
+    request.mode = mode;
+    for (int shape = 0; shape < 3; ++shape) {
+      StoredHtmlFacts facts = live;
+      facts.no_transform = shape == 1;
+      facts.withheld = shape == 2;
+      const HtmlServeVerdict v = ClassifyHtmlForServe(request, facts);
+      const bool served = v.action == HtmlServeAction::kServeHtml ||
+                          v.action == HtmlServeAction::kServeMarkdown;
+      if (served && (request.has_range || request.has_origin ||
+                     !request.method_cacheable)) {
+        Violation("served a request the cache never answers");
+      }
+      if (v.action == HtmlServeAction::kServeMarkdown &&
+          (!request.wants_markdown || facts.no_transform || facts.withheld)) {
+        Violation("served Markdown that may not be served");
+      }
+      if (static_cast<uint8_t>(v.reason) >= kHtmlServeReasonCount) {
+        Violation("serve reason out of range");
+      }
+      out.push_back(v);
+    }
+  }
+  return out;
+}
+
+// A serve-side line from each verdict, built the way a front end builds it.
+void FormatServeLines(const ParsedBlob& parsed,
+                      const std::vector<HtmlServeVerdict>& verdicts) {
+  for (const HtmlServeVerdict& v : verdicts) {
+    const std::string age = std::to_string(v.age_s);
+    const std::vector<HtmlCacheDecisionField> fields = {
+        {"ts_ms", "1700000000000"},
+        {"host", "fuzz.example"},
+        {"mode", HtmlCacheModeName(HtmlCacheMode::kServeVariants)},
+        {"action", HtmlServeActionName(v.action)},
+        {"reason", HtmlServeReasonName(v.reason)},
+        {"request", parsed.req_accept.has_value() ? "accept_markdown" : "none"},
+        {"variant", "markdown"},
+        {"binding",
+         v.reason == HtmlServeReason::kBindingStale ? "stale" : "live"},
+        {"age_s", age},
+    };
+    if (!HtmlCacheDecisionCApiAdmits(fields)) {
+      Violation("the C API gate refused a serve-side line");
+    }
+    const std::optional<std::string> line = FormatHtmlCacheDecisionLine(fields);
+    if (!line.has_value()) Violation("a serve-side line was refused");
+    CheckLine(line);
+  }
+}
+
 void CheckLine(const std::optional<std::string>& line) {
   if (!line.has_value()) return;
   if (line->empty() || line->front() != '{' || line->back() != '}') {
@@ -517,6 +621,22 @@ std::vector<std::string> BuildSeeds() {
   constexpr std::string_view kType = "Content-Type: text/html; charset=utf-8";
   constexpr std::string_view kAge = "Cache-Control: max-age=300";
   std::vector<std::string> seeds;
+  // Serve requests.
+  seeds.push_back(Blob({":req-accept: text/markdown", kType, kAge}));
+  seeds.push_back(
+      Blob({":req-accept: text/markdown", ":req-range: 1", kType, kAge}));
+  seeds.push_back(
+      Blob({":req-accept: text/markdown", ":req-origin: 1", kType, kAge}));
+  seeds.push_back(
+      Blob({":req-accept: text/markdown", ":serve-method: POST", kType, kAge}));
+  seeds.push_back(
+      Blob({":req-accept: text/markdown;q=0.5, text/html",
+            ":req-cache-control: max-age=abc, No-Cache", kType, kAge}));
+  seeds.push_back(Blob({":req-accept: text/markdown",
+                        ":req-cache-control: min-fresh=400", kType, kAge}));
+  seeds.push_back(Blob({":req-accept: */*", ":serve-method: HEAD",
+                        ":req-cache-control: min-fresh=99999999999999999999",
+                        kType, kAge}));
   // A storable response.
   seeds.push_back(Blob({kType, kAge, "ETag: \"v1\""}));
   // Request-side facts.
@@ -605,6 +725,11 @@ HtmlStoreVerdict ClassifyHtmlCachePolicyFuzzBlob(std::string_view blob) {
   return Classify(ParseBlob(blob));
 }
 
+std::vector<HtmlServeVerdict> ServeHtmlCachePolicyFuzzBlob(
+    std::string_view blob) {
+  return ServeRequestVerdicts(ParseBlob(blob));
+}
+
 void HtmlCachePolicyFuzzOne(std::string_view blob) {
   const ParsedBlob parsed = ParseBlob(blob);
   const HtmlStoreVerdict verdict = Classify(parsed);
@@ -614,6 +739,7 @@ void HtmlCachePolicyFuzzOne(std::string_view blob) {
   }
   CheckServe(parsed, verdict);
   FormatOne(parsed, verdict);
+  FormatServeLines(parsed, ServeRequestVerdicts(parsed));
   for (const auto& [name, value] : parsed.headers) {
     (void)ParseHttpDateSeconds(value, parsed.now);
   }

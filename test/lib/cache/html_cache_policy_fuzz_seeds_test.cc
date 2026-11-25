@@ -197,5 +197,25 @@ TEST(HtmlCachePolicyFuzzSeedsTest, MalformedAndEmptyInputsAreHandled) {
   }
 }
 
+TEST(HtmlCachePolicyFuzzSeedsTest, SeedsReachTheServeRequestReasons) {
+  std::set<HtmlServeReason> reasons;
+  bool markdown = false;
+  for (const std::string& seed : fuzz::HtmlCachePolicyFuzzSeeds()) {
+    for (const HtmlServeVerdict& v : fuzz::ServeHtmlCachePolicyFuzzBlob(seed)) {
+      reasons.insert(v.reason);
+      markdown |= v.action == HtmlServeAction::kServeMarkdown;
+    }
+  }
+  EXPECT_TRUE(markdown);
+  for (HtmlServeReason r :
+       {HtmlServeReason::kMethod, HtmlServeReason::kRange,
+        HtmlServeReason::kCors, HtmlServeReason::kNoTransform,
+        HtmlServeReason::kWithheld, HtmlServeReason::kClientNoCache,
+        HtmlServeReason::kParentStale, HtmlServeReason::kFresh}) {
+    EXPECT_TRUE(reasons.count(r) != 0)
+        << "no seed reaches " << HtmlServeReasonName(r);
+  }
+}
+
 }  // namespace
 }  // namespace pagespeed

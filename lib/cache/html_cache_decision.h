@@ -47,7 +47,10 @@ namespace pagespeed {
 //   reason                                   a store or serve reason name,
 //                                            validated, validation_failed,
 //                                            sidecar_write_failed,
-//                                            invalidated, or `headers:<name>`
+//                                            invalidated, purge_race, budget,
+//                                            sidecar_unpaired, url_disagree,
+//                                            transport_conflict, or
+//                                            `headers:<name>`
 //                                            / `vary:<token>` with an RFC 9110
 //                                            token of at most 128 bytes
 //   validators                               none, or an ordered subset of
@@ -75,6 +78,11 @@ namespace pagespeed {
 //   before                                   a hash, decimal or lowercase hex
 //   variant                                  0x7C or markdown
 //   binding                                  live or stale
+//   vhost_added                              header names the server's
+//                                            own configuration added after
+//                                            the store snapshot, as a
+//                                            comma-separated list of tokens,
+//                                            at most 1024 bytes (names only)
 //
 // Every value is non-empty (a fact that is absent is an absent key, which is
 // how the line says "null") and carries no control byte.  A caller therefore
@@ -94,7 +102,7 @@ struct HtmlCacheDecisionField {
 // The closed key set, in canonical output order:
 //   ts_ms, host, path, mode, action, reason, status, size, lifetime_s,
 //   validators, cc, vary, sidecar, request, personalisation, before, variant,
-//   binding, age_s
+//   binding, age_s, vhost_added
 std::span<const std::string_view> HtmlCacheDecisionKeys();
 
 // Longest `path` value the formatter accepts, in bytes.  The caller truncates.
@@ -116,6 +124,16 @@ inline constexpr size_t kMaxHtmlCacheDecisionVaryBytes = 1024;
 // mode off or report-only, a report-only action, a store reason, no request
 // fact or key that only describes a serve.  The C API admits only such a line.
 bool HtmlCacheDecisionIsStoreSide(
+    std::span<const HtmlCacheDecisionField> fields);
+
+// The gate the C API applies (PS_API 1.14).  A line whose mode serves
+// (serve-variants or serve-cached-html) is admitted whole; the formatter's
+// grammar is then the only check.  Any other line must state nothing beyond
+// the store side and the report, as HtmlCacheDecisionIsStoreSide requires,
+// with two widenings: `request` may carry accept_markdown (report-only records
+// whether a request asked for the Markdown copy), and `reason` may carry the
+// front-end store refusals purge_race, budget and url_disagree.
+bool HtmlCacheDecisionCApiAdmits(
     std::span<const HtmlCacheDecisionField> fields);
 
 std::optional<std::string> FormatHtmlCacheDecisionLine(

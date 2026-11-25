@@ -60,6 +60,13 @@ extern "C" {
  * ps_cache_write_site_purge_epoch and ps_cache_read_site_purge_epoch, and
  * publishes PS_SENTINEL_MARKDOWN_WITHHELD, PS_FLAG_HEADERS_CLASSIFIED and
  * PS_FLAG_HEADERS_SIDECAR_REQUIRED.
+ * 1.14 adds the HTML serve policy: ps_html_serve_classify with its request,
+ * stored-facts and verdict structs, ps_html_serve_reason_name,
+ * ps_html_store_write_params, ps_html_stored_facts_from_reads,
+ * ps_html_markdown_etag, ps_if_none_match_matches_weak and
+ * ps_read_shared_config_html_mode; the serve mode values of
+ * ps_html_cache_mode_t, which ps_html_store_classify now accepts with the
+ * store actions 1 and 2; and PS_NOTIFY_FLAG_HTML_STORED.
  *
  * A published constant is ABI surface too (see ABI.md), so a minor that adds
  * only one still moves the number: it is what a consumer compiles against to
@@ -73,7 +80,7 @@ extern "C" {
  * checked-in record of the current surface and is what the gate compares
  * against. */
 #define PS_API_VERSION_MAJOR 1
-#define PS_API_VERSION_MINOR 13
+#define PS_API_VERSION_MINOR 14
 #define PS_API_VERSION_PATCH 0
 
 PS_EXPORT int ps_version_major(void);
@@ -1247,11 +1254,17 @@ PS_EXPORT void ps_header_block_free(ps_header_block_t* block);
 
 /* ---------- HTML cacheability policy ---------- */
 
-/* The `mode` ps_html_store_classify takes. Any other value is a malformed call.
- * Nothing in this API writes or serves cached HTML. */
+/* The `mode` ps_html_store_classify and ps_html_serve_classify take. Any
+ * other value is a malformed call. The library decides; it never writes or
+ * serves cached HTML itself. */
 typedef enum ps_html_cache_mode_t {
   PS_HTML_CACHE_OFF = 0,         /* refuse every response */
   PS_HTML_CACHE_REPORT_ONLY = 1, /* decide and report, never act */
+  /* PS_API 1.14. Store HTML and serve its Markdown copy; HTML itself still
+     comes from the origin. */
+  PS_HTML_CACHE_SERVE_VARIANTS = 2,
+  /* PS_API 1.14. Also serve the stored HTML while it is fresh. */
+  PS_HTML_CACHE_SERVE_CACHED_HTML = 3,
   /* Pins the enum to int width, like every other published enum here.
      Published C API identifier: the double underscore is regrettable,
      but it matches ps_error_t / ps_content_type_t above.
@@ -1259,8 +1272,13 @@ typedef enum ps_html_cache_mode_t {
   PS_HTML_CACHE__FORCE_INT = 0x7FFFFFFF
 } ps_html_cache_mode_t;
 
-/* What ps_html_store_classify returns. The values 1 and 2 are reserved. */
+/* What ps_html_store_classify returns. 1 and 2 (PS_API 1.14) are returned
+ * only in a serve mode, and only they mean "store"; 3 and 4 are the
+ * report-only answers and mean that nothing may be written. */
 #define PS_HTML_STORE_ACTION_REFUSE 0
+#define PS_HTML_STORE_ACTION_STORE 1
+/* Store, but do not notify the optimizer (the response said no-transform). */
+#define PS_HTML_STORE_ACTION_STORE_NO_NOTIFY 2
 #define PS_HTML_STORE_ACTION_WOULD_STORE 3
 #define PS_HTML_STORE_ACTION_WOULD_STORE_NO_NOTIFY 4
 
@@ -1301,13 +1319,16 @@ typedef enum ps_html_cache_mode_t {
  * `body_prefix`.
  * `max_body_bytes` is the operator's size cap, clamped to a 16 MiB ceiling.
  *
- * Returns a PS_HTML_STORE_ACTION_* value: refuse, would store, or would store
- * without notifying the optimizer (the response said no-transform). No value
- * means "store", and the caller must not write anything. A body with a
+ * Returns a PS_HTML_STORE_ACTION_* value. In report-only that is refuse,
+ * would store, or would store without notifying the optimizer (the response
+ * said no-transform), and the caller must not write anything. In a serve mode
+ * (PS_API 1.14) it is refuse, store, or store without notifying; the rules
+ * are the same in every mode, so a serve mode stores exactly what report-only
+ * reports it would. A body with a
  * per-client marker is refused with the reason `personalisation_signal`, whose
  * detail names the marker. In the off mode every response is refused with the
  * reason `mode`. Returns -1 for a malformed call (a `mode` outside the
- * enumerated set, a NULL `method`, `url_path` or out-parameter other than the detail buffer;
+ * enumerated set (a library before 1.14 also refuses the serve modes), a NULL `method`, `url_path` or out-parameter other than the detail buffer;
  * NULL arrays or elements with `count` > 0; a NULL `body_prefix` with a
  * non-zero length; a NULL `detail_buf` with a non-zero capacity); no
  * out-parameter is written then.
@@ -1373,6 +1394,29 @@ PS_EXPORT int ps_html_store_classify(
  * `?`, `#`, `%` or `;`). A value is never empty: a fact that is absent is a key that is
  * left out.
  *
+ * PS_API 1.14 widens the line, appending only, so every line a 1.12 caller
+ * formats comes out byte for byte as before:
+ *   - a new key, vhost_added, after the ones above (and after the serve
+ *     keys variant, binding and age_s): the names of the headers the
+ *     server's own configuration added after the store snapshot, as a
+ *     comma-separated list of tokens of at most 1024 bytes, names only;
+ *   - request may also carry accept_markdown on every line, and no_cache
+ *     on a serve-side line (the order is authorization, cookie, no_cache,
+ *     accept_markdown);
+ *   - reason may also carry purge_race, budget and url_disagree, which a
+ *     front end's own engine decides, not the policy;
+ *   - a line whose mode is serve-variants or serve-cached-html is a serve-side
+ *     line and may carry every key and value the grammar admits: the serve
+ *     actions (would_serve, stored, served_html, served_markdown, validated,
+ *     purged, invalidated and the verdict names of ps_html_serve_classify),
+ *     the serve reasons (ps_html_serve_reason_name, plus validated,
+ *     validation_failed, invalidated, sidecar_unpaired and
+ *     transport_conflict), variant (0x7C or markdown), binding (live or
+ *     stale) and age_s (a canonical decimal integer, written as a number).
+ * Any other line (mode off, report-only or absent) still states only the
+ * store side: a report-only line takes a report-only action, a store reason
+ * and no serve key, as above.
+ *
  * The line (no trailing newline) is written to `buf` NUL-terminated, and
  * `*out_len` receives its length. Returns 0 on success; -1 for a malformed
  * call (NULL arrays or elements with `count` > 0, a NULL `out_len`, a NULL
@@ -1393,6 +1437,314 @@ PS_EXPORT int ps_html_decision_format(const char* const* keys,
  * Available from PS_API 1.12. Returns a static NUL-terminated string that must
  * not be freed, or NULL for a value outside the enumerated set. */
 PS_EXPORT const char* ps_html_store_reason_name(int reason);
+
+/* ---------- HTML serve policy (PS_API 1.14) ----------
+ *
+ * Whether a stored HTML page, or its Markdown copy, may answer a request, and
+ * the pieces a front end needs to store a page so that this question can be
+ * answered later. Every verdict is the library's: a front end gathers facts
+ * and acts on the answer, and decides nothing about caching itself, so every
+ * front end answers the same request the same way.
+ *
+ * Like the store classifier these are pure: no cache handle (except where a
+ * read result is the input), no I/O, no clock read (the caller passes the
+ * time), no state, and the last-error message is never touched. The one
+ * exception is ps_read_shared_config_html_mode, which reads a file and
+ * behaves like the other shared-config readers.
+ *
+ * The three structs below carry struct_size as their first field. The caller
+ * sets it to sizeof() as the caller's build sees it. A request or facts struct
+ * smaller than its PS_API 1.14 size is a malformed call; a larger one is read
+ * only as far as this library knows it. The verdict is written only as far as
+ * the smaller of the two sizes reaches. */
+
+/* What ps_html_serve_classify returns in `action`. */
+#define PS_HTML_SERVE_ACTION_FALL_THROUGH 0
+#define PS_HTML_SERVE_ACTION_SERVE_HTML 1
+#define PS_HTML_SERVE_ACTION_SERVE_MARKDOWN 2
+/* The entry must be validated with the origin first. Returned only in
+ * PS_HTML_CACHE_SERVE_CACHED_HTML; a caller without a validation step treats
+ * it as a fall-through. */
+#define PS_HTML_SERVE_ACTION_VALIDATE 3
+
+/* Bits of ps_html_serve_request_t::request_flags. Unknown bits are ignored. */
+#define PS_HTML_SERVE_REQUEST_HAS_AUTHORIZATION 1u /* or Proxy-Authorization */
+#define PS_HTML_SERVE_REQUEST_AUTHENTICATED_USER 2u
+#define PS_HTML_SERVE_REQUEST_HAS_COOKIE 4u /* Cookie or Cookie2 */
+#define PS_HTML_SERVE_REQUEST_HAS_RANGE 8u
+#define PS_HTML_SERVE_REQUEST_HAS_IF_RANGE 16u
+#define PS_HTML_SERVE_REQUEST_HAS_ORIGIN 32u
+
+/* One request, as ps_html_serve_classify sees it. Zero everywhere is a valid
+ * request in the off mode. Header values are the request's lines AS
+ * RECEIVED, every line of one field joined with ", " (RFC 9110 section 5.3);
+ * NULL means the field was absent. */
+typedef struct {
+  size_t struct_size;
+  int mode;           /* a ps_html_cache_mode_t value */
+  const char* method; /* required; GET and HEAD are answered, nothing else */
+  const char* accept;
+  const char* cache_control;
+  const char* pragma;
+  /* The client's If-None-Match as it arrived, before any front end removed
+   * its own entity tags from it for the request to the origin. */
+  const char* if_none_match;
+  uint32_t request_flags; /* PS_HTML_SERVE_REQUEST_* */
+  uint32_t now_seconds;   /* the request's time */
+} ps_html_serve_request_t;
+
+/* Bits of ps_html_stored_facts_t::flags. */
+#define PS_HTML_FACTS_PRESENT 0x1u /* the HTML entry exists */
+#define PS_HTML_FACTS_NEEDS_VALIDATION 0x2u
+#define PS_HTML_FACTS_EXPLICIT_SHARED 0x4u
+#define PS_HTML_FACTS_HEADERS_NOT_REPRODUCIBLE 0x8u
+#define PS_HTML_FACTS_SIDECAR_REQUIRED 0x10u
+#define PS_HTML_FACTS_SIDECAR_PRESENT 0x20u
+/* The caller's purge state covers the entry. The caller sets it; nothing the
+ * library reads can know it. */
+#define PS_HTML_FACTS_PURGED 0x40u
+/* The origin confirmed the entry with a 304 for this request. Consulted only
+ * in PS_HTML_CACHE_SERVE_CACHED_HTML. */
+#define PS_HTML_FACTS_VALIDATED_THIS_REQUEST 0x80u
+#define PS_HTML_FACTS_VARIANT_PRESENT 0x100u /* a Markdown copy exists */
+/* The copy was derived from exactly the stored content. */
+#define PS_HTML_FACTS_BINDING_LIVE 0x200u
+/* The page was stored with Cache-Control: no-transform. */
+#define PS_HTML_FACTS_NO_TRANSFORM 0x400u
+/* The deriver refused to build a copy for this content. */
+#define PS_HTML_FACTS_WITHHELD 0x800u
+
+/* Why a copy was withheld (ps_html_stored_facts_t::withheld_reason). */
+#define PS_HTML_WITHHELD_BELOW_FLOOR 1   /* too little text to be useful */
+#define PS_HTML_WITHHELD_TOO_LARGE 2     /* over the deriver's size cap */
+#define PS_HTML_WITHHELD_ENCODED 3       /* the stored bytes are encoded */
+#define PS_HTML_WITHHELD_HASH_MISMATCH 4 /* the bytes do not match the stamp */
+#define PS_HTML_WITHHELD_EXTRACT_FAILED 5
+
+/* Length of a content hash, the binding and Markdown hashes below. */
+#define PS_HTML_HASH_BYTES 32
+
+/* What is stored for one URL. Fill it with ps_html_stored_facts_from_reads
+ * and then set PS_HTML_FACTS_PURGED from your purge state; filling it by hand
+ * is possible, but the reads are where the facts come from. Zero means "no
+ * entry", which falls through. */
+typedef struct {
+  size_t struct_size;
+  uint32_t flags;        /* PS_HTML_FACTS_* */
+  uint32_t stored_at;    /* the entry's insert time, Unix seconds */
+  uint32_t age_at_store; /* 0 when the insert time is already Age-adjusted */
+  uint32_t lifetime_s;   /* the stored freshness lifetime */
+  /* The copy's own lifetime bound; 0 means the default, 86400. */
+  uint32_t render_ttl_s;
+  int withheld_reason; /* PS_HTML_WITHHELD_* with PS_HTML_FACTS_WITHHELD */
+  /* The content hash stamped on the stored HTML; all zero when unbound. */
+  uint8_t binding_hash[PS_HTML_HASH_BYTES];
+  /* The hash of the Markdown copy's bytes; all zero when not known, in which
+   * case no entity tag can be made and no 304 is answered. */
+  uint8_t markdown_hash[PS_HTML_HASH_BYTES];
+} ps_html_stored_facts_t;
+
+/* Characters in a Markdown entity tag, W/"psm-" plus 16 hex digits and the
+ * closing quote, not counting a terminating NUL. */
+#define PS_HTML_MARKDOWN_ETAG_CHARS 24
+
+/* The answer. */
+typedef struct {
+  size_t struct_size;
+  int action;         /* PS_HTML_SERVE_ACTION_* */
+  int reason;         /* see ps_html_serve_reason_name */
+  int enforce;        /* 0 in off and report-only, where nothing is acted on */
+  int wants_markdown; /* the request selected the Markdown copy */
+  uint32_t age_s;     /* the entry's current age; 0 when no entry */
+  /* 1 when the action is PS_HTML_SERVE_ACTION_SERVE_MARKDOWN and the request's
+   * If-None-Match matches `etag`: answer 304 instead of the copy. Never 1
+   * for any other action, so a tag can only be confirmed by a copy this
+   * request would have been served. */
+  int not_modified;
+  /* With PS_HTML_SERVE_ACTION_SERVE_MARKDOWN and both hashes known, the
+   * copy's entity tag (ps_html_markdown_etag), NUL-terminated; otherwise the
+   * empty string. A caller whose struct_size ends inside this field gets
+   * only NUL bytes in the part it has, never a partial tag. */
+  char etag[PS_HTML_MARKDOWN_ETAG_CHARS + 8];
+} ps_html_serve_verdict_t;
+
+/* Decide whether a stored HTML page, or its Markdown copy, answers a request.
+ * Available from PS_API 1.14.
+ *
+ * The rules, in the order they are applied (the first that decides is the
+ * reason):
+ *   1. The mode. Off and report-only always fall through with reason `mode`
+ *      and `enforce` 0.
+ *   2. The request. A method other than GET or HEAD falls through (`method`);
+ *      Range or If-Range (`range`); Origin (`cors`, the stored entry carries
+ *      no CORS answer).
+ *   3. No entry (`absent`). An entry stored more than 5 seconds after the
+ *      request's time (`skew`): its age cannot be known, and calling it 0
+ *      would turn a clock step into freshness.
+ *   4. Credentials (`auth_request`); a cookie unless the entry was
+ *      explicitly shared (`cookie_request`); the client's no-cache, or
+ *      Pragma: no-cache with no Cache-Control (`client_no_cache`); the
+ *      caller's purge (`purged`); headers the entry cannot reproduce
+ *      (`headers_not_reproducible`, `sidecar_missing`).
+ *   5. Freshness (RFC 9111 section 4.2). Stale entries are never served. The
+ *      request's max-age and min-fresh are honoured; max-stale is not.
+ *   6. Markdown. The request selects it only by preference (the rule of
+ *      ps_wants_agent_markdown, applied here to `accept`). The copy is served
+ *      only from a fresh parent (else `parent_stale`); never for a parent
+ *      stored with no-transform or a request whose Cache-Control carries
+ *      no-transform (`no_transform`) or whose copy was withheld
+ *      (`withheld`); only when it exists (`absent`) and was derived from
+ *      exactly the stored content (`binding_stale`); and only while the
+ *      PARENT's age is below the smaller of the parent's lifetime and the
+ *      copy's render lifetime (`parent_stale`). The copy is not separately
+ *      limited by its own age: the binding hash is what ties it to the
+ *      content it was made from, so a change of content unbinds it.
+ *   7. HTML is served only in PS_HTML_CACHE_SERVE_CACHED_HTML.
+ *
+ * HEAD gets exactly the verdict GET would get, entity tag included, and the
+ * caller sends no body; a HEAD whose If-None-Match matches may be answered
+ * 304 (RFC 9110 section 9.3.2).
+ *
+ * If-None-Match is compared weakly (ps_if_none_match_matches_weak) against
+ * the copy's own tag only. A Markdown tag (W/"psm-...") never confirms HTML,
+ * and no other tag confirms Markdown.
+ *
+ * Returns 0 with `*out` written. Returns -1 for a malformed call (NULL
+ * request, facts or out; a struct_size below the PS_API 1.14 size of
+ * request or facts, or below the width of struct_size for out; a mode outside
+ * the enumerated set; a NULL method); `*out` is not written then. */
+PS_EXPORT int ps_html_serve_classify(const ps_html_serve_request_t* request,
+                                     const ps_html_stored_facts_t* facts,
+                                     ps_html_serve_verdict_t* out);
+
+/* The closed-set name for a reason ps_html_serve_classify wrote: fresh, mode,
+ * auth_request, cookie_request, client_no_cache, needs_validation, stale,
+ * headers_not_reproducible, sidecar_missing, purged, absent, binding_stale,
+ * parent_stale, method, range, cors, no_transform, withheld, skew. New
+ * reasons are appended. Returns a static string, or NULL for a value outside
+ * the set; a caller must treat a reason it does not know as a fall-through.
+ * Available from PS_API 1.14. */
+PS_EXPORT const char* ps_html_serve_reason_name(int reason);
+
+/* Fill the write parameters for storing one HTML page as its durable
+ * original (ps_cache_write_original_site), from the verdict
+ * ps_html_store_classify returned for it. Available from PS_API 1.14.
+ *
+ * This is the ONE place the insert time is computed. `capture_start_ms` is
+ * when the request was sent to the origin (or entered the handler), in Unix
+ * milliseconds, never a later moment such as the commit; the library floors
+ * it to seconds. The time is then moved back by the response's inbound Age:
+ * `age_lines` / `age_count` are the response's Age header lines AS RECEIVED,
+ * in order (count 0 when there was none). An insert time that is too early
+ * makes the entry expire early and fall behind a purge sooner; one that is
+ * too late would let a page captured before a purge pass as captured after
+ * it, or an old page pass as fresh. So the Age is never ignored: lines that
+ * repeat one value count once, and a value that is not delta-seconds
+ * (negative, fractional, empty, any other byte), two lines that disagree, a
+ * value above 2147483647, or a value at or above the capture time make the
+ * call fail, and the caller stores nothing. The Age is folded into the
+ * insert time once; the stored entry records no separate age.
+ *
+ * `action` must be PS_HTML_STORE_ACTION_STORE or
+ * PS_HTML_STORE_ACTION_STORE_NO_NOTIFY; `lifetime_s`, `store_flags` and
+ * `cc_flags` are the classifier's out-parameters for the same response.
+ * `sidecar_stored` is non-zero when the header block for the page was
+ * stored, which makes a serve that cannot read it fall through. `params` must
+ * be initialized with ps_write_params_init_auto, and only the fields up to its
+ * struct_size are written; a field appended later (such as a content hash) is
+ * the caller's to set. The class, the content type, the origin state and the
+ * flags are set; the caller's own content_length is replaced by
+ * `content_length`.
+ *
+ * Returns 0, or -1 for a malformed call or an Age the rules above refuse (an
+ * action that does not store, a capture_start_ms below 1000, a NULL params or
+ * origin_content_type, NULL lines with a non-zero count, or a struct_size
+ * smaller than the PS_API 1.2 struct); nothing is written then. */
+PS_EXPORT int ps_html_store_write_params(
+    int action, uint32_t lifetime_s, uint32_t store_flags, uint16_t cc_flags,
+    int sidecar_stored, int64_t capture_start_ms, const char* const* age_lines,
+    size_t age_count, uint64_t content_length, const char* origin_content_type,
+    ps_write_params_t* params);
+
+/* Build the stored facts for one URL from what the cache holds for it.
+ * Available from PS_API 1.14.
+ *
+ * `original` is the exact-id read of the HTML entry (PS_SENTINEL_ORIGINAL,
+ * site-scoped), `markdown` the exact-id read of its Markdown copy, and
+ * `withheld_marker` the read of the deriver's withheld record; each is NULL
+ * when the read missed. `sidecar_present` is non-zero when the page's header
+ * block was read and parsed.
+ *
+ * The HTML entry counts as present only when it is an HTML page this API
+ * stored: an origin content type of text/html and the flags
+ * ps_html_store_write_params sets. Anything else at that id is absent here.
+ *
+ * The withheld record is tested FIRST: one for the stored content's hash and
+ * this library's own deriver version sets PS_HTML_FACTS_WITHHELD and leaves
+ * the binding clear, whatever copy is also present, so a copy that may not be
+ * served is never called live. A record for other content, or for an older
+ * deriver, is ignored and a new derivation may run. Otherwise
+ * PS_HTML_FACTS_BINDING_LIVE is set only when the copy's recorded parent hash
+ * equals the stored content hash and that hash is not all zero.
+ *
+ * PS_HTML_FACTS_PURGED is never set here: the caller adds it from its purge
+ * state. `markdown_hash` is left all zero by this version: the Markdown
+ * copy does not yet carry its own content hash, so until it does no entity
+ * tag is made and no 304 is answered from these facts. Returns 0 with `*out` written up to its struct_size, or -1 for a
+ * NULL out or a struct_size below the PS_API 1.14 size. */
+PS_EXPORT int ps_html_stored_facts_from_reads(
+    const ps_read_result_t* original, const ps_read_result_t* markdown,
+    const ps_read_result_t* withheld_marker, int sidecar_present,
+    ps_html_stored_facts_t* out);
+
+/* The Markdown copy's weak entity tag: W/"psm-" followed by 16 lowercase hex
+ * digits, the first 8 bytes of SHA-256(binding_hash || markdown_hash), and a
+ * closing quote. Both hashes are PS_HTML_HASH_BYTES long. The tag changes
+ * when either the stored page or the copy changes. It is computed from two
+ * stored hashes, so it costs the same for every copy whatever its size.
+ * Available from PS_API 1.14.
+ *
+ * Written to `buf` NUL-terminated, with `*out_len` its length. Returns 0;
+ * -1 for a NULL or all-zero hash, a NULL out_len, or a NULL buf with a
+ * non-zero capacity; -3 when the buffer is too small (`*out_len` is then the
+ * length needed and a non-empty buffer holds the empty string). */
+PS_EXPORT int ps_html_markdown_etag(const uint8_t* binding_hash,
+                                    const uint8_t* markdown_hash, char* buf,
+                                    size_t capacity, size_t* out_len);
+
+/* Does an If-None-Match field value match `etag` under the weak comparison
+ * (RFC 9110 sections 8.8.3.2 and 13.1.2)? `if_none_match` is the field's lines
+ * joined with ", ", `etag` one entity-tag. Returns 1 when any member of the
+ * list is weakly equal to `etag`, 0 otherwise.
+ *
+ * A field that is exactly `*` (surrounding whitespace aside) matches (RFC
+ * 9110 section 13.1.2: any current representation); a caller asks only about
+ * a representation it is about to send, and ps_html_serve_classify asks only
+ * for a copy it would serve. Fail-safe in one direction, toward sending the
+ * full response: a list that does not parse matches nothing, and `*` inside
+ * a list is such a list. Returns 0 for a NULL `if_none_match`, and -1 for a
+ * NULL or malformed `etag`.
+ * Available from PS_API 1.14. */
+PS_EXPORT int ps_if_none_match_matches_weak(const char* if_none_match,
+                                            const char* etag);
+
+/* The worker's HTML mode, as published in the shared config. */
+#define PS_HTML_MODE_OFF 0
+#define PS_HTML_MODE_MARKDOWN_STATIC 1
+#define PS_HTML_MODE_MARKDOWN_RENDERED 2
+#define PS_HTML_MODE_FULL 3
+
+/* Read the worker's HTML mode from the shared config under cache_path (the
+ * same string the worker was configured with; see
+ * ps_read_shared_config_volume_size). Returns a PS_HTML_MODE_* value, or -1
+ * for a NULL cache_path. The worker's own precedence applies: a valid
+ * html_mode key wins, otherwise disable_html=true is off and false is full;
+ * a missing or unreadable config, or one with neither key, reads as the
+ * worker's default, PS_HTML_MODE_FULL. Only a PS_HTML_MODE_MARKDOWN_* value means the
+ * worker derives Markdown copies of pages a front end stores; a front end
+ * gates its store and notify on it, reading it on a timer rather than per
+ * request (it reads a file). Available from PS_API 1.14. */
+PS_EXPORT int ps_read_shared_config_html_mode(const char* cache_path);
 
 PS_EXPORT PS_NODISCARD ps_error_t ps_write_data(ps_write_handle_t* handle,
                                                 const void* data,
@@ -1937,9 +2289,22 @@ typedef struct {
 #define PS_NOTIFY_FLAG_HOST_VOUCHED 0x1u
 
 /* The sender is the mod_pagespeed in-place arm. Such a notification must
- * carry a site, and must not carry PS_CONTENT_HTML, an agent request, the
- * llms.txt mask or PS_NOTIFY_FLAG_HOST_VOUCHED; each is PS_ERR_INVALID_ARG. */
+ * carry a site and must not carry the llms.txt mask. It may carry
+ * PS_CONTENT_HTML (and with it an agent request) only together with BOTH
+ * PS_NOTIFY_FLAG_HOST_VOUCHED and PS_NOTIFY_FLAG_HTML_STORED (PS_API 1.14);
+ * otherwise it must carry neither PS_CONTENT_HTML, an agent request nor
+ * PS_NOTIFY_FLAG_HOST_VOUCHED. Each violation is PS_ERR_INVALID_ARG. */
 #define PS_NOTIFY_FLAG_FROM_MODULE 0x2u
+
+/* PS_API 1.14. The notification names a present entry this module's HTML
+ * store wrote in this volume generation (ps_cache_write_original_site with
+ * ps_html_store_write_params): the worker may work from those stored bytes,
+ * which it checks before it reads any of them. Valid only with
+ * PS_NOTIFY_FLAG_FROM_MODULE and PS_CONTENT_HTML; anywhere else it is
+ * PS_ERR_INVALID_ARG. A worker built before this flag refuses a
+ * notification carrying it, so send it only to a worker that publishes a
+ * Markdown HTML mode (ps_read_shared_config_html_mode). */
+#define PS_NOTIFY_FLAG_HTML_STORED 0x8u
 
 /* Zero `size` bytes at `params` and stamp struct_size = size. Always pass
  * sizeof(ps_notify_params_t) as YOUR build sees it — use the _auto spelling
