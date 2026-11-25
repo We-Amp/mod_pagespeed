@@ -12219,6 +12219,50 @@
       }
     },
     {
+      "id": "live-compressor-ignores-no-gzip",
+      "runners": ["live"],
+      "why": "markdown: transport conflict is kept and counted",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"compress_markdown": {"ignores_no_compress": true}},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Content-Encoding": {"count": 1}},
+              "counter_delta": {"daemon_markdown_transport_conflict": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "live-body-filter-length-agrees",
       "runners": ["live"],
       "why": "markdown: declared length matches the bytes sent",
