@@ -4,7 +4,7 @@
 import { expect, test } from "@playwright/test";
 import { LABEL_INSET, valueAxisFit } from "./support/chart-axis";
 import { widenText } from "./support/layout";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, NETWORK_ERROR, openConsole, type Reply } from "./support/mock-admin";
 import * as F from "./support/fixtures";
 import {
   DAEMON_STATS,
@@ -1087,28 +1087,82 @@ test("the history span is rounded to the nearest unit and says so: 1 h 39 min is
 });
 
 // The history read runs beside the poll, so it answers after the card has
-// painted; the card holds the history's space from the start.
-for (const [name, graphs] of [
-  ["a recorded history", F.graphsDeliveredHistory()],
-  ["the logging-off hint", F.GRAPHS_LOGGING_OFF],
-] as const) {
-  test(`the card does not change height when ${name} arrives`, async ({ page }) => {
-    await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs }, { delayMs: { graphs: 1_500 } });
+// painted. While that first read is in flight the card holds the history's
+// space; once it has answered, the stand-in is gone.
+/**
+ * A log whose history covers the types counted since the restart (as a log
+ * that runs through the restart does): JavaScript for this server, CSS for
+ * the optimizer cache, on top of graphsDeliveredHistory's.
+ */
+const historyOfTheSameTypes = (): Reply => {
+  const reply = F.graphsDeliveredHistory();
+  const variables = (reply.body as { variables: Record<string, number[]> }).variables;
+  variables.javascript_served_original_bytes = [0, 500_000, 0, 200_000];
+  variables.javascript_served_optimized_bytes = [0, 300_000, 0, 120_000];
+  variables.ipro_daemon_served_css_original_bytes = [0, 0, 0, 90_000];
+  variables.ipro_daemon_served_css_optimized_bytes = [0, 0, 0, 60_000];
+  return reply;
+};
+
+for (const width of [1280, 390]) {
+  test(`at ${width} px the card grows by at most a line when a recorded history arrives`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: historyOfTheSameTypes() }, { delayMs: { graphs: 1_500 } });
     await openConsole(page, "pagespeed_global_admin", "#/savings");
     const card = page.getByTestId("savings-delivered-card");
     await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
     const before = await card.boundingBox();
-    // Measured while the read is still held.
+    // Measured while the read is still held, with the space reserved.
     await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
-    await expect(page.getByTestId("savings-delivered-no-log")).toHaveCount(0);
-    await expect(
-      page.getByTestId(name === "a recorded history" ? "savings-delivered-window" : "savings-delivered-no-log"),
-    ).toBeVisible();
+    await expect(page.getByTestId("savings-delivered-history-reserve")).toHaveCount(1);
+    await expect(page.getByTestId("savings-delivered-window")).toBeVisible();
+    await expect(page.getByTestId("savings-delivered-history-reserve")).toHaveCount(0);
     const after = await card.boundingBox();
     expect(before).not.toBeNull();
-    expect(after?.height).toBe(before?.height);
-    // Nothing of the held space is announced or found.
-    await expect(card.getByText(/of recorded history/)).toHaveCount(name === "a recorded history" ? 1 : 0);
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(28);
+    // Nothing of the reserved space is part of the card's text.
+    await expect(card.getByText(/of recorded history/)).toHaveCount(1);
+  });
+}
+
+/** The slot's height less the margin boxes of what it shows: 0 when nothing is held. */
+async function heldSpace(page: import("@playwright/test").Page): Promise<number> {
+  return page.getByTestId("savings-delivered-history-slot").evaluate((slot) => {
+    let shown = 0;
+    for (const child of Array.from(slot.children)) {
+      const style = getComputedStyle(child);
+      shown = Math.max(
+        shown,
+        child.getBoundingClientRect().height + parseFloat(style.marginTop) + parseFloat(style.marginBottom),
+      );
+    }
+    return slot.getBoundingClientRect().height - shown;
+  });
+}
+
+const oneSample = (): Reply =>
+  F.ok({
+    timestamps: [Date.now()],
+    variables: { image_served_original_bytes: [1_000_000], image_served_optimized_bytes: [250_000] },
+  });
+
+for (const [name, graphs, shows] of [
+  ["a failed read (500)", F.MODULE_FAILURE, null],
+  ["a network error", NETWORK_ERROR, null],
+  ["a log of one sample", oneSample(), null],
+  ["statistics logging off (404)", F.GRAPHS_LOGGING_OFF, "savings-delivered-no-log"],
+] as const) {
+  test(`after ${name} the card holds no space for the history`, async ({ page }) => {
+    const admin = await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs }, { delayMs: { graphs: 500 } });
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
+    await expect.poll(() => admin.calls("graphs")).toBeGreaterThan(0);
+    await expect(page.getByTestId("savings-delivered-history-reserve")).toHaveCount(0);
+    await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
+    if (shows) await expect(page.getByTestId(shows)).toBeVisible();
+    else await expect(page.getByTestId("savings-delivered-history-slot")).toHaveJSProperty("childElementCount", 0);
+    expect(await heldSpace(page)).toBeLessThanOrEqual(0.5);
   });
 }
 

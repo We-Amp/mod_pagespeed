@@ -100,11 +100,13 @@ describe("formatHistorySpan", () => {
   it("under an hour: the nearest minute, About when rounded", () => {
     expect(formatHistorySpan(0)).toBe("Under 1 min");
     expect(formatHistorySpan(29)).toBe("Under 1 min");
+    expect(formatHistorySpan(30)).toBe("About 1 min");
     expect(formatHistorySpan(42)).toBe("About 1 min");
     expect(formatHistorySpan(59 * MIN)).toBe("59 min");
     expect(formatHistorySpan(59 * MIN + 10)).toBe("About 59 min");
   });
   it("rounding up to the hour is stated in hours", () => {
+    expect(formatHistorySpan(59 * MIN + 30)).toBe("About 1 h");
     expect(formatHistorySpan(59 * MIN + 40)).toBe("About 1 h");
     expect(formatHistorySpan(HOUR)).toBe("1 h");
     expect(formatHistorySpan(HOUR + 3)).toBe("About 1 h");
@@ -114,9 +116,11 @@ describe("formatHistorySpan", () => {
     expect(formatHistorySpan(HOUR + 40 * MIN)).toBe("1 h 40 min");
     expect(formatHistorySpan(9 * HOUR)).toBe("9 h");
     expect(formatHistorySpan(5 * HOUR + 3 * MIN)).toBe("About 5 h");
+    expect(formatHistorySpan(HOUR + 55 * MIN)).toBe("About 2 h");
     expect(formatHistorySpan(23 * HOUR + 50 * MIN)).toBe("23 h 50 min");
   });
   it("rounding up to the day is stated in days", () => {
+    expect(formatHistorySpan(23 * HOUR + 55 * MIN)).toBe("About 1 d");
     expect(formatHistorySpan(23 * HOUR + 59 * MIN)).toBe("About 1 d");
     expect(formatHistorySpan(DAY)).toBe("1 d");
   });
@@ -130,6 +134,11 @@ describe("formatHistorySpan", () => {
   it("a negative or non-finite span is no span", () => {
     expect(formatHistorySpan(-4)).toBe("Under 1 min");
     expect(formatHistorySpan(Number.NaN)).toBe("Under 1 min");
+    expect(formatHistorySpan(Number.POSITIVE_INFINITY)).toBe(formatHistorySpan(Number.NaN));
+    expect(formatHistorySpan(Number.NEGATIVE_INFINITY)).toBe(formatHistorySpan(-4));
+  });
+  it("a fraction of a second is not rounding", () => {
+    expect(formatHistorySpan(3_599.6)).toBe("1 h");
   });
 });
 

@@ -80,7 +80,10 @@ export function formatSpan(seconds: number): string {
  * A recorded span as a heading states it, rounded to the nearest minute under
  * an hour, the nearest 10 minutes under a day and the nearest hour from a day
  * on: "About 1 h 40 min", "About 2 d 3 h". "About" marks a rounded span; an
- * exact one has none ("59 min", "1 h"). Under 30 s: "Under 1 min".
+ * exact one has none ("59 min", "1 h"). Under 30 s: "Under 1 min", which is
+ * also what a negative or non-finite span gives. The span is first rounded to
+ * whole seconds, so a fraction of a second is not counted as rounding:
+ * 3599.6 s is "1 h", without "About".
  */
 export function formatHistorySpan(seconds: number): string {
   const s = Math.round(Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
