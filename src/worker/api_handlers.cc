@@ -307,10 +307,25 @@ json BuildStatsJson(ApiContext& ctx) {
   // purged_on_change counts genuine content changes that dropped it, and
   // rebuild_forced counts multi-churn-race heals driven by the sticky intent
   // flag.  A healthy stable site shows preserved >> purged_on_change.
+  //
+  // below_floor counts copies not kept because their body fell below the
+  // fidelity floor, on both paths (static and rendered).  The module_* keys
+  // cover pages the module's HTML store wrote, derived without a browser:
+  // copies written, permanent refusals recorded as a withheld marker, and
+  // frames that found such a marker for the content and did no derivation.
+  uint64_t below_floor = s.agent_markdown_below_floor.load();
+  if (const BrowserAnalysisManager* bm =
+          ctx.browser_manager ? ctx.browser_manager() : nullptr) {
+    below_floor += bm->stats().agent_markdown_below_floor.load();
+  }
   j["agent_markdown"] = {
       {"preserved", s.agent_markdown_preserved.load()},
       {"purged_on_change", s.agent_markdown_purged_on_change.load()},
-      {"rebuild_forced", s.agent_markdown_rebuild_forced.load()}};
+      {"rebuild_forced", s.agent_markdown_rebuild_forced.load()},
+      {"below_floor", below_floor},
+      {"module_derived", s.module_markdown_derived.load()},
+      {"module_withheld", s.module_markdown_withheld.load()},
+      {"module_withheld_skips", s.module_markdown_withheld_skips.load()}};
   j["selector_invocations"] = s.selector_invocations.load();
   j["source_reads_from_durable_original"] =
       s.source_reads_from_durable_original.load();

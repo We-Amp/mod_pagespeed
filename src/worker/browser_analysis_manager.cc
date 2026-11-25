@@ -24,6 +24,7 @@
 #include "absl/strings/str_format.h"
 #include "lib/base/message_handler.h"
 #include "lib/base/url_util.h"
+#include "lib/cache/html_withheld_marker.h"
 #include "lib/classify/alternate_id.h"
 #include "lib/classify/alternate_metadata.h"
 #include "lib/classify/capability_mask.h"
@@ -1803,10 +1804,60 @@ void BrowserAnalysisManager::FinishAnalysis() {
   // notification whose sender vouched for that host.
   if (MayRunAgentRender(current_analysis_->item, config_.agent_optimize,
                         chrome_ && chrome_->running())) {
+    const AnalysisQueue::Item& item = current_analysis_->item;
+    if (item.has_origin_html_hash &&
+        AgentCopyBelowFloor(item.url, item.hostname, item.scheme, item.site,
+                            item.origin_html_hash)) {
+      stats_.agent_render_floor_skips.fetch_add(1, std::memory_order_relaxed);
+      OnAnalysisComplete();
+      return;
+    }
     RunAgentRender();  // → OnAgentRenderDone → OnAnalysisComplete
     return;
   }
   OnAnalysisComplete();
+}
+
+namespace {
+std::string BelowFloorKey(std::string_view url, std::string_view hostname,
+                          std::string_view scheme, std::string_view site) {
+  return absl::StrCat(url, "|", hostname, "|", scheme, "|", site);
+}
+}  // namespace
+
+bool BrowserAnalysisManager::AgentCopyBelowFloor(
+    std::string_view url, std::string_view hostname, std::string_view scheme,
+    std::string_view site, const std::array<std::byte, 32>& origin_hash) const {
+  const std::string key = BelowFloorKey(url, hostname, scheme, site);
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(below_floor_mutex_);
+  auto it = below_floor_.find(key);
+  return it != below_floor_.end() && it->second.origin_hash == origin_hash &&
+         now - it->second.at < std::chrono::seconds(kBelowFloorRetrySecs);
+}
+
+void BrowserAnalysisManager::NoteAgentCopyBelowFloor(
+    std::string_view url, std::string_view hostname, std::string_view scheme,
+    std::string_view site, const std::array<std::byte, 32>& origin_hash) {
+  const std::string key = BelowFloorKey(url, hostname, scheme, site);
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(below_floor_mutex_);
+  if (below_floor_.size() >= kMaxBelowFloorRecords &&
+      !below_floor_.contains(key)) {
+    std::erase_if(below_floor_, [now](const auto& kv) {
+      return now - kv.second.at >= std::chrono::seconds(kBelowFloorRetrySecs);
+    });
+    if (below_floor_.size() >= kMaxBelowFloorRecords) return;
+  }
+  below_floor_[key] = BelowFloorRecord{origin_hash, now};
+}
+
+void BrowserAnalysisManager::TestAgentRenderDone(
+    AnalysisQueue::Item item, absl::StatusOr<PageAnalysisResult> result) {
+  current_analysis_ = std::make_unique<AnalysisContext>();
+  current_analysis_->item = std::move(item);
+  analysis_in_progress_ = true;
+  OnAgentRenderDone(std::move(result));
 }
 
 // One-shot, viewport-independent agent_optimize render.  Renders
@@ -1898,6 +1949,19 @@ void BrowserAnalysisManager::OnAgentRenderDone(
         handler_->Info(
             "agent_optimize: discarding markdown for %s (answer no longer "
             "confirmed as shareable)",
+            item.url.c_str());
+      }
+    } else if (MarkdownBelowFidelityFloor(result->agent_markdown)) {
+      // A shell is not a copy of the page: the request falls back to the
+      // page itself, and the same content is not rendered again for a while.
+      stats_.agent_markdown_below_floor.fetch_add(1, std::memory_order_relaxed);
+      if (item.has_origin_html_hash) {
+        NoteAgentCopyBelowFloor(item.url, item.hostname, item.scheme, item.site,
+                                item.origin_html_hash);
+      }
+      if (handler_ != nullptr) {
+        handler_->Info(
+            "agent_optimize: no Markdown copy for %s: below the fidelity floor",
             item.url.c_str());
       }
     } else if (!AgentBindingStillLive(*cache_, item)) {

@@ -154,6 +154,12 @@ struct BrowserStats {
   // Agent renders (or their Markdown writes) skipped because the page's own
   // anonymous answer was not confirmed as shareable.
   std::atomic<uint64_t> agent_render_page_refused{0};
+  // Rendered Markdown copies not kept because their body fell below the
+  // fidelity floor (kHtmlMarkdownFloorBytes).
+  std::atomic<uint64_t> agent_markdown_below_floor{0};
+  // Agent renders not started because the same content fell below the floor
+  // within the retry window.
+  std::atomic<uint64_t> agent_render_floor_skips{0};
   // Analyses queued because a template's validation record no longer matched
   // the stylesheet its page is served with (RequestRevalidation), and requests
   // the per-template rate limit turned away.
@@ -264,6 +270,24 @@ class BrowserAnalysisManager {
   // assert what EnqueueAnalysis stored on it (e.g. the owned original_html
   // copy) without driving a live Chrome render through RunAnalysis.
   std::optional<AnalysisQueue::Item> TestDequeue() { return queue_.Dequeue(); }
+
+  // Test-only seam: finish an agent render for `item` with `result`, as the
+  // render's own callback does, without a browser.
+  void TestAgentRenderDone(AnalysisQueue::Item item,
+                           absl::StatusOr<PageAnalysisResult> result);
+
+  // Whether the last agent render of this page, for this origin content,
+  // fell below the fidelity floor within the retry window.  A render of the
+  // same content would almost certainly fall below it again, so callers do
+  // not ask for one; a changed page, or the end of the window, asks again.
+  // Thread-safe.
+  bool AgentCopyBelowFloor(std::string_view url, std::string_view hostname,
+                           std::string_view scheme, std::string_view site,
+                           const std::array<std::byte, 32>& origin_hash) const;
+  // Records such a render.  Thread-safe.
+  void NoteAgentCopyBelowFloor(std::string_view url, std::string_view hostname,
+                               std::string_view scheme, std::string_view site,
+                               const std::array<std::byte, 32>& origin_hash);
 
   // The stylesheet bytes a page is judged against, supplied by the serve path's
   // own assembly rather than reimplemented here.  See the alias definitions in
@@ -487,6 +511,19 @@ class BrowserAnalysisManager {
   static constexpr size_t kMaxRevalidationBudgets = 4096;
   std::mutex revalidation_mutex_;
   std::unordered_map<uint64_t, RevalidationBudget> revalidation_budgets_;
+
+  // Agent renders that fell below the fidelity floor, by page, with the
+  // origin hash they were made for (AgentCopyBelowFloor).  Bounded; only
+  // expired records are swept, and a full table records nothing new, which
+  // costs a repeat render, never a skipped one.
+  struct BelowFloorRecord {
+    std::array<std::byte, 32> origin_hash;
+    std::chrono::steady_clock::time_point at;
+  };
+  static constexpr int kBelowFloorRetrySecs = 600;
+  static constexpr size_t kMaxBelowFloorRecords = 4096;
+  mutable std::mutex below_floor_mutex_;
+  std::unordered_map<std::string, BelowFloorRecord> below_floor_;
 
   TemplateDetector template_detector_;
 

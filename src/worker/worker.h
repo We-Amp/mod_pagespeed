@@ -170,8 +170,13 @@ struct WorkerStats {
   std::atomic<uint64_t> notifications_rejected_option_context{0};
   // Site and sender (wire v6), checked at dispatch right after the option
   // context.  A notification from the module must name a site
-  // (rejected_empty_site) and must not ask for page work: HTML, the llms.txt
-  // build, an agent request, or a vouched host (rejected_module_render).
+  // (rejected_empty_site) and must not ask for page work: the llms.txt build,
+  // or an agent request or a vouched host on anything but a stored page
+  // (rejected_module_render).  HTML from the module is accepted only for a
+  // page its HTML store wrote, for a host it vouched for, while this worker
+  // derives Markdown copies (a markdown-* html_mode with agent_optimize on);
+  // the same counter takes every refusal of such a page, including the ones
+  // made after reading the stored entry and before copying a byte of it.
   std::atomic<uint64_t> notifications_rejected_empty_site{0};
   std::atomic<uint64_t> notifications_rejected_module_render{0};
   // Not a refusal: frames libpagespeed built for a caller whose parameters
@@ -444,6 +449,17 @@ struct WorkerStats {
   // because the variant had already been lost in a prior churn — the
   // multi-churn demand-gating race that would otherwise leave it absent.
   std::atomic<uint64_t> agent_markdown_rebuild_forced{0};
+  // below_floor: a Markdown copy was not kept because its body fell below
+  // the fidelity floor (kHtmlMarkdownFloorBytes), on the static path.  The
+  // browser path counts its own in BrowserStats; the stats page shows the sum.
+  std::atomic<uint64_t> agent_markdown_below_floor{0};
+  // Markdown copies derived without a browser from a page the module's HTML
+  // store wrote: copies written, permanent refusals recorded as a withheld
+  // marker, and frames that found a marker for the page already in place
+  // and did no derivation.
+  std::atomic<uint64_t> module_markdown_derived{0};
+  std::atomic<uint64_t> module_markdown_withheld{0};
+  std::atomic<uint64_t> module_markdown_withheld_skips{0};
 };
 
 // Purge fence baseline captured when a notification is dispatched
@@ -827,6 +843,13 @@ class Worker {
   // notification.
   std::function<void()> test_hook_after_html_origin_read_;
 
+  // TEST-ONLY seam.  When set, invoked on the worker-pool thread by the
+  // module HTML handler right after its owned copy of the stored page is
+  // taken and the borrow released, so a test can change the stored entry, or
+  // hold the pass, at the point between the checks and the writes.  Never
+  // set in production.
+  std::function<void()> test_hook_module_html_after_copy_;
+
   // TEST-ONLY seam.  When set, invoked on the worker-pool thread before each
   // image variant write; returning true makes that write fail as a cache
   // write would, so a test can produce an incomplete variant matrix on
@@ -913,6 +936,11 @@ class Worker {
   BrowserAnalysisManager* TestBrowserManager() {
     return browser_manager_.get();
   }
+
+  // Test-only seam: the gate that answers whether a sub-resource is served
+  // to an anonymous client, so a test can replace the HEADs it sends (after
+  // Initialize, which installs the production ones).
+  SubresourceGate* TestSubresourceGate() { return subresource_gate_.get(); }
 
   // Get the shared mmap'd serve-time stats (nullptr until created).
   ServeStats* serve_stats() const { return serve_stats_; }
@@ -1273,6 +1301,26 @@ class Worker {
   // nothing to optimize from either way.
   bool OriginNegotiatesByAccept(const CacheNotification& notification) const;
 
+  // Whether a notification from the module that names an HTML page may be
+  // processed at all: the page must be one the module's HTML store wrote
+  // (html_stored), for a host it vouched for, in a site, without the
+  // llms.txt mask, and this worker must derive Markdown copies (a markdown-*
+  // html_mode with agent_optimize on).  Every condition is a refusal.
+  static bool ModuleHtmlFrameAccepted(const CacheNotification& notification,
+                                      const WorkerConfig& cfg);
+
+  // A stored HTML page from the module (ModuleHtmlFrameAccepted): derive its
+  // Markdown copy without a browser.  Reads the stored page by exact id,
+  // refuses one that is not a classified HTML page or that forbids
+  // transformation before copying a byte, drops the derived copies when the
+  // content changed (the stored page and its header block stay), and
+  // extracts the copy only on demand.  A permanent refusal writes a withheld
+  // marker for the page's content hash.  Never fetches, renders or writes an
+  // HTML variant.  Runs on the thread pool, ahead of the dedup and cooldown.
+  void HandleModuleHtmlNotification(const CacheNotification& notification,
+                                    const PurgeDispatchGen& purge_gen,
+                                    const WorkerConfig& cfg);
+
   // Handle a warmup request (sentinel mask 0xFFFFFFFE): generate
   // full format variant matrix for images, ensure minified versions
   // for CSS/JS.
@@ -1348,6 +1396,12 @@ class Worker {
   // Origin-refreshed sentinels turned away by the in-flight guard, one per
   // in-flight key, dispatched from OnNotificationDone.  Event loop only.
   std::unordered_map<std::string, CacheNotification> pending_origin_refresh_;
+  // The same for a stored-page notification from the module: a store frame
+  // is often followed within milliseconds by the agent request that wants
+  // its copy, and dropping that one would leave the copy unbuilt until the
+  // module asks again.  One per key; a later frame replaces it, keeping its
+  // agent request.  Event loop only.
+  std::unordered_map<std::string, CacheNotification> pending_module_html_;
 
   // Health check socket
   std::unique_ptr<uv_pipe_s> health_server_;
@@ -1631,6 +1685,9 @@ class Worker {
                               const std::array<std::byte, 32>& origin_hash);
   mutable std::mutex markdown_pass_mutex_;
   std::unordered_map<std::string, MarkdownPass> markdown_pass_last_;
+
+  // Logged once: markdown-rendered derives module pages statically.
+  std::atomic<bool> module_rendered_mode_logged_{false};
 
   // Outcome of RecheckRecordedOriginal.
   enum class OriginRecheck : uint8_t {

@@ -346,8 +346,15 @@ void CheckFacts(Checker& c, const std::string& w, const json& in,
          {"present", "variant_present", "binding_live", "withheld",
           "explicit_shared", "sidecar_present", "sidecar_required",
           "needs_validation", "stored_at", "age_at_store", "lifetime_s",
-          "cc_flags", "serve"},
+          "cc_flags", "serve", "etag"},
          {"present"});
+  if (ex.contains("etag") && !ex["etag"].is_null()) {
+    static const std::regex kFactsTag("W/\"psm-[0-9a-f]{16}\"");
+    if (!ex["etag"].is_string() ||
+        !std::regex_match(ex["etag"].get<std::string>(), kFactsTag)) {
+      c.Fail(w + " expect", "etag is not null or W/\"psm-<16 hex>\"");
+    }
+  }
   for (const char* key : {"present", "variant_present", "binding_live",
                           "withheld", "explicit_shared", "sidecar_present",
                           "sidecar_required", "needs_validation"}) {

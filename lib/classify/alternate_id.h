@@ -107,10 +107,11 @@ enum class SentinelId : uint8_t {
                                   // exact-id reader of another class asks for
                                   // it.  A durable original written for the
                                   // key (WriteOriginalAlternate) removes it in
-                                  // the same call.  The id and its payload
-                                  // format version are reserved here; the
-                                  // writer lands with the worker change that
-                                  // produces it.
+                                  // the same call.  Written only by the
+                                  // worker's Markdown deriver, through the
+                                  // in-tree PageSpeedCache::WriteSentinel;
+                                  // the payload is lib/cache/
+                                  // html_withheld_marker.h.
 };
 
 // Payload shape of an entry class, i.e. how a reader of that class knows what
@@ -238,7 +239,7 @@ inline constexpr SentinelRegistryEntry kSentinelRegistry[] = {
      SentinelWriter::kDedicated},
     {static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld),
      "agent_markdown_withheld", SentinelPayload::kVersionedPayload,
-     SentinelWriter::kReserved},
+     SentinelWriter::kDedicated},
 };
 
 inline constexpr size_t kSentinelRegistrySize =
@@ -419,8 +420,8 @@ static_assert(!IsEmbedderWritableSentinel(
 // it refuses the other classes with writer-side invariants.
 static_assert(!IsEmbedderWritableSentinel(
     static_cast<AlternateId>(SentinelId::kDeclineTombstone)));
-// The withheld marker is reserved: nothing may write it through the embedder
-// surface, now or once its worker writer exists.
+// The withheld marker has one writer, the worker's Markdown deriver: nothing
+// may write it through the embedder surface.
 static_assert(!IsEmbedderWritableSentinel(
     static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld)));
 static_assert(IsEmbedderWritableSentinel(0xFC));

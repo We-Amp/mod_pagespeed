@@ -516,11 +516,13 @@ gtest_test(
     deps = [
         "//lib/base:message_handler",
         "//lib/cache:freshness",
+        "//lib/cache:html_withheld_marker",
         "//lib/cache:pagespeed_cache",
         "//lib/classify:alternate_id",
         "//lib/classify:alternate_metadata",
         "//lib/classify:capability_mask",
         "//lib/classify:option_context",
+        "//lib/net:upstream_pin",
         "//src/browser:optimization_profile",
         "//src/browser:template_detector",
         # Early Hints line parser: the test asserts the sentinel a deferred

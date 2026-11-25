@@ -57,7 +57,10 @@
     "ps_html_stored_facts_from_reads. expect: any field of the produced facts",
     "(present, variant_present, binding_live, withheld, explicit_shared,",
     "sidecar_present, sidecar_required, needs_validation, stored_at, age_at_store,",
-    "lifetime_s, cc_flags = exactly these PS_CC_ORIGIN_* names), and serve {action,",
+    "lifetime_s, cc_flags = exactly these PS_CC_ORIGIN_* names), etag (the",
+    "ps_html_markdown_etag of the produced binding_hash and markdown_hash, which",
+    "the facts fill from the copy's stamped content hash only for a live binding;",
+    "null = no tag can be made), and serve {action,",
     "reason}: ps_html_serve_classify on the produced facts in serve-variants with",
     "GET, Accept text/markdown and input.now_s.",
     "",
@@ -5328,6 +5331,7 @@
           "now_s": 1790000300
         },
         "expect": {
+          "etag": "W/\"psm-f7fd01b44f8ba0f5\"",
           "present": true,
           "variant_present": true,
           "binding_live": true,
@@ -5359,6 +5363,7 @@
           "now_s": 1790000300
         },
         "expect": {
+          "etag": null,
           "present": true,
           "variant_present": true,
           "binding_live": false,
@@ -5445,6 +5450,7 @@
           "now_s": 1790000300
         },
         "expect": {
+          "etag": null,
           "present": true,
           "binding_live": false,
           "withheld": true,

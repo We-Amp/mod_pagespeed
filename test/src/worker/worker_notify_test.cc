@@ -2213,9 +2213,8 @@ TEST_F(WorkerTest, DefaultHtmlModeIsFullAndRefusesModuleHtml) {
 }
 
 TEST_F(WorkerTest, MarkdownHtmlModeStillRefusesModuleHtml) {
-  // Module HTML stays refused in every html_mode until the worker gains a
-  // handler for it; a markdown-* mode changes only what the front sender's
-  // pages produce.
+  // A markdown-* mode accepts module HTML only for a page the module's HTML
+  // store wrote (the html_stored flag); vouching for the host is not enough.
   WorkerConfig config = SiteAnalysisConfig(socket_path_, cache_path_);
   config.html_mode = HtmlMode::kMarkdownStatic;
   Worker worker(config, nullptr);

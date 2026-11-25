@@ -16,12 +16,19 @@
 #include "test/src/worker/worker_test_fixture.h"
 // clang-format on
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <ctime>
+#include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -29,9 +36,14 @@
 #include "lib/base/message_handler.h"
 #include "lib/cache/cache.h"
 #include "lib/cache/freshness.h"
+#include "lib/cache/html_withheld_marker.h"
 #include "lib/classify/alternate_id.h"
 #include "lib/classify/alternate_metadata.h"
 #include "lib/classify/capability_mask.h"
+#include "lib/net/upstream_pin.h"
+#include "sha256.hpp"
+#include "src/browser/analysis_queue.h"
+#include "src/browser/page_analysis.h"
 #include "src/proto/worker_ipc.h"
 #include "src/worker/browser_analysis_manager.h"
 #include "src/worker/browser_analysis_manager_internal.h"
@@ -1107,6 +1119,736 @@ TEST(AgentPageAdmittedTest, AsksTheSharedCopyQuestionAboutThePage) {
   EXPECT_FALSE(browser_internal::AgentPageAdmitted(&gate, item, true, none));
   EXPECT_FALSE(browser_internal::AgentPageAdmitted(nullptr, item, true, none));
   EXPECT_EQ(asked.size(), 2u);
+}
+
+// =============================================================================
+// Pages stored by the module's HTML store: the Markdown copy is derived from
+// the stored bytes, without a browser and without a request leaving the worker.
+// =============================================================================
+
+// A page with enough text to clear the fidelity floor.
+constexpr char kModuleRichPage[] =
+    "<html><head><title>Module page</title></head><body><main>"
+    "<h1>Stored by the module</h1>"
+    "<p>This paragraph is long enough that the Markdown copy derived from it "
+    "clears the fidelity floor with room to spare. It talks about caching, "
+    "about agents that ask for text instead of markup, and about the worker "
+    "that turns one into the other without opening a browser.</p>"
+    "<p>A second paragraph adds more words, so that no reasonable floor could "
+    "call this page a shell: it has a heading, two paragraphs and a list.</p>"
+    "<ul><li>first item</li><li>second item</li></ul>"
+    "</main></body></html>";
+
+// A script-rendered shell: nothing to read without running it.
+constexpr char kModuleShellPage[] =
+    "<html><head><title>App</title></head><body><div id=\"app\"></div>"
+    "<script src=\"/app.js\"></script></body></html>";
+
+std::array<std::byte, 32> Sha256Of(std::string_view s) {
+  return cyclone::crypto::SHA256::hash(std::span<const std::byte>(
+      reinterpret_cast<const std::byte*>(s.data()), s.size()));
+}
+
+// What the module's HTML store writes for a test page.
+struct ModuleStoredPage {
+  std::string content_type = "text/html; charset=utf-8";
+  ContentType type = ContentType::kHtml;
+  uint8_t flags = AlternateMetadata::kFlagHeadersClassified;
+  uint16_t cc_flags = 0;
+  std::optional<std::array<std::byte, 32>> stamp;  // default: SHA-256(body)
+};
+
+struct ModuleStoredEntry {
+  std::string content;
+  AlternateMetadata metadata;
+};
+
+class ModuleHtmlTest : public WorkerTest {
+ protected:
+  static constexpr const char* kPath = "/page.html";
+  static constexpr const char* kHost = "example.com";
+  const std::string site_ = std::string(kSiteIdChars, 'c');
+
+  using StoredPage = ModuleStoredPage;
+  using Entry = ModuleStoredEntry;
+
+  void TearDown() override {
+    stopper_.reset();
+    worker_.reset();
+    WorkerTest::TearDown();
+  }
+
+  WorkerConfig Config(HtmlMode mode = HtmlMode::kMarkdownStatic) {
+    WorkerConfig config = MakeAgentOptimizeConfig(socket_path_, cache_path_);
+    config.html_mode = mode;
+    return config;
+  }
+
+  // `before_run` runs after Initialize and before the event loop starts.
+  void Start(const WorkerConfig& config,
+             const std::function<void(Worker&)>& before_run = nullptr) {
+    worker_ = std::make_unique<Worker>(config, &handler_);
+    ASSERT_TRUE(worker_->Initialize());
+    if (before_run) before_run(*worker_);
+    thread_ = std::thread([this]() { worker_->Run(); });
+    stopper_ = std::make_unique<WorkerStopper>(*worker_, thread_);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+
+  PageSpeedCache* cache() { return worker_->cache(); }
+  const WorkerStats& stats() { return worker_->stats(); }
+
+  // What the module's HTML store writes: the page at the durable-original id,
+  // in its site, classified, stamped with its content hash.
+  void Store(std::string_view body, const StoredPage& page = {}) {
+    AlternateMetadata meta;
+    meta.full_mask = static_cast<uint32_t>(SentinelId::kOriginalContent);
+    meta.content_type = page.type;
+    meta.origin_content_type = page.content_type;
+    meta.flags = page.flags;
+    meta.origin_cc_flags = static_cast<uint16_t>(
+        page.cc_flags | AlternateMetadata::kCCOriginHeaderPresent |
+        AlternateMetadata::kCCOriginPublic);
+    meta.origin_max_age = 3600;
+    meta.cache_inserted_at = static_cast<uint32_t>(std::time(nullptr));
+    meta.origin_html_hash = page.stamp.value_or(Sha256Of(body));
+    auto wh = cache()->WriteOriginalAlternate(kPath, kHost, "https",
+                                              body.size(), meta, site_);
+    ASSERT_TRUE(wh.has_value());
+    ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(body))).has_value());
+    ASSERT_TRUE(wh->close_sync().has_value());
+  }
+
+  [[nodiscard]] CacheNotification Frame(bool agent_request) const {
+    CacheNotification n;
+    n.url = std::string("http://example.com") + kPath;
+    n.hostname = kHost;
+    n.scheme = "https";
+    n.content_type = ContentType::kHtml;
+    n.capability_mask = CapabilityMask().Encode();
+    n.site = site_;
+    n.from_module = true;
+    n.host_vouched = true;
+    n.html_stored = true;
+    n.agent_request = agent_request;
+    return n;
+  }
+
+  // Sends and waits for every frame sent so far to retire.
+  void Send(const CacheNotification& n) {
+    SendNotification(n);
+    ++sent_;
+    ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(
+        *worker_, sent_, kWorkerStallBudget));
+  }
+
+  std::optional<Entry> Read(SentinelId id) {
+    const auto alt = static_cast<AlternateId>(id);
+    cache()->EvictAlternateFromRamCache(kPath, kHost, "https", alt, site_);
+    auto r = cache()->ReadAlternate(kPath, kHost, "https", alt, site_);
+    if (!r.has_value()) return std::nullopt;
+    auto c = r->content();
+    return Entry{std::string(reinterpret_cast<const char*>(c.data()), c.size()),
+                 r->metadata};
+  }
+
+  std::optional<HtmlWithheldMarker> Marker() {
+    auto e = Read(SentinelId::kAgentMarkdownWithheld);
+    if (!e.has_value()) return std::nullopt;
+    return DecodeHtmlWithheldMarker(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t*>(e->content.data()),
+        e->content.size()));
+  }
+
+  void WriteMarker(const HtmlWithheldMarker& marker) {
+    const std::string payload = EncodeHtmlWithheldMarker(marker);
+    auto wh = cache()->WriteSentinel(kPath, kHost, "https",
+                                     SentinelId::kAgentMarkdownWithheld,
+                                     payload.size(), site_);
+    ASSERT_TRUE(wh.has_value());
+    ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(payload))).has_value());
+    ASSERT_TRUE(wh->close_sync().has_value());
+  }
+
+  // The copy is present, bound to `body`, stamped with its own content hash
+  // and actually Markdown of the page.
+  void ExpectCopyOf(std::string_view body) {
+    auto copy = Read(SentinelId::kAgentMarkdown);
+    ASSERT_TRUE(copy.has_value()) << "no Markdown copy was written";
+    EXPECT_EQ(copy->metadata.origin_html_hash, Sha256Of(body));
+    EXPECT_EQ(copy->metadata.render_source_hash, Sha256Of(copy->content))
+        << "the copy's content hash, which its entity tag is made from";
+    EXPECT_NE(copy->content.find("Stored by the module"), std::string::npos);
+    EXPECT_FALSE(MarkdownBelowFidelityFloor(copy->content));
+  }
+
+  // A permanent refusal: no copy, and a marker for this content, the current
+  // deriver and `reason`, which the library's serve-side test applies.
+  void ExpectWithheld(std::string_view stamp_of, HtmlWithheldReason reason) {
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value());
+    auto marker = Marker();
+    ASSERT_TRUE(marker.has_value()) << "no withheld marker";
+    EXPECT_EQ(marker->reason, reason);
+    EXPECT_EQ(marker->deriver_version, kHtmlMarkdownDeriverVersion);
+    const auto h = Sha256Of(stamp_of);
+    EXPECT_EQ(std::memcmp(marker->parent_hash.data(), h.data(), h.size()), 0);
+    auto raw = Read(SentinelId::kAgentMarkdownWithheld);
+    ASSERT_TRUE(raw.has_value());
+    EXPECT_TRUE(HtmlWithheldMarkerApplies(
+        std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(raw->content.data()),
+            raw->content.size()),
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(h.data()),
+                                 h.size())))
+        << "the serve side would not read this marker as withheld";
+  }
+
+  NullMessageHandler handler_;
+  std::unique_ptr<Worker> worker_;
+  std::thread thread_;
+  std::unique_ptr<WorkerStopper> stopper_;
+  uint64_t sent_ = 0;
+};
+
+// A store frame records the content hash and builds nothing; the agent frame
+// that follows (the lost-copy notification for a present page) builds the
+// copy.  No HTML variant, no analysis.
+TEST_F(ModuleHtmlTest, StoreFrameRecordsAndAgentFrameDerives) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/false)));
+  auto recorded = Read(SentinelId::kContentHash);
+  ASSERT_TRUE(recorded.has_value());
+  const auto h = Sha256Of(kModuleRichPage);
+  EXPECT_EQ(recorded->content,
+            std::string(reinterpret_cast<const char*>(h.data()), h.size()));
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value())
+      << "a copy nobody asked for was built";
+
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_EQ(stats().module_markdown_derived.load(), 1u);
+  EXPECT_EQ(stats().notifications_rejected_module_render.load(), 0u);
+  EXPECT_EQ(stats().variants_written.load(), 0u) << "no HTML variant";
+  EXPECT_EQ(stats().html_processed.load(), 0u);
+  EXPECT_FALSE(worker_->TestBrowserManager()->TestDequeue().has_value());
+  // The stored page is untouched.
+  auto page = Read(SentinelId::kOriginalContent);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(page->content, kModuleRichPage);
+}
+
+// The agent request that arrives while the store frame is still being
+// processed is held, not dropped, and a later store frame that replaces it in
+// the hold keeps its agent request: the copy is built once the first pass
+// ends.  The first pass is held at a known point so both frames are certain to
+// meet the in-flight guard.
+TEST_F(ModuleHtmlTest, AgentFrameBehindAnInFlightStoreFrameIsHeldNotDropped) {
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+  std::atomic<bool> first{true};
+  ASSERT_NO_FATAL_FAILURE(Start(Config(), [&](Worker& worker) {
+    worker.test_hook_module_html_after_copy_ = [&]() {
+      if (!first.exchange(false)) return;
+      entered = true;
+      for (int i = 0; i < 2000 && !release; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    };
+  }));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  SendNotification(Frame(/*agent_request=*/false));
+  for (int i = 0; i < 2000 && !entered; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_TRUE(entered) << "the first pass never started";
+  SendNotification(Frame(/*agent_request=*/true));
+  SendNotification(Frame(/*agent_request=*/false));
+  for (int i = 0; i < 2000 && stats().notifications_skipped_inflight.load() < 2;
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(stats().notifications_skipped_inflight.load(), 2u);
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value())
+      << "a copy appeared before the held frame ran";
+  release = true;
+  // Three frames sent; the held one is dispatched again when the first ends.
+  sent_ = 4;
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(*worker_, sent_,
+                                                           kWorkerStallBudget));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_EQ(stats().module_markdown_derived.load(), 1u);
+  EXPECT_FALSE(
+      worker_->GetCooldownForUrl(kPath, kHost, "https", std::string_view(site_))
+          .has_value())
+      << "the page was left under a cooldown";
+}
+
+// A page stored again between the checks and the writes is checked again:
+// the same bytes, now with no-transform, get neither a copy nor a marker.
+TEST_F(ModuleHtmlTest, AnEntryThatTurnsNoTransformBeforeTheWriteGetsNothing) {
+  for (const char* body : {kModuleRichPage, kModuleShellPage}) {
+    SCOPED_TRACE(body == kModuleRichPage ? "copy" : "marker");
+    TearDown();
+    SetUp();
+    sent_ = 0;
+    ASSERT_NO_FATAL_FAILURE(Start(Config(), [this, body](Worker& worker) {
+      worker.test_hook_module_html_after_copy_ = [this, body]() {
+        StoredPage refusing;
+        refusing.cc_flags = AlternateMetadata::kCCOriginNoTransform;
+        Store(body, refusing);
+      };
+    }));
+    ASSERT_NO_FATAL_FAILURE(Store(body));
+    ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value());
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value());
+    EXPECT_EQ(stats().module_markdown_derived.load(), 0u);
+    EXPECT_EQ(stats().module_markdown_withheld.load(), 0u);
+  }
+}
+
+// Every condition of the stored-page shape and of this worker's mode is a
+// refusal at the event loop, counted.
+TEST_F(ModuleHtmlTest, RefusedUnlessStoredAndTheWorkerDerivesCopies) {
+  struct Case {
+    const char* name;
+    HtmlMode mode;
+    bool agent_optimize;
+    bool html_stored;
+    uint32_t mask;
+  };
+  const uint32_t plain = CapabilityMask().Encode();
+  const Case cases[] = {
+      {"full", HtmlMode::kFull, true, true, plain},
+      {"off", HtmlMode::kOff, true, true, plain},
+      {"agent_optimize off", HtmlMode::kMarkdownStatic, false, true, plain},
+      {"not stored by the module", HtmlMode::kMarkdownStatic, true, false,
+       plain},
+      {"warmup mask", HtmlMode::kMarkdownStatic, true, true, kWarmupSentinel},
+      {"origin-refresh mask", HtmlMode::kMarkdownStatic, true, true,
+       kOriginRefreshedSentinel},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    TearDown();
+    SetUp();
+    sent_ = 0;
+    WorkerConfig config = Config(c.mode);
+    config.browser_analysis.agent_optimize = c.agent_optimize;
+    ASSERT_NO_FATAL_FAILURE(Start(config));
+    ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+    CacheNotification n = Frame(/*agent_request=*/true);
+    n.capability_mask = c.mask;
+    if (!c.html_stored) {
+      // Without the stored-page flag the module may not vouch or ask for a
+      // copy either (the wire refuses that shape).
+      n.html_stored = false;
+      n.host_vouched = false;
+      n.agent_request = false;
+    }
+    ASSERT_NO_FATAL_FAILURE(Send(n));
+    EXPECT_EQ(stats().notifications_rejected_module_render.load(), 1u);
+    EXPECT_FALSE(Read(SentinelId::kContentHash).has_value());
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value());
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value());
+  }
+}
+
+// What the stored entry says it is decides before a byte is copied: a
+// missing page, one that is not HTML, one the HTML store did not write, one
+// that forbids transformation and one without a content hash are refused,
+// counted, and leave nothing behind.
+TEST_F(ModuleHtmlTest, StoredEntryRefusedBeforeAnyCopy) {
+  struct Case {
+    const char* name;
+    bool store;
+    StoredPage page;
+  };
+  StoredPage not_html;
+  not_html.content_type = "text/plain";
+  StoredPage not_html_type;
+  not_html_type.type = ContentType::kOther;
+  StoredPage unflagged;
+  unflagged.flags = 0;
+  StoredPage no_transform;
+  no_transform.cc_flags = AlternateMetadata::kCCOriginNoTransform;
+  StoredPage unstamped;
+  unstamped.stamp = std::array<std::byte, 32>{};
+  const Case cases[] = {
+      {"missing", false, {}},
+      {"text/plain", true, not_html},
+      {"not an HTML entry", true, not_html_type},
+      {"not classified", true, unflagged},
+      {"no-transform", true, no_transform},
+      {"no content hash", true, unstamped},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    TearDown();
+    SetUp();
+    sent_ = 0;
+    ASSERT_NO_FATAL_FAILURE(Start(Config()));
+    if (c.store) ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage, c.page));
+    ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+    EXPECT_EQ(stats().notifications_rejected_module_render.load(), 1u);
+    // The content-hash record is written after the copy and its checks, so
+    // its absence shows the pass stopped before copying.
+    EXPECT_FALSE(Read(SentinelId::kContentHash).has_value());
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value());
+    EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value());
+    EXPECT_EQ(stats().module_markdown_derived.load(), 0u);
+  }
+}
+
+// New content drops the copies derived from the old content, keeps the
+// module's stored page and header block, and derives again.
+TEST_F(ModuleHtmlTest, ChangedContentKeepsTheStoredPageAndRederives) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  {
+    const std::string block = std::string(1, '\x01') + "X-Kept: yes\r\n";
+    auto wh = cache()->WriteSentinel(kPath, kHost, "https",
+                                     SentinelId::kHeadersSidecar, block.size(),
+                                     site_);
+    ASSERT_TRUE(wh.has_value());
+    ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(block))).has_value());
+    ASSERT_TRUE(wh->close_sync().has_value());
+  }
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+
+  std::string changed = kModuleRichPage;
+  changed.replace(changed.find("first item"), 10, "other item");
+  ASSERT_NO_FATAL_FAILURE(Store(changed));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(changed);
+  auto page = Read(SentinelId::kOriginalContent);
+  ASSERT_TRUE(page.has_value()) << "the stored page was purged";
+  EXPECT_EQ(page->content, changed);
+  EXPECT_TRUE(Read(SentinelId::kHeadersSidecar).has_value())
+      << "the header block was purged";
+  EXPECT_EQ(stats().module_markdown_derived.load(), 2u);
+}
+
+// A copy left behind for older content (one written after the page changed,
+// for example) is never bound to the new content: the next frame for the new
+// content replaces it, even without an agent request.
+TEST_F(ModuleHtmlTest, ACopyForOlderContentIsRebuiltNotServed) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  std::string changed = kModuleRichPage;
+  changed.replace(changed.find("first item"), 10, "other item");
+  ASSERT_NO_FATAL_FAILURE(Store(changed));
+  {
+    AlternateMetadata meta;
+    meta.full_mask = static_cast<uint32_t>(SentinelId::kAgentMarkdown);
+    meta.content_type = ContentType::kOther;
+    meta.origin_content_type = "text/markdown";
+    meta.flags = AlternateMetadata::kFlagWorkerProcessed;
+    meta.origin_html_hash = Sha256Of(kModuleRichPage);
+    const std::string old_copy = "# the old page\n";
+    auto wh = cache()->WriteAgentAlternate(kPath, kHost, "https",
+                                           old_copy.size(), meta, site_);
+    ASSERT_TRUE(wh.has_value());
+    ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(old_copy))).has_value());
+    ASSERT_TRUE(wh->close_sync().has_value());
+  }
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/false)));
+  ExpectCopyOf(changed);
+}
+
+// A purge (or a refresh) that leaves the same bytes behind is processed
+// again: nothing about "same content" skips a page whose copy is gone.
+TEST_F(ModuleHtmlTest, SameBytesAfterAPurgeStillDerive) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+
+  // The module's purge removes the whole key in its site; it then stores the
+  // same page again.
+  ASSERT_TRUE(cache()->Remove(kPath, kHost, "https", site_).has_value());
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdown).has_value());
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_EQ(stats().module_markdown_derived.load(), 2u);
+
+  // A refresh with the same bytes while the copy is in place keeps it.
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_EQ(stats().module_markdown_derived.load(), 2u)
+      << "a bound copy was rebuilt";
+}
+
+// Each permanent refusal writes no copy but a marker with its reason, and a
+// second agent frame for the same content does no derivation.
+TEST_F(ModuleHtmlTest, PermanentRefusalsWriteAMarkerAndAreNotRepeated) {
+  struct Case {
+    const char* name;
+    std::string body;
+    StoredPage page;
+    size_t max_html_size;
+    HtmlWithheldReason reason;
+  };
+  StoredPage mismatched;
+  mismatched.stamp = Sha256Of("some other page");
+  const std::string gzip_body =
+      std::string("\x1f\x8b\x08\x00", 4) + std::string(64, 'x');
+  const Case cases[] = {
+      {"below floor",
+       kModuleShellPage,
+       {},
+       1 << 20,
+       HtmlWithheldReason::kBelowFloor},
+      {"too large", kModuleRichPage, {}, 64, HtmlWithheldReason::kTooLarge},
+      {"encoded", gzip_body, {}, 1 << 20, HtmlWithheldReason::kEncoded},
+      {"hash mismatch", kModuleRichPage, mismatched, 1 << 20,
+       HtmlWithheldReason::kHashMismatch},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    TearDown();
+    SetUp();
+    sent_ = 0;
+    WorkerConfig config = Config();
+    config.max_html_size = c.max_html_size;
+    ASSERT_NO_FATAL_FAILURE(Start(config));
+    ASSERT_NO_FATAL_FAILURE(Store(c.body, c.page));
+    ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+    const std::string stamp_of = c.reason == HtmlWithheldReason::kHashMismatch
+                                     ? "some other page"
+                                     : c.body;
+    ExpectWithheld(stamp_of, c.reason);
+    if (c.reason == HtmlWithheldReason::kTooLarge) {
+      EXPECT_EQ(Marker()->size_cap, c.max_html_size);
+    }
+    EXPECT_EQ(stats().module_markdown_withheld.load(), 1u);
+    const uint64_t floor_before = stats().agent_markdown_below_floor.load();
+
+    ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+    EXPECT_EQ(stats().module_markdown_withheld_skips.load(), 1u);
+    EXPECT_EQ(stats().module_markdown_withheld.load(), 1u);
+    EXPECT_EQ(stats().agent_markdown_below_floor.load(), floor_before)
+        << "the second frame ran the extractor";
+    EXPECT_EQ(stats().module_markdown_derived.load(), 0u);
+
+    // A marker never reads as a page: neither a selection for an agent
+    // request nor one for a browser returns it.
+    CapabilityMask agent;
+    auto best =
+        cache()->ReadBestAlternateAgent(kPath, kHost, "https", agent,
+                                        /*agent_request_entitled=*/true, site_);
+    EXPECT_FALSE(best.has_value()) << "a selection read returned an entry";
+    auto plain = cache()->ReadBestAlternate(kPath, kHost, "https",
+                                            CapabilityMask(), false, site_);
+    EXPECT_FALSE(plain.has_value()) << "a selection read returned an entry";
+  }
+}
+
+// A marker from an older deriver is not obeyed: the page is derived and the
+// marker goes, so the serve side stops withholding the copy.
+TEST_F(ModuleHtmlTest, AMarkerFromAnOlderDeriverIsIgnored) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/false)));
+  HtmlWithheldMarker old;
+  old.reason = HtmlWithheldReason::kBelowFloor;
+  old.deriver_version = kHtmlMarkdownDeriverVersion - 1;
+  const auto h = Sha256Of(kModuleRichPage);
+  std::memcpy(old.parent_hash.data(), h.data(), h.size());
+  ASSERT_NO_FATAL_FAILURE(WriteMarker(old));
+
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value());
+}
+
+// A size refusal is about the cap it was made under: raise the cap and the
+// page derives.
+TEST_F(ModuleHtmlTest, ATooLargeMarkerIsIgnoredAfterTheCapIsRaised) {
+  WorkerConfig config = Config();
+  config.max_html_size = 64;
+  ASSERT_NO_FATAL_FAILURE(Start(config));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectWithheld(kModuleRichPage, HtmlWithheldReason::kTooLarge);
+
+  config.max_html_size = 1 << 20;
+  worker_->UpdateConfig(std::make_shared<const WorkerConfig>(config));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value());
+}
+
+// A refusal for bytes that did not match their hash is undone when the
+// module stores the page again: the store removes the marker, and the next
+// agent request derives the copy.
+TEST_F(ModuleHtmlTest, AHashMismatchMarkerIsClearedByTheNextStore) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config()));
+  StoredPage mismatched;
+  mismatched.stamp = Sha256Of("some other page");
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage, mismatched));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectWithheld("some other page", HtmlWithheldReason::kHashMismatch);
+
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  EXPECT_FALSE(Read(SentinelId::kAgentMarkdownWithheld).has_value())
+      << "the store did not clear the marker";
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+}
+
+// markdown-rendered derives module pages statically too: the module's
+// frames may never start a browser.
+TEST_F(ModuleHtmlTest, RenderedModeDerivesModulePagesStatically) {
+  ASSERT_NO_FATAL_FAILURE(Start(Config(HtmlMode::kMarkdownRendered)));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+  EXPECT_FALSE(worker_->TestBrowserManager()->TestDequeue().has_value());
+}
+
+// The network stub: with no browser, no sub-resource check allowed and no
+// test override in place, a module page still gets its copy, and nothing
+// that fetches, analyses or renders ran.
+TEST_F(ModuleHtmlTest, DerivesWithoutAnyRequestLeavingTheWorker) {
+  // The fixture's blanket "admitted" override would hide a gate call.
+  SubresourceGate::SetVerdictOverrideForTest(nullptr);
+  std::atomic<int> heads{0};
+  ASSERT_NO_FATAL_FAILURE(Start(Config(), [&heads](Worker& worker) {
+    worker.TestSubresourceGate()->SetHead(
+        [&heads](const std::string&,
+                 const std::string& url) -> std::optional<int> {
+          ++heads;
+          ADD_FAILURE() << "HEAD sent for " << url;
+          return std::nullopt;
+        });
+    worker.TestSubresourceGate()->SetSharedCopyHead(
+        [&heads](const std::string&, const std::string& url,
+                 const std::vector<PinnedUpstream>&) -> std::optional<int> {
+          ++heads;
+          ADD_FAILURE() << "shared-copy HEAD sent for " << url;
+          return std::nullopt;
+        });
+  }));
+  ASSERT_NO_FATAL_FAILURE(Store(kModuleRichPage));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/false)));
+  ASSERT_NO_FATAL_FAILURE(Send(Frame(/*agent_request=*/true)));
+  ExpectCopyOf(kModuleRichPage);
+
+  EXPECT_EQ(heads.load(), 0);
+  const BrowserStats& bs = worker_->TestBrowserManager()->stats();
+  EXPECT_EQ(bs.queue_enqueued.load(), 0u) << "an analysis was queued";
+  EXPECT_EQ(bs.queue_processed.load(), 0u) << "an analysis ran";
+  EXPECT_EQ(bs.profiles_generated.load(), 0u);
+  EXPECT_EQ(bs.chrome_restarts.load(), 0u) << "a browser was started";
+  EXPECT_EQ(bs.script_fetches_served.load(), 0u);
+  EXPECT_EQ(bs.script_fetches_blocked.load(), 0u);
+  EXPECT_FALSE(worker_->TestBrowserManager()->TestDequeue().has_value());
+  EXPECT_EQ(stats().notifications_unvouched_render_skipped.load(), 0u);
+  // Nothing on this path builds the /llms.txt index, the only user of the
+  // agent fetcher.
+  EXPECT_FALSE(Read(SentinelId::kLlmsTxt).has_value());
+}
+
+// The rendered path keeps no copy below the fidelity floor, and remembers it
+// for that content so the page is not rendered again for every request.
+TEST_F(WorkerTest, RenderedCopyBelowTheFloorIsNotKept) {
+  WorkerConfig config = MakeAgentOptimizeConfig(socket_path_, cache_path_);
+  NullMessageHandler handler;
+  Worker worker(config, &handler);
+  ASSERT_TRUE(worker.Initialize());
+  BrowserAnalysisManager* manager = worker.TestBrowserManager();
+  ASSERT_NE(manager, nullptr);
+
+  AnalysisQueue::Item item;
+  item.url = "/rendered.html";
+  item.hostname = "example.com";
+  item.scheme = "https";
+  item.host_vouched = true;
+  item.has_origin_html_hash = true;
+  item.origin_html_hash = Sha256Of("the rendered page");
+  {
+    auto wh = worker.cache()->WriteSentinel(
+        item.url, item.hostname, item.scheme, SentinelId::kContentHash, 32);
+    ASSERT_TRUE(wh.has_value());
+    ASSERT_TRUE(wh->write_sync(std::as_bytes(std::span(item.origin_html_hash)))
+                    .has_value());
+    ASSERT_TRUE(wh->close_sync().has_value());
+  }
+  const auto copy = [&]() {
+    const auto id = static_cast<AlternateId>(SentinelId::kAgentMarkdown);
+    worker.cache()->EvictAlternateFromRamCache(item.url, item.hostname,
+                                               item.scheme, id);
+    return worker.cache()
+        ->ReadAlternate(item.url, item.hostname, item.scheme, id)
+        .has_value();
+  };
+
+  PageAnalysisResult shell;
+  shell.agent_markdown = "# App\n\nLoading...\n";
+  manager->TestAgentRenderDone(item, shell);
+  EXPECT_FALSE(copy()) << "a copy below the floor was kept";
+  EXPECT_EQ(manager->stats().agent_markdown_below_floor.load(), 1u);
+  EXPECT_TRUE(manager->AgentCopyBelowFloor(item.url, item.hostname, item.scheme,
+                                           item.site, item.origin_html_hash));
+  EXPECT_FALSE(manager->AgentCopyBelowFloor(item.url, item.hostname,
+                                            item.scheme, item.site,
+                                            Sha256Of("changed content")))
+      << "a changed page must be rendered again";
+
+  // Positive control: the same render with a real body is kept.
+  PageAnalysisResult page;
+  page.agent_markdown = "# Page\n\n" + std::string(300, 'w') + "\n";
+  manager->TestAgentRenderDone(item, page);
+  EXPECT_TRUE(copy());
+}
+
+// In full mode an agent request for a warm template queues a forced render
+// whenever the page has no copy.  After a render of the same content fell
+// below the floor it queues none, so a shell page costs one render per retry
+// window, not one per request.
+TEST_F(WorkerTest, BelowFloorRenderIsNotRepeatedInFullMode) {
+  WorkerConfig config = MakeAgentOptimizeConfig(socket_path_, cache_path_);
+  ASSERT_EQ(config.html_mode, HtmlMode::kFull);
+  NullMessageHandler handler;
+  Worker worker(config, &handler);
+  ASSERT_TRUE(worker.Initialize());
+  const std::string url = "http://example.com/shell.html";
+  CacheOriginal(worker.cache(), "/shell.html", kAgentHtml);
+  SeedProfileFor(worker, url, kAgentHtml);
+  std::thread worker_thread([&worker]() { worker.Run(); });
+  WorkerStopper stopper(worker, worker_thread);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  SendNotification(AgentHtmlNotification(url, /*host_vouched=*/true));
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 1,
+                                                           kWorkerStallBudget));
+  auto queued = worker.TestBrowserManager()->TestDequeue();
+  ASSERT_TRUE(queued.has_value());
+  ASSERT_TRUE(queued->force_agent_render);
+  ASSERT_TRUE(queued->has_origin_html_hash);
+
+  // Without a record, the next request queues the render again.
+  worker.ClearDedupAndCooldown(queued->url, queued->hostname, queued->scheme);
+  SendNotification(AgentHtmlNotification(url, /*host_vouched=*/true));
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 2,
+                                                           kWorkerStallBudget));
+  ASSERT_TRUE(worker.TestBrowserManager()->TestDequeue().has_value());
+
+  // The render fell below the floor: the next request queues nothing.
+  worker.TestBrowserManager()->NoteAgentCopyBelowFloor(
+      queued->url, queued->hostname, queued->scheme, queued->site,
+      queued->origin_html_hash);
+  worker.ClearDedupAndCooldown(queued->url, queued->hostname, queued->scheme);
+  SendNotification(AgentHtmlNotification(url, /*host_vouched=*/true));
+  ASSERT_TRUE(pagespeed::test::WaitForNotificationsRetired(worker, 3,
+                                                           kWorkerStallBudget));
+  EXPECT_FALSE(worker.TestBrowserManager()->TestDequeue().has_value())
+      << "a render of content known to fall below the floor was queued";
 }
 
 }  // namespace

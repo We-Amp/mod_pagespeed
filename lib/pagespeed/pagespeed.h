@@ -1688,10 +1688,12 @@ PS_EXPORT int ps_html_store_write_params(
  * equals the stored content hash and that hash is not all zero.
  *
  * PS_HTML_FACTS_PURGED is never set here: the caller adds it from its purge
- * state. `markdown_hash` is left all zero by this version: the Markdown
- * copy does not yet carry its own content hash, so until it does no entity
- * tag is made and no 304 is answered from these facts. Returns 0 with `*out` written up to its struct_size, or -1 for a
- * NULL out or a struct_size below the PS_API 1.14 size. */
+ * state. `markdown_hash` is the content hash the optimizer stamped on the
+ * copy when it wrote it, filled only when the binding is live; it stays all
+ * zero otherwise, and for a copy written without one, so no entity tag is
+ * made and no 304 is answered for a copy that may not be served. Returns 0
+ * with `*out` written up to its struct_size, or -1 for a NULL out or a
+ * struct_size below the PS_API 1.14 size. */
 PS_EXPORT int ps_html_stored_facts_from_reads(
     const ps_read_result_t* original, const ps_read_result_t* markdown,
     const ps_read_result_t* withheld_marker, int sidecar_present,

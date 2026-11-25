@@ -11,16 +11,21 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cinttypes>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <functional>
+#include <new>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -35,6 +40,7 @@
 #include "lib/base/string_writer.h"
 #include "lib/base/tee_message_handler.h"
 #include "lib/base/url_util.h"
+#include "lib/cache/html_withheld_marker.h"
 #include "lib/classify/alternate_id.h"
 #include "lib/classify/alternate_metadata.h"
 #include "lib/classify/capability_mask.h"
@@ -47,6 +53,7 @@
 #include "lib/html/html_keywords.h"
 #include "lib/html/html_parse.h"
 #include "lib/html/html_writer_filter.h"
+#include "lib/html/markdown_extractor_filter.h"
 #include "lib/image/content_analyzer.h"
 #include "lib/image/image_util.h"
 #include "lib/image/svg_vectorizer.h"
@@ -3231,16 +3238,45 @@ bool Worker::AcceptSiteAndSender(const CacheNotification& notification) {
         1, std::memory_order_relaxed);
     return false;
   }
-  // The module records no HTML and asks for no page work.  Work that fetches
+  // HTML from the module: only a page its HTML store wrote, for a host it
+  // vouched for, and only while this worker derives Markdown copies.  The
+  // stored entry itself is checked on the thread pool, before any byte of it
+  // is copied (HandleModuleHtmlNotification): no cache read happens here.
+  if (notification.content_type == ContentType::kHtml) {
+    if (ModuleHtmlFrameAccepted(notification, *live_config_.load())) {
+      return true;
+    }
+    stats_.notifications_rejected_module_render.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  // Anything else from the module asks for no page work.  Work that fetches
   // from the notification's host never starts from a module notification.
-  if (notification.content_type == ContentType::kHtml ||
-      notification.capability_mask == kLlmsTxtSentinel ||
+  if (notification.capability_mask == kLlmsTxtSentinel ||
       notification.agent_request || notification.host_vouched) {
     stats_.notifications_rejected_module_render.fetch_add(
         1, std::memory_order_relaxed);
     return false;
   }
   return true;
+}
+
+bool Worker::ModuleHtmlFrameAccepted(const CacheNotification& notification,
+                                     const WorkerConfig& cfg) {
+  // Every flag of the stored-page shape, not just html_stored: the wire
+  // check (HtmlStoredShapeValid) already refuses html_stored without the
+  // others, and this does not rely on it.
+  // A plain capability mask only: a sentinel-shaped one (viewport bits 3:
+  // llms.txt, warmup, origin-refresh and every reserved class) names work
+  // this path does not do, and a warmup mask would also bypass the in-flight
+  // guard that keeps one pass per page.
+  const bool plain_mask = ((notification.capability_mask >> 2) & 0x03U) != 3;
+  return notification.from_module &&
+         notification.content_type == ContentType::kHtml &&
+         notification.html_stored && notification.host_vouched &&
+         !notification.site.empty() && plain_mask &&
+         HtmlModeIsMarkdown(cfg.html_mode) &&
+         cfg.browser_analysis.agent_optimize;
 }
 
 bool Worker::KnownSitesIncomplete() const {
@@ -3309,6 +3345,17 @@ void Worker::DispatchNotification(const CacheNotification& notification) {
       // still not allowed to run beside the item in flight.
       if (normalized.capability_mask == kOriginRefreshedSentinel) {
         pending_origin_refresh_[dedup_key] = std::move(normalized);
+      } else if (normalized.from_module &&
+                 normalized.content_type == ContentType::kHtml) {
+        // Held, not dropped: see pending_module_html_.  A held agent request
+        // is not given up for a later store frame.
+        auto [held, fresh] =
+            pending_module_html_.try_emplace(dedup_key, normalized);
+        if (!fresh) {
+          const bool agent = held->second.agent_request;
+          held->second = std::move(normalized);
+          held->second.agent_request = held->second.agent_request || agent;
+        }
       }
       return;
     }
@@ -3366,12 +3413,18 @@ void Worker::OnNotificationDone(uv_work_t* req, int status) {
 
   Worker* worker = ctx->worker;
   std::optional<CacheNotification> held_refresh;
+  std::optional<CacheNotification> held_module_html;
   if (!ctx->dedup_key.empty()) {
     worker->in_flight_urls_.erase(ctx->dedup_key);
     auto held = worker->pending_origin_refresh_.find(ctx->dedup_key);
     if (held != worker->pending_origin_refresh_.end()) {
       held_refresh = std::move(held->second);
       worker->pending_origin_refresh_.erase(held);
+    }
+    auto module_held = worker->pending_module_html_.find(ctx->dedup_key);
+    if (module_held != worker->pending_module_html_.end()) {
+      held_module_html = std::move(module_held->second);
+      worker->pending_module_html_.erase(module_held);
     }
   }
   delete ctx;
@@ -3380,6 +3433,9 @@ void Worker::OnNotificationDone(uv_work_t* req, int status) {
   // never observed idle between the two.
   if (held_refresh) {
     worker->DispatchNotification(*held_refresh);
+  }
+  if (held_module_html) {
+    worker->DispatchNotification(*held_module_html);
   }
 
   worker->in_flight_work_.fetch_sub(1, std::memory_order_relaxed);
@@ -4963,6 +5019,408 @@ Worker::OriginRecheck Worker::RecheckRecordedOriginal(
   return OriginRecheck::kPurgedRebuild;
 }
 
+namespace {
+
+// The stored page's declared media type is HTML: "text/html", alone or with
+// parameters.  The same test the library applies when it reads the entry for
+// a serve (ps_html_stored_facts_from_reads), so the deriver never derives a
+// copy for an entry the serve side would not call a stored page.
+bool DeclaresHtml(std::string_view content_type) {
+  constexpr std::string_view kHtml = "text/html";
+  if (content_type.size() < kHtml.size()) return false;
+  for (size_t i = 0; i < kHtml.size(); ++i) {
+    char c = content_type[i];
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c | 0x20);
+    if (c != kHtml[i]) return false;
+  }
+  if (content_type.size() == kHtml.size()) return true;
+  const char next = content_type[kHtml.size()];
+  return next == ';' || next == ' ' || next == '\t';
+}
+
+// The page's own URL, which the extractor resolves relative links against.
+// It is never fetched.
+std::string ModulePageUrl(const CacheNotification& n) {
+  if (!n.url.starts_with('/')) return n.url;
+  return absl::StrCat(n.scheme.empty() ? "http" : n.scheme, "://", n.hostname,
+                      n.url);
+}
+
+std::span<const uint8_t> AsBytes(const std::array<std::byte, 32>& h) {
+  return {reinterpret_cast<const uint8_t*>(h.data()), h.size()};
+}
+
+bool AllZeroHash(const std::array<std::byte, 32>& h) {
+  return std::all_of(h.begin(), h.end(),
+                     [](std::byte b) { return b == std::byte{0}; });
+}
+
+// Why a stored entry may not have a Markdown copy derived from it, or
+// nullptr when it may: it must be an HTML page the module's HTML store
+// wrote, allow transformation and carry its content hash.  Asked before any
+// byte is copied and again just before anything is written for it.
+const char* ModuleStoredEntryRefusal(const AlternateMetadata& meta) {
+  if (meta.content_type != ContentType::kHtml ||
+      !DeclaresHtml(meta.origin_content_type)) {
+    return "the stored entry is not an HTML page";
+  }
+  if ((meta.flags & AlternateMetadata::kFlagHeadersClassified) == 0) {
+    return "the stored entry was not written by the module's HTML store";
+  }
+  if ((meta.origin_cc_flags & AlternateMetadata::kCCOriginNoTransform) != 0) {
+    return "the origin forbids transformation (no-transform)";
+  }
+  if (AllZeroHash(meta.origin_html_hash)) {
+    return "the stored page carries no content hash, so no copy could bind";
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+void Worker::HandleModuleHtmlNotification(const CacheNotification& notification,
+                                          const PurgeDispatchGen& purge_gen,
+                                          const WorkerConfig& cfg) {
+  const std::string& url = notification.url;
+  const std::string& host = notification.hostname;
+  const std::string& scheme = notification.scheme;
+  const std::string& site = notification.site;
+  constexpr auto kWithheldId =
+      static_cast<AlternateId>(SentinelId::kAgentMarkdownWithheld);
+  constexpr auto kMarkdownId =
+      static_cast<AlternateId>(SentinelId::kAgentMarkdown);
+  constexpr auto kContentHashId =
+      static_cast<AlternateId>(SentinelId::kContentHash);
+  constexpr auto kOriginalId =
+      static_cast<AlternateId>(SentinelId::kOriginalContent);
+
+  // This path never holds the page off with a cooldown: a lockout left by
+  // anything else must not hold off the next frame either.
+  ScopeExit clear_cooldown([this, &url, &host, &scheme, &site] {
+    const std::string key = ComposeInternalKey(url, host, scheme, site);
+    std::lock_guard<std::mutex> lock(write_cooldown_mutex_);
+    text_cooldown_expiry_.erase(key);
+  });
+  const auto refuse = [this, &url](const char* why) {
+    stats_.notifications_rejected_module_render.fetch_add(
+        1, std::memory_order_relaxed);
+    LogInfo("Module HTML for %s refused: %s", url.c_str(), why);
+  };
+
+  // Checked again against this pass's own configuration: the mode or
+  // agent_optimize may have changed since the event loop accepted the frame.
+  if (!ModuleHtmlFrameAccepted(notification, cfg)) {
+    refuse("not a stored page this worker derives a copy for");
+    return;
+  }
+  if (cfg.html_mode == HtmlMode::kMarkdownRendered &&
+      !module_rendered_mode_logged_.exchange(true, std::memory_order_relaxed)) {
+    LogInfo(
+        "html_mode markdown-rendered: pages stored by the module are derived "
+        "without a browser, as in markdown-static (logged once)");
+  }
+  if (!cache_) {
+    LogWarning("Cache not initialized, skipping module HTML for %s",
+               url.c_str());
+    return;
+  }
+
+  // The stored page, by EXACT id and only by exact id: a selection read could
+  // return something other than the entry the module's HTML store wrote.
+  // The module writes from another process, and this process's RAM tier is
+  // write-around, so every read below evicts first.  A miss is retried with
+  // the same backoff as every other source read, for the cross-process
+  // propagation delay on a cold volume.
+  std::optional<ReadResult> stored;
+  for (int attempt = 0, delay_ms = kCacheReadInitialDelayMs;; ++attempt) {
+    cache_->EvictAlternateFromRamCache(url, host, scheme, kOriginalId, site);
+    auto read = cache_->ReadOriginalAlternate(url, host, scheme, site);
+    if (read.has_value()) {
+      stored = std::move(*read);
+      break;
+    }
+    if (attempt >= kCacheReadMaxRetries ||
+        (read.error() != cyclone::CacheError::NotFound &&
+         read.error() != cyclone::CacheError::AlternateNotFound)) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    delay_ms *= kCacheReadBackoffMultiplier;
+  }
+  if (!stored.has_value()) {
+    refuse("no stored page");
+    return;
+  }
+
+  // Refused before a byte of the page is copied: what the entry says it is.
+  if (const char* why = ModuleStoredEntryRefusal(stored->metadata)) {
+    refuse(why);
+    return;
+  }
+  const std::array<std::byte, 32> stamp = stored->metadata.origin_html_hash;
+  const size_t stored_bytes = stored->content().size();
+
+  // A refusal already recorded for this content needs no second derivation.
+  cache_->EvictAlternateFromRamCache(url, host, scheme, kWithheldId, site);
+  bool marker_present = false;
+  if (auto marker = cache_->ReadAlternate(url, host, scheme, kWithheldId, site);
+      marker.has_value()) {
+    marker_present = true;
+    const auto payload = marker->content();
+    if (HtmlWithheldMarkerBlocksDerivation(
+            std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(payload.data()),
+                payload.size()),
+            AsBytes(stamp), cfg.max_html_size)) {
+      stats_.module_markdown_withheld_skips.fetch_add(
+          1, std::memory_order_relaxed);
+      LogInfo("Markdown copy of %s is withheld for this content; not derived",
+              url.c_str());
+      return;
+    }
+  }
+
+  // The purge fence for every write below.  Re-captured after this pass's
+  // own purge of the derived copies, so the pass is not fenced by its own
+  // bump, while a purge from anywhere else still fences it.
+  PurgeDispatchGen gen = purge_gen;
+  const auto purged = [this, &url, &host, &scheme, &site, &gen] {
+    return WasPurgedSinceDispatch(url, host, gen, scheme, site);
+  };
+  // True while the stored page still carries the content hash this pass
+  // read and still passes every entry check: a page stored again meanwhile,
+  // even with the same bytes but now refusing transformation, is another
+  // page's business.
+  const auto still_bound = [this, &url, &host, &scheme, &site, &stamp] {
+    cache_->EvictAlternateFromRamCache(url, host, scheme, kOriginalId, site);
+    auto now = cache_->ReadOriginalAlternate(url, host, scheme, site);
+    return now.has_value() &&
+           ModuleStoredEntryRefusal(now->metadata) == nullptr &&
+           now->metadata.origin_html_hash == stamp;
+  };
+  // A permanent refusal for this content: recorded, so the serve side
+  // answers "withheld" and asks for no copy again until the content, the
+  // deriver or (for a size refusal) the size cap changes.
+  const auto withhold = [&](HtmlWithheldReason reason) {
+    if (purged() || !still_bound()) return;
+    HtmlWithheldMarker marker;
+    marker.reason = reason;
+    marker.deriver_version = kHtmlMarkdownDeriverVersion;
+    std::memcpy(marker.parent_hash.data(), stamp.data(), stamp.size());
+    if (reason == HtmlWithheldReason::kTooLarge) {
+      marker.size_cap = cfg.max_html_size;
+    }
+    const std::string payload = EncodeHtmlWithheldMarker(marker);
+    auto wh = cache_->WriteSentinel(url, host, scheme,
+                                    SentinelId::kAgentMarkdownWithheld,
+                                    payload.size(), site);
+    const bool written =
+        wh.has_value() &&
+        wh->write_sync(std::as_bytes(std::span(payload.data(), payload.size())))
+            .has_value() &&
+        wh->close_sync().has_value();
+    cache_->EvictAlternateFromRamCache(url, host, scheme, kWithheldId, site);
+    const std::string_view name = HtmlWithheldReasonName(reason);
+    if (!written) {
+      stats_.errors.fetch_add(1, std::memory_order_relaxed);
+      LogWarning("Withheld marker write failed for %s (%.*s)", url.c_str(),
+                 static_cast<int>(name.size()), name.data());
+      return;
+    }
+    stats_.module_markdown_withheld.fetch_add(1, std::memory_order_relaxed);
+    LogInfo("Markdown copy of %s withheld: %.*s", url.c_str(),
+            static_cast<int>(name.size()), name.data());
+  };
+
+  if (stored_bytes > cfg.max_html_size) {
+    LogWarning("HTML too large (%zu > %zu), no Markdown copy for %s",
+               stored_bytes, cfg.max_html_size, url.c_str());
+    withhold(HtmlWithheldReason::kTooLarge);
+    return;
+  }
+
+  // An owned copy, proven untorn, and the borrow released before anything
+  // else runs against the bytes (the same discipline as the HTML pipeline).
+  const auto borrowed = stored->content();
+  std::string html(reinterpret_cast<const char*>(borrowed.data()),
+                   borrowed.size());
+  if (!BorrowCopyUntorn(*stored, cfg.read_lease_duration_ms > 0)) {
+    stats_.read_borrow_wrap_discards.fetch_add(1, std::memory_order_relaxed);
+    LogWarning("Stored HTML borrow wrapped during the copy, skipping %s",
+               url.c_str());
+    return;
+  }
+  stored.reset();
+  if (test_hook_module_html_after_copy_) test_hook_module_html_after_copy_();
+
+  if (IsGzipCompressed(html)) {
+    stats_.errors_origin_misconfiguration.fetch_add(1,
+                                                    std::memory_order_relaxed);
+    LogWarning("Stored HTML for %s is compressed; no Markdown copy",
+               url.c_str());
+    withhold(HtmlWithheldReason::kEncoded);
+    return;
+  }
+  const std::array<std::byte, 32> h =
+      cyclone::crypto::SHA256::hash(std::span<const std::byte>(
+          reinterpret_cast<const std::byte*>(html.data()), html.size()));
+  if (h != stamp) {
+    LogWarning(
+        "Stored HTML for %s does not match its content hash; no Markdown copy",
+        url.c_str());
+    withhold(HtmlWithheldReason::kHashMismatch);
+    return;
+  }
+
+  // What is stored beside the page now.  Read from disk: a removal by the
+  // module, in another process, leaves this process's RAM copies behind.
+  cache_->EvictAlternateFromRamCache(url, host, scheme, kContentHashId, site);
+  cache_->EvictAlternateFromRamCache(url, host, scheme, kMarkdownId, site);
+  bool content_changed = true;
+  if (auto recorded =
+          cache_->ReadAlternate(url, host, scheme, kContentHashId, site);
+      recorded.has_value()) {
+    const auto c = recorded->content();
+    content_changed =
+        c.size() != h.size() || std::memcmp(c.data(), h.data(), h.size()) != 0;
+  }
+  bool copy_present = false;
+  bool copy_bound = false;
+  if (auto copy = cache_->ReadAlternate(url, host, scheme, kMarkdownId, site);
+      copy.has_value()) {
+    copy_present = true;
+    copy_bound = copy->metadata.origin_html_hash == h;
+  }
+
+  if (content_changed) {
+    // A purge from anywhere else since dispatch: this pass is fenced, and
+    // its own purge below must not re-capture the fence past it.
+    if (purged()) {
+      LogInfo("Module HTML for %s not processed: purged meanwhile",
+              url.c_str());
+      return;
+    }
+    // New content, a first pass, or a removal in between.  Drop the copies
+    // derived from earlier content; the stored page and its header block are
+    // the module's and stay.  Never the whole key.  A copy already bound to
+    // exactly these bytes is kept: only the record went missing.
+    if (!copy_bound) {
+      if (copy_present) {
+        stats_.agent_markdown_purged_on_change.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+      PurgeDerivedCopiesAndBumpGeneration(url, host, scheme, site);
+      gen = CapturePurgeGen(url, host, scheme, site);
+      marker_present = false;  // the purge removed it with the other copies
+    }
+    auto wh = cache_->WriteSentinel(url, host, scheme, SentinelId::kContentHash,
+                                    h.size(), site);
+    const bool recorded =
+        wh.has_value() &&
+        wh->write_sync(std::as_bytes(std::span(h.data(), h.size())))
+            .has_value() &&
+        wh->close_sync().has_value();
+    cache_->EvictAlternateFromRamCache(url, host, scheme, kContentHashId, site);
+    if (!recorded) {
+      // Without the record the next frame cannot tell this content from new
+      // content.  Leave the copy for that frame rather than build it now.
+      stats_.errors.fetch_add(1, std::memory_order_relaxed);
+      LogWarning("Content hash write failed for %s; no Markdown copy yet",
+                 url.c_str());
+      return;
+    }
+  }
+
+  // Demand: an agent asked for the copy and none is bound to this content,
+  // or a copy that was in use belongs to earlier content.
+  const bool demanded = notification.agent_request && !copy_bound;
+  const bool stale_copy = copy_present && !copy_bound;
+  if (!demanded && !stale_copy) {
+    LogInfo("Module HTML for %s recorded; no Markdown copy requested",
+            url.c_str());
+    return;
+  }
+
+  // Extraction from the stored bytes alone: no request leaves this process.
+  std::string markdown;
+  try {
+    markdown =
+        net_instaweb::ExtractAgentMarkdown(html, ModulePageUrl(notification));
+  } catch (const std::bad_alloc&) {
+    // Memory pressure says nothing about the page: no marker, a later
+    // request tries again.
+    stats_.errors.fetch_add(1, std::memory_order_relaxed);
+    LogWarning("Markdown extraction for %s ran out of memory", url.c_str());
+    return;
+  } catch (const std::exception& e) {
+    LogWarning("Markdown extraction failed for %s: %s", url.c_str(), e.what());
+    withhold(HtmlWithheldReason::kExtractFailed);
+    return;
+  }
+  if (MarkdownBelowFidelityFloor(markdown)) {
+    stats_.agent_markdown_below_floor.fetch_add(1, std::memory_order_relaxed);
+    withhold(HtmlWithheldReason::kBelowFloor);
+    return;
+  }
+
+  if (purged()) {
+    stats_.alternate_writes_fenced.fetch_add(1, std::memory_order_relaxed);
+    LogInfo("Markdown copy of %s not written: purged meanwhile", url.c_str());
+    return;
+  }
+  if (!still_bound()) {
+    LogInfo("Markdown copy of %s not written: the page was stored again",
+            url.c_str());
+    return;
+  }
+  AlternateMetadata copy_meta;
+  copy_meta.full_mask = static_cast<uint32_t>(SentinelId::kAgentMarkdown);
+  copy_meta.content_type = ContentType::kOther;
+  copy_meta.origin_content_type = "text/markdown";
+  copy_meta.flags |= AlternateMetadata::kFlagWorkerProcessed;
+  copy_meta.origin_html_hash = h;
+  copy_meta.render_source_hash = cyclone::crypto::SHA256::hash(
+      std::as_bytes(std::span(markdown.data(), markdown.size())));
+  auto wh = cache_->WriteAgentAlternate(url, host, scheme, markdown.size(),
+                                        copy_meta, site);
+  const bool written =
+      wh.has_value() &&
+      wh->write_sync(std::as_bytes(std::span(markdown.data(), markdown.size())))
+          .has_value() &&
+      wh->close_sync().has_value();
+  cache_->EvictAlternateFromRamCache(url, host, scheme, kMarkdownId, site);
+  if (!written) {
+    stats_.alternate_write_failures.fetch_add(1, std::memory_order_relaxed);
+    LogWarning("Markdown copy write failed for %s", url.c_str());
+    return;
+  }
+  if (purged()) {
+    // A purge landed between the check and the commit: take the copy back.
+    if (!cache_->RemoveAlternate(url, host, scheme, kMarkdownId, site)
+             .has_value()) {
+      LogWarning("Markdown copy of %s written across a purge was not removed",
+                 url.c_str());
+    }
+    stats_.alternate_writes_fenced.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  if (marker_present) {
+    // A marker this pass did not obey (an older deriver, or a size cap since
+    // raised) must not keep the serve side withholding the copy just built.
+    if (!cache_->RemoveAlternate(url, host, scheme, kWithheldId, site)
+             .has_value()) {
+      // The copy stays unserved until the next store clears the marker.
+      LogWarning(
+          "Withheld marker for %s was not removed after its copy was "
+          "written",
+          url.c_str());
+    }
+  }
+  stats_.module_markdown_derived.fetch_add(1, std::memory_order_relaxed);
+  LogInfo("Wrote %zu bytes of Markdown for %s from the stored page",
+          markdown.size(), url.c_str());
+}
+
 void Worker::HandleNotification(const CacheNotification& notification,
                                 const PurgeDispatchGen& purge_gen) {
   // Snapshot live config for this notification (RCU read).
@@ -5045,6 +5503,17 @@ void Worker::HandleNotification(const CacheNotification& notification,
       stats_.errors.fetch_add(1, std::memory_order_relaxed);
       return;
     }
+  }
+
+  // A stored HTML page from the module has a handler of its own, ahead of
+  // the dedup, the cooldown and the front end's repeat-pass skip below: none
+  // of them may swallow the agent request that follows a store frame, and
+  // nothing of the HTML pipeline after them (the scan, the stylesheet reads,
+  // browser analysis, an HTML variant) applies to it.
+  if (notification.from_module &&
+      notification.content_type == ContentType::kHtml) {
+    HandleModuleHtmlNotification(notification, purge_gen, *cfg);
+    return;
   }
 
   // Warmup sentinel: nginx sends mask=0xFFFFFFFE when a URL crosses
@@ -5802,6 +6271,10 @@ void Worker::HandleNotification(const CacheNotification& notification,
         } else if (may_analyse && cfg->browser_analysis.agent_optimize &&
                    notification.agent_request &&
                    agent_origin_html_hash.has_value() &&
+                   !browser_manager_->AgentCopyBelowFloor(
+                       notification.url, notification.hostname,
+                       notification.scheme, notification.site,
+                       *agent_origin_html_hash) &&
                    AgentMarkdownNeedsBuild(
                        notification.url, notification.hostname,
                        notification.scheme, notification.site,

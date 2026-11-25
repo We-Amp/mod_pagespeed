@@ -1903,6 +1903,12 @@ extern "C" int ps_html_stored_facts_from_reads(
         if (std::memcmp(copy_hash.data(), facts.binding_hash,
                         PS_HTML_HASH_BYTES) == 0) {
           flags |= PS_HTML_FACTS_BINDING_LIVE;
+          // The copy's own content hash, stamped by the optimizer when it
+          // wrote the copy, so the entity tag costs no pass over the copy.
+          // A copy without one leaves it zero: no tag, no 304.
+          std::memcpy(facts.markdown_hash,
+                      markdown->result.metadata.render_source_hash.data(),
+                      PS_HTML_HASH_BYTES);
         }
       }
       facts.flags = flags;

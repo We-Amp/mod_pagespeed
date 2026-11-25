@@ -6021,6 +6021,12 @@ void RunFactsRow(const nlohmann::json& in, const nlohmann::json& expect,
                  reinterpret_cast<uint8_t*>(meta.origin_html_hash.data()),
                  PS_HTML_HASH_BYTES);
     }
+    // The copy's own content hash, where the optimizer stamps it.
+    if (m.contains("markdown_hash") && !m["markdown_hash"].is_null()) {
+      HexToBytes(m["markdown_hash"].get<std::string>(),
+                 reinterpret_cast<uint8_t*>(meta.render_source_hash.data()),
+                 PS_HTML_HASH_BYTES);
+    }
     const std::string copy = "# a page for facts\n";
     if (!WriteBytes(cache->cache->WriteAgentAlternate(kUrl, kHost, kScheme,
                                                       copy.size(), meta, site),
@@ -6109,6 +6115,22 @@ void RunFactsRow(const nlohmann::json& in, const nlohmann::json& expect,
           WithheldReasonValue(
               vol["withheld_marker"].at("reason").get<std::string>())) {
     run->Fail("withheld_reason is not the marker's");
+  }
+  if (expect.contains("etag")) {
+    // The tag a front end answers with for these facts: null when none can
+    // be made (no live binding, or a copy without its content hash).
+    char tag[PS_HTML_MARKDOWN_ETAG_CHARS + 1] = {};
+    size_t tag_len = 0;
+    const bool made =
+        ps_html_markdown_etag(facts.binding_hash, facts.markdown_hash, tag,
+                              sizeof(tag), &tag_len) == 0;
+    const nlohmann::json& want = expect["etag"];
+    if (want.is_null()) {
+      if (made) run->Fail(std::string("an entity tag was made: ") + tag);
+    } else if (!made || std::string(tag, tag_len) != want.get<std::string>()) {
+      run->Fail("etag " + std::string(made ? tag : "(none)") + ", expected " +
+                want.get<std::string>());
+    }
   }
   if (expect.contains("serve")) {
     const nlohmann::json req = {{"method", "GET"},

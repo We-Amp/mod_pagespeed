@@ -378,8 +378,12 @@ struct AlternateMetadata {
   //   the serve-time equality gate refuses to serve a variant whose stamp != the
   //   live kContentHash sentinel for the key, and the store-time re-validation
   //   discards a render whose source advanced underneath it.
-  // render_source_hash: SHA-256 of the rendered DOM source the markdown was
-  //   extracted from (provenance; not used by the serve gate).
+  // render_source_hash: on a kAgentMarkdown entry, SHA-256 of the Markdown
+  //   bytes themselves.  The optimizer stamps it when it derives the copy
+  //   from a stored HTML page without a browser, and the Markdown entity tag
+  //   is computed from it (ps_html_stored_facts_from_reads), so a validator
+  //   costs no pass over the copy.  All-zero on every other entry and on a
+  //   copy written without it: no entity tag.  Not used by the serve gate.
   // All-zero is the reserved "no binding / cannot prove" value (the default for
   // v6-and-earlier blobs and for variants written without a binding); the D8
   // gates treat all-zero as absent and fail toward refuse-to-serve.

@@ -25,7 +25,7 @@ inline constexpr std::string_view kDaemonHtmlPolicyCasesPath =
 
 // FNV-1a 64 of the file with every carriage return removed. Any edit to the
 // file must update this value in the same change.
-inline constexpr uint64_t kDaemonHtmlPolicyCasesFnv1a64 = 0xa46d06358ab43123ULL;
+inline constexpr uint64_t kDaemonHtmlPolicyCasesFnv1a64 = 0x47fc287755d65652ULL;
 
 // FNV-1a 64 (offset basis 0xcbf29ce484222325, prime 0x100000001b3).
 inline uint64_t PolicyCasesFnv1a64(std::string_view data) {
