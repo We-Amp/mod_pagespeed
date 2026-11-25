@@ -33,10 +33,11 @@
 #   PAGESPEED_API_NO_AUTH             - Confirm a deliberate tokenless local API (default: false)
 #   PAGESPEED_API_TOKEN               - API bearer token. When the API is enabled and no
 #                                       token is supplied, one is GENERATED per container
-#                                       start and printed once to this log.
+#                                       start and written to $DATA_DIR/generated-tokens
+#                                       (mode 0600); the log names the file, not the value.
 #   PAGESPEED_PURGE_TOKEN             - Token for PURGE on the .mgmt socket. Generated per
-#                                       container start and printed once when unset, so
-#                                       cache invalidation works out of the box.
+#                                       container start when unset and written to the same
+#                                       file, so cache invalidation works out of the box.
 #   PAGESPEED_API_READ_OPEN           - Allow unauthenticated reads (default: false)
 #   PAGESPEED_BROWSER_SANDBOX         - Headless Chrome sandbox: require|off (default: require).
 #                                       The optimizer runs as the unprivileged `pagespeed` user,
@@ -149,10 +150,10 @@ fi
 [ "${PAGESPEED_API_NO_AUTH:-false}" = "true" ] && ARGS+=(--api-no-auth)
 
 # Tokens: install-time generation is meaningless in a container (no persistent
-# /etc), so generate PER START when the operator supplied none -- and PRINT
-# them, once, clearly labelled. A generated credential nobody can read is not
-# a credential: it just turns "no token configured" into "authentication
-# required" and leaves the operator with no way in.
+# /etc), so generate PER START when the operator supplied none -- and make
+# them READABLE (see the token file below). A generated credential nobody can
+# read is not a credential: it just turns "no token configured" into
+# "authentication required" and leaves the operator with no way in.
 ps_gen_token() { head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'; }
 PS_GENERATED_API=""
 PS_GENERATED_PURGE=""
@@ -168,15 +169,47 @@ if [ -z "${PAGESPEED_PURGE_TOKEN:-}" ]; then
   PAGESPEED_PURGE_TOKEN="$(ps_gen_token)"
   PS_GENERATED_PURGE="yes"
 fi
+# The generated values go to an owner-only file in the data directory, NOT to
+# this log: container logs are routinely shipped off-host and kept, and a
+# credential in them outlives the container. The log names the file and how
+# to read it. The file is rewritten on every start; when nothing was generated
+# (the operator set both), a stale one from an earlier start is removed.
+# printf is a builtin, so the values never appear in any argv.
+PS_TOKEN_FILE="$DATA_DIR/generated-tokens"
+ps_write_generated_tokens() {
+  local tmp
+  tmp="$(mktemp "$DATA_DIR/.generated-tokens.XXXXXX")" || return 1
+  if {
+       if [ -n "$PS_GENERATED_API" ]; then
+         printf 'PAGESPEED_API_TOKEN=%s\n' "$PAGESPEED_API_TOKEN"
+       fi
+       if [ -n "$PS_GENERATED_PURGE" ]; then
+         printf 'PAGESPEED_PURGE_TOKEN=%s\n' "$PAGESPEED_PURGE_TOKEN"
+       fi
+     } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$PS_TOKEN_FILE"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 if [ -n "$PS_GENERATED_API" ] || [ -n "$PS_GENERATED_PURGE" ]; then
   echo "=============================================================================="
-  echo "PAGESPEED CREDENTIALS generated for this container start."
-  echo "They change on every restart -- set them yourself for stable values."
+  echo "PAGESPEED CREDENTIALS generated for this container start:"
   [ -n "$PS_GENERATED_API" ] && \
-    echo "  PAGESPEED_API_TOKEN=$PAGESPEED_API_TOKEN   (Authorization: Bearer <token>)"
+    echo "  PAGESPEED_API_TOKEN     (Authorization: Bearer <token>)"
   [ -n "$PS_GENERATED_PURGE" ] && \
-    echo "  PAGESPEED_PURGE_TOKEN=$PAGESPEED_PURGE_TOKEN   (AUTH <token> on the .mgmt socket)"
+    echo "  PAGESPEED_PURGE_TOKEN   (AUTH <token> on the .mgmt socket)"
+  if ps_write_generated_tokens; then
+    echo "Written to $PS_TOKEN_FILE (mode 0600, one KEY=value per line). Read them with:"
+    echo "  docker exec <container> cat $PS_TOKEN_FILE"
+  else
+    echo "WARNING: could not write them to $PS_TOKEN_FILE; set PAGESPEED_API_TOKEN" >&2
+    echo "WARNING: and PAGESPEED_PURGE_TOKEN yourself to know their values." >&2
+  fi
+  echo "They change on every restart -- set them yourself for stable values."
   echo "=============================================================================="
+else
+  rm -f "$PS_TOKEN_FILE"
 fi
 # Deliberately NOT --api-token: the daemon reads both from the ENVIRONMENT,
 # which keeps them out of /proc/<pid>/cmdline. That matters beyond this

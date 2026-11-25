@@ -2384,8 +2384,9 @@ Invalidates all cached variants for a URL. `PURGE` is refused unless the
 connection was authenticated first: send `AUTH <token>` and then `PURGE`
 followed by the hostname and URL, on the same connection. The token is the
 worker's `PAGESPEED_PURGE_TOKEN` (the packages generate it into
-`/etc/pagespeed-optimizer/daemon.env`; the container images generate one per
-start and print it once in the container log unless you set it). It is not in
+`/etc/pagespeed-optimizer/daemon.env`; when you do not set it, the container
+images generate one per start and write it to `/data/generated-tokens`, mode
+0600). It is not in
 your shell by itself; [Purge and re-test a specific
 URL](/docs/troubleshooting/#purge-and-re-test-a-specific-url) shows how to
 read it per deployment before running:

@@ -325,10 +325,11 @@ To force the worker to re-process a URL:
 # PAGESPEED_PURGE_TOKEN is not in your shell by itself; read it in first.
 # Packages: the env file is readable by root and group `pagespeed`, one KEY=value per line
 PAGESPEED_PURGE_TOKEN=$(sudo sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /etc/pagespeed-optimizer/daemon.env)
-# Container images and the Helm chart: the worker prints the token once at
-# start when you did not set it -- `docker logs <worker> 2>&1 | grep PAGESPEED_PURGE_TOKEN=`
-# or `kubectl logs <pod> -c worker | grep PAGESPEED_PURGE_TOKEN=` -- or set it
-# yourself in the compose file's `environment:` and use that value.
+# Container images and the Helm chart: when you did not set it, the worker
+# writes the generated token to /data/generated-tokens (mode 0600) at start --
+# `docker exec <worker> sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /data/generated-tokens`
+# or `kubectl exec <pod> -c worker -- sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /data/generated-tokens`
+# -- or set it yourself in the compose file's `environment:` and use that value.
 
 # Purge all variants
 printf 'AUTH %s\nPURGE localhost /images/photo.jpg\n' "$PAGESPEED_PURGE_TOKEN" | socat - UNIX-CONNECT:/run/pagespeed-optimizer/notify.sock.mgmt

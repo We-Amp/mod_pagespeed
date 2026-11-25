@@ -234,8 +234,9 @@ the worker refuses a `PURGE` on a connection that has not sent a valid `AUTH`,
 and there is no unauthenticated mode. The token is the worker's
 `PAGESPEED_PURGE_TOKEN` environment variable. The packages generate one into
 `/etc/pagespeed-optimizer/daemon.env`; the container images generate one per
-container start and print it once in the container log when you did not set
-it.
+container start when you did not set it and write it to
+`/data/generated-tokens` (mode 0600). The container log names that file but
+not the value.
 
 **Request:** `AUTH <your-token>\n`
 

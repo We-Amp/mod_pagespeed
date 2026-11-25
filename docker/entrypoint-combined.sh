@@ -52,7 +52,8 @@ fi
 [ -n "${PAGESPEED_API_SOCKET:-}" ] && WARGS+=(--api-socket "$PAGESPEED_API_SOCKET")
 [ "${PAGESPEED_API_ALLOW_REMOTE:-false}" = "true" ] && WARGS+=(--api-allow-remote)
 [ "${PAGESPEED_API_NO_AUTH:-false}" = "true" ] && WARGS+=(--api-no-auth)
-# Per-start credentials when the operator supplied none -- and PRINTED, once.
+# Per-start credentials when the operator supplied none -- written to an
+# owner-only file whose path the log names (never the values themselves).
 # A generated credential nobody can read is not a credential: it only turns
 # "no token configured" into "authentication required" and leaves the operator
 # with no way in.  Mirrors docker/entrypoint-worker.sh.  Passed by
@@ -70,15 +71,47 @@ if [ -z "${PAGESPEED_PURGE_TOKEN:-}" ]; then
   PAGESPEED_PURGE_TOKEN="$(ps_gen_token)"
   PS_GENERATED_PURGE="yes"
 fi
+# The generated values go to an owner-only file in the data directory, NOT to
+# this log: container logs are routinely shipped off-host and kept, and a
+# credential in them outlives the container. The log names the file and how
+# to read it. The file is rewritten on every start; when nothing was generated
+# (the operator set both), a stale one from an earlier start is removed.
+# printf is a builtin, so the values never appear in any argv.
+PS_TOKEN_FILE="$DATA_DIR/generated-tokens"
+ps_write_generated_tokens() {
+  local tmp
+  tmp="$(mktemp "$DATA_DIR/.generated-tokens.XXXXXX")" || return 1
+  if {
+       if [ -n "$PS_GENERATED_API" ]; then
+         printf 'PAGESPEED_API_TOKEN=%s\n' "$PAGESPEED_API_TOKEN"
+       fi
+       if [ -n "$PS_GENERATED_PURGE" ]; then
+         printf 'PAGESPEED_PURGE_TOKEN=%s\n' "$PAGESPEED_PURGE_TOKEN"
+       fi
+     } > "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$PS_TOKEN_FILE"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 if [ -n "$PS_GENERATED_API" ] || [ -n "$PS_GENERATED_PURGE" ]; then
   echo "=============================================================================="
-  echo "PAGESPEED CREDENTIALS generated for this container start."
-  echo "They change on every restart -- set them yourself for stable values."
+  echo "PAGESPEED CREDENTIALS generated for this container start:"
   [ -n "$PS_GENERATED_API" ] && \
-    echo "  PAGESPEED_API_TOKEN=$PAGESPEED_API_TOKEN   (Authorization: Bearer <token>)"
+    echo "  PAGESPEED_API_TOKEN     (Authorization: Bearer <token>)"
   [ -n "$PS_GENERATED_PURGE" ] && \
-    echo "  PAGESPEED_PURGE_TOKEN=$PAGESPEED_PURGE_TOKEN   (AUTH <token> on the .mgmt socket)"
+    echo "  PAGESPEED_PURGE_TOKEN   (AUTH <token> on the .mgmt socket)"
+  if ps_write_generated_tokens; then
+    echo "Written to $PS_TOKEN_FILE (mode 0600, one KEY=value per line). Read them with:"
+    echo "  docker exec <container> cat $PS_TOKEN_FILE"
+  else
+    echo "WARNING: could not write them to $PS_TOKEN_FILE; set PAGESPEED_API_TOKEN" >&2
+    echo "WARNING: and PAGESPEED_PURGE_TOKEN yourself to know their values." >&2
+  fi
+  echo "They change on every restart -- set them yourself for stable values."
   echo "=============================================================================="
+else
+  rm -f "$PS_TOKEN_FILE"
 fi
 [ -n "${PAGESPEED_API_TOKEN:-}" ] && export PAGESPEED_API_TOKEN
 export PAGESPEED_PURGE_TOKEN

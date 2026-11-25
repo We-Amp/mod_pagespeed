@@ -3291,11 +3291,13 @@ API, set both — and keep your reverse proxy's own authentication in front of
 it as well.
 
 When the API is enabled and no token is supplied, the entrypoint generates one
-per container start and prints it once to the container log, together with a
-generated `PURGE` token so cache invalidation works out of the box. **Both are
-printed to stdout: if you ship container logs off-host, you are shipping those
-credentials with them.** Set `PAGESPEED_API_TOKEN` and `PAGESPEED_PURGE_TOKEN`
-yourself to keep them out of the log and stable across restarts.
+per container start, together with a generated `PURGE` token so cache
+invalidation works out of the box. It writes both to `/data/generated-tokens`
+(mode 0600, one `KEY=value` per line) and logs only that path; read them with
+`docker exec <container> cat /data/generated-tokens`. (Releases before this
+change printed the values to the container log.) Set `PAGESPEED_API_TOKEN` and
+`PAGESPEED_PURGE_TOKEN` yourself for values that stay the same across
+restarts.
 
 ### Browser analysis: the sandbox is required
 
@@ -10660,8 +10662,9 @@ Invalidates all cached variants for a URL. `PURGE` is refused unless the
 connection was authenticated first: send `AUTH <token>` and then `PURGE`
 followed by the hostname and URL, on the same connection. The token is the
 worker's `PAGESPEED_PURGE_TOKEN` (the packages generate it into
-`/etc/pagespeed-optimizer/daemon.env`; the container images generate one per
-start and print it once in the container log unless you set it). It is not in
+`/etc/pagespeed-optimizer/daemon.env`; when you do not set it, the container
+images generate one per start and write it to `/data/generated-tokens`, mode
+0600). It is not in
 your shell by itself; [Purge and re-test a specific
 URL](https://modpagespeed.com/docs/troubleshooting/#purge-and-re-test-a-specific-url) shows how to
 read it per deployment before running:
@@ -19351,10 +19354,11 @@ To force the worker to re-process a URL:
 # PAGESPEED_PURGE_TOKEN is not in your shell by itself; read it in first.
 # Packages: the env file is readable by root and group `pagespeed`, one KEY=value per line
 PAGESPEED_PURGE_TOKEN=$(sudo sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /etc/pagespeed-optimizer/daemon.env)
-# Container images and the Helm chart: the worker prints the token once at
-# start when you did not set it -- `docker logs <worker> 2>&1 | grep PAGESPEED_PURGE_TOKEN=`
-# or `kubectl logs <pod> -c worker | grep PAGESPEED_PURGE_TOKEN=` -- or set it
-# yourself in the compose file's `environment:` and use that value.
+# Container images and the Helm chart: when you did not set it, the worker
+# writes the generated token to /data/generated-tokens (mode 0600) at start --
+# `docker exec <worker> sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /data/generated-tokens`
+# or `kubectl exec <pod> -c worker -- sed -n 's/^PAGESPEED_PURGE_TOKEN=//p' /data/generated-tokens`
+# -- or set it yourself in the compose file's `environment:` and use that value.
 
 # Purge all variants
 printf 'AUTH %s\nPURGE localhost /images/photo.jpg\n' "$PAGESPEED_PURGE_TOKEN" | socat - UNIX-CONNECT:/run/pagespeed-optimizer/notify.sock.mgmt
@@ -20743,8 +20747,9 @@ the worker refuses a `PURGE` on a connection that has not sent a valid `AUTH`,
 and there is no unauthenticated mode. The token is the worker's
 `PAGESPEED_PURGE_TOKEN` environment variable. The packages generate one into
 `/etc/pagespeed-optimizer/daemon.env`; the container images generate one per
-container start and print it once in the container log when you did not set
-it.
+container start when you did not set it and write it to
+`/data/generated-tokens` (mode 0600). The container log names that file but
+not the value.
 
 **Request:** `AUTH <your-token>\n`
 

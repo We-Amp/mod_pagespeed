@@ -76,11 +76,13 @@ API, set both — and keep your reverse proxy's own authentication in front of
 it as well.
 
 When the API is enabled and no token is supplied, the entrypoint generates one
-per container start and prints it once to the container log, together with a
-generated `PURGE` token so cache invalidation works out of the box. **Both are
-printed to stdout: if you ship container logs off-host, you are shipping those
-credentials with them.** Set `PAGESPEED_API_TOKEN` and `PAGESPEED_PURGE_TOKEN`
-yourself to keep them out of the log and stable across restarts.
+per container start, together with a generated `PURGE` token so cache
+invalidation works out of the box. It writes both to `/data/generated-tokens`
+(mode 0600, one `KEY=value` per line) and logs only that path; read them with
+`docker exec <container> cat /data/generated-tokens`. (Releases before this
+change printed the values to the container log.) Set `PAGESPEED_API_TOKEN` and
+`PAGESPEED_PURGE_TOKEN` yourself for values that stay the same across
+restarts.
 
 ### Browser analysis: the sandbox is required
 
