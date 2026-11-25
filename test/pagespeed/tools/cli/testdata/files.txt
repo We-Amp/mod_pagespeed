@@ -31,4 +31,6 @@ seeded/28-unexpected-closer.conf
 seeded/29-include-wildcard.conf
 seeded/30-continuation.conf
 seeded/31-crlf.conf
+seeded/32-deprecated-shard-domain.conf
+seeded/33-deprecated-experiment-variable.conf
 seeded/conf.d/sites.conf

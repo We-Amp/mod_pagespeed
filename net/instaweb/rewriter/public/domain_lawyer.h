@@ -248,6 +248,12 @@ class DomainLawyer {
                 const StringPiece& comma_separated_shards,
                 MessageHandler* handler);
 
+  // The deprecation warning AddShard logs for a mapping.  The one text of
+  // it: RewriteOptions lists ShardDomain in its deprecated-option table and
+  // the offline config linter reports it from there.
+  static GoogleString ShardDeprecationMessage(
+      const StringPiece& to_domain, const StringPiece& comma_separated_shards);
+
   // Computes a domain shard based on a passed-in hash, returning true
   // if the domain was sharded.  Output argument 'sharded_domain' is
   // only updated if when the return value is true.

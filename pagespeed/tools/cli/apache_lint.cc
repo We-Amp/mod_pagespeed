@@ -584,11 +584,27 @@ void ApacheLinter::CheckValue(const Line& at, const ApacheCommand& command) {
                "<VirtualHost>"));
   }
   GoogleString deprecated;
-  const bool is_deprecated = !directive.substr(kPrefixSize).empty() &&
-                             SystemRewriteOptions::DeprecatedOptionMessage(
-                                 directive.substr(kPrefixSize), &deprecated);
+  const StringPiece option_name = directive.substr(kPrefixSize);
+  // A warning that names the option's arguments (ShardDomain) can show a
+  // value that is masked; a warning from the option name alone cannot.
+  bool names_arguments = false;
+  bool is_deprecated =
+      !option_name.empty() &&
+      SystemRewriteOptions::DeprecatedOptionMessage(option_name, &deprecated);
+  if (!is_deprecated && !option_name.empty() &&
+      command.handler == Handler::kParseDirective2 && at.args.size() >= 2 &&
+      RewriteOptions::DeprecatedOptionMessage(option_name, at.args[0],
+                                              at.args[1], &deprecated)) {
+    is_deprecated = true;
+    names_arguments = true;
+  }
   if (is_deprecated) {
-    Add(at, "PS202", Severity::kWarning, deprecated);
+    Add(at, "PS202", Severity::kWarning,
+        (at.values_safe || !names_arguments)
+            ? deprecated
+            : StrCat(at.name,
+                     " is deprecated (text not shown, the value may "
+                     "be secret)"));
   }
   if (filter_list || ignored_here) {
     return;  // Their parser warnings are reported above.
