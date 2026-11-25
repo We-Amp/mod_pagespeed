@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_SYSTEM_DAEMON_IPRO_RECORDER_H_
 #define PAGESPEED_SYSTEM_DAEMON_IPRO_RECORDER_H_
 
+#include <cstddef>
 #include <cstdint>
 
 #include "pagespeed/kernel/base/atomic_int32.h"
@@ -114,6 +115,8 @@ struct DaemonRecordOutcome {
 //
 // The content cap is applied WHILE accumulating, not to a finished buffer.
 // The point of a cap is not to discover after holding 16 MB that it was 16 MB.
+// For the same reason an HTML response, which is never recorded, is decided
+// from its headers and its body is not accumulated at all.
 class DaemonIproRecorder : public IproRecorder {
  public:
   // `abi`, `cache`, `timer` and `handler` are borrowed and must outlive this
@@ -171,6 +174,9 @@ class DaemonIproRecorder : public IproRecorder {
     outcome_ = sink;
   }
 
+  // Bytes of response body currently held.  Test seam only.
+  size_t buffered_bytes_for_testing() const { return body_.size(); }
+
  private:
   // Builds the gate's input from the final response headers.  `input` borrows
   // from this object and from `response_headers`, so it must not outlive
@@ -209,6 +215,11 @@ class DaemonIproRecorder : public IproRecorder {
   // The finalized Content-Encoding lines, joined, for the same reason.
   GoogleString content_encoding_storage_;
   bool failure_ = false;
+  // Set when headers offered to ConsiderResponseHeaders classify as HTML.
+  // From then on no body is buffered and the record is refused as
+  // html-classic-chain.  Distinct from `failure_`: the seams read failed()
+  // to cut a recording short, and an HTML response is an ordinary outcome.
+  bool html_at_headers_ = false;
   // Set when the body ran past the durable-originals cap.  Distinct from
   // `failure_` so the outcome can be reported as the ordinary thing it is
   // rather than as a malfunction.

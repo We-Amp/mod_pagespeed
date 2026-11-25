@@ -109,7 +109,7 @@ int64 DaemonIproRecorder::num_constructed() { return num_constructed_.value(); }
 
 bool DaemonIproRecorder::Write(const StringPiece& contents,
                                MessageHandler* /*handler*/) {
-  if (failure_ || over_cap_) {
+  if (failure_ || over_cap_ || html_at_headers_) {
     // Already decided; keep taking the bytes so the response still reaches
     // the client, but stop growing a buffer nothing will use.
     return true;
@@ -131,7 +131,25 @@ bool DaemonIproRecorder::Write(const StringPiece& contents,
 
 void DaemonIproRecorder::ConsiderResponseHeaders(
     HeadersKind headers_kind, ResponseHeaders* response_headers) {
-  if (headers_kind != kPreliminaryHeaders || response_headers == nullptr) {
+  if (response_headers == nullptr) {
+    return;
+  }
+  // HTML is never recorded on this substrate (see DoneAndSetHeaders), and
+  // its content type is known here, before the body.  Deciding now means the
+  // body -- for HTML, the rewritten page streaming out to the client -- is
+  // never held in memory only to be refused once it has all passed.  Judged
+  // with the same classifier, over the same header line, the gate uses, and
+  // for either kind of headers: a seam that offers only its full headers
+  // (IIS) states the content type just as well.  Sticky once set.
+  if (abi_ != nullptr) {
+    const char* content_type =
+        response_headers->Lookup1(HttpAttributes::kContentType);
+    if (abi_->ClassifyContentType(content_type) == kPsContentHtml) {
+      html_at_headers_ = true;
+      GoogleString().swap(body_);
+    }
+  }
+  if (headers_kind != kPreliminaryHeaders) {
     return;
   }
   // The one thing worth knowing before the body arrives: whether what is
@@ -290,8 +308,10 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
       break;
     }
     // ---- the site -----------------------------------------------------
-    // First, before any call to the peer: an entry may be written, and a
-    // notification sent, only under the site that admitted the request.
+    // First, before any cache or notify call to the peer: an entry may be
+    // written, and a notification sent, only under the site that admitted
+    // the request.  (ConsiderResponseHeaders may already have asked the
+    // peer's pure content-type classifier, which touches no state.)
     if (!IsSiteId(request_.site)) {
       outcome.verdict = DaemonRecordVerdict::kRefuse;
       outcome.reason = daemon_record_reason::kNoSiteId;
@@ -306,6 +326,17 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     if (request_.has_origin && http_options_.ipro_cors_guard) {
       outcome.verdict = DaemonRecordVerdict::kRefuse;
       outcome.reason = daemon_record_reason::kCorsRequest;
+      break;
+    }
+    // ---- HTML, decided at the headers -------------------------------
+    // The same refusal the check after the gate makes, reached without a
+    // body: nothing was buffered, so there is nothing to judge, store or
+    // notify.  After the site and CORS checks, so those keep their order
+    // and their counter for HTML as for everything else.
+    if (html_at_headers_) {
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kHtmlClassicChain;
+      outcome.notify_mask = 0;
       break;
     }
     if (failure_ || over_cap_ || !entire_response_received) {
@@ -422,7 +453,9 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     }
     if (decision.params.content_type == kPsContentHtml) {
       // The daemon serves no HTML on these ports, so nothing is stored or
-      // sent to the worker for it.
+      // sent to the worker for it.  Normally decided at the headers
+      // (ConsiderResponseHeaders); this is the backstop for a seam whose
+      // headers did not state the type until the end.
       outcome.verdict = DaemonRecordVerdict::kRefuse;
       outcome.reason = daemon_record_reason::kHtmlClassicChain;
       outcome.notify_mask = 0;
