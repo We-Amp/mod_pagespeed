@@ -12,12 +12,15 @@
     PAGESPEED_OPTIMIZER_PIN or -Pin names another, such as the release pin
     install\debian\optimizer-pin.json) and provides factory_worker.exe and
     pagespeed.dll built from the optimizer's public source at that commit, with
-    MSVC and Bazel from the host.
+    MSVC and Bazel from the host, in the optimizer's optimized release
+    configuration (--config=windows --config=opt) and with GIT_COMMIT set to
+    the pinned commit, so the worker reports the commit it was built from.
 
     Builds are kept under -LaneDir (CI_OPTIMIZER_LANE_DIR, default
     <system drive>\pagespeed_optimizer_lane), one directory per pin and recipe,
-    named <commit12>-<recipe8>. The recipe hash covers this script, the
-    cache-library commit this module links, the MSVC toolset, the Windows SDK,
+    named <commit12>-<recipe8>. The recipe hash covers this script, the build
+    configuration, the cache-library commit this module links, the MSVC
+    toolset, the Windows SDK,
     CMake and NASM, so a change to any of them builds again instead of reusing
     an older build. Each directory carries SHA256SUMS and optimizer-commit.txt.
     A directory is reused only when:
@@ -53,13 +56,16 @@
     A file the build directory is written to.
 .PARAMETER Verify
     Only check this build directory against the pin.
+.PARAMETER PrintBuildConfig
+    Only print the Bazel configurations the build uses, one per line.
 #>
 param(
     [string]$Pin = "",
     [string]$LaneDir = "",
     [string]$LogFile = "",
     [string]$ResultFile = "",
-    [string]$Verify = ""
+    [string]$Verify = "",
+    [switch]$PrintBuildConfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +76,9 @@ $OptimizerRepo = "https://github.com/We-Amp/pagespeed-optimizer.git"
 $LaneFiles = @('factory_worker.exe', 'optimizer-commit.txt', 'pagespeed.dll')
 $LockMinutes = 60
 $LockName = 'Global\pagespeed-optimizer-lane-build'
+# The optimizer's own Windows release build configurations: an optimized
+# worker, so the tests see release encode times, not a debug build's.
+$BuildConfigs = @('--config=windows', '--config=opt')
 
 # Rights that let an account change a file or directory, or what it holds.
 $WriteMask = [int64](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
@@ -258,6 +267,7 @@ function Get-Recipe($BuildEnv) {
     $cyclone = Select-String -LiteralPath (Join-Path $RepoRoot 'bazel\repositories.bzl') -Pattern '^\s*CYCLONE_COMMIT\s*=' |
         Select-Object -First 1
     $parts.Add("$($cyclone.Line.Trim())")
+    $parts.Add("configs=$($BuildConfigs -join ' ')")
     $parts.Add("msvc=$($BuildEnv['VCToolsVersion'])")
     $parts.Add("sdk=$($BuildEnv['WindowsSDKVersion'])")
     $saved = $env:PATH
@@ -321,6 +331,10 @@ function Invoke-LaneBuild($BuildEnv, [string]$Commit, [string]$PinFile, [string]
         }
         $head = & { $ErrorActionPreference = 'Continue'; "$(& git -C $src rev-parse HEAD 2>$null)".Trim() }
         if ($head -cne $Commit) { Write-Warn "the fetched optimizer source is at $head, not $Commit"; return $false }
+        # The worker reports the commit in GIT_COMMIT; the source tree carries
+        # a placeholder, which a kept output base would otherwise keep
+        # reporting for every later pin.
+        [IO.File]::WriteAllText((Join-Path $src 'GIT_COMMIT'), $Commit)
 
         if ((Invoke-Native $python @('-I', (Join-Path $RepoRoot 'tools\ci\check_optimizer_pin_pair.py'), $PinFile,
                 (Join-Path $src 'MODULE.bazel'), (Join-Path $RepoRoot 'bazel\repositories.bzl')) $Log) -ne 0) {
@@ -333,7 +347,7 @@ function Invoke-LaneBuild($BuildEnv, [string]$Commit, [string]$PinFile, [string]
         $startup = @('--nohome_rc', "--output_user_root=$($root -replace '\\', '/')")
         $jobs = 'HOST_CPUS*.75'
         if ($env:CI_SLOT_CPUS -match '^[1-9][0-9]{0,3}$') { $jobs = $env:CI_SLOT_CPUS }
-        $common = @('--config=windows', "--jobs=$jobs", '--nostamp', '--show_progress_rate_limit=30')
+        $common = $BuildConfigs + @("--jobs=$jobs", '--nostamp', '--show_progress_rate_limit=30')
         if ($env:CI_WIN_CACHE_DIR) { $common += "--disk_cache=$($env:CI_WIN_CACHE_DIR -replace '\\', '/')" }
         if ($env:BAZEL_REMOTE_CACHE_URL) { $common += "--remote_cache=$($env:BAZEL_REMOTE_CACHE_URL)" }
         $targets = @('//src/worker:factory_worker', '//lib/pagespeed:libpagespeed.so')
@@ -390,6 +404,10 @@ function Remove-Tree([string]$Path) {
 }
 
 # --- main ---
+if ($PrintBuildConfig) {
+    $BuildConfigs | ForEach-Object { Write-Output $_ }
+    exit 0
+}
 if (-not $Pin) { $Pin = if ($env:PAGESPEED_OPTIMIZER_PIN) { $env:PAGESPEED_OPTIMIZER_PIN } else { Join-Path $RepoRoot 'test\system\optimizer-test-pin.json' } }
 try {
     $commit = Get-PinCommit $Pin

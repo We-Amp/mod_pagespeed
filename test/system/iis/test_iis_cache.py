@@ -679,11 +679,14 @@ class TestOptimizerFullPurge:
 
         # (1) Serve until the optimizer's variant is what comes back.
         for path, headers in resources:
-            deadline = time.time() + _OPTIMIZER_SERVE_DEADLINE_S
+            started = time.time()
+            deadline = started + _OPTIMIZER_SERVE_DEADLINE_S
             while True:
                 response = client.get(path, headers=headers)
                 require_status_ok(response, path)
                 if _served_by_optimizer(response):
+                    print(f"{path}: optimizer variant served after "
+                          f"{time.time() - started:.1f}s")
                     break
                 if time.time() >= deadline:
                     pytest.fail(

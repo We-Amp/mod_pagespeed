@@ -11,7 +11,8 @@
 #   * a SHA256SUMS line for a file that is not part of the build;
 #   * an ACL that lets Users write;
 #   * the directory being a junction to a sound build;
-# and that a pin without a full commit hash is refused.
+# that a pin without a full commit hash is refused, and that the build uses
+# the optimized release configuration (--config=opt).
 #
 # Run:   powershell -NoProfile -File tools\ci\Build-OptimizerPin_test.ps1
 $ErrorActionPreference = 'Stop'
@@ -112,6 +113,10 @@ try {
     [IO.File]::WriteAllText($bad, '{"optimizer_commit": "main"}')
     $r = Invoke-Verify $good $bad
     if ($r.Code -ne 0 -and $r.Out -match 'full commit hash') { Pass 'a pin without a full commit hash is refused' } else { Fail "a pin without a full commit hash is refused: $($r.Out)" }
+    # The build is the optimizer's optimized release configuration, not a
+    # debug (fastbuild) build.
+    $cfg = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $script -PrintBuildConfig 2>&1 | ForEach-Object { "$_".Trim() })
+    if ($LASTEXITCODE -eq 0 -and $cfg -contains '--config=opt' -and $cfg -contains '--config=windows') { Pass 'the build uses --config=windows --config=opt' } else { Fail "the build uses --config=windows --config=opt: $($cfg -join ' ')" }
 } finally {
     if (Test-Path -LiteralPath (Join-Path $root 'junction')) { & $env:ComSpec /c "rmdir `"$(Join-Path $root 'junction')`"" | Out-Null }
     & icacls.exe $root /reset /T /Q 2>$null | Out-Null
