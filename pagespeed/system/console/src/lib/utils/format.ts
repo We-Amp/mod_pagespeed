@@ -76,6 +76,27 @@ export function formatSpan(seconds: number): string {
   return h < 24 ? `${h} h` : `${Math.floor(h / 24)} d`;
 }
 
+/**
+ * A recorded span as a heading states it, rounded to the nearest minute under
+ * an hour, the nearest 10 minutes under a day and the nearest hour from a day
+ * on: "About 1 h 40 min", "About 2 d 3 h". "About" marks a rounded span; an
+ * exact one has none ("59 min", "1 h"). Under 30 s: "Under 1 min".
+ */
+export function formatHistorySpan(seconds: number): string {
+  const s = Math.round(Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
+  const step = (v: number) => (v < 3_600 ? 60 : v < 86_400 ? 600 : 3_600);
+  const near = (unit: number) => Math.round(s / unit) * unit;
+  let rounded = near(step(s));
+  // Rounding up into the next band (59 min 40 s, 23 h 58 min) rounds again at that band's step.
+  if (step(rounded) !== step(s)) rounded = near(step(rounded));
+  if (rounded === 0) return "Under 1 min";
+  const d = Math.floor(rounded / 86_400);
+  const h = Math.floor((rounded % 86_400) / 3_600);
+  const m = Math.floor((rounded % 3_600) / 60);
+  const parts = [d > 0 ? `${d} d` : "", h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : ""].filter((p) => p !== "");
+  return `${rounded === s ? "" : "About "}${parts.join(" ")}`;
+}
+
 /** "12 s ago" / "5 min ago" / "3 h ago" / "2 d ago"; pair with formatIsoTitle. */
 export function formatRelative(ms: number, now: number): string {
   return `${formatSpan((now - ms) / 1000)} ago`;

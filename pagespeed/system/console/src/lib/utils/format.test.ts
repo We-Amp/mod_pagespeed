@@ -8,6 +8,7 @@ import {
   formatClock,
   formatCount,
   formatDuration,
+  formatHistorySpan,
   formatIsoTitle,
   formatPercent,
   formatRelative,
@@ -89,6 +90,46 @@ describe("formatRelative", () => {
   });
   it("clamps a future timestamp to 0 s ago", () => {
     expect(formatRelative(now + 5_000, now)).toBe("0 s ago");
+  });
+});
+
+describe("formatHistorySpan", () => {
+  const MIN = 60;
+  const HOUR = 3_600;
+  const DAY = 86_400;
+  it("under an hour: the nearest minute, About when rounded", () => {
+    expect(formatHistorySpan(0)).toBe("Under 1 min");
+    expect(formatHistorySpan(29)).toBe("Under 1 min");
+    expect(formatHistorySpan(42)).toBe("About 1 min");
+    expect(formatHistorySpan(59 * MIN)).toBe("59 min");
+    expect(formatHistorySpan(59 * MIN + 10)).toBe("About 59 min");
+  });
+  it("rounding up to the hour is stated in hours", () => {
+    expect(formatHistorySpan(59 * MIN + 40)).toBe("About 1 h");
+    expect(formatHistorySpan(HOUR)).toBe("1 h");
+    expect(formatHistorySpan(HOUR + 3)).toBe("About 1 h");
+  });
+  it("under a day: hours and the nearest 10 minutes, never rounded down to the hour", () => {
+    expect(formatHistorySpan(HOUR + 39 * MIN)).toBe("About 1 h 40 min");
+    expect(formatHistorySpan(HOUR + 40 * MIN)).toBe("1 h 40 min");
+    expect(formatHistorySpan(9 * HOUR)).toBe("9 h");
+    expect(formatHistorySpan(5 * HOUR + 3 * MIN)).toBe("About 5 h");
+    expect(formatHistorySpan(23 * HOUR + 50 * MIN)).toBe("23 h 50 min");
+  });
+  it("rounding up to the day is stated in days", () => {
+    expect(formatHistorySpan(23 * HOUR + 59 * MIN)).toBe("About 1 d");
+    expect(formatHistorySpan(DAY)).toBe("1 d");
+  });
+  it("from a day on: days and the nearest hour", () => {
+    expect(formatHistorySpan(DAY + 5)).toBe("About 1 d");
+    expect(formatHistorySpan(DAY + 3 * HOUR)).toBe("1 d 3 h");
+    expect(formatHistorySpan(DAY + 3 * HOUR + 31 * MIN)).toBe("About 1 d 4 h");
+    expect(formatHistorySpan(2 * DAY + 23 * HOUR + 40 * MIN)).toBe("About 3 d");
+    expect(formatHistorySpan(30 * DAY)).toBe("30 d");
+  });
+  it("a negative or non-finite span is no span", () => {
+    expect(formatHistorySpan(-4)).toBe("Under 1 min");
+    expect(formatHistorySpan(Number.NaN)).toBe("Under 1 min");
   });
 });
 

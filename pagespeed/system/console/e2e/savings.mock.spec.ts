@@ -1065,7 +1065,7 @@ test("with a statistics log: the figures over the history it holds, across a res
   await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: F.graphsDeliveredHistory() });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   const history = page.getByTestId("savings-delivered-window");
-  await expect(history.getByRole("heading")).toHaveText("Over 9 h of recorded history");
+  await expect(history.getByRole("heading")).toHaveText("9 h of recorded history");
   await expect(page.getByTestId("savings-delivered-window-module")).toHaveText(
     "Optimized by this server: CSS 25% smaller (488 KB → 366 KB) · Images 75% smaller (3.05 MB → 781 KB)",
   );
@@ -1074,6 +1074,43 @@ test("with a statistics log: the figures over the history it holds, across a res
   );
   await expect(page.getByTestId("savings-delivered-no-log")).toHaveCount(0);
 });
+
+test("the history span is rounded to the nearest unit and says so: 1 h 39 min is about 1 h 40 min", async ({ page }) => {
+  const reply = F.graphsDeliveredHistory();
+  const now = Date.now();
+  (reply.body as { timestamps: number[] }).timestamps = [now - 99 * 60_000, now - 66 * 60_000, now - 33 * 60_000, now];
+  await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs: reply });
+  await openConsole(page, "pagespeed_global_admin", "#/savings");
+  await expect(page.getByTestId("savings-delivered-window").getByRole("heading")).toHaveText(
+    "About 1 h 40 min of recorded history",
+  );
+});
+
+// The history read runs beside the poll, so it answers after the card has
+// painted; the card holds the history's space from the start.
+for (const [name, graphs] of [
+  ["a recorded history", F.graphsDeliveredHistory()],
+  ["the logging-off hint", F.GRAPHS_LOGGING_OFF],
+] as const) {
+  test(`the card does not change height when ${name} arrives`, async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", { ...DELIVERED, graphs }, { delayMs: { graphs: 1_500 } });
+    await openConsole(page, "pagespeed_global_admin", "#/savings");
+    const card = page.getByTestId("savings-delivered-card");
+    await expect(page.getByTestId("savings-delivered-module-total")).toContainText("38.5 MB");
+    const before = await card.boundingBox();
+    // Measured while the read is still held.
+    await expect(page.getByTestId("savings-delivered-window")).toHaveCount(0);
+    await expect(page.getByTestId("savings-delivered-no-log")).toHaveCount(0);
+    await expect(
+      page.getByTestId(name === "a recorded history" ? "savings-delivered-window" : "savings-delivered-no-log"),
+    ).toBeVisible();
+    const after = await card.boundingBox();
+    expect(before).not.toBeNull();
+    expect(after?.height).toBe(before?.height);
+    // Nothing of the held space is announced or found.
+    await expect(card.getByText(/of recorded history/)).toHaveCount(name === "a recorded history" ? 1 : 0);
+  });
+}
 
 test("statistics logging off (the default): the card says how to get a history, naming both settings", async ({ page }) => {
   // What the module answers while it writes no statistics log.
