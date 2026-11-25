@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# These advisories are fixed in the Nuxt 4 release this fixture pins. Their
+# entries for the 3.x line (">= 3.0.0, < 4.0.0", no fix) reach OSV without the
+# upper bound, so OSV matches every later version as well. npm audit, which
+# reads the ranges as published, reports none of them.
+
+[[IgnoredVulns]]
+id = "GHSA-f3x9-2chm-73c8"
+ignoreUntil = 2027-05-25
+reason = "Fixed in nuxt and @nuxt/nitro-server 4.6.4; OSV range for 3.x lacks its < 4.0.0 bound"
+
+[[IgnoredVulns]]
+id = "GHSA-hf59-9xwc-2g4p"
+ignoreUntil = 2027-05-25
+reason = "Fixed in nuxt and @nuxt/nitro-server 4.6.4; OSV range for 3.x lacks its < 4.0.0 bound"
+
+[[IgnoredVulns]]
+id = "GHSA-vjh5-4x84-xrqp"
+ignoreUntil = 2027-05-25
+reason = "Fixed in nuxt and @nuxt/nitro-server 4.6.2; OSV range for 3.x lacks its < 4.0.0 bound"
+
+[[IgnoredVulns]]
+id = "GHSA-96x6-fvhx-49hg"
+ignoreUntil = 2027-05-25
+reason = "Fixed in nuxt 4.6.4; OSV range for 3.x lacks its < 4.0.0 bound"
