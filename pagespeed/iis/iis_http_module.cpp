@@ -866,11 +866,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		facts->method = method == nullptr ? "" : method;
 		facts->scheme = (raw != nullptr && raw->pSslInfo != nullptr) ? "https" : "http";
 		facts->path = IisRawRequestTarget(raw);
+		// The host and port of the URL this module keys the request on (the
+		// Host the client sent, with the local port unless it is the
+		// scheme's default): the URL an admin purge on this port names, so a
+		// purge finds the entry on a site bound to another port.
+		facts->host = inner->gurl()->HostAndPort().as_string();
 		USHORT length = 0;
-		PCSTR value = request->GetHeader(HttpHeaderHost, &length);
-		if (value != nullptr) {
-			facts->host.assign(value, length);
-		}
+		PCSTR value = nullptr;
 		facts->site = IisRequestSiteId(
 			RequestIisSiteId(http_context),
 			inner->process_context()->site_id(),
