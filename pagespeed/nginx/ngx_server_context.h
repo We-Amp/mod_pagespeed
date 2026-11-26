@@ -27,7 +27,7 @@
 
 #include "ngx_message_handler.h"
 #include "pagespeed/system/daemon_adapter.h"
-#include "pagespeed/system/daemon_html_report.h"
+#include "pagespeed/system/daemon_html_engine.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/system_server_context.h"
 
@@ -86,9 +86,10 @@ class NgxServerContext : public SystemServerContext {
   // calls it.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
-  // The counters and decision log of DaemonHtmlCache report-only, built on
-  // first use so a server that never sets the option has none.
-  DaemonHtmlReporter* daemon_html_reporter();
+  // The HTML cache engine of this server (DaemonHtmlCache), built on first
+  // use so a server that never sets the option has none.  It holds the
+  // report-only counters and decision log.
+  DaemonHtmlEngine* daemon_html_engine();
 
   // The peer's serve-stats mmap for this server, or nullptr when no daemon
   // is configured.  Borrowed; PROCESS-lifetime, and deliberately not opened
@@ -131,8 +132,8 @@ class NgxServerContext : public SystemServerContext {
   // configuration that name the same socket and volume (see
   // NgxRewriteDriverFactory::daemon_adapter_pool()).
   std::shared_ptr<DaemonAdapter> daemon_adapter_;
-  std::once_flag daemon_html_reporter_once_;
-  std::unique_ptr<DaemonHtmlReporter> daemon_html_reporter_;
+  std::once_flag daemon_html_engine_once_;
+  std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
   NgxServerContext(const NgxServerContext&) = delete;

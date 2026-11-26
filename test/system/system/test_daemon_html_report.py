@@ -4,17 +4,22 @@
 
 """DaemonHtmlCache report-only against a live server.
 
-The lane serves two name-based virtual hosts that differ only in that
+The lane serves three name-based virtual hosts that differ only in that
 directive (lane fixture "daemon_html_report", on the port named by
-PAGESPEED_RULE_PACKS_PORT; both have the optimizer daemon configured):
+PAGESPEED_RULE_PACKS_PORT; all have the optimizer daemon configured):
 
-  daemon-html-off.example.com     DaemonHtmlCache off
-  daemon-html-report.example.com  DaemonHtmlCache report-only
+  daemon-html-off.example.com       DaemonHtmlCache off
+  daemon-html-report.example.com    DaemonHtmlCache report-only
+  daemon-html-variants.example.com  DaemonHtmlCache serve-variants
 
 Report-only must leave every response byte-identical, its headers included, and
 store nothing; only the counters and the decision log may differ. An optimizer
 older than the policy reports "unavailable" instead, which is what the lane's
 pinned optimizer does until the pin reaches it.
+
+serve-variants is accepted, and until this server stores and serves it runs
+exactly as report-only: the same bytes as off, a Markdown request included,
+the same counters, and report-only decision lines.
 """
 
 import email.utils
@@ -31,6 +36,9 @@ from pagespeed_test_framework import VhostClient
 
 OFF_HOST = "daemon-html-off.example.com"
 REPORT_HOST = "daemon-html-report.example.com"
+VARIANTS_HOST = "daemon-html-variants.example.com"
+# The hosts that record, each compared with OFF_HOST.
+RECORDING_HOSTS = [REPORT_HOST, VARIANTS_HOST]
 FIXTURE_DIR = "/daemon_html"
 
 # Headers each response legitimately has its own value of.
@@ -77,6 +85,8 @@ REQUESTS = [
     ("HEAD", {"Accept-Encoding": "identity"}, "head"),
     ("GET", {"Accept-Encoding": "identity", "If-Modified-Since": NOT_MODIFIED_SINCE}, "if-modified-since"),
     ("GET", {"Accept-Encoding": "identity", "Range": "bytes=0-99"}, "range"),
+    # A request for the Markdown copy gets the page, as with the option off.
+    ("GET", {"Accept-Encoding": "identity", "Accept": "text/markdown"}, "markdown"),
 ]
 
 
@@ -179,17 +189,20 @@ def _wait_for_line(host: str, path: str) -> dict:
 
 @pytest.mark.requires_fixture("daemon_html_report")
 class TestReportOnlyIsInert:
+    @pytest.mark.parametrize("host", RECORDING_HOSTS)
     @pytest.mark.parametrize("path", PAGES)
     @pytest.mark.parametrize(
         "method,headers",
         [(method, headers) for method, headers, _ in REQUESTS],
         ids=[request_id for _, _, request_id in REQUESTS],
     )
-    def test_off_and_report_only_are_byte_identical(self, path: str, method: str, headers: Dict[str, str]):
+    def test_off_and_report_only_are_byte_identical(
+        self, host: str, path: str, method: str, headers: Dict[str, str]
+    ):
         request = dict(headers)
         request["X-PSA-Blocking-Rewrite"] = "psatest"
         off = _site(OFF_HOST)
-        report = _site(REPORT_HOST)
+        report = _site(host)
         # The two hosts have separate cache entries, so both are given time to
         # settle on the same rewrites; a real difference never settles.
         for _ in range(10):
@@ -224,8 +237,9 @@ class TestReportOnlyIsInert:
             ("GET", "upstream404.html"),
         ],
     )
-    def test_only_a_200_with_a_body_is_evaluated(self, method: str, page: str):
-        site = _site(REPORT_HOST)
+    @pytest.mark.parametrize("host", RECORDING_HOSTS)
+    def test_only_a_200_with_a_body_is_evaluated(self, host: str, method: str, page: str):
+        site = _site(host)
         path = f"{FIXTURE_DIR}/{page}"
         before = _stats(site)
         response = site.head(path) if method == "HEAD" else site.get(path)
@@ -242,8 +256,9 @@ class TestDecisions:
         if not _policy_available():
             pytest.skip("the installed optimizer library predates the HTML cache policy")
 
-    def test_a_plain_page_would_store(self):
-        site = _site(REPORT_HOST)
+    @pytest.mark.parametrize("host", RECORDING_HOSTS)
+    def test_a_plain_page_would_store(self, host: str):
+        site = _site(host)
         before = _stats(site)
         path = f"{FIXTURE_DIR}/plain.html"
         assert site.get(path).status == 200
@@ -251,10 +266,25 @@ class TestDecisions:
         assert _delta(before, after, "daemon_html_evaluated") == 1
         assert _delta(before, after, "daemon_html_would_store") == 1, after
         assert _delta(before, after, "daemon_html_classify_failed") == 0
-        entry = _wait_for_line(REPORT_HOST, path)
+        # Nothing is stored and nothing waits on serving: serve-variants
+        # reports, on this server, exactly as report-only does.
+        assert _delta(before, after, "daemon_html_stored") == 0
+        assert _delta(before, after, "daemon_html_serve_unavailable") == 0
+        entry = _wait_for_line(host, path)
         assert entry["mode"] == "report-only"
         assert entry["action"] == "would_store"
         assert "reason" not in entry
+
+    def test_a_markdown_request_is_answered_with_the_page(self):
+        site = _site(VARIANTS_HOST)
+        before = _stats(site)
+        path = f"{FIXTURE_DIR}/plain.html"
+        response = site.get(path, headers={"Accept": "text/markdown"})
+        assert response.status == 200
+        assert response.header("Content-Type").startswith("text/html")
+        after = _stats(site)
+        assert _delta(before, after, "daemon_html_evaluated") == 1
+        assert _delta(before, after, "daemon_html_stored") == 0
 
     def test_the_lifetime_from_the_expires_stage_is_seen(self):
         site = _site(REPORT_HOST)
@@ -334,6 +364,21 @@ class TestDecisions:
         entry = _wait_for_line(REPORT_HOST, path)
         assert entry["action"] == "refuse", entry
         assert entry["reason"] == reason, entry
+
+    def test_vhost_added_names_what_the_server_configuration_added(self, server_config):
+        """The line names, without values, the headers the server's own
+        configuration added after the store snapshot.  Apache reads a second
+        header view after mod_headers; nginx has a single view, so its lines
+        carry none."""
+        site = _site(REPORT_HOST)
+        path = f"{FIXTURE_DIR}/addheader.html"
+        assert site.get(path).status == 200
+        entry = _wait_for_line(REPORT_HOST, path)
+        if server_config.is_nginx:
+            assert "vhost_added" not in entry, entry
+        else:
+            assert "x-lane-added" in entry["vhost_added"].split(","), entry
+        assert "1" not in entry.get("vhost_added", "").split(","), entry
 
 
 if __name__ == "__main__":

@@ -269,18 +269,16 @@ cc_library(
     ],
 )
 
-# DaemonHtmlCache report-only: a bounded read-only capture of an HTML response,
-# classified by the library's policy through the run-time binding, counted and
-# logged. Nothing here stores or serves anything.
+# The HTML cache's decision log: one writer thread per process, lines
+# formatted by the library through the run-time binding.
 cc_library(
-    name = "daemon_html_report",
-    srcs = ["daemon_html_report.cc"],
-    hdrs = ["daemon_html_report.h"],
+    name = "daemon_html_decision_log",
+    srcs = ["daemon_html_decision_log.cc"],
+    hdrs = ["daemon_html_decision_log.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
         ":rule_pack_decision_log",
-        "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
@@ -307,6 +305,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
+        ":daemon_html_decision_log",
         ":daemon_html_purge_observer",
         ":daemon_record_arm",
         ":daemon_serve_arm",

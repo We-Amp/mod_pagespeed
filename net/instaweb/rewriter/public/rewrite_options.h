@@ -286,9 +286,15 @@ class RewriteOptions {
   // Off (the default) does nothing. Report-only classifies each HTML response
   // and reports whether the HTML cache policy would store it: nothing is
   // stored, nothing is served, and the response is not changed.
+  // Serve-variants is the mode that stores HTML pages and serves their
+  // Markdown copies to requests that ask for one; a server that does not
+  // store and serve yet runs it exactly as report-only.  The value
+  // serve-cached-html is reserved: setting it is refused with a warning and
+  // leaves the option as it was.
   enum DaemonHtmlCacheMode {
     kDaemonHtmlCacheOff,
     kDaemonHtmlCacheReportOnly,
+    kDaemonHtmlCacheServeVariants,
   };
 
   // Any new Option added should have a corresponding name here that must be

@@ -126,6 +126,26 @@ TEST_F(ApacheConfigTest, SetFromHtaccessSurvivesMergeAndClone) {
   EXPECT_TRUE(clone->set_from_htaccess());
 }
 
+// DaemonHtmlCache: serve-variants parses (and runs as report-only on this
+// server for now); the value reserved for a later release is refused with
+// a warning, not a configuration error, and leaves the option as it was.
+TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
+  GoogleString msg;
+  NullMessageHandler handler;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                               "serve-variants", &msg,
+                                               &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            config_.daemon_html_cache());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                               "serve-cached-html", &msg,
+                                               &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            config_.daemon_html_cache());
+}
+
 TEST_F(ApacheConfigTest, DaemonPathsDefaultToUnconfigured) {
   EXPECT_TRUE(config_.daemon_socket_path().empty());
   EXPECT_TRUE(config_.daemon_volume_path().empty());

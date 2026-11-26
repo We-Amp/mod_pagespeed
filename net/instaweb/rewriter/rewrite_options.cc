@@ -1470,9 +1470,12 @@ void RewriteOptions::AddProperties() {
   // cached work.
   AddBaseProperty(kDaemonHtmlCacheOff, &RewriteOptions::daemon_html_cache_,
                   "dhc", kDaemonHtmlCache, kServerScope,
-                  "HTML on the optimizer daemon path: off (default), or "
+                  "HTML on the optimizer daemon path: off (default); "
                   "report-only, which reports whether each HTML response "
-                  "could be stored and changes nothing else.",
+                  "could be stored and changes nothing else; or "
+                  "serve-variants, which stores HTML pages to serve their "
+                  "Markdown copies and, on a server that does not serve "
+                  "them yet, runs as report-only.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -2651,6 +2654,20 @@ RewriteOptions::OptionSettingResult
 RewriteOptions::ParseAndSetOptionFromNameWithScope(
     StringPiece name, StringPiece arg, RewriteOptions::OptionScope max_scope,
     GoogleString* msg, MessageHandler* handler) {
+  // A value reserved for a later release: refused, with a warning instead of
+  // a configuration error, so a configuration written for that release still
+  // loads.  The option keeps the value it had.
+  if (StringCaseEqual(name, kDaemonHtmlCache) &&
+      StringCaseEqual(arg, "serve-cached-html")) {
+    if (handler != nullptr) {
+      handler->Message(kWarning,
+                       "'%s serve-cached-html' is not available in this "
+                       "release and is ignored; use serve-variants or "
+                       "report-only",
+                       kDaemonHtmlCache);
+    }
+    return kOptionOk;
+  }
   GoogleString error_detail;
   OptionSettingResult result =
       SetOptionFromNameInternal(name, arg, max_scope, &error_detail);
@@ -2986,7 +3003,10 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kDaemonHtmlCacheOff;
   } else if (StringCaseEqual(value_string, "report-only")) {
     *value = kDaemonHtmlCacheReportOnly;
+  } else if (StringCaseEqual(value_string, "serve-variants")) {
+    *value = kDaemonHtmlCacheServeVariants;
   } else {
+    // serve-cached-html included: see ParseAndSetOptionFromNameWithScope.
     return false;
   }
   return true;
@@ -3856,6 +3876,8 @@ GoogleString RewriteOptions::ToString(DaemonHtmlCacheMode mode) {
       return "off";
     case kDaemonHtmlCacheReportOnly:
       return "report-only";
+    case kDaemonHtmlCacheServeVariants:
+      return "serve-variants";
   }
   return "?";
 }

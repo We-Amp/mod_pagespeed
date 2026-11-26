@@ -2720,7 +2720,7 @@ configure_daemon_vhost() {
 </VirtualHost>
 EOF
     write_daemon_html_content /var/www/html/daemon_html sudo
-    for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only; do
+    for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only daemon-html-variants.example.com:serve-variants; do
         sudo tee -a "$conf" > /dev/null << EOF
 
 <VirtualHost *:@@APACHE_SECONDARY_PORT@@>

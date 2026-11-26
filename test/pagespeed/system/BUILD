@@ -965,19 +965,24 @@ pagespeed_cc_test(
     ],
 )
 
-# DaemonHtmlCache report-only: what the module does with the policy's answers,
-# against the dlopen-able stand-in.
+# DaemonHtmlCache report-only through the HTML cache engine: what the module
+# does with the policy's answers, against the dlopen-able stand-in, and the
+# decision line's vhost_added.
 pagespeed_cc_test(
     name = "daemon_html_report_test",
     srcs = ["daemon_html_report_test.cc"],
-    data = [":libdaemon_stub_html_policy.so"],
+    data = [
+        ":libdaemon_stub.so",
+        ":libdaemon_stub_html_policy.so",
+    ],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":daemon_stub_test_util",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/util",
-        "//pagespeed/system:daemon_html_report",
+        "//pagespeed/system:daemon_html_decision_log",
+        "//pagespeed/system:daemon_html_engine",
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )
@@ -985,8 +990,8 @@ pagespeed_cc_test(
 # The decision log writer thread failing to start: the line is dropped and the
 # next one starts it. A binary of its own, so no earlier test has started it.
 pagespeed_cc_test(
-    name = "daemon_html_report_writer_start_test",
-    srcs = ["daemon_html_report_writer_start_test.cc"],
+    name = "daemon_html_decision_log_writer_start_test",
+    srcs = ["daemon_html_decision_log_writer_start_test.cc"],
     data = [":libdaemon_stub_html_policy.so"],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
@@ -994,7 +999,8 @@ pagespeed_cc_test(
         ":daemon_stub_test_util",
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/util",
-        "//pagespeed/system:daemon_html_report",
+        "//pagespeed/system:daemon_html_decision_log",
+        "//pagespeed/system:daemon_html_engine",
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )

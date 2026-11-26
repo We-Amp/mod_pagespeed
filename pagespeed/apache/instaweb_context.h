@@ -74,7 +74,7 @@ apr_status_t apache_cleanup(void* object) {
 // call Finish when we see the EOS bucket.
 //
 // TODO(sligocki): Factor out similarities between this and ProxyFetch.
-class DaemonHtmlCapture;
+class DaemonHtmlRecording;
 
 class InstawebContext {
  public:
@@ -107,13 +107,13 @@ class InstawebContext {
   bool FlushWouldSendEditableHeaders() const;
 
   apr_bucket_brigade* bucket_brigade() const { return bucket_brigade_; }
-  // DaemonHtmlCache report-only: the capture of this response, or nullptr in
-  // any other mode.  Owned by the request pool.
-  DaemonHtmlCapture* daemon_html_capture() const {
-    return daemon_html_capture_;
+  // DaemonHtmlCache: the HTML cache engine's recording of this response, or
+  // nullptr when the option is off.  Owned by the request pool.
+  DaemonHtmlRecording* daemon_html_recording() const {
+    return daemon_html_recording_;
   }
-  void set_daemon_html_capture(DaemonHtmlCapture* capture) {
-    daemon_html_capture_ = capture;
+  void set_daemon_html_recording(DaemonHtmlRecording* recording) {
+    daemon_html_recording_ = recording;
   }
   ContentEncoding content_encoding() const { return content_encoding_; }
   ApacheServerContext* apache_server_context() { return server_context_; }
@@ -185,7 +185,7 @@ class InstawebContext {
  private:
   class WindowSink;
 
-  DaemonHtmlCapture* daemon_html_capture_ = nullptr;
+  DaemonHtmlRecording* daemon_html_recording_ = nullptr;
   void ComputeContentEncoding(request_rec* request);
   void BlockingPropertyCacheLookup();
   void ProcessBytes(const char* input, int size);

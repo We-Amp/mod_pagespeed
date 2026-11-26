@@ -84,15 +84,18 @@ DaemonReader* NgxServerContext::NewDaemonReader() {
                              message_handler());
 }
 
-DaemonHtmlReporter* NgxServerContext::daemon_html_reporter() {
-  std::call_once(daemon_html_reporter_once_, [this] {
+DaemonHtmlEngine* NgxServerContext::daemon_html_engine() {
+  std::call_once(daemon_html_engine_once_, [this] {
     const SystemRewriteOptions* options =
         SystemRewriteOptions::DynamicCast(global_options());
-    daemon_html_reporter_ = std::make_unique<DaemonHtmlReporter>(
-        statistics(), timer(), options == nullptr ? "" : options->log_dir(),
-        message_handler());
+    daemon_html_engine_ = NewDaemonHtmlEngineForPort(
+        global_options()->daemon_html_cache(),
+        global_options()->daemon_html_max_bytes(),
+        options == nullptr ? GoogleString() : options->log_dir(),
+        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+        statistics(), timer(), message_handler());
   });
-  return daemon_html_reporter_.get();
+  return daemon_html_engine_.get();
 }
 
 SystemRequestContext* NgxServerContext::NewRequestContext(

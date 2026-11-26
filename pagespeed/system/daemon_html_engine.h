@@ -33,6 +33,18 @@
 // daemon_html_serve_unavailable counter moves for each HTML response, and
 // one line is logged for each change of state, naming the condition.
 //
+// REPORT-ONLY.  In report-only (the mode, or the state above) every HTML
+// response a port records is classified, counted (daemon_html_evaluated,
+// daemon_html_would_store, daemon_html_refused_<reason>, ...) and logged to
+// the decision log, whatever its host or URL, and nothing else happens: no
+// volume call, no byte of the response changed.  The line carries the
+// final view's verdict, the view the report has always read; with a library
+// that publishes C API 1.14 it also names, in vhost_added, the header lines
+// the server's own configuration added after the store snapshot.  When the
+// engine stores and serves, the same log takes a line for each store, each
+// Markdown answer and each purge that removed an entry, through the same
+// writer thread and under the same per-second limit.
+//
 // THE PURGE FENCE.  An entry is purged when its insert time (the request's
 // start, floored to the second and moved back by the inbound Age) is at or
 // before the newest purge that covers it: a URL purge, the global purge this
@@ -63,6 +75,7 @@
 #include <utility>
 #include <vector>
 
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -73,6 +86,7 @@ namespace net_instaweb {
 
 class DaemonAbi;
 class DaemonHealNotifyLimiter;
+class DaemonHtmlDecisionLog;
 class MessageHandler;
 class Statistics;
 class Timer;
@@ -311,8 +325,17 @@ class DaemonHtmlRecording {
   // baseline to this set, transport changes ignored).
   void NoteFinalHeaders(DaemonHtmlHeaderLines lines);
 
-  // Bounded by the engine's max bytes and the process-wide budget.
+  // Bounded by the engine's max bytes and the process-wide budget.  A
+  // recording that cannot store keeps only the prefix the body scan reads,
+  // outside the budget.
   void AddBody(const char* data, size_t size);
+  // The server's word that the body ended: a report of a body that never
+  // ended reads as incomplete.
+  void set_body_ended() { body_ended_ = true; }
+  // Whether a baseline was set and the final view has not been noted yet.
+  bool needs_final_headers() const {
+    return has_baseline_ && !has_final_lines_;
+  }
 
   // Classifies both views and stores, or removes a refused entry, as the
   // library and the rules allow.  `aborted` is the server's word that the
@@ -347,6 +370,7 @@ class DaemonHtmlRecording {
   int64 reserved_ = 0;
   bool budget_refused_ = false;
   bool over_size_ = false;
+  bool body_ended_ = false;
   bool finished_ = false;
 };
 
@@ -380,6 +404,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
     DaemonHtmlByteBudget* budget = nullptr;
     // Runs the admin path's and the ticks' volume I/O; inline when null.
     DaemonHtmlBlockingRunner* runner = nullptr;
+    // The decision log goes to <log_dir>/daemon-html/; none when empty.
+    GoogleString log_dir;
   };
 
   // Points inside a commit, for tests that interleave a purge.
@@ -402,8 +428,12 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   DaemonHtmlEngine& operator=(const DaemonHtmlEngine&) = delete;
 
   // A recording for an HTML response, or nullptr when there is nothing the
-  // engine may do with it (mode off, URL disagreement, a host the site does
-  // not list, no site).  `port` must outlive the recording.
+  // engine may do with it: mode off, or no library (counted as
+  // daemon_html_unavailable).  While the engine stores, a request it may
+  // not store for gets nullptr too: a URL disagreement, a host the site does
+  // not list, no site.  Otherwise (report-only) every response is recorded
+  // and reported.  `port` must outlive the recording; it may be null for a
+  // recording that cannot store, as no blocking work is handed to it.
   std::unique_ptr<DaemonHtmlRecording> StartRecording(
       const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port);
 
@@ -459,7 +489,20 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // The two views and the store path.
   void FinishRecording(DaemonHtmlRecording* recording, bool aborted);
   bool Classify(const DaemonHtmlRecording& r, const DaemonHtmlHeaderLines& view,
-                int mode, StoreVerdict* out);
+                int mode, bool body_complete, StoreVerdict* out);
+  // The report of one recording: the counters, and a decision line.
+  void Report(const DaemonHtmlRecording& r, const StoreVerdict& verdict,
+              bool classified, const DaemonHtmlHeaderLines& store_view,
+              const DaemonHtmlHeaderLines& final_view, bool serve_line);
+  // Queues one decision line (absent values left out).  `request_path` is a
+  // thread a server's message handler may be called from.
+  void QueueLine(const std::vector<std::pair<const char*, GoogleString>>& f,
+                 const GoogleString& dedup_key, int64 now_ms,
+                 bool request_path);
+  void LogServeSide(const char* action, const GoogleString& reason,
+                    const GoogleString& host, const GoogleString& path,
+                    int status, uint64 size, uint32 lifetime_s,
+                    const char* variant, int64 age_s);
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
               const DaemonHtmlHeaderLines& store_view,
@@ -485,6 +528,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   Deps deps_;
   DaemonHtmlPurgeOracle oracle_;
   std::unique_ptr<Counters> counters_;
+  std::shared_ptr<DaemonHtmlDecisionLog> log_;
   TestHooks* test_hooks_ = nullptr;
 
   mutable std::mutex mutex_;
@@ -506,6 +550,17 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   };
   std::map<GoogleString, Unpaired> unpaired_;
 };
+
+// The engine a server port builds from its DaemonHtmlCache settings, or
+// nullptr for off.  Until the port stores and serves, serve-variants runs
+// exactly as report-only: the response is never changed and nothing is
+// written to the volume.  An empty `log_dir` leaves the counters and logs one
+// warning.  `abi` may be null (no optimizer library: every HTML response
+// counts as daemon_html_unavailable).  All pointers must outlive the engine.
+std::unique_ptr<DaemonHtmlEngine> NewDaemonHtmlEngineForPort(
+    RewriteOptions::DaemonHtmlCacheMode mode, int64 max_bytes,
+    const GoogleString& log_dir, const DaemonAbi* abi, Statistics* statistics,
+    Timer* timer, MessageHandler* handler);
 
 }  // namespace net_instaweb
 

@@ -2671,10 +2671,10 @@ void ps_release_request_context(void* data) {
     ctx->inflater_ = nullptr;
   }
 
-  if (ctx->daemon_html_capture != nullptr) {
-    ctx->daemon_html_capture->Finish(true /* the body never ended here */);
-    delete ctx->daemon_html_capture;
-    ctx->daemon_html_capture = nullptr;
+  if (ctx->daemon_html_recording != nullptr) {
+    ctx->daemon_html_recording->Finish(true /* the body never ended here */);
+    delete ctx->daemon_html_recording;
+    ctx->daemon_html_recording = nullptr;
   }
 
   if (ctx->driver != nullptr) {
@@ -4099,18 +4099,20 @@ static ngx_int_t ps_read_file_buffer(ngx_http_request_t* r, ngx_buf_t* buf) {
 
 namespace html_rewrite {
 
-// DaemonHtmlCache report-only.  A read-only copy of what the response carries
-// at the input of the module's HTML filter, before ps_resource_handler and
-// ps_strip_html_headers change anything.  In any other mode the only thing that
-// runs is the mode check in ps_html_rewrite_header_filter.
+// DaemonHtmlCache.  A read-only copy of what the response carries at the
+// input of the module's HTML filter, before ps_resource_handler and
+// ps_strip_html_headers change anything, recorded by the HTML cache engine
+// (daemon_html_engine.h); on this server it only reports, in report-only and
+// serve-variants alike.  With the option off the only thing that runs is the
+// mode check in ps_html_rewrite_header_filter.
 //
 // nginx's headers filter runs expires and add_header together, above this
 // module, so both are part of what the policy reads: an add_header line the
 // cache could not reproduce refuses as headers:<name>, and one that makes the
 // response private, no-store or sets a cookie refuses for that.  Apache reads
 // what mod_expires and mod_headers change at a later filter, to the same end.
-void ps_add_list_to_capture(const ngx_list_t& list,
-                            DaemonHtmlCapture* capture) {
+void ps_add_list_to_lines(const ngx_list_t& list,
+                          DaemonHtmlHeaderLines* lines) {
   const ngx_list_part_t* part = &list.part;
   const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
   for (ngx_uint_t i = 0; /* void */; i++) {
@@ -4121,8 +4123,8 @@ void ps_add_list_to_capture(const ngx_list_t& list,
       i = 0;
     }
     if (header[i].hash == 0) continue;
-    capture->AddHeader(str_to_string_piece(header[i].key),
-                       str_to_string_piece(header[i].value));
+    lines->emplace_back(str_to_string_piece(header[i].key).as_string(),
+                        str_to_string_piece(header[i].value).as_string());
   }
 }
 
@@ -4144,26 +4146,21 @@ bool ps_request_has_header(ngx_http_request_t* r, StringPiece lowercase_name) {
   return false;
 }
 
-DaemonHtmlCapture* ps_start_daemon_html_capture(ngx_http_request_t* r,
-                                                NgxServerContext* context) {
-  DaemonAdapter* adapter = context->daemon_adapter();
-  const DaemonAbi* abi = adapter == nullptr ? nullptr : adapter->abi();
-  if (abi == nullptr || !abi->PublishesHtmlStorePolicy()) return nullptr;
-  DaemonHtmlCapture* capture =
-      new DaemonHtmlCapture(context->daemon_html_reporter(), abi,
-                            context->global_options()->daemon_html_max_bytes());
-  capture->SetRequest(str_to_string_piece(r->method_name),
-                      str_to_string_piece(r->unparsed_uri),
-                      str_to_string_piece(r->headers_in.server));
-  if (ps_request_has_header(r, "authorization") ||
-      ps_request_has_header(r, "proxy-authorization")) {
-    capture->set_has_authorization();
-  }
-  if (r->headers_in.user.len != 0) capture->set_authenticated_user();
-  if (ps_request_has_header(r, "cookie") ||
-      ps_request_has_header(r, "cookie2")) {
-    capture->set_has_cookie();
-  }
+// Returns nullptr when the engine records nothing (no optimizer library,
+// counted there as unavailable).
+std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
+    ngx_http_request_t* r, NgxServerContext* context) {
+  DaemonHtmlEngine* engine = context->daemon_html_engine();
+  if (engine == nullptr) return nullptr;
+  DaemonHtmlRequestFacts facts;
+  facts.method = str_to_string_piece(r->method_name).as_string();
+  facts.path = str_to_string_piece(r->unparsed_uri).as_string();
+  facts.host = str_to_string_piece(r->headers_in.server).as_string();
+  facts.has_authorization = ps_request_has_header(r, "authorization") ||
+                            ps_request_has_header(r, "proxy-authorization");
+  facts.authenticated_user = r->headers_in.user.len != 0;
+  facts.has_cookie = ps_request_has_header(r, "cookie") ||
+                     ps_request_has_header(r, "cookie2");
   const ngx_list_part_t* part = &r->headers_in.headers.part;
   const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
   for (ngx_uint_t i = 0; /* void */; i++) {
@@ -4174,28 +4171,38 @@ DaemonHtmlCapture* ps_start_daemon_html_capture(ngx_http_request_t* r,
       i = 0;
     }
     if (StringCaseEqual(str_to_string_piece(header[i].key), "cache-control")) {
-      capture->AddRequestCacheControl(str_to_string_piece(header[i].value));
+      if (facts.has_cache_control) facts.cache_control.append(", ");
+      facts.has_cache_control = true;
+      StrAppend(&facts.cache_control, str_to_string_piece(header[i].value));
     }
   }
+  // Nothing blocking is ever handed to a port by a recording that only
+  // reports.
+  std::unique_ptr<DaemonHtmlRecording> recording =
+      engine->StartRecording(facts, /*port=*/nullptr);
+  if (recording == nullptr) return nullptr;
 
-  capture->set_status(r->headers_out.status);
-  ps_add_list_to_capture(r->headers_out.headers, capture);
-  capture->AddHeader(HttpAttributes::kContentType,
-                     str_to_string_piece(r->headers_out.content_type));
+  recording->set_status(r->headers_out.status);
+  DaemonHtmlHeaderLines origin;
+  ps_add_list_to_lines(r->headers_out.headers, &origin);
+  origin.emplace_back(
+      HttpAttributes::kContentType,
+      str_to_string_piece(r->headers_out.content_type).as_string());
   // nginx renders these two in its header filter, downstream of here.
   if (r->headers_out.last_modified_time != -1 &&
       r->headers_out.last_modified == nullptr) {
     u_char date[sizeof("Mon, 28 Sep 1970 06:00:00 GMT")];
     u_char* end = ngx_http_time(date, r->headers_out.last_modified_time);
-    capture->AddHeader(HttpAttributes::kLastModified,
-                       StringPiece(reinterpret_cast<char*>(date), end - date));
+    origin.emplace_back(HttpAttributes::kLastModified,
+                        GoogleString(reinterpret_cast<char*>(date), end - date));
   }
   if (r->headers_out.content_length_n >= 0 &&
       r->headers_out.content_length == nullptr) {
-    capture->AddHeader(HttpAttributes::kContentLength,
-                       Integer64ToString(r->headers_out.content_length_n));
+    origin.emplace_back(HttpAttributes::kContentLength,
+                        Integer64ToString(r->headers_out.content_length_n));
   }
-  return capture;
+  recording->SetOriginHeaders(std::move(origin));
+  return recording;
 }
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
@@ -4244,15 +4251,17 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   }
 
   // As on Apache, the report covers a 200 that carries a body: nothing else,
-  // a HEAD included, is captured or counted.
-  const bool daemon_html_report_only =
-      cfg_s->server_context->global_options()->daemon_html_cache() ==
-          RewriteOptions::kDaemonHtmlCacheReportOnly &&
+  // a HEAD included, is recorded or counted.  serve-variants records the
+  // same responses and, until this server stores and serves, only reports
+  // them.
+  const bool daemon_html_report =
+      cfg_s->server_context->global_options()->daemon_html_cache() !=
+          RewriteOptions::kDaemonHtmlCacheOff &&
       r->headers_out.status == NGX_HTTP_OK && r->method != NGX_HTTP_HEAD;
-  std::unique_ptr<DaemonHtmlCapture> daemon_html_capture;
-  if (daemon_html_report_only) {
-    daemon_html_capture.reset(
-        ps_start_daemon_html_capture(r, cfg_s->server_context));
+  std::unique_ptr<DaemonHtmlRecording> daemon_html_recording;
+  if (daemon_html_report) {
+    daemon_html_recording =
+        ps_start_daemon_html_recording(r, cfg_s->server_context);
   }
 
   ngx_int_t rc = ps_resource_handler(r, true /* html rewrite */,
@@ -4262,10 +4271,8 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
     return ngx_http_next_header_filter(r);
   }
 
-  if (daemon_html_capture != nullptr) {
-    ctx->daemon_html_capture = daemon_html_capture.release();
-  } else if (daemon_html_report_only) {
-    cfg_s->server_context->daemon_html_reporter()->CountUnavailable();
+  if (daemon_html_recording != nullptr) {
+    ctx->daemon_html_recording = daemon_html_recording.release();
   }
 
   if (r->headers_out.content_encoding &&
@@ -4365,16 +4372,16 @@ ngx_int_t ps_html_rewrite_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                  "http pagespeed html rewrite body filter \"%V\"", &r->uri);
 
-  if (ctx->daemon_html_capture != nullptr) {
+  if (ctx->daemon_html_recording != nullptr) {
     for (ngx_chain_t* cl = in; cl != nullptr; cl = cl->next) {
       const ngx_buf_t* buf = cl->buf;
       if (ngx_buf_in_memory(buf)) {
-        ctx->daemon_html_capture->AddBody(reinterpret_cast<char*>(buf->pos),
-                                          buf->last - buf->pos);
+        ctx->daemon_html_recording->AddBody(reinterpret_cast<char*>(buf->pos),
+                                            buf->last - buf->pos);
       }
       if (buf->last_buf) {
-        ctx->daemon_html_capture->set_body_ended();
-        ctx->daemon_html_capture->Finish(r->connection->error != 0);
+        ctx->daemon_html_recording->set_body_ended();
+        ctx->daemon_html_recording->Finish(r->connection->error != 0);
       }
     }
   }
