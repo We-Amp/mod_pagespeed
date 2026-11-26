@@ -600,6 +600,7 @@ void DaemonHtmlRecording::NoteStoreHeaders(DaemonHtmlHeaderLines lines) {
 }
 
 void DaemonHtmlRecording::NoteFinalHeaders(DaemonHtmlHeaderLines lines) {
+  if (has_final_lines_) return;  // Only the first counts.
   final_lines_ = std::move(lines);
   has_final_lines_ = true;
 }
@@ -942,11 +943,15 @@ void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
   it->second->Add(1);
 }
 
+void DaemonHtmlEngine::CountUnavailable() { counters_->unavailable->Add(1); }
+
 std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
-    const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port) {
+    const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port,
+    bool* unavailable) {
+  if (unavailable != nullptr) *unavailable = false;
   if (config_.mode == DaemonHtmlMode::kOff) return nullptr;
   if (deps_.substrate.abi == nullptr) {
-    counters_->unavailable->Add(1);
+    if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
   const bool serve_mode =
@@ -954,7 +959,9 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   bool may_store = false;
   if (serve_mode) {
     if (serving() && deps_.substrate.cache != nullptr) {
-      may_store = true;
+      // Without a port there is nowhere to run the store's blocking work:
+      // such a recording only reports.
+      may_store = port != nullptr;
     } else {
       counters_->serve_unavailable->Add(1);
       NoteUnavailable();
@@ -975,7 +982,7 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     }
   } else if (!deps_.substrate.abi->PublishesHtmlStorePolicy()) {
     // A library older than the policy: nothing can be classified.
-    counters_->unavailable->Add(1);
+    if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
   return std::unique_ptr<DaemonHtmlRecording>(
@@ -1203,14 +1210,23 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
     Report(*r, fin, final_ok, store_view, final_view, /*serve_line=*/false);
     return;
   }
+  // A body over the cap was not kept whole: never stored, whatever a
+  // verdict says (the library refuses it by its byte count), so it is
+  // reported as refused for its size.
+  if (store_ok && final_ok && r->over_size_ &&
+      (store.stores() || fin.stores())) {
+    StoreVerdict too_large = fin;
+    too_large.action = kPsHtmlStoreActionRefuse;
+    too_large.reason = "size";
+    too_large.detail.clear();
+    Report(*r, too_large, true, store_view, final_view, /*serve_line=*/true);
+    return;
+  }
   // A store needs both views; the refusal, when there is one, is the view
   // that refused (the store view first).
   Report(*r, store_ok && !store.stores() ? store : fin, store_ok && final_ok,
          store_view, final_view, /*serve_line=*/true);
   if (!store_ok || !final_ok) return;
-  // A body over the cap was not kept whole: never stored, whatever a
-  // verdict says (the library refuses it by its byte count).
-  if (r->over_size_ && (store.stores() || fin.stores())) return;
 
   GoogleString url;
   GoogleString hostname;

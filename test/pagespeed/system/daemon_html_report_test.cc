@@ -5,6 +5,7 @@
 // counts and logs for a recording it may not store, and the vhost_added
 // field of its decision line.
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -27,9 +28,76 @@
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/system/daemon_stub_test_util.h"
+#include "test/pagespeed/system/recording_daemon_abi.h"
 
 namespace net_instaweb {
 namespace {
+
+// The stub library, with every call of the store classifier recorded: the
+// exact header view and body facts the engine hands to the policy.
+class ClassifyRecordingAbi : public RecordingDaemonAbi {
+ public:
+  struct Call {
+    int mode = 0;
+    DaemonHtmlHeaderLines headers;
+    uint64_t body_bytes = 0;
+    int body_complete = -1;
+    size_t prefix_len = 0;
+  };
+
+  explicit ClassifyRecordingAbi(const DaemonAbi* stub)
+      : RecordingDaemonAbi(stub), stub_(stub) {}
+
+  bool PublishesHtmlStorePolicy() const override {
+    return stub_->PublishesHtmlStorePolicy();
+  }
+  int HtmlStoreClassify(int mode, const char* method, const char* url_path,
+                        uint32_t request_flags, int status,
+                        const char* const* names, const char* const* values,
+                        size_t count, uint64_t body_bytes, int body_complete,
+                        const char* body_prefix, size_t body_prefix_len,
+                        uint64_t max_body_bytes, uint32_t now_seconds,
+                        int* out_reason, uint32_t* out_lifetime_s,
+                        uint32_t* out_flags, uint16_t* out_cc_flags,
+                        int* out_sidecar, char* detail_buf,
+                        size_t detail_capacity,
+                        size_t* out_detail_len) const override {
+    Call call;
+    call.mode = mode;
+    for (size_t i = 0; i < count; ++i) {
+      call.headers.emplace_back(names[i], values[i]);
+    }
+    call.body_bytes = body_bytes;
+    call.body_complete = body_complete;
+    call.prefix_len = body_prefix_len;
+    calls.push_back(call);
+    return stub_->HtmlStoreClassify(
+        mode, method, url_path, request_flags, status, names, values, count,
+        body_bytes, body_complete, body_prefix, body_prefix_len, max_body_bytes,
+        now_seconds, out_reason, out_lifetime_s, out_flags, out_cc_flags,
+        out_sidecar, detail_buf, detail_capacity, out_detail_len);
+  }
+  const char* HtmlStoreReasonName(int reason) const override {
+    return stub_->HtmlStoreReasonName(reason);
+  }
+  int HtmlDecisionFormat(const char* const* keys, const char* const* values,
+                         size_t count, char* buf, size_t capacity,
+                         size_t* out_len) const override {
+    return stub_->HtmlDecisionFormat(keys, values, count, buf, capacity,
+                                     out_len);
+  }
+
+  // Two per recording: the store view, then the final view.
+  mutable std::vector<Call> calls;
+
+ private:
+  const DaemonAbi* stub_;
+};
+
+DaemonHtmlHeaderLines Sorted(DaemonHtmlHeaderLines lines) {
+  std::sort(lines.begin(), lines.end());
+  return lines;
+}
 
 // Against the stub library flavour that exports the policy, whose classifier
 // answers what PS_STUB_HTML_ACTION and PS_STUB_HTML_REASON say and whose
@@ -179,18 +247,31 @@ TEST_F(DaemonHtmlReportTest, BodyWindowIsBounded) {
 }
 
 TEST_F(DaemonHtmlReportTest, AnUnendedOrAbortedBodyIsClassifiedIncomplete) {
-  // The stub library records nothing of what it was given, so this checks
-  // the call is made and counted; that the flag reaches the library is the
-  // engine runner's to show.
-  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine(/*with_log=*/false);
-  Run(engine.get(), "/a.html", /*end=*/false);
-  std::unique_ptr<DaemonHtmlRecording> rec =
-      engine->StartRecording(Request("/b.html"), nullptr);
-  ASSERT_NE(nullptr, rec);
-  rec->set_status(200);
-  rec->set_body_ended();
-  rec->Finish(/*aborted=*/true);
-  EXPECT_EQ(2, Count("daemon_html_evaluated"));
+  ClassifyRecordingAbi abi(abi_.get());
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine(
+      /*with_log=*/false, DaemonHtmlMode::kReportOnly, &abi);
+  auto run = [&](bool ended, bool aborted) {
+    std::unique_ptr<DaemonHtmlRecording> rec =
+        engine->StartRecording(Request("/a.html"), nullptr);
+    ASSERT_NE(nullptr, rec);
+    rec->set_status(200);
+    rec->SetOriginHeaders({{"Content-Type", "text/html"}});
+    rec->AddBody("<html></html>", 13);
+    if (ended) rec->set_body_ended();
+    rec->Finish(aborted);
+  };
+  run(/*ended=*/true, /*aborted=*/false);
+  run(/*ended=*/false, /*aborted=*/false);
+  run(/*ended=*/true, /*aborted=*/true);
+  ASSERT_EQ(6u, abi.calls.size());
+  for (size_t i = 0; i < abi.calls.size(); ++i) {
+    EXPECT_EQ(kPsHtmlCacheReportOnly, abi.calls[i].mode) << i;
+    EXPECT_EQ(13u, abi.calls[i].body_bytes) << i;
+    EXPECT_EQ(13u, abi.calls[i].prefix_len) << i;
+    // Complete only for the body that ended and was not aborted.
+    EXPECT_EQ(i < 2 ? 1 : 0, abi.calls[i].body_complete) << i;
+  }
+  EXPECT_EQ(3, Count("daemon_html_evaluated"));
 }
 
 TEST_F(DaemonHtmlReportTest, PersonalisationIsARefusalWithItsReason) {
@@ -277,6 +358,101 @@ TEST_F(DaemonHtmlReportTest, EnginesOfOneLogDirShareTheLog) {
   DaemonHtmlDecisionLog::WaitForWritesForTesting();
   Run(first.get(), "/after2.html");
   EXPECT_EQ(2, Count("daemon_html_log_dropped"));
+}
+
+// The exact final view the policy reads, from the origin's lines, the
+// baseline (after the module's own changes) and the lines at the final
+// position.
+class DaemonHtmlReportViewTest : public DaemonHtmlReportTest {
+ protected:
+  DaemonHtmlHeaderLines FinalView(const DaemonHtmlHeaderLines& origin,
+                                  const DaemonHtmlHeaderLines& baseline,
+                                  const DaemonHtmlHeaderLines& at_final) {
+    ClassifyRecordingAbi abi(abi_.get());
+    std::unique_ptr<DaemonHtmlEngine> engine = NewEngine(
+        /*with_log=*/false, DaemonHtmlMode::kReportOnly, &abi);
+    std::unique_ptr<DaemonHtmlRecording> rec =
+        engine->StartRecording(Request("/v.html"), nullptr);
+    EXPECT_NE(nullptr, rec);
+    if (rec == nullptr) return {};
+    rec->set_status(200);
+    rec->SetOriginHeaders(origin);
+    rec->SetBaselineHeaders(baseline);
+    EXPECT_TRUE(rec->needs_final_headers());
+    rec->NoteFinalHeaders(at_final);
+    EXPECT_FALSE(rec->needs_final_headers());
+    // Only the first final view counts.
+    rec->NoteFinalHeaders({{"X-Late", "1"}});
+    rec->set_body_ended();
+    rec->Finish(false);
+    EXPECT_EQ(2u, abi.calls.size());
+    if (abi.calls.size() != 2) return {};
+    // Without a store snapshot the store view is the origin's lines.
+    EXPECT_EQ(origin, abi.calls[0].headers);
+    return abi.calls[1].headers;
+  }
+};
+
+TEST_F(DaemonHtmlReportViewTest, LateHeadersApplyWhatChangedSinceTheBaseline) {
+  // The origin's lines, as captured early; then the module's own changes
+  // (its signature added, the length gone); later the header stage replaced
+  // Cache-Control, set a cookie and removed one of two repeated lines, and
+  // compression added Vary and an encoding.
+  const DaemonHtmlHeaderLines view =
+      FinalView({{"Content-Type", "text/html"},
+                 {"Cache-Control", "max-age=60"},
+                 {"Content-Length", "13"},
+                 {"X-Origin", "a"},
+                 {"X-Origin", "a"}},
+                {{"Cache-Control", "max-age=60"},
+                 {"X-Origin", "a"},
+                 {"X-Origin", "a"},
+                 {"X-Mod-Pagespeed", "1"}},
+                {{"cache-control", "private, no-store"},
+                 {"X-Origin", "a"},
+                 {"Set-Cookie", "lane=1"},
+                 {"X-Mod-Pagespeed", "1"},
+                 {"Vary", "Accept-Encoding"},
+                 {"Content-Encoding", "gzip"}});
+  const DaemonHtmlHeaderLines expected = {
+      {"Content-Type", "text/html"},
+      {"Content-Length", "13"},
+      {"X-Origin", "a"},
+      {"cache-control", "private, no-store"},
+      {"Set-Cookie", "lane=1"}};
+  EXPECT_EQ(expected, view);
+}
+
+TEST_F(DaemonHtmlReportViewTest, WhatCompressionAddsIsNoChange) {
+  const DaemonHtmlHeaderLines view = FinalView(
+      {{"Vary", "User-Agent"}, {"ETag", "\"abc\""}},
+      {{"Vary", "User-Agent"}, {"ETag", "\"abc\""}},
+      {{"Vary", "user-agent,Accept-Encoding"}, {"ETag", "\"abc-gzip\""}});
+  EXPECT_EQ(Sorted({{"Vary", "User-Agent"}, {"ETag", "\"abc\""}}),
+            Sorted(view));
+}
+
+TEST_F(DaemonHtmlReportViewTest, AnAppendedVaryTokenAndAReplacedEtagCount) {
+  // Header append Vary Cookie counts; so does an ETag the server replaced
+  // (kept as sent, compression's suffix included: it is not the origin's).
+  const DaemonHtmlHeaderLines view =
+      FinalView({{"Content-Type", "text/html"},
+                 {"Vary", "User-Agent"},
+                 {"ETag", "\"abc\""}},
+                {{"Vary", "User-Agent, Accept-Encoding"}, {"ETag", "\"abc\""}},
+                {{"Vary", "User-Agent,Accept-Encoding,Cookie"},
+                 {"ETag", "\"xyz-gzip\""}});
+  EXPECT_EQ(Sorted({{"Content-Type", "text/html"},
+                    {"ETag", "\"xyz-gzip\""},
+                    {"Vary", "User-Agent, Cookie"}}),
+            Sorted(view));
+}
+
+TEST_F(DaemonHtmlReportViewTest, AVaryTokenTheServerRemovedGoes) {
+  const DaemonHtmlHeaderLines view = FinalView(
+      {{"Vary", "Cookie"}, {"Vary", "User-Agent"}},
+      {{"Vary", "Cookie"}, {"Vary", "User-Agent"}}, {{"Vary", "User-Agent"}});
+  EXPECT_EQ(DaemonHtmlHeaderLines({{"Vary", "User-Agent"}}), view);
 }
 
 TEST_F(DaemonHtmlReportTest, TheFinalViewIsWhatIsReported) {
@@ -413,7 +589,13 @@ TEST_F(DaemonHtmlReportTest, NoLibraryIsUnavailable) {
   deps.timer = &timer_;
   deps.handler = &handler_;
   DaemonHtmlEngine engine(config, deps);
-  EXPECT_EQ(nullptr, engine.StartRecording(Request("/a.html"), nullptr));
+  bool unavailable = false;
+  EXPECT_EQ(nullptr,
+            engine.StartRecording(Request("/a.html"), nullptr, &unavailable));
+  EXPECT_TRUE(unavailable);
+  // Counted by the port, once it knows it handles the response.
+  EXPECT_EQ(0, Count("daemon_html_unavailable"));
+  engine.CountUnavailable();
   EXPECT_EQ(1, Count("daemon_html_unavailable"));
   EXPECT_EQ(0, Count("daemon_html_evaluated"));
 }
@@ -423,9 +605,19 @@ TEST_F(DaemonHtmlReportTest, ALibraryWithoutThePolicyIsUnavailable) {
   ASSERT_FALSE(old->PublishesHtmlStorePolicy());
   std::unique_ptr<DaemonHtmlEngine> engine =
       NewEngine(/*with_log=*/false, DaemonHtmlMode::kReportOnly, old.get());
-  EXPECT_EQ(nullptr, engine->StartRecording(Request("/a.html"), nullptr));
-  EXPECT_EQ(1, Count("daemon_html_unavailable"));
+  bool unavailable = false;
+  EXPECT_EQ(nullptr,
+            engine->StartRecording(Request("/a.html"), nullptr, &unavailable));
+  EXPECT_TRUE(unavailable);
+  EXPECT_EQ(0, Count("daemon_html_unavailable"));
   EXPECT_EQ(0, Count("daemon_html_evaluated"));
+
+  // A recording made says nothing is unavailable.
+  std::unique_ptr<DaemonHtmlEngine> good = NewEngine(/*with_log=*/false);
+  unavailable = true;
+  EXPECT_NE(nullptr,
+            good->StartRecording(Request("/a.html"), nullptr, &unavailable));
+  EXPECT_FALSE(unavailable);
 }
 
 TEST_F(DaemonHtmlReportTest, ServeVariantsOnAPortReportsExactlyAsReportOnly) {

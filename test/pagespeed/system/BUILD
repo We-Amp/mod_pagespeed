@@ -970,7 +970,10 @@ pagespeed_cc_test(
 # decision line's vhost_added.
 pagespeed_cc_test(
     name = "daemon_html_report_test",
-    srcs = ["daemon_html_report_test.cc"],
+    srcs = [
+        "daemon_html_report_test.cc",
+        "recording_daemon_abi.h",
+    ],
     data = [
         ":libdaemon_stub.so",
         ":libdaemon_stub_html_policy.so",

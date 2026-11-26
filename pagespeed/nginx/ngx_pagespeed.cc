@@ -4146,10 +4146,12 @@ bool ps_request_has_header(ngx_http_request_t* r, StringPiece lowercase_name) {
   return false;
 }
 
-// Returns nullptr when the engine records nothing (no optimizer library,
-// counted there as unavailable).
+// Returns nullptr when the engine records nothing; `*unavailable` then says
+// whether that is for want of a library that can classify, which the caller
+// counts once it knows the module handles the response.
 std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
-    ngx_http_request_t* r, NgxServerContext* context) {
+    ngx_http_request_t* r, NgxServerContext* context, bool* unavailable) {
+  *unavailable = false;
   DaemonHtmlEngine* engine = context->daemon_html_engine();
   if (engine == nullptr) return nullptr;
   DaemonHtmlRequestFacts facts;
@@ -4179,7 +4181,7 @@ std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
   // Nothing blocking is ever handed to a port by a recording that only
   // reports.
   std::unique_ptr<DaemonHtmlRecording> recording =
-      engine->StartRecording(facts, /*port=*/nullptr);
+      engine->StartRecording(facts, /*port=*/nullptr, unavailable);
   if (recording == nullptr) return nullptr;
 
   recording->set_status(r->headers_out.status);
@@ -4260,9 +4262,10 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
           RewriteOptions::kDaemonHtmlCacheOff &&
       r->headers_out.status == NGX_HTTP_OK && r->method != NGX_HTTP_HEAD;
   std::unique_ptr<DaemonHtmlRecording> daemon_html_recording;
+  bool daemon_html_unavailable = false;
   if (daemon_html_report) {
-    daemon_html_recording =
-        ps_start_daemon_html_recording(r, cfg_s->server_context);
+    daemon_html_recording = ps_start_daemon_html_recording(
+        r, cfg_s->server_context, &daemon_html_unavailable);
   }
 
   ngx_int_t rc = ps_resource_handler(r, true /* html rewrite */,
@@ -4274,6 +4277,8 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
 
   if (daemon_html_recording != nullptr) {
     ctx->daemon_html_recording = daemon_html_recording.release();
+  } else if (daemon_html_unavailable) {
+    cfg_s->server_context->daemon_html_engine()->CountUnavailable();
   }
 
   if (r->headers_out.content_encoding &&

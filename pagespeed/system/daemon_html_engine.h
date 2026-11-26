@@ -322,7 +322,8 @@ class DaemonHtmlRecording {
   // the change from the baseline to this set).
   void NoteStoreHeaders(DaemonHtmlHeaderLines lines);
   // The header set at the final view (the origin plus the change from the
-  // baseline to this set, transport changes ignored).
+  // baseline to this set, transport changes ignored).  Only the first call
+  // counts.
   void NoteFinalHeaders(DaemonHtmlHeaderLines lines);
 
   // Bounded by the engine's max bytes and the process-wide budget.  A
@@ -428,14 +429,21 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   DaemonHtmlEngine& operator=(const DaemonHtmlEngine&) = delete;
 
   // A recording for an HTML response, or nullptr when there is nothing the
-  // engine may do with it: mode off, or no library (counted as
-  // daemon_html_unavailable).  While the engine stores, a request it may
-  // not store for gets nullptr too: a URL disagreement, a host the site does
-  // not list, no site.  Otherwise (report-only) every response is recorded
-  // and reported.  `port` must outlive the recording; it may be null for a
-  // recording that cannot store, as no blocking work is handed to it.
+  // engine may do with it: mode off, or no library that can classify (then
+  // `*unavailable` is set, when given; the port counts it with
+  // CountUnavailable once it knows it handles the response).  While the
+  // engine stores, a request it may not store for gets nullptr too: a URL
+  // disagreement, a host the site does not list, no site.  Otherwise
+  // (report-only) every response is recorded and reported.  `port` must
+  // outlive the recording; with a null port nothing is ever stored, as there
+  // is nowhere to run the blocking work, and the recording only reports.
   std::unique_ptr<DaemonHtmlRecording> StartRecording(
-      const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port);
+      const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port,
+      bool* unavailable = nullptr);
+
+  // An HTML response the report covers that no installed library could
+  // classify (daemon_html_unavailable).
+  void CountUnavailable();
 
   // The Markdown serve: a fall-through, or a final answer the port has been
   // asked to emit.  Reads the volume only past the serve gate.

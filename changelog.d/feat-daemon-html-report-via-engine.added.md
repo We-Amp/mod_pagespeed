@@ -12,5 +12,5 @@
   With an optimizer library that publishes C API 1.14, a report-only line on
   Apache carries `vhost_added`: the names (never the values) of the response
   headers that the server's own configuration, such as `mod_headers` or
-  `mod_expires`, added after the module recorded the response. nginx reads a
-  single header view, so its lines carry no `vhost_added`.
+  `mod_expires`, added or changed after the module recorded the response.
+  nginx reads a single header view, so its lines carry no `vhost_added`.

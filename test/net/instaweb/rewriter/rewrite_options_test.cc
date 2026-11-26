@@ -1173,6 +1173,21 @@ TEST_F(RewriteOptionsTest,
             options_.daemon_html_cache());
   EXPECT_EQ(2, handler.MessagesOfType(kWarning));
 
+  // With no handler the caller gets the warning as the message.
+  msg.clear();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, nullptr));
+  EXPECT_NE(GoogleString::npos, msg.find("serve-cached-html' is not available"))
+      << msg;
+
+  // Below the option's scope, the scope error stands.
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCache", "serve-cached-html",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
   // The handler-less setter (a configuration source with its own warning
   // for a refused value) refuses it as a value.
   EXPECT_EQ(

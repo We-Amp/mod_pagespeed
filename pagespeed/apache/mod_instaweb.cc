@@ -379,10 +379,13 @@ DaemonHtmlHeaderLines apache_header_lines(const request_rec* request) {
 // before the module adds its signature and its Vary tokens.  mod_expires and
 // mod_headers have not run yet at this position;
 // instaweb_daemon_html_report_filter brings their changes in.  Returns
-// nullptr when the engine records nothing (no optimizer library, counted
-// there as unavailable).
+// nullptr when the engine records nothing; `*unavailable` then says whether
+// that is for want of a library that can classify, which the caller counts
+// once it knows the module handles the response.
 DaemonHtmlRecording* start_daemon_html_recording(request_rec* request,
-                                                 ApacheServerContext* context) {
+                                                 ApacheServerContext* context,
+                                                 bool* unavailable) {
+  *unavailable = false;
   DaemonHtmlEngine* engine = context->daemon_html_engine();
   if (engine == nullptr) return nullptr;
   DaemonHtmlRequestFacts facts;
@@ -410,7 +413,7 @@ DaemonHtmlRecording* start_daemon_html_recording(request_rec* request,
   // Nothing blocking is ever handed to a port by a recording that only
   // reports.
   std::unique_ptr<DaemonHtmlRecording> recording =
-      engine->StartRecording(facts, /*port=*/nullptr);
+      engine->StartRecording(facts, /*port=*/nullptr, unavailable);
   if (recording == nullptr) return nullptr;
   recording->set_status(request->status);
   DaemonHtmlHeaderLines origin =
@@ -741,8 +744,11 @@ apr_status_t instaweb_out_filter(ap_filter_t* filter, apr_bucket_brigade* bb) {
                         request->main == nullptr &&
                         request->status == HTTP_OK && !request->header_only &&
                         is_html_like(request);
+    bool unavailable = false;
     DaemonHtmlRecording* recording =
-        report ? start_daemon_html_recording(request, report_context) : nullptr;
+        report
+            ? start_daemon_html_recording(request, report_context, &unavailable)
+            : nullptr;
     // Added before build_context_for_request adds the fix-headers filter.
     ap_filter_t* report_filter =
         recording == nullptr
@@ -760,6 +766,8 @@ apr_status_t instaweb_out_filter(ap_filter_t* filter, apr_bucket_brigade* bb) {
     if (recording != nullptr) {
       context->set_daemon_html_recording(recording);
       recording->SetBaselineHeaders(apache_header_lines(request));
+    } else if (unavailable) {
+      report_context->daemon_html_engine()->CountUnavailable();
     }
   }
 

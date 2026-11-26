@@ -2656,16 +2656,19 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
     GoogleString* msg, MessageHandler* handler) {
   // A value reserved for a later release: refused, with a warning instead of
   // a configuration error, so a configuration written for that release still
-  // loads.  The option keeps the value it had.
+  // loads.  The option keeps the value it had.  Only where the option may be
+  // set at all: below its scope the usual scope error is the answer.
   if (StringCaseEqual(name, kDaemonHtmlCache) &&
-      StringCaseEqual(arg, "serve-cached-html")) {
+      StringCaseEqual(arg, "serve-cached-html") && max_scope >= kServerScope) {
+    const GoogleString warning =
+        StrCat("'", kDaemonHtmlCache,
+               " serve-cached-html' is not available in this release and is "
+               "ignored; use serve-variants or report-only");
     if (handler != nullptr) {
-      handler->Message(kWarning,
-                       "'%s serve-cached-html' is not available in this "
-                       "release and is ignored; use serve-variants or "
-                       "report-only",
-                       kDaemonHtmlCache);
+      handler->Message(kWarning, "%s", warning.c_str());
     }
+    // Also to a caller that reports the message itself.
+    if (msg != nullptr) *msg = warning;
     return kOptionOk;
   }
   GoogleString error_detail;
