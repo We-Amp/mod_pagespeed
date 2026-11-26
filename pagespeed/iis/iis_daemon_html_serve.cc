@@ -104,7 +104,7 @@ IisMarkdownFinalPlan PlanIisMarkdownFinal(int status, int substatus,
   for (const auto& line : current) {
     const GoogleString& name = line.first;
     if (StringCaseEqual(name, HttpAttributes::kContentEncoding) ||
-        StringCaseEqual(name, HttpAttributes::kContentRange)) {
+        StringCaseEqual(name, "Content-Range")) {
       plan.transport_conflict = true;
       continue;
     }
