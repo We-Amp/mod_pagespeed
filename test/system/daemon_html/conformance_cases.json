@@ -3759,6 +3759,892 @@
       }
     },
     {
+      "id": "store-final-view-server-header-left-out",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["X-T"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["X-Frame-Options"], "headers_exclude": ["X-T"]}
+                },
+                {"fn": "ps_cache_write_headers_sidecar_site", "args": {"headers_exclude": ["X-T"]}}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-policy-line-kept",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Set-Cookie", "a=1"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Set-Cookie"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Set-Cookie: a=1"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-surrogate-control",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Surrogate-Control", "no-store"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Surrogate-Control"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Surrogate-Control: no-store"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-cdn-cache-control",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["CDN-Cache-Control", "private"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["CDN-Cache-Control"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["CDN-Cache-Control: private"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-example-cdn-cache-control",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Example-CDN-Cache-Control", "no-store"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Example-CDN-Cache-Control"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Example-CDN-Cache-Control: no-store"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-x-accel-expires",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["X-Accel-Expires", "0"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["X-Accel-Expires"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["X-Accel-Expires: 0"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-clear-site-data",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Clear-Site-Data", "\"cookies\""]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Clear-Site-Data"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Clear-Site-Data: \"cookies\""], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-authentication-info",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Authentication-Info", "nextnonce=\"x\""]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Authentication-Info"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Authentication-Info: nextnonce=\"x\""], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-proxy-authenticate",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Proxy-Authenticate", "Basic realm=\"x\""]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Proxy-Authenticate"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Proxy-Authenticate: Basic realm=\"x\""], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-proxy-authentication-info",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Proxy-Authentication-Info", "nextnonce=\"x\""]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Proxy-Authentication-Info"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Proxy-Authentication-Info: nextnonce=\"x\""], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-content-location",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Content-Location", "/other"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Content-Location"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Content-Location: /other"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-date",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Date", "Thu, 01 Jan 2026 00:00:00 GMT"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Date"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Date: Thu, 01 Jan 2026 00:00:00 GMT"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-surrogate-control-lowercase",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["surrogate-control", "no-store"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["surrogate-control"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["surrogate-control: no-store"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-x-accel-expires-lowercase",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["x-accel-expires", "0"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["x-accel-expires"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["x-accel-expires: 0"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-keeps-example-cdn-cache-control-lowercase",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["example-cdn-cache-control", "no-store"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["example-cdn-cache-control"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["example-cdn-cache-control: no-store"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "store-final-view-no-cache-kept",
       "runners": [
         "engine"
@@ -5047,7 +5933,7 @@
     {
       "id": "store-host-non-default-port",
       "runners": ["engine"],
-      "why": "host validation: a non-default port stays in the key",
+      "why": "host validation: the volume keys an entry by host name, without the port",
       "engine": {
         "verdicts": [
           {
@@ -5090,11 +5976,11 @@
               "body_ref": "page"
             },
             "expect": {
-              "stored": [{"kind": "original", "url": "https://www.example.test:8443/page"}],
+              "stored": [{"kind": "original", "url": "https://www.example.test/page"}],
               "calls": [
                 {
                   "fn": "ps_cache_write_original_site",
-                  "args": {"url": "https://www.example.test:8443/page"}
+                  "args": {"url": "https://www.example.test/page"}
                 }
               ]
             }
@@ -12844,11 +13730,11 @@
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html"}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
+            },
             "pre": [{"wait_markdown": {"timeout_s": 30}}],
             "expect": {
               "status": 200,
@@ -12862,8 +13748,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
-              "headers_only": true,
-              "body_ref": "page_v2"
+              "headers_only": true
             }
           }
         ]
@@ -12891,7 +13776,7 @@
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 6}}],
             "expect": {"status": 200}
           },
@@ -12925,7 +13810,7 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 6}}],
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
             "expect": {"status": 200}
           },
           {
@@ -12934,6 +13819,7 @@
               "path": "/page",
               "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
             },
+            "pre": [{"sleep_s": {"s": 6}}],
             "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
@@ -13132,7 +14018,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13162,7 +14048,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 401, "stored": false}
           }
         ]
       }
@@ -13311,7 +14197,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13340,7 +14226,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13395,7 +14281,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13425,7 +14311,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -16228,7 +17114,11 @@
             "request": {
               "method": "GET",
               "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip, br"]]
+              "headers": [
+                ["Accept", "text/markdown"],
+                ["Accept-Encoding", "gzip, br"],
+                ["If-None-Match", "$markdown_etag"]
+              ]
             },
             "expect": {
               "status": 304,

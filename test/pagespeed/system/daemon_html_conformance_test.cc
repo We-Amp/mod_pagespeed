@@ -648,7 +648,8 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                                    int* out_verdict,
                                    int* out_stored) const override {
     Call c = Rec("ps_cache_write_headers_sidecar_site");
-    c.args["url"] = params->url;
+    c.args["url"] = FakeDaemonVolume::EntryUrl(params->url, params->hostname,
+                                               params->scheme);
     c.args["site"] = SiteName(params->site);
     c.args["paired"] = params->origin_html_hash != nullptr;
     for (size_t i = 0; i < count; ++i) {
@@ -675,7 +676,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                          const char* scheme, const char* site,
                          void** out) const override {
     Call c = Rec("ps_headers_sidecar_read");
-    c.args["url"] = url;
+    c.args["url"] = FakeDaemonVolume::EntryUrl(url, host, scheme);
     calls_.push_back(c);
     return vol()->HeadersSidecarRead(cache, url, host, scheme, site, out);
   }
@@ -698,7 +699,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
   int CacheRemoveSite(void* cache, const char* url, const char* host,
                       const char* scheme, const char* site) const override {
     Call c = Rec("ps_cache_remove_site");
-    c.args["url"] = url;
+    c.args["url"] = FakeDaemonVolume::EntryUrl(url, host, scheme);
     c.args["site"] = SiteName(site);
     calls_.push_back(c);
     Json::Value v = Pop("ps_cache_remove_site");
@@ -759,7 +760,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                              const PsWriteParams* params,
                              void** out) const override {
     Call c = Rec("ps_cache_write_original_site");
-    c.args["url"] = url;
+    c.args["url"] = FakeDaemonVolume::EntryUrl(url, host, scheme);
     c.args["hostname"] = host;
     c.args["site"] = SiteName(site);
     c.args["inserted_at_s"] = params->cache_inserted_at;
@@ -779,7 +780,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                              const char* scheme, const char* site, uint8_t id,
                              void** out) const override {
     Call c = Rec("ps_cache_read_alternate_site");
-    c.args["url"] = url;
+    c.args["url"] = FakeDaemonVolume::EntryUrl(url, host, scheme);
     c.args["alternate"] = id == kPsSentinelOriginal           ? "original"
                           : id == kPsSentinelAgentMarkdown    ? "markdown"
                           : id == kPsSentinelMarkdownWithheld ? "withheld"

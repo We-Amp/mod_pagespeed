@@ -777,6 +777,24 @@ TEST_F(RewriteOptionsTest, CopyTakesLaterPurgesFromPurgeSet) {
   EXPECT_EQ(1000, location->cache_invalidation_timestamp());
 }
 
+// The URL half of the purge set alone: a global flush never makes a URL
+// invalid here, and a URL purge does from its time on (at or after).
+TEST_F(RewriteOptionsTest, UrlCacheValidityIgnoringTheGlobalFlush) {
+  const char kPurged[] = "http://example.com/page";
+  const char kOther[] = "http://example.com/other";
+  RewriteOptions options(&thread_system_);
+  options.UpdateCacheInvalidationTimestampMs(1000);
+  CopyOnWrite<PurgeSet> purges(options.purge_set());
+  purges.MakeWriteable()->Put(kPurged, 3000);
+  EXPECT_TRUE(options.UpdateCachePurgeSet(purges));
+
+  EXPECT_FALSE(options.IsUrlCacheValid(kOther, 900, false));
+  EXPECT_TRUE(options.IsUrlCacheValidIgnoringGlobal(kOther, 900));
+  EXPECT_FALSE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 2999));
+  EXPECT_FALSE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 3000));
+  EXPECT_TRUE(options.IsUrlCacheValidIgnoringGlobal(kPurged, 3001));
+}
+
 TEST_F(RewriteOptionsTest, MergeOnlyProcessScopeOptions) {
   RewriteOptions dest(&thread_system_), src(&thread_system_);
   dest.set_image_max_rewrites_at_once(2);

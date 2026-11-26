@@ -4941,6 +4941,12 @@ void RewriteOptions::UrlValuedAttribute(
   *category = eac.category;
 }
 
+bool RewriteOptions::IsUrlCacheValidIgnoringGlobal(StringPiece url,
+                                                   int64 time_ms) const {
+  ThreadSystem::ScopedReader read_lock(cache_purge_mutex_.get());
+  return purge_set_->IsValidIgnoringGlobal(url.as_string(), time_ms);
+}
+
 bool RewriteOptions::IsUrlCacheValid(StringPiece url, int64 time_ms,
                                      bool search_wildcards) const {
   {
