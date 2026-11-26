@@ -67,6 +67,11 @@
     "body_bytes, length_matches_body, origin_saw, origin_saw_absent,",
     "counter_delta, differential {against: modes, allow_vary_accept}. The request",
     "header value $markdown_etag is replaced by the ETag of the last Markdown 200.",
+    "counter_delta spans the whole step, its pre ops included. allow_vary_accept",
+    "requires the one Accept token it allows. A background step is checked after",
+    "the next step ran and asserts only its own response (status, content_type,",
+    "headers_*, body_*, length_matches_body). Volume, counter and origin reads",
+    "come after the provider settled every commit of answered requests.",
     "",
     "bodies: fixture bodies referenced by body_ref."
   ],
@@ -9428,10 +9433,31 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "mode": 1
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "final",
+                    "mode": 1
+                  }
+                }
+              ],
               "calls_exclude": [
                 "ps_cache_write_original_site",
                 "ps_cache_write_headers_sidecar_site",
-                "ps_notify_worker_ex"
+                "ps_notify_worker_ex",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_store_write_params",
+                "ps_cache_remove_site"
               ],
               "counters": {"daemon_html_serve_unavailable": 1},
               "log_lines": 1
@@ -9449,7 +9475,16 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls_exclude": ["ps_html_serve_classify"],
+              "calls_exclude": [
+                "ps_html_serve_classify",
+                "ps_wants_agent_markdown",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
+                "ps_html_markdown_etag",
+                "ps_if_none_match_matches_weak"
+              ],
               "serve": {"kind": "fall_through"},
               "log_lines": 0
             }
@@ -9489,10 +9524,31 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "mode": 1
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "final",
+                    "mode": 1
+                  }
+                }
+              ],
               "calls_exclude": [
                 "ps_cache_write_original_site",
                 "ps_cache_write_headers_sidecar_site",
-                "ps_notify_worker_ex"
+                "ps_notify_worker_ex",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_store_write_params",
+                "ps_cache_remove_site"
               ],
               "counters": {"daemon_html_serve_unavailable": 1},
               "log_lines": 1
@@ -9510,7 +9566,16 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls_exclude": ["ps_html_serve_classify"],
+              "calls_exclude": [
+                "ps_html_serve_classify",
+                "ps_wants_agent_markdown",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
+                "ps_html_markdown_etag",
+                "ps_if_none_match_matches_weak"
+              ],
               "serve": {"kind": "fall_through"},
               "log_lines": 0
             }
@@ -9550,10 +9615,31 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "mode": 1
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "final",
+                    "mode": 1
+                  }
+                }
+              ],
               "calls_exclude": [
                 "ps_cache_write_original_site",
                 "ps_cache_write_headers_sidecar_site",
-                "ps_notify_worker_ex"
+                "ps_notify_worker_ex",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_store_write_params",
+                "ps_cache_remove_site"
               ],
               "counters": {"daemon_html_serve_unavailable": 1},
               "log_lines": 1
@@ -9571,7 +9657,16 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls_exclude": ["ps_html_serve_classify"],
+              "calls_exclude": [
+                "ps_html_serve_classify",
+                "ps_wants_agent_markdown",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
+                "ps_html_markdown_etag",
+                "ps_if_none_match_matches_weak"
+              ],
               "serve": {"kind": "fall_through"},
               "log_lines": 0
             }
@@ -9611,10 +9706,31 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "mode": 1
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "final",
+                    "mode": 1
+                  }
+                }
+              ],
               "calls_exclude": [
                 "ps_cache_write_original_site",
                 "ps_cache_write_headers_sidecar_site",
-                "ps_notify_worker_ex"
+                "ps_notify_worker_ex",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_store_write_params",
+                "ps_cache_remove_site"
               ],
               "counters": {"daemon_html_serve_unavailable": 1},
               "log_lines": 1
@@ -9632,7 +9748,16 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls_exclude": ["ps_html_serve_classify"],
+              "calls_exclude": [
+                "ps_html_serve_classify",
+                "ps_wants_agent_markdown",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
+                "ps_html_markdown_etag",
+                "ps_if_none_match_matches_weak"
+              ],
               "serve": {"kind": "fall_through"},
               "log_lines": 0
             }
@@ -9672,10 +9797,31 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "mode": 1
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "final",
+                    "mode": 1
+                  }
+                }
+              ],
               "calls_exclude": [
                 "ps_cache_write_original_site",
                 "ps_cache_write_headers_sidecar_site",
-                "ps_notify_worker_ex"
+                "ps_notify_worker_ex",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_store_write_params",
+                "ps_cache_remove_site"
               ],
               "counters": {"daemon_html_serve_unavailable": 1},
               "log_lines": 1
@@ -9693,7 +9839,16 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls_exclude": ["ps_html_serve_classify"],
+              "calls_exclude": [
+                "ps_html_serve_classify",
+                "ps_wants_agent_markdown",
+                "ps_cache_read_best_site",
+                "ps_cache_read_alternate_site",
+                "ps_headers_sidecar_read",
+                "ps_html_stored_facts_from_reads",
+                "ps_html_markdown_etag",
+                "ps_if_none_match_matches_weak"
+              ],
               "serve": {"kind": "fall_through"},
               "log_lines": 0
             }
@@ -11665,7 +11820,7 @@
                 {"fn": "ps_html_stored_facts_from_reads"},
                 {"fn": "ps_html_serve_classify"}
               ],
-              "calls_exclude": ["ps_cache_read_best", "ps_cache_read_best_site", "ps_cache_read_best_agent"]
+              "calls_exclude": ["ps_cache_read_best_site"]
             }
           }
         ]

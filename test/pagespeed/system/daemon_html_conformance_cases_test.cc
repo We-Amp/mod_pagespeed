@@ -282,9 +282,17 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
           }
           for (Json::ArrayIndex k = 0; exact.isArray() && k < exact.size();
                ++k) {
-            if (!exact[k].isString() || (exact[k].asString() != "request" &&
-                                         exact[k].asString() != "stored")) {
-              c.Fail(sw + " call", "exact names request or stored only");
+            // Only the structs the function's record carries.
+            const GoogleString fn = calls[j]["fn"].asString();
+            const GoogleString prefix =
+                exact[k].isString() ? exact[k].asString() : GoogleString();
+            const bool ok =
+                (prefix == "request" && (fn == "ps_html_serve_classify" ||
+                                         fn == "ps_html_store_classify")) ||
+                (prefix == "stored" && fn == "ps_html_serve_classify");
+            if (!ok) {
+              c.Fail(sw + " call",
+                     StrCat("exact ", prefix, " is not recorded for ", fn));
             }
           }
         }
@@ -476,6 +484,32 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsMalformedRows) {
   EXPECT_FALSE(LabelIsPublicSafe("tracked as XYZ-99"));
   EXPECT_FALSE(LabelIsPublicSafe("an X-Y event"));
   EXPECT_TRUE(LabelIsPublicSafe("validator: 304 set (RFC 9110 15.4.5)"));
+}
+
+// An exact prefix the function's record does not carry would assert
+// nothing.
+TEST(DaemonHtmlConformanceCasesTest, RejectsAnExactStructTheCallDoesNotRecord) {
+  Json::Value bodies(Json::objectValue);
+  Checker c(bodies);
+  Json::Value engine(Json::objectValue);
+  engine["verdicts"] = Json::Value(Json::arrayValue);
+  Json::Value step(Json::objectValue);
+  step["kind"] = "serve";
+  Json::Value call(Json::objectValue);
+  call["fn"] = "ps_html_store_classify";
+  call["exact"].append("stored");
+  step["expect"]["calls"].append(call);
+  call["fn"] = "ps_html_serve_classify";
+  call["exact"][0] = "request";
+  call["exact"].append("stored");
+  step["expect"]["calls"].append(call);
+  engine["steps"].append(step);
+  CheckEngine(c, "row", engine);
+  ASSERT_EQ(1u, c.errors().size());
+  EXPECT_NE(GoogleString::npos,
+            c.errors()[0].find(
+                "exact stored is not recorded for ps_html_store_classify"))
+      << c.errors()[0];
 }
 
 }  // namespace

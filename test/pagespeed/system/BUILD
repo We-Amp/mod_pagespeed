@@ -610,8 +610,6 @@ pagespeed_cc_test(
     ],
 )
 
-# The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
-# epoch and clamp, the byte budget, and the degrade path.
 # The same runner over the degrade and fault rows, with the stub library
 # (a real binding loaded through LoadDaemonAbi) answering instead of the fake.
 pagespeed_cc_test(
@@ -649,6 +647,8 @@ pagespeed_cc_test(
     ],
 )
 
+# The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
+# epoch and clamp, the byte budget, and the degrade path.
 pagespeed_cc_test(
     name = "daemon_html_engine_test",
     srcs = [

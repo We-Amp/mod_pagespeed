@@ -169,6 +169,45 @@ uint32_t StoreFlagsOf(const Json::Value& names) {
   return out;
 }
 
+// The recorder below writes every field of these structs, so a row's
+// "exact" expectation covers the whole struct.  A field added to either
+// struct must be recorded in ConformanceAbi::HtmlServeClassify before these
+// sizes are updated; otherwise exact matching silently stops covering it.
+static_assert(sizeof(PsHtmlServeRequest) == 64,
+              "record the new PsHtmlServeRequest field, then update this size");
+static_assert(sizeof(PsHtmlStoredFacts) == 96,
+              "record the new PsHtmlStoredFacts field, then update this size");
+
+// Every library function the runner records.  A row naming any other in
+// calls or calls_exclude would assert nothing, so the runner refuses it.
+const char* const kRecordedFns[] = {"ps_cache_read_alternate_site",
+                                    "ps_cache_read_best_site",
+                                    "ps_cache_read_site_purge_epoch",
+                                    "ps_cache_remove_site",
+                                    "ps_cache_write_headers_sidecar_site",
+                                    "ps_cache_write_original_site",
+                                    "ps_cache_write_site_purge_epoch",
+                                    "ps_header_block_pairing",
+                                    "ps_headers_sidecar_read",
+                                    "ps_html_markdown_etag",
+                                    "ps_html_serve_classify",
+                                    "ps_html_store_classify",
+                                    "ps_html_store_write_params",
+                                    "ps_html_stored_facts_from_reads",
+                                    "ps_if_none_match_matches_weak",
+                                    "ps_notify_worker_ex",
+                                    "ps_read_shared_config_agent_entitled",
+                                    "ps_read_shared_config_html_mode",
+                                    "ps_wants_agent_markdown",
+                                    "ps_write_close"};
+
+bool IsRecordedFn(const GoogleString& fn) {
+  for (const char* f : kRecordedFns) {
+    if (fn == f) return true;
+  }
+  return false;
+}
+
 // One call the engine made, as the runner records it.
 struct Call {
   GoogleString fn;
@@ -405,6 +444,11 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
                         PsHtmlServeVerdict* out) const override {
     Call c = Rec("ps_html_serve_classify");
     // Every field of both structs, so a row can assert either exactly.
+    // Of the stored facts, the engine itself sets only `purged` (from its
+    // purge fence); the rest are what HtmlStoredFactsFromReads returned,
+    // which on this fake is the fake's reading of the volume.  A row's
+    // exact facts therefore prove the engine passed them on unchanged and
+    // set purged, not the library's facts rule.
     c.args["request.struct_size"] =
         static_cast<Json::UInt64>(request->struct_size);
     c.args["request.mode"] = request->mode;
@@ -888,6 +932,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     if (stub != nullptr) {
       stub_abi = LoadStub(*stub);
       if (stub_abi == nullptr) return;
+      ExpectStubMatchesRow(*stub_abi, engine_body_["library"]);
       // The stub answers; the row's injected verdicts are not used.
       if (!engine_body_["volume"].empty()) {
         ADD_FAILURE() << "a stub row cannot hold a volume";
@@ -967,6 +1012,24 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
 #endif
 
   bool on_stub() const { return stub_abi_ != nullptr; }
+
+  // The stub's PS_STUB_* settings must make it the library the row
+  // describes; a wrong mapping would turn a degrade row into a normal one.
+  static void ExpectStubMatchesRow(const DaemonAbi& abi,
+                                   const Json::Value& library) {
+    const int minor = library.get("minor", 14).asInt();
+    const bool bound =
+        minor >= kHtmlServeSetMinor && library.get("set_bound", true).asBool();
+    EXPECT_EQ(minor, abi.VersionMinor()) << "stub minor";
+    EXPECT_EQ(bound, abi.HasHtmlServeSet()) << "stub serve set";
+    if (!bound) return;
+    const int mode = ConformanceAbi::HtmlMode(
+        library.get("html_mode", "markdown-static").asString());
+    EXPECT_EQ(mode, abi.ReadSharedConfigHtmlMode("/unused")) << "stub mode";
+    EXPECT_EQ(library.get("agent_entitled", true).asBool() ? 1 : 0,
+              abi.ReadSharedConfigAgentEntitled("/unused"))
+        << "stub agent-optimize";
+  }
 
   // ---- setup
 
@@ -1448,6 +1511,15 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
              int writes, const std::map<GoogleString, int64>& before) {
     const GoogleString trace = StrCat("calls in the step:\n", Describe(calls));
     SCOPED_TRACE(trace);
+    for (const Json::Value& want : expect["calls"]) {
+      EXPECT_TRUE(IsRecordedFn(want["fn"].asString()))
+          << want["fn"].asString() << " is never recorded";
+    }
+    for (const Json::Value& fn : expect["calls_exclude"]) {
+      EXPECT_TRUE(IsRecordedFn(fn.asString()))
+          << fn.asString() << " is never recorded, so excluding it asserts "
+          << "nothing";
+    }
     if (expect.isMember("calls")) {
       size_t at = 0;
       for (const Json::Value& want : expect["calls"]) {
