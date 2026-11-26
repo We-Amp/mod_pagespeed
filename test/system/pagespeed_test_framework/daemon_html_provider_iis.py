@@ -92,6 +92,9 @@ ASK_INTERVAL_S = 2.0
 # The IIS rig's own knobs, used by test/system/iis/html_conformance/
 # iis_rows.json (the IIS-only rows):
 #   final_view: "removed"     the site's modules list removes PageSpeedFinalView
+#   final_view: "cleared"     the site's modules list is <clear/> followed by
+#                             every module the server lists but
+#                             PageSpeedFinalView
 #   custom_errors: "replace"  IIS's custom error pages replace every error
 #                             response (existingResponse Replace)
 #   static_file: true         /static.html (the row's body) and /plain.txt
@@ -444,6 +447,14 @@ class IisProvider(conf.Provider):
         if vhost.get("final_view") == "removed":
             extra.append('<modules><remove name="PageSpeedFinalView" /></modules>')
             applied.add("final_view")
+        elif vhost.get("final_view") == "cleared":
+            adds = "".join(
+                "<add " + " ".join(f'{k}="{_xml(v)}"' for k, v in m.items()) + " />"
+                for m in self._server_modules() if m["name"] != "PageSpeedFinalView")
+            extra.append(f"<modules><clear />{adds}</modules>")
+            applied.add("final_view")
+        elif "final_view" in vhost:
+            raise conf.ProviderUnsupported(f"final_view {vhost['final_view']!r}")
         if vhost.get("custom_errors") == "replace":
             extra.append('<httpErrors errorMode="Custom" existingResponse="Replace" />')
             applied.add("custom_errors")
@@ -483,6 +494,23 @@ class IisProvider(conf.Provider):
   </system.webServer>
 </configuration>
 """
+
+    def _server_modules(self) -> List[Dict[str, str]]:
+        """The server's <modules> entries, in order, with the attributes a
+        site's list repeats them by."""
+        import xml.etree.ElementTree as ET
+        out = _appcmd("list", "config", "-section:system.webServer/modules", "/xml",
+                      "/config:*")
+        modules = []
+        for add in ET.fromstring(out).iter("add"):
+            entry = {"name": add.get("name")}
+            for k in ("type", "preCondition"):
+                if add.get(k):
+                    entry[k] = add.get(k)
+            modules.append(entry)
+        if not any(m["name"] == "PageSpeedModule" for m in modules):
+            raise conf.ProviderUnsupported("the server lists no PageSpeedModule")
+        return modules
 
     def _apply_site(self, live: dict, applied: Set[str]) -> None:
         vhost = live.get("vhost", {})

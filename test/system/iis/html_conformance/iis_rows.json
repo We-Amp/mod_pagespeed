@@ -96,6 +96,96 @@
    }
   },
   {
+   "id": "iis-md-final-view-cleared",
+   "runners": [
+    "live"
+   ],
+   "why": "fail closed: the modules list cleared without the final-view entry",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ],
+      "expect": {
+       "status": 500,
+       "headers_absent": [
+        "X-Robots-Tag",
+        "ETag",
+        "Content-Type"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     }
+    ],
+    "vhost": {
+     "final_view": "cleared"
+    }
+   }
+  },
+  {
    "id": "iis-md-custom-error-replaces",
    "runners": [
     "live"
