@@ -144,4 +144,35 @@ GoogleString VouchedServeHost(StringPiece request_host,
   return GoogleString();
 }
 
+bool HostExactlyConfigured(StringPiece request_host,
+                           const ConfiguredHostNames& names) {
+  // The name without its port must not end in ".": NormalizeServeHostName
+  // would drop one trailing dot, and a vouch must not.
+  StringPiece name = request_host;
+  if (!name.empty() && name[0] != '[') {
+    const size_t colon = name.rfind(':');
+    if (colon != StringPiece::npos) {
+      name = name.substr(0, colon);
+    }
+  }
+  if (name.empty() || name[name.size() - 1] == '.') {
+    return false;
+  }
+  GoogleString request;
+  if (!NormalizeServeHostName(request_host, &request)) {
+    return false;
+  }
+  GoogleString configured;
+  if (ExactConfiguredName(names.primary, &configured) &&
+      configured == request) {
+    return true;
+  }
+  for (const GoogleString& alias : names.aliases) {
+    if (ExactConfiguredName(alias, &configured) && configured == request) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace net_instaweb

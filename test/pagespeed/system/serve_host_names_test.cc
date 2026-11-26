@@ -199,5 +199,44 @@ TEST(ServeHostNamesTest, AddressLiteralNames) {
   EXPECT_EQ("10.1.2.3", VouchedServeHost("[::1]", Names("10.1.2.3")));
 }
 
+TEST(ServeHostNamesTest, HostExactlyConfiguredHasNoPrimaryFallback) {
+  const ConfiguredHostNames names =
+      Names("www.example.test", {"alias.example.test"});
+  EXPECT_TRUE(HostExactlyConfigured("www.example.test", names));
+  EXPECT_TRUE(HostExactlyConfigured("WWW.Example.Test", names));
+  EXPECT_TRUE(HostExactlyConfigured("www.example.test:443", names));
+  EXPECT_TRUE(HostExactlyConfigured("www.example.test:8443", names));
+  EXPECT_TRUE(HostExactlyConfigured("alias.example.test", names));
+  // VouchedServeHost answers the primary name for these; a vouch does not.
+  EXPECT_FALSE(HostExactlyConfigured("other.example.test", names));
+  EXPECT_FALSE(HostExactlyConfigured("", names));
+  // One trailing dot is not the configured spelling.
+  EXPECT_FALSE(HostExactlyConfigured("www.example.test.", names));
+  EXPECT_FALSE(HostExactlyConfigured("www.example.test.:443", names));
+}
+
+TEST(ServeHostNamesTest, HostExactlyConfiguredNeverMatchesAPattern) {
+  for (const char* name : {"*.example.test", "_", ".example.test",
+                           "~^www\\.example\\.test$", "*", ""}) {
+    const ConfiguredHostNames names = Names(name, {name});
+    EXPECT_FALSE(HostExactlyConfigured("www.example.test", names)) << name;
+    EXPECT_FALSE(HostExactlyConfigured("a.example.test", names)) << name;
+    EXPECT_FALSE(HostExactlyConfigured("example.test", names)) << name;
+  }
+  // nginx's spelling of a suffix block: the primary name is exact, the
+  // subdomains it also matches are not.
+  const ConfiguredHostNames nginx_spelling =
+      Names("example.test", {".example.test"});
+  EXPECT_TRUE(HostExactlyConfigured("example.test", nginx_spelling));
+  EXPECT_FALSE(HostExactlyConfigured("shop.example.test", nginx_spelling));
+}
+
+TEST(ServeHostNamesTest, HostExactlyConfiguredAddressLiterals) {
+  EXPECT_TRUE(
+      HostExactlyConfigured("[2001:DB8::1]:443", Names("[2001:db8::1]")));
+  EXPECT_TRUE(HostExactlyConfigured("10.1.2.3:80", Names("10.1.2.3")));
+  EXPECT_FALSE(HostExactlyConfigured("[::1]", Names("10.1.2.3")));
+}
+
 }  // namespace
 }  // namespace net_instaweb

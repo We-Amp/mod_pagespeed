@@ -584,6 +584,55 @@ pagespeed_cc_test(
     ],
 )
 
+# The HTML cache engine runner: every engine row of the conformance cases,
+# run on the real engine over the injected-verdict fake library, an
+# in-memory volume and the real PurgeSet.  No library is loaded.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_test",
+    srcs = [
+        "daemon_html_conformance_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    data = ["//test/system/daemon_html:conformance_cases.json"],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@boringssl//:crypto",
+        "@jsoncpp",
+    ],
+)
+
+# The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
+# epoch and clamp, the byte budget, and the degrade path.
+pagespeed_cc_test(
+    name = "daemon_html_engine_test",
+    srcs = [
+        "daemon_html_engine_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@boringssl//:crypto",
+    ],
+)
+
 # The HTML cache engine and live conformance cases parse and keep the
 # documented row shape.
 pagespeed_cc_test(
