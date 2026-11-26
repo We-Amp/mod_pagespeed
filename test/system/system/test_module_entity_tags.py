@@ -166,10 +166,17 @@ def test_module_tag_in_any_spelling_drops_both_fields(inm):
 
 
 def test_module_tag_on_a_second_header_line_drops_every_line():
-    status, seen = _through_origin(
-        AGENT_HOST,
-        [("If-None-Match", '"v1"'), ("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", PAST)],
-    )
+    headers = [("If-None-Match", '"v1"'), ("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", PAST)]
+    if os.environ.get("PAGESPEED_SERVER_TYPE") == "nginx":
+        # nginx refuses a repeated If-None-Match line itself, before any
+        # module runs: nothing reaches the origin.
+        rid = f"r{next(_IDS)}-{time.monotonic_ns()}"
+        status, _ = _request(AGENT_HOST, f"/strip_echo/page.html?rid={rid}", headers)
+        assert status == 400
+        with _SEEN_LOCK:
+            assert rid not in _SEEN
+        return
+    status, seen = _through_origin(AGENT_HOST, headers)
     assert status == 200
     _assert_nothing_forwarded(seen)
 
