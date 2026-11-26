@@ -38,6 +38,7 @@
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
 #include "pagespeed/iis/iis_server_context.h"
 #include "pagespeed/iis/iis_final_view_module.h"
 #include "pagespeed/iis/iis_registration.h"
@@ -157,6 +158,16 @@ class MyGlobalModule : public CGlobalModule {
                                 cooked.AbsPathLength / sizeof(WCHAR));
         pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
             "X-PRISTINE-PATH", path.c_str());
+      }
+      // And the request target as the client sent it, before an inbound
+      // rewrite can replace it: the HTML cache keys a page on it.  The raw
+      // target is bytes; each one is kept as one wide character.
+      const HTTP_REQUEST* raw = rq->GetRawHttpRequest();
+      if (raw->pRawUrl != nullptr && raw->RawUrlLength > 0) {
+        const std::wstring target(raw->pRawUrl,
+                                  raw->pRawUrl + raw->RawUrlLength);
+        pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
+            net_instaweb::kIisPristineTargetVariable, target.c_str());
       }
     }
     return GL_NOTIFICATION_CONTINUE;

@@ -865,7 +865,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		PCSTR method = request->GetHttpMethod();
 		facts->method = method == nullptr ? "" : method;
 		facts->scheme = (raw != nullptr && raw->pSslInfo != nullptr) ? "https" : "http";
-		facts->path = IisRawRequestTarget(raw);
+		// The target as the client sent it, taken before any module could
+		// rewrite the request; the current one when that cannot be read.
+		PCWSTR pristine = nullptr;
+		DWORD pristine_length = 0;
+		if (FAILED(http_context->GetRootContext()->GetServerVariable(
+				kIisPristineTargetVariable, &pristine, &pristine_length)) ||
+			!IisPristineTarget(pristine, pristine_length, &facts->path)) {
+			facts->path = IisRawRequestTarget(raw);
+		}
 		// The host and port of the URL this module keys the request on (the
 		// Host the client sent, with the local port unless it is the
 		// scheme's default): the URL an admin purge on this port names, so a

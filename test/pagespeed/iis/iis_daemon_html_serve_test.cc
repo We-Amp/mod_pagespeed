@@ -71,6 +71,34 @@ TEST(IisHtmlCachePathTest, OnlyTheEscapedNonAsciiByteIsAllowed) {
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/%G0"));
 }
 
+// ---- the request target before any rewrite
+
+TEST(IisPristineTargetTest, TheTargetIsReadBackByteForByte) {
+  GoogleString out;
+  const std::wstring plain = L"/blog/post-1?x=%2F";
+  ASSERT_TRUE(IisPristineTarget(plain.data(), plain.size(), &out));
+  EXPECT_EQ("/blog/post-1?x=%2F", out);
+  const std::wstring absolute = L"http://www.example.test/a/b";
+  ASSERT_TRUE(IisPristineTarget(absolute.data(), absolute.size(), &out));
+  EXPECT_EQ("/a/b", out);
+  const std::wstring bare = L"http://www.example.test";
+  ASSERT_TRUE(IisPristineTarget(bare.data(), bare.size(), &out));
+  EXPECT_EQ("/", out);
+  const std::wstring high = L"/caf\x00e9";
+  ASSERT_TRUE(IisPristineTarget(high.data(), high.size(), &out));
+  EXPECT_EQ("/caf\xe9", out);
+}
+
+TEST(IisPristineTargetTest, AnythingButBytesIsRefused) {
+  GoogleString out = "x";
+  EXPECT_FALSE(IisPristineTarget(nullptr, 0, &out));
+  EXPECT_TRUE(out.empty());
+  const std::wstring wide = L"/\x0100";
+  EXPECT_FALSE(IisPristineTarget(wide.data(), wide.size(), &out));
+  const std::wstring nul(L"/a\0b", 4);
+  EXPECT_FALSE(IisPristineTarget(nul.data(), nul.size(), &out));
+}
+
 // ---- finalising the Markdown answer at the final-view send
 
 IisMarkdownAnswer Answer200() {

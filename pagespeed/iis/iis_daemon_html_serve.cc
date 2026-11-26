@@ -35,6 +35,30 @@ bool HasLine(const DaemonHtmlHeaderLines& lines, StringPiece name) {
 
 }  // namespace
 
+bool IisPristineTarget(const wchar_t* value, size_t length, GoogleString* out) {
+  out->clear();
+  if (value == nullptr || length == 0) return false;
+  GoogleString target;
+  target.reserve(length);
+  for (size_t i = 0; i < length; ++i) {
+    if (value[i] == L'\0' || value[i] > 0xFF) return false;
+    target.push_back(static_cast<char>(value[i]));
+  }
+  if (target[0] != '/') {
+    const size_t scheme_end = target.find("://");
+    const size_t path_start = scheme_end == GoogleString::npos
+                                  ? GoogleString::npos
+                                  : target.find('/', scheme_end + 3);
+    if (path_start == GoogleString::npos) {
+      *out = "/";
+      return true;
+    }
+    target.erase(0, path_start);
+  }
+  out->swap(target);
+  return true;
+}
+
 bool IisHtmlCachePathIsCanonical(StringPiece target) {
   StringPiece path = target;
   const size_t query = path.find('?');

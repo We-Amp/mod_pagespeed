@@ -52,6 +52,17 @@ bool IisHtmlCachePathIsCanonical(StringPiece target);
 // already (or the value is "*").
 GoogleString IisVaryWithAccept(StringPiece existing);
 
+// The server variable the global GL_PRE_BEGIN_REQUEST notification sets to
+// the request target as the client sent it, before any module (an inbound
+// URL Rewrite rule) changes the request: the HTML cache's key.  Each byte of
+// the target is one wide character.  Not a name a request header maps to.
+inline constexpr char kIisPristineTargetVariable[] = "X-PRISTINE-TARGET";
+
+// The request target, path and query, from that variable's value: false
+// when it is empty or holds a character that is not a byte.  An
+// absolute-form target loses its scheme and authority.
+bool IisPristineTarget(const wchar_t* value, size_t length, GoogleString* out);
+
 // The response the main registration leaves for a Markdown answer it has
 // kept for the final-view registration: an empty 500 with this sub-status,
 // which IIS does not use.
