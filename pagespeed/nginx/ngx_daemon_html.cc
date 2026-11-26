@@ -77,11 +77,11 @@ class DaemonHtmlTask : public Function {
     WaitWhileHeld();
     commit_.Run();
   }
-  // A shutdown: a store is not worth delaying the exit for, but the admin
-  // path's work runs, so the purge it belongs to still answers.
-  void Cancel() override {
-    if (!bounded_) commit_.Run();
-  }
+  // A shutdown: the work is dropped unrun, whatever it is.  The worker is
+  // exiting after its event loop stopped, so an admin purge cancelled here
+  // has no client left to answer, and running it would complete a fetch the
+  // port has already torn down.
+  void Cancel() override {}
 
  private:
   DaemonHtmlCommit commit_;
@@ -170,12 +170,12 @@ DaemonHtmlHeaderLines DaemonHtmlOriginLines(
 }
 
 NgxMarkdownLine ClassifyMarkdownLine(StringPiece name) {
-  static const char* const kOwned[] = {"Content-Type", "Content-Length",
+  static const char* const kOwned[] = {"Content-Type",  "Content-Length",
                                        "Cache-Control", "Vary",
-                                       "X-Robots-Tag", "Age",
+                                       "X-Robots-Tag",  "Age",
                                        "ETag"};
-  static const char* const kTransport[] = {
-      "Date", "Server", "Connection", "Keep-Alive", "Transfer-Encoding"};
+  static const char* const kTransport[] = {"Date", "Server", "Connection",
+                                           "Keep-Alive", "Transfer-Encoding"};
   for (const char* n : kOwned) {
     if (StringCaseEqual(name, n)) return NgxMarkdownLine::kOwned;
   }

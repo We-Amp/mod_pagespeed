@@ -56,10 +56,9 @@ extern const char kDaemonHtmlCommitHoldEnv[];
 class NgxDaemonHtmlRunner : public DaemonHtmlBlockingRunner {
  public:
   // `bounded`: a store's commit or a refusal's removal, which the shared
-  // queue caps may turn away (dropped, counted) and a shutdown cancels
-  // unrun.  Not bounded: the admin path's and the ticks' work, which is
-  // never turned away (an admin purge answers only once it ran) and which a
-  // shutdown runs rather than drops, so a purge in flight still answers.
+  // queue caps may turn away (dropped, counted).  Not bounded: the admin
+  // path's and the ticks' work, which is never turned away (an admin purge
+  // answers only once it ran).  A shutdown cancels either unrun.
   // The variables may be null.
   NgxDaemonHtmlRunner(bool bounded, Variable* posted, Variable* finished,
                       Variable* dropped);

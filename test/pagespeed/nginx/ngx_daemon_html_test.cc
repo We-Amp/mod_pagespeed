@@ -4,6 +4,7 @@
 #include "pagespeed/nginx/ngx_daemon_html.h"
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -120,9 +121,8 @@ TEST_F(NgxDaemonHtmlTest, AFullQueueTurnsAStoreAway) {
   EXPECT_EQ(0, posted_->Get());
 }
 
-// At shutdown a queued store is cancelled unrun (it would only delay the
-// exit), while the admin path's work runs, so a purge in flight answers.
-TEST_F(NgxDaemonHtmlTest, AShutdownDropsAStoreAndRunsAPurge) {
+// At shutdown queued work is cancelled unrun, and what it owned is released.
+TEST_F(NgxDaemonHtmlTest, AShutdownCancelsQueuedWorkUnrun) {
   NgxDaemonHtmlRunner stores(/*bounded=*/true, posted_, finished_, dropped_);
   NgxDaemonHtmlRunner admin(/*bounded=*/false, posted_, finished_, dropped_);
   QueuedWorkerPool pool(1, "daemon_html_test", thread_system_.get());
@@ -139,10 +139,14 @@ TEST_F(NgxDaemonHtmlTest, AShutdownDropsAStoreAndRunsAPurge) {
   admin.RunBlocking(Commit(&admin_runs));
   pool.WaitForShutDownComplete();
   EXPECT_EQ(0, store_runs.load());
+  EXPECT_EQ(0, admin_runs.load());
   EXPECT_TRUE(weak.expired());
-  EXPECT_EQ(1, admin_runs.load());
   EXPECT_EQ(2, posted_->Get());
   EXPECT_EQ(2, finished_->Get());
+  // The queue room the store reserved is back.
+  for (int i = 0; i < kDaemonCompletionQueueMaxItems; ++i) {
+    EXPECT_TRUE(TryQueueDaemonCompletion(0, nullptr));
+  }
 }
 
 // Unbounded work is never turned away by the caps.
@@ -155,6 +159,9 @@ TEST_F(NgxDaemonHtmlTest, AdminWorkIgnoresTheQueueCaps) {
   admin.set_sequence(pool.NewSequence());
   std::atomic<int> runs{0};
   admin.RunBlocking(Commit(&runs));
+  for (int i = 0; i < 5000 && runs.load() == 0; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   pool.ShutDown();
   EXPECT_EQ(1, runs.load());
   EXPECT_EQ(0, dropped_->Get());
@@ -210,8 +217,8 @@ TEST_F(NgxDaemonHtmlTest, RequestFactsCountEveryLine) {
 
 TEST_F(NgxDaemonHtmlTest, AnEmptyFieldIsPresent) {
   DaemonHtmlRequestFacts facts;
-  FillDaemonHtmlRequestHeaderFacts({{"Cache-Control", ""}, {"Authorization", ""}},
-                                   nullptr, &facts);
+  FillDaemonHtmlRequestHeaderFacts(
+      {{"Cache-Control", ""}, {"Authorization", ""}}, nullptr, &facts);
   EXPECT_TRUE(facts.has_cache_control);
   EXPECT_EQ("", facts.cache_control);
   EXPECT_TRUE(facts.has_authorization);
@@ -224,12 +231,10 @@ TEST_F(NgxDaemonHtmlTest, TheRefusalClassComesFromTheUpstream) {
   const DaemonHtmlHeaderLines out = {{"Content-Type", "text/html"},
                                      {"Cache-Control", "max-age=60"},
                                      {"X-Kept", "1"}};
-  const DaemonHtmlHeaderLines upstream = {{"Content-Type", "text/html"},
-                                          {"Set-Cookie", "a=1"},
-                                          {"Cache-Control", "private"},
-                                          {"vary", "Cookie"},
-                                          {"Pragma", "no-cache"},
-                                          {"X-Hidden", "1"}};
+  const DaemonHtmlHeaderLines upstream = {
+      {"Content-Type", "text/html"}, {"Set-Cookie", "a=1"},
+      {"Cache-Control", "private"},  {"vary", "Cookie"},
+      {"Pragma", "no-cache"},        {"X-Hidden", "1"}};
   const DaemonHtmlHeaderLines origin =
       DaemonHtmlOriginLines(out, /*has_upstream=*/true, upstream);
   EXPECT_EQ((DaemonHtmlHeaderLines{{"Content-Type", "text/html"},
@@ -249,8 +254,7 @@ TEST_F(NgxDaemonHtmlTest, MarkdownLinesAreOwnedKeptOrRemoved) {
   }
   for (const char* name :
        {"Date", "Server", "Connection", "Keep-Alive", "Transfer-Encoding"}) {
-    EXPECT_EQ(NgxMarkdownLine::kTransport, ClassifyMarkdownLine(name))
-        << name;
+    EXPECT_EQ(NgxMarkdownLine::kTransport, ClassifyMarkdownLine(name)) << name;
   }
   for (const char* name : {"Content-Encoding", "content-range"}) {
     EXPECT_EQ(NgxMarkdownLine::kConflict, ClassifyMarkdownLine(name)) << name;
