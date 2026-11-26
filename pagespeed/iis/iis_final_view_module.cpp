@@ -94,6 +94,29 @@ void FinalizeIisMarkdownAnswer(IHttpContext* http_context,
 
 }  // namespace
 
+DaemonHtmlHeaderLines IisResponseHeaderLines(const HTTP_RESPONSE& response) {
+  DaemonHtmlHeaderLines lines;
+  for (int i = 0; i < HttpHeaderResponseMaximum; ++i) {
+    const HTTP_KNOWN_HEADER& known = response.Headers.KnownHeaders[i];
+    if (known.pRawValue != nullptr && known.RawValueLength > 0) {
+      lines.emplace_back(HTTP_HEADER_ID_STRINGS_RESPONSE[i],
+                         GoogleString(known.pRawValue, known.RawValueLength));
+    }
+  }
+  if (response.Headers.pUnknownHeaders != nullptr) {
+    for (USHORT i = 0; i < response.Headers.UnknownHeaderCount; ++i) {
+      const HTTP_UNKNOWN_HEADER& unknown = response.Headers.pUnknownHeaders[i];
+      if (unknown.pName == nullptr || unknown.NameLength == 0) continue;
+      lines.emplace_back(
+          GoogleString(unknown.pName, unknown.NameLength),
+          unknown.pRawValue == nullptr
+              ? GoogleString()
+              : GoogleString(unknown.pRawValue, unknown.RawValueLength));
+    }
+  }
+  return lines;
+}
+
 REQUEST_NOTIFICATION_STATUS IisFinalViewModule::OnSendResponse(
     IN IHttpContext* pHttpContext, IN ISendResponseProvider* pProvider) {
   // Only the main registration's own context says whether this response is

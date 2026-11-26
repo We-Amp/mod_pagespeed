@@ -282,9 +282,11 @@ TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
       << "a Markdown answer can be made where the final view was missing";
   // An answer no final-view send took is noted when the request ends.
   const GoogleString inner = ReadStrippedSource("iis_request_context.cpp");
+  const size_t kept_at = inner.find("if(markdown_answer_!=nullptr){");
+  ASSERT_NE(GoogleString::npos, kept_at);
   EXPECT_NE(GoogleString::npos,
-            inner.find("if(markdown_answer_!=nullptr){server_context_->"
-                       "NoteDaemonHtmlMarkdownNotFinalized();"));
+            FunctionBody(inner.substr(kept_at), "if(markdown_answer_!=nullptr){")
+                .find("server_context_->NoteDaemonHtmlMarkdownNotFinalized();"));
 
   const GoogleString emit = FunctionBody(
       cc, "boolClearAndEmitAllowlisted(constDaemonHtmlServeResult&result,"
