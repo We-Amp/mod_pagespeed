@@ -210,6 +210,7 @@ We-Amp B.V., The Netherlands (founded 2012, KvK 57898138); info@we-amp.com for s
 ## Blog
 
 - [PageSpeed for Envoy: what the proxy itself costs in CPU](https://modpagespeed.com/blog/envoy-cpu-series/): 2026-11-26. PageSpeed for Envoy runs inside Envoy, so every request also pays Envoy's own CPU. Findings from our Envoy CPU series and how to reproduce them.
+- [Why our releases have more gates now](https://modpagespeed.com/blog/why-our-releases-have-more-gates/): 2026-11-26. AI agents write, test and review the changes in every mod_pagespeed release. What a release must pass before it ships, and the release behind one gate.
 - [PageSpeed for Envoy: what a PGO and ThinLTO build means](https://modpagespeed.com/blog/envoy-filter-pgo-thinlto/): 2026-11-15. In our proxy benchmarks, PGO and ThinLTO cut stock Envoy's CPU per request by 20% to 40%. What that means for the experimental PageSpeed filter.
 - [mod_pagespeed 2.8.0: security fixes and nginx.org packages](https://modpagespeed.com/blog/mod-pagespeed-2-8-release/): 2026-11-05. mod_pagespeed 2.8.0 fixes a large number of security issues; update recommended. New nginx module packages for Ubuntu 26.04 and nginx.org's nginx.
 - [Long-standing upstream issues, resolved](https://modpagespeed.com/blog/long-standing-upstream-issues-resolved/): 2026-11-01. Dozens of open issues in the archived mod_pagespeed and ngx_pagespeed trackers are resolved in current mod_pagespeed. Each is listed with its fix.
