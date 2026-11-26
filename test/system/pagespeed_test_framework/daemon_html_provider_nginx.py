@@ -1039,13 +1039,22 @@ http {{
         return self._send(self._instance(process), method, path, host or ROW_HOST, headers)
 
     def _stats(self, inst: _Instance) -> Dict[str, int]:
-        c = http.client.HTTPConnection("127.0.0.1", inst.ports["probe"], timeout=30)
-        try:
-            c.request("GET", GLOBAL_STATISTICS_PATH, headers={"Host": "localhost"})
-            r = c.getresponse()
-            text = r.read().decode("utf-8", "replace")
-        finally:
-            c.close()
+        # A worker of the previous generation that is closing after a reload
+        # may drop a connection it had accepted; that is transport, so the
+        # read is retried a few times (an assertion never is).
+        for attempt in range(5):
+            c = http.client.HTTPConnection("127.0.0.1", inst.ports["probe"], timeout=30)
+            try:
+                c.request("GET", GLOBAL_STATISTICS_PATH, headers={"Host": "localhost"})
+                r = c.getresponse()
+                text = r.read().decode("utf-8", "replace")
+                break
+            except (http.client.RemoteDisconnected, ConnectionResetError):
+                if attempt == 4:
+                    raise
+                time.sleep(0.2)
+            finally:
+                c.close()
         if r.status != 200:
             raise conf.ProviderUnsupported(f"global statistics of {inst.name}: {r.status}")
         return parse_statistics(text)
