@@ -85,14 +85,27 @@ ApacheServerContext::~ApacheServerContext() {
     }
     // Bounded: a prefork child told to stop exits from its signal handler,
     // and a frame it interrupted between Enter and Leave never resumes.
-    // Then the engine is left to the process exit, not destroyed under
-    // that frame.
+    // Then everything that frame can still reach is left to the process
+    // exit, not destroyed under it: the engine, the in-flight count, the
+    // purge source the engine reads, and the daemon adapter whose handle
+    // the engine's volume source hands out.
     static constexpr int64 kInFlightWaitMs = 5000;
     if (daemon_html_in_flight_->WaitIdleFor(kInFlightWaitMs)) {
       daemon_html_engine_.reset();
     } else {
       // Left to the process exit on purpose.
-      static_cast<void>(daemon_html_engine_.release());
+      DaemonHtmlEngine* const engine = daemon_html_engine_.release();
+      ApacheDaemonHtmlInFlight* const in_flight =
+          daemon_html_in_flight_.release();
+      SystemDaemonHtmlPurgeSource* const purge_source =
+          daemon_html_purge_source_.release();
+      // One more owner of the adapter, never released.
+      auto* const adapter = new std::shared_ptr<DaemonAdapter>(  // NOLINT
+          daemon_adapter_);
+      static_cast<void>(engine);
+      static_cast<void>(in_flight);
+      static_cast<void>(purge_source);
+      static_cast<void>(adapter);
     }
   }
 }

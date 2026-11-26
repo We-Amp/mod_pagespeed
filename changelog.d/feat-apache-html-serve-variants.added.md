@@ -27,6 +27,9 @@
     remove it fails.
   - Markdown is served with in-place optimization off, and never under a
     location where PageSpeed is off.
+  - A site whose server configuration adds `CDN-Cache-Control` or
+    `Surrogate-Control` to every HTML response gets no HTML cache: its pages
+    are not stored.
   Without a worker in a Markdown mode, or with an optimizer library that
   does not publish the HTML serve set, the mode stays report-only and logs
   why once.
