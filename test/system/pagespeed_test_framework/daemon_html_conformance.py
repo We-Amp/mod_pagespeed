@@ -744,11 +744,17 @@ class RowRunner:
             for mode in diff["against"]:
                 self.provider.set_mode(mode)
                 other = self._send(step)
+                other_headers = other.headers
+                if diff.get("allow_vary_accept"):
+                    # The other mode may vary on Accept for reasons of its
+                    # own (another feature); only the token serve-variants
+                    # adds is allowed to differ.
+                    other_headers, _ = _vary_without_accept(other_headers)
                 if other.status != r.status:
                     self._fail(index, f"{mode}: status {other.status} != {r.status}")
                 if other.body != r.body:
                     self._fail(index, f"{mode}: the body differs")
-                if _header_multiset(other.headers) != _header_multiset(primary):
+                if _header_multiset(other_headers) != _header_multiset(primary):
                     self._fail(
                         index,
                         f"{mode}: headers differ: {other.headers!r} vs {r.headers!r}",

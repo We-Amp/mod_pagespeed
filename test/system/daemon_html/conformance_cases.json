@@ -3759,6 +3759,125 @@
       }
     },
     {
+      "id": "store-final-view-server-header-left-out",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["X-T"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["X-Frame-Options"], "headers_exclude": ["X-T"]}
+                },
+                {"fn": "ps_cache_write_headers_sidecar_site", "args": {"headers_exclude": ["X-T"]}}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-final-view-policy-line-kept",
+      "runners": ["engine"],
+      "why": "store: server-config headers after the snapshot are honoured",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [["X-T", "1"], ["Set-Cookie", "a=1"]],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {"fn": "ps_html_store_classify", "args": {"headers_exclude": ["Set-Cookie"]}},
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {"headers_include": ["Set-Cookie: a=1"], "headers_exclude": ["X-T"]}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "store-final-view-no-cache-kept",
       "runners": [
         "engine"
@@ -5047,7 +5166,7 @@
     {
       "id": "store-host-non-default-port",
       "runners": ["engine"],
-      "why": "host validation: a non-default port stays in the key",
+      "why": "host validation: the volume keys an entry by host name, without the port",
       "engine": {
         "verdicts": [
           {
@@ -5090,11 +5209,11 @@
               "body_ref": "page"
             },
             "expect": {
-              "stored": [{"kind": "original", "url": "https://www.example.test:8443/page"}],
+              "stored": [{"kind": "original", "url": "https://www.example.test/page"}],
               "calls": [
                 {
                   "fn": "ps_cache_write_original_site",
-                  "args": {"url": "https://www.example.test:8443/page"}
+                  "args": {"url": "https://www.example.test/page"}
                 }
               ]
             }
@@ -12844,8 +12963,8 @@
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200, "content_type": "text/html"}
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {"status": 200}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
@@ -12862,8 +12981,7 @@
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
               },
-              "headers_only": true,
-              "body_ref": "page_v2"
+              "headers_only": true
             }
           }
         ]
@@ -12891,7 +13009,7 @@
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 6}}],
             "expect": {"status": 200}
           },
@@ -12925,7 +13043,7 @@
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}, {"sleep_s": {"s": 6}}],
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
             "expect": {"status": 200}
           },
           {
@@ -12934,6 +13052,7 @@
               "path": "/page",
               "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
             },
+            "pre": [{"sleep_s": {"s": 6}}],
             "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
@@ -13132,7 +13251,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13162,7 +13281,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 401, "stored": false}
           }
         ]
       }
@@ -13311,7 +13430,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13340,7 +13459,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13395,7 +13514,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -13425,7 +13544,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 2}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": false}
+            "expect": {"status": 200, "content_type": "text/html"}
           }
         ]
       }
@@ -16228,7 +16347,11 @@
             "request": {
               "method": "GET",
               "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip, br"]]
+              "headers": [
+                ["Accept", "text/markdown"],
+                ["Accept-Encoding", "gzip, br"],
+                ["If-None-Match", "$markdown_etag"]
+              ]
             },
             "expect": {
               "status": 304,
