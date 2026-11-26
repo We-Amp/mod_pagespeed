@@ -93,6 +93,7 @@ function Setup {
     Set-ItemProperty "IIS:\AppPools\dhc" -Name managedRuntimeVersion -Value "v4.0"
     & $appcmd set config -section:system.applicationHost/applicationPools "/+[name='dhc'].environmentVariables.[name='PAGESPEED_TEST_HTML_COMMIT_HOLD_FILE',value='$Root\state\commit.hold']" /commit:apphost | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "setting the pool's environment failed" }
+    & $appcmd set config -section:system.applicationHost/applicationPools "/+[name='dhc'].environmentVariables.[name='PAGESPEED_TEST_HTML_TRACE_FILE',value='$Root\state\trace.log']" /commit:apphost | Out-Null
     if (Test-Path "IIS:\Sites\Default Web Site") { Stop-Website -Name "Default Web Site" }
     New-Website -Name dhc -Port 80 -HostHeader "www.example.test" -PhysicalPath "$Root\site" -ApplicationPool dhc | Out-Null
     New-WebBinding -Name dhc -Protocol https -Port 443 -HostHeader "www.example.test"

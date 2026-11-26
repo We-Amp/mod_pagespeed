@@ -124,6 +124,14 @@ namespace net_instaweb {
 		static const char kDaemonHtmlCommitsFinished[];
 		static void InitDaemonHtmlStats(Statistics* statistics);
 
+		// Test equipment: when PAGESPEED_TEST_HTML_TRACE_FILE names a file,
+		// one line per HTML cache decision is appended to it (process id,
+		// time, `event`, the shared purge index, whether this process's
+		// purge set holds a purge of `url`, and `detail`).  Unset in
+		// production; a no-op then.
+		void TraceDaemonHtml(const char* event, const GoogleString& url,
+		                     const GoogleString& detail);
+
 		// A recorded HTML response got no final header view: the
 		// final-view module entry did not run for this site.  Logged once
 		// per site.

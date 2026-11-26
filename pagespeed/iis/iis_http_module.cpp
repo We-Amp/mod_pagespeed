@@ -1067,7 +1067,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		DaemonHtmlRequestFacts facts;
 		BuildIisDaemonHtmlFacts(http_context, inner, options, /*at_store=*/false, &facts);
 		IisDaemonHtmlServePort port(http_context, inner);
+		const GoogleString trace_url = StrCat(facts.scheme, "://", facts.host, facts.path);
+		server_context->TraceDaemonHtml("serve-begin", trace_url, "");
 		const DaemonHtmlServeResult result = engine->Serve(facts, &port);
+		server_context->TraceDaemonHtml("serve-end", trace_url,
+			StrCat("kind=", IntegerToString(result.kind), " reason=", result.reason));
 		if (result.kind != DaemonHtmlServeResult::kFinal) {
 			return false;
 		}
@@ -1110,6 +1114,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		std::unique_ptr<IisDaemonHtmlCapture> capture(
 			new IisDaemonHtmlCapture(std::move(recording)));
 		capture->SetOrigin(200, origin, inflated);
+		inner->set_daemon_html_trace_url(StrCat(facts.scheme, "://", facts.host, facts.path));
 		inner->set_daemon_html_capture(std::move(capture));
 	}
 

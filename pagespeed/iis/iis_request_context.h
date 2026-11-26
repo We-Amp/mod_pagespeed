@@ -160,6 +160,8 @@ public:
 	// The capture finished its body, so a commit follows at cleanup
 	// (IisServerContext::NoteDaemonHtmlCommitStarted).
 	void NoteDaemonHtmlBodyEnded();
+	// The capture's cache URL, for TraceDaemonHtml.
+	void set_daemon_html_trace_url(const GoogleString& url) { daemon_html_trace_url_ = url; }
 protected:
 	virtual ~IisInnerRequestContext();
 private:
@@ -197,6 +199,7 @@ private:
 	ClientConditionalStash client_conditionals_;
 	std::unique_ptr<IisMarkdownAnswer> markdown_answer_;
 	bool daemon_html_commit_started_ = false;
+	GoogleString daemon_html_trace_url_;
 
 	IisInnerRequestContext(const IisInnerRequestContext&) = delete;
 	IisInnerRequestContext& operator=(const IisInnerRequestContext&) = delete;

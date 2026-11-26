@@ -211,6 +211,32 @@ namespace net_instaweb {
 		statistics()->GetVariable(kDaemonHtmlCommitsFinished)->Add(1);
 	}
 
+	void IisServerContext::TraceDaemonHtml(const char* event,
+	                                       const GoogleString& url,
+	                                       const GoogleString& detail) {
+		static const std::string trace_file = [] {
+			char buffer[MAX_PATH] = {0};
+			const DWORD n = GetEnvironmentVariableA(
+				"PAGESPEED_TEST_HTML_TRACE_FILE", buffer, MAX_PATH);
+			return (n > 0 && n < MAX_PATH) ? std::string(buffer, n) : std::string();
+		}();
+		if (trace_file.empty()) return;
+		const int64 index =
+			statistics()->GetVariable(PurgeContext::kPurgeIndex)->Get();
+		const bool knows_purge =
+			!global_options()->IsUrlCacheValidIgnoringGlobal(url, 0);
+		const GoogleString line = StrCat(
+			IntegerToString(static_cast<int>(GetCurrentProcessId())), " ",
+			Integer64ToString(timer()->NowMs()), " ", event, " url=", url,
+			" purge_index=", Integer64ToString(index),
+			" knows_purge=", knows_purge ? "1" : "0", " ", detail, "\n");
+		FILE* f = fopen(trace_file.c_str(), "a");
+		if (f != nullptr) {
+			fwrite(line.data(), 1, line.size(), f);
+			fclose(f);
+		}
+	}
+
 	bool IisServerContext::daemon_html_serves_variants() const {
 		const RewriteOptions* options = global_options();
 		return options->daemon_html_cache() ==

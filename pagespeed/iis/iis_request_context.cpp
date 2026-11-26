@@ -6,6 +6,8 @@
 #include "pagespeed/iis/iis_final_view_module.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/iis/iis_server_context.h"
 
 namespace net_instaweb
 {
@@ -72,8 +74,16 @@ void IisInnerRequestContext::CleanupStoredContext()
 		if (daemon_html_commit_started_) {
 			HoldDaemonHtmlCommitForTest();
 		}
+		server_context_->TraceDaemonHtml("commit-begin", daemon_html_trace_url_, "");
 		if (daemon_html_capture_->Finish()) {
 			server_context_->NoteDaemonHtmlFinalViewMissing();
+		}
+		{
+			Statistics* stats = server_context_->statistics();
+			server_context_->TraceDaemonHtml("commit-end", daemon_html_trace_url_,
+				StrCat("stored=", Integer64ToString(stats->GetVariable("daemon_html_stored")->Get()),
+					" purge_race_refused=",
+					Integer64ToString(stats->GetVariable("daemon_html_purge_race_refused")->Get())));
 		}
 		daemon_html_capture_.reset();
 		if (daemon_html_commit_started_) {
