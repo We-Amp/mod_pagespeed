@@ -36,8 +36,7 @@
 #ifndef PAGESPEED_APACHE_APACHE_DAEMON_HTML_H_
 #define PAGESPEED_APACHE_APACHE_DAEMON_HTML_H_
 
-#include <condition_variable>
-#include <mutex>
+#include <atomic>
 
 #include "pagespeed/apache/apache_httpd_includes.h"  // NOLINT
 #include "pagespeed/kernel/base/basictypes.h"
@@ -58,19 +57,25 @@ extern const char kApacheMarkdownHeadersFilterName[];
 constexpr int kApacheMarkdownHeadersFilterType = AP_FTYPE_PROTOCOL - 1;
 
 // Counts the engine's work in flight on this server context, so the context
-// can wait for it before the engine goes away.
+// can wait for it before the engine goes away.  Lock-free: a prefork child
+// told to stop exits from its signal handler, on the request thread, where
+// a frame between Enter and Leave never resumes.
 class ApacheDaemonHtmlInFlight {
  public:
-  void Enter();
-  void Leave();
-  // Returns once nothing is in flight.
-  void WaitIdle();
+  void Enter() { count_.fetch_add(1, std::memory_order_acq_rel); }
+  void Leave() { count_.fetch_sub(1, std::memory_order_acq_rel); }
+  // Whether nothing was in flight within `timeout_ms` (polled).
+  bool WaitIdleFor(int64 timeout_ms);
 
  private:
-  std::mutex mutex_;
-  std::condition_variable idle_;
-  int count_ = 0;
+  std::atomic<int> count_{0};
 };
+
+// Whether httpd's normalized, percent-decoded request path can be a cache
+// key as it is: it starts with "/" and holds no "?", "#", control byte,
+// space or DEL, so the first "?" of a key is always the boundary between
+// the path and the raw query.
+bool ApacheDaemonHtmlKeyablePath(StringPiece decoded_path);
 
 // The site id the optimizer's volume keys `server`'s entries under: the
 // keyspace of the record (its own cache fragment, or its configuration's).
@@ -82,10 +87,12 @@ GoogleString ApacheDaemonHtmlSiteId(const server_rec* server,
 bool ApacheDaemonHtmlMainRequest(const request_rec* r);
 
 // The engine's view of one request.  `context` is the request's server
-// context, `url` the module's reading of the request URL (scheme, host and
-// port come from it), `options` the request's options (null leaves
+// context, `url` the module's reading of the request URL (the scheme comes
+// from it), `options` the request's options (null leaves
 // options_enabled_and_allowed false and the option context empty).  The
-// path is the request target's path and query as received.
+// path is httpd's normalized, percent-decoded path (the one its access
+// checks ran on) and the raw query; a path ApacheDaemonHtmlKeyablePath
+// refuses leaves url_agreed false.
 void FillApacheDaemonHtmlRequestFacts(request_rec* r,
                                       ApacheServerContext* context,
                                       const RewriteOptions* options,
@@ -125,6 +132,9 @@ class ApacheDaemonHtmlPort : public DaemonHtmlPort {
 // would have gone through on its way to the protocol filters.
 void ApacheRemoveContentFilters(request_rec* r);
 
+// The final pass: no configured content filter can run on a Markdown
+// answer (all are removed), so a kept Content-Encoding or Content-Range
+// line here comes only from a filter declared at protocol level or above.
 // Makes `r`'s header tables carry exactly `lines`: clears every line of
 // both tables and writes `lines` to headers_out (Content-Type and
 // Content-Length through the request's own fields, as httpd writes them),

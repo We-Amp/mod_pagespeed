@@ -53,6 +53,7 @@ class ApacheDaemonHtmlTest : public testing::Test {
     *static_cast<const char**>(apr_array_push(request_.content_languages)) =
         "en";
     apr_table_setn(request_.notes, "no-etag", "1");
+    apr_table_setn(request_.subprocess_env, "force-no-vary", "1");
   }
 
   const DaemonHtmlHeaderLines kOk = {
@@ -88,6 +89,7 @@ TEST_F(ApacheDaemonHtmlTest, TheSetReplacesEveryTable) {
   EXPECT_EQ(nullptr, request_.content_languages);
   EXPECT_EQ(nullptr, request_.content_encoding);
   EXPECT_EQ(nullptr, apr_table_get(request_.notes, "no-etag"));
+  EXPECT_EQ(nullptr, apr_table_get(request_.subprocess_env, "force-no-vary"));
   EXPECT_EQ(
       "ap_set_content_type(text/markdown; charset=utf-8) "
       "ap_set_content_length(12)",
@@ -173,6 +175,33 @@ TEST_F(ApacheDaemonHtmlTest, OnlyAMainRequestIsAnswered) {
   request_.prev = nullptr;
   request_.main = &other;
   EXPECT_FALSE(ApacheDaemonHtmlMainRequest(&request_));
+}
+
+// A decoded path is a key only when the first "?" of the key is the real
+// boundary of the query: "/a%3Fb" decodes to "/a?b", which would read as
+// the path "/a" with the query "b".
+TEST(ApacheDaemonHtmlKeyablePathTest, OnlyAPathThatCannotBeReadAsAnother) {
+  EXPECT_TRUE(ApacheDaemonHtmlKeyablePath("/"));
+  EXPECT_TRUE(ApacheDaemonHtmlKeyablePath("/a/b.html"));
+  EXPECT_TRUE(ApacheDaemonHtmlKeyablePath("/caf\xc3\xa9"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath(""));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("page"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("/a?b"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("/a#b"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("/a b"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath(StringPiece("/a\0b", 4)));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("/a\tb"));
+  EXPECT_FALSE(ApacheDaemonHtmlKeyablePath("/a\x7f"));
+}
+
+// The wait for work in flight is bounded, and takes no lock.
+TEST(ApacheDaemonHtmlInFlightTest, TheWaitIsBounded) {
+  ApacheDaemonHtmlInFlight in_flight;
+  EXPECT_TRUE(in_flight.WaitIdleFor(0));
+  in_flight.Enter();
+  EXPECT_FALSE(in_flight.WaitIdleFor(20));
+  in_flight.Leave();
+  EXPECT_TRUE(in_flight.WaitIdleFor(20));
 }
 
 }  // namespace

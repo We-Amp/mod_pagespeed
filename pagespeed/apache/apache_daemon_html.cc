@@ -3,7 +3,9 @@
 
 #include "pagespeed/apache/apache_daemon_html.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <thread>
 
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -90,6 +92,9 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
   // A "no-etag" note (FileETag None for the path) would drop the copy's own
   // entity tag in the core header filter.
   apr_table_unset(r->notes, "no-etag");
+  // force-no-vary (BrowserMatch, SetEnvIf) would drop the copy's one Vary
+  // line in the core header filter.
+  apr_table_unset(r->subprocess_env, "force-no-vary");
   bool has_type = false;
   for (const auto& [name, value] : lines) {
     if (StringCaseEqual(name, HttpAttributes::kContentType)) {
@@ -118,19 +123,23 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
 
 }  // namespace
 
-void ApacheDaemonHtmlInFlight::Enter() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  ++count_;
+bool ApacheDaemonHtmlInFlight::WaitIdleFor(int64 timeout_ms) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms);
+  while (count_.load(std::memory_order_acquire) != 0) {
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return true;
 }
 
-void ApacheDaemonHtmlInFlight::Leave() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (--count_ == 0) idle_.notify_all();
-}
-
-void ApacheDaemonHtmlInFlight::WaitIdle() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  idle_.wait(lock, [this] { return count_ == 0; });
+bool ApacheDaemonHtmlKeyablePath(StringPiece decoded_path) {
+  if (decoded_path.empty() || decoded_path[0] != '/') return false;
+  for (const char c : decoded_path) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (c == '?' || c == '#' || u <= 0x20 || u == 0x7f) return false;
+  }
+  return true;
 }
 
 GoogleString ApacheDaemonHtmlSiteId(const server_rec* server,
@@ -156,20 +165,26 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   if (url.IsWebValid()) {
     url.Scheme().CopyToString(&facts->scheme);
   }
-  // The host as the client sent it, a port included; for a request target
-  // in absolute form httpd's own reading of it.
+  // The Host field as the client sent it, a port included (httpd's own
+  // reading when there is none).  A name that is not one of the record's
+  // own is neither stored nor served, whatever else the request says.
   const char* host = apr_table_get(in, HttpAttributes::kHost);
   if (host == nullptr) host = r->hostname;
   facts->host = host == nullptr ? "" : host;
-  // The request target's path and query, as received.  Not unparsed_uri: a
-  // target in absolute form carries the scheme and host there.
-  facts->path = r->parsed_uri.path == nullptr ? "" : r->parsed_uri.path;
+  // httpd's normalized, percent-decoded path (r->parsed_uri.path is the
+  // buffer httpd decodes in place before any handler runs) and the raw
+  // query.  Decoding is lossy at the path/query boundary ("/a%3Fb" decodes
+  // to "/a?b"), so a decoded path that could be read as another key is
+  // refused below.
+  const char* decoded = r->parsed_uri.path == nullptr ? "" : r->parsed_uri.path;
+  const bool keyable = ApacheDaemonHtmlKeyablePath(decoded);
+  facts->path = decoded;
   if (r->parsed_uri.query != nullptr) {
     StrAppend(&facts->path, "?", r->parsed_uri.query);
   }
   facts->site = ApacheDaemonHtmlSiteId(r->server, context);
-  facts->url_agreed =
-      ApacheDaemonHtmlMainRequest(r) && InstawebContext::InPlaceUrlAgreed(r);
+  facts->url_agreed = keyable && ApacheDaemonHtmlMainRequest(r) &&
+                      InstawebContext::InPlaceUrlAgreed(r);
   facts->has_authorization = Has(in, HttpAttributes::kAuthorization) ||
                              Has(in, HttpAttributes::kProxyAuthorization);
   facts->authenticated_user = r->user != nullptr;
@@ -280,6 +295,9 @@ bool ApacheDaemonHtmlPort::ClearAndEmitAllowlisted(
   return true;
 }
 
+// Inline, on the request's thread, before the request is logged: the live
+// conformance provider's settle() relies on it (a logged request's store or
+// removal has finished).  Moving it to a runner needs a new signal there.
 void ApacheDaemonHtmlPort::RunBlocking(DaemonHtmlCommit commit) {
   in_flight_->Enter();
   commit.Run();

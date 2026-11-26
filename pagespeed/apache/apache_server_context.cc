@@ -83,8 +83,17 @@ ApacheServerContext::~ApacheServerContext() {
     if (daemon_html_observing_purges_ && cache_path() != nullptr) {
       cache_path()->RemovePurgeObserver(daemon_html_engine_.get());
     }
-    daemon_html_in_flight_->WaitIdle();
-    daemon_html_engine_.reset();
+    // Bounded: a prefork child told to stop exits from its signal handler,
+    // and a frame it interrupted between Enter and Leave never resumes.
+    // Then the engine is left to the process exit, not destroyed under
+    // that frame.
+    static constexpr int64 kInFlightWaitMs = 5000;
+    if (daemon_html_in_flight_->WaitIdleFor(kInFlightWaitMs)) {
+      daemon_html_engine_.reset();
+    } else {
+      // Left to the process exit on purpose.
+      static_cast<void>(daemon_html_engine_.release());
+    }
   }
 }
 
