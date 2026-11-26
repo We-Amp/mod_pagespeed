@@ -531,7 +531,6 @@ class IisProvider(conf.Provider):
         list with locked entries (the operator this row stands for
         unlocked them)."""
         import re
-        import xml.etree.ElementTree as ET
         config = os.path.join(os.environ.get("windir", r"C:\Windows"), "system32",
                               "inetsrv", "config", "applicationHost.config")
         with open(config, encoding="utf-8-sig") as f:
@@ -543,11 +542,12 @@ class IisProvider(conf.Provider):
             with open(config, "w", encoding="utf-8") as f:
                 f.write(text[:start] + block + text[end:])
         modules = []
-        for add in ET.fromstring(block + "</modules>").iter("add"):
-            entry = {"name": add.get("name")}
+        for add in re.finditer(r"<add\s([^>]*?)/?>", block):
+            attrs = dict(re.findall(r'(\w+)="([^"]*)"', add.group(1)))
+            entry = {"name": attrs["name"]}
             for k in ("type", "preCondition"):
-                if add.get(k):
-                    entry[k] = add.get(k)
+                if attrs.get(k):
+                    entry[k] = attrs[k]
             modules.append(entry)
         if not any(m["name"] == "PageSpeedModule" for m in modules):
             raise conf.ProviderUnsupported("the server lists no PageSpeedModule")
