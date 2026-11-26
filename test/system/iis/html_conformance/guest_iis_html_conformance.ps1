@@ -118,6 +118,9 @@ function Run {
     $env:PAGESPEED_DHC_IIS_SOCKET = $Socket
     $pyArgs = @("$Bin\run_iis_html_conformance.py", "$Bin\system")
     if ($Rows) { $pyArgs += ($Rows -split ",") }
+    # Python writes its own errors to stderr: they are lines of the run,
+    # not a failure of this script.
+    $ErrorActionPreference = "Continue"
     & "$Bin\python\python.exe" @pyArgs 2>&1 | ForEach-Object { "$_" }
 }
 
