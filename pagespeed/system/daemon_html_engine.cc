@@ -105,18 +105,28 @@ const char* const kTransportLines[] = {"Content-Encoding", "Content-Length",
 // from the store view) and is not part of a Markdown answer either, so it
 // is left out of the final view the store is classified on.  (Report-only
 // classifies the whole final view, as it always has.)
-const char* const kFinalViewPolicyLines[] = {
-    "Cache-Control",       "Pragma",
-    "Expires",             "Date",
-    "Age",                 "Set-Cookie",
-    "Set-Cookie2",         "Vary",
-    "Content-Type",        "Content-Encoding",
-    "Content-Range",       "Content-Location",
-    "Content-Security-Policy", "Link",
-    "WWW-Authenticate",    "Proxy-Authenticate",
-    "Authentication-Info", "Proxy-Authentication-Info",
-    "Clear-Site-Data",     "Surrogate-Control",
-    "CDN-Cache-Control",   "X-Accel-Expires"};
+const char* const kFinalViewPolicyLines[] = {"Cache-Control",
+                                             "Pragma",
+                                             "Expires",
+                                             "Date",
+                                             "Age",
+                                             "Set-Cookie",
+                                             "Set-Cookie2",
+                                             "Vary",
+                                             "Content-Type",
+                                             "Content-Encoding",
+                                             "Content-Range",
+                                             "Content-Location",
+                                             "Content-Security-Policy",
+                                             "Link",
+                                             "WWW-Authenticate",
+                                             "Proxy-Authenticate",
+                                             "Authentication-Info",
+                                             "Proxy-Authentication-Info",
+                                             "Clear-Site-Data",
+                                             "Surrogate-Control",
+                                             "CDN-Cache-Control",
+                                             "X-Accel-Expires"};
 
 // A policy line by name: one of the above, or any name ending in
 // "Cache-Control" (a targeted cache control such as CDN-Cache-Control).
@@ -1599,28 +1609,28 @@ void DaemonHtmlEngine::MaybeRemoveOnRefusal(
   const GoogleString scheme = facts.scheme;
   const GoogleString identity = VolumeIdentity(url, hostname, scheme);
   if (RecentlyRemoved(identity, now_s)) return;
-  port->RunBlocking(DaemonHtmlCommit([this, url, hostname, scheme, identity,
-                                      now_s] {
-    const DaemonAbi* abi = deps_.substrate.abi;
-    void* cache = Cache();
-    if (cache == nullptr) return;
-    const char* site = config_.site.c_str();
-    ServeReads existing(abi);
-    if (abi->CacheReadAlternateSite(
-            cache, VolumeUrl(url).c_str(), hostname.c_str(), scheme.c_str(),
-            site, kPsSentinelOriginal, &existing.original) != kPsOk) {
-      existing.original = nullptr;
-    }
-    if (existing.original != nullptr) {
-      const int rc =
-          abi->CacheRemoveSite(cache, VolumeUrl(url).c_str(), hostname.c_str(),
-                               scheme.c_str(), site);
-      if (rc != kPsOk && rc != kPsErrNotFound) return;
-      if (rc == kPsOk) counters_->removed->Add(1);
-      counters_->removed_on_refusal->Add(1);
-    }
-    NoteRemoved(identity, now_s);
-  }));
+  port->RunBlocking(
+      DaemonHtmlCommit([this, url, hostname, scheme, identity, now_s] {
+        const DaemonAbi* abi = deps_.substrate.abi;
+        void* cache = Cache();
+        if (cache == nullptr) return;
+        const char* site = config_.site.c_str();
+        ServeReads existing(abi);
+        if (abi->CacheReadAlternateSite(
+                cache, VolumeUrl(url).c_str(), hostname.c_str(), scheme.c_str(),
+                site, kPsSentinelOriginal, &existing.original) != kPsOk) {
+          existing.original = nullptr;
+        }
+        if (existing.original != nullptr) {
+          const int rc =
+              abi->CacheRemoveSite(cache, VolumeUrl(url).c_str(),
+                                   hostname.c_str(), scheme.c_str(), site);
+          if (rc != kPsOk && rc != kPsErrNotFound) return;
+          if (rc == kPsOk) counters_->removed->Add(1);
+          counters_->removed_on_refusal->Add(1);
+        }
+        NoteRemoved(identity, now_s);
+      }));
 }
 
 void DaemonHtmlEngine::Notify(const DaemonHtmlRequestFacts& facts,

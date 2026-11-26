@@ -3,11 +3,11 @@
 
 #include "pagespeed/system/daemon_html_purge_source.h"
 
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
-#include "net/instaweb/rewriter/public/rewrite_options.h"
 
 namespace net_instaweb {
 
@@ -28,9 +28,9 @@ bool IsAbsolutePath(StringPiece path) {
 GoogleString DaemonHtmlCacheFlushPath(StringPiece cache_flush_filename,
                                       StringPiece file_cache_path) {
   // The rule SystemServerContext::CheckLegacyGlobalCacheFlushFile applies.
-  const StringPiece name =
-      cache_flush_filename.empty() ? StringPiece("cache.flush")
-                                   : cache_flush_filename;
+  const StringPiece name = cache_flush_filename.empty()
+                               ? StringPiece("cache.flush")
+                               : cache_flush_filename;
   if (IsAbsolutePath(name)) return name.as_string();
   if (file_cache_path.empty()) return GoogleString();
   return StrCat(file_cache_path, "/", name);
