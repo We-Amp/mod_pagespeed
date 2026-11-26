@@ -129,6 +129,16 @@ namespace net_instaweb {
 		// per site.
 		void NoteDaemonHtmlFinalViewMissing();
 
+		// A Markdown answer the main registration kept was never taken: the
+		// final-view module entry did not run for it (it is not in the
+		// site's modules list), so the client got the pending error.  From
+		// then on this site answers Markdown requests with their HTML.
+		// Logged once.
+		void NoteDaemonHtmlMarkdownNotFinalized();
+		bool daemon_html_final_view_missing() const {
+			return daemon_html_markdown_not_finalized_.load(std::memory_order_relaxed);
+		}
+
 	private:
 
 		GoogleString site_app_id_;
@@ -153,6 +163,7 @@ namespace net_instaweb {
 		std::atomic<int64> daemon_html_last_poll_tick_ms_{0};
 		std::atomic<int64> daemon_html_last_stats_tick_ms_{0};
 		std::atomic<bool> daemon_html_final_view_missing_logged_{false};
+		std::atomic<bool> daemon_html_markdown_not_finalized_{false};
  		IisServerContext(const IisServerContext&) = delete;
  		IisServerContext& operator=(const IisServerContext&) = delete;
 	};

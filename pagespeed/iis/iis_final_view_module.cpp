@@ -20,17 +20,7 @@
 
 namespace net_instaweb {
 
-HTTP_MODULE_ID IisFinalViewModuleFactory::final_view_module_id_ = nullptr;
-
 namespace {
-
-// The mark IisFinalViewRunsFor reads: one object for every request, which
-// IIS only ever asks to clean up.
-class IisFinalViewMark : public IHttpStoredContext {
- public:
-  void CleanupStoredContext() override {}
-};
-IisFinalViewMark final_view_mark;
 
 // Replaces the pending error response with the Markdown answer the main
 // registration kept (iis_daemon_html_serve.h).  Runs at the first send that
@@ -103,49 +93,6 @@ void FinalizeIisMarkdownAnswer(IHttpContext* http_context,
 }
 
 }  // namespace
-
-bool IisFinalViewRunsFor(IHttpContext* http_context) {
-  const HTTP_MODULE_ID id = IisFinalViewModuleFactory::final_view_module_id();
-  if (id == nullptr || http_context == nullptr) return false;
-  IHttpModuleContextContainer* container =
-      http_context->GetModuleContextContainer();
-  return container != nullptr && container->GetModuleContext(id) != nullptr;
-}
-
-REQUEST_NOTIFICATION_STATUS IisFinalViewModule::OnResolveRequestCache(
-    IN IHttpContext* pHttpContext, IN IHttpEventProvider* pProvider) {
-  UNREFERENCED_PARAMETER(pProvider);
-  const HTTP_MODULE_ID id = IisFinalViewModuleFactory::final_view_module_id();
-  IHttpModuleContextContainer* container =
-      pHttpContext->GetModuleContextContainer();
-  if (id != nullptr && container != nullptr) {
-    container->SetModuleContext(&final_view_mark, id);
-  }
-  return RQ_NOTIFICATION_CONTINUE;
-}
-
-DaemonHtmlHeaderLines IisResponseHeaderLines(const HTTP_RESPONSE& response) {
-  DaemonHtmlHeaderLines lines;
-  for (int i = 0; i < HttpHeaderResponseMaximum; ++i) {
-    const HTTP_KNOWN_HEADER& known = response.Headers.KnownHeaders[i];
-    if (known.pRawValue != nullptr && known.RawValueLength > 0) {
-      lines.emplace_back(HTTP_HEADER_ID_STRINGS_RESPONSE[i],
-                         GoogleString(known.pRawValue, known.RawValueLength));
-    }
-  }
-  if (response.Headers.pUnknownHeaders != nullptr) {
-    for (USHORT i = 0; i < response.Headers.UnknownHeaderCount; ++i) {
-      const HTTP_UNKNOWN_HEADER& unknown = response.Headers.pUnknownHeaders[i];
-      if (unknown.pName == nullptr || unknown.NameLength == 0) continue;
-      lines.emplace_back(
-          GoogleString(unknown.pName, unknown.NameLength),
-          unknown.pRawValue == nullptr
-              ? GoogleString()
-              : GoogleString(unknown.pRawValue, unknown.RawValueLength));
-    }
-  }
-  return lines;
-}
 
 REQUEST_NOTIFICATION_STATUS IisFinalViewModule::OnSendResponse(
     IN IHttpContext* pHttpContext, IN ISendResponseProvider* pProvider) {

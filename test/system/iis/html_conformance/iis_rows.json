@@ -62,6 +62,26 @@
        }
       ],
       "expect": {
+       "status": 500,
+       "headers_absent": [
+        "X-Robots-Tag",
+        "ETag",
+        "Content-Type"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
        "status": 200,
        "content_type": "text/html",
        "headers_absent": [

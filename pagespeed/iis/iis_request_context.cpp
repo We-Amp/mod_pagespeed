@@ -80,7 +80,11 @@ void IisInnerRequestContext::CleanupStoredContext()
 			server_context_->NoteDaemonHtmlCommitFinished();
 		}
 	}
-	markdown_answer_.reset();
+	if (markdown_answer_ != nullptr) {
+		// Kept for the final-view registration, which never took it.
+		server_context_->NoteDaemonHtmlMarkdownNotFinalized();
+		markdown_answer_.reset();
+	}
 	// IIS is done with the request, but the rewriter may still be producing
 	// output for it on its own threads: cut the fetch off from the request
 	// first, so nothing it does from here on can reach IIS.

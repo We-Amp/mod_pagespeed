@@ -15,8 +15,10 @@
     `customHeaders` (for example `Strict-Transport-Security` and
     `X-Content-Type-Options`) are not on it, and it is never compressed.
   - The answer is sent by the `PageSpeedFinalView` module entry, which the
-    installer lists first. A site that removes that entry, or another
-    module that replaces the response first (a custom error page), gets the
-    page's HTML or that response, never a Markdown answer.
+    installer lists first. Where that entry does not run, the first Markdown
+    request gets an error and every later one the page's HTML (logged once);
+    where another module replaces the response first (a custom error page),
+    the client gets that response. Never a Markdown answer with the site's
+    own headers on it.
   - Every HTML response of such a site is kept out of IIS's kernel and
     output caches, so an agent is never answered with cached HTML.

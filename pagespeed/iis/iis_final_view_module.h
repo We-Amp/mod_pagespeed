@@ -30,10 +30,9 @@
 // Markdown answer is never held: it is finalised on the thread that made
 // it.)
 //
-// At RQ_RESOLVE_REQUEST_CACHE, where the installer's order runs it before
-// the main registration, it only marks the request as one it will see at
-// its send (IisFinalViewRunsFor): the main registration keeps a Markdown
-// answer only for such a request, and answers any other with its HTML.
+// IIS gives both entries of one image the same module id, so this
+// registration has no module context of its own: everything it shares with
+// the main registration is the main registration's context.
 
 #ifndef PAGESPEED_IIS_IIS_FINAL_VIEW_MODULE_H_
 #define PAGESPEED_IIS_IIS_FINAL_VIEW_MODULE_H_
@@ -52,17 +51,9 @@ namespace net_instaweb {
 // and then the unknown ones, as copies.
 DaemonHtmlHeaderLines IisResponseHeaderLines(const HTTP_RESPONSE& response);
 
-// Whether the final-view registration ran its resolve-cache notification for
-// this request, so it will run its send too.  False when the entry is not in
-// the request's module list, or not ahead of the main one.
-bool IisFinalViewRunsFor(IHttpContext* http_context);
-
 class IisFinalViewModule : public CHttpModule {
  public:
   IisFinalViewModule() = default;
-
-  REQUEST_NOTIFICATION_STATUS OnResolveRequestCache(
-      IN IHttpContext* pHttpContext, IN IHttpEventProvider* pProvider) override;
 
   REQUEST_NOTIFICATION_STATUS OnSendResponse(
       IN IHttpContext* pHttpContext,
@@ -82,16 +73,6 @@ class IisFinalViewModuleFactory : public IHttpModuleFactory {
   HRESULT GetHttpModule(OUT CHttpModule** ppModule,
                         IN IModuleAllocator* pAllocator) override;
   void Terminate() override { delete this; }
-
-  // The final-view registration's own module id, which keys the mark
-  // IisFinalViewRunsFor reads; set once at its registration.
-  static HTTP_MODULE_ID final_view_module_id() { return final_view_module_id_; }
-  static void set_final_view_module_id(HTTP_MODULE_ID id) {
-    final_view_module_id_ = id;
-  }
-
- private:
-  static HTTP_MODULE_ID final_view_module_id_;
 };
 
 }  // namespace net_instaweb

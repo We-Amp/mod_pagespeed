@@ -9,16 +9,16 @@
 //   * RegisterModule tells the two registrations apart by name, runs the
 //     process-wide setup once, and sets the module id every per-request
 //     context is kept under from the main registration only;
-//   * the final-view registration has a send notification and a
-//     resolve-cache notification, both at PRIORITY_ALIAS_FIRST; its send
+//   * the final-view registration has one send notification, at
+//     PRIORITY_ALIAS_FIRST, and keeps no module context of its own (IIS
+//     gives both entries of one image the same module id); its send
 //     reaches the request's state only through the main registration's
 //     module context, completes nothing and takes no lock, and changes the
 //     response only to finalise a Markdown answer the main registration
-//     kept, after the plan says the response is still the pending one; its
-//     resolve-cache notification only marks the request;
-//   * the main registration serves a Markdown answer only for a request
-//     the final-view registration marked, and never writes the answer
-//     itself;
+//     kept, after the plan says the response is still the pending one;
+//   * the main registration never writes a Markdown answer itself, and
+//     makes none for a site where the final-view entry was seen not to
+//     run;
 //   * the capture's body is fed only from the main registration's send,
 //     before that send clears the response for the rewriter, so the
 //     module's rewritten output can never be recorded.
@@ -129,27 +129,21 @@ TEST_F(IisFinalViewPinTest, RegisterModuleKeepsTheMainIdToTheMainEntry) {
       FunctionBody(registration.substr(final_at),
                    "kind==net_instaweb::IisRegistrationKind::kFinalView");
   ASSERT_FALSE(final_branch.empty());
-  EXPECT_NE(GoogleString::npos,
-            final_branch.find("SetRequestNotifications(newnet_instaweb::"
-                              "IisFinalViewModuleFactory(),RQ_SEND_RESPONSE|"
-                              "RQ_RESOLVE_REQUEST_CACHE,0)"))
-      << "the final-view registration takes other notifications";
+  EXPECT_NE(
+      GoogleString::npos,
+      final_branch.find("SetRequestNotifications(newnet_instaweb::"
+                        "IisFinalViewModuleFactory(),RQ_SEND_RESPONSE,0)"))
+      << "the final-view registration takes more than its send";
   EXPECT_NE(GoogleString::npos,
             final_branch.find("SetPriorityForRequestNotification("
                               "RQ_SEND_RESPONSE,PRIORITY_ALIAS_FIRST)"))
       << "the final-view send no longer runs after IIS's header stages";
-  EXPECT_NE(GoogleString::npos,
-            final_branch.find("SetPriorityForRequestNotification("
-                              "RQ_RESOLVE_REQUEST_CACHE,PRIORITY_ALIAS_FIRST)"))
-      << "the final-view mark may run after the main registration's serve";
-  EXPECT_EQ(CountOf(final_branch, "RQ_SEND_RESPONSE") +
-                CountOf(final_branch, "RQ_RESOLVE_REQUEST_CACHE"),
+  EXPECT_EQ(CountOf(final_branch, "RQ_SEND_RESPONSE"),
             CountOf(final_branch, "RQ_"))
       << "the final-view branch names another notification";
-  EXPECT_NE(GoogleString::npos,
-            final_branch.find("set_final_view_module_id(pModuleInfo->GetId())"));
   for (const char* name : {"set_module_id", "SetGlobalNotifications",
-                           "IisModuleFactory("}) {
+                           "IisModuleFactory(", "RQ_RESOLVE_REQUEST_CACHE",
+                           "GetId()"}) {
     EXPECT_EQ(GoogleString::npos, final_branch.find(name))
         << "the final-view branch names " << name;
   }
@@ -169,9 +163,8 @@ TEST_F(IisFinalViewPinTest, RegisterModuleKeepsTheMainIdToTheMainEntry) {
 TEST_F(IisFinalViewPinTest, TheFinalViewModuleOnlyReadsAtItsSend) {
   const GoogleString header = ReadStrippedSource("iis_final_view_module.h");
   EXPECT_NE(GoogleString::npos, header.find("OnSendResponse("));
-  EXPECT_NE(GoogleString::npos, header.find("OnResolveRequestCache("));
-  EXPECT_EQ(2, CountOf(header, "REQUEST_NOTIFICATION_STATUSOn"))
-      << "the final-view module handles another notification";
+  EXPECT_EQ(1, CountOf(header, "REQUEST_NOTIFICATION_STATUSOn"))
+      << "the final-view module handles a notification besides its send";
   EXPECT_EQ(GoogleString::npos, header.find("OnAsyncCompletion("));
 
   const GoogleString cc = ReadStrippedSource("iis_final_view_module.cpp");
@@ -193,6 +186,10 @@ TEST_F(IisFinalViewPinTest, TheFinalViewModuleOnlyReadsAtItsSend) {
         << "the final-view send names " << name;
   }
   EXPECT_EQ(GoogleString::npos, cc.find("thread_local"));
+  // It never takes a module context slot: the slot is the main
+  // registration's (both entries share one module id).
+  EXPECT_EQ(GoogleString::npos, cc.find("SetModuleContext"));
+  EXPECT_EQ(GoogleString::npos, cc.find("GetModuleContext("));
   // The one writer it calls, for a pending Markdown answer only, at the
   // first send that carries the headers.
   EXPECT_EQ(1, CountOf(send, "FinalizeIisMarkdownAnswer("));
@@ -268,18 +265,6 @@ TEST_F(IisFinalViewPinTest, AMarkdownAnswerIsFinalisedOnlyAfterThePlanSaysSo) {
                            "thread_local", "Lock", "mutex"}) {
     EXPECT_EQ(GoogleString::npos, finalize.find(name)) << name;
   }
-
-  // The resolve-cache notification only marks the request.
-  const GoogleString resolve =
-      FunctionBody(cc, "IisFinalViewModule::OnResolveRequestCache(");
-  ASSERT_FALSE(resolve.empty());
-  EXPECT_EQ(1, CountOf(resolve, "SetModuleContext(&final_view_mark,id)"));
-  EXPECT_EQ(CountOf(resolve, "return"),
-            CountOf(resolve, "returnRQ_NOTIFICATION_CONTINUE;"));
-  for (const char* name : {"GetResponse", "GetServerVariable", "SetStatus",
-                           "GetRequestContext"}) {
-    EXPECT_EQ(GoogleString::npos, resolve.find(name)) << name;
-  }
 }
 
 TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
@@ -288,12 +273,18 @@ TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
       FunctionBody(cc, "staticboolServeIisMarkdownAnswer(");
   ASSERT_FALSE(serve.empty())
       << "ServeIisMarkdownAnswer was not found; this pin needs updating";
-  const size_t marked_at = serve.find("IisFinalViewRunsFor(http_context)");
+  const size_t missing_at =
+      serve.find("server_context->daemon_html_final_view_missing()");
   const size_t serve_at = serve.find("engine->Serve(");
-  ASSERT_NE(GoogleString::npos, marked_at);
+  ASSERT_NE(GoogleString::npos, missing_at);
   ASSERT_NE(GoogleString::npos, serve_at);
-  EXPECT_LT(marked_at, serve_at)
-      << "a Markdown answer can be made for a request the final view misses";
+  EXPECT_LT(missing_at, serve_at)
+      << "a Markdown answer can be made where the final view was missing";
+  // An answer no final-view send took is noted when the request ends.
+  const GoogleString inner = ReadStrippedSource("iis_request_context.cpp");
+  EXPECT_NE(GoogleString::npos,
+            inner.find("if(markdown_answer_!=nullptr){server_context_->"
+                       "NoteDaemonHtmlMarkdownNotFinalized();"));
 
   const GoogleString emit = FunctionBody(
       cc, "boolClearAndEmitAllowlisted(constDaemonHtmlServeResult&result,"

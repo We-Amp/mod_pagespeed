@@ -1029,17 +1029,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (engine == nullptr) {
 			return false;
 		}
-		// Only a request the final-view entry will see can be answered: it is
-		// what sends the answer.  Any other gets its HTML.
-		if (!IisFinalViewRunsFor(http_context)) {
-			static std::atomic<bool> logged(false);
-			if (!logged.exchange(true)) {
-				server_context->message_handler()->Message(kWarning,
-					"DaemonHtmlCache: the %s module entry does not run ahead of "
-					"the main entry for %s, so no Markdown copy is served there "
-					"(the installer lists it first in the modules list)",
-					kIisFinalViewModuleNameAscii, inner->gurl()->spec_c_str());
-			}
+		// The final-view entry sends the answer.  A site where it was seen
+		// not to run gets its HTML (the first such answer went out as the
+		// pending error).
+		if (server_context->daemon_html_final_view_missing()) {
 			return false;
 		}
 		DaemonHtmlRequestFacts facts;
