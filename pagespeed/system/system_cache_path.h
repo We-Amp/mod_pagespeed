@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -36,6 +37,7 @@ namespace net_instaweb {
 class AbstractMutex;
 class AbstractSharedMem;
 class CacheInterface;
+class DaemonHtmlPurgeObserver;
 class LRUCache;
 class MessageHandler;
 class NamedLockManager;
@@ -121,6 +123,13 @@ class SystemCachePath {
 
   PurgeContext* purge_context() { return purge_context_.get(); }
 
+  // The observers every admin purge of this path is also given (the HTML
+  // cache engines of its virtual hosts; see daemon_html_purge_observer.h).
+  // Not owned: an observer removes itself before it is destroyed.
+  void AddPurgeObserver(DaemonHtmlPurgeObserver* observer);
+  void RemovePurgeObserver(DaemonHtmlPurgeObserver* observer);
+  std::vector<DaemonHtmlPurgeObserver*> purge_observers() const;
+
  private:
   using ServerContextSet = std::set<SystemServerContext*>;
 
@@ -151,6 +160,7 @@ class SystemCachePath {
 
   std::unique_ptr<AbstractMutex> mutex_;
   ServerContextSet server_context_set_ GUARDED_BY(mutex_);
+  std::vector<DaemonHtmlPurgeObserver*> purge_observers_ GUARDED_BY(mutex_);
 };
 
 }  // namespace net_instaweb

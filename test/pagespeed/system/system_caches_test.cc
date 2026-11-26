@@ -71,6 +71,7 @@
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/system/admin_site.h"
+#include "pagespeed/system/daemon_html_purge_observer.h"
 #include "pagespeed/system/external_server_spec.h"
 #include "pagespeed/system/memcached_cache.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -1781,6 +1782,83 @@ TEST_F(SystemCachesTest, PurgeUrl) {
   EXPECT_EQ(kNotFoundResult, HttpBlockingFindWithOptions(
                                  options, kUrl2, server_context->http_cache(),
                                  &value, &headers));
+}
+
+// Records the admin purges it is given and answers with `ok`.
+class RecordingPurgeObserver : public DaemonHtmlPurgeObserver {
+ public:
+  explicit RecordingPurgeObserver(bool ok) : ok_(ok) {}
+  void OnAdminPurge(StringPiece url, bool global, int64 now_ms,
+                    Done done) override {
+    urls.emplace_back(url.data(), url.size());
+    globals.push_back(global);
+    done(ok_, ok_ ? GoogleString() : GoogleString("observer refused"));
+  }
+
+  std::vector<GoogleString> urls;
+  std::vector<bool> globals;
+
+ private:
+  bool ok_;
+};
+
+TEST_F(SystemCachesTest, PurgeUrlAddsTheNormalisedForm) {
+  options_->set_enable_cache_purge(true);
+  SystemServerContext* server_context = PopulateCacheForPurgeTest();
+  server_context->PostInitHook();
+  SystemRewriteOptions* options =
+      server_context->global_system_rewrite_options();
+  RequestContextPtr request_context(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  StringAsyncFetch fetch(request_context);
+  const int64 before_ms = timer()->NowMs() - 1;
+  server_context->admin_site()->PurgeHandler(
+      "http://EXAMPLE.com:80/b.css", server_context->cache_path(), &fetch);
+  ASSERT_TRUE(fetch.done());
+  EXPECT_THAT(fetch.buffer(), ::testing::HasSubstr("\"success\":true"));
+  server_context->FlushCacheIfNecessary();
+  EXPECT_FALSE(
+      options->IsUrlCacheValid("http://EXAMPLE.com:80/b.css", before_ms, true));
+  EXPECT_FALSE(
+      options->IsUrlCacheValid("http://example.com/b.css", before_ms, true));
+  EXPECT_TRUE(
+      options->IsUrlCacheValid("http://example.com/c.css", before_ms, true));
+}
+
+TEST_F(SystemCachesTest, PurgeReachesEveryObserverAndFailsWithOne) {
+  options_->set_enable_cache_purge(true);
+  SystemServerContext* server_context = PopulateCacheForPurgeTest();
+  server_context->PostInitHook();
+  RequestContextPtr request_context(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  RecordingPurgeObserver good(true);
+  RecordingPurgeObserver bad(false);
+  SystemCachePath* cache_path = server_context->cache_path();
+  cache_path->AddPurgeObserver(&good);
+
+  StringAsyncFetch url_fetch(request_context);
+  server_context->admin_site()->PurgeHandler(kUrl1, cache_path, &url_fetch);
+  ASSERT_TRUE(url_fetch.done());
+  EXPECT_THAT(url_fetch.buffer(), ::testing::HasSubstr("\"success\":true"));
+  ASSERT_EQ(1u, good.urls.size());
+  EXPECT_EQ(kUrl1, good.urls[0]);
+  EXPECT_FALSE(good.globals[0]);
+
+  cache_path->AddPurgeObserver(&bad);
+  StringAsyncFetch global_fetch(request_context);
+  server_context->admin_site()->PurgeHandler("http://example.com/*", cache_path,
+                                             &global_fetch);
+  ASSERT_TRUE(global_fetch.done());
+  EXPECT_THAT(global_fetch.buffer(), ::testing::HasSubstr("\"success\":false"));
+  EXPECT_THAT(global_fetch.buffer(), ::testing::HasSubstr("observer refused"));
+  ASSERT_EQ(2u, good.urls.size());
+  EXPECT_TRUE(good.globals[1]);
+  ASSERT_EQ(1u, bad.urls.size());
+  EXPECT_TRUE(bad.globals[0]);
+
+  cache_path->RemovePurgeObserver(&good);
+  cache_path->RemovePurgeObserver(&bad);
+  EXPECT_TRUE(cache_path->purge_observers().empty());
 }
 
 TEST_F(SystemCachesTest, InvalidateWithPurgeDisabled) {

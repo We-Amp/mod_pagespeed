@@ -306,6 +306,23 @@ void SystemCachePath::RemoveServerContext(SystemServerContext* server_context) {
   server_context_set_.erase(server_context);
 }
 
+void SystemCachePath::AddPurgeObserver(DaemonHtmlPurgeObserver* observer) {
+  ScopedMutex lock(mutex_.get());
+  purge_observers_.push_back(observer);
+}
+
+void SystemCachePath::RemovePurgeObserver(DaemonHtmlPurgeObserver* observer) {
+  ScopedMutex lock(mutex_.get());
+  purge_observers_.erase(
+      std::remove(purge_observers_.begin(), purge_observers_.end(), observer),
+      purge_observers_.end());
+}
+
+std::vector<DaemonHtmlPurgeObserver*> SystemCachePath::purge_observers() const {
+  ScopedMutex lock(mutex_.get());
+  return purge_observers_;
+}
+
 void SystemCachePath::UpdateCachePurgeSet(
     const CopyOnWrite<PurgeSet>& purge_set) {
   ScopedMutex lock(mutex_.get());
