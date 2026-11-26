@@ -138,6 +138,9 @@ function Setup {
             [IO.File]::WriteAllText("$dir\$name", $page)
         }
         [IO.File]::WriteAllText("$dir\gzip.html", $large)
+        # One modification time for every copy: a page the module leaves
+        # alone (a HEAD) carries Last-Modified and an entity tag made from it.
+        Get-ChildItem $dir -Filter *.html | ForEach-Object { $_.LastWriteTimeUtc = [DateTime]::new(2026, 1, 1, 0, 0, 0, [DateTimeKind]::Utc) }
         # The per-site file is layered last over the machine-wide one. ASCII:
         # the module's configuration reader has no byte order mark handling.
         $cfg = @(
@@ -201,10 +204,22 @@ function Teardown {
 
 # One response as compared across the sites: status, header lines without
 # Date (each response has its own), and the body.
-function Snapshot($r) {
-    $lines = @($r.Lines | Where-Object { $_ -notmatch '^(?i)date:' })
-    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($r.Body)).Replace("-", "").Substring(0, 16)
-    "{0}|{1}|{2}|{3}" -f $r.Status, ($lines -join "~"), $r.Body.Length, $hash
+function Snapshot($r, [string]$Site) {
+    # IIS's own error pages name the site's physical path: compared with the
+    # site name taken out, and their length with it (as the Apache and nginx
+    # lanes take the host name out).
+    $text = [Text.Encoding]::GetEncoding(28591).GetString($r.Body)
+    $plain = $text.Replace($Site, "SITE")
+    $shrink = $text.Length - $plain.Length
+    $body = [Text.Encoding]::GetEncoding(28591).GetBytes($plain)
+    $lines = @()
+    foreach ($l in $r.Lines) {
+        if ($l -match '^(?i)date:') { continue }
+        if ($shrink -ne 0 -and $l -match '^(?i)content-length:\s*(\d+)$') { $l = "Content-Length: $([int64]$Matches[1] - $shrink)" }
+        $lines += $l
+    }
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($body)).Replace("-", "").Substring(0, 16)
+    "{0}|{1}|{2}|{3}" -f $r.Status, ($lines -join "~"), $body.Length, $hash
 }
 
 function Read-Decisions([string]$Site) {
@@ -256,7 +271,7 @@ function Run {
             foreach ($page in $requests.Keys) {
                 $req = $requests[$page]
                 $r = Invoke-Raw $Sites[$s].Port "/$page" $req.Method $req.Headers
-                $snap["$s|$page"] = Snapshot $r
+                $snap["$s|$page"] = Snapshot $r $s
                 if ($pass -eq "compare" -and $s -eq "htmlrep-off") {
                     Write-Output ("INFO | {0} | status={1} lines={2}" -f $page, $r.Status, (($r.Lines | Where-Object { $_ -notmatch '^(?i)date:' }) -join "; "))
                 }
