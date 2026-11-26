@@ -219,3 +219,7 @@ def test_static_handler_still_answers_its_own_conditionals(host):
     assert status == 304
     status, _ = _request(host, STATIC, [("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", last_modified)])
     assert status == 200
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
