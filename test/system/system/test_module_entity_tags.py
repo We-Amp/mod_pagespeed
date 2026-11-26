@@ -20,7 +20,7 @@ PAGESPEED_STRIP_ECHO_PORT, which records the conditionals it receives:
                            the same server: a module in front of a module
 
 Each host also serves the static file /strip_tags/plain.txt from its document
-root, where the server's own handler answers conditionals.
+root, whose conditionals the server's own handler answers.
 """
 
 import itertools
@@ -203,18 +203,19 @@ def test_chained_module_origin_never_sees_an_outer_tag():
     assert seen["if-none-match"] == ['W/"v1"'], seen
 
 
-# The server's own static handler answers conditionals: a module tag must not
-# let the If-Modified-Since beside it turn a 200 into a 304.
+# The server's own static handler answers conditionals. If-Modified-Since
+# without a module tag still reaches it; with one, both fields are gone, and
+# the file is sent in full.
 STATIC = "/strip_tags/plain.txt"
 
 
 @pytest.mark.parametrize("host", [OFF_HOST, AGENT_HOST])
-def test_static_handler_never_sees_the_tag(host):
+def test_static_handler_still_answers_its_own_conditionals(host):
     status, headers = _request(host, STATIC, [])
     assert status == 200
     last_modified = dict((n.lower(), v) for n, v in headers).get("last-modified")
     assert last_modified, headers
     status, _ = _request(host, STATIC, [("If-Modified-Since", last_modified)])
-    assert status == 304, "control: the static handler answers If-Modified-Since"
+    assert status == 304
     status, _ = _request(host, STATIC, [("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", last_modified)])
     assert status == 200
