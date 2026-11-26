@@ -223,6 +223,12 @@ Write-Host "site+pool created ($SiteName on :$Port, pool $PoolName)"
 Write-Host "install ASan module exit: $LASTEXITCODE"
 & $ac set config "$SiteName/" -section:system.webServer/modules "/+[name='$ModuleName']" /commit:apphost
 Write-Host "site-level enable ASan module exit: $LASTEXITCODE"
+# The ASan image's second registration, first in the site's modules, so the
+# final-view send runs under ASan too (the entry is known by this name).
+& $ac install module /name:PageSpeedFinalView /image:"$RigDir\bin\pagespeed_iis.dll" /add:false
+Write-Host "install ASan PageSpeedFinalView exit: $LASTEXITCODE"
+& $ac set config "$SiteName/" -section:system.webServer/modules "/+[@start,name='PageSpeedFinalView']" /commit:apphost
+Write-Host "site-level enable ASan PageSpeedFinalView exit: $LASTEXITCODE"
 
 # 10. Start
 & $ac start apppool $PoolName

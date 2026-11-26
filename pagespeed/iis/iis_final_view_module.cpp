@@ -7,6 +7,7 @@
 
 #include "pagespeed/iis/iis_daemon_html_capture.h"
 #include "pagespeed/iis/iis_global_constants.h"
+#include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_module_request_context.h"
 #include "pagespeed/iis/iis_request_context.h"
 
@@ -38,7 +39,9 @@ DaemonHtmlHeaderLines IisResponseHeaderLines(const HTTP_RESPONSE& response) {
 REQUEST_NOTIFICATION_STATUS IisFinalViewModule::OnSendResponse(
     IN IHttpContext* pHttpContext, IN ISendResponseProvider* pProvider) {
   // Only the main registration's own context says whether this response is
-  // one the module records.
+  // one the module records.  Without the main entry (it was removed while
+  // this one stayed) there is no such context to read.
+  if (IisModuleFactory::module_id() == nullptr) return RQ_NOTIFICATION_CONTINUE;
   IisModuleRequestContext* request_context =
       IisModuleRequestContext::GetRequestContext(pHttpContext);
   if (request_context == nullptr) return RQ_NOTIFICATION_CONTINUE;

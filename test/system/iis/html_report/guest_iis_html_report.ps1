@@ -321,7 +321,7 @@ function Run {
     foreach ($s in @("htmlrep-report", "htmlrep-variants")) {
         $d = Decision $s "/gzip.html"
         $plain = Decision $s "/plain.html"
-        Check "static-gzip:$s" ($cached.Count -gt 0 -and $d -ne $null -and [int64]$d.size -eq $len -and $d.reason -ne "encoding" -and $d.action -eq $plain.action) ("compressed copies={0} size={1} file={2} action={3} reason={4} plain_action={5}" -f $cached.Count, $d.size, $len, $d.action, $d.reason, $plain.action)
+        Check "static-gzip:$s" ($cached.Count -gt 0 -and $d -ne $null -and [int64]$d.size -eq $len -and $d.reason -ne "encoding" -and $d.action -eq $plain.action -and $d.reason -eq $plain.reason) ("compressed copies={0} size={1} file={2} action={3} reason={4} plain_action={5}" -f $cached.Count, $d.size, $len, $d.action, $d.reason, $plain.action)
     }
 
     # Without the second entry: the store view only, so the customHeaders

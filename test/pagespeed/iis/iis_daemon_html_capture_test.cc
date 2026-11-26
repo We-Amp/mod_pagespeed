@@ -360,6 +360,43 @@ TEST_F(IisDaemonHtmlCaptureTest, ABrokenOrAbortedBodyIsNotWhole) {
   }
 }
 
+TEST_F(IisDaemonHtmlCaptureTest, ATruncatedInflatedBodyIsNotWhole) {
+  // The inflater did not reach the end of the gzip stream at the handler's
+  // last send: the decoded bytes are a prefix, never a whole body.
+  std::unique_ptr<IisDaemonHtmlCapture> capture = NewCapture();
+  capture->SetOrigin(200, kOrigin, /*body_inflated=*/true);
+  capture->AddBody("<html><body>", 12);
+  capture->NoteBodyEnd(/*decoded_whole=*/false);
+  capture->AddBody("</body></html>", 14);
+  capture->NoteModuleView(kModuleView);
+  capture->NoteFinalView(200, kModuleView);
+  capture->Finish();
+  ASSERT_EQ(2u, abi_->calls.size());
+  EXPECT_EQ(0, StoreView().body_complete);
+  EXPECT_EQ(0, FinalView().body_complete);
+  EXPECT_EQ(12u, StoreView().body_bytes);
+}
+
+TEST_F(IisDaemonHtmlCaptureTest, AnUnfinishedResponseDoesNotReportAMissingView) {
+  // Aborted, broken, or never ended before the final-view send: the send
+  // may simply not have come, so nothing says the entry is missing.
+  for (int variant = 0; variant < 3; ++variant) {
+    abi_->calls.clear();
+    std::unique_ptr<IisDaemonHtmlCapture> capture = NewCapture();
+    capture->SetOrigin(200, kOrigin, false);
+    capture->AddBody("<html></html>", 13);
+    capture->NoteModuleView(kModuleView);
+    if (variant == 0) {
+      capture->NoteBodyEnd();
+      capture->NoteAborted();
+    } else if (variant == 1) {
+      capture->NoteBodyBroken();
+      capture->NoteBodyEnd();
+    }  // variant 2: the body never ended
+    EXPECT_FALSE(capture->Finish()) << variant;
+  }
+}
+
 TEST(IisDaemonHtmlViewLinesTest, DropsOnlyTheModulesOwnLines) {
   const DaemonHtmlHeaderLines lines =
       IisDaemonHtmlViewLines({{"x-page-speed", "1"},

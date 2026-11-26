@@ -95,7 +95,8 @@ void IisDaemonHtmlCapture::AddBody(const char* data, size_t size) {
   recording_->AddBody(data, size);
 }
 
-void IisDaemonHtmlCapture::NoteBodyEnd() {
+void IisDaemonHtmlCapture::NoteBodyEnd(bool decoded_whole) {
+  if (!decoded_whole) body_broken_ = true;
   if (finished_ || body_broken_ || body_ended_) return;
   body_ended_ = true;
   recording_->set_body_ended();
@@ -125,7 +126,10 @@ void IisDaemonHtmlCapture::NoteFinalView(int status,
 
 bool IisDaemonHtmlCapture::Finish() {
   if (finished_) return false;
-  const bool final_view_missing = recording_->needs_final_headers();
+  // Missing only for a response that went out whole: one that was aborted
+  // or broken may simply not have reached the final-view send.
+  const bool final_view_missing = recording_->needs_final_headers() &&
+                                  body_ended_ && !body_broken_ && !aborted_;
   finished_ = true;
   recording_->Finish(aborted_);
   return final_view_missing;

@@ -2407,7 +2407,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				if (!more_data)/*not chunked, seen final chunk*/
 				{
 					if (innerContext->daemon_html_capture() != nullptr) {
-						innerContext->daemon_html_capture()->NoteBodyEnd();
+						// An inflated body is whole only when the inflater reached
+						// the end of its stream: a truncated gzip body is not.
+						GzipInflater* body_inflater = request_context->inflater();
+						innerContext->daemon_html_capture()->NoteBodyEnd(
+							body_inflater == nullptr || body_inflater->finished());
 					}
 					log(pHttpContext, "OnSendResponse: call proxy_fetch->Done(), return pending");
 					// The hand-off must precede Done(): it reads innerContext's

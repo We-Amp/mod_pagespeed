@@ -81,8 +81,10 @@ class IisDaemonHtmlCapture {
   // The body, in order, as the rewriter is given it.  Nothing is taken
   // after NoteBodyEnd.
   void AddBody(const char* data, size_t size);
-  // The handler's last send: the body is whole.
-  void NoteBodyEnd();
+  // The handler's last send: the body is whole, unless `decoded_whole` says
+  // the decoder of an inflated body did not reach the end of its stream (a
+  // truncated gzip body), which counts as NoteBodyBroken.
+  void NoteBodyEnd(bool decoded_whole = true);
   // Part of the body could not be read or decoded: it is never whole.
   void NoteBodyBroken();
   // The response did not reach the client (a reset or a disconnect).
@@ -98,8 +100,9 @@ class IisDaemonHtmlCapture {
   bool needs_final_view() const;
 
   // Hands the recording to the engine, once.  Returns true when the module
-  // view was taken but no final view came: the report then read the store
-  // view alone.
+  // view was taken but no final view came for a response that went out
+  // whole (not aborted, not broken): the report then read the store view
+  // alone.
   bool Finish();
   bool finished() const { return finished_; }
 

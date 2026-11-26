@@ -1240,8 +1240,14 @@ function Install-PageSpeedModule {
     # view).  "install module /add:true" would append it at the end.
     $out = Invoke-AppCmd install module /name:PageSpeedFinalView /image:$systemModulePath /add:false
     if ($LASTEXITCODE -ne 0) { throw "Could not register PageSpeedFinalView: $out" }
-    $out = Invoke-AppCmd set config -section:system.webServer/modules "/+[@start,name='PageSpeedFinalView']" /commit:apphost
+    # /section:, not -section: -- PowerShell splits a "-name:value" token
+    # passed to a function, and appcmd then reads the section as a site.
+    $out = Invoke-AppCmd set config /section:system.webServer/modules "/+[@start,name='PageSpeedFinalView']" /commit:apphost
     if ($LASTEXITCODE -ne 0) { throw "Could not add PageSpeedFinalView first in modules: $out" }
+    [xml]$modulesXml = (Invoke-AppCmd list config /section:system.webServer/modules) -join "`n"
+    $names = @($modulesXml.SelectNodes('/system.webServer/modules/add') | ForEach-Object { $_.GetAttribute('name') })
+    Write-Status "modules order: $($names -join ', ')" "Gray"
+    if ($names.Count -eq 0 -or $names[0] -ne 'PageSpeedFinalView') { throw "PageSpeedFinalView is not the first entry of system.webServer/modules" }
     Write-Status "Registered PageSpeedFinalView first in modules" "Green"
 }
 
