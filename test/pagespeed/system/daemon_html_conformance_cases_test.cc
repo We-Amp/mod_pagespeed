@@ -505,11 +505,19 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsAnExactStructTheCallDoesNotRecord) {
   step["expect"]["calls"].append(call);
   engine["steps"].append(step);
   CheckEngine(c, "row", engine);
-  ASSERT_EQ(1u, c.errors().size());
+  // Only the store classifier's "stored" is refused; the serve
+  // classifier records both structs.
+  std::vector<GoogleString> refused;
+  for (const GoogleString& e : c.errors()) {
+    if (e.find("is not recorded for") != GoogleString::npos) {
+      refused.push_back(e);
+    }
+  }
+  ASSERT_EQ(1u, refused.size()) << JoinCollection(c.errors(), "\n");
   EXPECT_NE(GoogleString::npos,
-            c.errors()[0].find(
+            refused[0].find(
                 "exact stored is not recorded for ps_html_store_classify"))
-      << c.errors()[0];
+      << refused[0];
 }
 
 }  // namespace
