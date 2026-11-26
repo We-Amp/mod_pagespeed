@@ -142,6 +142,14 @@ class RewriteStats {
   // (pagespeed/system/daemon_html_report.h).
   static const char* const kDaemonHtmlRefusedReasons[];
 
+  // The HTML cache engine (DaemonHtmlCache serve-variants): its counters,
+  // and the reasons a Markdown request falls through, each counted as
+  // daemon_markdown_fallthrough_<reason>.  Both nullptr-terminated.  The
+  // reasons are the library's serve reasons (ps_html_serve_reason_name) in
+  // its order, then the engine's own, then "other" for anything else.
+  static const char* const kDaemonHtmlEngineCounters[];
+  static const char* const kDaemonMarkdownFallthroughReasons[];
+
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
   Variable* ipro_daemon_served_original() {
     return ipro_daemon_served_original_;

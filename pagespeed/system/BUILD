@@ -285,6 +285,39 @@ cc_library(
     ],
 )
 
+# The seam between the shared admin purge and the HTML cache engine, and the
+# purge-key normalisation both use.  Pure; the system library depends on it.
+cc_library(
+    name = "daemon_html_purge_observer",
+    srcs = ["daemon_html_purge_observer.cc"],
+    hdrs = ["daemon_html_purge_observer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The HTML cache engine: store, Markdown serve and purge fence for every port,
+# with every policy verdict from the library through the run-time binding.
+# The same LICENSING BOUNDARY as :daemon_adapter applies.
+cc_library(
+    name = "daemon_html_engine",
+    srcs = ["daemon_html_engine.cc"],
+    hdrs = ["daemon_html_engine.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_adapter",
+        ":daemon_html_purge_observer",
+        ":daemon_record_arm",
+        ":daemon_serve_arm",
+        ":serve_host_names",
+        ":site_cache_fragment",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@boringssl//:crypto",
+    ],
+)
+
 # The root process sets the statistics start-time gauge where the shared
 # segment is created; that call site needs a live server to execute, so
 # test/pagespeed/apache/daemon_seam_test.cc reads this source to pin it.
