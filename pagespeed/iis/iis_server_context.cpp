@@ -331,18 +331,16 @@ namespace net_instaweb {
 			kIisFinalViewModuleNameAscii);
 	}
 
-	void IisServerContext::NoteDaemonHtmlMarkdownNotFinalized() {
+	void IisServerContext::NoteDaemonHtmlMarkdownNotFinalized(const char* why) {
 		if (daemon_html_markdown_not_finalized_.exchange(true)) {
 			return;
 		}
 		message_handler()->Message(
 			kWarning,
-			"DaemonHtmlCache: the %s module entry did not run for this site, so "
-			"a Markdown answer could not be sent (the client got an error) and "
-			"no Markdown copy is served here until the application pool "
-			"restarts. Add the entry at the top of the site's modules list "
-			"(the installer does).",
-			kIisFinalViewModuleNameAscii);
+			"DaemonHtmlCache: a Markdown answer could not be sent on this site "
+			"(%s; the client got an error), so no Markdown copy is served here "
+			"until the application pool restarts.",
+			why);
 	}
 
 	IisServerContext::~IisServerContext() {

@@ -134,9 +134,21 @@ namespace net_instaweb {
 		// site's modules list), so the client got the pending error.  From
 		// then on this site answers Markdown requests with their HTML.
 		// Logged once.
-		void NoteDaemonHtmlMarkdownNotFinalized();
+		// `why` names the cause for the log: the entry did not run, another
+		// module replaced the response, or a compressor encoded it.
+		void NoteDaemonHtmlMarkdownNotFinalized(const char* why);
 		bool daemon_html_final_view_missing() const {
 			return daemon_html_markdown_not_finalized_.load(std::memory_order_relaxed);
+		}
+		// The final-view entry's send ran for a response of this site in
+		// this process: positive evidence that it can send a Markdown
+		// answer.  Until then this site answers Markdown requests with
+		// their HTML.  Lock-free.
+		void NoteDaemonHtmlFinalViewSeen() {
+			daemon_html_final_view_seen_.store(true, std::memory_order_relaxed);
+		}
+		bool daemon_html_final_view_seen() const {
+			return daemon_html_final_view_seen_.load(std::memory_order_relaxed);
 		}
 
 	private:
@@ -164,6 +176,7 @@ namespace net_instaweb {
 		std::atomic<int64> daemon_html_last_stats_tick_ms_{0};
 		std::atomic<bool> daemon_html_final_view_missing_logged_{false};
 		std::atomic<bool> daemon_html_markdown_not_finalized_{false};
+		std::atomic<bool> daemon_html_final_view_seen_{false};
  		IisServerContext(const IisServerContext&) = delete;
  		IisServerContext& operator=(const IisServerContext&) = delete;
 	};

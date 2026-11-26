@@ -16,10 +16,19 @@
     `customHeaders` (for example `Strict-Transport-Security` and
     `X-Content-Type-Options`) are not on it, and it is never compressed.
   - The answer is sent by the `PageSpeedFinalView` module entry, which the
-    installer lists first. Where that entry does not run, the first Markdown
-    request gets an error and every later one the page's HTML (logged once);
-    where another module replaces the response first (a custom error page),
-    the client gets that response. Never a Markdown answer with the site's
+    installer lists first. Each worker process serves Markdown for a site
+    only after it has seen that entry run for one of the site's responses;
+    a site without it gets HTML. Where another module replaces the answer
+    first (a custom error page with `existingResponse="Replace"`) or a
+    compressor encodes it, that request gets the error and every later one
+    the page's HTML (logged once). Never a Markdown answer with the site's
     own headers on it.
   - Every HTML response of such a site is kept out of IIS's kernel and
     output caches, so an agent is never answered with cached HTML.
+  - Each worker process reads the site's bindings once: a binding added or
+    removed takes effect when the application pool recycles. An HTML page
+    IIS cached before the option was turned on is answered from that cache
+    until it expires; recycle the pool after turning it on.
+  - `Vary: Accept` is added to the HTML pages the module rewrites; a page it
+    passes through unchanged (a HEAD, an AJAX request, a disallowed URL)
+    does not get it.

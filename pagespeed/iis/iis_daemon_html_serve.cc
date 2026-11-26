@@ -124,16 +124,20 @@ IisMarkdownFinalPlan PlanIisMarkdownFinal(int status, int substatus,
       HasLine(current, HttpAttributes::kContentType)) {
     return plan;
   }
+  for (const auto& line : current) {
+    if (StringCaseEqual(line.first, HttpAttributes::kContentEncoding) ||
+        StringCaseEqual(line.first, "Content-Range")) {
+      // The body is written after the stage that set this: it would not
+      // describe it.
+      plan.transport_conflict = true;
+      return plan;
+    }
+  }
   plan.finalize = true;
   const bool has_length =
       HasLine(answer.headers, HttpAttributes::kContentLength);
   for (const auto& line : current) {
     const GoogleString& name = line.first;
-    if (StringCaseEqual(name, HttpAttributes::kContentEncoding) ||
-        StringCaseEqual(name, "Content-Range")) {
-      plan.transport_conflict = true;
-      continue;
-    }
     if (IsTransportLine(name) &&
         !(has_length &&
           StringCaseEqual(name, HttpAttributes::kTransferEncoding))) {

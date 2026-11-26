@@ -82,7 +82,9 @@ void IisInnerRequestContext::CleanupStoredContext()
 	}
 	if (markdown_answer_ != nullptr) {
 		// Kept for the final-view registration, which never took it.
-		server_context_->NoteDaemonHtmlMarkdownNotFinalized();
+		server_context_->NoteDaemonHtmlMarkdownNotFinalized(
+			"the PageSpeedFinalView module entry did not run; add it at the top of "
+			"the site's modules list, as the installer does");
 		markdown_answer_.reset();
 	}
 	// IIS is done with the request, but the rewriter may still be producing

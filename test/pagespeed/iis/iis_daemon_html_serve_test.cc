@@ -159,15 +159,16 @@ TEST(IisMarkdownFinalTest, ThePendingAnswerIsFinalisedWithEverythingElseRemoved)
   }
 }
 
-TEST(IisMarkdownFinalTest, AnEncodingOrRangeLineIsKeptAndCounted) {
+TEST(IisMarkdownFinalTest, AnEncodingOrRangeLineMeansNoAnswer) {
+  // The answer's body is written after every stage that could encode it,
+  // so a line that describes an encoding or a range would not describe it:
+  // the answer is not sent, and the conflict is counted.
   for (const char* name : {"Content-Encoding", "Content-Range"}) {
     const IisMarkdownFinalPlan plan = PlanIisMarkdownFinal(
         kIisMarkdownPendingStatus, kIisMarkdownPendingSubStatus, 0,
         {{name, "gzip"}, {"X-Custom", "v"}}, Answer200());
-    ASSERT_TRUE(plan.finalize) << name;
+    EXPECT_FALSE(plan.finalize) << name;
     EXPECT_TRUE(plan.transport_conflict) << name;
-    EXPECT_FALSE(Removes(plan, name)) << name;
-    EXPECT_TRUE(Removes(plan, "X-Custom")) << name;
   }
 }
 

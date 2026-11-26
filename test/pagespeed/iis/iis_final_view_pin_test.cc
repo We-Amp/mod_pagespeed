@@ -92,6 +92,7 @@ const char* const kCallsAllowedInFinalView[] = {
     "needs_final_view", "GetResponse",         "GetRawHttpResponse",
     "NoteFinalView",    "GetConnection",       "IsConnected",
     "NoteAborted",      "markdown_answer_pending",
+    "server_context",   "NoteDaemonHtmlFinalViewSeen",
 };
 
 class IisFinalViewPinTest : public testing::Test {};
@@ -242,6 +243,13 @@ TEST_F(IisFinalViewPinTest, AMarkdownAnswerIsFinalisedOnlyAfterThePlanSaysSo) {
   const size_t take_at = finalize.find("inner->take_markdown_answer()");
   const size_t plan_at = finalize.find("PlanIisMarkdownFinal(");
   const size_t refuse_at = finalize.find("if(!plan.finalize){");
+  // A refused answer is latched: the site answers later Markdown requests
+  // with their HTML.
+  EXPECT_NE(GoogleString::npos,
+            finalize.find("server_context->NoteDaemonHtmlMarkdownNotFinalized("));
+  // Every header call is checked, and a failure leaves a plain error.
+  EXPECT_EQ(0, CountOf(finalize, ";response->DeleteHeader("));
+  EXPECT_EQ(0, CountOf(finalize, ";response->SetHeader("));
   ASSERT_NE(GoogleString::npos, take_at);
   ASSERT_NE(GoogleString::npos, plan_at);
   ASSERT_NE(GoogleString::npos, refuse_at);
@@ -273,11 +281,16 @@ TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
       FunctionBody(cc, "staticboolServeIisMarkdownAnswer(");
   ASSERT_FALSE(serve.empty())
       << "ServeIisMarkdownAnswer was not found; this pin needs updating";
+  const size_t seen_at =
+      serve.find("!server_context->daemon_html_final_view_seen()");
+  ASSERT_NE(GoogleString::npos, seen_at);
   const size_t missing_at =
       serve.find("server_context->daemon_html_final_view_missing()");
   const size_t serve_at = serve.find("engine->Serve(");
   ASSERT_NE(GoogleString::npos, missing_at);
   ASSERT_NE(GoogleString::npos, serve_at);
+  EXPECT_LT(seen_at, serve_at)
+      << "a Markdown answer can be made before the final view was seen";
   EXPECT_LT(missing_at, serve_at)
       << "a Markdown answer can be made where the final view was missing";
   // An answer no final-view send took is noted when the request ends.
@@ -286,7 +299,7 @@ TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
   ASSERT_NE(GoogleString::npos, kept_at);
   EXPECT_NE(GoogleString::npos,
             FunctionBody(inner.substr(kept_at), "if(markdown_answer_!=nullptr){")
-                .find("server_context_->NoteDaemonHtmlMarkdownNotFinalized();"));
+                .find("server_context_->NoteDaemonHtmlMarkdownNotFinalized("));
 
   const GoogleString emit = FunctionBody(
       cc, "boolClearAndEmitAllowlisted(constDaemonHtmlServeResult&result,"

@@ -26,7 +26,8 @@
 // untouched error response (PlanIisMarkdownFinal).  When the final-view
 // entry does not run, or another module replaced the response in between
 // (a custom error page), the client gets an error, never a Markdown answer
-// with the site's own headers on it.
+// with the site's own headers on it, and the site answers later Markdown
+// requests with their HTML.
 
 #ifndef PAGESPEED_IIS_IIS_DAEMON_HTML_SERVE_H_
 #define PAGESPEED_IIS_IIS_DAEMON_HTML_SERVE_H_
@@ -82,8 +83,9 @@ struct IisMarkdownFinalPlan {
   bool finalize = false;
   // The names to delete before the answer's own lines are set, each once.
   std::vector<GoogleString> remove;
-  // A Content-Encoding or Content-Range line is present and kept, so the
-  // body stays readable: counted as a transport conflict.
+  // A Content-Encoding or Content-Range line is present (a compressor that
+  // ignored the no-compress mark): the answer, whose body is written after
+  // that stage, is not sent, and the conflict is counted.
   bool transport_conflict = false;
 };
 

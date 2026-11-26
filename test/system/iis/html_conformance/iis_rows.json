@@ -62,11 +62,10 @@
        }
       ],
       "expect": {
-       "status": 500,
+       "status": 200,
+       "content_type": "text/html",
        "headers_absent": [
-        "X-Robots-Tag",
-        "ETag",
-        "Content-Type"
+        "X-Robots-Tag"
        ]
       }
      },
@@ -152,11 +151,10 @@
        }
       ],
       "expect": {
-       "status": 500,
+       "status": 200,
+       "content_type": "text/html",
        "headers_absent": [
-        "X-Robots-Tag",
-        "ETag",
-        "Content-Type"
+        "X-Robots-Tag"
        ]
       }
      },
@@ -247,6 +245,44 @@
        "headers_absent": [
         "X-Robots-Tag",
         "ETag"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
        ]
       }
      }

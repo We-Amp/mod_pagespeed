@@ -998,18 +998,23 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			if (!head && result.status == 200) answer->body = result.body;
 			IHttpResponse* response = http_context_->GetResponse();
 			if (response == nullptr) return false;
-			// Dynamic compression is IIS's last stage before the final-view
-			// send; static compression never sees an answer made here.
-			if (no_compress_ &&
-				FAILED(http_context_->SetServerVariable("IIS_EnableDynamicCompression", L"0"))) {
+			// Nothing of the response has been made yet at this stage, so a
+			// failure here leaves it as it was and the request falls through.
+			response->Clear();
+			if (FAILED(response->SetStatus(kIisMarkdownPendingStatus, "Internal Server Error",
+				kIisMarkdownPendingSubStatus, S_OK, nullptr, TRUE))) {
+				response->Clear();
 				return false;
 			}
 			// Never kept by IIS's response caches: the answer is per client.
 			DisarmResponseCaches(response);
-			response->Clear();
-			if (FAILED(response->SetStatus(kIisMarkdownPendingStatus, "Internal Server Error",
-				kIisMarkdownPendingSubStatus, S_OK, nullptr, TRUE))) {
-				return false;
+			// Dynamic compression is IIS's last stage before the final-view
+			// send; static compression never sees an answer made here.  Set
+			// last, so no failure above leaves an HTML response uncompressed.
+			// If it cannot be set, a compressed response is never finalised
+			// (PlanIisMarkdownFinal): the client gets the pending error.
+			if (no_compress_) {
+				http_context_->SetServerVariable("IIS_EnableDynamicCompression", L"0");
 			}
 			inner_->set_markdown_answer(std::move(answer));
 			return true;
@@ -1039,10 +1044,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (engine == nullptr) {
 			return false;
 		}
-		// The final-view entry sends the answer.  A site where it was seen
-		// not to run gets its HTML (the first such answer went out as the
-		// pending error).
-		if (server_context->daemon_html_final_view_missing()) {
+		// The final-view entry sends the answer: only once its send has been
+		// seen running for this site in this process, and never again after
+		// an answer could not be sent.  Any other request gets its HTML.
+		if (!server_context->daemon_html_final_view_seen() ||
+			server_context->daemon_html_final_view_missing()) {
 			return false;
 		}
 		DaemonHtmlRequestFacts facts;
