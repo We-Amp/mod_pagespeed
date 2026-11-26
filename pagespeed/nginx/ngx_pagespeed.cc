@@ -2746,8 +2746,7 @@ PsDaemonHtmlRequest* ps_daemon_html_state(ps_request_ctx_t* ctx) {
 // that are sent (hash 0 lines are not); of an upstream's, every line it
 // received (`all`), so that no module that zeroed a hash hides one.
 void ps_daemon_html_list_lines(const ngx_list_t& list,
-                               DaemonHtmlHeaderLines* lines,
-                               bool all = false) {
+                               DaemonHtmlHeaderLines* lines, bool all = false) {
   const ngx_list_part_t* part = &list.part;
   const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
   for (ngx_uint_t i = 0; /* void */; i++) {
@@ -2830,10 +2829,9 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   // serve runs, has not applied.
   const StringPiece target = str_to_string_piece(r->unparsed_uri);
   const StringPiece raw_path = target.substr(0, target.find('?'));
-  facts->url_agreed = r == r->main && !r->internal && host_agreed &&
-                      url.IsWebValid() &&
-                      raw_path == str_to_string_piece(r->uri) &&
-                      ps_in_place_url_agrees(r, url);
+  facts->url_agreed =
+      r == r->main && !r->internal && host_agreed && url.IsWebValid() &&
+      raw_path == str_to_string_piece(r->uri) && ps_in_place_url_agrees(r, url);
   facts->authenticated_user = r->headers_in.user.len != 0;
   std::vector<NgxHeaderLine> lines;
   NgxListIterator it(&r->headers_in.headers.part);
