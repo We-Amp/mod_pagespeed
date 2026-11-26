@@ -776,7 +776,7 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
     bool zero = true;
     for (size_t i = 0; i < kPsHtmlHashBytes; ++i) zero = zero && hash[i] == 0;
     if (zero) return "zero";
-    const GoogleString hex = Hex(hash, kPsHtmlHashBytes);
+    const GoogleString hex = net_instaweb::Hex(hash, kPsHtmlHashBytes);
     auto it = hash_names_.find(hex);
     return it == hash_names_.end() ? Json::Value(hex)
                                    : Json::Value(StrCat("sha256:", it->second));
