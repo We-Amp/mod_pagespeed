@@ -1094,17 +1094,25 @@ int ps_read_shared_config_html_mode(const char* cache_path) {
 }
 
 const char* ps_html_serve_reason_name(int reason) {
-  static const char* const kNames[] = {
-      "fresh",          "mode",
-      "auth_request",   "cookie_request",
-      "client_no_cache", "needs_validation",
-      "stale",          "headers_not_reproducible",
-      "sidecar_missing", "purged",
-      "absent",         "binding_stale",
-      "parent_stale",   "method",
-      "range",          "cors",
-      "no_transform",   "withheld",
-      "skew"};
+  static const char* const kNames[] = {"fresh",
+                                       "mode",
+                                       "auth_request",
+                                       "cookie_request",
+                                       "client_no_cache",
+                                       "needs_validation",
+                                       "stale",
+                                       "headers_not_reproducible",
+                                       "sidecar_missing",
+                                       "purged",
+                                       "absent",
+                                       "binding_stale",
+                                       "parent_stale",
+                                       "method",
+                                       "range",
+                                       "cors",
+                                       "no_transform",
+                                       "withheld",
+                                       "skew"};
   if (reason < 0 ||
       static_cast<size_t>(reason) >= sizeof(kNames) / sizeof(kNames[0])) {
     return nullptr;
@@ -1138,8 +1146,7 @@ int ps_html_markdown_etag(const uint8_t* binding_hash,
   return 0;
 }
 
-int ps_if_none_match_matches_weak(const char* if_none_match,
-                                  const char* etag) {
+int ps_if_none_match_matches_weak(const char* if_none_match, const char* etag) {
   if (etag == nullptr || *etag == '\0') return -1;
   if (if_none_match == nullptr) return 0;
   const char* p = TrimLeft(if_none_match);
@@ -1179,8 +1186,8 @@ int ps_html_serve_classify(const StubServeRequest* request,
     v.reason = static_cast<int>(EnvOr("PS_STUB_HTML_SERVE_REASON", 0));
     size_t len = 0;
     if (v.action == 2 &&
-        ps_html_markdown_etag(facts->binding_hash, facts->markdown_hash,
-                              v.etag, sizeof(v.etag), &len) == 0) {
+        ps_html_markdown_etag(facts->binding_hash, facts->markdown_hash, v.etag,
+                              sizeof(v.etag), &len) == 0) {
       v.not_modified =
           ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
     }
@@ -1231,8 +1238,7 @@ int ps_html_store_write_params(int action, uint32_t lifetime_s,
 
 int ps_html_stored_facts_from_reads(const void* original, const void* markdown,
                                     const void* withheld_marker,
-                                    int sidecar_present,
-                                    StubStoredFacts* out) {
+                                    int sidecar_present, StubStoredFacts* out) {
   if (out == nullptr || out->struct_size < sizeof(StubStoredFacts)) {
     return -1;
   }
@@ -1254,9 +1260,8 @@ int ps_html_stored_facts_from_reads(const void* original, const void* markdown,
 int ps_cache_write_headers_sidecar_site(void* cache,
                                         const StubSidecarWriteParams* params,
                                         const char* const* names,
-                                        const char* const* values,
-                                        size_t count, int* out_verdict,
-                                        int* out_stored) {
+                                        const char* const* values, size_t count,
+                                        int* out_verdict, int* out_stored) {
   if (cache == nullptr || params == nullptr ||
       params->struct_size < sizeof(StubSidecarWriteParams) ||
       params->url == nullptr || params->hostname == nullptr ||
@@ -1264,7 +1269,8 @@ int ps_cache_write_headers_sidecar_site(void* cache,
       (params->origin_html_hash != nullptr &&
        AllZero(params->origin_html_hash)) ||
       (count != 0 && (names == nullptr || values == nullptr)) ||
-      count > kSidecarLines || strlen(params->url) >= sizeof(g_sidecars[0].url)) {
+      count > kSidecarLines ||
+      strlen(params->url) >= sizeof(g_sidecars[0].url)) {
     return kErrInvalidArg;
   }
   for (size_t i = 0; i < count; ++i) {
@@ -1893,8 +1899,8 @@ int ps_notify_worker_ex(const char* socket_path,
           ? params->agent_request
           : 0;
   const bool has_site_fields =
-      params->struct_size >= offsetof(StubNotifyParams, notify_flags) +
-                                 sizeof(params->notify_flags);
+      params->struct_size >=
+      offsetof(StubNotifyParams, notify_flags) + sizeof(params->notify_flags);
   const char* site = has_site_fields ? params->site : nullptr;
   const uint32_t flags = has_site_fields ? params->notify_flags : 0;
   if (!StubSiteIsValid(site)) {

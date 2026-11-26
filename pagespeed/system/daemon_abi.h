@@ -1060,9 +1060,8 @@ class DaemonAbi {
   // ps_html_markdown_etag: 0; -1 for a bad argument; -3 when `capacity` is
   // too small (*out_len is then the length needed).
   virtual int HtmlMarkdownEtag(const uint8_t* /*binding_hash*/,
-                               const uint8_t* /*markdown_hash*/,
-                               char* /*buf*/, size_t /*capacity*/,
-                               size_t* /*out_len*/) const {
+                               const uint8_t* /*markdown_hash*/, char* /*buf*/,
+                               size_t /*capacity*/, size_t* /*out_len*/) const {
     return -1;
   }
 
@@ -1115,8 +1114,7 @@ class DaemonAbi {
   // ps_cache_remove_site: the whole key in one site.  kPsErrNotFound means
   // nothing was stored, which a remover treats as success.
   virtual int CacheRemoveSite(void* /*cache*/, const char* /*url*/,
-                              const char* /*hostname*/,
-                              const char* /*scheme*/,
+                              const char* /*hostname*/, const char* /*scheme*/,
                               const char* /*site*/) const {
     return kPsErrInvalidArg;
   }

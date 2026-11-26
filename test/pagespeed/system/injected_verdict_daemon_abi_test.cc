@@ -68,9 +68,9 @@ TEST_F(InjectedVerdictDaemonAbiTest, EveryServeVerdictCanBeInjected) {
   request.struct_size = sizeof(request);
   request.mode = kPsHtmlCacheServeVariants;
   request.method = "GET";
-  for (int action : {kPsHtmlServeActionFallThrough, kPsHtmlServeActionServeHtml,
-                     kPsHtmlServeActionServeMarkdown,
-                     kPsHtmlServeActionValidate}) {
+  for (int action :
+       {kPsHtmlServeActionFallThrough, kPsHtmlServeActionServeHtml,
+        kPsHtmlServeActionServeMarkdown, kPsHtmlServeActionValidate}) {
     for (int reason = 0; reason < 19; ++reason) {
       for (int not_modified : {0, 1}) {
         PsHtmlServeVerdict* v = &fake_->mutable_injection()->verdict;
@@ -164,9 +164,9 @@ TEST_F(InjectedVerdictDaemonAbiTest, StoreWriteParamsAndFactsAreInjectable) {
   PsWriteParams params = {};
   params.struct_size = sizeof(params);
   const char* age[] = {"5", "5"};
-  ASSERT_EQ(0, fake_->HtmlStoreWriteParams(kPsHtmlStoreActionStore, 60, 1, 0,
-                                           1, 2000500, age, 2, 99,
-                                           "text/html", &params));
+  ASSERT_EQ(0, fake_->HtmlStoreWriteParams(kPsHtmlStoreActionStore, 60, 1, 0, 1,
+                                           2000500, age, 2, 99, "text/html",
+                                           &params));
   EXPECT_EQ(2000u, params.cache_inserted_at);
   EXPECT_EQ(kPsSentinelOriginal, params.alternate_id);
   EXPECT_EQ(kPsFlagHeadersClassified | kPsFlagHeadersSidecarRequired,
@@ -178,9 +178,9 @@ TEST_F(InjectedVerdictDaemonAbiTest, StoreWriteParamsAndFactsAreInjectable) {
   EXPECT_EQ("age=5", call.args.back());
 
   fake_->mutable_injection()->write_params_inserted_at = 1900;
-  ASSERT_EQ(0, fake_->HtmlStoreWriteParams(kPsHtmlStoreActionStore, 60, 1, 0,
-                                           0, 2000500, nullptr, 0, 99,
-                                           "text/html", &params));
+  ASSERT_EQ(0, fake_->HtmlStoreWriteParams(kPsHtmlStoreActionStore, 60, 1, 0, 0,
+                                           2000500, nullptr, 0, 99, "text/html",
+                                           &params));
   EXPECT_EQ(1900u, params.cache_inserted_at);
   // A refused Age: the call fails and the caller stores nothing.
   fake_->mutable_injection()->write_params_rc = -1;
@@ -190,13 +190,12 @@ TEST_F(InjectedVerdictDaemonAbiTest, StoreWriteParamsAndFactsAreInjectable) {
 
   fake_->mutable_injection()->facts.flags =
       kPsHtmlFactsPresent | kPsHtmlFactsWithheld;
-  fake_->mutable_injection()->facts.withheld_reason =
-      kPsHtmlWithheldBelowFloor;
+  fake_->mutable_injection()->facts.withheld_reason = kPsHtmlWithheldBelowFloor;
   PsHtmlStoredFacts facts = {};
   facts.struct_size = sizeof(facts);
   int original = 0;
-  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReads(&original, nullptr, &original,
-                                               1, &facts));
+  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReads(&original, nullptr, &original, 1,
+                                               &facts));
   EXPECT_EQ(kPsHtmlFactsPresent | kPsHtmlFactsWithheld, facts.flags);
   EXPECT_EQ(kPsHtmlWithheldBelowFloor, facts.withheld_reason);
   EXPECT_EQ("withheld", fake_->html_calls().back().args[2]);
@@ -208,14 +207,14 @@ TEST_F(InjectedVerdictDaemonAbiTest, EtagAndIfNoneMatchAreInjectable) {
   uint8_t markdown[kPsHtmlHashBytes] = {2};
   char buf[64];
   size_t len = 0;
-  ASSERT_EQ(0, fake_->HtmlMarkdownEtag(binding, markdown, buf, sizeof(buf),
-                                       &len));
+  ASSERT_EQ(0,
+            fake_->HtmlMarkdownEtag(binding, markdown, buf, sizeof(buf), &len));
   EXPECT_STREQ("W/\"psm-0123456789abcdef\"", buf);
   EXPECT_EQ(kPsHtmlMarkdownEtagChars, len);
   EXPECT_EQ(-3, fake_->HtmlMarkdownEtag(binding, markdown, buf, 4, &len));
   fake_->mutable_injection()->etag_rc = -1;
-  EXPECT_EQ(-1, fake_->HtmlMarkdownEtag(binding, markdown, buf, sizeof(buf),
-                                        &len));
+  EXPECT_EQ(-1,
+            fake_->HtmlMarkdownEtag(binding, markdown, buf, sizeof(buf), &len));
 
   EXPECT_EQ(0, fake_->IfNoneMatchMatchesWeak("W/\"psm-x\"", buf));
   fake_->mutable_injection()->inm_match = 1;
@@ -246,13 +245,12 @@ TEST_F(InjectedVerdictDaemonAbiTest, SidecarWritesAndReadsAreInjectable) {
   EXPECT_EQ(kSite, fake_->html_calls().back().args[4]);
 
   fake_->mutable_injection()->sidecar_write_rc = 2;  // an I/O failure
-  EXPECT_EQ(2, fake_->CacheWriteHeadersSidecarSite(nullptr, &params, names,
-                                                   values, 2, &verdict,
-                                                   &stored));
+  EXPECT_EQ(2, fake_->CacheWriteHeadersSidecarSite(
+                   nullptr, &params, names, values, 2, &verdict, &stored));
 
   void* block = &verdict;
-  EXPECT_EQ(kPsErrNotFound, fake_->HeadersSidecarRead(nullptr, "u", "h",
-                                                      "http", kSite, &block));
+  EXPECT_EQ(kPsErrNotFound, fake_->HeadersSidecarRead(nullptr, "u", "h", "http",
+                                                      kSite, &block));
   EXPECT_EQ(nullptr, block);
 
   HtmlServeInjection* in = fake_->mutable_injection();
@@ -262,23 +260,21 @@ TEST_F(InjectedVerdictDaemonAbiTest, SidecarWritesAndReadsAreInjectable) {
   memcpy(in->block.pairing_hash, hash, sizeof(hash));
   for (int pairing : {kPsSidecarPaired, kPsSidecarUnpaired}) {
     in->pairing = pairing;
-    ASSERT_EQ(kPsOk, fake_->HeadersSidecarRead(nullptr, "u", "h", "http",
-                                               kSite, &block));
+    ASSERT_EQ(kPsOk, fake_->HeadersSidecarRead(nullptr, "u", "h", "http", kSite,
+                                               &block));
     ASSERT_TRUE(block != nullptr);
     EXPECT_EQ(1, fake_->live_blocks());
     EXPECT_EQ(1u, fake_->HeaderBlockCount(block));
     const char* name = nullptr;
     size_t name_len = 0;
-    ASSERT_EQ(kPsOk,
-              fake_->HeaderBlockGet(block, 0, &name, &name_len, nullptr,
-                                    nullptr));
+    ASSERT_EQ(kPsOk, fake_->HeaderBlockGet(block, 0, &name, &name_len, nullptr,
+                                           nullptr));
     EXPECT_STREQ("Link", name);
     EXPECT_EQ(4u, name_len);
-    EXPECT_EQ(kPsErrInvalidArg,
-              fake_->HeaderBlockGet(block, 1, &name, nullptr, nullptr,
-                                    nullptr));
-    EXPECT_EQ(0, memcmp(hash, fake_->HeaderBlockPairingHash(block),
-                        sizeof(hash)));
+    EXPECT_EQ(kPsErrInvalidArg, fake_->HeaderBlockGet(block, 1, &name, nullptr,
+                                                      nullptr, nullptr));
+    EXPECT_EQ(0,
+              memcmp(hash, fake_->HeaderBlockPairingHash(block), sizeof(hash)));
     EXPECT_EQ(pairing, fake_->HeaderBlockPairing(block, hash));
     fake_->HeaderBlockFree(block);
     EXPECT_EQ(0, fake_->live_blocks());

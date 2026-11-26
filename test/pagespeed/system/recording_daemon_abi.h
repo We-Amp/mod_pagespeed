@@ -164,19 +164,17 @@ class RecordingDaemonAbi : public DaemonAbi {
                         void** out) const override {
     Count();
     Site(site);
-    return inner_->CacheReadBestSite(cache, url, host, scheme, site, mask,
-                                     out);
+    return inner_->CacheReadBestSite(cache, url, host, scheme, site, mask, out);
   }
   int CacheReadAlternateSite(void* cache, const char* url, const char* host,
-                             const char* scheme, const char* site,
-                             uint8_t id, void** out) const override {
+                             const char* scheme, const char* site, uint8_t id,
+                             void** out) const override {
     Count();
     Site(site);
     return inner_->CacheReadAlternateSite(cache, url, host, scheme, site, id,
                                           out);
   }
-  int ReadContent(const void* r, const uint8_t** d,
-                  size_t* n) const override {
+  int ReadContent(const void* r, const uint8_t** d, size_t* n) const override {
     return Count(), inner_->ReadContent(r, d, n);
   }
   uint32_t ReadMask(const void* r) const override {
@@ -278,15 +276,14 @@ class RecordingDaemonAbi : public DaemonAbi {
                            PsWriteParams* params) const override {
     return Count(), inner_->HtmlStoreWriteParams(
                         action, lifetime_s, store_flags, cc_flags,
-                        sidecar_stored, capture_start_ms, age_lines,
-                        age_count, content_length, origin_ct, params);
+                        sidecar_stored, capture_start_ms, age_lines, age_count,
+                        content_length, origin_ct, params);
   }
   int HtmlStoredFactsFromReads(const void* original, const void* markdown,
                                const void* withheld, int sidecar_present,
                                PsHtmlStoredFacts* out) const override {
-    return Count(), inner_->HtmlStoredFactsFromReads(original, markdown,
-                                                     withheld,
-                                                     sidecar_present, out);
+    return Count(), inner_->HtmlStoredFactsFromReads(
+                        original, markdown, withheld, sidecar_present, out);
   }
   int HtmlMarkdownEtag(const uint8_t* binding, const uint8_t* markdown,
                        char* buf, size_t capacity,
@@ -294,8 +291,7 @@ class RecordingDaemonAbi : public DaemonAbi {
     return Count(),
            inner_->HtmlMarkdownEtag(binding, markdown, buf, capacity, out_len);
   }
-  int IfNoneMatchMatchesWeak(const char* inm,
-                             const char* etag) const override {
+  int IfNoneMatchMatchesWeak(const char* inm, const char* etag) const override {
     return Count(), inner_->IfNoneMatchMatchesWeak(inm, etag);
   }
   int CacheWriteHeadersSidecarSite(void* cache,
@@ -307,8 +303,7 @@ class RecordingDaemonAbi : public DaemonAbi {
     Count();
     Site(params == nullptr ? nullptr : params->site);
     return inner_->CacheWriteHeadersSidecarSite(cache, params, names, values,
-                                                count, out_verdict,
-                                                out_stored);
+                                                count, out_verdict, out_stored);
   }
   int HeadersSidecarRead(void* cache, const char* url, const char* host,
                          const char* scheme, const char* site,

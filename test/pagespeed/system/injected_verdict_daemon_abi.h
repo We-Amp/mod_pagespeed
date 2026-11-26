@@ -88,14 +88,25 @@ struct HtmlServeInjection {
   PsHtmlServeVerdict verdict = {};
 
   // ps_html_serve_reason_name: index = reason; nullptr past the end.
-  std::vector<const char*> reason_names = {
-      "fresh",       "mode",           "auth_request",
-      "cookie_request", "client_no_cache", "needs_validation",
-      "stale",       "headers_not_reproducible", "sidecar_missing",
-      "purged",      "absent",         "binding_stale",
-      "parent_stale", "method",        "range",
-      "cors",        "no_transform",   "withheld",
-      "skew"};
+  std::vector<const char*> reason_names = {"fresh",
+                                           "mode",
+                                           "auth_request",
+                                           "cookie_request",
+                                           "client_no_cache",
+                                           "needs_validation",
+                                           "stale",
+                                           "headers_not_reproducible",
+                                           "sidecar_missing",
+                                           "purged",
+                                           "absent",
+                                           "binding_stale",
+                                           "parent_stale",
+                                           "method",
+                                           "range",
+                                           "cors",
+                                           "no_transform",
+                                           "withheld",
+                                           "skew"};
 
   // ps_html_store_write_params: the return code, and on success the insert
   // time it stamps (0 = capture_start_ms floored to seconds).
@@ -198,9 +209,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
     }
     serve_requests_.push_back(r);
     serve_facts_.push_back(facts == nullptr ? PsHtmlStoredFacts() : *facts);
-    Record("ps_html_serve_classify",
-           {request == nullptr ? "null" : "request",
-            facts == nullptr ? "null" : "facts"});
+    Record("ps_html_serve_classify", {request == nullptr ? "null" : "request",
+                                      facts == nullptr ? "null" : "facts"});
     if (injection_.serve_rc != 0) return injection_.serve_rc;
     if (out == nullptr || out->struct_size < sizeof(size_t)) return -1;
     const size_t size = out->struct_size;
@@ -227,14 +237,9 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
                            const char* origin_content_type,
                            PsWriteParams* params) const override {
     std::vector<GoogleString> args = {
-        Num(action),
-        Num(lifetime_s),
-        Num(store_flags),
-        Num(cc_flags),
-        Num(sidecar_stored),
-        Num(capture_start_ms),
-        Num(content_length),
-        Str(origin_content_type)};
+        Num(action),         Num(lifetime_s),         Num(store_flags),
+        Num(cc_flags),       Num(sidecar_stored),     Num(capture_start_ms),
+        Num(content_length), Str(origin_content_type)};
     for (size_t i = 0; i < age_count; ++i) {
       args.push_back(StrCat("age=", Str(age_lines[i])));
     }
@@ -257,8 +262,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   int HtmlStoredFactsFromReads(const void* original, const void* markdown,
-                               const void* withheld_marker,
-                               int sidecar_present,
+                               const void* withheld_marker, int sidecar_present,
                                PsHtmlStoredFacts* out) const override {
     Record("ps_html_stored_facts_from_reads",
            {original == nullptr ? "null" : "original",
@@ -275,8 +279,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   int HtmlMarkdownEtag(const uint8_t* binding_hash,
-                       const uint8_t* markdown_hash, char* buf,
-                       size_t capacity, size_t* out_len) const override {
+                       const uint8_t* markdown_hash, char* buf, size_t capacity,
+                       size_t* out_len) const override {
     Record("ps_html_markdown_etag", {Hex(binding_hash), Hex(markdown_hash)});
     if (injection_.etag_rc != 0) return injection_.etag_rc;
     if (out_len == nullptr) return -1;
@@ -311,8 +315,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
       Record("ps_cache_write_headers_sidecar_site", {"null"});
     } else {
       Record("ps_cache_write_headers_sidecar_site",
-             {Num(params->struct_size), Str(params->url),
-              Str(params->hostname), Str(params->scheme), Str(params->site),
+             {Num(params->struct_size), Str(params->url), Str(params->hostname),
+              Str(params->scheme), Str(params->site),
               Hex(params->origin_html_hash), Num(count)});
     }
     if (injection_.sidecar_write_rc != kPsOk) {
@@ -333,8 +337,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
     if (injection_.sidecar_read_rc != kPsOk) {
       return injection_.sidecar_read_rc;
     }
-    blocks_.push_back(
-        std::make_unique<InjectedHeaderBlock>(injection_.block));
+    blocks_.push_back(std::make_unique<InjectedHeaderBlock>(injection_.block));
     ++live_blocks_;
     *out_block = blocks_.back().get();
     return kPsOk;
@@ -392,8 +395,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
 
   int CacheWriteSitePurgeEpoch(void* cache, const char* site,
                                uint64_t epoch_s) const override {
-    Record("ps_cache_write_site_purge_epoch",
-           {Str(site), Num(epoch_s)});
+    Record("ps_cache_write_site_purge_epoch", {Str(site), Num(epoch_s)});
     return injection_.epoch_write_rc;
   }
 
@@ -417,8 +419,7 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   int WantsAgentMarkdown(const char* accept) const override {
-    Record("ps_wants_agent_markdown",
-           {accept == nullptr ? "(null)" : accept});
+    Record("ps_wants_agent_markdown", {accept == nullptr ? "(null)" : accept});
     return injection_.wants_markdown;
   }
 

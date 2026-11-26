@@ -340,8 +340,8 @@ using IfNoneMatchMatchesWeakFn = int (*)(const char*, const char*);
 using CacheWriteHeadersSidecarSiteFn = int (*)(void*,
                                                const PsSidecarWriteParams*,
                                                const char* const*,
-                                               const char* const*, size_t,
-                                               int*, int*);
+                                               const char* const*, size_t, int*,
+                                               int*);
 using HeadersSidecarReadFn = int (*)(void*, const char*, const char*,
                                      const char*, const char*, void**);
 using HeaderBlockCountFn = size_t (*)(const void*);
@@ -350,8 +350,8 @@ using HeaderBlockGetFn = int (*)(const void*, size_t, const char**, size_t*,
 using HeaderBlockPairingHashFn = const uint8_t* (*)(const void*);
 using HeaderBlockPairingFn = int (*)(const void*, const uint8_t*);
 using HeaderBlockFreeFn = void (*)(void*);
-using CacheRemoveSiteFn = int (*)(void*, const char*, const char*,
-                                  const char*, const char*);
+using CacheRemoveSiteFn = int (*)(void*, const char*, const char*, const char*,
+                                  const char*);
 using CacheWriteSitePurgeEpochFn = int (*)(void*, const char*, uint64_t);
 using CacheReadSitePurgeEpochFn = int (*)(void*, const char*, uint64_t*);
 using ReadSharedConfigIntFn = int (*)(const char*);
@@ -502,21 +502,19 @@ class LibraryDaemonAbi : public DaemonAbi {
   }
 
   int HtmlStoredFactsFromReads(const void* original, const void* markdown,
-                               const void* withheld_marker,
-                               int sidecar_present,
+                               const void* withheld_marker, int sidecar_present,
                                PsHtmlStoredFacts* out) const override {
     if (!HasHtmlServeSet()) return -1;
-    return html_serve_.stored_facts_from_reads(original, markdown,
-                                               withheld_marker,
-                                               sidecar_present, out);
+    return html_serve_.stored_facts_from_reads(
+        original, markdown, withheld_marker, sidecar_present, out);
   }
 
   int HtmlMarkdownEtag(const uint8_t* binding_hash,
-                       const uint8_t* markdown_hash, char* buf,
-                       size_t capacity, size_t* out_len) const override {
+                       const uint8_t* markdown_hash, char* buf, size_t capacity,
+                       size_t* out_len) const override {
     if (!HasHtmlServeSet()) return -1;
-    return html_serve_.markdown_etag(binding_hash, markdown_hash, buf,
-                                     capacity, out_len);
+    return html_serve_.markdown_etag(binding_hash, markdown_hash, buf, capacity,
+                                     out_len);
   }
 
   int IfNoneMatchMatchesWeak(const char* if_none_match,
@@ -532,9 +530,8 @@ class LibraryDaemonAbi : public DaemonAbi {
                                    int* out_verdict,
                                    int* out_stored) const override {
     if (!HasHtmlServeSet()) return kPsErrInvalidArg;
-    return html_serve_.write_headers_sidecar_site(cache, params, names, values,
-                                                  count, out_verdict,
-                                                  out_stored);
+    return html_serve_.write_headers_sidecar_site(
+        cache, params, names, values, count, out_verdict, out_stored);
   }
 
   int HeadersSidecarRead(void* cache, const char* url, const char* hostname,
@@ -544,8 +541,8 @@ class LibraryDaemonAbi : public DaemonAbi {
       return DaemonAbi::HeadersSidecarRead(cache, url, hostname, scheme, site,
                                            out_block);
     }
-    return html_serve_.headers_sidecar_read(cache, url, hostname, scheme,
-                                            site, out_block);
+    return html_serve_.headers_sidecar_read(cache, url, hostname, scheme, site,
+                                            out_block);
   }
 
   size_t HeaderBlockCount(const void* block) const override {
@@ -987,12 +984,11 @@ class LibraryDaemonAbi : public DaemonAbi {
   void BindHtmlServeSet() {
     const int minor = version_minor_();
     if (minor < kHtmlServeSetMinor) {
-      html_serve_unavailable_ =
-          StrCat("the optimizer library reports C API ",
-                 IntegerToString(version_major_()), ".",
-                 IntegerToString(minor), "; the HTML serve set needs ",
-                 IntegerToString(kRequiredAbiMajor), ".",
-                 IntegerToString(kHtmlServeSetMinor), " or a later minor");
+      html_serve_unavailable_ = StrCat(
+          "the optimizer library reports C API ",
+          IntegerToString(version_major_()), ".", IntegerToString(minor),
+          "; the HTML serve set needs ", IntegerToString(kRequiredAbiMajor),
+          ".", IntegerToString(kHtmlServeSetMinor), " or a later minor");
       return;
     }
     HtmlServeSetFns fns;
@@ -1000,8 +996,7 @@ class LibraryDaemonAbi : public DaemonAbi {
     const bool bound =
         Bind("ps_html_serve_classify", &fns.serve_classify, &missing) &&
         Bind("ps_html_serve_reason_name", &fns.serve_reason_name, &missing) &&
-        Bind("ps_html_store_write_params", &fns.store_write_params,
-             &missing) &&
+        Bind("ps_html_store_write_params", &fns.store_write_params, &missing) &&
         Bind("ps_html_stored_facts_from_reads", &fns.stored_facts_from_reads,
              &missing) &&
         Bind("ps_html_markdown_etag", &fns.markdown_etag, &missing) &&
@@ -1009,14 +1004,12 @@ class LibraryDaemonAbi : public DaemonAbi {
              &missing) &&
         Bind("ps_cache_write_headers_sidecar_site",
              &fns.write_headers_sidecar_site, &missing) &&
-        Bind("ps_headers_sidecar_read", &fns.headers_sidecar_read,
-             &missing) &&
+        Bind("ps_headers_sidecar_read", &fns.headers_sidecar_read, &missing) &&
         Bind("ps_header_block_count", &fns.header_block_count, &missing) &&
         Bind("ps_header_block_get", &fns.header_block_get, &missing) &&
         Bind("ps_header_block_pairing_hash", &fns.header_block_pairing_hash,
              &missing) &&
-        Bind("ps_header_block_pairing", &fns.header_block_pairing,
-             &missing) &&
+        Bind("ps_header_block_pairing", &fns.header_block_pairing, &missing) &&
         Bind("ps_header_block_free", &fns.header_block_free, &missing) &&
         Bind("ps_cache_remove_site", &fns.cache_remove_site, &missing) &&
         Bind("ps_cache_write_site_purge_epoch", &fns.write_site_purge_epoch,
@@ -1066,8 +1059,7 @@ class LibraryDaemonAbi : public DaemonAbi {
   HtmlDecisionFormatFn html_decision_format_ = nullptr;
   HtmlStoreReasonNameFn html_store_reason_name_ = nullptr;
   HtmlServeSetFns html_serve_;
-  GoogleString html_serve_unavailable_ =
-      "the HTML serve set was not bound";
+  GoogleString html_serve_unavailable_ = "the HTML serve set was not bound";
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
   CacheWriteOriginalSiteFn cache_write_original_site_ = nullptr;
