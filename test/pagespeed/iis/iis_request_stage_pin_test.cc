@@ -169,7 +169,7 @@ TEST_F(IisRequestStagePinTest, BeginRequestOnlyStripsModuleEntityTags) {
   }
   // No configuration, context or serving names.
   for (const char* name : {"config", "Config", "context_", "Context(",
-                           "OnBeginRequestPageSpeed", "Serve", "Fetch"}) {
+                           "OnBeginRequestPageSpeed", "ServeFrom", "Fetch"}) {
     EXPECT_EQ(GoogleString::npos, begin.find(name))
         << "OnBeginRequest names " << name;
   }
