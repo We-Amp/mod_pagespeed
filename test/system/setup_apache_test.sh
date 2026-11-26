@@ -84,6 +84,19 @@ DAEMON_LOG="$LANE_STATE_DIR/daemon_worker.log"
 # Set once the worker answers on its socket; the vhost writers read it.
 DAEMON_READY=""
 
+# Lane fixture "daemon_html_conformance" (system/test_daemon_html_conformance.py
+# through pagespeed_test_framework/daemon_html_provider_apache.py): a second
+# optimizer worker of its own, in a markdown HTML mode with agent-optimize on,
+# behind one virtual host the provider rewrites for every row.
+DHC_STATE_DIR="$LANE_STATE_DIR/dhc"
+DHC_WORKER_DIR="$DHC_STATE_DIR/worker"
+DHC_SOCKET="$DHC_WORKER_DIR/notify.sock"
+DHC_VOLUME="$DHC_WORKER_DIR/cache/cache"
+DHC_PID="$LANE_STATE_DIR/dhc_worker.pid"
+DHC_LOG="$LANE_STATE_DIR/dhc_worker.log"
+DHC_API_PORT="${DHC_API_PORT:-8186}"
+DHC_SITE_CONF="pagespeed-test-dhc"
+
 # TLS configuration
 TLS_CERT_DIR="/tmp/apache_pagespeed_test/certs"
 TLS_CERT_FILE="$TLS_CERT_DIR/server.crt"
@@ -2489,6 +2502,55 @@ EOF
     DAEMON_READY=1
 }
 
+# The conformance fixture's worker: the lane's own worker binary and library,
+# a volume and socket of its own, HTML in markdown-static with agent-optimize.
+start_dhc_worker() {
+    [ -n "$DAEMON_READY" ] || return 0
+    stop_dhc_worker
+    sudo rm -rf "$DHC_WORKER_DIR"
+    sudo mkdir -p "$DHC_WORKER_DIR/cache"
+    sudo chown -R www-data:www-data "$DHC_WORKER_DIR"
+    sudo chmod 755 "$DHC_STATE_DIR" "$DHC_WORKER_DIR"
+    nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \
+        --cache-dir "$DHC_WORKER_DIR/cache" --socket "$DHC_SOCKET" \
+        --cache-size 268435456 --log-level info \
+        --html-mode markdown-static --agent-optimize \
+        --api-port "$DHC_API_PORT" --api-no-auth \
+        > "$DHC_LOG" 2>&1 < /dev/null &
+    echo $! > "$DHC_PID"
+    local i
+    for i in $(seq 1 100); do
+        if [ -S "$DHC_SOCKET" ] && [ -n "$(sudo find "$DHC_WORKER_DIR" -name pagespeed-shared.conf 2>/dev/null)" ]; then
+            sudo chmod 666 "$DHC_SOCKET"
+            log_info "Conformance worker is listening on $DHC_SOCKET"
+            return 0
+        fi
+        sleep 0.2
+    done
+    tail -20 "$DHC_LOG" 2>/dev/null || true
+    stop_dhc_worker
+    daemon_unavailable "the conformance worker did not open its socket"
+    return 0
+}
+
+stop_dhc_worker() {
+    local pid=""
+    if [ -f "$DHC_PID" ]; then
+        pid="$(cat "$DHC_PID")"
+        # Only a process that is still this lane's conformance worker.
+        if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "factory_worker\|sudo"; then
+            sudo pkill -TERM -P "$pid" 2>/dev/null || true
+            sudo kill -TERM "$pid" 2>/dev/null || true
+            local i
+            for i in $(seq 1 100); do
+                [ -d "/proc/$pid" ] || break
+                sleep 0.1
+            done
+        fi
+        rm -f "$DHC_PID"
+    fi
+}
+
 stop_daemon_worker() {
     local pid=""
     if [ -f "$DAEMON_PID" ]; then
@@ -2722,6 +2784,49 @@ configure_strip_tags_vhosts() {
 EOF
     sudo a2ensite pagespeed-test-strip-tags 2>/dev/null || true
     provide_fixture strip_echo
+}
+
+# Lane fixture "daemon_html_conformance": the state the provider writes each
+# row's virtual host into (document root, file cache, password file, the
+# access log it settles on, the Lua filters the third-party-filter knobs use),
+# and an empty site file it overwrites. The provider starts the origin itself.
+configure_dhc_fixture() {
+    if [ -z "$DAEMON_READY" ] || [ ! -S "$DHC_SOCKET" ]; then
+        sudo a2dissite "$DHC_SITE_CONF" > /dev/null 2>&1 || true
+        sudo rm -f "$APACHE_CONF_DIR/sites-available/$DHC_SITE_CONF.conf"
+        return 0
+    fi
+    log_info "Configuring the HTML cache conformance fixture..."
+    sudo mkdir -p "$DHC_STATE_DIR/docroot" "$DHC_STATE_DIR/filecache" "$DHC_STATE_DIR/log" "$DHC_STATE_DIR/lua"
+    sudo chown -R www-data:www-data "$DHC_STATE_DIR/filecache" "$DHC_STATE_DIR/log"
+    # u:p for the auth knob (apr1, which mod_authn_file reads).
+    printf 'u:%s\n' "$(openssl passwd -apr1 p)" | sudo tee "$DHC_STATE_DIR/htpasswd" > /dev/null
+    # A filter another module would add: one header on every response it
+    # sees. And one that marks the response encoded whatever subprocess_env
+    # says (a compressor that ignores no-gzip).
+    sudo tee "$DHC_STATE_DIR/lua/filters.lua" > /dev/null << 'LUA'
+function add_header(r)
+    r.headers_out["X-Filter"] = "1"
+    coroutine.yield()
+    while bucket do
+        coroutine.yield(bucket)
+    end
+end
+
+function mark_encoded(r)
+    r.headers_out["Content-Encoding"] = "gzip"
+    coroutine.yield()
+    while bucket do
+        coroutine.yield(bucket)
+    end
+end
+LUA
+    local conf="$APACHE_CONF_DIR/sites-available/$DHC_SITE_CONF.conf"
+    printf '# Rewritten for each conformance row.\n' | sudo tee "$conf" > /dev/null
+    sudo chmod 666 "$conf"
+    sudo a2enmod lua substitute filter auth_basic authn_file > /dev/null 2>&1 || true
+    sudo a2ensite "$DHC_SITE_CONF" > /dev/null 2>&1 || true
+    provide_fixture daemon_html_conformance
 }
 
 # Lane fixture "daemon_html_report": the pages test_daemon_html_report.py fetches.
@@ -3100,6 +3205,7 @@ EOF
     configure_rule_pack_vhosts
     configure_self_fetch_access_vhost
     configure_daemon_vhost
+    configure_dhc_fixture
     configure_external_origin
     configure_external_origin_https
     configure_flush_origin_proxy
@@ -3210,6 +3316,7 @@ case "${1:-start}" in
         setup_test_content
         generate_tls_certs || exit 1
         start_daemon_worker
+        start_dhc_worker
         configure_apache
         start_flush_origin || exit 1
         start_remote_config_server || exit 1
@@ -3219,6 +3326,7 @@ case "${1:-start}" in
         stop_apache
         stop_flush_origin
         stop_remote_config_server
+        stop_dhc_worker
         stop_daemon_worker
         ;;
     status)

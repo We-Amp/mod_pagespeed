@@ -1268,7 +1268,7 @@ class TestLaneFixtureGate:
             "rule_packs", "rule_pack_log", "rule_pack_signing",
             "rule_pack_no_link_header", "rule_pack_multi", "daemon_arm",
             "aspnet_stream", "daemon_html_report", "self_fetch_access",
-            "strip_echo",
+            "strip_echo", "daemon_html_conformance",
         })
 
     def test_daemon_worker_is_only_believed_while_its_socket_answers(self):
