@@ -27,6 +27,7 @@ py_library(
         "client.py",
         "daemon_html_conformance.py",
         "daemon_html_provider_apache.py",
+        "daemon_html_provider_nginx.py",
         "flush_origin.py",
         "pytest_main.py",
         "require.py",

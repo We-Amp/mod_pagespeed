@@ -35,7 +35,10 @@ def _port(server_config) -> str:
 
 # What each port's provider needs from its lane, as a lane fixture: without
 # it (a lane that runs no optimizer worker) the rows have nothing to run on.
-PROVIDER_FIXTURES = {"apache": "daemon_html_conformance"}
+PROVIDER_FIXTURES = {
+    "apache": "daemon_html_conformance",
+    "nginx": "daemon_html_conformance",
+}
 
 
 @pytest.fixture(scope="module")
