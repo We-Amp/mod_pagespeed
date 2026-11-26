@@ -2042,6 +2042,18 @@ run_tests() {
     export PAGESPEED_DAEMON_SITE_PORT_B="$NGINX_DAEMON_SITE_PORT_B"
     export PAGESPEED_DAEMON_API="127.0.0.1:$NGINX_DAEMON_API_PORT"
     export PAGESPEED_DAEMON_RESTART="$DAEMON_RESTART"
+    # Lane fixture daemon_html_conformance: what the HTML cache conformance
+    # provider (pagespeed_test_framework/daemon_html_provider_nginx.py) runs
+    # its own servers and worker from, and the ports it takes (8080 + 10022 to
+    # + 10030 at the default: the origin, then four per server instance).
+    if [ -n "$DAEMON_READY" ]; then
+        export PAGESPEED_DHC_NGINX_BINARY="$NGINX_BINARY"
+        export PAGESPEED_DHC_MODULE="$MODULE_PATH"
+        export PAGESPEED_DHC_DAEMON_DIR="$DAEMON_ARTIFACT_DIR"
+        export PAGESPEED_DHC_NGINX_SRC="${PAGESPEED_DHC_NGINX_SRC:-$(dirname "$(dirname "$NGINX_BINARY")")}"
+        export PAGESPEED_DHC_DIR="${PAGESPEED_DHC_DIR:-$NGINX_CONFIG_DIR/daemon_html_conformance}"
+        export PAGESPEED_DHC_PORT_BASE="$((NGINX_PORT + 10022))"
+    fi
 
     # Lane fixtures this lane provides (test/system/conftest.py
     # KNOWN_LANE_FIXTURES): cache_flush -- PAGESPEED_CACHE_DIR above is the
@@ -2058,7 +2070,7 @@ run_tests() {
     else
         local daemon_fixture=""
         if [ -n "$DAEMON_READY" ]; then
-            daemon_fixture=",daemon_arm,daemon_html_report"
+            daemon_fixture=",daemon_arm,daemon_html_report,daemon_html_conformance"
         fi
         export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi,self_fetch_access,strip_echo${daemon_fixture}}"
     fi

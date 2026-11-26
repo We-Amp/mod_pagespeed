@@ -148,6 +148,7 @@ StringPiece str_to_string_piece(ngx_str_t s);
 char* string_piece_to_pool_string(ngx_pool_t* pool, StringPiece sp);
 
 class DaemonHtmlRecording;
+struct PsDaemonHtmlRequest;
 
 struct ps_request_ctx_t {
   NgxBaseFetch* base_fetch;
@@ -180,6 +181,11 @@ struct ps_request_ctx_t {
   // at the latest when this context is released (a response with no body
   // filter pass).
   DaemonHtmlRecording* daemon_html_recording = nullptr;
+  // DaemonHtmlCache: the rest of this request's HTML cache state (the
+  // origin's lines taken at the first header filter, the port the
+  // recording stores through, the Markdown answer being sent).  Owned;
+  // released after the recording, which borrows its port.
+  PsDaemonHtmlRequest* daemon_html = nullptr;
 
   bool daemon_record_pending;
   bool daemon_recorder;

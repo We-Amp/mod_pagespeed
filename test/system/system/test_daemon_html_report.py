@@ -367,17 +367,14 @@ class TestDecisions:
 
     def test_vhost_added_names_what_the_server_configuration_added(self, server_config):
         """The line names, without values, the headers the server's own
-        configuration added after the store snapshot.  Apache reads a second
-        header view after mod_headers; nginx has a single view, so its lines
-        carry none."""
+        configuration added after the store snapshot: Apache reads a second
+        header view after mod_headers, nginx after its headers filter
+        (add_header), against the view at the first header filter."""
         site = _site(REPORT_HOST)
         path = f"{FIXTURE_DIR}/addheader.html"
         assert site.get(path).status == 200
         entry = _wait_for_line(REPORT_HOST, path)
-        if server_config.is_nginx:
-            assert "vhost_added" not in entry, entry
-        else:
-            assert "x-lane-added" in entry["vhost_added"].split(","), entry
+        assert "x-lane-added" in entry["vhost_added"].split(","), entry
         assert "1" not in entry.get("vhost_added", "").split(","), entry
 
 

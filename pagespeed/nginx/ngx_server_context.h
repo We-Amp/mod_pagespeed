@@ -22,8 +22,10 @@
 #ifndef NGX_SERVER_CONTEXT_H_
 #define NGX_SERVER_CONTEXT_H_
 
+#include <atomic>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "ngx_message_handler.h"
 #include "pagespeed/system/daemon_adapter.h"
@@ -86,10 +88,33 @@ class NgxServerContext : public SystemServerContext {
   // calls it.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
-  // The HTML cache engine of this server (DaemonHtmlCache), built on first
-  // use so a server that never sets the option has none.  It holds the
-  // report-only counters and decision log.
+  // The HTML cache engine of this server (DaemonHtmlCache).  A serving
+  // worker builds it at its start (InitDaemonHtmlEngine); anywhere else it
+  // is built on first use and only reports.  nullptr with the option off.
   DaemonHtmlEngine* daemon_html_engine();
+
+  // Builds this server's engine in a serving worker, before any request:
+  // `host_names` are the names this server block lists, `epoch_sites` every
+  // site configured on this server's cache path, `runner` the record arm's
+  // runner for the admin path's and the ticks' volume work, `budget` the
+  // process's byte budget.  Registers the engine as a purge observer of the
+  // cache path.  All pointers must outlive ShutDownDaemonHtmlEngine.
+  void InitDaemonHtmlEngine(const ConfiguredHostNames& host_names,
+                            std::vector<GoogleString> epoch_sites,
+                            DaemonHtmlBlockingRunner* runner,
+                            DaemonHtmlByteBudget* budget);
+
+  // Unregisters and destroys the engine.  The caller has joined every
+  // thread that runs the engine's work first (the record pool), so nothing
+  // is in flight.  Idempotent.
+  void ShutDownDaemonHtmlEngine();
+
+  // The engine's ticks, called on the request path next to
+  // FlushCacheIfNecessary: at most one purge-poll tick per poll interval and
+  // one statistics tick per kDaemonHtmlStatisticsTickMs, each posted to
+  // `runner` (a tick reads files), never run on the calling thread.
+  void MaybeTickDaemonHtmlEngine(DaemonHtmlBlockingRunner* runner);
+  static constexpr int64 kDaemonHtmlStatisticsTickMs = 10 * 1000;
 
   // The peer's serve-stats mmap for this server, or nullptr when no daemon
   // is configured.  Borrowed; PROCESS-lifetime, and deliberately not opened
@@ -133,7 +158,13 @@ class NgxServerContext : public SystemServerContext {
   // NgxRewriteDriverFactory::daemon_adapter_pool()).
   std::shared_ptr<DaemonAdapter> daemon_adapter_;
   std::once_flag daemon_html_engine_once_;
+  // What the serving engine reads purges from; declared before the engine,
+  // which borrows it.
+  std::unique_ptr<DaemonHtmlPurgeSource> daemon_html_purge_source_;
   std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
+  bool daemon_html_observing_ = false;
+  std::atomic<int64> daemon_html_last_poll_tick_ms_{0};
+  std::atomic<int64> daemon_html_last_stats_tick_ms_{0};
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
   NgxServerContext(const NgxServerContext&) = delete;

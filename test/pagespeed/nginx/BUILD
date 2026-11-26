@@ -203,6 +203,22 @@ pagespeed_cc_test(
     ],
 )
 
+# The nginx-free half of the HTML cache adapter: the posted commits, the
+# request facts, the store's origin view and the Markdown header classes.
+pagespeed_cc_test(
+    name = "ngx_daemon_html_test",
+    srcs = ["ngx_daemon_html_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/thread",
+        "//pagespeed/kernel/util:util",
+        "//pagespeed/nginx:ngx_daemon_html",
+        "//pagespeed/nginx:ngx_daemon_record_completion",
+        "//pagespeed/system:module_entity_tags",
+    ],
+)
+
 # The composed response of the daemon serve arm -- the nginx-free half of
 # that arm, tested standalone.
 pagespeed_cc_test(

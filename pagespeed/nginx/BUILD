@@ -59,6 +59,27 @@ cc_library(
     ],
 )
 
+# The nginx-free half of the HTML cache adapter (DaemonHtmlCache
+# serve-variants): the runner that posts the engine's blocking work to the
+# record arm's sequence, the request facts read from header lines, the
+# origin's store view and the Markdown answer's header classes.  Unit tested
+# standalone (//test/pagespeed/nginx:ngx_daemon_html_test); the module
+# targets below compile ngx_daemon_html.cc directly in their srcs for the
+# same archive-linking reason as ngx_segment_buffer above.
+cc_library(
+    name = "ngx_daemon_html",
+    srcs = ["ngx_daemon_html.cc"],
+    hdrs = ["ngx_daemon_html.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ngx_daemon_record_completion",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/thread",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:module_entity_tags",
+    ],
+)
+
 # In-place removal of nginx list elements that keeps every other element at
 # its address (the cached r->headers_in pointers stay valid).  Header-only and
 # nginx-free (a template over the list types), so it is unit tested standalone
@@ -307,6 +328,7 @@ cc_library(
         "ngx_cache_control_merge.cc",
         "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
+        "ngx_daemon_html.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
         "ngx_daemon_serve_notify.cc",
@@ -338,6 +360,7 @@ cc_library(
         "ngx_cache_control_merge.h",
         "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
+        "ngx_daemon_html.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
         "ngx_daemon_serve_notify.h",
@@ -380,6 +403,7 @@ cc_library(
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:file_owner",
         "//pagespeed/system:inplace_url_agreement",
@@ -480,6 +504,7 @@ cc_library(
         "ngx_cache_control_merge.cc",
         "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
+        "ngx_daemon_html.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
         "ngx_daemon_serve_notify.cc",
@@ -510,6 +535,7 @@ cc_library(
         "ngx_cache_control_merge.h",
         "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
+        "ngx_daemon_html.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
         "ngx_daemon_serve_notify.h",
@@ -556,6 +582,7 @@ cc_library(
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:inplace_url_agreement",
         "//pagespeed/system:module_entity_tags",

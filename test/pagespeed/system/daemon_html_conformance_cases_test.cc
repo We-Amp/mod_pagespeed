@@ -73,7 +73,8 @@ const StringSet kVhostKnobs = {"header_add",
                                "third_party_filter",
                                "merge_slashes",
                                "poll_interval_s",
-                               "chained_module_origin"};
+                               "chained_module_origin", "named_location",
+                               "proxy_hide", "trailer"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
 const StringSet kLiveStepKeys = {"request", "pre", "process", "background",

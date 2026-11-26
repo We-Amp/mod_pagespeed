@@ -15328,7 +15328,7 @@
       "id": "live-later-added-always-private",
       "runners": ["live"],
       "why": "store: server-config headers after the snapshot are honoured",
-      "ports": ["apache"],
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15359,6 +15359,7 @@
       "id": "live-later-added-short-max-age",
       "runners": ["live"],
       "why": "store: shorter of the two lifetimes",
+      "ports": ["apache", "iis"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15376,6 +15377,32 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
             "expect": {"stored": true, "stored_lifetime_s": 60}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-later-added-short-max-age-nginx",
+      "runners": ["live"],
+      "why": "store: add_header appends a second Cache-Control line, so no lifetime is kept",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"header_add": [["Cache-Control", "max-age=60"]]},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=86400"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"stored": true, "stored_lifetime_s": 0}
           }
         ]
       }
@@ -15414,7 +15441,7 @@
       "id": "live-vhost-header-not-in-sidecar",
       "runners": ["live"],
       "why": "store: header block taken before server-config headers",
-      "ports": ["apache"],
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -17248,7 +17275,7 @@
       "id": "live-body-filter-length-agrees",
       "runners": ["live"],
       "why": "markdown: declared length matches the bytes sent",
-      "ports": ["apache", "nginx"],
+      "ports": ["apache"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -17288,6 +17315,55 @@
               },
               "headers_only": true,
               "length_matches_body": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-body-filter-length-chunked-nginx",
+      "runners": ["live"],
+      "why": "markdown: a body filter cleared the length, the answer goes chunked",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"third_party_filter": {"rewrites_body": "text/markdown"}},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Transfer-Encoding": {"count": 1, "value": "chunked"},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true,
+              "headers_absent": ["Content-Length"]
             }
           }
         ]
@@ -18086,7 +18162,7 @@
       "id": "live-markdown-request-cookie-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache"],
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18124,7 +18200,7 @@
       "id": "live-markdown-request-authorization-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache"],
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18162,7 +18238,7 @@
       "id": "live-markdown-request-client-no-cache-gets-html",
       "runners": ["live"],
       "why": "serve: request facts reach the verdict",
-      "ports": ["apache"],
+      "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -18340,6 +18416,303 @@
           {
             "request": {"method": "GET", "path": "/off/page", "headers": [["Accept", "text/markdown"]]},
             "expect": {"status": 200, "content_type": "text/html", "stored": false}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-internal-redirect-never-stored",
+      "runners": ["live"],
+      "why": "request: a page from a named location (internal redirect) is never stored",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"named_location": true},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-escaped-query-never-stored",
+      "runners": ["live"],
+      "why": "request: a percent-escaped path is never stored",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-escaped-path-never-stored",
+      "runners": ["live"],
+      "why": "request: a percent-escaped path is never stored",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/%70age", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/%70age", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-merged-slashes-never-stored",
+      "runners": ["live"],
+      "why": "request: a path the server merged slashes in is never stored",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "//page", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "//page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-proxy-hide-set-cookie-refuses",
+      "runners": ["live"],
+      "why": "store: proxy_hide_header does not hide a Set-Cookie from the store",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"proxy_hide": ["Set-Cookie"]},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""],
+            ["Set-Cookie", "a=1"]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-proxy-hide-private-refuses",
+      "runners": ["live"],
+      "why": "store: proxy_hide_header does not hide a private origin from the store",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"proxy_hide": ["Cache-Control"], "header_add": [["Cache-Control", "max-age=300"]]},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "private, max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"stored": false, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-absolute-form-other-host-never-stored",
+      "runners": ["live"],
+      "why": "host validation: the request line names another host than Host",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"alias": ["alias.example.test"]},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "http://alias.example.test/page", "headers": []},
+            "expect": {"status": 200, "counter_delta": {"daemon_html_stored": 0}}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-trailer-not-on-markdown",
+      "runners": ["live"],
+      "why": "markdown: no trailer fields (add_trailer)",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"trailer": [["X-T", "v"]]},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true,
+              "length_matches_body": true,
+              "headers_absent": [
+                "CDN-Cache-Control",
+                "Content-Language",
+                "Expires",
+                "Strict-Transport-Security",
+                "Surrogate-Control",
+                "X-Filter"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-html-head-vary-accept",
+      "runners": ["live"],
+      "why": "vary: HEAD of a page carries Vary Accept",
+      "ports": ["nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "headers_exact": {"Vary": {"count": 1, "contains": "Accept"}}}
           }
         ]
       }
