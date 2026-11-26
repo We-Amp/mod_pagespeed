@@ -224,6 +224,8 @@ cc_library(
             "shlwapi.lib",
             "ws2_32.lib",
             "bcrypt.lib",
+            # BSTR and VARIANT helpers for the admin manager (site bindings).
+            "oleaut32.lib",
         ],
         "//conditions:default": [],
     }),
