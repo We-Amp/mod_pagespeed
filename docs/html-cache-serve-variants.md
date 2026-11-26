@@ -18,11 +18,17 @@ The module alone does not produce the Markdown copy. A worker does, and the
 module and the worker have to agree:
 
 - The optimizer library installed with the module must publish C API 1.14 or
-  later. With an older one the module logs why once and stays in `report-only`.
+  later. With an older one the module logs why when the state changes and stays in `report-only`.
 - The optimizer worker must run with `--html-mode markdown-static` (or
-  `markdown-rendered`) and `--agent-optimize`. In the Docker images the second
-  one is `PAGESPEED_AGENT_OPTIMIZE=true`. The worker derives the copy from the
-  stored page alone: no browser runs and no request leaves the worker.
+  `markdown-rendered`) and `--agent-optimize`. `html_mode` is a setting of the
+  whole worker, not of one site. The worker derives the copy from the stored
+  page alone: no browser runs and no request leaves the worker.
+  The Docker images set `--agent-optimize` with `PAGESPEED_AGENT_OPTIMIZE=true`
+  but have no variable for the HTML mode yet, and they do not pass arguments
+  through. Set the mode with the `html_mode` key in `pagespeed.json`, which the
+  worker reads at start from the directory that holds its cache volume (the
+  data directory, `/data` by default, in the images), or with
+  `PATCH /v1/config` on the worker's management API.
 - The module needs `AgentOptimize on` and `DaemonHtmlCache serve-variants`.
 - A `LogDir` is needed for the decision log (below).
 - nginx must be 1.13.4 or later.
@@ -33,18 +39,22 @@ Do the steps in this order.
 
 1. Install the optimizer and restart it before you reload the web server. A
    worker from before this release refuses the module's notifications.
-2. Start the worker with `--html-mode markdown-static` and `--agent-optimize`.
+2. Start the worker with `--html-mode markdown-static` and `--agent-optimize`
+   (or set `html_mode` as described above).
 3. Set `report-only` first, with `AgentOptimize on`, and let traffic run:
 
-   Apache (in the `VirtualHost`; the directive does not work inside
-   `<Location>` or `<Directory>` for serving):
+   Apache. Set both directives in the `VirtualHost` (or at server level, which
+   virtual hosts inherit). Inside `<Location>`, `<Directory>` or `.htaccess`,
+   `AgentOptimize` does not turn serving on, and `AgentOptimize off` there does
+   not stop it. To keep a path out, turn PageSpeed off there
+   (`ModPagespeed off`) or use `ModPagespeedDisallow`:
 
    ```apache
    ModPagespeedAgentOptimize on
    ModPagespeedDaemonHtmlCache report-only
    ```
 
-   nginx (in the `server` block):
+   nginx, in the `server` block (or `http`):
 
    ```nginx
    pagespeed AgentOptimize on;
@@ -59,17 +69,19 @@ Do the steps in this order.
    would gain nothing from `serve-variants`.
 4. Change the value to `serve-variants` and reload. The log then says that the
    optimizer library and worker allow serving. If they do not, the module logs
-   why (for example, that the worker's `html_mode` is not a Markdown mode) and
-   keeps running as `report-only`; `daemon_html_serve_unavailable` counts the
+   why (for example, that the worker's `html_mode` is not a Markdown mode) each
+   time that state changes, and keeps running as `report-only`; `daemon_html_serve_unavailable` counts the
    HTML responses seen in that state.
-5. Check with a request that prefers Markdown, twice:
+5. Check with a `GET` that prefers Markdown:
 
    ```sh
-   curl -sI -H 'Accept: text/markdown' https://example.com/page
+   curl -s -o /dev/null -D - -H 'Accept: text/markdown' https://example.com/page
    ```
 
-   The first request for a page gets HTML: the copy is derived after the
-   module stores the page. Later requests get `Content-Type: text/markdown`.
+   The first `GET` for a page gets HTML: it stores the page, and the worker then
+   derives the copy. Repeat the request after a few seconds; it then gets
+   `Content-Type: text/markdown`. A `HEAD` request never stores a page, so do
+   not use `curl -I` for this check.
 
 `DaemonHtmlMaxBytes` (default 5 MiB) is the largest HTML body that is stored.
 To switch back, set `DaemonHtmlCache off` (the default) and reload; that is the
@@ -82,20 +94,24 @@ A page is stored only when all of these hold:
 - It was served for one of the virtual host's own names (Apache `ServerName` or
   an exact `ServerAlias`; nginx an exact `server_name`). Wildcard aliases and
   requests that reach the default host are not stored.
-- The origin gave it an explicit lifetime (`max-age` or `s-maxage`). A page
-  without one, and a `no-cache` page, gains nothing yet.
+- The origin gave it an explicit lifetime (`max-age`, `s-maxage` or
+  `Expires`). A page without one, and a `no-cache` page, gains nothing yet.
+  On nginx, an `add_header Cache-Control` beside the origin's own line leaves the
+  page with no lifetime (see "nginx" below).
 - Its headers allow a shared cache to keep it: no `Set-Cookie`,
-  `Cache-Control: private` or `no-store`, and no `Vary` that makes it differ
-  per visitor (for example `Vary: Cookie`).
+  `Cache-Control: private` or `no-store`, and no `Vary` naming anything other
+  than `Accept-Encoding`.
 - The response as your server configuration sends it allows it too. Headers
-  added by `Header set`, `mod_expires`, `add_header` and `expires` count, and
-  the shorter of the two lifetimes applies. Those headers do not become part of
-  the stored copy.
+  added by `Header set` and `mod_expires` (Apache) or `add_header` and `expires`
+  (nginx) count: a header that refuses caching refuses the store, and where the
+  configuration replaces the lifetime the shorter of the two applies. Those
+  headers do not become part of the stored copy.
 - The request was answered on its first pass under the URL exactly as sent.
   A request the server and the module read differently (merged slashes,
   percent-escaped paths, dot segments, a request line naming another host than
   `Host`) is left to the server. A page reached through an internal redirect is
-  neither stored nor served.
+  neither stored nor served (on Apache, `DirectoryIndex` is the exception; see
+  below).
 
 A page whose response carries a `CDN-Cache-Control` or `Surrogate-Control`
 header added by your server configuration is refused, so a site that adds one
@@ -124,8 +140,9 @@ Consequences to plan for:
   the Markdown copy. Set them at a stage in front of the server.
 - The Markdown copy is never compressed in this release.
 - With `AgentOptimize on` and `serve-variants`, every rewritten HTML response
-  carries `Vary: Accept`. An HTML `304` and an HTML `HEAD` answer do not; a
-  cache keeps the `Vary` of the `200`.
+  carries `Vary: Accept`, on Apache and on nginx. An HTML `304` does not, and on
+  Apache neither does an HTML `HEAD` answer; a cache keeps the `Vary` of the
+  `200`.
 - `Cache-Control: private` keeps the copy out of shared caches, including CDNs
   that ignore `Vary`. Behind a CDN, `Age` can cost extra cache misses.
 
@@ -137,7 +154,8 @@ Consequences to plan for:
   `DirectoryIndex` works: `/` served as `index.html` is stored and served.
 - A decoded path containing `?`, `#`, a space, a control byte or DEL is neither
   stored nor served.
-- Output filters other than the core ones do not run on a Markdown answer, so
+- Content filters (every output filter ahead of the protocol stage) do not run
+  on a Markdown answer, so
   `mod_security` response-body scanning and `mod_substitute` do not see it.
   Set security headers at a front stage.
 
@@ -148,7 +166,11 @@ Consequences to plan for:
   a directory URL such as `/` gets no Markdown on nginx yet.
 - A static file nginx serves without an upstream `Cache-Control` has no
   lifetime of its own, because `expires` is applied after the store decision.
-  Such pages are not stored on nginx.
+  Such pages are never served as Markdown on nginx.
+- `add_header Cache-Control ...` adds a second `Cache-Control` line beside the
+  origin's. Two lines with different `max-age` values conflict, so the page
+  keeps no lifetime and is never served as Markdown. Set the lifetime at the
+  origin and do not add a `Cache-Control` line with `add_header`.
 - A `proxy_hide_header` does not hide a `Set-Cookie`, `Cache-Control`, `Vary`
   or `Pragma` from the store decision.
 
@@ -158,14 +180,15 @@ A URL purge (the purge method or `?purge=`) removes the stored page and its
 copy; one that cannot remove it reports a failure. The URL is matched with its
 host in lowercase and a default port removed, but a purge for a different
 scheme does not match. A global purge, from the admin page or a touch of
-`cache.flush`, fences everything stored before it.
+`cache.flush` (read while `EnableCachePurge` is off), fences everything stored before it.
 
 - A purge takes effect in other server processes within one poll interval
   (`CacheFlushPollIntervalSec`, default 5 seconds).
 - A global purge is kept in a per-site file beside the cache volume. If that
   file cannot be read, the whole site is fenced until it can.
-- A `cache.flush` touch followed by a wipe of the file cache, before any
-  process has seen the touch, is not recorded.
+- After touching `cache.flush`, wait one poll interval
+  (`CacheFlushPollIntervalSec`) before wiping the file cache. A wipe before any
+  server process has seen the touch loses that purge.
 
 ## Limits
 
@@ -174,9 +197,11 @@ scheme does not match. A global purge, from the admin page or a touch of
   stylesheet stays in the copy.
 - A page whose Markdown body is too small to be useful gets no copy, and agents
   get the page itself.
-- On an origin whose refusal depends on request headers, a client can trigger
-  the removal of a stored entry, at the rate pages are stored. This fails
-  closed: the next request gets HTML.
+- If your origin refuses caching for some requests based on a request header
+  (for example `Cache-Control: private` for one `User-Agent`), such a request
+  removes the stored copy, and agents get HTML until the page is stored again.
+  Mark such pages `private` for every request, or let them vary only on
+  `Accept-Encoding`.
 - One entry is stored per site path, whatever port it is requested on.
 - The decision log is a file under `<LogDir>/daemon-html`; the admin console's
   HTML cache panel shows the mode, the counters and the reasons serving is not
