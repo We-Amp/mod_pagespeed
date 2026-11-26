@@ -105,19 +105,32 @@ const char* const kTransportLines[] = {"Content-Encoding", "Content-Length",
 // from the store view) and is not part of a Markdown answer either, so it
 // is left out of the final view the store is classified on.  (Report-only
 // classifies the whole final view, as it always has.)
-const char* const kFinalViewPolicyLines[] = {"Cache-Control",
-                                             "Pragma",
-                                             "Expires",
-                                             "Set-Cookie",
-                                             "Set-Cookie2",
-                                             "Vary",
-                                             "Content-Type",
-                                             "Content-Encoding",
-                                             "Content-Security-Policy",
-                                             "Link",
-                                             "Age",
-                                             "WWW-Authenticate",
-                                             "Content-Range"};
+const char* const kFinalViewPolicyLines[] = {
+    "Cache-Control",       "Pragma",
+    "Expires",             "Date",
+    "Age",                 "Set-Cookie",
+    "Set-Cookie2",         "Vary",
+    "Content-Type",        "Content-Encoding",
+    "Content-Range",       "Content-Location",
+    "Content-Security-Policy", "Link",
+    "WWW-Authenticate",    "Proxy-Authenticate",
+    "Authentication-Info", "Proxy-Authentication-Info",
+    "Clear-Site-Data",     "Surrogate-Control",
+    "CDN-Cache-Control",   "X-Accel-Expires"};
+
+// A policy line by name: one of the above, or any name ending in
+// "Cache-Control" (a targeted cache control such as CDN-Cache-Control).
+bool IsFinalViewPolicyLine(StringPiece name) {
+  const StringPiece kSuffix("Cache-Control");
+  if (name.size() >= kSuffix.size() &&
+      StringCaseEqual(name.substr(name.size() - kSuffix.size()), kSuffix)) {
+    return true;
+  }
+  for (const char* n : kFinalViewPolicyLines) {
+    if (StringCaseEqual(name, n)) return true;
+  }
+  return false;
+}
 
 template <size_t N>
 bool NameIn(StringPiece name, const char* const (&names)[N]) {
@@ -313,7 +326,7 @@ DaemonHtmlHeaderLines FinalViewForStore(
         break;
       }
     }
-    if (in_store || NameIn(line.first, kFinalViewPolicyLines)) {
+    if (in_store || IsFinalViewPolicyLine(line.first)) {
       out.push_back(line);
     }
   }
