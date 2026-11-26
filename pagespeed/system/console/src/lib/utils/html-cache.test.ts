@@ -2,7 +2,10 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
+import { STAT_DESCRIPTIONS, statDescriptionSource } from "../data/stat-descriptions";
 import {
+  HTML_CACHE_WARNINGS,
+  HTML_CACHE_TEXT,
   CONFIG_RETRY_FIRST_MS,
   CONFIG_RETRY_MAX_MS,
   configRetryDelayMs,
@@ -75,5 +78,99 @@ describe("htmlCacheView", () => {
     const view = htmlCacheView({ daemon_html_evaluated: "x", daemon_html_refused_vary: -2 });
     expect(view.state).toBe("off");
     expect(view.reasons).toEqual([]);
+  });
+});
+
+describe("serve-variants", () => {
+  it("reads serve-variants from the configuration text", () => {
+    const listed = "Version: 14: on\n\nOptions\n  DaemonHtmlCache (dhc)   serve-variants\n";
+    expect(htmlCacheMode({ config: listed })).toBe("serve-variants");
+    expect(htmlCacheView({}, "serve-variants").state).toBe("waiting");
+    expect(htmlCacheView({}, "serve-variants").mode).toBe("serve-variants");
+  });
+
+  it("counts stored, served and fall-through, largest first", () => {
+    const view = htmlCacheView(
+      {
+        daemon_html_stored: 5,
+        daemon_html_removed: 2,
+        daemon_html_removed_on_refusal: 1,
+        daemon_markdown_served: 7,
+        daemon_markdown_not_modified: 3,
+        daemon_markdown_fallthrough_absent: 2,
+        daemon_markdown_fallthrough_stale: 9,
+        daemon_html_refused_budget: 1,
+        daemon_html_refused_vary: 4,
+        daemon_html_refused_url_disagree: 2,
+      },
+      "serve-variants",
+    );
+    expect(view.state).toBe("reporting");
+    expect(view.stored).toBe(5);
+    expect(view.markdownServed).toBe(7);
+    expect(view.fallthroughs).toEqual([
+      { name: "stale", count: 9 },
+      { name: "absent", count: 2 },
+    ]);
+    expect(view.storeRefusals).toEqual([
+      { name: "url_disagree", count: 2 },
+      { name: "budget", count: 1 },
+    ]);
+    // The engine's refusals are not report reasons.
+    expect(view.reasons).toEqual([{ name: "vary", count: 4 }]);
+    expect(view.servingBlocked).toBe(false);
+  });
+
+  it("names the degraded state when serving is unavailable", () => {
+    const view = htmlCacheView({ daemon_html_serve_unavailable: 4, daemon_html_evaluated: 4 }, "serve-variants");
+    expect(view.servingBlocked).toBe(true);
+    expect(HTML_CACHE_TEXT.degradedCauses).toEqual([
+      "optimizer library below 1.14",
+      "worker not in a markdown mode",
+      "worker agent-optimize off",
+    ]);
+    expect(htmlCacheView({ daemon_html_serve_unavailable: 4 }, "report-only").servingBlocked).toBe(false);
+  });
+
+  it("shows exactly the five warning counters, only when they moved and the cache is on", () => {
+    expect(HTML_CACHE_WARNINGS.map(([n]) => n)).toEqual([
+      "daemon_html_sidecar_unpaired_stale",
+      "daemon_html_epoch_write_failed",
+      "daemon_html_purge_remove_failed",
+      "daemon_html_refused_url_disagree",
+      "daemon_markdown_transport_conflict",
+    ]);
+    const stats = { daemon_html_epoch_write_failed: 2, daemon_markdown_transport_conflict: 1 };
+    expect(htmlCacheView(stats, "serve-variants").warnings.map((w) => w.name)).toEqual([
+      "daemon_html_epoch_write_failed",
+      "daemon_markdown_transport_conflict",
+    ]);
+    expect(htmlCacheView(stats, "off").warnings).toEqual([]);
+    expect(htmlCacheView({}, "serve-variants").warnings).toEqual([]);
+  });
+
+  it("infers serve-variants from engine counters when the mode is unreadable", () => {
+    expect(htmlCacheView({ daemon_html_stored: 1 }).mode).toBe("serve-variants");
+    expect(htmlCacheView({}).mode).toBeNull();
+  });
+
+  it("describes every counter the module registers for the engine", () => {
+    const engine = [
+      "stored", "refused_budget", "refused_url_disagree", "sidecar_write_failed", "sidecar_unpaired_stale",
+      "purge_race_refused", "removed", "removed_on_refusal", "restore_skipped", "epoch_write_failed",
+      "purge_remove_failed", "serve_unavailable", "notify_sent", "notify_limited",
+    ].map((n) => `daemon_html_${n}`);
+    const markdown = ["served", "not_modified", "served_without_preference", "transport_conflict"].map(
+      (n) => `daemon_markdown_${n}`,
+    );
+    const reasons = [
+      "fresh", "mode", "auth_request", "cookie_request", "client_no_cache", "needs_validation", "stale",
+      "headers_not_reproducible", "sidecar_missing", "purged", "absent", "binding_stale", "parent_stale",
+      "method", "range", "cors", "no_transform", "withheld", "skew", "sidecar_unpaired", "url_disagree", "other",
+    ].map((n) => `daemon_markdown_fallthrough_${n}`);
+    for (const name of [...engine, ...markdown, ...reasons]) {
+      expect(statDescriptionSource(name), name).toBe("exact");
+      expect(STAT_DESCRIPTIONS[name]!.length, name).toBeGreaterThan(10);
+    }
   });
 });

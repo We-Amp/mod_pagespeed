@@ -222,3 +222,35 @@ test("phone: the status page does not scroll sideways", async ({ page }) => {
     await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1),
   ).toBe(true);
 });
+
+test("serve-variants: mode, engine counters, the degraded causes and the warnings", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    config: F.ok({
+      config: "Version: 14: on\n\nOptions\n  DaemonHtmlCache (dhc)   serve-variants\n",
+      effective_config: "Version: 14: on\n\nOptions\n  DaemonHtmlCache (dhc)   serve-variants\n",
+    }),
+    stats_json: F.ok({
+      variables: {
+        daemon_html_evaluated: 10,
+        daemon_html_stored: 4,
+        daemon_html_serve_unavailable: 3,
+        daemon_html_epoch_write_failed: 1,
+        daemon_markdown_served: 6,
+        daemon_markdown_fallthrough_stale: 2,
+      },
+      maxlength: 60,
+      timestamp_ms: 1_790_000_000_000,
+    }),
+  });
+  await openConsole(page, "pagespeed_admin", "#/optimizer");
+  await ready(page);
+  const panel = page.locator("#optimizer-html-cache");
+  await expect(page.getByTestId("html-cache-mode")).toContainText("serve-variants");
+  await expect(page.getByTestId("html-cache-degraded")).toContainText("optimizer library below 1.14");
+  await expect(page.getByTestId("html-cache-degraded")).toContainText("worker not in a markdown mode");
+  await expect(page.getByTestId("html-cache-degraded")).toContainText("worker agent-optimize off");
+  await expect(page.getByTestId("html-cache-warnings")).toContainText("daemon_html_epoch_write_failed");
+  await expect(page.getByTestId("html-cache-engine")).toContainText("Markdown answers (200): 6");
+  await expect(panel.getByRole("table", { name: /Fall-throughs/ })).toContainText("stale");
+});
