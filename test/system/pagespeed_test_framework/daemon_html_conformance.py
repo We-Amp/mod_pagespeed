@@ -49,7 +49,7 @@ PORTS = ("apache", "nginx", "iis")
 # make_provider(server_config). A lane outside this set skips every row; a
 # lane in it fails when its provider cannot be imported. The change that
 # adds a lane's provider adds its port here.
-PROVIDER_PORTS = frozenset(["apache", "nginx"])
+PROVIDER_PORTS = frozenset(["apache", "nginx", "iis"])
 
 # Expect keys a background step may carry: what its own response shows. Its
 # expectations are checked after the next step ran, so volume, counter and

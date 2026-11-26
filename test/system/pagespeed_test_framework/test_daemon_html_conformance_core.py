@@ -874,13 +874,14 @@ class TestProviderPorts:
         assert modules == set(conf.PROVIDER_PORTS)
         assert set(conf.PROVIDER_PORTS) <= set(conf.PORTS)
 
-    def test_a_port_without_a_provider_is_skipped(self):
+    def test_a_port_without_a_provider_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(conf, "PROVIDER_PORTS", frozenset())
         assert conf.load_provider("iis", object()) is None
 
     def test_a_listed_port_whose_provider_is_missing_fails(self, monkeypatch):
-        monkeypatch.setattr(conf, "PROVIDER_PORTS", frozenset(["iis"]))
+        monkeypatch.setattr(conf, "PROVIDER_PORTS", frozenset(["no-such-port"]))
         with pytest.raises(ModuleNotFoundError):
-            conf.load_provider("iis", object())
+            conf.load_provider("no-such-port", object())
 
 
 class TestHeaderHelpers:
