@@ -2333,6 +2333,170 @@
       }
     },
     {
+      "id": "race-global-same-second-is-a-miss",
+      "runners": ["engine"],
+      "why": "purge: capture-time fence",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000100
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ]
+            },
+            "pre": [
+              {"disable_recheck": {}},
+              {"purge_global": {"at_ms": 1790000000000, "source": "other_process"}}
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}]},
+            "pre": [{"advance_clock": {"ms": 1000}}, {"make_visible": {}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "epoch-same-second-is-a-miss",
+      "runners": ["engine"],
+      "why": "purge: global purge persisted per site",
+      "engine": {
+        "volume": [{"kind": "epoch", "site": "default", "epoch_s": 1790000000}],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "purged",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000100
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "stored_at_s": 1790000000
+                }
+              ]
+            },
+            "pre": [
+              {"disable_recheck": {}}
+            ]
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {"calls": [{"fn": "ps_html_serve_classify", "args": {"stored.purged": true}}]},
+            "pre": [{"advance_clock": {"ms": 1000}}]
+          }
+        ]
+      }
+    },
+    {
       "id": "race-visible-after-recheck",
       "runners": ["engine"],
       "why": "purge: capture-time fence",
@@ -8898,6 +9062,18 @@
       "runners": ["engine"],
       "why": "degrade: report-only unless library and worker allow serving",
       "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
         "verdicts": [
           {"fn": "ps_read_shared_config_html_mode", "value": "off"},
           {"fn": "ps_read_shared_config_html_mode", "value": "markdown-static"},
@@ -8948,6 +9124,18 @@
       "runners": ["engine"],
       "why": "degrade: report-only unless library and worker allow serving",
       "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
         "verdicts": [
           {"fn": "ps_read_shared_config_agent_entitled", "value": true},
           {
@@ -9104,7 +9292,15 @@
             "expect": {
               "serve": {
                 "kind": "final",
-                "headers_exact": {"Vary": {"count": 1, "value": "Accept-Encoding, Accept"}}
+                "headers_exact": {
+                  "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                  "Content-Length": {"count": 1},
+                  "Cache-Control": {"count": 1, "value": "private"},
+                  "Vary": {"count": 1, "value": "Accept-Encoding, Accept"},
+                  "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                  "Age": {"count": 1},
+                  "ETag": {"count": 1}
+                }
               }
             }
           }
@@ -10346,7 +10542,25 @@
           {"kind": "sidecar", "url": "https://www.example.test/page"}
         ],
         "verdicts": [],
-        "steps": [{"kind": "stats_tick", "expect": {"counters": {"daemon_html_sidecar_unpaired_stale": 1}}}]
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "serve": {"kind": "fall_through", "reason": "sidecar_unpaired"},
+              "counters": {"daemon_html_sidecar_unpaired_stale": 0}
+            }
+          },
+          {"kind": "stats_tick", "expect": {"counters": {"daemon_html_sidecar_unpaired_stale": 1}}}
+        ]
       }
     },
     {
