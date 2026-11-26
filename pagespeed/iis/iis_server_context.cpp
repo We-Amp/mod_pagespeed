@@ -81,13 +81,6 @@ namespace net_instaweb {
 
 	IHttpServer* iis_http_server = nullptr;
 
-	// The bytes every engine of this process may hold for bodies being
-	// recorded.
-	DaemonHtmlByteBudget* ProcessIisDaemonHtmlByteBudget() {
-		static DaemonHtmlByteBudget* budget = new DaemonHtmlByteBudget();
-		return budget;
-	}
-
 	// A string property of an admin-manager element, as UTF-8; empty when
 	// it is absent.
 	GoogleString AdminProperty(IAppHostElement* element, const wchar_t* name) {
@@ -285,7 +278,7 @@ namespace net_instaweb {
 			deps.timer = timer();
 			deps.handler = message_handler();
 			deps.limiter = ProcessDaemonHealNotifyLimiter();
-			deps.budget = ProcessIisDaemonHtmlByteBudget();
+			deps.budget = ProcessDaemonHtmlByteBudget();
 			// The admin path's and the ticks' work run inline, on the IIS
 			// thread that asked.
 			deps.runner = nullptr;
