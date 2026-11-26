@@ -427,6 +427,59 @@ cc_binary(
     win_def_file = "daemon_stub_html_policy.def",
 )
 
+# A library that publishes the HTML serve set (C API 1.13 + 1.14) beside the
+# 1.12 store policy. The set is bound only when the reported minor is 14 or
+# later, so the same library stands for a 1.12, a 1.13 and a 1.14 peer.
+cc_binary(
+    name = "libdaemon_stub_html_serve.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve.def",
+)
+
+# The HTML serve set less one entry point, while reporting 1.14. The set is
+# bound as a whole, so this library loads and none of the set is used; it is
+# what tells "bound as a set" from "bound symbol by symbol".
+cc_binary(
+    name = "libdaemon_stub_html_serve_partial.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = [
+        "PS_STUB_HTML_POLICY",
+        "PS_STUB_HTML_SERVE",
+        "PS_STUB_OMIT_SITE_PURGE_EPOCH_READ",
+    ],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_serve_partial.def",
+)
+
 # A daemon package from before the per-failure explanation was published. Like
 # the two flavours above this entry point is bound OPTIONALLY, so this library
 # must still load and still work; without it "an older library is unaffected"
@@ -483,14 +536,41 @@ cc_binary(
 # The ABI floor and the published layout the module binds: a library below
 # 1.12, and a 1.12 library without the sited cache calls, are refused; the
 # notification parameters are the published 88 bytes with the site and flags
-# where the peer reads them.
+# where the peer reads them. The HTML serve set is bound only whole and only
+# from a 1.14 library, and its absence never refuses a library.
 pagespeed_cc_test(
     name = "daemon_abi_test",
     srcs = ["daemon_abi_test.cc"],
     data = [
         ":libdaemon_stub.so",
+        ":libdaemon_stub_html_serve.so",
+        ":libdaemon_stub_html_serve_partial.so",
         ":libdaemon_stub_no_site.so",
     ],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+    ],
+)
+
+# The injected-verdict fake for the HTML cache engine's tests: every entry
+# point of the HTML serve set answers what a case injects and records its
+# arguments; everything else forwards to the stub library.
+pagespeed_cc_test(
+    name = "injected_verdict_daemon_abi_test",
+    srcs = [
+        "injected_verdict_daemon_abi.h",
+        "injected_verdict_daemon_abi_test.cc",
+        "recording_daemon_abi.h",
+    ],
+    data = [":libdaemon_stub.so"],
     shard_count = 1,
     target_compatible_with = select({
         "@platforms//os:linux": [],

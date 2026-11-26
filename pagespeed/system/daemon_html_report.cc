@@ -25,11 +25,9 @@ namespace net_instaweb {
 
 namespace {
 
-// The mode, the action values and the flag bits of the library's published
-// policy API (PS_API 1.12), hand-copied for the reason daemon_abi.h gives.
-constexpr int kPsHtmlCacheReportOnly = 1;
-constexpr int kPsHtmlStoreActionWouldStore = 3;
-constexpr int kPsHtmlStoreActionWouldStoreNoNotify = 4;
+// The flag bits of the library's published policy API (PS_API 1.12),
+// hand-copied for the reason daemon_abi.h gives.  The mode and the action
+// values are daemon_abi.h's own.
 constexpr uint32_t kPsHtmlStoreFlagSidecarEvaluated = 16;
 constexpr uint32_t kPsHtmlStoreFlagCcEvaluated = 32;
 constexpr uint32_t kPsHtmlRequestHasAuthorization = 1;

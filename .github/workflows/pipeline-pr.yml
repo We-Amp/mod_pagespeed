@@ -415,6 +415,26 @@ jobs:
           python3 tools/ci/check_image_selection_vary.py pagespeed/system/daemon_abi.h \
             "${RUNNER_TEMP}/capability_mask.h" "${RUNNER_TEMP}/vary_emission.cc"
 
+      # daemon_abi.h mirrors the optimizer's C API by hand (constants, struct
+      # layouts, and the minor that publishes the optional HTML serve set).
+      # Compared with the optimizer at the test pin, which is what the
+      # daemon lanes load.
+      - name: Optimizer C API mirrors match the optimizer - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/ci/check_daemon_abi_mirrors.py --self-test
+      - name: Optimizer C API mirrors match the optimizer
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(python3 -c "import json;print(json.load(open('test/system/optimizer-test-pin.json'))['optimizer_commit'])")
+          BASE="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/pagespeed/pagespeed.h" "${RUNNER_TEMP}/opt-pagespeed.h"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/classify/alternate_id.h" "${RUNNER_TEMP}/opt-alternate_id.h"
+          bash tools/ci/fetch_retry.sh "${BASE}/lib/pagespeed/symbols.lds" "${RUNNER_TEMP}/opt-symbols.lds"
+          python3 tools/ci/check_daemon_abi_mirrors.py pagespeed/system/daemon_abi.h \
+            pagespeed/system/daemon_abi.cc "${RUNNER_TEMP}/opt-pagespeed.h" \
+            "${RUNNER_TEMP}/opt-alternate_id.h" "${RUNNER_TEMP}/opt-symbols.lds"
+
       - name: Legacy-docs guard - self-test
         if: ${{ !cancelled() }}
         run: sh tools/ci/check_legacy_docs.sh --self-test
@@ -3350,6 +3370,8 @@ jobs:
           & $bazel $root test @common --test_output=errors --keep_going -- `
             //test/pagespeed/iis/... `
             //test/pagespeed/system:daemon_adapter_test `
+            //test/pagespeed/system:daemon_abi_test `
+            //test/pagespeed/system:injected_verdict_daemon_abi_test `
             //test/pagespeed/kernel/image:avif_test `
             //test/pagespeed/kernel/packs/... `
             //third_party/css_parser:css_parser_test

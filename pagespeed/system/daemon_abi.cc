@@ -322,6 +322,65 @@ using HtmlDecisionFormatFn = int (*)(const char* const*, const char* const*,
                                      size_t, char*, size_t, size_t*);
 using HtmlStoreReasonNameFn = const char* (*)(int);
 
+// The HTML serve set (1.13 + 1.14).  ps_error_t is pinned to int width by the
+// peer, so the cache calls are spelled with int returns like every other.
+using HtmlServeClassifyFn = int (*)(const PsHtmlServeRequest*,
+                                    const PsHtmlStoredFacts*,
+                                    PsHtmlServeVerdict*);
+using HtmlServeReasonNameFn = const char* (*)(int);
+using HtmlStoreWriteParamsFn = int (*)(int, uint32_t, uint32_t, uint16_t, int,
+                                       int64_t, const char* const*, size_t,
+                                       uint64_t, const char*, PsWriteParams*);
+using HtmlStoredFactsFromReadsFn = int (*)(const void*, const void*,
+                                           const void*, int,
+                                           PsHtmlStoredFacts*);
+using HtmlMarkdownEtagFn = int (*)(const uint8_t*, const uint8_t*, char*,
+                                   size_t, size_t*);
+using IfNoneMatchMatchesWeakFn = int (*)(const char*, const char*);
+using CacheWriteHeadersSidecarSiteFn = int (*)(void*,
+                                               const PsSidecarWriteParams*,
+                                               const char* const*,
+                                               const char* const*, size_t, int*,
+                                               int*);
+using HeadersSidecarReadFn = int (*)(void*, const char*, const char*,
+                                     const char*, const char*, void**);
+using HeaderBlockCountFn = size_t (*)(const void*);
+using HeaderBlockGetFn = int (*)(const void*, size_t, const char**, size_t*,
+                                 const char**, size_t*);
+using HeaderBlockPairingHashFn = const uint8_t* (*)(const void*);
+using HeaderBlockPairingFn = int (*)(const void*, const uint8_t*);
+using HeaderBlockFreeFn = void (*)(void*);
+using CacheRemoveSiteFn = int (*)(void*, const char*, const char*, const char*,
+                                  const char*);
+using CacheWriteSitePurgeEpochFn = int (*)(void*, const char*, uint64_t);
+using CacheReadSitePurgeEpochFn = int (*)(void*, const char*, uint64_t*);
+using ReadSharedConfigIntFn = int (*)(const char*);
+using WantsAgentMarkdownFn = int (*)(const char*);
+
+// The resolved HTML serve set.  Filled as a whole or left empty: see
+// LibraryDaemonAbi::BindHtmlServeSet.
+struct HtmlServeSetFns {
+  HtmlServeClassifyFn serve_classify = nullptr;
+  HtmlServeReasonNameFn serve_reason_name = nullptr;
+  HtmlStoreWriteParamsFn store_write_params = nullptr;
+  HtmlStoredFactsFromReadsFn stored_facts_from_reads = nullptr;
+  HtmlMarkdownEtagFn markdown_etag = nullptr;
+  IfNoneMatchMatchesWeakFn if_none_match_matches_weak = nullptr;
+  CacheWriteHeadersSidecarSiteFn write_headers_sidecar_site = nullptr;
+  HeadersSidecarReadFn headers_sidecar_read = nullptr;
+  HeaderBlockCountFn header_block_count = nullptr;
+  HeaderBlockGetFn header_block_get = nullptr;
+  HeaderBlockPairingHashFn header_block_pairing_hash = nullptr;
+  HeaderBlockPairingFn header_block_pairing = nullptr;
+  HeaderBlockFreeFn header_block_free = nullptr;
+  CacheRemoveSiteFn cache_remove_site = nullptr;
+  CacheWriteSitePurgeEpochFn write_site_purge_epoch = nullptr;
+  CacheReadSitePurgeEpochFn read_site_purge_epoch = nullptr;
+  ReadSharedConfigIntFn read_shared_config_html_mode = nullptr;
+  ReadSharedConfigIntFn read_shared_config_agent_entitled = nullptr;
+  WantsAgentMarkdownFn wants_agent_markdown = nullptr;
+};
+
 class LibraryDaemonAbi : public DaemonAbi {
  public:
   explicit LibraryDaemonAbi(void* handle) : handle_(handle) {}
@@ -404,6 +463,148 @@ class LibraryDaemonAbi : public DaemonAbi {
 
   bool PublishesVolumeSize() const override {
     return shared_config_volume_size_ != nullptr;
+  }
+
+  // The HTML serve set.  html_serve_ is either wholly bound or wholly empty,
+  // so testing one pointer answers for the set.
+  bool HasHtmlServeSet() const override {
+    return html_serve_.serve_classify != nullptr;
+  }
+
+  GoogleString HtmlServeSetUnavailableReason() const override {
+    return html_serve_unavailable_;
+  }
+
+  int HtmlServeClassify(const PsHtmlServeRequest* request,
+                        const PsHtmlStoredFacts* facts,
+                        PsHtmlServeVerdict* out) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.serve_classify(request, facts, out);
+  }
+
+  const char* HtmlServeReasonName(int reason) const override {
+    if (!HasHtmlServeSet()) return nullptr;
+    return html_serve_.serve_reason_name(reason);
+  }
+
+  int HtmlStoreWriteParams(int action, uint32_t lifetime_s,
+                           uint32_t store_flags, uint16_t cc_flags,
+                           int sidecar_stored, int64_t capture_start_ms,
+                           const char* const* age_lines, size_t age_count,
+                           uint64_t content_length,
+                           const char* origin_content_type,
+                           PsWriteParams* params) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.store_write_params(
+        action, lifetime_s, store_flags, cc_flags, sidecar_stored,
+        capture_start_ms, age_lines, age_count, content_length,
+        origin_content_type, params);
+  }
+
+  int HtmlStoredFactsFromReads(const void* original, const void* markdown,
+                               const void* withheld_marker, int sidecar_present,
+                               PsHtmlStoredFacts* out) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.stored_facts_from_reads(
+        original, markdown, withheld_marker, sidecar_present, out);
+  }
+
+  int HtmlMarkdownEtag(const uint8_t* binding_hash,
+                       const uint8_t* markdown_hash, char* buf, size_t capacity,
+                       size_t* out_len) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.markdown_etag(binding_hash, markdown_hash, buf, capacity,
+                                     out_len);
+  }
+
+  int IfNoneMatchMatchesWeak(const char* if_none_match,
+                             const char* etag) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.if_none_match_matches_weak(if_none_match, etag);
+  }
+
+  int CacheWriteHeadersSidecarSite(void* cache,
+                                   const PsSidecarWriteParams* params,
+                                   const char* const* names,
+                                   const char* const* values, size_t count,
+                                   int* out_verdict,
+                                   int* out_stored) const override {
+    if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    return html_serve_.write_headers_sidecar_site(
+        cache, params, names, values, count, out_verdict, out_stored);
+  }
+
+  int HeadersSidecarRead(void* cache, const char* url, const char* hostname,
+                         const char* scheme, const char* site,
+                         void** out_block) const override {
+    if (!HasHtmlServeSet()) {
+      return DaemonAbi::HeadersSidecarRead(cache, url, hostname, scheme, site,
+                                           out_block);
+    }
+    return html_serve_.headers_sidecar_read(cache, url, hostname, scheme, site,
+                                            out_block);
+  }
+
+  size_t HeaderBlockCount(const void* block) const override {
+    if (!HasHtmlServeSet()) return 0;
+    return html_serve_.header_block_count(block);
+  }
+
+  int HeaderBlockGet(const void* block, size_t index, const char** out_name,
+                     size_t* out_name_len, const char** out_value,
+                     size_t* out_value_len) const override {
+    if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    return html_serve_.header_block_get(block, index, out_name, out_name_len,
+                                        out_value, out_value_len);
+  }
+
+  const uint8_t* HeaderBlockPairingHash(const void* block) const override {
+    if (!HasHtmlServeSet()) return nullptr;
+    return html_serve_.header_block_pairing_hash(block);
+  }
+
+  int HeaderBlockPairing(const void* block,
+                         const uint8_t* entry_hash) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.header_block_pairing(block, entry_hash);
+  }
+
+  void HeaderBlockFree(void* block) const override {
+    if (!HasHtmlServeSet()) return;
+    html_serve_.header_block_free(block);
+  }
+
+  int CacheRemoveSite(void* cache, const char* url, const char* hostname,
+                      const char* scheme, const char* site) const override {
+    if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    return html_serve_.cache_remove_site(cache, url, hostname, scheme, site);
+  }
+
+  int CacheWriteSitePurgeEpoch(void* cache, const char* site,
+                               uint64_t epoch_s) const override {
+    if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    return html_serve_.write_site_purge_epoch(cache, site, epoch_s);
+  }
+
+  int CacheReadSitePurgeEpoch(void* cache, const char* site,
+                              uint64_t* out_epoch_s) const override {
+    if (!HasHtmlServeSet()) return kPsErrInvalidArg;
+    return html_serve_.read_site_purge_epoch(cache, site, out_epoch_s);
+  }
+
+  int ReadSharedConfigHtmlMode(const char* cache_path) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.read_shared_config_html_mode(cache_path);
+  }
+
+  int ReadSharedConfigAgentEntitled(const char* cache_path) const override {
+    if (!HasHtmlServeSet()) return -1;
+    return html_serve_.read_shared_config_agent_entitled(cache_path);
+  }
+
+  int WantsAgentMarkdown(const char* accept) const override {
+    if (!HasHtmlServeSet()) return 0;
+    return html_serve_.wants_agent_markdown(accept);
   }
 
   uint32_t SharedConfigGeneration(const char* volume_path) const override {
@@ -770,6 +971,64 @@ class LibraryDaemonAbi : public DaemonAbi {
       html_decision_format_ = format;
       html_store_reason_name_ = reason_name;
     }
+    BindHtmlServeSet();
+  }
+
+  // The HTML serve set (1.13 + 1.14), ALL OR NOTHING.  Resolved into a local
+  // first and published only when every entry point is there and the
+  // library reports the minor that publishes them: a library that exports
+  // the symbols but reports an older minor does not promise their 1.14
+  // behaviour, and one that lacks any of them is treated as having none, so
+  // no caller can reach half a set.  Absence is never a load failure; the
+  // reason is kept for the caller's one log line.
+  void BindHtmlServeSet() {
+    const int minor = version_minor_();
+    if (minor < kHtmlServeSetMinor) {
+      html_serve_unavailable_ = StrCat(
+          "the optimizer library reports C API ",
+          IntegerToString(version_major_()), ".", IntegerToString(minor),
+          "; the HTML serve set needs ", IntegerToString(kRequiredAbiMajor),
+          ".", IntegerToString(kHtmlServeSetMinor), " or a later minor");
+      return;
+    }
+    HtmlServeSetFns fns;
+    GoogleString missing;
+    const bool bound =
+        Bind("ps_html_serve_classify", &fns.serve_classify, &missing) &&
+        Bind("ps_html_serve_reason_name", &fns.serve_reason_name, &missing) &&
+        Bind("ps_html_store_write_params", &fns.store_write_params, &missing) &&
+        Bind("ps_html_stored_facts_from_reads", &fns.stored_facts_from_reads,
+             &missing) &&
+        Bind("ps_html_markdown_etag", &fns.markdown_etag, &missing) &&
+        Bind("ps_if_none_match_matches_weak", &fns.if_none_match_matches_weak,
+             &missing) &&
+        Bind("ps_cache_write_headers_sidecar_site",
+             &fns.write_headers_sidecar_site, &missing) &&
+        Bind("ps_headers_sidecar_read", &fns.headers_sidecar_read, &missing) &&
+        Bind("ps_header_block_count", &fns.header_block_count, &missing) &&
+        Bind("ps_header_block_get", &fns.header_block_get, &missing) &&
+        Bind("ps_header_block_pairing_hash", &fns.header_block_pairing_hash,
+             &missing) &&
+        Bind("ps_header_block_pairing", &fns.header_block_pairing, &missing) &&
+        Bind("ps_header_block_free", &fns.header_block_free, &missing) &&
+        Bind("ps_cache_remove_site", &fns.cache_remove_site, &missing) &&
+        Bind("ps_cache_write_site_purge_epoch", &fns.write_site_purge_epoch,
+             &missing) &&
+        Bind("ps_cache_read_site_purge_epoch", &fns.read_site_purge_epoch,
+             &missing) &&
+        Bind("ps_read_shared_config_html_mode",
+             &fns.read_shared_config_html_mode, &missing) &&
+        Bind("ps_read_shared_config_agent_entitled",
+             &fns.read_shared_config_agent_entitled, &missing) &&
+        Bind("ps_wants_agent_markdown", &fns.wants_agent_markdown, &missing);
+    if (!bound) {
+      // `missing` is the loader's sentence naming the first absent symbol.
+      html_serve_unavailable_ =
+          StrCat(missing, "; the HTML serve set is not used");
+      return;
+    }
+    html_serve_ = fns;
+    html_serve_unavailable_.clear();
   }
 
  private:
@@ -799,6 +1058,8 @@ class LibraryDaemonAbi : public DaemonAbi {
   HtmlStoreClassifyFn html_store_classify_ = nullptr;
   HtmlDecisionFormatFn html_decision_format_ = nullptr;
   HtmlStoreReasonNameFn html_store_reason_name_ = nullptr;
+  HtmlServeSetFns html_serve_;
+  GoogleString html_serve_unavailable_ = "the HTML serve set was not bound";
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
   CacheWriteOriginalSiteFn cache_write_original_site_ = nullptr;

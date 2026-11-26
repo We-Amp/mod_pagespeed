@@ -114,6 +114,18 @@
 //   PS_STUB_OMIT_SITE            no _site cache entry points, while still
 //                                REPORTING 1.12: refused, because they are
 //                                bound unconditionally.
+//   PS_STUB_HTML_SERVE           exports the HTML serve set (1.13 + 1.14).
+//                                Bound only when the reported minor is 14 or
+//                                later, so a case sets PS_STUB_MINOR.  Its
+//                                answers are steered by PS_STUB_HTML_SERVE_*,
+//                                PS_STUB_HTML_MODE, PS_STUB_AGENT_ENTITLED,
+//                                PS_STUB_SIDECAR_WRITE_STATUS,
+//                                PS_STUB_REMOVE_STATUS and
+//                                PS_STUB_EPOCH_{WRITE,READ}_STATUS.
+//   PS_STUB_OMIT_SITE_PURGE_EPOCH_READ
+//                                with PS_STUB_HTML_SERVE: the set without
+//                                ps_cache_read_site_purge_epoch.  The set is
+//                                bound as a whole, so none of it is used.
 //
 // WHY THIS FILE MODELS THE PEER'S VALIDATION RATHER THAN JUST SUCCEEDING.
 // A stand-in that accepts everything cannot fail the way the real library
@@ -138,6 +150,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #ifdef _WIN32
 // WIN32_LEAN_AND_MEAN and NOMINMAX keep the header's COM and min/max macros
@@ -211,6 +224,8 @@ struct StubWriteParams {
   uint32_t origin_last_modified;
   uint16_t origin_cc_flags;
   uint8_t reserved_[6];
+  // 1.13: the content binding.
+  const uint8_t* origin_html_hash;
 };
 
 struct StubCacheControl {
@@ -265,8 +280,12 @@ constexpr size_t kMaxOptionContextBytes = 16384;
 // is merely close is read as the much shorter earlier revision.
 size_t ClampWriteParamsSize(size_t declared) {
   const size_t v1_1 = offsetof(StubWriteParams, origin_etag);
+  const size_t v1_2 = offsetof(StubWriteParams, origin_html_hash);
   if (declared >= sizeof(StubWriteParams)) {
     return sizeof(StubWriteParams);
+  }
+  if (declared >= v1_2) {
+    return v1_2;
   }
   if (declared >= v1_1) {
     return v1_1;
@@ -834,6 +853,119 @@ void SiteLog(const char* op, const char* site, const char* url) {
   fclose(f);
 }
 
+#ifdef PS_STUB_HTML_SERVE
+// ---------------------------------------------------------------------------
+// The HTML serve set's state: a few fixed slots, no C++ runtime (see above).
+// ---------------------------------------------------------------------------
+
+constexpr size_t kHashBytes = 32;
+constexpr size_t kSidecarSlots = 8;
+constexpr size_t kSidecarLines = 8;
+
+struct StubSidecarWriteParams {
+  size_t struct_size;
+  const char* url;
+  const char* hostname;
+  const char* scheme;
+  const char* site;
+  const uint8_t* origin_html_hash;
+};
+
+struct StubServeRequest {
+  size_t struct_size;
+  int mode;
+  const char* method;
+  const char* accept;
+  const char* cache_control;
+  const char* pragma;
+  const char* if_none_match;
+  uint32_t request_flags;
+  uint32_t now_seconds;
+};
+
+struct StubStoredFacts {
+  size_t struct_size;
+  uint32_t flags;
+  uint32_t stored_at;
+  uint32_t age_at_store;
+  uint32_t lifetime_s;
+  uint32_t render_ttl_s;
+  int withheld_reason;
+  uint8_t binding_hash[kHashBytes];
+  uint8_t markdown_hash[kHashBytes];
+};
+
+struct StubServeVerdict {
+  size_t struct_size;
+  int action;
+  int reason;
+  int enforce;
+  int wants_markdown;
+  uint32_t age_s;
+  int not_modified;
+  char etag[32];
+};
+
+// A stored sidecar, and also the block a read hands out (a malloc'd copy).
+struct StubSidecar {
+  int used;
+  char url[512];
+  char site[kSiteIdChars + 1];
+  size_t count;
+  char names[kSidecarLines][64];
+  char values[kSidecarLines][256];
+  int has_hash;
+  uint8_t hash[kHashBytes];
+};
+
+StubSidecar g_sidecars[kSidecarSlots];
+
+struct StubEpoch {
+  int used;
+  char site[kSiteIdChars + 1];
+  uint64_t value;
+};
+
+StubEpoch g_epochs[kSidecarSlots];
+
+// A site the sited-only entry points accept: exactly kSiteIdChars hex.
+bool StubSiteIsNamed(const char* site) {
+  return site != nullptr && *site != '\0' && StubSiteIsValid(site);
+}
+
+StubSidecar* FindSidecar(const char* url, const char* site) {
+  for (size_t i = 0; i < kSidecarSlots; ++i) {
+    StubSidecar* s = &g_sidecars[i];
+    if (s->used && strcmp(s->url, url) == 0 &&
+        strcmp(s->site, site == nullptr ? "" : site) == 0) {
+      return s;
+    }
+  }
+  return nullptr;
+}
+
+bool AllZero(const uint8_t* bytes) {
+  for (size_t i = 0; i < kHashBytes; ++i) {
+    if (bytes[i] != 0) return false;
+  }
+  return true;
+}
+
+const char* TrimLeft(const char* s) {
+  while (*s == ' ' || *s == '\t') ++s;
+  return s;
+}
+
+// Whether [begin, end) equals `etag`, both compared without a W/ prefix.
+bool WeakEqual(const char* begin, const char* end, const char* etag) {
+  while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) --end;
+  if (end - begin >= 2 && begin[0] == 'W' && begin[1] == '/') begin += 2;
+  if (etag[0] == 'W' && etag[1] == '/') etag += 2;
+  const size_t length = static_cast<size_t>(end - begin);
+  return strlen(etag) == length && strncmp(begin, etag, length) == 0;
+}
+#endif  // PS_STUB_HTML_SERVE
+
 }  // namespace
 
 extern "C" {
@@ -939,6 +1071,353 @@ const char* ps_html_store_reason_name(int reason) {
   return nullptr;
 }
 #endif  // PS_STUB_HTML_POLICY
+
+#ifdef PS_STUB_HTML_SERVE
+// ---------------------------------------------------------------------------
+// The HTML serve set (1.13 + 1.14), in the flavour that exports it.  Every
+// entry point keeps the real library's argument checks and fail directions;
+// the verdicts themselves are what the PS_STUB_HTML_SERVE_* settings say.
+// ---------------------------------------------------------------------------
+
+int ps_wants_agent_markdown(const char* accept) {
+  return accept != nullptr && strstr(accept, "text/markdown") != nullptr;
+}
+
+int ps_read_shared_config_agent_entitled(const char* cache_path) {
+  if (cache_path == nullptr) return -1;
+  return static_cast<int>(EnvOr("PS_STUB_AGENT_ENTITLED", 1));
+}
+
+int ps_read_shared_config_html_mode(const char* cache_path) {
+  if (cache_path == nullptr) return -1;
+  return static_cast<int>(EnvOr("PS_STUB_HTML_MODE", 1));
+}
+
+const char* ps_html_serve_reason_name(int reason) {
+  static const char* const kNames[] = {"fresh",
+                                       "mode",
+                                       "auth_request",
+                                       "cookie_request",
+                                       "client_no_cache",
+                                       "needs_validation",
+                                       "stale",
+                                       "headers_not_reproducible",
+                                       "sidecar_missing",
+                                       "purged",
+                                       "absent",
+                                       "binding_stale",
+                                       "parent_stale",
+                                       "method",
+                                       "range",
+                                       "cors",
+                                       "no_transform",
+                                       "withheld",
+                                       "skew"};
+  if (reason < 0 ||
+      static_cast<size_t>(reason) >= sizeof(kNames) / sizeof(kNames[0])) {
+    return nullptr;
+  }
+  return kNames[reason];
+}
+
+int ps_html_markdown_etag(const uint8_t* binding_hash,
+                          const uint8_t* markdown_hash, char* buf,
+                          size_t capacity, size_t* out_len) {
+  if (binding_hash == nullptr || markdown_hash == nullptr ||
+      out_len == nullptr || (buf == nullptr && capacity != 0) ||
+      AllZero(binding_hash) || AllZero(markdown_hash)) {
+    return -1;
+  }
+  uint8_t both[2 * kHashBytes];
+  memcpy(both, binding_hash, kHashBytes);
+  memcpy(both + kHashBytes, markdown_hash, kHashBytes);
+  uint8_t digest[32];
+  Sha256(both, sizeof(both), digest);
+  char hex[2 * 8 + 1];
+  Hex(digest, 8, hex);
+  char tag[40];
+  const int n = snprintf(tag, sizeof(tag), "W/\"psm-%s\"", hex);
+  *out_len = static_cast<size_t>(n);
+  if (capacity <= static_cast<size_t>(n)) {
+    if (capacity > 0) buf[0] = '\0';
+    return -3;
+  }
+  memcpy(buf, tag, static_cast<size_t>(n) + 1);
+  return 0;
+}
+
+int ps_if_none_match_matches_weak(const char* if_none_match, const char* etag) {
+  if (etag == nullptr || *etag == '\0') return -1;
+  if (if_none_match == nullptr) return 0;
+  const char* p = TrimLeft(if_none_match);
+  const char* end = p + strlen(p);
+  while (end > p && (end[-1] == ' ' || end[-1] == '\t')) --end;
+  if (end - p == 1 && *p == '*') return 1;
+  while (p < end) {
+    const char* comma = p;
+    while (comma < end && *comma != ',') ++comma;
+    if (WeakEqual(TrimLeft(p), comma, etag)) return 1;
+    p = comma < end ? comma + 1 : end;
+  }
+  return 0;
+}
+
+int ps_html_serve_classify(const StubServeRequest* request,
+                           const StubStoredFacts* facts,
+                           StubServeVerdict* out) {
+  if (request == nullptr || facts == nullptr || out == nullptr ||
+      request->struct_size < sizeof(StubServeRequest) ||
+      facts->struct_size < sizeof(StubStoredFacts) ||
+      out->struct_size < sizeof(size_t) || request->mode < 0 ||
+      request->mode > 3 || request->method == nullptr) {
+    return -1;
+  }
+  StubServeVerdict v;
+  memset(&v, 0, sizeof(v));
+  v.wants_markdown = ps_wants_agent_markdown(request->accept);
+  if (request->mode < 2) {
+    v.reason = 1;  // mode
+  } else if ((facts->flags & 0x1u) == 0) {
+    v.reason = 10;  // absent
+    v.enforce = 1;
+  } else {
+    v.enforce = 1;
+    v.action = static_cast<int>(EnvOr("PS_STUB_HTML_SERVE_ACTION", 0));
+    v.reason = static_cast<int>(EnvOr("PS_STUB_HTML_SERVE_REASON", 0));
+    size_t len = 0;
+    if (v.action == 2 &&
+        ps_html_markdown_etag(facts->binding_hash, facts->markdown_hash, v.etag,
+                              sizeof(v.etag), &len) == 0) {
+      v.not_modified =
+          ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
+    }
+  }
+  const size_t size = out->struct_size;
+  v.struct_size = size;
+  memcpy(out, &v, size < sizeof(v) ? size : sizeof(v));
+  return 0;
+}
+
+int ps_html_store_write_params(int action, uint32_t lifetime_s,
+                               uint32_t store_flags, uint16_t cc_flags,
+                               int sidecar_stored, int64_t capture_start_ms,
+                               const char* const* age_lines, size_t age_count,
+                               uint64_t content_length,
+                               const char* origin_content_type,
+                               StubWriteParams* params) {
+  if ((action != 1 && action != 2) || capture_start_ms < 1000 ||
+      params == nullptr || origin_content_type == nullptr ||
+      (age_lines == nullptr && age_count != 0) ||
+      params->struct_size < offsetof(StubWriteParams, origin_html_hash)) {
+    return -1;
+  }
+  const int64_t capture_s = capture_start_ms / 1000;
+  long age = -1;
+  for (size_t i = 0; i < age_count; ++i) {
+    const char* line = age_lines[i];
+    if (line == nullptr || *line == '\0') return -1;
+    char* end = nullptr;
+    const long value = strtol(line, &end, 10);
+    if (*end != '\0' || value < 0 || (age >= 0 && age != value)) return -1;
+    age = value;
+  }
+  if (age < 0) age = 0;
+  if (age >= capture_s) return -1;
+  params->alternate_id = kSentinelOriginal;
+  params->full_mask = kSentinelOriginal;
+  params->content_type = 0;  // HTML
+  params->content_length = content_length;
+  params->origin_ct = origin_content_type;
+  params->origin_max_age = lifetime_s;
+  params->origin_cc_flags = cc_flags;
+  params->flags = static_cast<uint8_t>(0x10u | (sidecar_stored ? 0x20u : 0u));
+  params->cache_inserted_at = static_cast<uint32_t>(capture_s - age);
+  (void)store_flags;
+  return 0;
+}
+
+int ps_html_stored_facts_from_reads(const void* original, const void* markdown,
+                                    const void* withheld_marker,
+                                    int sidecar_present, StubStoredFacts* out) {
+  if (out == nullptr || out->struct_size < sizeof(StubStoredFacts)) {
+    return -1;
+  }
+  const size_t size = out->struct_size;
+  memset(out, 0, sizeof(*out));
+  out->struct_size = size;
+  if (original == nullptr) return 0;
+  out->flags = 0x1u;
+  if (sidecar_present) out->flags |= 0x20u;
+  if (markdown != nullptr) out->flags |= 0x100u;
+  if (withheld_marker != nullptr) {
+    out->flags |= 0x800u;
+  } else if (markdown != nullptr) {
+    out->flags |= 0x200u;
+  }
+  return 0;
+}
+
+int ps_cache_write_headers_sidecar_site(void* cache,
+                                        const StubSidecarWriteParams* params,
+                                        const char* const* names,
+                                        const char* const* values, size_t count,
+                                        int* out_verdict, int* out_stored) {
+  if (cache == nullptr || params == nullptr ||
+      params->struct_size < sizeof(StubSidecarWriteParams) ||
+      params->url == nullptr || params->hostname == nullptr ||
+      !StubSiteIsValid(params->site) ||
+      (params->origin_html_hash != nullptr &&
+       AllZero(params->origin_html_hash)) ||
+      (count != 0 && (names == nullptr || values == nullptr)) ||
+      count > kSidecarLines ||
+      strlen(params->url) >= sizeof(g_sidecars[0].url)) {
+    return kErrInvalidArg;
+  }
+  for (size_t i = 0; i < count; ++i) {
+    if (names[i] == nullptr || values[i] == nullptr) return kErrInvalidArg;
+  }
+  const long forced = EnvOr("PS_STUB_SIDECAR_WRITE_STATUS", 0);
+  if (forced != 0) return static_cast<int>(forced);
+  SiteLog("write_sidecar", params->site, params->url);
+  if (out_verdict != nullptr) *out_verdict = 0;
+  const bool paired = params->origin_html_hash != nullptr;
+  if (count == 0 && !paired) {
+    if (out_stored != nullptr) *out_stored = 0;
+    return kOk;
+  }
+  StubSidecar* slot = FindSidecar(params->url, params->site);
+  for (size_t i = 0; slot == nullptr && i < kSidecarSlots; ++i) {
+    if (!g_sidecars[i].used) slot = &g_sidecars[i];
+  }
+  if (slot == nullptr) return kErrNoSpace;
+  memset(slot, 0, sizeof(*slot));
+  slot->used = 1;
+  snprintf(slot->url, sizeof(slot->url), "%s", params->url);
+  snprintf(slot->site, sizeof(slot->site), "%s",
+           params->site == nullptr ? "" : params->site);
+  slot->count = count;
+  for (size_t i = 0; i < count; ++i) {
+    snprintf(slot->names[i], sizeof(slot->names[i]), "%s", names[i]);
+    snprintf(slot->values[i], sizeof(slot->values[i]), "%s", values[i]);
+  }
+  if (paired) {
+    slot->has_hash = 1;
+    memcpy(slot->hash, params->origin_html_hash, kHashBytes);
+  }
+  if (out_stored != nullptr) *out_stored = 1;
+  return kOk;
+}
+
+int ps_headers_sidecar_read(void* cache, const char* url, const char* hostname,
+                            const char* scheme, const char* site, void** out) {
+  if (out != nullptr) *out = nullptr;
+  if (cache == nullptr || url == nullptr || hostname == nullptr ||
+      out == nullptr || !StubSiteIsValid(site)) {
+    return kErrInvalidArg;
+  }
+  SiteLog("read_sidecar", site, url);
+  const StubSidecar* found = FindSidecar(url, site);
+  if (found == nullptr) return kErrNotFound;
+  StubSidecar* block = static_cast<StubSidecar*>(malloc(sizeof(StubSidecar)));
+  if (block == nullptr) return kErrIo;
+  memcpy(block, found, sizeof(*block));
+  *out = block;
+  return kOk;
+}
+
+size_t ps_header_block_count(const void* block) {
+  return block == nullptr ? 0 : static_cast<const StubSidecar*>(block)->count;
+}
+
+int ps_header_block_get(const void* block, size_t index, const char** out_name,
+                        size_t* out_name_len, const char** out_value,
+                        size_t* out_value_len) {
+  const StubSidecar* b = static_cast<const StubSidecar*>(block);
+  if (b == nullptr || index >= b->count) return kErrInvalidArg;
+  if (out_name != nullptr) *out_name = b->names[index];
+  if (out_name_len != nullptr) *out_name_len = strlen(b->names[index]);
+  if (out_value != nullptr) *out_value = b->values[index];
+  if (out_value_len != nullptr) *out_value_len = strlen(b->values[index]);
+  return kOk;
+}
+
+const uint8_t* ps_header_block_pairing_hash(const void* block) {
+  const StubSidecar* b = static_cast<const StubSidecar*>(block);
+  return b == nullptr || !b->has_hash ? nullptr : b->hash;
+}
+
+int ps_header_block_pairing(const void* block, const uint8_t* entry_hash) {
+  const StubSidecar* b = static_cast<const StubSidecar*>(block);
+  if (b == nullptr) return -1;
+  return b->has_hash && entry_hash != nullptr &&
+                 memcmp(b->hash, entry_hash, kHashBytes) == 0
+             ? 1
+             : 0;
+}
+
+void ps_header_block_free(void* block) { free(block); }
+
+int ps_cache_remove_site(void* cache, const char* url, const char* hostname,
+                         const char* scheme, const char* site) {
+  if (cache == nullptr || url == nullptr || hostname == nullptr ||
+      !StubSiteIsValid(site)) {
+    return kErrInvalidArg;
+  }
+  const long forced = EnvOr("PS_STUB_REMOVE_STATUS", 0);
+  if (forced != 0) return static_cast<int>(forced);
+  SiteLog("remove", site, url);
+  StubSidecar* found = FindSidecar(url, site);
+  if (found == nullptr) return kErrNotFound;
+  memset(found, 0, sizeof(*found));
+  return kOk;
+}
+
+int ps_cache_write_site_purge_epoch(void* cache, const char* site,
+                                    uint64_t epoch_s) {
+  if (cache == nullptr || !StubSiteIsNamed(site)) return kErrInvalidArg;
+  const long forced = EnvOr("PS_STUB_EPOCH_WRITE_STATUS", 0);
+  if (forced != 0) return static_cast<int>(forced);
+  if (epoch_s > static_cast<uint64_t>(time(nullptr)) + 5) {
+    return kErrInvalidArg;
+  }
+  StubEpoch* slot = nullptr;
+  for (size_t i = 0; i < kSidecarSlots; ++i) {
+    if (g_epochs[i].used && strcmp(g_epochs[i].site, site) == 0) {
+      slot = &g_epochs[i];
+    }
+  }
+  for (size_t i = 0; slot == nullptr && i < kSidecarSlots; ++i) {
+    if (!g_epochs[i].used) {
+      slot = &g_epochs[i];
+      slot->used = 1;
+      snprintf(slot->site, sizeof(slot->site), "%s", site);
+      slot->value = 0;
+    }
+  }
+  if (slot == nullptr) return kErrIo;
+  if (epoch_s > slot->value) slot->value = epoch_s;  // max-merge
+  return kOk;
+}
+
+#ifndef PS_STUB_OMIT_SITE_PURGE_EPOCH_READ
+int ps_cache_read_site_purge_epoch(void* cache, const char* site,
+                                   uint64_t* out_epoch_s) {
+  if (cache == nullptr || out_epoch_s == nullptr || !StubSiteIsNamed(site)) {
+    return kErrInvalidArg;
+  }
+  const long forced = EnvOr("PS_STUB_EPOCH_READ_STATUS", 0);
+  if (forced != 0) return static_cast<int>(forced);
+  for (size_t i = 0; i < kSidecarSlots; ++i) {
+    if (g_epochs[i].used && strcmp(g_epochs[i].site, site) == 0) {
+      *out_epoch_s = g_epochs[i].value;
+      return kOk;
+    }
+  }
+  *out_epoch_s = 0;
+  return kOk;
+}
+#endif  // PS_STUB_OMIT_SITE_PURGE_EPOCH_READ
+#endif  // PS_STUB_HTML_SERVE
 
 int ps_cache_open(const StubCacheConfig* config, void** out_cache) {
   if (out_cache == nullptr) return 5;
