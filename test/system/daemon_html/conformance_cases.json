@@ -15611,7 +15611,7 @@
     {
       "id": "live-leak-cdn-cache-control-200",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15629,37 +15629,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15667,7 +15642,7 @@
     {
       "id": "live-leak-cdn-cache-control-head",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15685,38 +15660,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "body_bytes": 0,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15724,7 +15673,7 @@
     {
       "id": "live-leak-cdn-cache-control-304",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15742,40 +15691,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {
-              "method": "GET",
-              "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
-            },
-            "expect": {
-              "status": 304,
-              "headers_exact": {
-                "ETag": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "Age",
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Content-Type",
-                "Expires",
-                "Set-Cookie",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter",
-                "X-Robots-Tag"
-              ]
-            }
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"], ["If-None-Match", "W/\"psm-0123456789abcdef\""]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15783,7 +15704,7 @@
     {
       "id": "live-leak-surrogate-control-200",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15801,37 +15722,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15839,7 +15735,7 @@
     {
       "id": "live-leak-surrogate-control-head",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15857,38 +15753,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "body_bytes": 0,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15896,7 +15766,7 @@
     {
       "id": "live-leak-surrogate-control-304",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15914,40 +15784,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {
-              "method": "GET",
-              "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
-            },
-            "expect": {
-              "status": 304,
-              "headers_exact": {
-                "ETag": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "Age",
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Content-Type",
-                "Expires",
-                "Set-Cookie",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter",
-                "X-Robots-Tag"
-              ]
-            }
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"], ["If-None-Match", "W/\"psm-0123456789abcdef\""]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
