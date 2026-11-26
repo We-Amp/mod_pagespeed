@@ -10,8 +10,8 @@
   (`add_header`, `expires`) allow it. An `add_header Cache-Control` adds a
   second `Cache-Control` line beside the origin's, and two different `max-age`
   values leave the page with no lifetime, so it gets no Markdown copy: set the
-  lifetime at the origin. `proxy_hide_header` does not hide a `Set-Cookie`, `Cache-Control`, `Vary` or
-  `Pragma` from that decision. The Markdown answer carries exactly
+  lifetime at the origin. `proxy_hide_header` does not hide a `Set-Cookie`,
+  `Cache-Control`, `Vary` or `Pragma` from that decision. The Markdown answer carries exactly
   `Content-Type`, `Content-Length` (when no body filter changed the body),
   `Cache-Control: private`, one `Vary` line, `X-Robots-Tag: noindex`, `Age` and
   an `ETag`, whatever `add_header ... always`, `expires` or another filter

@@ -9,11 +9,11 @@
   reloading the web server. Start with `report-only` and read its counters and
   decision log first. Without those conditions the mode runs as `report-only`
   and logs why when the state changes. IIS does not serve Markdown yet: there,
-  `serve-variants` runs as `report-only` (the response is never changed and nothing is stored),
-  and on Envoy it is counted as `daemon_html_unavailable`, as `report-only` is.
-  The Apache and nginx entries in this section list what each server stores and serves,
-  and the guide in `docs/html-cache-serve-variants.md` covers the steps and the
-  limits. The value `serve-cached-html` is reserved for a later release:
+  `serve-variants` runs as `report-only` (the response is never changed and
+  nothing is stored), and on Envoy it is counted as `daemon_html_unavailable`,
+  as `report-only` is. The Apache and nginx entries in this section list what
+  each server stores and serves, and the guide in
+  `docs/html-cache-serve-variants.md` covers the steps and the limits. The value `serve-cached-html` is reserved for a later release:
   setting it logs a warning and leaves the option as it was, so a configuration
   written for that release still loads.
 - **The HTML cache decision log names what the server configuration added.**

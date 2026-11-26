@@ -18,7 +18,8 @@ The module alone does not produce the Markdown copy. A worker does, and the
 module and the worker have to agree:
 
 - The optimizer library installed with the module must publish C API 1.14 or
-  later. With an older one the module logs why when the state changes and stays in `report-only`.
+  later. With an older one the module logs why when the state changes and
+  stays in `report-only`.
 - The optimizer worker must run with `--html-mode markdown-static` (or
   `markdown-rendered`) and `--agent-optimize`. `html_mode` is a setting of the
   whole worker, not of one site. The worker derives the copy from the stored
@@ -28,7 +29,8 @@ module and the worker have to agree:
   through. Set the mode with the `html_mode` key in `pagespeed.json`, which the
   worker reads at start from the directory that holds its cache volume (the
   data directory, `/data` by default, in the images), or with
-  `PATCH /v1/config` on the worker's management API.
+  `PATCH /v1/config` on the worker's management API (enabled with
+  `PAGESPEED_API_PORT` or `PAGESPEED_API_SOCKET` in the images).
 - The module needs `AgentOptimize on` and `DaemonHtmlCache serve-variants`.
 - A `LogDir` is needed for the decision log (below).
 - nginx must be 1.13.4 or later.
@@ -63,15 +65,17 @@ Do the steps in this order.
 
    In `report-only` nothing a client receives changes. Each HTML response is
    judged and counted: `daemon_html_would_store` against
-   `daemon_html_refused_<reason>`, and the decision log in `<LogDir>/daemon-html`
+   `daemon_html_refused_<reason>`, and the decision log in
+   `<LogDir>/daemon-html`
    gives the reason for each page. Read them before going on. If most of your
    pages are refused for `no_lifetime`, `vary`, `headers` or `private`, they
    would gain nothing from `serve-variants`.
 4. Change the value to `serve-variants` and reload. The log then says that the
    optimizer library and worker allow serving. If they do not, the module logs
    why (for example, that the worker's `html_mode` is not a Markdown mode) each
-   time that state changes, and keeps running as `report-only`; `daemon_html_serve_unavailable` counts the
-   HTML responses seen in that state.
+   time that state changes, and keeps running as `report-only`;
+   `daemon_html_serve_unavailable` counts the HTML responses seen in that
+   state.
 5. Check with a `GET` that prefers Markdown:
 
    ```sh
@@ -96,8 +100,8 @@ A page is stored only when all of these hold:
   requests that reach the default host are not stored.
 - The origin gave it an explicit lifetime (`max-age`, `s-maxage` or
   `Expires`). A page without one, and a `no-cache` page, gains nothing yet.
-  On nginx, an `add_header Cache-Control` beside the origin's own line leaves the
-  page with no lifetime (see "nginx" below).
+  On nginx, an `add_header Cache-Control` beside the origin's own line leaves
+  the page with no lifetime (see "nginx" below).
 - Its headers allow a shared cache to keep it: no `Set-Cookie`,
   `Cache-Control: private` or `no-store`, and no `Vary` naming anything other
   than `Accept-Encoding`.
@@ -180,7 +184,8 @@ A URL purge (the purge method or `?purge=`) removes the stored page and its
 copy; one that cannot remove it reports a failure. The URL is matched with its
 host in lowercase and a default port removed, but a purge for a different
 scheme does not match. A global purge, from the admin page or a touch of
-`cache.flush` (read while `EnableCachePurge` is off), fences everything stored before it.
+`cache.flush` (read while `EnableCachePurge` is off), fences everything stored
+before it.
 
 - A purge takes effect in other server processes within one poll interval
   (`CacheFlushPollIntervalSec`, default 5 seconds).
