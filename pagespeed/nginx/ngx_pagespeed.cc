@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <new>
 #include <optional>
@@ -57,6 +58,7 @@
 #include "ngx_base_fetch.h"
 #include "ngx_cache_control_merge.h"
 #include "ngx_caching_headers.h"
+#include "ngx_daemon_html.h"
 #include "ngx_daemon_record_completion.h"
 #include "ngx_daemon_serve_emit.h"
 #include "ngx_daemon_serve_notify.h"
@@ -92,6 +94,7 @@
 #include "pagespeed/kernel/webbotauth/key_directory_warmer.h"
 #include "pagespeed/kernel/webbotauth/webbotauth_counter_store.h"
 #include "pagespeed/system/admin_site.h"
+#include "pagespeed/system/daemon_html_engine.h"
 #include "pagespeed/system/daemon_ipro_recorder.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/file_owner.h"
@@ -163,6 +166,19 @@ QueuedWorkerPool::Sequence* g_daemon_record_sequence = nullptr;
 // as "no queue": the recording is counted as dropped.
 QueuedWorkerPool* g_classic_record_pool = nullptr;
 QueuedWorkerPool::Sequence* g_classic_record_sequence = nullptr;
+
+// DaemonHtmlCache serve-variants: the runners that carry the HTML cache
+// engine's blocking work -- a store's commit and a refusal's removal
+// (bounded by the record arm's queue caps), and a purge's removal, an epoch
+// write and the ticks (never turned away) -- onto the daemon record
+// sequence above, so nothing the engine does blocks the event thread (see
+// ngx_daemon_html.h).  Created in ps_init_child_process for a serving
+// process; the process's byte budget for bodies being recorded lives with
+// them.  ps_exit_child_process shuts the pool down (joining it) before the
+// engines are destroyed and the volume handles close.
+NgxDaemonHtmlRunner* g_daemon_html_store_runner = nullptr;
+NgxDaemonHtmlRunner* g_daemon_html_admin_runner = nullptr;
+DaemonHtmlByteBudget* g_daemon_html_budget = nullptr;
 
 StringPiece str_to_string_piece(ngx_str_t s) {
   return StringPiece(reinterpret_cast<char*>(s.data), s.len);
@@ -2157,6 +2173,62 @@ StringPiece ps_determine_host(ngx_http_request_t* r) {
   return host;
 }
 
+// ---------------------------------------------------------------------------
+// DaemonHtmlCache serve-variants: the HTML cache engine on nginx.
+//
+// STORE.  The store view is the origin's header lines at the first header
+// filter (ps_origin_caching_header_filter), before nginx's headers filter
+// (expires, add_header) or any third-party header filter ran, the
+// refusal-class lines taken from an upstream's own lines so
+// proxy_hide_header cannot hide them; the stored header block comes from
+// that view.  The final view is the response at the input of the module's
+// HTML filter (ps_html_rewrite_header_filter), the position the report has
+// always read; the body is tapped at the same filter's input.  The engine's
+// blocking work goes to the record arm's sequence (ngx_daemon_html.h).
+//
+// SERVE.  ps_daemon_html_serve, in the module's content-phase handler
+// (PRECONTENT from nginx 1.13.4, after every access phase), ahead of the
+// in-place gate.  A Markdown answer is composed in the content phase and then
+// enforced twice on its way down the header filter chain: by the module's
+// fix-headers filter, which runs after nginx's headers filter, and finally by
+// the etag filter, the module's last header filter, after the compressors
+// (ps_daemon_html_enforce_markdown).
+
+// The port a recording stores through: only its blocking work is used.
+class NgxDaemonHtmlStorePort : public DaemonHtmlPort {
+ public:
+  bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& /*result*/,
+                               bool /*head*/) override {
+    return false;
+  }
+  void MarkNoCompress() override {}
+  void RemoveClientConditionals() override {}
+  void RunBlocking(DaemonHtmlCommit commit) override {
+    // Without a runner (no record pool in this process) the commit is
+    // dropped here, and what it owns with it.
+    if (g_daemon_html_store_runner != nullptr) {
+      g_daemon_html_store_runner->RunBlocking(std::move(commit));
+    }
+  }
+};
+
+struct PsDaemonHtmlRequest {
+  // The origin's lines at the first header filter (the store view).
+  bool has_origin_lines = false;
+  DaemonHtmlHeaderLines origin_lines;
+  // Outlives the recording, which borrows it.
+  NgxDaemonHtmlStorePort store_port;
+  // The Markdown answer this response carries, once the engine had it sent:
+  // the header filters enforce exactly its header set.
+  bool markdown = false;
+  DaemonHtmlServeResult answer;
+  DaemonHtmlEngine* engine = nullptr;
+  // The never-sent Content-Encoding entry that keeps the compressors off
+  // this response (see ps_daemon_html_mark_no_compress).
+  ngx_table_elt_t* no_compress = nullptr;
+  bool conflict_noted = false;
+};
+
 // External-linkage accessor, defined here (OUTSIDE the anonymous namespace
 // below) so other translation units -- the Web-Bot-Auth glue in
 // ngx_webbotauth_handler.cc -- can link against it. Mirrors the file-local
@@ -2657,6 +2729,443 @@ void ps_create_base_fetch(StringPiece url, ps_request_ctx_t* ctx,
   ctx->base_fetch->SetRequestHeadersTakingOwnership(request_headers);
 }
 
+// The client's conditionals as they arrived (defined with the strip
+// handler below).
+const ClientConditionalStash* ps_client_conditional_stash(
+    ngx_http_request_t* r);
+
+// This request's HTML cache state, created on first use.
+PsDaemonHtmlRequest* ps_daemon_html_state(ps_request_ctx_t* ctx) {
+  if (ctx->daemon_html == nullptr) {
+    ctx->daemon_html = new PsDaemonHtmlRequest();
+  }
+  return ctx->daemon_html;
+}
+
+// Every sent header line of `list` (hash 0 lines are not sent).
+void ps_daemon_html_list_lines(const ngx_list_t& list,
+                               DaemonHtmlHeaderLines* lines) {
+  const ngx_list_part_t* part = &list.part;
+  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+  for (ngx_uint_t i = 0; /* void */; i++) {
+    if (i >= part->nelts) {
+      if (part->next == nullptr) break;
+      part = part->next;
+      header = static_cast<ngx_table_elt_t*>(part->elts);
+      i = 0;
+    }
+    if (header[i].hash == 0) continue;
+    lines->emplace_back(str_to_string_piece(header[i].key).as_string(),
+                        str_to_string_piece(header[i].value).as_string());
+  }
+}
+
+// The response's header lines as the engine reads them: the list, plus the
+// lines nginx renders from fields in its header writer, downstream of every
+// module filter (Content-Type, and Last-Modified and Content-Length when
+// only their fields are set).
+void ps_daemon_html_response_lines(ngx_http_request_t* r,
+                                   DaemonHtmlHeaderLines* lines) {
+  ps_daemon_html_list_lines(r->headers_out.headers, lines);
+  lines->emplace_back(
+      HttpAttributes::kContentType,
+      str_to_string_piece(r->headers_out.content_type).as_string());
+  if (r->headers_out.last_modified_time != -1 &&
+      r->headers_out.last_modified == nullptr) {
+    u_char date[sizeof("Mon, 28 Sep 1970 06:00:00 GMT")];
+    u_char* end = ngx_http_time(date, r->headers_out.last_modified_time);
+    lines->emplace_back(
+        HttpAttributes::kLastModified,
+        GoogleString(reinterpret_cast<char*>(date), end - date));
+  }
+  if (r->headers_out.content_length_n >= 0 &&
+      r->headers_out.content_length == nullptr) {
+    lines->emplace_back(HttpAttributes::kContentLength,
+                        Integer64ToString(r->headers_out.content_length_n));
+  }
+}
+
+// The HTML cache engine of the request's server block, or nullptr.
+DaemonHtmlEngine* ps_daemon_html_engine(ngx_http_request_t* r) {
+  ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
+  if (cfg_s == nullptr || cfg_s->server_context == nullptr ||
+      !cfg_s->server_context->initialized()) {
+    return nullptr;
+  }
+  return cfg_s->server_context->daemon_html_engine();
+}
+
+// The request as the HTML cache engine reads it.  `url` is the URL this
+// module parsed from the request line, before any option or forwarded-proto
+// change: the URL agreement compares it with the server's own reading.
+void ps_daemon_html_request_facts(ngx_http_request_t* r,
+                                  NgxServerContext* server_context,
+                                  const GoogleUrl& url,
+                                  DaemonHtmlRequestFacts* facts) {
+  facts->method = str_to_string_piece(r->method_name).as_string();
+  facts->scheme = ps_is_https(r) ? "https" : "http";
+  // As received, port included: the port is part of the cache key.
+  facts->host = r->headers_in.host != nullptr
+                    ? str_to_string_piece(r->headers_in.host->value).as_string()
+                    : str_to_string_piece(r->headers_in.server).as_string();
+  facts->path = str_to_string_piece(r->unparsed_uri).as_string();
+  facts->site = SiteIdFromServerFragment(
+      server_context->global_options()->cache_fragment());
+  facts->url_agreed =
+      r == r->main && url.IsWebValid() && ps_in_place_url_agrees(r, url);
+  facts->authenticated_user = r->headers_in.user.len != 0;
+  std::vector<NgxHeaderLine> lines;
+  NgxListIterator it(&r->headers_in.headers.part);
+  for (ngx_table_elt_t* h = it.Next(); h != nullptr; h = it.Next()) {
+    lines.emplace_back(str_to_string_piece(h->key),
+                       str_to_string_piece(h->value));
+  }
+  FillDaemonHtmlRequestHeaderFacts(lines, ps_client_conditional_stash(r),
+                                   facts);
+  const SystemRewriteOptions* options =
+      SystemRewriteOptions::DynamicCast(server_context->global_options());
+  if (options != nullptr &&
+      OptionContext::Compute(*options, &facts->option_context,
+                             &facts->option_signature) !=
+          OptionContextStatus::kOk) {
+    facts->option_context.clear();
+    facts->option_signature.clear();
+  }
+  facts->capture_start_ms =
+      static_cast<int64>(r->start_sec) * Timer::kSecondMs + r->start_msec;
+}
+
+// Takes the store view: the origin's lines at the first header filter, for
+// a main request's 200 to a GET that the HTML filter may handle, on a server
+// whose engine is on.
+void ps_daemon_html_take_origin_lines(ngx_http_request_t* r,
+                                      ps_request_ctx_t* ctx) {
+  if (r != r->main || ctx == nullptr || !ctx->html_rewrite ||
+      r->headers_out.status != NGX_HTTP_OK || r->method == NGX_HTTP_HEAD) {
+    return;
+  }
+  DaemonHtmlEngine* engine = ps_daemon_html_engine(r);
+  if (engine == nullptr || engine->config().mode == DaemonHtmlMode::kOff) {
+    return;
+  }
+  DaemonHtmlHeaderLines out;
+  ps_daemon_html_response_lines(r, &out);
+  const bool has_upstream =
+      r->upstream != nullptr && r->upstream->headers_in.headers.last != nullptr;
+  DaemonHtmlHeaderLines upstream;
+  if (has_upstream) {
+    ps_daemon_html_list_lines(r->upstream->headers_in.headers, &upstream);
+  }
+  PsDaemonHtmlRequest* state = ps_daemon_html_state(ctx);
+  state->origin_lines = DaemonHtmlOriginLines(out, has_upstream, upstream);
+  state->has_origin_lines = true;
+}
+
+// Whether this response is the Markdown answer the engine had sent (an error
+// page sent in its place has another status and is left alone).
+bool ps_daemon_html_markdown(ngx_http_request_t* r, ps_request_ctx_t* ctx) {
+  return r == r->main && ctx != nullptr && ctx->daemon_html != nullptr &&
+         ctx->daemon_html->markdown &&
+         static_cast<int>(r->headers_out.status) ==
+             ctx->daemon_html->answer.status;
+}
+
+ngx_table_elt_t* ps_daemon_html_push_line(ngx_http_request_t* r,
+                                          StringPiece name, StringPiece value) {
+  ngx_table_elt_t* h =
+      static_cast<ngx_table_elt_t*>(ngx_list_push(&r->headers_out.headers));
+  if (h == nullptr) return nullptr;
+  char* key = string_piece_to_pool_string(r->pool, name);
+  char* val = string_piece_to_pool_string(r->pool, value);
+  if (key == nullptr || val == nullptr) return nullptr;
+  h->hash = 1;
+  h->key.data = reinterpret_cast<u_char*>(key);
+  h->key.len = name.size();
+  h->value.data = reinterpret_cast<u_char*>(val);
+  h->value.len = value.size();
+  h->lowcase_key = nullptr;
+#if defined(nginx_version) && nginx_version >= 1023000
+  h->next = nullptr;
+#endif
+  return h;
+}
+
+// Clears every line and field of the response's headers, for a Markdown
+// answer composed in the content phase.
+ngx_int_t ps_daemon_html_reset_headers(ngx_http_request_t* r) {
+  ngx_http_headers_out_t* out = &r->headers_out;
+  if (ngx_list_init(&out->headers, r->pool, 20, sizeof(ngx_table_elt_t)) !=
+      NGX_OK) {
+    return NGX_ERROR;
+  }
+  out->server = nullptr;
+  out->date = nullptr;
+  out->content_length = nullptr;
+  out->content_encoding = nullptr;
+  out->location = nullptr;
+  out->refresh = nullptr;
+  out->last_modified = nullptr;
+  out->content_range = nullptr;
+  out->accept_ranges = nullptr;
+  out->www_authenticate = nullptr;
+  out->expires = nullptr;
+  out->etag = nullptr;
+#if defined(nginx_version) && nginx_version >= 1023000
+  out->cache_control = nullptr;
+  out->link = nullptr;
+#else
+  out->cache_control.elts = nullptr;
+  out->cache_control.nelts = 0;
+#endif
+  ngx_str_null(&out->status_line);
+  ngx_str_null(&out->content_type);
+  out->content_type_len = 0;
+  out->content_type_lowcase = nullptr;
+  ngx_str_null(&out->charset);
+  out->content_length_n = -1;
+  out->last_modified_time = -1;
+  return NGX_OK;
+}
+
+// No compressor touches this response: nginx's gzip filter reads its test
+// as done and failed, and every compressor (gzip, brotli and the like) skips
+// a response that already has a Content-Encoding.  That one is an entry that
+// is never sent (hash 0), so the client never sees it.
+ngx_int_t ps_daemon_html_mark_no_compress(ngx_http_request_t* r,
+                                          PsDaemonHtmlRequest* state) {
+#if (NGX_HTTP_GZIP)
+  r->gzip_tested = 1;
+  r->gzip_ok = 0;
+#endif
+  ngx_table_elt_t* h =
+      ps_daemon_html_push_line(r, "Content-Encoding", "identity");
+  if (h == nullptr) return NGX_ERROR;
+  h->hash = 0;
+  r->headers_out.content_encoding = h;
+  state->no_compress = h;
+  return NGX_OK;
+}
+
+void ps_daemon_html_undo_no_compress(ngx_http_request_t* r,
+                                     PsDaemonHtmlRequest* state) {
+#if (NGX_HTTP_GZIP)
+  r->gzip_tested = 0;
+  r->gzip_ok = 0;
+#endif
+  if (state->no_compress != nullptr &&
+      r->headers_out.content_encoding == state->no_compress) {
+    r->headers_out.content_encoding = nullptr;
+  }
+  state->no_compress = nullptr;
+}
+
+// The Markdown answer's header set, on whatever the header stages so far
+// made of the response: every line outside the set is removed from the list
+// and from the fields nginx renders lines from, the set is written once from
+// the answer, and the server core's transport lines stay.  A
+// Content-Encoding or Content-Range line some stage added is kept, so the
+// body stays readable; `*conflict` says so.  A length an earlier stage
+// cleared stays cleared (the answer then goes chunked).  Run by the
+// fix-headers filter and, last, by the etag filter.
+ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
+                                          PsDaemonHtmlRequest* state,
+                                          bool* conflict) {
+  ngx_http_headers_out_t* out = &r->headers_out;
+  NgxListIterator it(&out->headers.part);
+  for (ngx_table_elt_t* h = it.Next(); h != nullptr; h = it.Next()) {
+    if (h->hash == 0) continue;
+    switch (ClassifyMarkdownLine(str_to_string_piece(h->key))) {
+      case NgxMarkdownLine::kTransport:
+        break;
+      case NgxMarkdownLine::kConflict:
+        *conflict = true;
+        break;
+      case NgxMarkdownLine::kOwned:
+      case NgxMarkdownLine::kRemove:
+        h->hash = 0;
+        break;
+    }
+  }
+  // The fields, each pointing into the list or rendered by nginx's header
+  // writer on its own.
+  out->content_length = nullptr;
+  out->location = nullptr;
+  out->refresh = nullptr;
+  out->last_modified = nullptr;
+  out->last_modified_time = -1;
+  out->accept_ranges = nullptr;
+  out->www_authenticate = nullptr;
+  out->expires = nullptr;
+  out->etag = nullptr;
+#if defined(nginx_version) && nginx_version >= 1023000
+  out->cache_control = nullptr;
+  out->link = nullptr;
+#else
+  out->cache_control.elts = nullptr;
+  out->cache_control.nelts = 0;
+#endif
+  if (out->content_encoding != nullptr &&
+      out->content_encoding != state->no_compress &&
+      out->content_encoding->hash == 0) {
+    out->content_encoding = nullptr;
+  }
+  if (out->content_range != nullptr && out->content_range->hash == 0) {
+    out->content_range = nullptr;
+  }
+  r->allow_ranges = 0;
+  ngx_str_null(&out->charset);
+  out->override_charset = nullptr;
+
+  ngx_str_null(&out->content_type);
+  out->content_type_len = 0;
+  out->content_type_lowcase = nullptr;
+  for (const auto& [name, value] : state->answer.headers) {
+    if (StringCaseEqual(name, "Content-Type")) {
+      char* type = string_piece_to_pool_string(r->pool, value);
+      if (type == nullptr) return NGX_ERROR;
+      out->content_type.data = reinterpret_cast<u_char*>(type);
+      out->content_type.len = value.size();
+      const size_t semi = value.find(';');
+      out->content_type_len = semi == GoogleString::npos ? value.size() : semi;
+    } else if (StringCaseEqual(name, "Content-Length")) {
+      // Set by the emit; never restored here once a stage cleared it.
+    } else if (StringCaseEqual(name, "Cache-Control")) {
+      char* cc = string_piece_to_pool_string(r->pool, value);
+      if (cc == nullptr || ps_set_cache_control(r, cc) != NGX_OK) {
+        return NGX_ERROR;
+      }
+    } else {
+      ngx_table_elt_t* h = ps_daemon_html_push_line(r, name, value);
+      if (h == nullptr) return NGX_ERROR;
+      if (StringCaseEqual(name, "ETag")) out->etag = h;
+    }
+  }
+  if (DaemonHtmlAnswerContentLength(state->answer) < 0) {
+    out->content_length_n = -1;  // A 304.
+  }
+  return NGX_OK;
+}
+
+// The serve's port: sends the Markdown answer from the content phase.
+class NgxDaemonHtmlServePort : public DaemonHtmlPort {
+ public:
+  NgxDaemonHtmlServePort(ngx_http_request_t* r, PsDaemonHtmlRequest* state,
+                         DaemonHtmlEngine* engine)
+      : r_(r), state_(state), engine_(engine) {}
+
+  ngx_int_t rc() const { return rc_; }
+
+  void MarkNoCompress() override { mark_no_compress_ = true; }
+
+  bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& result,
+                               bool head) override {
+    // A GET may carry a body; it is discarded before this answer is sent.
+    ps_discard_request_body(r_);
+    if (ps_daemon_html_reset_headers(r_) != NGX_OK) {
+      return false;
+    }
+    state_->answer = result;
+    state_->engine = engine_;
+    r_->headers_out.status = result.status;
+    const int64 length = DaemonHtmlAnswerContentLength(result);
+    r_->headers_out.content_length_n = length;
+    bool conflict = false;
+    if ((mark_no_compress_ &&
+         ps_daemon_html_mark_no_compress(r_, state_) != NGX_OK) ||
+        ps_daemon_html_enforce_markdown(r_, state_, &conflict) != NGX_OK) {
+      ps_daemon_html_undo_no_compress(r_, state_);
+      ps_daemon_html_reset_headers(r_);
+      return false;
+    }
+    state_->markdown = true;
+    // The engine answered the conditionals itself: nginx's not-modified
+    // filter must not give a second opinion, and no range is served.
+    r_->disable_not_modified = 1;
+    r_->allow_ranges = 0;
+    rc_ = ngx_http_send_header(r_);
+    if (rc_ == NGX_ERROR || rc_ > NGX_OK || r_->header_only || head ||
+        result.status != NGX_HTTP_OK) {
+      return true;
+    }
+    ngx_buf_t* buf = static_cast<ngx_buf_t*>(ngx_calloc_buf(r_->pool));
+    if (buf == nullptr) {
+      rc_ = NGX_ERROR;
+      return true;
+    }
+    if (!result.body.empty()) {
+      u_char* copy =
+          static_cast<u_char*>(ngx_palloc(r_->pool, result.body.size()));
+      if (copy == nullptr) {
+        rc_ = NGX_ERROR;
+        return true;
+      }
+      ngx_memcpy(copy, result.body.data(), result.body.size());
+      buf->pos = copy;
+      buf->last = copy + result.body.size();
+      buf->temporary = 1;
+    } else {
+      buf->sync = 1;
+    }
+    buf->last_buf = 1;
+    ngx_chain_t out;
+    out.buf = buf;
+    out.next = nullptr;
+    rc_ = ngx_http_output_filter(r_, &out);
+    return true;
+  }
+
+  void RemoveClientConditionals() override {
+    // Done for every request by the strip handler (POST_READ and REWRITE),
+    // which keeps the stash the facts read.
+  }
+
+  void RunBlocking(DaemonHtmlCommit commit) override {
+    if (g_daemon_html_store_runner != nullptr) {
+      g_daemon_html_store_runner->RunBlocking(std::move(commit));
+    }
+  }
+
+ private:
+  ngx_http_request_t* r_;
+  PsDaemonHtmlRequest* state_;
+  DaemonHtmlEngine* engine_;
+  bool mark_no_compress_ = false;
+  ngx_int_t rc_ = NGX_DECLINED;
+};
+
+// The Markdown serve, ahead of the in-place gate: NGX_DECLINED to go on
+// with the request as before, any other value is the answer's own result.
+ngx_int_t ps_daemon_html_serve(ngx_http_request_t* r, ps_srv_conf_t* cfg_s,
+                               ps_request_ctx_t* ctx,
+                               const RewriteOptions* options,
+                               const GoogleUrl& url) {
+  if (r != r->main || r->internal ||
+      (r->method != NGX_HTTP_GET && r->method != NGX_HTTP_HEAD)) {
+    return NGX_DECLINED;
+  }
+  NgxServerContext* server_context = cfg_s->server_context;
+  DaemonHtmlEngine* engine = server_context->daemon_html_engine();
+  if (engine == nullptr ||
+      engine->config().mode < DaemonHtmlMode::kServeVariants ||
+      !engine->config().agent_optimize) {
+    return NGX_DECLINED;
+  }
+  DaemonHtmlRequestFacts facts;
+  ps_daemon_html_request_facts(r, server_context,
+                               GoogleUrl(ps_determine_url(r)), &facts);
+  facts.options_enabled_and_allowed =
+      options->enabled() && options->IsAllowed(url.Spec());
+  PsDaemonHtmlRequest* state = ps_daemon_html_state(ctx);
+  NgxDaemonHtmlServePort port(r, state, engine);
+  const DaemonHtmlServeResult result = engine->Serve(facts, &port);
+  if (result.kind != DaemonHtmlServeResult::kFinal) {
+    state->markdown = false;
+    ps_daemon_html_undo_no_compress(r, state);
+    return NGX_DECLINED;
+  }
+  return port.rc();
+}
+
 void ps_release_request_context(void* data) {
   ps_request_ctx_t* ctx = static_cast<ps_request_ctx_t*>(data);
 
@@ -2679,6 +3188,9 @@ void ps_release_request_context(void* data) {
     delete ctx->daemon_html_recording;
     ctx->daemon_html_recording = nullptr;
   }
+  // After the recording, which borrows its port.
+  delete ctx->daemon_html;
+  ctx->daemon_html = nullptr;
 
   if (ctx->driver != nullptr) {
     ctx->driver->Cleanup();
@@ -3559,6 +4071,20 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     ngx_http_set_ctx(r, ctx, ngx_pagespeed);
   }
 
+  // DaemonHtmlCache serve-variants: the Markdown copy of a stored page,
+  // ahead of every other branch that answers a page and of the in-place
+  // gate, which it does not need (in-place rewriting may be off).  This
+  // handler runs after nginx's access phases, so access rules and
+  // authentication have already been applied.
+  if (!html_rewrite && !pagespeed_resource &&
+      response_category == RequestRouting::kResource) {
+    const ngx_int_t markdown_rc =
+        ps_daemon_html_serve(r, cfg_s, ctx, options, url);
+    if (markdown_rc != NGX_DECLINED) {
+      return markdown_rc;
+    }
+  }
+
   if (pagespeed_resource) {
     // TODO(jefftk): Set using_spdy appropriately.  See
     // ProxyInterface::ProxyRequestCallback
@@ -3968,8 +4494,40 @@ bool ps_has_stacked_content_encoding(ngx_http_request_t* r) {
   return false;
 }
 
+// The etag filter's work for a Markdown answer of the HTML cache (see
+// ps_etag_header_filter): the header set enforced a final time, a transport
+// conflict counted once, and no compressor's Vary stamp, as the answer
+// states its one Vary line itself.
+ngx_int_t ps_daemon_html_final_enforcement(ngx_http_request_t* r,
+                                           PsDaemonHtmlRequest* state) {
+  bool conflict = false;
+  if (ps_daemon_html_enforce_markdown(r, state, &conflict) != NGX_OK) {
+    return NGX_ERROR;
+  }
+  if (conflict && !state->conflict_noted && state->engine != nullptr) {
+    state->conflict_noted = true;
+    state->engine->NoteTransportConflict();
+  }
+#if (NGX_HTTP_GZIP)
+  r->gzip_vary = 0;
+#endif
+  return NGX_OK;
+}
+
 ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
+  // A Markdown answer of the HTML cache: the module's last header filter,
+  // after the compressors and every other module filter, enforces the
+  // answer's header set a final time, and does none of the Vary and
+  // s-maxage work below.  A Content-Encoding or Content-Range some stage
+  // added despite the no-compress mark stays, so the body stays readable,
+  // and is counted.
+  if (ps_daemon_html_markdown(r, ctx)) {
+    if (ps_daemon_html_final_enforcement(r, ctx->daemon_html) != NGX_OK) {
+      return NGX_ERROR;
+    }
+    return ngx_http_ef_next_header_filter(r);
+  }
 #if (NGX_HTTP_GZIP)
   if (ctx && ctx->psol_vary_accept_only) {
     // One shot, and only while the module's Vary is really on this
@@ -4102,112 +4660,46 @@ static ngx_int_t ps_read_file_buffer(ngx_http_request_t* r, ngx_buf_t* buf) {
 
 namespace html_rewrite {
 
-// DaemonHtmlCache.  A read-only copy of what the response carries at the
-// input of the module's HTML filter, before ps_resource_handler and
-// ps_strip_html_headers change anything, recorded by the HTML cache engine
-// (daemon_html_engine.h); on this server it only reports, in report-only and
-// serve-variants alike.  With the option off the only thing that runs is the
-// mode check in ps_html_rewrite_header_filter.
+// DaemonHtmlCache.  The recording of an HTML response by the HTML cache
+// engine (daemon_html_engine.h): the final view is what the response carries
+// at the input of the module's HTML filter, before ps_resource_handler and
+// ps_strip_html_headers change anything, so nginx's headers filter (expires,
+// add_header) and every header filter above this one have run; the store
+// view was taken at the first header filter, before any of them
+// (ps_daemon_html_take_origin_lines).  A line the configuration added that
+// the cache could not reproduce refuses as headers:<name>, and one that makes
+// the response private, no-store or sets a cookie refuses for that.  With the
+// option off the only thing that runs is the mode check in
+// ps_html_rewrite_header_filter.
 //
-// nginx's headers filter runs expires and add_header together, above this
-// module, so both are part of what the policy reads: an add_header line the
-// cache could not reproduce refuses as headers:<name>, and one that makes the
-// response private, no-store or sets a cookie refuses for that.  Apache reads
-// what mod_expires and mod_headers change at a later filter, to the same end.
-void ps_add_list_to_lines(const ngx_list_t& list,
-                          DaemonHtmlHeaderLines* lines) {
-  const ngx_list_part_t* part = &list.part;
-  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
-  for (ngx_uint_t i = 0; /* void */; i++) {
-    if (i >= part->nelts) {
-      if (part->next == nullptr) break;
-      part = part->next;
-      header = static_cast<ngx_table_elt_t*>(part->elts);
-      i = 0;
-    }
-    if (header[i].hash == 0) continue;
-    lines->emplace_back(str_to_string_piece(header[i].key).as_string(),
-                        str_to_string_piece(header[i].value).as_string());
-  }
-}
-
-// Whether the request carries a header of this exact lowercase name.
-bool ps_request_has_header(ngx_http_request_t* r, StringPiece lowercase_name) {
-  const ngx_list_part_t* part = &r->headers_in.headers.part;
-  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
-  for (ngx_uint_t i = 0; /* void */; i++) {
-    if (i >= part->nelts) {
-      if (part->next == nullptr) break;
-      part = part->next;
-      header = static_cast<ngx_table_elt_t*>(part->elts);
-      i = 0;
-    }
-    if (StringCaseEqual(str_to_string_piece(header[i].key), lowercase_name)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Returns nullptr when the engine records nothing; `*unavailable` then says
 // whether that is for want of a library that can classify, which the caller
 // counts once it knows the module handles the response.
 std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
-    ngx_http_request_t* r, NgxServerContext* context, bool* unavailable) {
+    ngx_http_request_t* r, ps_request_ctx_t* ctx, NgxServerContext* context,
+    bool* unavailable) {
   *unavailable = false;
   DaemonHtmlEngine* engine = context->daemon_html_engine();
   if (engine == nullptr) return nullptr;
   DaemonHtmlRequestFacts facts;
-  facts.method = str_to_string_piece(r->method_name).as_string();
-  facts.path = str_to_string_piece(r->unparsed_uri).as_string();
-  facts.host = str_to_string_piece(r->headers_in.server).as_string();
-  facts.has_authorization = ps_request_has_header(r, "authorization") ||
-                            ps_request_has_header(r, "proxy-authorization");
-  facts.authenticated_user = r->headers_in.user.len != 0;
-  facts.has_cookie =
-      ps_request_has_header(r, "cookie") || ps_request_has_header(r, "cookie2");
-  const ngx_list_part_t* part = &r->headers_in.headers.part;
-  const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
-  for (ngx_uint_t i = 0; /* void */; i++) {
-    if (i >= part->nelts) {
-      if (part->next == nullptr) break;
-      part = part->next;
-      header = static_cast<ngx_table_elt_t*>(part->elts);
-      i = 0;
-    }
-    if (StringCaseEqual(str_to_string_piece(header[i].key), "cache-control")) {
-      if (facts.has_cache_control) facts.cache_control.append(", ");
-      facts.has_cache_control = true;
-      StrAppend(&facts.cache_control, str_to_string_piece(header[i].value));
-    }
-  }
-  // Nothing blocking is ever handed to a port by a recording that only
-  // reports.
+  ps_daemon_html_request_facts(r, context, GoogleUrl(ps_determine_url(r)),
+                               &facts);
+  // The store runs its blocking work through the request's port, which
+  // posts it to the record arm's sequence.
+  PsDaemonHtmlRequest* state = ps_daemon_html_state(ctx);
   std::unique_ptr<DaemonHtmlRecording> recording =
-      engine->StartRecording(facts, /*port=*/nullptr, unavailable);
+      engine->StartRecording(facts, &state->store_port, unavailable);
   if (recording == nullptr) return nullptr;
 
   recording->set_status(r->headers_out.status);
-  DaemonHtmlHeaderLines origin;
-  ps_add_list_to_lines(r->headers_out.headers, &origin);
-  origin.emplace_back(
-      HttpAttributes::kContentType,
-      str_to_string_piece(r->headers_out.content_type).as_string());
-  // nginx renders these two in its header filter, downstream of here.
-  if (r->headers_out.last_modified_time != -1 &&
-      r->headers_out.last_modified == nullptr) {
-    u_char date[sizeof("Mon, 28 Sep 1970 06:00:00 GMT")];
-    u_char* end = ngx_http_time(date, r->headers_out.last_modified_time);
-    origin.emplace_back(
-        HttpAttributes::kLastModified,
-        GoogleString(reinterpret_cast<char*>(date), end - date));
-  }
-  if (r->headers_out.content_length_n >= 0 &&
-      r->headers_out.content_length == nullptr) {
-    origin.emplace_back(HttpAttributes::kContentLength,
-                        Integer64ToString(r->headers_out.content_length_n));
-  }
-  recording->SetOriginHeaders(std::move(origin));
+  // The final view: the response here, after nginx's headers filter
+  // (expires, add_header) and every header filter above this one.
+  DaemonHtmlHeaderLines final_lines;
+  ps_daemon_html_response_lines(r, &final_lines);
+  // The store view: the origin's lines at the first header filter.
+  recording->SetOriginHeaders(state->has_origin_lines ? state->origin_lines
+                                                      : final_lines);
+  recording->NoteFinalHeaders(std::move(final_lines));
   return recording;
 }
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -4230,6 +4722,8 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   // poll with.
   if (cfg_s->server_context->initialized()) {
     cfg_s->server_context->FlushCacheIfNecessary();
+    cfg_s->server_context->MaybeTickDaemonHtmlEngine(
+        g_daemon_html_admin_runner);
   }
 
   ps_request_ctx_t* ctx = ps_get_request_context(r);
@@ -4258,8 +4752,7 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
 
   // As on Apache, the report covers a 200 that carries a body: nothing else,
   // a HEAD included, is recorded or counted.  serve-variants records the
-  // same responses and, until this server stores and serves, only reports
-  // them.
+  // same responses, and stores those the engine may store.
   const bool daemon_html_report =
       cfg_s->server_context->global_options()->daemon_html_cache() !=
           RewriteOptions::kDaemonHtmlCacheOff &&
@@ -4268,7 +4761,7 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   bool daemon_html_unavailable = false;
   if (daemon_html_report) {
     daemon_html_recording = ps_start_daemon_html_recording(
-        r, cfg_s->server_context, &daemon_html_unavailable);
+        r, ctx, cfg_s->server_context, &daemon_html_unavailable);
   }
 
   ngx_int_t rc = ps_resource_handler(r, true /* html rewrite */,
@@ -4432,6 +4925,8 @@ ngx_http_output_header_filter_pt ngx_http_next_origin_caching_header_filter;
 ngx_int_t ps_origin_caching_header_filter(ngx_http_request_t* r) {
   if (r == r->main) {
     ps_request_ctx_t* ctx = ps_get_request_context(r);
+    // DaemonHtmlCache: the store view of an HTML response.
+    ps_daemon_html_take_origin_lines(r, ctx);
     if (ctx != nullptr &&
         (ctx->daemon_record_pending || ctx->recorder != nullptr)) {
       ResponseHeaders* origin = new ResponseHeaders();
@@ -5284,6 +5779,7 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
 
   // Poll for cache flush on every request (polls are rate-limited).
   cfg_s->server_context->FlushCacheIfNecessary();
+  cfg_s->server_context->MaybeTickDaemonHtmlEngine(g_daemon_html_admin_runner);
 
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                  "http pagespeed handler \"%V\"", &r->uri);
@@ -5405,6 +5901,17 @@ ngx_int_t ps_html_rewrite_fix_headers_filter(ngx_http_request_t* r) {
     ps_remove_option_override_token(r);
   }
   ps_request_ctx_t* ctx = ps_get_request_context(r);
+  // A Markdown answer of the HTML cache: its exact header set, after
+  // `expires` and `add_header` (always or not), on the 200, the HEAD and
+  // the 304.  The etag filter enforces it again after the compressors.
+  if (ps_daemon_html_markdown(r, ctx)) {
+    bool conflict = false;
+    if (ps_daemon_html_enforce_markdown(r, ctx->daemon_html, &conflict) !=
+        NGX_OK) {
+      return NGX_ERROR;
+    }
+    return ngx_http_next_header_filter(r);
+  }
   if (r != r->main || ctx == nullptr || !ctx->html_rewrite ||
       ctx->preserve_caching_headers == kPreserveAllCachingHeaders) {
     return ngx_http_next_header_filter(r);
@@ -6196,7 +6703,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
 // remote directory). Each forked nginx worker has its own copy (fork semantics);
 // stopped+joined in ps_exit_child_process BEFORE the factory tears down the
 // fetcher/cache they borrow. Populated in ps_init_child_process.
-std::vector<std::unique_ptr<webbotauth::KeyDirectoryWarmer> >
+std::vector<std::unique_ptr<webbotauth::KeyDirectoryWarmer>>
     g_key_directory_warmers;
 
 void ps_exit_child_process(ngx_cycle_t* cycle) {
@@ -6249,6 +6756,30 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
     g_daemon_record_pool = nullptr;
     g_daemon_record_sequence = nullptr;
   }
+  // DaemonHtmlCache: the pool above was the only thread running the HTML
+  // cache engines' work, and it is joined, so no commit, removal or epoch
+  // write is in flight; the engines go before the volume handles they read
+  // through close below.  Each leaves its cache path's purge observers
+  // first.
+  if (cfg_m != nullptr) {
+    ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
+        ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));
+    ngx_http_core_srv_conf_t** cscfp =
+        static_cast<ngx_http_core_srv_conf_t**>(cmcf->servers.elts);
+    for (ngx_uint_t s = 0; s < cmcf->servers.nelts; s++) {
+      ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+          cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+      if (cfg_s->server_context != nullptr) {
+        cfg_s->server_context->ShutDownDaemonHtmlEngine();
+      }
+    }
+  }
+  delete g_daemon_html_store_runner;
+  g_daemon_html_store_runner = nullptr;
+  delete g_daemon_html_admin_runner;
+  g_daemon_html_admin_runner = nullptr;
+  delete g_daemon_html_budget;
+  g_daemon_html_budget = nullptr;
   // Close every server context's daemon volume handle HERE rather than
   // leaving it to the adapter's destructor.  The destructor only runs when
   // the cycle pool is destroyed and its cleanup handler deletes the factory,
@@ -6550,6 +7081,56 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
     g_daemon_record_pool = new QueuedWorkerPool(
         1, "daemon_record", cfg_m->driver_factory->thread_system());
     g_daemon_record_sequence = g_daemon_record_pool->NewSequence();
+  }
+
+  // DaemonHtmlCache: the runners onto the record sequence and every server's
+  // engine, in a serving process.  After the pool, so the engines' first
+  // epoch write has somewhere to go, and after every server's volume handle
+  // opened above.  The global purge epoch is written for every site on a
+  // cache path, so each engine is given those of its own path, read from the
+  // configuration.
+  if (ngx_process == NGX_PROCESS_WORKER || ngx_process == NGX_PROCESS_SINGLE) {
+    Statistics* stats = cfg_m->driver_factory->statistics();
+    Variable* posted = stats == nullptr
+                           ? nullptr
+                           : stats->FindVariable(kDaemonHtmlCommitsPosted);
+    Variable* finished = stats == nullptr
+                             ? nullptr
+                             : stats->FindVariable(kDaemonHtmlCommitsFinished);
+    Variable* dropped = stats == nullptr
+                            ? nullptr
+                            : stats->FindVariable(kDaemonHtmlCommitsDropped);
+    g_daemon_html_budget = new DaemonHtmlByteBudget();
+    g_daemon_html_store_runner =
+        new NgxDaemonHtmlRunner(/*bounded=*/true, posted, finished, dropped);
+    g_daemon_html_admin_runner =
+        new NgxDaemonHtmlRunner(/*bounded=*/false, posted, finished, dropped);
+    g_daemon_html_store_runner->set_sequence(g_daemon_record_sequence);
+    g_daemon_html_admin_runner->set_sequence(g_daemon_record_sequence);
+    std::map<SystemCachePath*, std::vector<GoogleString>> sites;
+    for (s = 0; s < cmcf->servers.nelts; s++) {
+      ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+          cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+      if (cfg_s->server_context == nullptr) continue;
+      const GoogleString site = SiteIdFromServerFragment(
+          cfg_s->server_context->global_options()->cache_fragment());
+      std::vector<GoogleString>& list =
+          sites[cfg_s->server_context->cache_path()];
+      if (IsSiteId(site) &&
+          std::find(list.begin(), list.end(), site) == list.end()) {
+        list.push_back(site);
+      }
+    }
+    for (s = 0; s < cmcf->servers.nelts; s++) {
+      ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+          cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+      if (cfg_s->server_context == nullptr) continue;
+      cfg_s->server_context->InitDaemonHtmlEngine(
+          cfg_s->host_names == nullptr ? ConfiguredHostNames()
+                                       : *cfg_s->host_names,
+          sites[cfg_s->server_context->cache_path()],
+          g_daemon_html_admin_runner, g_daemon_html_budget);
+    }
   }
 
   // The classic record pool: see its globals for the lifetime.

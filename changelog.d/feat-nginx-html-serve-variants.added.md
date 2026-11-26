@@ -1,0 +1,25 @@
+- **nginx: `DaemonHtmlCache serve-variants` stores pages and serves their
+  Markdown copies.** With `AgentOptimize on`, an optimizer library that
+  publishes C API 1.14 and an optimizer worker running with
+  `--html-mode markdown-static` (or `markdown-rendered`) and
+  `--agent-optimize`, nginx now stores an HTML page it served under one of
+  the server block's exact `server_name` entries, and answers a request that
+  prefers `text/markdown` with the page's Markdown copy once the worker has
+  derived it. A page is stored only when both the response as the origin sent
+  it and the response after the server's own header configuration
+  (`add_header`, `expires`) allow it, and for the shorter of their lifetimes;
+  `proxy_hide_header` does not hide a `Set-Cookie`, `Cache-Control`, `Vary` or
+  `Pragma` from that decision. The Markdown answer carries exactly
+  `Content-Type`, `Content-Length` (when no body filter changed the body),
+  `Cache-Control: private`, one `Vary` line, `X-Robots-Tag: noindex`, `Age` and
+  an `ETag`, whatever `add_header ... always`, `expires` or another filter
+  adds, and is never compressed. Access rules and authentication run before
+  it. A URL purge removes the stored page and its copy; a global purge, by
+  the admin page or `cache.flush`, fences everything stored before it, on
+  every worker. A static file nginx serves without an upstream
+  `Cache-Control` has no lifetime of its own (`expires` is applied after the
+  store decision) and is not stored.
+- **nginx: the HTML cache decision log names what the server configuration
+  added.** With C API 1.14, nginx's report-only lines now carry `vhost_added`
+  as Apache's do: the names of the response headers `add_header` or
+  `expires` added or changed.
