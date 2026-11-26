@@ -1080,7 +1080,7 @@ EOF
     # LogDir (generate_nginx_config above), in packs/<pack id>/.
     if [ -n "$DAEMON_READY" ]; then
         local html_host
-        for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only; do
+        for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only daemon-html-variants.example.com:serve-variants; do
             cat >> "$NGINX_CONFIG_FILE" << EOF
     server {
         listen $NGINX_PORT;

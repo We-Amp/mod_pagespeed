@@ -116,12 +116,16 @@ bool ApacheServerContext::RunDaemonStartupCheck(DaemonAdapterPool* pool) {
   return ok;
 }
 
-DaemonHtmlReporter* ApacheServerContext::daemon_html_reporter() {
-  std::call_once(daemon_html_reporter_once_, [this] {
-    daemon_html_reporter_ = std::make_unique<DaemonHtmlReporter>(
-        statistics(), timer(), global_config()->log_dir(), message_handler());
+DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
+  std::call_once(daemon_html_engine_once_, [this] {
+    const ApacheConfig* config = global_config();
+    daemon_html_engine_ = NewDaemonHtmlEngineForPort(
+        config->daemon_html_cache(), config->daemon_html_max_bytes(),
+        config->log_dir(),
+        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+        statistics(), timer(), message_handler());
   });
-  return daemon_html_reporter_.get();
+  return daemon_html_engine_.get();
 }
 
 ApacheConfig* ApacheServerContext::global_config() {

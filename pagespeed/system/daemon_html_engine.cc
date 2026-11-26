@@ -12,6 +12,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_html_decision_log.h"
 #include "pagespeed/system/daemon_notify_params.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/site_cache_fragment.h"
@@ -31,6 +32,15 @@ constexpr uint32_t kStoreRequestNoStore = 8u;
 // needs-validation from either view, explicit-shared only from both.
 constexpr uint32_t kStoreFlagNeedsValidation = 2u;
 constexpr uint32_t kStoreFlagExplicitShared = 8u;
+// ps_html_store_classify's sidecar-evaluated out flag, and its sidecar
+// verdicts, for the decision line.
+constexpr uint32_t kStoreFlagSidecarEvaluated = 16u;
+constexpr int kSidecarEligible = 0;
+constexpr int kSidecarFallThrough = 1;
+constexpr int kSidecarNever = 2;
+
+// The library that formats vhost_added (and the serve-side lines).
+constexpr int kVhostAddedMinor = 14;
 
 // The Cache-Control bits that widen what a cache may do with an entry: kept
 // only when both views carry them.  Every other bit restricts (or only
@@ -197,6 +207,13 @@ DaemonHtmlHeaderLines BuildView(const DaemonHtmlHeaderLines& origin,
                                 const DaemonHtmlHeaderLines& at_point,
                                 const DaemonHtmlHeaderLines& module,
                                 bool final_view) {
+  // Nothing changed after the baseline: the origin's lines as they came, in
+  // their order.
+  if (at_point.size() == baseline.size() &&
+      std::equal(at_point.begin(), at_point.end(), baseline.begin(),
+                 SameLine)) {
+    return origin;
+  }
   DaemonHtmlHeaderLines added = Minus(
       Minus(WithoutVary(at_point), WithoutVary(baseline)), WithoutVary(module));
   DaemonHtmlHeaderLines removed =
@@ -465,12 +482,27 @@ struct DaemonHtmlEngine::Counters {
         served_without_preference(
             s->GetVariable("daemon_markdown_served_without_preference")),
         transport_conflict(
-            s->GetVariable("daemon_markdown_transport_conflict")) {
+            s->GetVariable("daemon_markdown_transport_conflict")),
+        evaluated(s->GetVariable("daemon_html_evaluated")),
+        would_store(s->GetVariable("daemon_html_would_store")),
+        would_store_no_notify(
+            s->GetVariable("daemon_html_would_store_no_notify")),
+        would_store_bytes(s->GetVariable("daemon_html_would_store_bytes")),
+        refused(s->GetVariable("daemon_html_refused")),
+        refused_other(s->GetVariable("daemon_html_refused_other")),
+        unavailable(s->GetVariable("daemon_html_unavailable")),
+        classify_failed(s->GetVariable("daemon_html_classify_failed")),
+        log_dropped(s->GetVariable("daemon_html_log_dropped")) {
     for (const char* const* reason =
              RewriteStats::kDaemonMarkdownFallthroughReasons;
          *reason != nullptr; ++reason) {
       fallthrough[*reason] =
           s->GetVariable(StrCat("daemon_markdown_fallthrough_", *reason));
+    }
+    for (const char* const* reason = RewriteStats::kDaemonHtmlRefusedReasons;
+         *reason != nullptr; ++reason) {
+      refused_by_reason[*reason] =
+          s->GetVariable(StrCat("daemon_html_refused_", *reason));
     }
   }
 
@@ -493,6 +525,17 @@ struct DaemonHtmlEngine::Counters {
   Variable* served_without_preference;
   Variable* transport_conflict;
   std::map<GoogleString, Variable*> fallthrough;
+  // The report's, in every mode.
+  Variable* evaluated;
+  Variable* would_store;
+  Variable* would_store_no_notify;
+  Variable* would_store_bytes;
+  Variable* refused;
+  Variable* refused_other;
+  Variable* unavailable;
+  Variable* classify_failed;
+  Variable* log_dropped;
+  std::map<GoogleString, Variable*> refused_by_reason;
 };
 
 // One view's classification.
@@ -509,6 +552,15 @@ struct DaemonHtmlEngine::StoreVerdict {
   bool stores() const {
     return action == kPsHtmlStoreActionStore ||
            action == kPsHtmlStoreActionStoreNoNotify;
+  }
+  // A store or, in report-only, a would-store.
+  bool would_store() const {
+    return stores() || action == kPsHtmlStoreActionWouldStore ||
+           action == kPsHtmlStoreActionWouldStoreNoNotify;
+  }
+  bool no_notify() const {
+    return action == kPsHtmlStoreActionStoreNoNotify ||
+           action == kPsHtmlStoreActionWouldStoreNoNotify;
   }
 };
 
@@ -548,6 +600,7 @@ void DaemonHtmlRecording::NoteStoreHeaders(DaemonHtmlHeaderLines lines) {
 }
 
 void DaemonHtmlRecording::NoteFinalHeaders(DaemonHtmlHeaderLines lines) {
+  if (has_final_lines_) return;  // Only the first counts.
   final_lines_ = std::move(lines);
   has_final_lines_ = true;
 }
@@ -555,6 +608,14 @@ void DaemonHtmlRecording::NoteFinalHeaders(DaemonHtmlHeaderLines lines) {
 void DaemonHtmlRecording::AddBody(const char* data, size_t size) {
   if (finished_ || size == 0) return;
   body_bytes_ += size;
+  if (!may_store_) {
+    // Only classified, never stored: the prefix the body scan reads is all
+    // that is kept, and it is not held against the budget.
+    if (body_.size() < kBodyPrefixBytes) {
+      body_.append(data, std::min(size, kBodyPrefixBytes - body_.size()));
+    }
+    return;
+  }
   if (budget_refused_ || over_size_) return;
   const int64 max_bytes = engine_->config_.max_bytes;
   size_t take = size;
@@ -593,6 +654,9 @@ DaemonHtmlEngine::DaemonHtmlEngine(Config config, Deps deps)
       deps_(std::move(deps)),
       oracle_(deps_.purge_source, deps_.timer),
       counters_(new Counters(deps_.statistics)) {
+  if (!deps_.log_dir.empty()) {
+    log_ = DaemonHtmlDecisionLog::ForLogDir(deps_.log_dir);
+  }
   if (config_.epoch_sites.empty()) {
     config_.epoch_sites.push_back(config_.site);
   }
@@ -879,10 +943,15 @@ void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
   it->second->Add(1);
 }
 
+void DaemonHtmlEngine::CountUnavailable() { counters_->unavailable->Add(1); }
+
 std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
-    const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port) {
-  if (config_.mode == DaemonHtmlMode::kOff || !IsSiteId(config_.site) ||
-      facts.site != config_.site || deps_.substrate.abi == nullptr) {
+    const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port,
+    bool* unavailable) {
+  if (unavailable != nullptr) *unavailable = false;
+  if (config_.mode == DaemonHtmlMode::kOff) return nullptr;
+  if (deps_.substrate.abi == nullptr) {
+    if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
   const bool serve_mode =
@@ -890,17 +959,30 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
   bool may_store = false;
   if (serve_mode) {
     if (serving() && deps_.substrate.cache != nullptr) {
-      may_store = true;
+      // Without a port there is nowhere to run the store's blocking work:
+      // such a recording only reports.
+      may_store = port != nullptr;
     } else {
       counters_->serve_unavailable->Add(1);
       NoteUnavailable();
     }
   }
-  if (!facts.url_agreed) {
-    if (may_store) counters_->refused_url_disagree->Add(1);
-    return nullptr;
-  }
-  if (!HostExactlyConfigured(facts.host, config_.host_names)) {
+  if (may_store) {
+    // What the engine may store: this site's own requests, on one of its
+    // exact names, read the same way by the server and this module.
+    if (!IsSiteId(config_.site) || facts.site != config_.site) return nullptr;
+    if (!facts.url_agreed) {
+      counters_->refused_url_disagree->Add(1);
+      LogServeSide("refuse", "url_disagree", facts.host, facts.path, 0, 0, 0,
+                   nullptr, -1);
+      return nullptr;
+    }
+    if (!HostExactlyConfigured(facts.host, config_.host_names)) {
+      return nullptr;
+    }
+  } else if (!deps_.substrate.abi->PublishesHtmlStorePolicy()) {
+    // A library older than the policy: nothing can be classified.
+    if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
   return std::unique_ptr<DaemonHtmlRecording>(
@@ -909,7 +991,7 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
 
 bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
                                 const DaemonHtmlHeaderLines& view, int mode,
-                                StoreVerdict* out) {
+                                bool body_complete, StoreVerdict* out) {
   const DaemonAbi* abi = deps_.substrate.abi;
   std::vector<const char*> names;
   std::vector<const char*> values;
@@ -933,8 +1015,8 @@ bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
   const size_t prefix = std::min(r.body_.size(), kBodyPrefixBytes);
   const int action = abi->HtmlStoreClassify(
       mode, f.method.c_str(), f.path.c_str(), request_flags, r.status_,
-      names.data(), values.data(), names.size(), r.body_bytes_, 1,
-      r.body_.data(), prefix,
+      names.data(), values.data(), names.size(), r.body_bytes_,
+      body_complete ? 1 : 0, r.body_.data(), prefix,
       static_cast<uint64_t>(std::max<int64>(config_.max_bytes, 0)),
       static_cast<uint32_t>(deps_.timer->NowMs() / Timer::kSecondMs), &reason,
       &out->lifetime_s, &out->flags, &out->cc_flags, &out->sidecar, detail,
@@ -948,11 +1030,159 @@ bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
   return true;
 }
 
-void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
-  if (aborted || deps_.substrate.abi == nullptr) return;
-  if (r->budget_refused_) {
-    if (r->may_store_) counters_->refused_budget->Add(1);
+void DaemonHtmlEngine::QueueLine(
+    const std::vector<std::pair<const char*, GoogleString>>& fields,
+    const GoogleString& dedup_key, int64 now_ms, bool request_path) {
+  if (log_ == nullptr) return;
+  if (request_path) {
+    // What the writer dropped and had to say since the last line.
+    const int64 dropped = log_->TakeDropped();
+    if (dropped > 0) counters_->log_dropped->Add(dropped);
+    if (deps_.handler != nullptr) {
+      for (const GoogleString& message : log_->TakeMessages()) {
+        deps_.handler->Message(kWarning, "%s", message.c_str());
+      }
+    }
+  }
+  if (!log_->Queue(*deps_.substrate.abi, fields, dedup_key, now_ms)) {
+    counters_->log_dropped->Add(1);
+  }
+}
+
+void DaemonHtmlEngine::Report(const DaemonHtmlRecording& r,
+                              const StoreVerdict& v, bool classified,
+                              const DaemonHtmlHeaderLines& store_view,
+                              const DaemonHtmlHeaderLines& final_view,
+                              bool serve_line) {
+  counters_->evaluated->Add(1);
+  if (!classified) {
+    counters_->classify_failed->Add(1);
     return;
+  }
+  const bool would_store = v.would_store();
+  if (would_store) {
+    counters_->would_store->Add(1);
+    counters_->would_store_bytes->Add(static_cast<int64>(r.body_bytes_));
+    if (v.no_notify()) counters_->would_store_no_notify->Add(1);
+  } else {
+    counters_->refused->Add(1);
+    auto found = counters_->refused_by_reason.find(v.reason);
+    (found == counters_->refused_by_reason.end() ? counters_->refused_other
+                                                 : found->second)
+        ->Add(1);
+  }
+  // A store is logged when it is written (Commit).
+  if (log_ == nullptr || (serve_line && would_store)) return;
+
+  const DaemonAbi* abi = deps_.substrate.abi;
+  const DaemonHtmlRequestFacts& f = r.facts_;
+  const GoogleString& bare_reason = v.reason;
+  const bool has_detail = !v.detail.empty();
+  GoogleString reason_code;
+  if (!would_store) {
+    reason_code = bare_reason;
+    if ((bare_reason == "headers" || bare_reason == "vary") && has_detail) {
+      reason_code = StrCat(bare_reason, ":", v.detail);
+    }
+  }
+  GoogleString sidecar_code;
+  if ((v.flags & kStoreFlagSidecarEvaluated) != 0) {
+    if (v.sidecar == kSidecarEligible) {
+      sidecar_code = "eligible_block";
+    } else if (v.sidecar == kSidecarFallThrough) {
+      sidecar_code = bare_reason == "headers" && has_detail
+                         ? StrCat("fall_through:", v.detail)
+                         : GoogleString("fall_through");
+    } else if (v.sidecar == kSidecarNever) {
+      if (bare_reason == "nonce_csp") sidecar_code = "never:nonce_csp";
+      if (bare_reason == "nonce_link") sidecar_code = "never:nonce_link";
+    }
+  }
+  GoogleString request;
+  if (f.has_authorization) request = "authorization";
+  if (f.has_cookie) {
+    if (!request.empty()) request.push_back(',');
+    request.append("cookie");
+  }
+  if (request.empty()) request = "none";
+
+  const int64 now_ms = deps_.timer->NowMs();
+  const GoogleString path = DaemonHtmlLogPath(f.path);
+  const GoogleString action = serve_line ? "refuse"
+                              : v.action == kPsHtmlStoreActionWouldStoreNoNotify
+                                  ? "would_store_no_notify"
+                              : would_store ? "would_store"
+                                            : "refuse";
+  const bool vhost_added_known = abi->VersionMinor() >= kVhostAddedMinor;
+  const DaemonHtmlDecisionLog::Fields fields = {
+      {"ts_ms", Integer64ToString(now_ms)},
+      {"host", DaemonHtmlIsLogHost(f.host) ? f.host : GoogleString()},
+      {"path", path},
+      {"mode", serve_line ? "serve-variants" : "report-only"},
+      {"action", action},
+      {"reason", reason_code},
+      {"status", IntegerToString(r.status_)},
+      {"size", Integer64ToString(static_cast<int64>(r.body_bytes_))},
+      {"lifetime_s", Integer64ToString(v.lifetime_s)},
+      {"validators", DaemonHtmlLogValidators(final_view)},
+      {"cc", DaemonHtmlLogCc(v.cc_flags, v.flags)},
+      {"vary", DaemonHtmlLogVary(final_view)},
+      {"sidecar", sidecar_code},
+      {"request", request},
+      {"personalisation",
+       bare_reason == "personalisation_signal" ? v.detail : GoogleString()},
+      {"vhost_added", vhost_added_known
+                          ? DaemonHtmlVhostAdded(store_view, final_view)
+                          : GoogleString()},
+  };
+  QueueLine(fields,
+            StrCat(f.host, "\x1f", path, "\x1f", action, "\x1f", reason_code,
+                   "\x1f", sidecar_code),
+            now_ms, /*request_path=*/true);
+}
+
+void DaemonHtmlEngine::LogServeSide(const char* action,
+                                    const GoogleString& reason,
+                                    const GoogleString& host,
+                                    const GoogleString& path, int status,
+                                    uint64 size, uint32 lifetime_s,
+                                    const char* variant, int64 age_s) {
+  if (log_ == nullptr) return;
+  const int64 now_ms = deps_.timer->NowMs();
+  const GoogleString log_path = DaemonHtmlLogPath(path);
+  const DaemonHtmlDecisionLog::Fields fields = {
+      {"ts_ms", Integer64ToString(now_ms)},
+      {"host", DaemonHtmlIsLogHost(host) ? host : GoogleString()},
+      {"path", log_path},
+      {"mode", "serve-variants"},
+      {"action", action},
+      {"reason", reason},
+      {"status", status > 0 ? IntegerToString(status) : GoogleString()},
+      {"size",
+       size > 0 ? Integer64ToString(static_cast<int64>(size)) : GoogleString()},
+      {"lifetime_s",
+       lifetime_s > 0 ? Integer64ToString(lifetime_s) : GoogleString()},
+      {"variant", variant == nullptr ? GoogleString() : GoogleString(variant)},
+      {"age_s", age_s >= 0 ? Integer64ToString(age_s) : GoogleString()},
+  };
+  // Only the request path takes what the writer has to say; a commit may
+  // run on a pool thread.
+  QueueLine(fields,
+            StrCat(host, "\x1f", log_path, "\x1f", action, "\x1f", reason),
+            now_ms, /*request_path=*/false);
+}
+
+void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
+  const DaemonAbi* abi = deps_.substrate.abi;
+  if (abi == nullptr) return;
+  if (r->may_store_) {
+    if (aborted) return;
+    if (r->budget_refused_) {
+      counters_->refused_budget->Add(1);
+      LogServeSide("refuse", "budget", r->facts_.host, r->facts_.path,
+                   r->status_, r->body_bytes_, 0, nullptr, -1);
+      return;
+    }
   }
   const DaemonHtmlHeaderLines& baseline =
       r->has_baseline_ ? r->baseline_ : r->origin_;
@@ -967,14 +1197,36 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
 
   const int mode =
       r->may_store_ ? kPsHtmlCacheServeVariants : kPsHtmlCacheReportOnly;
+  // A report reads whether the body ended; a store needs it whole (an
+  // aborted response was never classified for one).
+  const bool body_complete = r->may_store_ || (r->body_ended_ && !aborted);
   StoreVerdict store;
   StoreVerdict fin;
-  const bool store_ok = Classify(*r, store_view, mode, &store);
-  const bool final_ok = Classify(*r, final_view, mode, &fin);
-  if (!r->may_store_ || !store_ok || !final_ok) return;
+  const bool store_ok = Classify(*r, store_view, mode, body_complete, &store);
+  const bool final_ok = Classify(*r, final_view, mode, body_complete, &fin);
+  if (!r->may_store_) {
+    // Report-only: the final view's verdict, the one the report has always
+    // read.
+    Report(*r, fin, final_ok, store_view, final_view, /*serve_line=*/false);
+    return;
+  }
   // A body over the cap was not kept whole: never stored, whatever a
-  // verdict says (the library refuses it by its byte count).
-  if (r->over_size_ && (store.stores() || fin.stores())) return;
+  // verdict says (the library refuses it by its byte count), so it is
+  // reported as refused for its size.
+  if (store_ok && final_ok && r->over_size_ &&
+      (store.stores() || fin.stores())) {
+    StoreVerdict too_large = fin;
+    too_large.action = kPsHtmlStoreActionRefuse;
+    too_large.reason = "size";
+    too_large.detail.clear();
+    Report(*r, too_large, true, store_view, final_view, /*serve_line=*/true);
+    return;
+  }
+  // A store needs both views; the refusal, when there is one, is the view
+  // that refused (the store view first).
+  Report(*r, store_ok && !store.stores() ? store : fin, store_ok && final_ok,
+         store_view, final_view, /*serve_line=*/true);
+  if (!store_ok || !final_ok) return;
 
   GoogleString url;
   GoogleString hostname;
@@ -1163,10 +1415,14 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
                                         facts.scheme.c_str(), site);
     if (rc == kPsOk) counters_->removed->Add(1);
     counters_->purge_race_refused->Add(1);
+    LogServeSide("purged", "purge_race", facts.host, facts.path, 200,
+                 body.size(), verdict.lifetime_s, nullptr, -1);
     return;
   }
   Hook(kAfterRecheck);
   counters_->stored->Add(1);
+  LogServeSide("stored", GoogleString(), facts.host, facts.path, 200,
+               body.size(), verdict.lifetime_s, nullptr, -1);
   if (verdict.action == kPsHtmlStoreActionStore && hash_changed) {
     Notify(facts, url, hostname, agent_request);
   }
@@ -1463,6 +1719,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   } else {
     counters_->markdown_served->Add(1);
   }
+  LogServeSide("served_markdown", "fresh", facts.host, facts.path,
+               result.status, not_modified || head ? 0 : markdown_len, 0,
+               "markdown", verdict.age_s);
   return result;
 }
 
@@ -1520,18 +1779,45 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
   parts.path = path_start == GoogleString::npos ? GoogleString()
                                                 : key.substr(path_start);
   CacheKey(parts, &cache_url, &hostname);
-  RunOn(deps_.runner, [this, cache_url, hostname, scheme = parts.scheme, done] {
+  RunOn(deps_.runner, [this, cache_url, hostname, host = parts.host,
+                       path = parts.path, scheme = parts.scheme, done] {
     const int rc = deps_.substrate.abi->CacheRemoveSite(
         deps_.substrate.cache, cache_url.c_str(), hostname.c_str(),
         scheme.c_str(), config_.site.c_str());
     if (rc == kPsOk || rc == kPsErrNotFound) {
-      if (rc == kPsOk) counters_->removed->Add(1);
+      if (rc == kPsOk) {
+        counters_->removed->Add(1);
+        LogServeSide("purged", GoogleString(), host, path, 0, 0, 0, nullptr,
+                     -1);
+      }
       done(true, GoogleString());
       return;
     }
     counters_->purge_remove_failed->Add(1);
     done(false, "the HTML cache's stored copy could not be removed");
   });
+}
+
+std::unique_ptr<DaemonHtmlEngine> NewDaemonHtmlEngineForPort(
+    RewriteOptions::DaemonHtmlCacheMode mode, int64 max_bytes,
+    const GoogleString& log_dir, const DaemonAbi* abi, Statistics* statistics,
+    Timer* timer, MessageHandler* handler) {
+  if (mode == RewriteOptions::kDaemonHtmlCacheOff) return nullptr;
+  if (log_dir.empty()) {
+    handler->Message(kWarning,
+                     "DaemonHtmlCache decision log is off: LogDir is not set");
+  }
+  DaemonHtmlEngine::Config config;
+  // No port stores or serves yet: serve-variants reports, as report-only.
+  config.mode = DaemonHtmlMode::kReportOnly;
+  config.max_bytes = max_bytes;
+  DaemonHtmlEngine::Deps deps;
+  deps.substrate.abi = abi;
+  deps.statistics = statistics;
+  deps.timer = timer;
+  deps.handler = handler;
+  deps.log_dir = log_dir;
+  return std::make_unique<DaemonHtmlEngine>(std::move(config), std::move(deps));
 }
 
 }  // namespace net_instaweb

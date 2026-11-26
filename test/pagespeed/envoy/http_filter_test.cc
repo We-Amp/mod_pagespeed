@@ -35,6 +35,7 @@
 #include "pagespeed/envoy/envoy_server_context.h"
 #include "pagespeed/envoy/header_utils.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/system/system_server_context.h"
 #include "pagespeed/system/system_thread_system.h"
@@ -210,6 +211,65 @@ TEST_F(HttpFilterTest, InPlaceLookupServesOnlyGetAndHead) {
   EXPECT_EQ(1u, wait_for_posted_callback());
   fake_dispatcher.runAllPendingCallbacks();
   EXPECT_EQ(1, server_context_->rewrite_stats()->ipro_not_in_cache()->Get());
+}
+
+// DaemonHtmlCache has no recording on this server: report-only and
+// serve-variants count each HTML response the report would cover as
+// unavailable and change nothing about it; off counts nothing.
+TEST_F(HttpFilterTest, DaemonHtmlCacheModesAreInert) {
+  std::vector<SystemServerContext*> server_contexts{server_context_};
+  GoogleString error_message;
+  int error_index = -1;
+  Statistics* global_statistics = nullptr;
+  factory_->PostConfig(server_contexts, &error_message, &error_index,
+                       &global_statistics);
+  ASSERT_EQ(-1, error_index) << error_message;
+  EnvoyRewriteDriverFactory::InitStats(global_statistics);
+  factory_->RootInit();
+  factory_->ChildInit();
+  Variable* unavailable =
+      server_context_->statistics()->GetVariable("daemon_html_unavailable");
+  ASSERT_NE(nullptr, unavailable);
+
+  const struct {
+    RewriteOptions::DaemonHtmlCacheMode mode;
+    int64 counted;
+  } kCases[] = {
+      {RewriteOptions::kDaemonHtmlCacheOff, 0},
+      {RewriteOptions::kDaemonHtmlCacheReportOnly, 1},
+      {RewriteOptions::kDaemonHtmlCacheServeVariants, 1},
+  };
+  for (const auto& c : kCases) {
+    RewriteOptions* options = server_context_->global_options();
+    options->ClearSignatureForTesting();
+    options->set_enabled(RewriteOptions::kEnabledOn);
+    options->set_in_place_rewriting_enabled(false);
+    options->set_daemon_html_cache(c.mode);
+    server_context_->ComputeSignature(options);
+
+    auto filter = std::make_unique<Envoy::Http::HttpPageSpeedDecoderFilter>(
+        config_, server_context_, nullptr /* proxy_fetch_factory */);
+    filter->setDecoderFilterCallbacks(decoder_callbacks_);
+    Envoy::Http::TestRequestHeaderMapImpl request{{":method", "GET"},
+                                                  {":path", "/page.html"},
+                                                  {":authority", "example.com"},
+                                                  {"accept", "text/markdown"}};
+    ASSERT_EQ(FilterHeadersStatus::Continue,
+              filter->decodeHeaders(request, true));
+    const Envoy::Http::TestResponseHeaderMapImpl sent{
+        {":status", "200"},
+        {"content-type", "text/html"},
+        {"cache-control", "max-age=300"},
+        {"etag", "W/\"v1\""}};
+    Envoy::Http::TestResponseHeaderMapImpl response = sent;
+    const int64 before = unavailable->Get();
+    EXPECT_EQ(FilterHeadersStatus::Continue,
+              filter->encodeHeaders(response, true));
+    EXPECT_EQ(c.counted, unavailable->Get() - before)
+        << static_cast<int>(c.mode);
+    // Not a header added, removed or changed: no Vary, no validator taken.
+    EXPECT_EQ(sent, response) << static_cast<int>(c.mode);
+  }
 }
 
 // Completes an admin fetch the way an AdminSite handler does.

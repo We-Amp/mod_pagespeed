@@ -54,7 +54,7 @@
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_adapter_pool.h"
-#include "pagespeed/system/daemon_html_report.h"
+#include "pagespeed/system/daemon_html_engine.h"
 // clang-format on
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -153,7 +153,7 @@ bool check_pagespeed_applicable(request_rec* request,
   return true;
 }
 
-DaemonHtmlCapture::HeaderLines apache_header_lines(const request_rec* request);
+DaemonHtmlHeaderLines apache_header_lines(const request_rec* request);
 
 // Create a new bucket from buf using HtmlRewriter.
 // TODO(lsong): the content is copied multiple times. The buf is
@@ -204,9 +204,9 @@ apr_bucket* rewrite_html(InstawebContext* context, request_rec* request,
     context->set_sent_headers(true);
     // The rewriter's own headers, its Vary tokens among them, are now in
     // place; what changes after this is the server's.
-    DaemonHtmlCapture* capture = context->daemon_html_capture();
-    if (capture != nullptr && capture->needs_late_headers()) {
-      capture->SetBaselineHeaders(apache_header_lines(request));
+    DaemonHtmlRecording* recording = context->daemon_html_recording();
+    if (recording != nullptr && recording->needs_final_headers()) {
+      recording->SetBaselineHeaders(apache_header_lines(request));
     }
   }
 
@@ -328,37 +328,39 @@ bool is_html_like(const request_rec* request) {
   return type != nullptr && type->IsHtmlLike();
 }
 
-// DaemonHtmlCache report-only.  These functions read the response and never
-// write it: the body through the bytes process_bucket has already read for the
-// rewriter, the headers through copies of the tables.  In any other mode the
+// DaemonHtmlCache.  These functions read the response and never write it:
+// the body through the bytes process_bucket has already read for the
+// rewriter, the headers through copies of the tables.  The HTML cache engine
+// (daemon_html_engine.h) classifies what they record; on this server it only
+// reports, in report-only and serve-variants alike.  With the option off the
 // only thing that runs is the mode check in instaweb_out_filter.
-apr_status_t delete_daemon_html_capture(void* data) {
-  delete static_cast<DaemonHtmlCapture*>(data);
+apr_status_t delete_daemon_html_recording(void* data) {
+  delete static_cast<DaemonHtmlRecording*>(data);
   return APR_SUCCESS;
 }
 
-void add_table_to_capture(const apr_table_t* table,
-                          DaemonHtmlCapture* capture) {
-  const apr_array_header_t* header = apr_table_elts(table);
-  const apr_table_entry_t* entries =
-      reinterpret_cast<const apr_table_entry_t*>(header->elts);
-  for (int i = 0; i < header->nelts; ++i) {
-    if (entries[i].key != nullptr && entries[i].val != nullptr) {
-      capture->AddHeader(entries[i].key, entries[i].val);
-    }
-  }
+// Lines whose changes after the module's own are not the server's: what the
+// module itself sets, and the digest compression drops with the body it
+// changes.  The engine's final view ignores the transport lines itself.
+bool is_module_or_digest_line(StringPiece name) {
+  return StringCaseEqual(name, "Content-MD5") ||
+         StringCaseEqual(name, kModPagespeedHeader) ||
+         StringCaseEqual(name, kPageSpeedHeader);
 }
 
-// Both header tables, in order, as copies.
-DaemonHtmlCapture::HeaderLines apache_header_lines(const request_rec* request) {
-  DaemonHtmlCapture::HeaderLines lines;
+// Both header tables, in order, as copies, without the lines above when
+// `skip_module_lines`.
+DaemonHtmlHeaderLines apache_header_lines(const request_rec* request,
+                                          bool skip_module_lines) {
+  DaemonHtmlHeaderLines lines;
   for (const apr_table_t* table :
        {request->headers_out, request->err_headers_out}) {
     const apr_array_header_t* header = apr_table_elts(table);
     const apr_table_entry_t* entries =
         reinterpret_cast<const apr_table_entry_t*>(header->elts);
     for (int i = 0; i < header->nelts; ++i) {
-      if (entries[i].key != nullptr && entries[i].val != nullptr) {
+      if (entries[i].key != nullptr && entries[i].val != nullptr &&
+          !(skip_module_lines && is_module_or_digest_line(entries[i].key))) {
         lines.emplace_back(entries[i].key, entries[i].val);
       }
     }
@@ -366,82 +368,95 @@ DaemonHtmlCapture::HeaderLines apache_header_lines(const request_rec* request) {
   return lines;
 }
 
+// The baseline and the final view: compared with each other, so the lines
+// whose changes do not count are left out of both.
+DaemonHtmlHeaderLines apache_header_lines(const request_rec* request) {
+  return apache_header_lines(request, /*skip_module_lines=*/true);
+}
+
 // The origin's headers as they arrive at the rewriter's input: before
 // build_context_for_request removes Content-Encoding and Content-Length, and
 // before the module adds its signature and its Vary tokens.  mod_expires and
 // mod_headers have not run yet at this position;
-// instaweb_daemon_html_report_filter brings their changes in.
-DaemonHtmlCapture* start_daemon_html_capture(request_rec* request,
-                                             ApacheServerContext* context) {
-  DaemonAdapter* adapter = context->daemon_adapter();
-  const DaemonAbi* abi = adapter == nullptr ? nullptr : adapter->abi();
-  if (abi == nullptr || !abi->PublishesHtmlStorePolicy()) return nullptr;
-  DaemonHtmlCapture* capture =
-      new DaemonHtmlCapture(context->daemon_html_reporter(), abi,
-                            context->global_config()->daemon_html_max_bytes());
-  apr_pool_cleanup_register(request->pool, capture, delete_daemon_html_capture,
-                            apr_pool_cleanup_null);
+// instaweb_daemon_html_report_filter brings their changes in.  Returns
+// nullptr when the engine records nothing; `*unavailable` then says whether
+// that is for want of a library that can classify, which the caller counts
+// once it knows the module handles the response.
+DaemonHtmlRecording* start_daemon_html_recording(request_rec* request,
+                                                 ApacheServerContext* context,
+                                                 bool* unavailable) {
+  *unavailable = false;
+  DaemonHtmlEngine* engine = context->daemon_html_engine();
+  if (engine == nullptr) return nullptr;
+  DaemonHtmlRequestFacts facts;
+  facts.method = request->method == nullptr ? "" : request->method;
   // Not unparsed_uri: a request in absolute form carries the scheme and host
   // there, and the policy reads a path.
-  GoogleString target =
+  facts.path =
       request->parsed_uri.path == nullptr ? "" : request->parsed_uri.path;
   if (request->parsed_uri.query != nullptr) {
-    StrAppend(&target, "?", request->parsed_uri.query);
+    StrAppend(&facts.path, "?", request->parsed_uri.query);
   }
-  capture->SetRequest(request->method == nullptr ? "" : request->method, target,
-                      request->hostname == nullptr ? "" : request->hostname);
+  facts.host = request->hostname == nullptr ? "" : request->hostname;
   const apr_table_t* in = request->headers_in;
-  if (apr_table_get(in, HttpAttributes::kAuthorization) != nullptr ||
-      apr_table_get(in, "Proxy-Authorization") != nullptr) {
-    capture->set_has_authorization();
-  }
-  if (request->user != nullptr) capture->set_authenticated_user();
-  if (apr_table_get(in, HttpAttributes::kCookie) != nullptr ||
-      apr_table_get(in, HttpAttributes::kCookie2) != nullptr) {
-    capture->set_has_cookie();
-  }
+  facts.has_authorization =
+      apr_table_get(in, HttpAttributes::kAuthorization) != nullptr ||
+      apr_table_get(in, "Proxy-Authorization") != nullptr;
+  facts.authenticated_user = request->user != nullptr;
+  facts.has_cookie = apr_table_get(in, HttpAttributes::kCookie) != nullptr ||
+                     apr_table_get(in, HttpAttributes::kCookie2) != nullptr;
   const char* request_cc = apr_table_get(in, HttpAttributes::kCacheControl);
-  if (request_cc != nullptr) capture->AddRequestCacheControl(request_cc);
-
-  capture->set_status(request->status);
-  add_table_to_capture(request->headers_out, capture);
-  add_table_to_capture(request->err_headers_out, capture);
+  if (request_cc != nullptr) {
+    facts.has_cache_control = true;
+    facts.cache_control = request_cc;
+  }
+  // Nothing blocking is ever handed to a port by a recording that only
+  // reports.
+  std::unique_ptr<DaemonHtmlRecording> recording =
+      engine->StartRecording(facts, /*port=*/nullptr, unavailable);
+  if (recording == nullptr) return nullptr;
+  recording->set_status(request->status);
+  DaemonHtmlHeaderLines origin =
+      apache_header_lines(request, /*skip_module_lines=*/false);
   // Apache keeps these two in the request until its header filter.
   if (request->content_type != nullptr &&
       apr_table_get(request->headers_out, HttpAttributes::kContentType) ==
           nullptr) {
-    capture->AddHeader(HttpAttributes::kContentType, request->content_type);
+    origin.emplace_back(HttpAttributes::kContentType, request->content_type);
   }
   if (request->content_encoding != nullptr &&
       apr_table_get(request->headers_out, HttpAttributes::kContentEncoding) ==
           nullptr) {
-    capture->AddHeader(HttpAttributes::kContentEncoding,
-                       request->content_encoding);
+    origin.emplace_back(HttpAttributes::kContentEncoding,
+                        request->content_encoding);
   }
-  return capture;
+  recording->SetOriginHeaders(std::move(origin));
+  DaemonHtmlRecording* raw = recording.release();
+  apr_pool_cleanup_register(request->pool, raw, delete_daemon_html_recording,
+                            apr_pool_cleanup_null);
+  return raw;
 }
 
 // Runs at AP_FTYPE_CONTENT_SET + 1, added only for a response being captured,
 // before build_context_for_request adds instaweb_fix_headers_filter at the same
 // type, so it runs first of the two: after mod_expires, mod_headers and
 // mod_deflate, before the module rewrites the caching headers.  What those
-// stages changed since the module's own changes reaches the capture, apart
-// from what compression and the module itself change: Vary is compared without
-// Accept-Encoding and an ETag without a -gzip suffix, so a Vary or ETag line
-// from mod_headers counts.  It passes every brigade on untouched.
+// stages changed since the module's own changes reaches the recording as its
+// final view, apart from what compression and the module itself change: Vary
+// is compared without Accept-Encoding and an ETag without a -gzip suffix, so
+// a Vary or ETag line from mod_headers counts.  It passes every brigade on
+// untouched.
 //
 // Design limit: a header that a filter sets after this one is not seen, so a
 // filter added at AP_FTYPE_CONTENT_SET + 1 after this one, or one at
 // AP_FTYPE_PROTOCOL or later, does not reach the report.
 apr_status_t instaweb_daemon_html_report_filter(ap_filter_t* filter,
                                                 apr_bucket_brigade* bb) {
-  DaemonHtmlCapture* capture = static_cast<DaemonHtmlCapture*>(filter->ctx);
+  DaemonHtmlRecording* recording =
+      static_cast<DaemonHtmlRecording*>(filter->ctx);
   request_rec* request = filter->r;
-  if (capture->needs_late_headers()) {
-    capture->ApplyLateHeaders(
-        apache_header_lines(request),
-        {HttpAttributes::kContentEncoding, HttpAttributes::kContentLength,
-         "Content-MD5", kModPagespeedHeader, kPageSpeedHeader});
+  if (recording->needs_final_headers()) {
+    recording->NoteFinalHeaders(apache_header_lines(request));
   }
   bool saw_eos = false;
   for (apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
@@ -449,7 +464,7 @@ apr_status_t instaweb_daemon_html_report_filter(ap_filter_t* filter,
     if (APR_BUCKET_IS_EOS(bucket)) saw_eos = true;
   }
   const apr_status_t status = ap_pass_brigade(filter->next, bb);
-  if (saw_eos) capture->Finish(request->connection->aborted != 0);
+  if (saw_eos) recording->Finish(request->connection->aborted != 0);
   return status;
 }
 
@@ -641,8 +656,8 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
     size_t bytes = 0;
     *return_code = apr_bucket_read(bucket, &buf, &bytes, APR_BLOCK_READ);
     if (*return_code == APR_SUCCESS) {
-      if (context->daemon_html_capture() != nullptr) {
-        context->daemon_html_capture()->AddBody(buf, bytes);
+      if (context->daemon_html_recording() != nullptr) {
+        context->daemon_html_recording()->AddBody(buf, bytes);
       }
       new_bucket = rewrite_html(context, request, REWRITE, buf, bytes);
     } else {
@@ -663,8 +678,8 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
       }
     }
   } else if (APR_BUCKET_IS_EOS(bucket)) {
-    if (context->daemon_html_capture() != nullptr) {
-      context->daemon_html_capture()->set_body_ended();
+    if (context->daemon_html_recording() != nullptr) {
+      context->daemon_html_recording()->set_body_ended();
     }
     new_bucket = rewrite_html(context, request, FINISH, nullptr, 0);
     if (new_bucket != nullptr) {
@@ -721,34 +736,38 @@ apr_status_t instaweb_out_filter(ap_filter_t* filter, apr_bucket_brigade* bb) {
     ApacheServerContext* report_context =
         InstawebContext::ServerContextFromServerRec(request->server);
     // As on nginx, the report covers a 200 of an HTML type that carries a
-    // body: a capture of anything else, a HEAD included, is not started.
-    const bool report_only =
-        report_context->global_config()->daemon_html_cache() ==
-            RewriteOptions::kDaemonHtmlCacheReportOnly &&
-        request->main == nullptr && request->status == HTTP_OK &&
-        !request->header_only && is_html_like(request);
-    DaemonHtmlCapture* capture =
-        report_only ? start_daemon_html_capture(request, report_context)
-                    : nullptr;
+    // body: a recording of anything else, a HEAD included, is not started.
+    // serve-variants records the same responses and, until this server
+    // stores and serves, only reports them.
+    const bool report = report_context->global_config()->daemon_html_cache() !=
+                            RewriteOptions::kDaemonHtmlCacheOff &&
+                        request->main == nullptr &&
+                        request->status == HTTP_OK && !request->header_only &&
+                        is_html_like(request);
+    bool unavailable = false;
+    DaemonHtmlRecording* recording =
+        report
+            ? start_daemon_html_recording(request, report_context, &unavailable)
+            : nullptr;
     // Added before build_context_for_request adds the fix-headers filter.
     ap_filter_t* report_filter =
-        capture == nullptr
+        recording == nullptr
             ? nullptr
-            : ap_add_output_filter(kModPagespeedDaemonHtmlReportName, capture,
+            : ap_add_output_filter(kModPagespeedDaemonHtmlReportName, recording,
                                    request, request->connection);
     context = build_context_for_request(request);
     if (context == nullptr) {
-      // The pool frees a capture that was never finished.
+      // The pool frees a recording that was never finished.
       if (report_filter != nullptr) ap_remove_output_filter(report_filter);
       ap_remove_output_filter(filter);
       return ap_pass_brigade(filter->next, bb);
     }
     filter->ctx = context;
-    if (capture != nullptr) {
-      context->set_daemon_html_capture(capture);
-      capture->SetBaselineHeaders(apache_header_lines(request));
-    } else if (report_only) {
-      report_context->daemon_html_reporter()->CountUnavailable();
+    if (recording != nullptr) {
+      context->set_daemon_html_recording(recording);
+      recording->SetBaselineHeaders(apache_header_lines(request));
+    } else if (unavailable) {
+      report_context->daemon_html_engine()->CountUnavailable();
     }
   }
 
@@ -1489,9 +1508,9 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
   ap_hook_insert_error_filter(instaweb_insert_strip_option_token_filter,
                               nullptr, nullptr, APR_HOOK_MIDDLE);
 
-  // DaemonHtmlCache report-only reads the late headers here: mod_expires,
-  // mod_headers and mod_deflate have run, instaweb_fix_headers_filter has not.
-  // Added per response, only in that mode.  Headers set by a filter that runs
+  // DaemonHtmlCache reads the final view here: mod_expires, mod_headers and
+  // mod_deflate have run, instaweb_fix_headers_filter has not.  Added per
+  // response, only when the option is on.  Headers set by a filter that runs
   // after it (one added later at this type, or at AP_FTYPE_PROTOCOL) are not
   // seen.
   ap_register_output_filter(

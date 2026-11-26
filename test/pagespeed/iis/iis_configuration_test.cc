@@ -308,6 +308,25 @@ TEST_F(IisConfigurationTest, HonorRequestFreshnessDefaultsOffAndParses) {
   EXPECT_FALSE(off.daemon_serve_honor_request_freshness());
 }
 
+// DaemonHtmlCache takes serve-variants here too (inert on this server, like
+// report-only); the value reserved for a later release is refused, with the
+// file's own warning, and leaves the option as it was.
+TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
+  IisRewriteOptions variants(nullptr);
+  ParseAndGetConfig("pagespeed DaemonHtmlCache serve-variants\n", "",
+                    &variants);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            variants.daemon_html_cache());
+
+  IisRewriteOptions reserved(nullptr);
+  ParseAndGetConfig(
+      "pagespeed DaemonHtmlCache report-only\n"
+      "pagespeed DaemonHtmlCache serve-cached-html\n",
+      "", &reserved);
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            reserved.daemon_html_cache());
+}
+
 // A quoted value with spaces and a backslash path survives byte for byte:
 // the config tokenizer keeps a double-quoted token verbatim.
 TEST_F(IisConfigurationTest, DaemonOptionQuotedValueWithSpacesVerbatim) {

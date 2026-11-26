@@ -20,7 +20,8 @@
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/daemon_abi.h"
-#include "pagespeed/system/daemon_html_report.h"
+#include "pagespeed/system/daemon_html_decision_log.h"
+#include "pagespeed/system/daemon_html_engine.h"
 #include "pagespeed/system/rule_pack_decision_log.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/system/daemon_stub_test_util.h"
@@ -28,7 +29,7 @@
 namespace net_instaweb {
 namespace {
 
-TEST(DaemonHtmlReportWriterStartTest, FailedStartDropsTheLineAndRetries) {
+TEST(DaemonHtmlDecisionLogWriterStartTest, FailedStartDropsTheLineAndRetries) {
   std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
   SimpleStats stats(thread_system.get());
   RewriteStats::InitStats(&stats);
@@ -44,18 +45,31 @@ TEST(DaemonHtmlReportWriterStartTest, FailedStartDropsTheLineAndRetries) {
   unsetenv("PS_STUB_HTML_ACTION");
   unsetenv("PS_STUB_HTML_REASON");
 
-  DaemonHtmlReporter reporter(&stats, &timer, dir.string(), &handler);
+  DaemonHtmlEngine::Config config;
+  config.mode = DaemonHtmlMode::kReportOnly;
+  DaemonHtmlEngine::Deps deps;
+  deps.substrate.abi = abi.get();
+  deps.statistics = &stats;
+  deps.timer = &timer;
+  deps.handler = &handler;
+  deps.log_dir = dir.string();
+  DaemonHtmlEngine engine(config, deps);
   auto run = [&](const char* path) {
-    DaemonHtmlCapture capture(&reporter, abi.get(), 5 << 20);
-    capture.SetRequest("GET", path, "www.example.com");
-    capture.set_status(200);
-    capture.AddHeader("Content-Type", "text/html");
-    capture.AddBody("<html></html>", 13);
-    capture.set_body_ended();
-    capture.Finish(false);
+    DaemonHtmlRequestFacts facts;
+    facts.method = "GET";
+    facts.path = path;
+    facts.host = "www.example.com";
+    std::unique_ptr<DaemonHtmlRecording> rec =
+        engine.StartRecording(facts, nullptr);
+    ASSERT_NE(nullptr, rec);
+    rec->set_status(200);
+    rec->SetOriginHeaders({{"Content-Type", "text/html"}});
+    rec->AddBody("<html></html>", 13);
+    rec->set_body_ended();
+    rec->Finish(false);
   };
   auto lines = [&]() {
-    DaemonHtmlReporter::WaitForLogWritesForTesting();
+    DaemonHtmlDecisionLog::WaitForWritesForTesting();
     std::vector<std::string> out;
     std::ifstream in(dir / "daemon-html" /
                      RulePackDecisionLog::FileName(
@@ -64,7 +78,7 @@ TEST(DaemonHtmlReportWriterStartTest, FailedStartDropsTheLineAndRetries) {
     return out;
   };
 
-  DaemonHtmlReporter::FailLogWriterStartForTesting(true);
+  DaemonHtmlDecisionLog::FailWriterStartForTesting(true);
   run("/first.html");
   EXPECT_EQ(1, stats.GetVariable("daemon_html_evaluated")->Get());
   EXPECT_EQ(1, stats.GetVariable("daemon_html_would_store")->Get());
@@ -72,7 +86,7 @@ TEST(DaemonHtmlReportWriterStartTest, FailedStartDropsTheLineAndRetries) {
   EXPECT_FALSE(std::filesystem::exists(dir / "daemon-html"));
 
   // The failed start left the writer unstarted, so the next line starts it.
-  DaemonHtmlReporter::FailLogWriterStartForTesting(false);
+  DaemonHtmlDecisionLog::FailWriterStartForTesting(false);
   run("/second.html");
   const std::vector<std::string> written = lines();
   ASSERT_EQ(1u, written.size());

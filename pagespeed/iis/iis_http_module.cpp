@@ -1662,9 +1662,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						{
 							innerContext->set_rewrite_html(true);
 							// DaemonHtmlCache has no capture on this server yet, so report-only
-							// says so rather than saying nothing.
-							if (innerContext->server_context()->global_options()->daemon_html_cache() ==
-							    net_instaweb::RewriteOptions::kDaemonHtmlCacheReportOnly) {
+							// and serve-variants say so rather than saying nothing.
+							if (innerContext->server_context()->global_options()->daemon_html_cache() !=
+							    net_instaweb::RewriteOptions::kDaemonHtmlCacheOff) {
 								innerContext->server_context()->statistics()->GetVariable(
 								    "daemon_html_unavailable")->Add(1);
 							}

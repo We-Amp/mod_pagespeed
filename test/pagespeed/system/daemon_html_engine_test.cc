@@ -445,6 +445,39 @@ TEST_F(DaemonHtmlEngineTest, ARequestWithoutASiteIsNeitherStoredNorServed) {
   EXPECT_TRUE(abi_.serve_requests().empty());
 }
 
+TEST_F(DaemonHtmlEngineTest, ANullPortNeverStores) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  ASSERT_TRUE(engine->serving());
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  std::unique_ptr<DaemonHtmlRecording> rec =
+      engine->StartRecording(MarkdownRequest(), /*port=*/nullptr);
+  ASSERT_NE(nullptr, rec);  // Reported, as report-only would.
+  rec->set_status(200);
+  rec->SetOriginHeaders(kOrigin);
+  rec->AddBody(kBody, sizeof(kBody) - 1);
+  rec->Finish(false);
+  EXPECT_EQ(0, budget_.in_use());
+  EXPECT_EQ(0, CallsOf("ps_html_store_write_params"));
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+  EXPECT_EQ(0, CallsOf("ps_cache_write_original_site"));
+  EXPECT_EQ(0, stats_.GetVariable("daemon_html_serve_unavailable")->Get());
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_evaluated")->Get());
+}
+
+TEST_F(DaemonHtmlEngineTest, AnOversizedBodyIsReportedRefusedForItsSize) {
+  config_.max_bytes = 8;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  InlinePort port;
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  EXPECT_EQ(0, CallsOf("ps_cache_write_original_site"));
+  EXPECT_EQ(0, stats_.GetVariable("daemon_html_would_store")->Get());
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_refused_size")->Get());
+  EXPECT_EQ(0, budget_.in_use());
+}
+
 TEST_F(DaemonHtmlEngineTest, AnEntryStoredAgainIsRemovedOnTheNextRefusal) {
   // An entry this process removed, stored again by a peer process (the
   // injected removal leaves the volume as it is), then refused again.

@@ -30,6 +30,7 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/purge_set.h"
@@ -41,6 +42,7 @@
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/message_handler_test_base.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
@@ -1126,13 +1128,17 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
                                                 "report-only", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
             options_.daemon_html_cache());
-  // The serving modes do not exist yet, so they are configuration errors.
-  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+  EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 "DaemonHtmlCache", "serve-variants", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
+  // Any other value is a configuration error.
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
-            options_.ParseAndSetOptionFromName1(
-                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve",
+                                                &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+            options_.daemon_html_cache());
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("DaemonHtmlMaxBytes", "1000",
                                                 &msg, &handler));
@@ -1140,6 +1146,55 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
   // Turning the report on does not re-key cached work.
   options_.ComputeSignature();
   EXPECT_EQ(signature_before, options_.signature());
+}
+
+// The value reserved for a later release is refused with a warning, not a
+// configuration error, and leaves the option as it was; on every path a
+// port's configuration takes.
+TEST_F(RewriteOptionsTest,
+       DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) {
+  GoogleString msg;
+  MockMessageHandler handler(new NullMutex);
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, options_.daemon_html_cache());
+  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
+  EXPECT_EQ(1, handler.TotalMessages());
+
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                                "report-only", &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCache", "Serve-Cached-HTML",
+                RewriteOptions::kProcessScopeStrict, &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            options_.daemon_html_cache());
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
+  // With no handler the caller gets the warning as the message.
+  msg.clear();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, nullptr));
+  EXPECT_NE(GoogleString::npos, msg.find("serve-cached-html' is not available"))
+      << msg;
+
+  // Below the option's scope, the scope error stands.
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromNameWithScope(
+                "DaemonHtmlCache", "serve-cached-html",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
+  // The handler-less setter (a configuration source with its own warning
+  // for a refused value) refuses it as a value.
+  EXPECT_EQ(
+      RewriteOptions::kOptionValueInvalid,
+      options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html", &msg));
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
+            options_.daemon_html_cache());
 }
 
 TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {

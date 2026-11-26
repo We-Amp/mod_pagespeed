@@ -1138,13 +1138,14 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
     int status_code = ps_response_headers->status_code();
     bool is_success = status_code >= 200 && status_code < 300;
 
-    // DaemonHtmlCache has no capture on this server, so report-only says so
-    // for each response the report would cover: a 200 of an HTML type, to a
-    // request other than HEAD, as on Apache and nginx.
+    // DaemonHtmlCache has no capture on this server, so report-only and
+    // serve-variants say so for each response the report would cover: a 200
+    // of an HTML type, to a request other than HEAD, as on Apache and nginx.
+    // Nothing else changes.
     if (is_html && status_code == 200 &&
         client_method_ != net_instaweb::RequestHeaders::kHead &&
-        options_->daemon_html_cache() ==
-            net_instaweb::RewriteOptions::kDaemonHtmlCacheReportOnly) {
+        options_->daemon_html_cache() !=
+            net_instaweb::RewriteOptions::kDaemonHtmlCacheOff) {
       net_instaweb::Variable* unavailable =
           server_context_->statistics()->GetVariable("daemon_html_unavailable");
       if (unavailable != nullptr) unavailable->Add(1);

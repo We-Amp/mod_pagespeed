@@ -184,6 +184,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   bool HasHtmlServeSet() const override { return injection_.has_set; }
+  // It answers the store policy itself, whatever the inner library has.
+  bool PublishesHtmlStorePolicy() const override { return true; }
   GoogleString HtmlServeSetUnavailableReason() const override {
     return injection_.has_set ? GoogleString() : injection_.unavailable_reason;
   }
