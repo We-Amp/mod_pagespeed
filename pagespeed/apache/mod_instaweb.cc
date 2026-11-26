@@ -736,20 +736,19 @@ apr_status_t instaweb_out_filter(ap_filter_t* filter, apr_bucket_brigade* bb) {
     // body: a recording of anything else, a HEAD included, is not started.
     // serve-variants records the same responses and, until this server
     // stores and serves, only reports them.
-    const bool report =
-        report_context->global_config()->daemon_html_cache() !=
-            RewriteOptions::kDaemonHtmlCacheOff &&
-        request->main == nullptr && request->status == HTTP_OK &&
-        !request->header_only && is_html_like(request);
+    const bool report = report_context->global_config()->daemon_html_cache() !=
+                            RewriteOptions::kDaemonHtmlCacheOff &&
+                        request->main == nullptr &&
+                        request->status == HTTP_OK && !request->header_only &&
+                        is_html_like(request);
     DaemonHtmlRecording* recording =
-        report ? start_daemon_html_recording(request, report_context)
-               : nullptr;
+        report ? start_daemon_html_recording(request, report_context) : nullptr;
     // Added before build_context_for_request adds the fix-headers filter.
     ap_filter_t* report_filter =
         recording == nullptr
             ? nullptr
-            : ap_add_output_filter(kModPagespeedDaemonHtmlReportName,
-                                   recording, request, request->connection);
+            : ap_add_output_filter(kModPagespeedDaemonHtmlReportName, recording,
+                                   request, request->connection);
     context = build_context_for_request(request);
     if (context == nullptr) {
       // The pool frees a recording that was never finished.

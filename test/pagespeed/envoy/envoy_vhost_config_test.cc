@@ -115,8 +115,8 @@ TEST_F(EnvoyVHostConfigTest, KnownCustomOptionIsSet) {
 TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheModesParse) {
   RecordingHandler rec;
   EnvoyRewriteOptions options(&thread_system_);
-  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com",
-                                     "DaemonHtmlCache", "serve-variants", &rec));
+  EXPECT_TRUE(ApplyVHostCustomOption(&options, "example.com", "DaemonHtmlCache",
+                                     "serve-variants", &rec));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
   EXPECT_EQ(0, rec.Count("Failed"));

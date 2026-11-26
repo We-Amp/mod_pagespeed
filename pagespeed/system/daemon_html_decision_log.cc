@@ -194,8 +194,7 @@ std::shared_ptr<DaemonHtmlDecisionLog> DaemonHtmlDecisionLog::ForLogDir(
 }
 
 bool DaemonHtmlDecisionLog::Queue(const DaemonAbi& abi, const Fields& fields,
-                                  const GoogleString& dedup_key,
-                                  int64 now_ms) {
+                                  const GoogleString& dedup_key, int64 now_ms) {
   std::vector<const char*> keys;
   std::vector<const char*> values;
   keys.reserve(fields.size());
@@ -277,7 +276,7 @@ GoogleString DaemonHtmlLogVary(const DaemonHtmlLogHeaderLines& headers) {
   return out;
 }
 
-GoogleString DaemonHtmlLogCc(uint16 cc_flags, uint32 store_flags) {
+GoogleString DaemonHtmlLogCc(uint16_t cc_flags, uint32_t store_flags) {
   GoogleString out;
   if ((store_flags & kPsHtmlStoreFlagCcEvaluated) == 0 ||
       (cc_flags & kPsCcOriginHeaderPresent) == 0) {

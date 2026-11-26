@@ -103,7 +103,7 @@ GoogleString DaemonHtmlLogVary(const DaemonHtmlLogHeaderLines& headers);
 
 // The Cache-Control directives the library found, by name, when it evaluated
 // them (`store_flags` carries its cc-evaluated bit).
-GoogleString DaemonHtmlLogCc(uint16 cc_flags, uint32 store_flags);
+GoogleString DaemonHtmlLogCc(uint16_t cc_flags, uint32_t store_flags);
 
 // "etag", "last_modified", both in that order, or "none".
 GoogleString DaemonHtmlLogValidators(const DaemonHtmlLogHeaderLines& headers);

@@ -70,8 +70,7 @@ class DaemonHtmlReportTest : public ::testing::Test {
   }
 
   std::unique_ptr<DaemonHtmlEngine> NewEngine(
-      bool with_log = true,
-      DaemonHtmlMode mode = DaemonHtmlMode::kReportOnly,
+      bool with_log = true, DaemonHtmlMode mode = DaemonHtmlMode::kReportOnly,
       const DaemonAbi* abi = nullptr) {
     DaemonHtmlEngine::Config config;
     config.mode = mode;
@@ -346,7 +345,8 @@ TEST_F(DaemonHtmlReportTest, VhostAddedNamesWhatTheServerAddedWithA114Library) {
   ASSERT_EQ(1u, lines.size());
   // Names only, lower-case, each once; what compression adds is not the
   // server's configuration.
-  EXPECT_NE(std::string::npos, lines[0].find("vhost_added=x-frame-options,x-t "))
+  EXPECT_NE(std::string::npos,
+            lines[0].find("vhost_added=x-frame-options,x-t "))
       << lines[0];
   EXPECT_EQ(std::string::npos, lines[0].find("DENY")) << lines[0];
 }

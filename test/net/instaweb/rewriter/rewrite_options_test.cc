@@ -1153,7 +1153,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
 // The value reserved for a later release is refused with a warning, not a
 // configuration error, and leaves the option as it was; on every path a
 // port's configuration takes.
-TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) {
+TEST_F(RewriteOptionsTest,
+       DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) {
   GoogleString msg;
   MockMessageHandler handler(new NullMutex);
   EXPECT_EQ(RewriteOptions::kOptionOk,
@@ -1164,8 +1165,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) 
   EXPECT_EQ(1, handler.TotalMessages());
 
   ASSERT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName1(
-                "DaemonHtmlCache", "report-only", &msg, &handler));
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache",
+                                                "report-only", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromNameWithScope(
                 "DaemonHtmlCache", "Serve-Cached-HTML",
@@ -1176,9 +1177,9 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlIsRefusedWithAWarning) 
 
   // The handler-less setter (a configuration source with its own warning
   // for a refused value) refuses it as a value.
-  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
-            options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html",
-                                       &msg));
+  EXPECT_EQ(
+      RewriteOptions::kOptionValueInvalid,
+      options_.SetOptionFromName("DaemonHtmlCache", "serve-cached-html", &msg));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheReportOnly,
             options_.daemon_html_cache());
 }

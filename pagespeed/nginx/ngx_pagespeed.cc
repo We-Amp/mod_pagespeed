@@ -4159,8 +4159,8 @@ std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
   facts.has_authorization = ps_request_has_header(r, "authorization") ||
                             ps_request_has_header(r, "proxy-authorization");
   facts.authenticated_user = r->headers_in.user.len != 0;
-  facts.has_cookie = ps_request_has_header(r, "cookie") ||
-                     ps_request_has_header(r, "cookie2");
+  facts.has_cookie =
+      ps_request_has_header(r, "cookie") || ps_request_has_header(r, "cookie2");
   const ngx_list_part_t* part = &r->headers_in.headers.part;
   const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
   for (ngx_uint_t i = 0; /* void */; i++) {
@@ -4193,8 +4193,9 @@ std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
       r->headers_out.last_modified == nullptr) {
     u_char date[sizeof("Mon, 28 Sep 1970 06:00:00 GMT")];
     u_char* end = ngx_http_time(date, r->headers_out.last_modified_time);
-    origin.emplace_back(HttpAttributes::kLastModified,
-                        GoogleString(reinterpret_cast<char*>(date), end - date));
+    origin.emplace_back(
+        HttpAttributes::kLastModified,
+        GoogleString(reinterpret_cast<char*>(date), end - date));
   }
   if (r->headers_out.content_length_n >= 0 &&
       r->headers_out.content_length == nullptr) {

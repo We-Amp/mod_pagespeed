@@ -133,15 +133,13 @@ TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
   GoogleString msg;
   NullMessageHandler handler;
   EXPECT_EQ(RewriteOptions::kOptionOk,
-            config_.ParseAndSetOptionFromName1("DaemonHtmlCache",
-                                               "serve-variants", &msg,
-                                               &handler));
+            config_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-variants", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             config_.daemon_html_cache());
   EXPECT_EQ(RewriteOptions::kOptionOk,
-            config_.ParseAndSetOptionFromName1("DaemonHtmlCache",
-                                               "serve-cached-html", &msg,
-                                               &handler));
+            config_.ParseAndSetOptionFromName1(
+                "DaemonHtmlCache", "serve-cached-html", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             config_.daemon_html_cache());
 }

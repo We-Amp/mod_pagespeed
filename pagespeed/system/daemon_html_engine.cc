@@ -1101,12 +1101,11 @@ void DaemonHtmlEngine::Report(const DaemonHtmlRecording& r,
 
   const int64 now_ms = deps_.timer->NowMs();
   const GoogleString path = DaemonHtmlLogPath(f.path);
-  const GoogleString action =
-      serve_line ? "refuse"
-      : v.action == kPsHtmlStoreActionWouldStoreNoNotify
-          ? "would_store_no_notify"
-      : would_store ? "would_store"
-                    : "refuse";
+  const GoogleString action = serve_line ? "refuse"
+                              : v.action == kPsHtmlStoreActionWouldStoreNoNotify
+                                  ? "would_store_no_notify"
+                              : would_store ? "would_store"
+                                            : "refuse";
   const bool vhost_added_known = abi->VersionMinor() >= kVhostAddedMinor;
   const DaemonHtmlDecisionLog::Fields fields = {
       {"ts_ms", Integer64ToString(now_ms)},
@@ -1152,8 +1151,8 @@ void DaemonHtmlEngine::LogServeSide(const char* action,
       {"action", action},
       {"reason", reason},
       {"status", status > 0 ? IntegerToString(status) : GoogleString()},
-      {"size", size > 0 ? Integer64ToString(static_cast<int64>(size))
-                        : GoogleString()},
+      {"size",
+       size > 0 ? Integer64ToString(static_cast<int64>(size)) : GoogleString()},
       {"lifetime_s",
        lifetime_s > 0 ? Integer64ToString(lifetime_s) : GoogleString()},
       {"variant", variant == nullptr ? GoogleString() : GoogleString(variant)},
@@ -1765,7 +1764,7 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
                                                 : key.substr(path_start);
   CacheKey(parts, &cache_url, &hostname);
   RunOn(deps_.runner, [this, cache_url, hostname, host = parts.host,
-                        path = parts.path, scheme = parts.scheme, done] {
+                       path = parts.path, scheme = parts.scheme, done] {
     const int rc = deps_.substrate.abi->CacheRemoveSite(
         deps_.substrate.cache, cache_url.c_str(), hostname.c_str(),
         scheme.c_str(), config_.site.c_str());
