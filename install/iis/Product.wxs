@@ -529,7 +529,9 @@
          position), then added at the TOP of <modules>: at equal priority IIS
          runs the send notifications in the reverse order of that list, so
          the first entry's send runs after every other one's. The installer
-         upgrade gate checks both entries and this order. -->
+         upgrade gate checks both entries and this order. In a formatted
+         command line [ and ] name a property, so the literal brackets of
+         appcmd's [@start,...] are written [\[] and [\]]. -->
     <CustomAction Id="RegisterFinalViewModule"
                   Directory="SystemFolder"
                   ExeCommand='inetsrv\appcmd.exe install module /name:PageSpeedFinalView /image:"[INSTALLDIR]pagespeed_iis.dll" /add:false'
@@ -539,7 +541,7 @@
 
     <CustomAction Id="AddFinalViewModuleFirst"
                   Directory="SystemFolder"
-                  ExeCommand="inetsrv\appcmd.exe set config -section:system.webServer/modules /+&quot;[@start,name='PageSpeedFinalView']&quot; /commit:apphost"
+                  ExeCommand="inetsrv\appcmd.exe set config -section:system.webServer/modules /+&quot;[\[]@start,name='PageSpeedFinalView'[\]]&quot; /commit:apphost"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
