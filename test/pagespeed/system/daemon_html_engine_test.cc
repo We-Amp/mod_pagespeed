@@ -416,6 +416,93 @@ TEST_F(DaemonHtmlEngineTest, NoCacheHandleStoresNothing) {
   EXPECT_EQ(0, CallsOf("ps_html_store_write_params"));
 }
 
+// A handle source is asked at each use: while it has no handle nothing is
+// read, written or removed, and once it has one the engine uses it, without
+// being created again.
+TEST_F(DaemonHtmlEngineTest, AHandleSourceIsAskedAtEachUse) {
+  void* handle = nullptr;
+  int asked = 0;
+  DaemonHtmlEngine::Deps deps;
+  deps.substrate.abi = &abi_;
+  deps.substrate.cache = &volume_;  // Ignored when a source is set.
+  deps.substrate.cache_source = [&handle, &asked]() {
+    ++asked;
+    return handle;
+  };
+  deps.purge_source = &source_;
+  deps.statistics = &stats_;
+  deps.timer = &timer_;
+  deps.handler = &handler_;
+  deps.limiter = &limiter_;
+  deps.budget = &budget_;
+  DaemonHtmlEngine engine(config_, deps);
+  InlinePort port;
+
+  // No handle: the store and the serve make no volume call.
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  std::unique_ptr<DaemonHtmlRecording> rec =
+      engine.StartRecording(MarkdownRequest(), &port);
+  if (rec != nullptr) {  // Report-only, then.
+    rec->set_status(200);
+    rec->SetOriginHeaders(kOrigin);
+    rec->AddBody(kBody, sizeof(kBody) - 1);
+    rec->Finish(false);
+  }
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
+            engine.Serve(MarkdownRequest(), &port).kind);
+  EXPECT_TRUE(abi_.serve_facts().empty());
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+  EXPECT_LT(0, asked);
+
+  // A handle now: the next store writes through it.
+  handle = &volume_;
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(&engine, &port, kOrigin, kOrigin, MarkdownRequest());
+  EXPECT_EQ(1, CallsOf("ps_cache_write_headers_sidecar_site"));
+  engine.Serve(MarkdownRequest(), &port);
+  EXPECT_EQ(1u, abi_.serve_facts().size());
+}
+
+// An admin URL purge fences this process at once: the purge set it reads
+// purges from learns of the purge only at its next poll, and a commit whose
+// capture predates the purge must not survive until then.
+TEST_F(DaemonHtmlEngineTest, AnAdminUrlPurgeFencesThisProcessAtOnce) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  class DeferringPort : public InlinePort {
+   public:
+    void RunBlocking(DaemonHtmlCommit commit) override {
+      held = std::move(commit);
+    }
+    DaemonHtmlCommit held;
+  } port;
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.capture_start_ms = kNowMs - 2000;
+  Capture(engine.get(), &port, kOrigin, kOrigin, facts);
+  ASSERT_FALSE(port.held.empty());
+  bool ok = false;
+  engine->OnAdminPurge("https://WWW.example.test:443/page", false, kNowMs,
+                       [&ok](bool o, const GoogleString&) { ok = o; });
+  EXPECT_TRUE(ok);
+  // The source (the purge set) has not seen the purge yet.
+  EXPECT_TRUE(source_.IsUrlValidIgnoringGlobal("https://www.example.test/page",
+                                               kNowMs - 2000));
+  port.held.Run();
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_purge_race_refused")->Get());
+  EXPECT_EQ(0, stats_.GetVariable("daemon_html_stored")->Get());
+  // A capture after the purge stores.
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  timer_.AdvanceMs(2000);
+  facts.capture_start_ms = kNowMs + 2000;
+  Capture(engine.get(), &port, kOrigin, kOrigin, facts);
+  port.held.Run();
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_stored")->Get());
+}
+
 TEST_F(DaemonHtmlEngineTest, TheInsertTimeTakesTheOriginsAge) {
   std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
   abi_.Queue(kPsHtmlStoreActionStore, "none");

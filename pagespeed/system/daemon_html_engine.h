@@ -218,6 +218,13 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
 struct DaemonHtmlSubstrate {
   const DaemonAbi* abi = nullptr;
   void* cache = nullptr;
+  // When set, asked for the handle at each use instead of `cache`, and
+  // `cache` is ignored.  For a server whose handle can change while the
+  // engine lives: a volume the optimizer replaced is reopened, and while no
+  // handle can be vouched for the answer is null, so nothing is written,
+  // removed or served (DaemonAdapter::RecordCacheForRequest).  Each store,
+  // serve, removal and tick asks once and keeps that handle to its end.
+  std::function<void*()> cache_source;
   // The directory the worker publishes its shared configuration under.
   GoogleString cache_path;
   // The worker's notification socket.
@@ -257,6 +264,12 @@ class DaemonHtmlPurgeOracle {
   void SetSiteEpoch(bool read_ok, uint64 epoch_s);
   // An epoch this process wrote for the site.
   void RaiseSiteEpoch(uint64 epoch_s);
+  // A URL purge this process carried out (the admin path), at `purge_ms`,
+  // under the cache key `url`: fenced here at once, before the purge set the
+  // source reads has polled the purge in.  Bounded; the oldest is dropped
+  // first, by which time the purge set has it.
+  void NoteUrlPurge(const GoogleString& url, int64 purge_ms);
+  static constexpr size_t kLocalUrlPurgesMax = 1024;
 
   // Whether an entry inserted at `stored_at_s` under `url` (the cache key,
   // normalised) is covered by a purge.  Refreshes the global first.
@@ -277,6 +290,7 @@ class DaemonHtmlPurgeOracle {
   int64 clamped_global_ms_ = -1;
   bool site_epoch_ok_ = true;
   uint64 site_epoch_s_ = 0;
+  std::map<GoogleString, int64> local_url_purges_;
   std::atomic<bool> recheck_disabled_{false};
 };
 
@@ -299,6 +313,9 @@ class DaemonHtmlByteBudget {
   std::atomic<int64> capacity_;
   std::atomic<int64> in_use_{0};
 };
+
+// The budget every engine of this process shares (never destroyed).
+DaemonHtmlByteBudget* ProcessDaemonHtmlByteBudget();
 
 class DaemonHtmlEngine;
 
@@ -486,12 +503,15 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   static void CacheKey(const DaemonHtmlRequestFacts& facts, GoogleString* url,
                        GoogleString* hostname);
 
+  // The volume handle for one operation (Substrate::cache_source).
+  void* Cache() const;
+
   // The serving conditions.
   void ReadConditions(bool log_change);
   // Logs the not-serving reason once per state.
   void NoteUnavailable();
   void ObservePurgeState();
-  void WriteEpoch(uint64 epoch_s, bool* all_ok);
+  void WriteEpoch(void* cache, uint64 epoch_s, bool* all_ok);
   void ReadSiteEpoch();
 
   // The two views and the store path.

@@ -654,6 +654,21 @@ pagespeed_cc_test(
     ],
 )
 
+# The purge state the HTML cache engine reads from a server's options.
+pagespeed_cc_test(
+    name = "daemon_html_purge_source_test",
+    srcs = ["daemon_html_purge_source_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_purge_source",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
 # epoch and clamp, the byte budget, and the degrade path.
 pagespeed_cc_test(

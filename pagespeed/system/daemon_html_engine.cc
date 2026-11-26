@@ -98,6 +98,27 @@ const char* const kNotInHeaderBlock[] = {
 const char* const kTransportLines[] = {"Content-Encoding", "Content-Length",
                                        "Transfer-Encoding"};
 
+// The lines the server's own configuration can add after the store view and
+// still refuse the store with: what decides whether, and for how long, a
+// shared cache may keep the page, and what makes the page per-client.  Any
+// other line the server adds there is not stored (the header block comes
+// from the store view) and is not part of a Markdown answer either, so it
+// is left out of the final view the store is classified on.  (Report-only
+// classifies the whole final view, as it always has.)
+const char* const kFinalViewPolicyLines[] = {"Cache-Control",
+                                             "Pragma",
+                                             "Expires",
+                                             "Set-Cookie",
+                                             "Set-Cookie2",
+                                             "Vary",
+                                             "Content-Type",
+                                             "Content-Encoding",
+                                             "Content-Security-Policy",
+                                             "Link",
+                                             "Age",
+                                             "WWW-Authenticate",
+                                             "Content-Range"};
+
 template <size_t N>
 bool NameIn(StringPiece name, const char* const (&names)[N]) {
   for (const char* n : names) {
@@ -277,6 +298,42 @@ DaemonHtmlHeaderLines BuildView(const DaemonHtmlHeaderLines& origin,
   return view;
 }
 
+// The final view as a store is classified on: without the lines the server
+// added after the store view whose names are not policy lines (see
+// kFinalViewPolicyLines).
+DaemonHtmlHeaderLines FinalViewForStore(
+    const DaemonHtmlHeaderLines& final_view,
+    const DaemonHtmlHeaderLines& store_view) {
+  DaemonHtmlHeaderLines out;
+  for (const auto& line : final_view) {
+    bool in_store = false;
+    for (const auto& s : store_view) {
+      if (StringCaseEqual(s.first, line.first)) {
+        in_store = true;
+        break;
+      }
+    }
+    if (in_store || NameIn(line.first, kFinalViewPolicyLines)) {
+      out.push_back(line);
+    }
+  }
+  return out;
+}
+
+// The URL argument of the volume calls for a cache key
+// ("scheme://host[:port]/path?query"): its path and query.  The volume keys
+// an entry by that, the host name, the scheme and the site, as the
+// optimizer worker and this module's other volume readers and writers do;
+// the full URL is what the purge fence is checked under.
+GoogleString VolumeUrl(const GoogleString& url) {
+  const size_t sep = url.find("://");
+  if (sep == GoogleString::npos) return url;
+  const size_t path = url.find_first_of("/?", sep + 3);
+  if (path == GoogleString::npos) return "/";
+  if (url[path] == '?') return StrCat("/", url.substr(path));
+  return url.substr(path);
+}
+
 // The header block the re-store skip compares: what a stored entry does not
 // already represent.
 DaemonHtmlHeaderLines HeaderBlockOf(const DaemonHtmlHeaderLines& lines) {
@@ -426,6 +483,25 @@ void DaemonHtmlPurgeOracle::RaiseSiteEpoch(uint64 epoch_s) {
   site_epoch_s_ = std::max(site_epoch_s_, epoch_s);
 }
 
+void DaemonHtmlPurgeOracle::NoteUrlPurge(const GoogleString& url,
+                                         int64 purge_ms) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = local_url_purges_.find(url);
+  if (it != local_url_purges_.end()) {
+    it->second = std::max(it->second, purge_ms);
+    return;
+  }
+  if (local_url_purges_.size() >= kLocalUrlPurgesMax) {
+    auto oldest = local_url_purges_.begin();
+    for (auto i = local_url_purges_.begin(); i != local_url_purges_.end();
+         ++i) {
+      if (i->second < oldest->second) oldest = i;
+    }
+    local_url_purges_.erase(oldest);
+  }
+  local_url_purges_[url] = purge_ms;
+}
+
 bool DaemonHtmlPurgeOracle::Purged(const GoogleString& url,
                                    uint32 stored_at_s) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -434,6 +510,10 @@ bool DaemonHtmlPurgeOracle::Purged(const GoogleString& url,
   if (stored_at_s <= site_epoch_s_) return true;
   const int64 stored_ms = static_cast<int64>(stored_at_s) * Timer::kSecondMs;
   if (global_ms >= 0 && stored_ms <= global_ms) return true;
+  const auto local = local_url_purges_.find(url);
+  if (local != local_url_purges_.end() && stored_ms <= local->second) {
+    return true;
+  }
   return source_ != nullptr &&
          !source_->IsUrlValidIgnoringGlobal(url, stored_ms);
 }
@@ -449,6 +529,11 @@ bool DaemonHtmlByteBudget::TryReserve(int64 bytes) {
   } while (!in_use_.compare_exchange_weak(used, used + bytes,
                                           std::memory_order_relaxed));
   return true;
+}
+
+DaemonHtmlByteBudget* ProcessDaemonHtmlByteBudget() {
+  static DaemonHtmlByteBudget* const budget = new DaemonHtmlByteBudget;
+  return budget;
 }
 
 void DaemonHtmlByteBudget::Release(int64 bytes) {
@@ -667,6 +752,11 @@ DaemonHtmlEngine::DaemonHtmlEngine(Config config, Deps deps)
 
 DaemonHtmlEngine::~DaemonHtmlEngine() = default;
 
+void* DaemonHtmlEngine::Cache() const {
+  if (deps_.substrate.cache_source) return deps_.substrate.cache_source();
+  return deps_.substrate.cache;
+}
+
 bool DaemonHtmlEngine::serving() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return set_bound_ && worker_markdown_ && worker_agent_entitled_;
@@ -785,18 +875,19 @@ void DaemonHtmlEngine::ReadSiteEpoch() {
     std::lock_guard<std::mutex> lock(mutex_);
     bound = set_bound_;
   }
-  if (!bound || deps_.substrate.cache == nullptr) return;
+  if (!bound) return;
+  void* cache = Cache();
+  if (cache == nullptr) return;
   uint64_t epoch_s = 0;
-  const int rc = abi->CacheReadSitePurgeEpoch(deps_.substrate.cache,
-                                              config_.site.c_str(), &epoch_s);
+  const int rc =
+      abi->CacheReadSitePurgeEpoch(cache, config_.site.c_str(), &epoch_s);
   oracle_.SetSiteEpoch(rc == kPsOk, rc == kPsOk ? epoch_s : 0);
 }
 
-void DaemonHtmlEngine::WriteEpoch(uint64 epoch_s, bool* all_ok) {
+void DaemonHtmlEngine::WriteEpoch(void* cache, uint64 epoch_s, bool* all_ok) {
   const DaemonAbi* abi = deps_.substrate.abi;
   for (const GoogleString& site : config_.epoch_sites) {
-    const int rc = abi->CacheWriteSitePurgeEpoch(deps_.substrate.cache,
-                                                 site.c_str(), epoch_s);
+    const int rc = abi->CacheWriteSitePurgeEpoch(cache, site.c_str(), epoch_s);
     if (rc != kPsOk) {
       *all_ok = false;
       counters_->epoch_write_failed->Add(1);
@@ -813,14 +904,15 @@ void DaemonHtmlEngine::ObservePurgeState() {
     bound = set_bound_;
     if (global_ms / Timer::kSecondMs <= epoch_written_s_) return;
   }
-  if (!bound || deps_.substrate.cache == nullptr ||
-      config_.mode < DaemonHtmlMode::kServeVariants) {
+  if (!bound || config_.mode < DaemonHtmlMode::kServeVariants) {
     return;
   }
+  void* cache = Cache();
+  if (cache == nullptr) return;
   const uint64 epoch_s = static_cast<uint64>(global_ms / Timer::kSecondMs);
-  RunOn(deps_.runner, [this, epoch_s] {
+  RunOn(deps_.runner, [this, cache, epoch_s] {
     bool all_ok = true;
-    WriteEpoch(epoch_s, &all_ok);
+    WriteEpoch(cache, epoch_s, &all_ok);
     if (all_ok) {
       {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -846,21 +938,23 @@ void DaemonHtmlEngine::OnStatisticsTick() {
     if (!set_bound_) return;
     watched = unpaired_;
   }
-  if (watched.empty() || deps_.substrate.cache == nullptr) return;
-  RunOn(deps_.runner, [this, watched] {
+  if (watched.empty()) return;
+  void* cache = Cache();
+  if (cache == nullptr) return;
+  RunOn(deps_.runner, [this, cache, watched] {
     const DaemonAbi* abi = deps_.substrate.abi;
     const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
     for (const auto& [url, key] : watched) {
       ServeReads reads(abi);
       bool done = true;
-      if (abi->CacheReadAlternateSite(deps_.substrate.cache, url.c_str(),
+      if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
                                       key.hostname.c_str(), key.scheme.c_str(),
                                       config_.site.c_str(), kPsSentinelOriginal,
                                       &reads.original) != kPsOk) {
         reads.original = nullptr;
       }
       if (reads.original != nullptr &&
-          abi->HeadersSidecarRead(deps_.substrate.cache, url.c_str(),
+          abi->HeadersSidecarRead(cache, VolumeUrl(url).c_str(),
                                   key.hostname.c_str(), key.scheme.c_str(),
                                   config_.site.c_str(),
                                   &reads.block) == kPsOk &&
@@ -958,7 +1052,7 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
       config_.mode >= DaemonHtmlMode::kServeVariants && config_.agent_optimize;
   bool may_store = false;
   if (serve_mode) {
-    if (serving() && deps_.substrate.cache != nullptr) {
+    if (serving() && Cache() != nullptr) {
       // Without a port there is nowhere to run the store's blocking work:
       // such a recording only reports.
       may_store = port != nullptr;
@@ -1203,7 +1297,10 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
   StoreVerdict store;
   StoreVerdict fin;
   const bool store_ok = Classify(*r, store_view, mode, body_complete, &store);
-  const bool final_ok = Classify(*r, final_view, mode, body_complete, &fin);
+  const bool final_ok = Classify(
+      *r,
+      r->may_store_ ? FinalViewForStore(final_view, store_view) : final_view,
+      mode, body_complete, &fin);
   if (!r->may_store_) {
     // Report-only: the final view's verdict, the one the report has always
     // read.
@@ -1279,7 +1376,8 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
                               const std::vector<GoogleString>& ages,
                               const GoogleString& body, bool agent_request) {
   const DaemonAbi* abi = deps_.substrate.abi;
-  void* cache = deps_.substrate.cache;
+  void* cache = Cache();
+  if (cache == nullptr) return;
   const char* site = config_.site.c_str();
   uint8_t hash[kPsHtmlHashBytes];
   Sha256(body, hash);
@@ -1305,9 +1403,10 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   bool hash_changed = true;
   {
     ServeReads existing(abi);
-    if (abi->CacheReadAlternateSite(
-            cache, url.c_str(), hostname.c_str(), facts.scheme.c_str(), site,
-            kPsSentinelOriginal, &existing.original) != kPsOk) {
+    if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
+                                    hostname.c_str(), facts.scheme.c_str(),
+                                    site, kPsSentinelOriginal,
+                                    &existing.original) != kPsOk) {
       existing.original = nullptr;
     }
     if (existing.original != nullptr) {
@@ -1329,9 +1428,9 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
           const int64 capture_s = facts.capture_start_ms / Timer::kSecondMs;
           const int64 age = capture_s - static_cast<int64>(stored_at);
           if (age >= 0 && age * 2 < static_cast<int64>(verdict.lifetime_s) &&
-              abi->HeadersSidecarRead(cache, url.c_str(), hostname.c_str(),
-                                      facts.scheme.c_str(), site,
-                                      &existing.block) == kPsOk &&
+              abi->HeadersSidecarRead(cache, VolumeUrl(url).c_str(),
+                                      hostname.c_str(), facts.scheme.c_str(),
+                                      site, &existing.block) == kPsOk &&
               existing.block != nullptr &&
               abi->HeaderBlockPairing(existing.block, old_hash) ==
                   kPsSidecarPaired) {
@@ -1371,7 +1470,8 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   }
   PsSidecarWriteParams sidecar = {};
   sidecar.struct_size = sizeof(sidecar);
-  sidecar.url = url.c_str();
+  const GoogleString volume_url = VolumeUrl(url);
+  sidecar.url = volume_url.c_str();
   sidecar.hostname = hostname.c_str();
   sidecar.scheme = facts.scheme.c_str();
   sidecar.site = site;
@@ -1389,9 +1489,9 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   }
   params.origin_html_hash = hash;
   void* handle = nullptr;
-  if (abi->CacheWriteOriginalSite(cache, url.c_str(), hostname.c_str(),
-                                  facts.scheme.c_str(), site, &params,
-                                  &handle) != kPsOk ||
+  if (abi->CacheWriteOriginalSite(cache, VolumeUrl(url).c_str(),
+                                  hostname.c_str(), facts.scheme.c_str(), site,
+                                  &params, &handle) != kPsOk ||
       handle == nullptr) {
     TrackUnpaired(url, hostname, facts.scheme);
     return;
@@ -1411,8 +1511,9 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   // The fence: a purge that covers the insert time and became visible while
   // the response was on its way removes what was just written.
   if (!oracle_.recheck_disabled() && oracle_.Purged(url, inserted_at)) {
-    const int rc = abi->CacheRemoveSite(cache, url.c_str(), hostname.c_str(),
-                                        facts.scheme.c_str(), site);
+    const int rc =
+        abi->CacheRemoveSite(cache, VolumeUrl(url).c_str(), hostname.c_str(),
+                             facts.scheme.c_str(), site);
     if (rc == kPsOk) counters_->removed->Add(1);
     counters_->purge_race_refused->Add(1);
     LogServeSide("purged", "purge_race", facts.host, facts.path, 200,
@@ -1455,17 +1556,19 @@ void DaemonHtmlEngine::MaybeRemoveOnRefusal(
   const GoogleString scheme = facts.scheme;
   port->RunBlocking(DaemonHtmlCommit([this, url, hostname, scheme, now_s] {
     const DaemonAbi* abi = deps_.substrate.abi;
-    void* cache = deps_.substrate.cache;
+    void* cache = Cache();
+    if (cache == nullptr) return;
     const char* site = config_.site.c_str();
     ServeReads existing(abi);
-    if (abi->CacheReadAlternateSite(cache, url.c_str(), hostname.c_str(),
-                                    scheme.c_str(), site, kPsSentinelOriginal,
-                                    &existing.original) != kPsOk) {
+    if (abi->CacheReadAlternateSite(
+            cache, VolumeUrl(url).c_str(), hostname.c_str(), scheme.c_str(),
+            site, kPsSentinelOriginal, &existing.original) != kPsOk) {
       existing.original = nullptr;
     }
     if (existing.original != nullptr) {
-      const int rc = abi->CacheRemoveSite(cache, url.c_str(), hostname.c_str(),
-                                          scheme.c_str(), site);
+      const int rc =
+          abi->CacheRemoveSite(cache, VolumeUrl(url).c_str(), hostname.c_str(),
+                               scheme.c_str(), site);
       if (rc != kPsOk && rc != kPsErrNotFound) return;
       if (rc == kPsOk) counters_->removed->Add(1);
       counters_->removed_on_refusal->Add(1);
@@ -1524,7 +1627,6 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     return result;
   }
   const DaemonAbi* abi = deps_.substrate.abi;
-  void* cache = deps_.substrate.cache;
   const GoogleString accept = JoinCollection(facts.accept_lines, ", ");
   const bool has_accept = !facts.accept_lines.empty();
   if (abi->WantsAgentMarkdown(accept.c_str()) != 1) {
@@ -1537,6 +1639,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     CountFallThrough(result.reason);
     return result;
   }
+  void* cache = Cache();
   if (cache == nullptr) return result;
 
   GoogleString url;
@@ -1546,8 +1649,9 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   const char* scheme = facts.scheme.c_str();
   ServeReads reads(abi);
   auto read = [&](uint8_t id, void** out) {
-    if (abi->CacheReadAlternateSite(cache, url.c_str(), hostname.c_str(),
-                                    scheme, site, id, out) != kPsOk) {
+    if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
+                                    hostname.c_str(), scheme, site, id,
+                                    out) != kPsOk) {
       *out = nullptr;
     }
   };
@@ -1559,8 +1663,8 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
                              ? nullptr
                              : abi->ReadOriginHtmlHash(reads.original);
   if (reads.original != nullptr &&
-      abi->HeadersSidecarRead(cache, url.c_str(), hostname.c_str(), scheme,
-                              site, &reads.block) == kPsOk &&
+      abi->HeadersSidecarRead(cache, VolumeUrl(url).c_str(), hostname.c_str(),
+                              scheme, site, &reads.block) == kPsOk &&
       reads.block != nullptr) {
     if (abi->HeaderBlockPairing(reads.block, stamp) != kPsSidecarPaired) {
       TrackUnpaired(url, hostname, facts.scheme);
@@ -1736,8 +1840,16 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     std::lock_guard<std::mutex> lock(mutex_);
     bound = set_bound_;
   }
-  if (!bound || deps_.substrate.cache == nullptr ||
-      config_.mode < DaemonHtmlMode::kServeVariants) {
+  if (!bound || config_.mode < DaemonHtmlMode::kServeVariants) {
+    done(true, GoogleString());
+    return;
+  }
+  void* cache = Cache();
+  if (cache == nullptr) {
+    // No volume this process can vouch for: nothing is served from one
+    // either.  The global purge is still fenced here, and a process with a
+    // handle writes its epoch on its purge-poll tick.
+    if (global) oracle_.NoteGlobalPurge(now_ms);
     done(true, GoogleString());
     return;
   }
@@ -1745,9 +1857,9 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     oracle_.NoteGlobalPurge(now_ms);
     const uint64 epoch_s = static_cast<uint64>(
         std::min(now_ms, deps_.timer->NowMs()) / Timer::kSecondMs);
-    RunOn(deps_.runner, [this, epoch_s, done] {
+    RunOn(deps_.runner, [this, cache, epoch_s, done] {
       bool all_ok = true;
-      WriteEpoch(epoch_s, &all_ok);
+      WriteEpoch(cache, epoch_s, &all_ok);
       if (!all_ok) {
         done(false, "the HTML cache's purge epoch could not be written");
         return;
@@ -1779,11 +1891,14 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
   parts.path = path_start == GoogleString::npos ? GoogleString()
                                                 : key.substr(path_start);
   CacheKey(parts, &cache_url, &hostname);
-  RunOn(deps_.runner, [this, cache_url, hostname, host = parts.host,
+  // Fenced in this process at once; peer processes see the purge set's
+  // record at their next poll.
+  oracle_.NoteUrlPurge(cache_url, now_ms);
+  RunOn(deps_.runner, [this, cache, cache_url, hostname, host = parts.host,
                        path = parts.path, scheme = parts.scheme, done] {
     const int rc = deps_.substrate.abi->CacheRemoveSite(
-        deps_.substrate.cache, cache_url.c_str(), hostname.c_str(),
-        scheme.c_str(), config_.site.c_str());
+        cache, VolumeUrl(cache_url).c_str(), hostname.c_str(), scheme.c_str(),
+        config_.site.c_str());
     if (rc == kPsOk || rc == kPsErrNotFound) {
       if (rc == kPsOk) {
         counters_->removed->Add(1);

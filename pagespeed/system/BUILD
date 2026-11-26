@@ -330,6 +330,19 @@ cc_library(
     ],
 )
 
+# The purge state a server's options hold, as the HTML cache engine reads it.
+cc_library(
+    name = "daemon_html_purge_source",
+    srcs = ["daemon_html_purge_source.cc"],
+    hdrs = ["daemon_html_purge_source.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_html_engine",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # The root process sets the statistics start-time gauge where the shared
 # segment is created; that call site needs a live server to execute, so
 # test/pagespeed/apache/daemon_seam_test.cc reads this source to pin it.

@@ -54,6 +54,19 @@ class FakeDaemonVolume : public DaemonAbi {
   static GoogleString Key(const char* site, const char* url) {
     return StrCat(site == nullptr ? "" : site, "\n", url == nullptr ? "" : url);
   }
+  // The real volume keys an entry by its URL path, host name, scheme and
+  // site.  Tests name an entry by "scheme://host/path": a path is keyed
+  // under that form, so both name the same entry.
+  static GoogleString EntryUrl(const char* url, const char* hostname,
+                               const char* scheme) {
+    if (url == nullptr || url[0] != '/') return url == nullptr ? "" : url;
+    return StrCat(scheme == nullptr ? "" : scheme, "://",
+                  hostname == nullptr ? "" : hostname, url);
+  }
+  static GoogleString Key(const char* site, const char* url,
+                          const char* hostname, const char* scheme) {
+    return Key(site, EntryUrl(url, hostname, scheme).c_str());
+  }
 
   // The volume, for a test to fill and inspect.
   std::map<std::pair<GoogleString, uint8_t>, FakeVolumeEntry>& entries() {
@@ -95,11 +108,12 @@ class FakeDaemonVolume : public DaemonAbi {
     p->struct_size = sizeof(*p);
   }
 
-  int CacheWriteOriginalSite(void*, const char* url, const char*, const char*,
-                             const char* site, const PsWriteParams* params,
+  int CacheWriteOriginalSite(void*, const char* url, const char* hostname,
+                             const char* scheme, const char* site,
+                             const PsWriteParams* params,
                              void** out) const override {
     auto* w = new PendingWrite;
-    w->key = Key(site, url);
+    w->key = Key(site, url, hostname, scheme);
     w->entry.alternate_id = params->alternate_id;
     w->entry.inserted_at = params->cache_inserted_at;
     w->entry.max_age = params->origin_max_age;
@@ -161,10 +175,10 @@ class FakeDaemonVolume : public DaemonAbi {
     *out = nullptr;
     return kPsErrNotFound;
   }
-  int CacheReadAlternateSite(void*, const char* url, const char*, const char*,
-                             const char* site, uint8_t id,
+  int CacheReadAlternateSite(void*, const char* url, const char* hostname,
+                             const char* scheme, const char* site, uint8_t id,
                              void** out) const override {
-    auto it = entries_.find({Key(site, url), id});
+    auto it = entries_.find({Key(site, url, hostname, scheme), id});
     if (it == entries_.end()) {
       *out = nullptr;
       return kPsErrNotFound;
@@ -245,14 +259,16 @@ class FakeDaemonVolume : public DaemonAbi {
       s.has_hash = true;
       memcpy(s.hash, params->origin_html_hash, kPsHtmlHashBytes);
     }
-    sidecars_[Key(params->site, params->url)] = s;
+    sidecars_[Key(params->site, params->url, params->hostname,
+                  params->scheme)] = s;
     if (out_verdict != nullptr) *out_verdict = 0;
     if (out_stored != nullptr) *out_stored = 1;
     return kPsOk;
   }
-  int HeadersSidecarRead(void*, const char* url, const char*, const char*,
-                         const char* site, void** out) const override {
-    auto it = sidecars_.find(Key(site, url));
+  int HeadersSidecarRead(void*, const char* url, const char* hostname,
+                         const char* scheme, const char* site,
+                         void** out) const override {
+    auto it = sidecars_.find(Key(site, url, hostname, scheme));
     if (it == sidecars_.end()) {
       *out = nullptr;
       return kPsErrNotFound;
@@ -292,9 +308,9 @@ class FakeDaemonVolume : public DaemonAbi {
   void HeaderBlockFree(void* b) const override {
     delete static_cast<FakeVolumeSidecar*>(b);
   }
-  int CacheRemoveSite(void*, const char* url, const char*, const char*,
-                      const char* site) const override {
-    const GoogleString key = Key(site, url);
+  int CacheRemoveSite(void*, const char* url, const char* hostname,
+                      const char* scheme, const char* site) const override {
+    const GoogleString key = Key(site, url, hostname, scheme);
     bool any = sidecars_.erase(key) > 0;
     for (auto it = entries_.begin(); it != entries_.end();) {
       if (it->first.first == key) {
