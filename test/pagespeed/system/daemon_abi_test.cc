@@ -242,7 +242,8 @@ class HtmlServeSetTest : public DaemonAbiTest {
               abi.CacheRemoveSite(&cache, "http://a/", "a", "http", kSite));
     EXPECT_EQ(kPsErrInvalidArg, abi.CacheWriteSitePurgeEpoch(&cache, kSite, 1));
     uint64_t epoch = 77;
-    EXPECT_NE(kPsOk, abi.CacheReadSitePurgeEpoch(&cache, kSite, &epoch));
+    EXPECT_EQ(kPsErrInvalidArg,
+              abi.CacheReadSitePurgeEpoch(&cache, kSite, &epoch));
     EXPECT_EQ(77u, epoch);
     EXPECT_EQ(-1, abi.ReadSharedConfigHtmlMode("/unused"));
     EXPECT_EQ(-1, abi.ReadSharedConfigAgentEntitled("/unused"));

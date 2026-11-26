@@ -3370,6 +3370,8 @@ jobs:
           & $bazel $root test @common --test_output=errors --keep_going -- `
             //test/pagespeed/iis/... `
             //test/pagespeed/system:daemon_adapter_test `
+            //test/pagespeed/system:daemon_abi_test `
+            //test/pagespeed/system:injected_verdict_daemon_abi_test `
             //test/pagespeed/kernel/image:avif_test `
             //test/pagespeed/kernel/packs/... `
             //third_party/css_parser:css_parser_test

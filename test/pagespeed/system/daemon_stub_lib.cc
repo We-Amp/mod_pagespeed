@@ -1899,8 +1899,8 @@ int ps_notify_worker_ex(const char* socket_path,
           ? params->agent_request
           : 0;
   const bool has_site_fields =
-      params->struct_size >=
-      offsetof(StubNotifyParams, notify_flags) + sizeof(params->notify_flags);
+      params->struct_size >= offsetof(StubNotifyParams, notify_flags) +
+                                 sizeof(params->notify_flags);
   const char* site = has_site_fields ? params->site : nullptr;
   const uint32_t flags = has_site_fields ? params->notify_flags : 0;
   if (!StubSiteIsValid(site)) {

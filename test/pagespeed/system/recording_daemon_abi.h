@@ -164,17 +164,19 @@ class RecordingDaemonAbi : public DaemonAbi {
                         void** out) const override {
     Count();
     Site(site);
-    return inner_->CacheReadBestSite(cache, url, host, scheme, site, mask, out);
+    return inner_->CacheReadBestSite(cache, url, host, scheme, site, mask,
+                                     out);
   }
   int CacheReadAlternateSite(void* cache, const char* url, const char* host,
-                             const char* scheme, const char* site, uint8_t id,
-                             void** out) const override {
+                             const char* scheme, const char* site,
+                             uint8_t id, void** out) const override {
     Count();
     Site(site);
     return inner_->CacheReadAlternateSite(cache, url, host, scheme, site, id,
                                           out);
   }
-  int ReadContent(const void* r, const uint8_t** d, size_t* n) const override {
+  int ReadContent(const void* r, const uint8_t** d,
+                  size_t* n) const override {
     return Count(), inner_->ReadContent(r, d, n);
   }
   uint32_t ReadMask(const void* r) const override {

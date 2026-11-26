@@ -12,7 +12,10 @@ own sources at a pinned commit:
   * every mirrored constant equals the optimizer's #define (or, for the two
     alternate ids the C header does not publish, its AlternateId enum);
   * every mirrored struct has the optimizer's fields, in the optimizer's
-    order, with the same array lengths;
+    order, with the same types and array lengths;
+  * every entry point the module binds as the HTML serve set is declared
+    (its function-pointer type in daemon_abi.cc) with the optimizer's
+    prototype: the same return type and the same argument types, in order;
   * every entry point the module binds as the HTML serve set is published at
     or below the minor the module requires for that set (symbols.lds), so the
     set cannot quietly grow a symbol a 1.14 library lacks.
@@ -139,8 +142,37 @@ LENGTHS = {
 }
 
 
+# Peer type spellings that are the same C type as the module's. The peer's
+# enums are pinned to int width; its opaque handles are void* here.
+TYPE_ALIASES = {
+    "ps_error_t": "int",
+    "ps_content_type_t": "int",
+    "ps_html_cache_mode_t": "int",
+    "ps_cache_t": "void",
+    "ps_read_result_t": "void",
+    "ps_header_block_t": "void",
+    "ps_write_handle_t": "void",
+}
+
+
 class DriftError(Exception):
     pass
+
+
+def _norm_type(ctype):
+    """One canonical spelling of a C type: aliases applied, mirror struct
+    names mapped to the peer's, pointer stars attached."""
+    names = dict(TYPE_ALIASES)
+    for mine, peer in STRUCTS.items():
+        names[mine] = peer
+    words = re.findall(r"\w+|\*", ctype)
+    words = [w for w in words if w not in ("PS_EXPORT", "PS_NODISCARD",
+                                           "struct")]
+    out = []
+    for w in words:
+        out.append("*" if w == "*" else names.get(w, w))
+    text = " ".join(out)
+    return re.sub(r"\s*\*", "*", text).strip()
 
 
 def _strip_comments(text):
@@ -196,7 +228,7 @@ def _fields(body):
             raise DriftError("cannot parse the field %r" % decl)
         ctype, name, length = m.group(1), m.group(2), m.group(3)
         length = LENGTHS.get(length.strip(), length.strip()) if length else None
-        fields.append((name.strip("_"), "*" in ctype, length))
+        fields.append((name.strip("_"), _norm_type(ctype), length))
     return fields
 
 
@@ -230,6 +262,59 @@ def module_serve_set(abi_cc_text):
     if not symbols:
         raise DriftError("BindHtmlServeSet binds no symbol")
     return symbols
+
+
+def _params(arglist):
+    arglist = arglist.strip()
+    if arglist in ("", "void"):
+        return []
+    out = []
+    for arg in arglist.split(","):
+        arg = " ".join(arg.split())
+        # Drop a trailing parameter name (the module's typedefs have none).
+        m = re.match(r"(.*?[\w*])\s+(\w+)$", arg)
+        if m and m.group(2) not in ("int", "char", "void", "size_t",
+                                    "uint8_t", "uint16_t", "uint32_t",
+                                    "uint64_t", "int64_t", "const"):
+            arg = m.group(1)
+        out.append(_norm_type(arg))
+    return out
+
+
+def module_prototypes(abi_cc_text):
+    """symbol -> (return type, [argument types]) for the HTML serve set, from
+    the Bind() calls in BindHtmlServeSet, the HtmlServeSetFns members and the
+    *Fn aliases."""
+    text = _strip_comments(abi_cc_text)
+    aliases = {}
+    for m in re.finditer(r"using\s+(\w+Fn)\s*=\s*(.*?)\(\s*\*\s*\)\s*\((.*?)\)\s*;",
+                         text, re.S):
+        aliases[m.group(1)] = (_norm_type(m.group(2)), _params(m.group(3)))
+    m = re.search(r"struct\s+HtmlServeSetFns\s*\{(.*?)\};", text, re.S)
+    if not m:
+        raise DriftError("could not find HtmlServeSetFns in daemon_abi.cc")
+    member_types = dict((name, fn) for fn, name in
+                        re.findall(r"(\w+Fn)\s+(\w+)\s*=", m.group(1)))
+    m = re.search(r"void\s+BindHtmlServeSet\(\)\s*\{(.*?)\n  \}", text, re.S)
+    if not m:
+        raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
+    out = {}
+    for sym, member in re.findall(r'Bind\(\s*"(ps_\w+)",\s*&fns\.(\w+)',
+                                  m.group(1)):
+        fn = member_types.get(member)
+        if fn is None or fn not in aliases:
+            raise DriftError("cannot resolve the type bound for %s" % sym)
+        out[sym] = aliases[fn]
+    return out
+
+
+def peer_prototypes(peer_h_text):
+    text = _strip_comments(peer_h_text)
+    out = {}
+    for m in re.finditer(r"PS_EXPORT\s+([^;{}()]*?)\b(ps_\w+)\s*\(([^;{}]*?)\)\s*;",
+                         text, re.S):
+        out[m.group(2)] = (_norm_type(m.group(1)), _params(m.group(3)))
+    return out
 
 
 def peer_symbol_minors(symbols_text):
@@ -268,6 +353,16 @@ def check(abi_h, abi_cc, peer_h, alternate_id_h, symbols_lds):
                             "    module:    %s\n    optimizer: %s" %
                             (mine, peer, a, b))
         checked += 1
+    theirs_protos = peer_prototypes(peer_h)
+    for sym, proto in sorted(module_prototypes(abi_cc).items()):
+        if sym not in theirs_protos:
+            problems.append("the optimizer's pagespeed.h declares no %s" % sym)
+        elif proto != theirs_protos[sym]:
+            problems.append("%s is bound as %s(%s) but the optimizer declares "
+                            "%s(%s)" % (sym, proto[0], ", ".join(proto[1]),
+                                        theirs_protos[sym][0],
+                                        ", ".join(theirs_protos[sym][1])))
+        checked += 1
     required = ours.get("kHtmlServeSetMinor")
     if required is None:
         problems.append("daemon_abi.h has no kHtmlServeSetMinor")
@@ -305,9 +400,15 @@ struct PsHtmlStoredFacts {
 };
 """
 SELF_ABI_CC = """
+using HtmlServeClassifyFn = int (*)(const PsHtmlStoredFacts*, uint32_t);
+using WantsAgentMarkdownFn = int (*)(const char*);
+struct HtmlServeSetFns {
+  HtmlServeClassifyFn serve_classify = nullptr;
+  WantsAgentMarkdownFn wants_agent_markdown = nullptr;
+};
   void BindHtmlServeSet() {
-    Bind("ps_html_serve_classify", &a, &e) &&
-    Bind("ps_wants_agent_markdown", &b, &e);
+    Bind("ps_html_serve_classify", &fns.serve_classify, &e) &&
+    Bind("ps_wants_agent_markdown", &fns.wants_agent_markdown, &e);
   }
 """
 SELF_PEER_H = """
@@ -322,6 +423,9 @@ typedef struct {
   uint32_t flags; /* PS_HTML_FACTS_* */
   uint8_t binding_hash[PS_HTML_HASH_BYTES];
 } ps_html_stored_facts_t;
+PS_EXPORT int ps_html_serve_classify(const ps_html_stored_facts_t* facts,
+                                     uint32_t now);
+PS_EXPORT int ps_wants_agent_markdown(const char* accept);
 """
 SELF_ALT = "enum class AlternateId : uint8_t {\n  kAgentMarkdown = 0x7C,  // md\n};\n"
 SELF_LDS = """PAGESPEED_1.2 { global: ps_wants_agent_markdown; };
@@ -340,7 +444,7 @@ def self_test():
     cases = 0
     try:
         args = [SELF_ABI_H, SELF_ABI_CC, SELF_PEER_H, SELF_ALT, SELF_LDS]
-        assert check(*args) == 7
+        assert check(*args) == 9
         cases += 1
         drifts = [
             (0, "0x8u;", "0x10u;"),                        # a value moved
@@ -358,6 +462,13 @@ def self_test():
             (2, "#define PS_HTML_HASH_BYTES 32\n", ""),    # peer lost a macro
             (2, "ps_html_stored_facts_t;", "ps_facts_t;"),  # peer renamed
             (1, "BindHtmlServeSet", "BindSomething"),      # gate cannot read
+            (2, "  uint32_t flags; /* PS_HTML_FACTS_* */",
+             "  uint64_t flags; /* PS_HTML_FACTS_* */"),   # a field widened
+            (2, "uint32_t now);", "uint32_t now, int extra);"),  # arg added
+            (2, "PS_EXPORT int ps_wants_agent_markdown",
+             "PS_EXPORT long ps_wants_agent_markdown"),    # return changed
+            (1, "int (*)(const PsHtmlStoredFacts*, uint32_t)",
+             "int (*)(const PsHtmlStoredFacts*, uint64_t)"),  # module drifts
         ]
         for index, old, new in drifts:
             mutated = list(args)

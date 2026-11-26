@@ -15,15 +15,15 @@
 ; specific language governing permissions and limitations
 ; under the License.
 
-; The stub daemon's export list with the HTML cache policy and the HTML serve set, spelled out by hand: a Windows linkshared
-; build exports nothing without it (the source uses plain extern "C" with
-; default visibility, POSIX-style).
+; The stub daemon's export list with the HTML cache policy and the HTML
+; serve set, spelled out by hand: a Windows linkshared build exports nothing
+; without it (the source uses plain extern "C" with default visibility,
+; POSIX-style).
 ;
 ; THIS LIST CANNOT DRIFT SILENTLY from the surface the shared loader binds.
-; Every name here is resolved by the loader's own binding sequence when the
-; stub-binding suites run against this DLL, so a name missing from this file
-; turns those tests red with the symbol's name in the message -- see
-; daemon_adapter_test's loader cases.
+; daemon_abi_test loads this DLL (the HtmlServeSetTest cases): a required
+; name missing from this file refuses the library, and a missing name of the
+; HTML serve set leaves the set unbound, so either turns those cases red.
 EXPORTS
   ps_age_adjusted_insert_time
   ps_build_cache_control
