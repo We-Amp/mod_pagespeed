@@ -13730,11 +13730,11 @@
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {"status": 200}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
+            },
             "pre": [{"wait_markdown": {"timeout_s": 30}}],
             "expect": {
               "status": 200,
