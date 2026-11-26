@@ -1089,6 +1089,7 @@ EOF
         pagespeed on;
         pagespeed RewriteLevel CoreFilters;
         pagespeed AgentOptimize on;
+        pagespeed DaemonHtmlCache serve-variants;
 
         location /strip_echo/ {
             proxy_pass http://127.0.0.1:$NGINX_STRIP_ECHO_PORT/;

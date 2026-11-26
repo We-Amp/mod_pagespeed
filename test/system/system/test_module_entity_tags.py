@@ -15,7 +15,8 @@ proxying /strip_echo/ to the origin this module starts on
 PAGESPEED_STRIP_ECHO_PORT, which records the conditionals it receives:
 
   strip-off.example.com    PageSpeed on, nothing else (the feature off)
-  strip-agent.example.com  PageSpeed on with AgentOptimize
+  strip-agent.example.com  PageSpeed on with AgentOptimize, DaemonHtmlCache
+                           serve-variants
   strip-chain.example.com  proxies /strip_echo/ to strip-agent.example.com on
                            the same server: a module in front of a module
 
@@ -227,6 +228,25 @@ def test_error_page_to_a_named_location_never_forwards_the_tag():
     seen = through([("If-None-Match", 'W/"v1"'), ("If-Modified-Since", PAST)])
     assert seen["if-none-match"] == ['W/"v1"'], seen
     _assert_nothing_forwarded(through([("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", PAST)]))
+
+
+# With AgentOptimize and serve-variants, every rewritten HTML response varies
+# on Accept, whatever the client sent; without them, only a Markdown request
+# would.
+def _vary_tokens(host: str, accept: str) -> List[str]:
+    rid = f"r{next(_IDS)}-{time.monotonic_ns()}"
+    status, headers = _request(host, f"/strip_echo/page.html?rid={rid}", [("Accept", accept)])
+    assert status == 200
+    return [t.strip().lower() for n, v in headers if n.lower() == "vary" for t in v.split(",")]
+
+
+def test_serve_variants_html_varies_on_accept_for_every_client():
+    tokens = _vary_tokens(AGENT_HOST, "text/html,application/xhtml+xml,*/*;q=0.8")
+    assert tokens.count("accept") == 1, tokens
+
+
+def test_feature_off_html_does_not_vary_on_accept():
+    assert "accept" not in _vary_tokens(OFF_HOST, "text/html,application/xhtml+xml,*/*;q=0.8")
 
 
 # The server's own static handler answers conditionals. If-Modified-Since

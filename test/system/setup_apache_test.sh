@@ -2705,6 +2705,7 @@ configure_strip_tags_vhosts() {
   ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
   ModPagespeedRewriteLevel CoreFilters
   ModPagespeedAgentOptimize on
+  ModPagespeedDaemonHtmlCache serve-variants
   ProxyPass /strip_echo/ http://127.0.0.1:$STRIP_ECHO_PORT/
 </VirtualHost>
 
