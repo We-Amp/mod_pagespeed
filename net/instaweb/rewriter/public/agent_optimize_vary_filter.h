@@ -22,10 +22,10 @@
 // when an agent_optimize negotiation is active. Agents request the markdown
 // representation with `Accept: text/markdown` (RFC 7763), so any response
 // whose content could turn on that header must declare it, or a shared cache
-// may hand one representation to a client that asked for the other. mod_
-// pagespeed 1.1 has NO markdown render moat (no headless browser), so the
-// response BODY is never changed and no markdown is ever served — this filter
-// is the negotiation/cloaking-safety signal only. It lives in the shared
+// may hand one representation to a client that asked for the other. This
+// filter never changes the response BODY (a Markdown copy, where the HTML
+// cache serves one, is answered before the rewriter runs) — it is the
+// negotiation/cloaking-safety signal only. It lives in the shared
 // rewrite filter chain so all four ports (Apache/nginx/Envoy/IIS) behave
 // identically; the per-port code only sources the Accept header.
 
@@ -88,7 +88,9 @@ class AcceptMarkdownPreference {
 //   options()->agent_optimize()  (gates this filter's presence, set at AddFilters;
 //                                 the operator flag is the only gate — the
 //                                 feature carries no license/entitlement check)
-//   AND the request's Accept header contains the text/markdown token.
+//   AND either the request's Accept header contains the text/markdown token,
+//       or the HTML cache mode is serve-variants or higher, in which every
+//       HTML response for the URL varies on Accept.
 // Never modifies the body. Idempotent (won't duplicate an existing Vary: Accept).
 class AgentOptimizeVaryFilter : public CommonFilter {
  public:

@@ -104,6 +104,61 @@ TEST_F(HttpFilterTest, RequestWithoutHostOrPathHeaderPassesThrough) {
             filter_->decodeHeaders(headers, true));
 }
 
+// A conditional that carries an entity tag this module minted never reaches
+// the router: every If-None-Match and If-Modified-Since entry is removed in
+// decodeHeaders, before any route is chosen, and the fields as they arrived
+// are kept for the filter.
+TEST_F(HttpFilterTest, ModuleEntityTagConditionalsAreRemoved) {
+  Envoy::Http::TestRequestHeaderMapImpl headers{
+      {":method", "GET"},
+      {":authority", "example.com"},
+      {"if-none-match", "\"v1\""},
+      {"if-none-match", "W/\"psm-0123456789abcdef\""},
+      {"if-modified-since", "Sun, 15 Nov 2026 11:00:00 GMT"},
+      {"accept", "text/markdown"}};
+  EXPECT_EQ(FilterHeadersStatus::Continue,
+            filter_->decodeHeaders(headers, true));
+  EXPECT_TRUE(headers.get(Envoy::Http::LowerCaseString("if-none-match"))
+                  .empty());
+  EXPECT_TRUE(headers.get(Envoy::Http::LowerCaseString("if-modified-since"))
+                  .empty());
+  EXPECT_EQ("text/markdown", headers.get_("accept"));
+  const ClientConditionalStash& stash = filter_->clientConditionals();
+  EXPECT_TRUE(stash.stripped);
+  EXPECT_EQ("\"v1\", W/\"psm-0123456789abcdef\"", stash.if_none_match);
+  EXPECT_EQ("Sun, 15 Nov 2026 11:00:00 GMT", stash.if_modified_since);
+}
+
+TEST_F(HttpFilterTest, ModuleHtmlTagIsRemovedWithoutIfModifiedSince) {
+  Envoy::Http::TestRequestHeaderMapImpl headers{
+      {":method", "GET"},
+      {":authority", "example.com"},
+      {"if-none-match", "\"psh-0123456789abcdef\""}};
+  EXPECT_EQ(FilterHeadersStatus::Continue,
+            filter_->decodeHeaders(headers, true));
+  EXPECT_TRUE(headers.get(Envoy::Http::LowerCaseString("if-none-match"))
+                  .empty());
+  EXPECT_TRUE(filter_->clientConditionals().stripped);
+  EXPECT_FALSE(filter_->clientConditionals().has_if_modified_since);
+}
+
+// Any other validator, weak or strong, is the origin's: forwarded untouched,
+// and If-Modified-Since with it.
+TEST_F(HttpFilterTest, ForeignConditionalsAreForwarded) {
+  Envoy::Http::TestRequestHeaderMapImpl headers{
+      {":method", "GET"},
+      {":authority", "example.com"},
+      {"if-none-match", "W/\"v1\", \"xpsm-1\""},
+      {"if-modified-since", "Sun, 15 Nov 2026 11:00:00 GMT"}};
+  EXPECT_EQ(FilterHeadersStatus::Continue,
+            filter_->decodeHeaders(headers, true));
+  EXPECT_EQ("W/\"v1\", \"xpsm-1\"", headers.get_("if-none-match"));
+  EXPECT_EQ("Sun, 15 Nov 2026 11:00:00 GMT",
+            headers.get_("if-modified-since"));
+  EXPECT_FALSE(filter_->clientConditionals().stripped);
+  EXPECT_TRUE(filter_->clientConditionals().has_if_none_match);
+}
+
 // The request method of the Envoy request is carried into the PageSpeed
 // request headers.
 TEST(HeaderUtilsTest, PropagatesRequestMethod) {

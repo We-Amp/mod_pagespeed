@@ -674,6 +674,12 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     RequestHeaderMap& headers, bool end_response) {
   RELEASE_ASSERT(base_fetch_ == nullptr, "Base fetch not null");
 
+  // Before anything else reads the request: a conditional carrying an entity
+  // tag this module minted never reaches the router or another filter, on
+  // every request and whatever is configured (module_entity_tags.h).
+  net_instaweb::HeaderUtils::StashAndStripClientConditionals(
+      headers, &client_conditionals_);
+
   // Record request start for metrics.
   if (metrics_collector_) {
     metrics_collector_->RecordRequestStart();

@@ -59,6 +59,16 @@ cc_library(
     ],
 )
 
+# In-place removal of nginx list elements that keeps every other element at
+# its address (the cached r->headers_in pointers stay valid).  Header-only and
+# nginx-free (a template over the list types), so it is unit tested standalone
+# (//test/pagespeed/nginx:ngx_list_filter_test).
+cc_library(
+    name = "ngx_list_filter",
+    hdrs = ["ngx_list_filter.h"],
+    visibility = ["//visibility:public"],
+)
+
 # Weak If-None-Match comparison (RFC 9110 13.1.2) for the module's own
 # resources: their headers enter the chain at the module's position, ahead of
 # which nginx's not-modified filter runs, so the module answers the
@@ -340,6 +350,7 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
+        "ngx_list_filter.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -372,6 +383,7 @@ cc_library(
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:file_owner",
         "//pagespeed/system:inplace_url_agreement",
+        "//pagespeed/system:module_entity_tags",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/system:optimization_thread_policy",
         "//pagespeed/system:site_cache_fragment",
@@ -510,6 +522,7 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
+        "ngx_list_filter.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -545,6 +558,7 @@ cc_library(
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:inplace_url_agreement",
+        "//pagespeed/system:module_entity_tags",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",

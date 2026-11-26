@@ -489,8 +489,9 @@ void RewriteDriver::AddPostRenderFilters() {
     AddOwnedPostRenderFilter(new MetaTagFilter(this));
   }
   // When agent_optimize is on, advertise Vary: Accept on HTML for an
-  // Accept: text/markdown request (no body change — 1.1 never renders
-  // markdown). This flag is the whole gate; the filter checks only Accept.
+  // Accept: text/markdown request, and on every HTML response when the HTML
+  // cache can serve a Markdown copy (no body change). This flag is the
+  // whole gate; the filter checks only Accept and the HTML cache mode.
   if (rewrite_options->agent_optimize()) {
     AddOwnedPostRenderFilter(new AgentOptimizeVaryFilter(this));
   }

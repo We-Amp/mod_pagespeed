@@ -10,6 +10,7 @@
 #include "pagespeed/kernel/http/headers.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/system/module_entity_tags.h"
 
 namespace net_instaweb {
 
@@ -25,6 +26,33 @@ class HeaderUtils {
   // cache: GET only.
   static bool MayStoreInCache(RequestHeaders::Method method) {
     return method == RequestHeaders::kGet;
+  }
+
+  // The module entity tag rule (pagespeed/system/module_entity_tags.h) on
+  // an Envoy request: fills `stash` with the client's conditionals as they
+  // arrived and, when If-None-Match carries a tag this module minted, removes
+  // every If-None-Match and If-Modified-Since entry, so neither the router
+  // nor a later filter sees them.  Returns whether it removed them.
+  static bool StashAndStripClientConditionals(
+      Envoy::Http::RequestHeaderMap& headers, ClientConditionalStash* stash) {
+    static const Envoy::Http::LowerCaseString kIfNoneMatch("if-none-match");
+    static const Envoy::Http::LowerCaseString kIfModifiedSince(
+        "if-modified-since");
+    const auto collect = [&headers](const Envoy::Http::LowerCaseString& name) {
+      StringPieceVector lines;
+      const Envoy::Http::HeaderMap::GetResult entries = headers.get(name);
+      for (size_t i = 0; i < entries.size(); ++i) {
+        lines.push_back(entries[i]->value().getStringView());
+      }
+      return lines;
+    };
+    if (!StashClientConditionals(collect(kIfNoneMatch),
+                                 collect(kIfModifiedSince), stash)) {
+      return false;
+    }
+    headers.remove(kIfNoneMatch);
+    headers.remove(kIfModifiedSince);
+    return true;
   }
 
   static std::unique_ptr<RequestHeaders> toPageSpeedRequestHeaders(

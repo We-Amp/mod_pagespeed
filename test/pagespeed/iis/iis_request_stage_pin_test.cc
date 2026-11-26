@@ -26,19 +26,33 @@
 namespace net_instaweb {
 namespace {
 
-// Request notifications IIS runs before or during its access decision. None
-// of them may carry work of this module.
+// Request notifications IIS runs during its access decision. None of them may
+// carry work of this module.
 const char* const kStagesBeforeAccessDecision[] = {
-    "RQ_BEGIN_REQUEST",
     "RQ_AUTHENTICATE_REQUEST",
     "RQ_AUTHORIZE_REQUEST",
 };
 
 // Handler overrides for those stages, in the whitespace-free form.
 const char* const kHandlersBeforeAccessDecision[] = {
-    "OnBeginRequest(",        "OnPostBeginRequest(",
-    "OnAuthenticateRequest(", "OnPostAuthenticateRequest(",
+    "OnPostBeginRequest(",
+    "OnAuthenticateRequest(",
+    "OnPostAuthenticateRequest(",
     "OnAuthorizeRequest(",
+};
+
+// RQ_BEGIN_REQUEST, before the access decision, carries exactly one step:
+// removing an entity tag this module minted from the request's conditionals.
+// It serves nothing; these calls may not appear in its handler.
+const char* const kForbiddenInBeginRequest[] = {
+    "OnBeginRequestPageSpeed(",
+    "ResourceFetch::",
+    "ServeFromIisDaemonSubstrate(",
+    "FetchInPlaceResource(",
+    "WriteEntityChunk",
+    "SetHeader(",
+    "CreateRequestContext(",
+    "GetModuleContextContainer(",
 };
 
 // Reads a port source file and removes every whitespace byte.
@@ -109,6 +123,35 @@ TEST_F(IisRequestStagePinTest, RequestWorkIsRegisteredAfterAuthorization) {
         << "dll_main.cc names " << stage
         << ": the module would act on a request before IIS has decided "
            "whether the client may have it";
+  }
+}
+
+TEST_F(IisRequestStagePinTest, BeginRequestOnlyStripsModuleEntityTags) {
+  const GoogleString dll = ReadStrippedSource("dll_main.cc");
+  const GoogleString registration =
+      FunctionBody(dll, "HRESULT__stdcallRegisterModule(");
+  ASSERT_FALSE(registration.empty());
+  EXPECT_NE(GoogleString::npos,
+            registration.find(
+                "RQ_BEGIN_REQUEST|RQ_SEND_RESPONSE|RQ_RESOLVE_REQUEST_CACHE,"))
+      << "the conditional strip is no longer registered";
+  EXPECT_NE(GoogleString::npos,
+            registration.find("SetPriorityForRequestNotification("
+                              "RQ_BEGIN_REQUEST,PRIORITY_ALIAS_FIRST)"))
+      << "the conditional strip no longer runs first";
+  EXPECT_EQ(2, CountOf(dll, "RQ_BEGIN_REQUEST"))
+      << "dll_main.cc uses RQ_BEGIN_REQUEST for more than the strip";
+
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const GoogleString begin = FunctionBody(cc, "IisHttpModule::OnBeginRequest(");
+  ASSERT_FALSE(begin.empty())
+      << "OnBeginRequest was not found; this pin needs updating";
+  EXPECT_NE(GoogleString::npos, begin.find("StashClientConditionals("));
+  EXPECT_NE(GoogleString::npos, begin.find("DeleteHeader("));
+  for (const char* call : kForbiddenInBeginRequest) {
+    EXPECT_EQ(GoogleString::npos, begin.find(call))
+        << "OnBeginRequest calls " << call
+        << " before IIS has decided whether the client may have the URL";
   }
 }
 

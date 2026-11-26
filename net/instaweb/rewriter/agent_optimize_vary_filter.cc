@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/agent_optimize_vary_filter.h"
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -327,9 +328,15 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
   // This filter is only added when options()->agent_optimize() is set (see
   // rewrite_driver_filter_init.cc) — the operator flag is the whole gate; the
   // feature carries no license/entitlement check of its own. The remaining
-  // condition is an Accept: text/markdown request.
-  // 1.1 never serves markdown — the sole effect here is the Vary: Accept signal.
-  if (!RequestAcceptsMarkdown(driver()->request_headers())) {
+  // condition is an Accept: text/markdown request, or an HTML cache mode
+  // that can answer this URL with its Markdown copy: then the response
+  // depends on Accept for every client, whatever this request sent.
+  // The body is never changed here — the sole effect is the Vary: Accept
+  // signal.
+  const bool may_serve_markdown = driver()->options()->daemon_html_cache() >=
+                                  RewriteOptions::kDaemonHtmlCacheServeVariants;
+  if (!may_serve_markdown &&
+      !RequestAcceptsMarkdown(driver()->request_headers())) {
     return;
   }
 

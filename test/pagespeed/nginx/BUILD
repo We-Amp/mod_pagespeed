@@ -161,6 +161,16 @@ pagespeed_cc_test(
     ],
 )
 
+# In-place removal from an nginx list, on structs laid out like ngx_list_t.
+pagespeed_cc_test(
+    name = "ngx_list_filter_test",
+    srcs = ["ngx_list_filter_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/nginx:ngx_list_filter",
+    ],
+)
+
 # The daemon record completion queue, caps, drop counter and open-attempt
 # latch -- the nginx-free half of the daemon record arm, tested standalone.
 pagespeed_cc_test(

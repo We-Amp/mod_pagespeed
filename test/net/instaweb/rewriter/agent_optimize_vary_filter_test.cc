@@ -110,6 +110,57 @@ TEST_F(AgentOptimizeVaryFilterTest, FlagOffNeverVaries) {
   EXPECT_FALSE(VariesOnAccept());
 }
 
+// With the HTML cache in serve-variants mode a page can be answered with its
+// Markdown copy whatever the client sends, so every HTML response varies on
+// Accept, not only one to a Markdown request.
+TEST_F(AgentOptimizeVaryFilterTest, ServeVariantsVariesEveryHtmlResponse) {
+  options()->ClearSignatureForTesting();
+  options()->set_daemon_html_cache(RewriteOptions::kDaemonHtmlCacheServeVariants);
+  EnableAgentOptimize();
+  ParseWithAccept(
+      "text/html,application/xhtml+xml,application/xml;q=0.9,"
+      "*/*;q=0.8");
+  EXPECT_TRUE(VariesOnAccept());
+}
+
+TEST_F(AgentOptimizeVaryFilterTest, ServeVariantsVariesWithoutAccept) {
+  options()->ClearSignatureForTesting();
+  options()->set_daemon_html_cache(RewriteOptions::kDaemonHtmlCacheServeVariants);
+  EnableAgentOptimize();
+  ParseWithAccept(nullptr);
+  EXPECT_TRUE(VariesOnAccept());
+}
+
+TEST_F(AgentOptimizeVaryFilterTest, ServeVariantsMarkdownAcceptVariesOnce) {
+  options()->ClearSignatureForTesting();
+  options()->set_daemon_html_cache(RewriteOptions::kDaemonHtmlCacheServeVariants);
+  EnableAgentOptimize();
+  response_headers_.Add(HttpAttributes::kVary, "accept");
+  ParseWithAccept("text/markdown");
+  ConstStringStarVector values;
+  ASSERT_TRUE(response_headers_.Lookup(HttpAttributes::kVary, &values));
+  ASSERT_EQ(1, values.size());
+  EXPECT_STREQ("accept", values[0]->c_str());
+}
+
+// Report-only serves nothing: only a Markdown request varies.
+TEST_F(AgentOptimizeVaryFilterTest, ReportOnlyVariesOnlyForMarkdownAccept) {
+  options()->ClearSignatureForTesting();
+  options()->set_daemon_html_cache(RewriteOptions::kDaemonHtmlCacheReportOnly);
+  EnableAgentOptimize();
+  ParseWithAccept("text/html");
+  EXPECT_FALSE(VariesOnAccept());
+}
+
+// Without AgentOptimize no Markdown is served, in any mode.
+TEST_F(AgentOptimizeVaryFilterTest, ServeVariantsWithoutAgentOptimizeNeverVaries) {
+  options()->ClearSignatureForTesting();
+  options()->set_daemon_html_cache(RewriteOptions::kDaemonHtmlCacheServeVariants);
+  rewrite_driver()->AddFilters();
+  ParseWithAccept("text/markdown");
+  EXPECT_FALSE(VariesOnAccept());
+}
+
 TEST_F(AgentOptimizeVaryFilterTest, ExistingVaryAcceptIsNotDuplicated) {
   EnableAgentOptimize();
   response_headers_.Add(HttpAttributes::kVary, HttpAttributes::kAccept);

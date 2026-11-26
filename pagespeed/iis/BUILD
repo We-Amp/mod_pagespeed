@@ -203,6 +203,7 @@ cc_library(
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:module_entity_tags",
         "//pagespeed/system:site_cache_fragment",
         "//pagespeed/system:system_windows",
         "@re2//:re2",

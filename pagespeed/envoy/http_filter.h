@@ -24,6 +24,7 @@
 #include "pagespeed/envoy/http_filter.pb.h"
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/module_entity_tags.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "source/common/network/cidr_range.h"
@@ -188,6 +189,12 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
     return encoder_callbacks_;
   };
 
+  // The client's If-None-Match and If-Modified-Since as they arrived, kept
+  // before decodeHeaders removes a conditional this module minted.
+  const net_instaweb::ClientConditionalStash& clientConditionals() const {
+    return client_conditionals_;
+  }
+
  private:
   // Computes custom options based on query params and headers.
   // Returns true if custom options were found and merged.
@@ -303,6 +310,9 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   // The request's X-Requested-With value: the admin cache actions accept only
   // a same-origin POST that carries it, so it must reach the admin fetch.
   std::string pending_admin_x_requested_with_;
+
+  // See clientConditionals().
+  net_instaweb::ClientConditionalStash client_conditionals_;
 
   // Driver used for IPRO lookup. Owned by this filter until IPRO completes.
   net_instaweb::RewriteDriver* ipro_driver_{nullptr};

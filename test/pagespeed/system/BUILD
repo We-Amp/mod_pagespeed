@@ -872,6 +872,18 @@ pagespeed_cc_test(
     ],
 )
 
+# The module entity tag rule every port applies to upstream conditionals.
+pagespeed_cc_test(
+    name = "module_entity_tags_test",
+    srcs = ["module_entity_tags_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:module_entity_tags",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The in-place URL agreement shared by the nginx and Apache ports, with the
 # readings each server produces.
 pagespeed_cc_test(
