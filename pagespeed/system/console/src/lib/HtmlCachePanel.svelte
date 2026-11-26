@@ -58,6 +58,7 @@
         {text.mode}: {view.mode === null ? text.modeUnknown : text.modeNames[view.mode]}{view.modeInferred ? ` ${text.inferred}` : ""}.
         {view.mode === "serve-variants" ? text.introServe : text.intro}
       </p>
+      {#if view.mode === "serve-variants"}<p class="note" data-testid="html-cache-agent-optimize">{text.agentOptimizeOff}</p>{/if}
       <p class="note" data-testid="html-cache-log">{text.decisionLog}</p>
       {#if view.servingBlocked || view.servingUnavailableTotal > 0}
         <div data-testid={view.servingBlocked ? "html-cache-degraded" : "html-cache-degraded-history"}>
@@ -69,7 +70,6 @@
           <ul>
             {#each text.degradedCauses as cause (cause)}<li>{cause}</li>{/each}
           </ul>
-          <p class="note">{text.agentOptimizeOff}</p>
         </div>
       {/if}
       {#if view.warnings.length > 0}

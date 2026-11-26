@@ -251,6 +251,7 @@ test("serve-variants: mode, engine counters, the degraded causes as history and 
   await expect(page.getByTestId("html-cache-degraded-history")).toContainText("worker not in a markdown mode");
   await expect(page.getByTestId("html-cache-degraded-history")).toContainText("worker agent-optimize off");
   await expect(page.getByTestId("html-cache-degraded-history")).toContainText("3 requests could not use serving since the server started");
+  await expect(page.getByTestId("html-cache-agent-optimize")).toContainText("AgentOptimize off");
   await expect(page.getByTestId("html-cache-log")).toContainText("LogDir/daemon-html");
   await expect(page.getByTestId("html-cache-warnings")).toContainText("daemon_html_epoch_write_failed");
   await expect(page.getByTestId("html-cache-engine")).toContainText("Markdown answers (200): 6");
