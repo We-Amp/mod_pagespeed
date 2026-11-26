@@ -4513,9 +4513,8 @@ void ps_merge_compressor_vary(ngx_http_request_t* r, ps_request_ctx_t* ctx) {
   if (r != r->main || ctx == nullptr || !ctx->html_rewrite || !r->gzip_vary) {
     return;
   }
-  const ngx_http_core_loc_conf_t* clcf =
-      static_cast<ngx_http_core_loc_conf_t*>(
-          ngx_http_get_module_loc_conf(r, ngx_http_core_module));
+  const ngx_http_core_loc_conf_t* clcf = static_cast<ngx_http_core_loc_conf_t*>(
+      ngx_http_get_module_loc_conf(r, ngx_http_core_module));
   if (clcf == nullptr || !clcf->gzip_vary) {
     return;
   }
