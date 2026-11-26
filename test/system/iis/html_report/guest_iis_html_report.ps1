@@ -134,7 +134,7 @@ function Setup {
     foreach ($s in $Sites.Keys) {
         $dir = "$Root\www\$s"
         New-Item -ItemType Directory -Force $dir, "$Root\logs\$s", "$Root\cache\$s" | Out-Null
-        foreach ($name in @("plain.html", "nostore.html", "cookie.html", "head.html", "markdown.html")) {
+        foreach ($name in @("plain.html", "nostore.html", "cookie.html", "head.html", "markdown.html", "bare.html")) {
             [IO.File]::WriteAllText("$dir\$name", $page)
         }
         [IO.File]::WriteAllText("$dir\gzip.html", $large)
@@ -240,7 +240,9 @@ function Run {
         "gzip.html"     = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "gzip" } }
         "cookie.html"   = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "identity"; "Cookie" = "a=b" } }
         "head.html"     = @{ Method = "HEAD"; Headers = @{ "Accept-Encoding" = "identity" } }
-        "markdown.html" = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "identity"; "Accept" = "text/markdown" } }
+        "markdown.html" = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "identity"; "Accept" = "text/markdown, text/html;q=0.5" } }
+        # Markdown alone: IIS's static file handler answers 406, on every site.
+        "bare.html"     = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "identity"; "Accept" = "text/markdown" } }
         "nostore.html"  = @{ Method = "GET";  Headers = @{ "Accept-Encoding" = "identity" } }
     }
     $before = Stat $Sites["htmlrep-report"].Port "daemon_html_unavailable"
