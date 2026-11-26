@@ -18,12 +18,14 @@ row.
 """
 
 import abc
+import http.client
+import importlib
 import json
 import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 HeaderLines = List[Tuple[str, str]]
 
@@ -34,6 +36,29 @@ CASES_PATH = os.path.join(
 )
 
 PORTS = ("apache", "nginx", "iis")
+
+# The ports whose lane ships a provider, as the module
+# pagespeed_test_framework.daemon_html_provider_<port> with
+# make_provider(server_config). A lane outside this set skips every row; a
+# lane in it fails when its provider cannot be imported. The change that
+# adds a lane's provider adds its port here.
+PROVIDER_PORTS = frozenset()
+
+# Expect keys a background step may carry: what its own response shows. Its
+# expectations are checked after the next step ran, so volume, counter and
+# origin state could belong to that later step.
+BACKGROUND_EXPECT_KEYS = frozenset(
+    [
+        "status",
+        "content_type",
+        "headers_exact",
+        "headers_only",
+        "headers_absent",
+        "body_ref",
+        "body_bytes",
+        "length_matches_body",
+    ]
+)
 
 # The server core's transport lines, allowed beside headers_exact under
 # headers_only.
@@ -137,17 +162,37 @@ class Provider(abc.ABC):
     (`teardown`), whatever the outcome. Requests name a path and, optionally,
     a host; the provider sends them to the row's virtual host on its own
     port. Every method may raise ProviderUnsupported.
+
+    The runner calls `settle` before every read of the volume, the counters
+    or the origin's request log, and before the counter snapshot a step
+    starts with.
     """
 
     #: The port this provider serves: one of PORTS.
     port: str = ""
 
     @abc.abstractmethod
-    def setup(self, row_id: str, live: dict, bodies: Dict[str, str]) -> None:
+    def setup(self, row_id: str, live: dict, bodies: Dict[str, str]) -> Iterable[str]:
         """Configure the row's mode, agent_optimize, worker state, vhost
         knobs and origin (status, headers, body from `bodies`, whether it
         echoes the conditionals it receives), on a volume holding nothing
-        for the row's URLs."""
+        for the row's URLs.
+
+        Returns the names of everything it applied: "mode",
+        "agent_optimize", "worker", each vhost knob by its name and each
+        origin key as "origin.<key>". The row fails when a key it uses is
+        not in that set (`required_keys`), so a knob a provider does not
+        implement can never turn a row into a plainer one that passes."""
+
+    @abc.abstractmethod
+    def settle(self) -> None:
+        """Return only once every commit, notification and purge removal the
+        server started for requests already answered has finished. The
+        provider proves it with a positive signal (for example the server's
+        in-flight commit gauge reaching zero, or a commit counter reaching
+        the number of responses it recorded), never with a fixed sleep. On
+        every port the commit runs after the client has the response, so a
+        read without this can see a page that will be stored as absent."""
 
     @abc.abstractmethod
     def teardown(self) -> None:
@@ -162,9 +207,18 @@ class Provider(abc.ABC):
         headers: HeaderLines,
         process: Optional[str] = None,
     ) -> Response:
-        """Send one request and return what the client received. `process`
-        names the server process to send it to (rows that race two
-        processes); None is any."""
+        """Send one request and return what the client received.
+
+        `path` goes on the request line byte for byte: no client
+        normalisation of `//`, `%2F`, dot segments or anything else. The
+        returned headers are one (name, value) pair per line as received,
+        never merged: two Cache-Control lines are two pairs (many clients
+        fold repeated fields into one; `send_raw` does not). `headers` are
+        sent as given, one line each.
+
+        `process` names the server process to send it to; None is any. Only
+        the cross-process rows set it. A provider that cannot pin a process
+        raises ProviderUnsupported, which fails those rows on that lane."""
 
     @abc.abstractmethod
     def stored_entry(self, path: str, host: Optional[str]) -> Optional[StoredEntry]:
@@ -215,6 +269,54 @@ class Provider(abc.ABC):
 def load_cases(path: str = CASES_PATH) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def send_raw(
+    address: str,
+    port: int,
+    method: str,
+    path: str,
+    host: str,
+    headers: HeaderLines,
+    timeout_s: float = 60,
+) -> Response:
+    """One HTTP/1.1 request as a provider's transport: the path verbatim,
+    every header line sent as given (Host included, nothing added but
+    Content-Length for no body), every received line kept as its own pair."""
+    conn = http.client.HTTPConnection(address, port, timeout=timeout_s)
+    try:
+        conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+        conn.putheader("Host", host)
+        for name, value in headers:
+            conn.putheader(name, value)
+        conn.endheaders()
+        r = conn.getresponse()
+        body = r.read()
+        return Response(r.status, list(r.getheaders()), body)
+    finally:
+        conn.close()
+
+
+def load_provider(port: str, server_config) -> Optional["Provider"]:
+    """The lane's provider, or None when its port is not in PROVIDER_PORTS.
+    A listed port whose module is missing raises."""
+    if port not in PROVIDER_PORTS:
+        return None
+    module = importlib.import_module(
+        f"pagespeed_test_framework.daemon_html_provider_{port}"
+    )
+    provider = module.make_provider(server_config)
+    if provider.port != port:
+        raise AssertionError(f"the {port} provider reports port {provider.port}")
+    return provider
+
+
+def required_keys(live: dict) -> Set[str]:
+    """What a provider must report applied for this row (see setup)."""
+    out = {k for k in ("mode", "agent_optimize", "worker") if k in live}
+    out |= set(live.get("vhost", {}))
+    out |= {f"origin.{k}" for k in live.get("origin", {})}
+    return out
 
 
 def live_rows(cases: dict) -> List[dict]:
@@ -276,6 +378,12 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
                 errors.append(f"{rid}: {where} set_mode mode")
         expect = step.get("expect", {})
         unknown(f"{where} expect", expect, EXPECT_KEYS)
+        if step.get("background"):
+            for key in expect:
+                if key in EXPECT_KEYS and key not in BACKGROUND_EXPECT_KEYS:
+                    errors.append(
+                        f"{rid}: {where} is a background step and cannot assert {key}"
+                    )
         if not expect:
             errors.append(f"{rid}: {where} expects nothing")
         for name, spec in expect.get("headers_exact", {}).items():
@@ -297,9 +405,9 @@ def media_type(value: str) -> str:
     return value.split(";", 1)[0].strip().lower()
 
 
-def _vary_without_accept(headers: HeaderLines) -> HeaderLines:
+def _vary_without_accept(headers: HeaderLines) -> Tuple[HeaderLines, bool]:
     """The header lines with one `Accept` token taken out of the Vary
-    lines; a Vary line left empty is dropped."""
+    lines (a Vary line left empty is dropped), and whether one was."""
     out: HeaderLines = []
     removed = False
     for name, value in headers:
@@ -315,7 +423,7 @@ def _vary_without_accept(headers: HeaderLines) -> HeaderLines:
                 continue
             value = ", ".join(kept)
         out.append((name, value))
-    return out
+    return out, removed
 
 
 def _header_multiset(headers: HeaderLines) -> List[Tuple[str, str]]:
@@ -362,11 +470,17 @@ class RowRunner:
         if errors:
             return errors
         try:
-            self.provider.setup(self.row["id"], self.live, self.bodies)
+            applied = self.provider.setup(self.row["id"], self.live, self.bodies)
         except ProviderUnsupported as e:
             return [f"{self.row['id']}: provider cannot set up the row: {e}"]
         pending: List[_Background] = []
         try:
+            missing = sorted(required_keys(self.live) - set(applied or ()))
+            if missing:
+                self.failures.append(
+                    f"{self.row['id']}: the provider did not apply {', '.join(missing)}"
+                )
+                return self.failures
             for index, step in enumerate(self.live["steps"]):
                 try:
                     if step.get("background"):
@@ -439,6 +553,7 @@ class RowRunner:
         expect_ready = arg.get("expect_ready", True)
         deadline = self.clock() + timeout
         while True:
+            self.provider.settle()
             if self.provider.markdown_ready(request["path"], request.get("host")):
                 if not expect_ready:
                     self._fail(index, "the Markdown copy became servable")
@@ -452,9 +567,13 @@ class RowRunner:
             self.sleep(self.poll_s)
 
     def _run_step(self, index: int, step: dict) -> None:
-        self._run_pre(index, step)
+        # The step's counter delta covers its pre ops too: a commit a pre op
+        # lets go (release_origin) is counted in the step that released it.
         expect = step["expect"]
+        self.provider.settle()
         counters_before = self.provider.counters() if "counter_delta" in expect else None
+        self._run_pre(index, step)
+        self.provider.settle()
         origin_before = len(self.provider.origin_requests())
         response = self._send(step)
         self._check(index, step, response, counters_before, origin_before)
@@ -462,7 +581,7 @@ class RowRunner:
     def _start_background(self, index: int, step: dict) -> _Background:
         self._run_pre(index, step)
         holder: dict = {}
-        origin_before = len(self.provider.origin_requests())
+        origin_before = 0  # A background step asserts no origin state.
 
         def go() -> None:
             try:
@@ -504,6 +623,19 @@ class RowRunner:
         expect = step["expect"]
         request = step["request"]
         fail = lambda what: self._fail(index, what)  # noqa: E731
+        if not isinstance(r.headers, list) or not all(
+            isinstance(h, tuple)
+            and len(h) == 2
+            and isinstance(h[0], str)
+            and isinstance(h[1], str)
+            for h in r.headers
+        ):
+            fail("the provider returned header lines that are not a list of (name, value) pairs")
+            return
+        if not step.get("background") and (
+            set(expect) - BACKGROUND_EXPECT_KEYS - {"differential"}
+        ):
+            self.provider.settle()
 
         if r.status == 200 and any(
             media_type(v) == "text/markdown" for v in r.lines("Content-Type")
@@ -539,6 +671,12 @@ class RowRunner:
             for name, value in r.headers:
                 if name.lower() not in allowed:
                     fail(f"header {name}: {value} is outside the allowed set")
+            for name in sorted(TRANSPORT_LINES):
+                count = len(r.lines(name))
+                if count > 1:
+                    fail(f"{count} {name.title()} lines; a transport line may appear once")
+            if r.lines("Transfer-Encoding") and r.lines("Content-Length"):
+                fail("Transfer-Encoding beside Content-Length (RFC 9112 section 6.3)")
         for name in expect.get("headers_absent", []):
             if r.lines(name):
                 fail(f"header {name} present: {r.lines(name)!r}")
@@ -598,7 +736,9 @@ class RowRunner:
     def _differential(self, index: int, step: dict, r: Response, diff: dict) -> None:
         primary = r.headers
         if diff.get("allow_vary_accept"):
-            primary = _vary_without_accept(primary)
+            primary, removed = _vary_without_accept(primary)
+            if not removed:
+                self._fail(index, "serve-variants HTML carries no Vary: Accept")
         own_mode = self.mode
         try:
             for mode in diff["against"]:

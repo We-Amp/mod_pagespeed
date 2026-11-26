@@ -6,15 +6,14 @@
 test/system/daemon_html/conformance_cases.json against this lane's server.
 
 The runner core (pagespeed_test_framework.daemon_html_conformance) drives the
-rows; a per-lane provider drives the server. A lane's provider is the module
+rows; a per-lane provider drives the server. A lane whose port is in
+daemon_html_conformance.PROVIDER_PORTS must ship the module
 `pagespeed_test_framework.daemon_html_provider_<port>` exposing
-`make_provider(server_config) -> Provider`. A row is skipped only when its
-`ports` leave this lane's port out. Until a lane ships its provider, every
-row of that lane is skipped with the reason below.
+`make_provider(server_config) -> Provider`; a missing one fails the lane.
+A lane outside that set skips every row until its provider lands. Within a
+lane with a provider, a row is skipped only when its `ports` leave the
+lane's port out.
 """
-
-import importlib
-from typing import Optional
 
 import pytest
 
@@ -32,22 +31,9 @@ def _port(server_config) -> str:
     return "apache"
 
 
-def _provider(server_config) -> Optional[conf.Provider]:
-    name = f"pagespeed_test_framework.daemon_html_provider_{_port(server_config)}"
-    try:
-        module = importlib.import_module(name)
-    except ModuleNotFoundError as e:
-        if e.name != name:
-            raise
-        return None
-    provider = module.make_provider(server_config)
-    assert provider.port == _port(server_config), provider.port
-    return provider
-
-
 @pytest.fixture(scope="module")
 def provider(server_config):
-    p = _provider(server_config)
+    p = conf.load_provider(_port(server_config), server_config)
     if p is None:
         pytest.skip(f"no HTML cache conformance provider for the {_port(server_config)} lane yet")
     return p
