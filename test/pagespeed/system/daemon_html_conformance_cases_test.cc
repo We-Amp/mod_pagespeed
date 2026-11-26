@@ -269,10 +269,24 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
       const Json::Value& calls = ex["calls"];
       if (!calls.isArray()) c.Fail(sw, "calls is not an array");
       for (Json::ArrayIndex j = 0; calls.isArray() && j < calls.size(); ++j) {
-        c.Keys(sw + " call", calls[j], {"fn", "args"}, {"fn"});
+        c.Keys(sw + " call", calls[j], {"fn", "args", "exact"}, {"fn"});
         c.LibraryFn(sw + " call fn", calls[j]["fn"]);
         if (calls[j].isMember("args") && !calls[j]["args"].isObject()) {
           c.Fail(sw + " call", "args is not an object");
+        }
+        if (calls[j].isMember("exact")) {
+          // Struct prefixes whose every field the call's args must name.
+          const Json::Value& exact = calls[j]["exact"];
+          if (!exact.isArray() || exact.empty()) {
+            c.Fail(sw + " call", "exact is not a list of struct prefixes");
+          }
+          for (Json::ArrayIndex k = 0; exact.isArray() && k < exact.size();
+               ++k) {
+            if (!exact[k].isString() || (exact[k].asString() != "request" &&
+                                         exact[k].asString() != "stored")) {
+              c.Fail(sw + " call", "exact names request or stored only");
+            }
+          }
         }
       }
     }

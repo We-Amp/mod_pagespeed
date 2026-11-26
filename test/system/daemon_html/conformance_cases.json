@@ -32,7 +32,11 @@
     "disable_recheck, budget. expect keys: calls (an ordered subsequence of the",
     "library calls made in the step: other calls may come between, and each",
     "listed call is matched on the subset of arguments given; dotted names",
-    "address struct fields), calls_exclude (fns never called in the step),",
+    "address struct fields; a call's exact [request | stored] makes the match",
+    "fail when the call carried a field of that struct the args do not name, so",
+    "the row states the whole struct: every flag bit, flags_unknown for any bit",
+    "without a name, and a hash as zero or sha256:<body>), calls_exclude (fns",
+    "never called in the step),",
     "port_calls and port_calls_exclude (port methods called or never called),",
     "stored, removed,",
     "notify ([] = none), counters (deltas), serve {kind fall_through | final,",
@@ -9985,7 +9989,50 @@
               "accept": ["text/markdown"]
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.head": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "HEAD",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {
                 "kind": "final",
                 "status": 200,
@@ -10186,8 +10233,52 @@
             "expect": {
               "calls": [
                 {
+                  "fn": "ps_wants_agent_markdown",
+                  "args": {
+                    "accept": "text/html;q=0.5, text/markdown"
+                  }
+                },
+                {
                   "fn": "ps_html_serve_classify",
-                  "args": {"request.accept": "text/html;q=0.5, text/markdown"}
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/html;q=0.5, text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
                 }
               ]
             }
@@ -10234,7 +10325,50 @@
               "cookie": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.cookie": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": true,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10280,7 +10414,50 @@
               "authorization": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.authorization": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": true,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10326,7 +10503,50 @@
               "authenticated_user": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.authenticated_user": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": true,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10372,7 +10592,50 @@
               "cache_control": "no-cache"
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.cache_control": "no-cache"}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": "no-cache",
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10418,7 +10681,50 @@
               "pragma": "no-cache"
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.pragma": "no-cache"}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": "no-cache",
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10472,7 +10778,36 @@
               "body_ref": "page"
             },
             "expect": {
-              "calls": [{"fn": "ps_html_store_classify", "args": {"request.cookie": true, "view": "store"}}]
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "store",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": true,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "final",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": true,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
+                }
+              ]
             }
           }
         ]
@@ -10528,7 +10863,31 @@
               "calls": [
                 {
                   "fn": "ps_html_store_classify",
-                  "args": {"request.authorization": true, "view": "store"}
+                  "exact": ["request"],
+                  "args": {
+                    "view": "store",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": true,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "final",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": true,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
                 }
               ]
             }
@@ -10586,7 +10945,31 @@
               "calls": [
                 {
                   "fn": "ps_html_store_classify",
-                  "args": {"request.authenticated_user": true, "view": "store"}
+                  "exact": ["request"],
+                  "args": {
+                    "view": "store",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": true,
+                    "request.cookie": false,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "final",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": true,
+                    "request.cookie": false,
+                    "request.no_store": false,
+                    "request.flags_unknown": 0
+                  }
                 }
               ]
             }
@@ -10644,9 +11027,119 @@
               "calls": [
                 {
                   "fn": "ps_html_store_classify",
-                  "args": {"request.no_store": true, "view": "store"}
+                  "exact": ["request"],
+                  "args": {
+                    "view": "store",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.no_store": true,
+                    "request.flags_unknown": 0
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "final",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.no_store": true,
+                    "request.flags_unknown": 0
+                  }
                 }
               ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-passes-every-request-flag",
+      "runners": ["engine"],
+      "why": "store: request facts passed exactly",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "auth_request",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "cache_control": "no-store",
+              "cookie": true,
+              "authorization": true,
+              "authenticated_user": true
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "store",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": true,
+                    "request.authenticated_user": true,
+                    "request.cookie": true,
+                    "request.no_store": true,
+                    "request.flags_unknown": 0
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "exact": ["request"],
+                  "args": {
+                    "view": "final",
+                    "method": "GET",
+                    "url_path": "/page",
+                    "request.authorization": true,
+                    "request.authenticated_user": true,
+                    "request.cookie": true,
+                    "request.no_store": true,
+                    "request.flags_unknown": 0
+                  }
+                }
+              ],
+              "stored": []
             }
           }
         ]
@@ -10691,7 +11184,50 @@
               "range": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.range": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": true,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10737,7 +11273,50 @@
               "if_range": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.if_range": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": true,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
             }
           }
@@ -10783,8 +11362,163 @@
               "origin": true
             },
             "expect": {
-              "calls": [{"fn": "ps_html_serve_classify", "args": {"request.origin": true}}],
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": null,
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": true,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
               "serve": {"kind": "fall_through"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-passes-every-request-field",
+      "runners": ["engine"],
+      "why": "serve: request facts passed exactly",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {
+            "kind": "markdown",
+            "url": "https://www.example.test/page",
+            "body_ref": "page_md"
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "auth_request",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "HEAD",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/html;q=0.9", "text/markdown;q=1", "*/*;q=0.1"],
+              "cookie": true,
+              "authorization": true,
+              "authenticated_user": true,
+              "cache_control": "max-age=0",
+              "pragma": "no-cache",
+              "if_none_match": "W/\"psm-0123456789abcdef\", \"v1\"",
+              "if_modified_since": "Tue, 15 Nov 1994 08:12:31 GMT",
+              "range": true,
+              "if_range": true,
+              "origin": true
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_wants_agent_markdown",
+                  "args": {
+                    "accept": "text/html;q=0.9, text/markdown;q=1, */*;q=0.1"
+                  }
+                },
+                {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "HEAD",
+                    "request.accept": "text/html;q=0.9, text/markdown;q=1, */*;q=0.1",
+                    "request.cache_control": "max-age=0",
+                    "request.pragma": "no-cache",
+                    "request.if_none_match": "W/\"psm-0123456789abcdef\", \"v1\"",
+                    "request.authorization": true,
+                    "request.authenticated_user": true,
+                    "request.cookie": true,
+                    "request.range": true,
+                    "request.if_range": true,
+                    "request.origin": true,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_if_none_match_matches_weak"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "auth_request"
+              }
             }
           }
         ]
@@ -10827,14 +11561,57 @@
               "url_agreed": true,
               "options_enabled_and_allowed": true,
               "accept": ["text/markdown"],
-              "if_none_match": "W/\"psm-0123456789abcdef\"",
-              "conditionals_stripped": true
+              "if_none_match": "W/\"psm-0123456789abcdef\""
             },
             "expect": {
               "calls": [
                 {
+                  "fn": "ps_html_serve_classify",
+                  "exact": ["request", "stored"],
+                  "args": {
+                    "request.struct_size": 64,
+                    "request.mode": 2,
+                    "request.method": "GET",
+                    "request.accept": "text/markdown",
+                    "request.cache_control": null,
+                    "request.pragma": null,
+                    "request.if_none_match": "W/\"psm-0123456789abcdef\"",
+                    "request.authorization": false,
+                    "request.authenticated_user": false,
+                    "request.cookie": false,
+                    "request.range": false,
+                    "request.if_range": false,
+                    "request.origin": false,
+                    "request.flags_unknown": 0,
+                    "request.now_seconds": 1790000000,
+                    "stored.struct_size": 96,
+                    "stored.present": true,
+                    "stored.needs_validation": false,
+                    "stored.explicit_shared": false,
+                    "stored.headers_not_reproducible": false,
+                    "stored.sidecar_required": false,
+                    "stored.sidecar_present": false,
+                    "stored.purged": false,
+                    "stored.validated_this_request": false,
+                    "stored.variant_present": true,
+                    "stored.binding_live": true,
+                    "stored.no_transform": false,
+                    "stored.withheld": false,
+                    "stored.flags_unknown": 0,
+                    "stored.stored_at": 1789999990,
+                    "stored.age_at_store": 0,
+                    "stored.lifetime_s": 300,
+                    "stored.render_ttl_s": 0,
+                    "stored.withheld_reason": 0,
+                    "stored.binding_hash": "sha256:page",
+                    "stored.markdown_hash": "zero"
+                  }
+                },
+                {
                   "fn": "ps_if_none_match_matches_weak",
-                  "args": {"if_none_match": "W/\"psm-0123456789abcdef\""}
+                  "args": {
+                    "if_none_match": "W/\"psm-0123456789abcdef\""
+                  }
                 }
               ],
               "serve": {"kind": "final", "status": 304}
