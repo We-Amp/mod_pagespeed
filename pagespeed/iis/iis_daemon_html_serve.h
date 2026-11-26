@@ -47,7 +47,8 @@ namespace net_instaweb {
 // percent-escape at all (a non-ASCII path folds case and can be read in the
 // system code page, so it has more than one spelling), no empty,
 // "." or ".." segment, no segment ending in ".", and none of
-// \ ; : ~ * " < > | space or control bytes.  The query is not read.
+// \ ; : ~ * " < > | space or control bytes.  The query is read only for
+// raw bytes outside printable ASCII, which no valid target carries.
 bool IisHtmlCachePathIsCanonical(StringPiece target);
 
 // The Vary value of an HTML response whose page can be answered with its

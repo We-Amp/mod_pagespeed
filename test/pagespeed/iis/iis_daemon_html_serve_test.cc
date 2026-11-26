@@ -62,6 +62,14 @@ TEST(IisHtmlCachePathTest, SpellingsIisReadsAsAnotherPathAreNot) {
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/a\x7f"));
 }
 
+TEST(IisHtmlCachePathTest, ARawByteOutsidePrintableAsciiIsRefusedAnywhere) {
+  // Not a valid request target in the query either.
+  EXPECT_FALSE(IisHtmlCachePathIsCanonical("/page?x=\xe9"));
+  EXPECT_FALSE(IisHtmlCachePathIsCanonical("/page?x=\x7f"));
+  EXPECT_FALSE(IisHtmlCachePathIsCanonical("/page?x=a b"));
+  EXPECT_TRUE(IisHtmlCachePathIsCanonical("/page?x=%E9"));
+}
+
 TEST(IisHtmlCachePathTest, NoPercentEscapeIsAllowed) {
   // A non-ASCII path has more than one spelling IIS reads as the same
   // file: its letters fold case (%C3%A9 and %C3%89), and a byte that is not

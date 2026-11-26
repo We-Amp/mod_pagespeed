@@ -66,7 +66,15 @@ bool IisPristineTarget(const wchar_t* value, size_t length, GoogleString* out) {
 bool IisHtmlCachePathIsCanonical(StringPiece target) {
   StringPiece path = target;
   const size_t query = path.find('?');
-  if (query != StringPiece::npos) path = path.substr(0, query);
+  if (query != StringPiece::npos) {
+    // The query is not read, except that it is a valid target: no raw byte
+    // outside printable ASCII.
+    for (const char ch : target.substr(query)) {
+      const unsigned char c = static_cast<unsigned char>(ch);
+      if (c < 0x21 || c >= 0x7F) return false;
+    }
+    path = path.substr(0, query);
+  }
   if (path.empty() || path[0] != '/') return false;
   size_t segment_start = 1;
   for (size_t i = 1; i <= path.size(); ++i) {
