@@ -9,12 +9,6 @@ namespace net_instaweb {
 
 namespace {
 
-int UpperHexValue(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
 // The server core's own lines, which a Markdown answer keeps.
 const char* const kTransportLines[] = {"Date", "Server", "Connection",
                                        "Keep-Alive", "Transfer-Encoding"};
@@ -81,14 +75,9 @@ bool IisHtmlCachePathIsCanonical(StringPiece target) {
       continue;
     }
     const unsigned char c = static_cast<unsigned char>(path[i]);
-    if (c == '%') {
-      if (i + 2 >= path.size()) return false;  // Not two digits left.
-      const int hi = UpperHexValue(path[i + 1]);
-      const int lo = UpperHexValue(path[i + 2]);
-      if (hi < 0 || lo < 0 || hi * 16 + lo < 0x80) return false;
-      i += 2;
-      continue;
-    }
+    // No percent-escape: every escaped spelling has another IIS reads as
+    // the same file.
+    if (c == '%') return false;
     if (c < 0x21 || c >= 0x7F) return false;
     if (c >= 'A' && c <= 'Z') return false;
     switch (c) {

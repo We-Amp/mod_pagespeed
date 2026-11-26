@@ -16,7 +16,7 @@ TEST(IisHtmlCachePathTest, PlainLowercasePathsAreCanonical) {
   for (const char* path :
        {"/", "/page.html", "/sub/page.html", "/sub/", "/a-b_c.d/e.aspx",
         "/page.html?x=1", "/page.html?Q=%2F..//", "/.well-known/x",
-        "/caf%C3%A9.html", "/a+b.html"}) {
+        "/a+b.html"}) {
     EXPECT_TRUE(IisHtmlCachePathIsCanonical(path)) << path;
   }
 }
@@ -62,9 +62,14 @@ TEST(IisHtmlCachePathTest, SpellingsIisReadsAsAnotherPathAreNot) {
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/a\x7f"));
 }
 
-TEST(IisHtmlCachePathTest, OnlyTheEscapedNonAsciiByteIsAllowed) {
-  EXPECT_TRUE(IisHtmlCachePathIsCanonical("/%80"));
-  EXPECT_TRUE(IisHtmlCachePathIsCanonical("/%FF"));
+TEST(IisHtmlCachePathTest, NoPercentEscapeIsAllowed) {
+  // A non-ASCII path has more than one spelling IIS reads as the same
+  // file: its letters fold case (%C3%A9 and %C3%89), and a byte that is not
+  // UTF-8 is read in the system code page (%E9).
+  for (const char* path : {"/caf%C3%A9.html", "/caf%C3%89.html",
+                           "/caf%E9.html", "/%80", "/%FF"}) {
+    EXPECT_FALSE(IisHtmlCachePathIsCanonical(path)) << path;
+  }
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/%7F"));
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/%20"));
   EXPECT_FALSE(IisHtmlCachePathIsCanonical("/%2F"));

@@ -5,12 +5,13 @@
   - A page is stored and served only for a host name one of the site's
     bindings names. A binding with an empty host name (`*:80:` or an address
     only) vouches for no name.
-  - Only the plain spelling of a URL path is stored or served: lowercase,
-    without percent-escapes of ASCII characters, merged or doubled slashes,
+  - Only the plain spelling of a URL path is stored or served: lowercase
+    ASCII, without percent-escapes, merged or doubled slashes,
     dot segments, 8.3 short names, a trailing dot, `;` parameters, `::$DATA`
     or path info after the file. IIS reads all of these as the same file, so
     a purge of one spelling could otherwise leave another serving. A site
-    whose URLs carry capitals gets no Markdown copy for them.
+    whose URLs carry capitals or non-ASCII characters gets no Markdown copy
+    for them.
   - The Markdown answer carries only its own header set: the site's
     `customHeaders` (for example `Strict-Transport-Security` and
     `X-Content-Type-Options`) are not on it, and it is never compressed.

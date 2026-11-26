@@ -42,7 +42,8 @@ namespace net_instaweb {
 
 // Whether `target` (a request target's path, with its query when there is
 // one) is the one spelling of its path: absolute, lowercase, no
-// percent-escape but an uppercase-hex escape of a non-ASCII byte, no empty,
+// percent-escape at all (a non-ASCII path folds case and can be read in the
+// system code page, so it has more than one spelling), no empty,
 // "." or ".." segment, no segment ending in ".", and none of
 // \ ; : ~ * " < > | space or control bytes.  The query is not read.
 bool IisHtmlCachePathIsCanonical(StringPiece target);
