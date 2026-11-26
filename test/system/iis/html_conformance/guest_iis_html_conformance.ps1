@@ -130,6 +130,10 @@ function Run {
     $env:PAGESPEED_DHC_IIS_LIBRARY = (Get-Content "$Root\library.txt").Trim()
     $env:PAGESPEED_DHC_IIS_VOLUME = $Volume
     $env:PAGESPEED_DHC_IIS_SOCKET = $Socket
+    # What a pytest run of the conformance test on this host reads: the
+    # server and the lane fixture the provider stands for.
+    $env:PAGESPEED_SERVER_TYPE = "iis"
+    $env:PAGESPEED_LANE_FIXTURES = "daemon_html_conformance"
     $pyArgs = @("$Bin\run_iis_html_conformance.py", "$Bin\system")
     if ($Rows) { $pyArgs += ($Rows -split ",") }
     # Python writes its own errors to stderr: they are lines of the run,
