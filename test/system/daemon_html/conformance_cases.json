@@ -52,7 +52,8 @@
     "header_early, expires, auth, alias, default_vhost, in_place,",
     "pagespeed_off_location, compress_markdown, third_party_filter, merge_slashes,",
     "poll_interval_s, chained_module_origin), origin {status, headers, body_ref,",
-    "echo_conditionals}, and steps [{request {method, path, host, headers}, pre,",
+    "echo_conditionals, truncate_body (the body ends before its Content-Length)},",
+    "and steps [{request {method, path, host, headers}, pre,",
     "process, background, expect}]. live pre ops: purge_url {url, form PURGE |",
     "query}, purge_global {via admin | flush_file}, wait_markdown {timeout_s,",
     "expect_ready (default true; false = the copy must NOT become servable",
@@ -15610,7 +15611,7 @@
     {
       "id": "live-leak-cdn-cache-control-200",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15628,37 +15629,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15666,7 +15642,7 @@
     {
       "id": "live-leak-cdn-cache-control-head",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15684,38 +15660,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "body_bytes": 0,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15723,7 +15673,7 @@
     {
       "id": "live-leak-cdn-cache-control-304",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15741,40 +15691,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {
-              "method": "GET",
-              "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
-            },
-            "expect": {
-              "status": 304,
-              "headers_exact": {
-                "ETag": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "Age",
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Content-Type",
-                "Expires",
-                "Set-Cookie",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter",
-                "X-Robots-Tag"
-              ]
-            }
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"], ["If-None-Match", "W/\"psm-0123456789abcdef\""]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15782,7 +15704,7 @@
     {
       "id": "live-leak-surrogate-control-200",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15800,37 +15722,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15838,7 +15735,7 @@
     {
       "id": "live-leak-surrogate-control-head",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15856,38 +15753,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true,
-              "body_bytes": 0,
-              "headers_absent": [
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Expires",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter"
-              ]
-            }
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -15895,7 +15766,7 @@
     {
       "id": "live-leak-surrogate-control-304",
       "runners": ["live"],
-      "why": "markdown: response header allowlist",
+      "why": "store: a server-added shared-cache directive refuses the store",
       "ports": ["apache", "nginx"],
       "live": {
         "mode": "serve-variants",
@@ -15913,40 +15784,12 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {"status": 200}
-          },
-          {
-            "request": {
-              "method": "GET",
-              "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
-            },
-            "expect": {
-              "status": 304,
-              "headers_exact": {
-                "ETag": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
-              },
-              "headers_only": true,
-              "headers_absent": [
-                "Age",
-                "CDN-Cache-Control",
-                "Content-Language",
-                "Content-Type",
-                "Expires",
-                "Set-Cookie",
-                "Strict-Transport-Security",
-                "Surrogate-Control",
-                "X-Filter",
-                "X-Robots-Tag"
-              ]
-            }
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"], ["If-None-Match", "W/\"psm-0123456789abcdef\""]]},
+            "pre": [{"sleep_s": {"s": 2}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": false}
           }
         ]
       }
@@ -16643,7 +16486,7 @@
       "id": "live-leak-expires-200",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -16696,10 +16539,65 @@
       }
     },
     {
+      "id": "live-leak-expires-200-apache",
+      "runners": ["live"],
+      "why": "markdown: response header allowlist (expires gives the lifetime on this port)",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"expires": "1h"},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true,
+              "headers_absent": [
+                "CDN-Cache-Control",
+                "Content-Language",
+                "Expires",
+                "Strict-Transport-Security",
+                "Surrogate-Control",
+                "X-Filter"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "live-leak-expires-head",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -16753,10 +16651,66 @@
       }
     },
     {
+      "id": "live-leak-expires-head-apache",
+      "runners": ["live"],
+      "why": "markdown: response header allowlist (expires gives the lifetime on this port)",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"expires": "1h"},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true,
+              "body_bytes": 0,
+              "headers_absent": [
+                "CDN-Cache-Control",
+                "Content-Language",
+                "Expires",
+                "Strict-Transport-Security",
+                "Surrogate-Control",
+                "X-Filter"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "live-leak-expires-304",
       "runners": ["live"],
       "why": "markdown: response header allowlist",
-      "ports": ["apache", "nginx"],
+      "ports": ["nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -16766,6 +16720,64 @@
           "headers": [
             ["Content-Type", "text/html; charset=utf-8"],
             ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
+            },
+            "expect": {
+              "status": 304,
+              "headers_exact": {
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"}
+              },
+              "headers_only": true,
+              "headers_absent": [
+                "Age",
+                "CDN-Cache-Control",
+                "Content-Language",
+                "Content-Type",
+                "Expires",
+                "Set-Cookie",
+                "Strict-Transport-Security",
+                "Surrogate-Control",
+                "X-Filter",
+                "X-Robots-Tag"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-leak-expires-304-apache",
+      "runners": ["live"],
+      "why": "markdown: response header allowlist (expires gives the lifetime on this port)",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"expires": "1h"},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
             ["ETag", "\"v1\""]
           ],
           "body_ref": "page"
@@ -17146,7 +17158,7 @@
       "id": "live-compressor-ignores-no-gzip",
       "runners": ["live"],
       "why": "markdown: transport conflict is kept and counted",
-      "ports": ["apache", "nginx"],
+      "ports": ["nginx"],
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -17181,6 +17193,52 @@
               "content_type": "text/markdown; charset=utf-8",
               "headers_exact": {"Content-Encoding": {"count": 1}},
               "counter_delta": {"daemon_markdown_transport_conflict": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-compressor-ignores-no-gzip-apache",
+      "runners": ["live"],
+      "why": "markdown: no content filter runs on the copy on this port",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"compress_markdown": {"ignores_no_compress": true}},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Content-Length": {"count": 1}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true,
+              "counter_delta": {"daemon_markdown_transport_conflict": 0}
             }
           }
         ]
@@ -17483,6 +17541,7 @@
     {
       "id": "live-url-disagree-encoded-slash",
       "runners": ["live"],
+      "ports": ["nginx", "iis"],
       "why": "request: server and module read the URL differently",
       "live": {
         "mode": "serve-variants",
@@ -17514,8 +17573,43 @@
       }
     },
     {
+      "id": "live-url-disagree-encoded-slash-apache",
+      "runners": ["live"],
+      "ports": ["apache"],
+      "why": "request: the server refuses an encoded slash itself on this port",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "GET", "path": "/a%2Fpage", "headers": [["Accept", "text/markdown"]]},
+            "expect": {"status": 404, "stored": false}
+          }
+        ]
+      }
+    },
+    {
       "id": "live-url-disagree-dot-segment",
       "runners": ["live"],
+      "ports": ["nginx", "iis"],
       "why": "request: server and module read the URL differently",
       "live": {
         "mode": "serve-variants",
@@ -17542,6 +17636,109 @@
           {
             "request": {"method": "GET", "path": "/x/../page", "headers": [["Accept", "text/markdown"]]},
             "expect": {"status": 200, "content_type": "text/html", "stored": false}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-url-disagree-dot-segment-apache",
+      "runners": ["live"],
+      "ports": ["apache"],
+      "why": "request: the server and module both resolve dot segments on this port",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200}
+          },
+          {
+            "request": {"method": "GET", "path": "/x/../page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-url-encoded-question-mark-apache",
+      "runners": ["live"],
+      "why": "request: a decoded path that reads as another key is refused",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": []},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "stored": false,
+              "counter_delta": {"daemon_html_refused_url_disagree": 1}
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_markdown_fallthrough_url_disagree": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-truncated-origin-never-stored",
+      "runners": ["live"],
+      "why": "store: only a whole body is stored",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page",
+          "truncate_body": true
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"stored": false}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 5, "expect_ready": false}}],
+            "expect": {"stored": false}
           }
         ]
       }
@@ -17857,11 +18054,11 @@
         },
         "steps": [
           {
-            "request": {"method": "GET", "path": "/page", "headers": []},
+            "request": {"method": "GET", "path": "/", "headers": []},
             "expect": {"status": 200, "content_type": "text/html", "stored": true}
           },
           {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "request": {"method": "GET", "path": "/", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"wait_markdown": {"timeout_s": 30}}],
             "expect": {"status": 200}
           },

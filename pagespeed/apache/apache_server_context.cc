@@ -19,6 +19,7 @@
 
 #include "pagespeed/apache/apache_server_context.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 
@@ -30,9 +31,11 @@
 #include "net/instaweb/rewriter/config/measurement_proxy_rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/measurement_proxy_url_namer.h"
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_daemon_html.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
 #include "pagespeed/apache/apache_request_context.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
+#include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/file_system.h"
@@ -40,7 +43,10 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/system/daemon_html_purge_source.h"
+#include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/uds_daemon_reader.h"
 
 namespace net_instaweb {
@@ -54,7 +60,8 @@ ApacheServerContext::ApacheServerContext(ApacheRewriteDriverFactory* factory,
     : SystemServerContext(factory, server->server_hostname, server->port),
       apache_factory_(factory),
       server_rec_(server),
-      version_(version.data(), version.size()) {
+      version_(version.data(), version.size()),
+      daemon_html_in_flight_(std::make_unique<ApacheDaemonHtmlInFlight>()) {
   // We may need the message handler for error messages very early, before
   // we get to InitServerContext in ChildInit().
   set_message_handler(apache_factory_->message_handler());
@@ -69,7 +76,39 @@ ApacheServerContext::ApacheServerContext(ApacheRewriteDriverFactory* factory,
   set_response_headers_finalized(false);
 }
 
-ApacheServerContext::~ApacheServerContext() {}
+ApacheServerContext::~ApacheServerContext() {
+  // The engine goes first: out of the admin purge path, then once nothing
+  // it handed out is still running.
+  if (daemon_html_engine_ != nullptr) {
+    if (daemon_html_observing_purges_ && cache_path() != nullptr) {
+      cache_path()->RemovePurgeObserver(daemon_html_engine_.get());
+    }
+    // Bounded: a prefork child told to stop exits from its signal handler,
+    // and a frame it interrupted between Enter and Leave never resumes.
+    // Then everything that frame can still reach is left to the process
+    // exit, not destroyed under it: the engine, the in-flight count, the
+    // purge source the engine reads, and the daemon adapter whose handle
+    // the engine's volume source hands out.
+    static constexpr int64 kInFlightWaitMs = 5000;
+    if (daemon_html_in_flight_->WaitIdleFor(kInFlightWaitMs)) {
+      daemon_html_engine_.reset();
+    } else {
+      // Left to the process exit on purpose.
+      DaemonHtmlEngine* const engine = daemon_html_engine_.release();
+      ApacheDaemonHtmlInFlight* const in_flight =
+          daemon_html_in_flight_.release();
+      SystemDaemonHtmlPurgeSource* const purge_source =
+          daemon_html_purge_source_.release();
+      // One more owner of the adapter, never released.
+      auto* const adapter = new std::shared_ptr<DaemonAdapter>(  // NOLINT
+          daemon_adapter_);
+      static_cast<void>(engine);
+      static_cast<void>(in_flight);
+      static_cast<void>(purge_source);
+      static_cast<void>(adapter);
+    }
+  }
+}
 
 void ApacheServerContext::InitStats(Statistics* statistics) {
   ProxyInterface::InitStats(kProxyInterfaceStatsPrefix, statistics);
@@ -119,13 +158,120 @@ bool ApacheServerContext::RunDaemonStartupCheck(DaemonAdapterPool* pool) {
 DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
   std::call_once(daemon_html_engine_once_, [this] {
     const ApacheConfig* config = global_config();
-    daemon_html_engine_ = NewDaemonHtmlEngineForPort(
-        config->daemon_html_cache(), config->daemon_html_max_bytes(),
-        config->log_dir(),
-        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
-        statistics(), timer(), message_handler());
+    const DaemonAbi* abi =
+        daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi();
+    if (config->daemon_html_cache() !=
+            RewriteOptions::kDaemonHtmlCacheServeVariants ||
+        !config->agent_optimize() || abi == nullptr) {
+      // Nothing to serve: report-only, exactly as before.
+      daemon_html_engine_ = NewDaemonHtmlEngineForPort(
+          config->daemon_html_cache(), config->daemon_html_max_bytes(),
+          config->log_dir(), abi, statistics(), timer(), message_handler());
+      return;
+    }
+    DaemonHtmlEngine::Config engine_config;
+    engine_config.mode = DaemonHtmlMode::kServeVariants;
+    engine_config.max_bytes = config->daemon_html_max_bytes();
+    engine_config.agent_optimize = true;
+    // This record's own names; a request served for another record that
+    // shares this configuration names another site and is never stored or
+    // served here.
+    engine_config.host_names =
+        ApacheConfiguredHostNames(server_rec_, apache_factory_->main_server(),
+                                  apache_factory_->stated_server_names());
+    engine_config.site = ApacheDaemonHtmlSiteId(server_rec_, this);
+    // Every record of this configuration's cache path, from the
+    // configuration: a global purge is fenced for each of their sites.
+    for (const server_rec* server = apache_factory_->main_server();
+         server != nullptr; server = server->next) {
+      ApacheServerContext* context =
+          InstawebContext::ServerContextFromServerRec(
+              const_cast<server_rec*>(server));
+      if (context == nullptr || context->cache_path() != cache_path()) {
+        continue;
+      }
+      const GoogleString site = ApacheDaemonHtmlSiteId(server, context);
+      if (IsSiteId(site) && std::find(engine_config.epoch_sites.begin(),
+                                      engine_config.epoch_sites.end(), site) ==
+                                engine_config.epoch_sites.end()) {
+        engine_config.epoch_sites.push_back(site);
+      }
+    }
+    if (IsSiteId(engine_config.site) &&
+        std::find(engine_config.epoch_sites.begin(),
+                  engine_config.epoch_sites.end(),
+                  engine_config.site) == engine_config.epoch_sites.end()) {
+      engine_config.epoch_sites.push_back(engine_config.site);
+    }
+    DaemonHtmlEngine::Deps deps;
+    deps.substrate.abi = abi;
+    // Asked at each use: the handle this process holds on the optimizer's
+    // current volume, or none while the daemon is not usable or its volume
+    // was replaced and not yet reopened.
+    DaemonAdapter* adapter = daemon_adapter_.get();
+    deps.substrate.cache_source = [adapter]() -> void* {
+      return adapter->ServingHealth() == DaemonHealth::kReady
+                 ? adapter->RecordCacheForRequest()
+                 : nullptr;
+    };
+    deps.substrate.cache_path = adapter->volume_path();
+    deps.substrate.notify_socket = adapter->socket_path();
+    // This server's purge set and global purge as the cache path's polling
+    // keeps them, and its cache.flush file.
+    daemon_html_purge_source_ = std::make_unique<SystemDaemonHtmlPurgeSource>(
+        global_options(), file_system(),
+        DaemonHtmlCacheFlushPath(config->cache_flush_filename(),
+                                 config->file_cache_path()));
+    deps.purge_source = daemon_html_purge_source_.get();
+    deps.statistics = statistics();
+    deps.timer = timer();
+    deps.handler = message_handler();
+    deps.limiter = ProcessDaemonHealNotifyLimiter();
+    deps.budget = ProcessDaemonHtmlByteBudget();
+    // An Apache request thread may block: the ticks' and the admin path's
+    // volume I/O runs inline.
+    deps.runner = nullptr;
+    deps.log_dir = config->log_dir();
+    if (deps.log_dir.empty()) {
+      message_handler()->Message(
+          kWarning, "DaemonHtmlCache decision log is off: LogDir is not set");
+    }
+    daemon_html_engine_ = std::make_unique<DaemonHtmlEngine>(
+        std::move(engine_config), std::move(deps));
+    if (cache_path() != nullptr) {
+      cache_path()->AddPurgeObserver(daemon_html_engine_.get());
+      daemon_html_observing_purges_ = true;
+    }
   });
   return daemon_html_engine_.get();
+}
+
+void ApacheServerContext::TickDaemonHtmlEngine() {
+  const ApacheConfig* config = global_config();
+  if (config->daemon_html_cache() !=
+          RewriteOptions::kDaemonHtmlCacheServeVariants ||
+      !config->agent_optimize()) {
+    return;
+  }
+  const int64 now_s = timer()->NowMs() / Timer::kSecondMs;
+  // The serving conditions and the global purge, at the purge-poll
+  // interval; the site's epoch and the unpaired keys every ten seconds.
+  // One request in each process runs a tick; the others go on.
+  const int64 poll_s =
+      std::max<int64>(1, config->cache_flush_poll_interval_sec());
+  int64 last = daemon_html_poll_tick_s_.load(std::memory_order_relaxed);
+  if (now_s - last >= poll_s &&
+      daemon_html_poll_tick_s_.compare_exchange_strong(last, now_s)) {
+    DaemonHtmlEngine* engine = daemon_html_engine();
+    if (engine != nullptr) engine->OnPurgePollTick();
+  }
+  static constexpr int64 kStatisticsTickSeconds = 10;
+  last = daemon_html_stats_tick_s_.load(std::memory_order_relaxed);
+  if (now_s - last >= kStatisticsTickSeconds &&
+      daemon_html_stats_tick_s_.compare_exchange_strong(last, now_s)) {
+    DaemonHtmlEngine* engine = daemon_html_engine();
+    if (engine != nullptr) engine->OnStatisticsTick();
+  }
 }
 
 ApacheConfig* ApacheServerContext::global_config() {

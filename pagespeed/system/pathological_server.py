@@ -27,10 +27,35 @@ Usage:
 Author: Jeff Kaufman (jefftk@google.com)
 """
 
-import select
+import selectors
 import socket
 import sys
 import time
+
+
+def _ready(read_list, write_list, timeout_s):
+  """The sockets of the two lists ready to read and to write.
+
+  Through the selectors module (epoll where there is one) rather than
+  select(), which cannot take a descriptor above FD_SETSIZE (1024): a server
+  that restarts often makes many clients fetch from here at once, and slow
+  answers keep their sockets open for seconds.
+  """
+  selector = selectors.DefaultSelector()
+  try:
+    for soc in set(read_list) | set(write_list):
+      events = 0
+      if soc in read_list:
+        events |= selectors.EVENT_READ
+      if soc in write_list:
+        events |= selectors.EVENT_WRITE
+      selector.register(soc, events)
+    ready = selector.select(timeout_s)
+  finally:
+    selector.close()
+  readable = [key.fileobj for key, ev in ready if ev & selectors.EVENT_READ]
+  writable = [key.fileobj for key, ev in ready if ev & selectors.EVENT_WRITE]
+  return readable, writable, []
 
 
 def _fail_future_requests(filename):
@@ -218,8 +243,8 @@ class PathologicalServer(object):
     self._read_list.append(self._server_socket)
 
     while True:
-      readable, writable, errored = select.select(
-          self._read_list, self._write_list, [], 0.1)
+      readable, writable, errored = _ready(self._read_list, self._write_list,
+                                           0.1)
 
       timer_entries_to_remove = []
       for entry in self._timer_list:

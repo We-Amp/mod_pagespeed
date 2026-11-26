@@ -75,7 +75,7 @@ const StringSet kVhostKnobs = {"header_add",
                                "poll_interval_s",
                                "chained_module_origin"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
-                               "echo_conditionals"};
+                               "echo_conditionals", "truncate_body"};
 const StringSet kLiveStepKeys = {"request", "pre", "process", "background",
                                  "expect"};
 const StringSet kLiveRequestKeys = {"method", "path", "host", "headers"};

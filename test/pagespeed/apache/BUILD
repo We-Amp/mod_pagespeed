@@ -39,6 +39,7 @@ pagespeed_cc_test(
     srcs = [
         "apache_conditional_stash_test.cc",
         "apache_config_test.cc",
+        "apache_daemon_html_test.cc",
         "apache_fetch_test.cc",
         "apache_host_names_test.cc",
         "apache_mmap_bucket_test.cc",

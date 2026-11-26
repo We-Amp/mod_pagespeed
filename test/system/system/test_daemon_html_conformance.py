@@ -15,6 +15,8 @@ lane with a provider, a row is skipped only when its `ports` leave the
 lane's port out.
 """
 
+import os
+
 import pytest
 
 from pagespeed_test_framework import daemon_html_conformance as conf
@@ -31,9 +33,19 @@ def _port(server_config) -> str:
     return "apache"
 
 
+# What each port's provider needs from its lane, as a lane fixture: without
+# it (a lane that runs no optimizer worker) the rows have nothing to run on.
+PROVIDER_FIXTURES = {"apache": "daemon_html_conformance"}
+
+
 @pytest.fixture(scope="module")
 def provider(server_config):
-    p = conf.load_provider(_port(server_config), server_config)
+    port = _port(server_config)
+    needed = PROVIDER_FIXTURES.get(port)
+    provided = {n.strip() for n in os.environ.get("PAGESPEED_LANE_FIXTURES", "").split(",")}
+    if needed is not None and needed not in provided:
+        pytest.skip(f"lane fixture {needed} not provided")
+    p = conf.load_provider(port, server_config)
     if p is None:
         pytest.skip(f"no HTML cache conformance provider for the {_port(server_config)} lane yet")
     return p

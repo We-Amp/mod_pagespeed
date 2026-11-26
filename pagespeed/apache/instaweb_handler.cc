@@ -41,6 +41,7 @@
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_daemon_html.h"
 #include "pagespeed/apache/apache_fetch.h"
 #include "pagespeed/apache/apache_logging_includes.h"
 #include "pagespeed/apache/apache_message_handler.h"
@@ -647,12 +648,44 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
 }
 
 GoogleString InstawebHandler::DaemonSiteId() const {
-  const GoogleString* site_fragment =
-      server_context_->apache_factory()->site_cache_fragment(request_->server);
-  return SiteIdFromServerFragment(
-      site_fragment != nullptr
-          ? *site_fragment
-          : server_context_->global_config()->cache_fragment());
+  return ApacheDaemonHtmlSiteId(request_->server, server_context_);
+}
+
+namespace {
+
+// Whether any Accept line names a Markdown type: the requests the HTML
+// cache's serve gate can answer at all.  The rest skip it without building
+// their facts.
+int FindMarkdownAccept(void* rec, const char* /*key*/, const char* value) {
+  if (value != nullptr &&
+      FindIgnoreCase(value, "markdown") != StringPiece::npos) {
+    *static_cast<bool*>(rec) = true;
+    return 0;  // Stop.
+  }
+  return 1;
+}
+
+}  // namespace
+
+bool InstawebHandler::ServeDaemonHtmlMarkdown() {
+  const ApacheConfig* config = server_context_->global_config();
+  if (config->daemon_html_cache() !=
+          RewriteOptions::kDaemonHtmlCacheServeVariants ||
+      !config->agent_optimize() || !ApacheDaemonHtmlMainRequest(request_)) {
+    return false;
+  }
+  bool asks_markdown = false;
+  apr_table_do(FindMarkdownAccept, &asks_markdown, request_->headers_in,
+               HttpAttributes::kAccept, nullptr);
+  if (!asks_markdown) return false;
+  DaemonHtmlEngine* engine = server_context_->daemon_html_engine();
+  if (engine == nullptr) return false;
+  DaemonHtmlRequestFacts facts;
+  FillApacheDaemonHtmlRequestFacts(request_, server_context_, options_,
+                                   stripped_gurl_, &facts);
+  ApacheDaemonHtmlPort port(request_, engine,
+                            server_context_->daemon_html_in_flight());
+  return engine->Serve(facts, &port).kind == DaemonHtmlServeResult::kFinal;
 }
 
 // Records ONE serve class against the peer's serve-stats mmap.  A no-op when
@@ -1261,7 +1294,10 @@ bool InstawebHandler::handle_as_resource(ApacheServerContext* server_context,
   if (server_context->IsPagespeedResource(*gurl)) {
     handled = true;
     instaweb_handler.HandleAsPagespeedResource();
-  } else if (instaweb_handler.HandleAsProxy()) {
+  } else if (instaweb_handler.HandleAsProxy() ||
+             // Its own gate, ahead of in-place optimization's: a page's
+             // Markdown copy is answered with in-place optimization off too.
+             instaweb_handler.ServeDaemonHtmlMarkdown()) {
     handled = true;
   } else if (options->in_place_rewriting_enabled() && options->enabled() &&
              options->IsAllowed(gurl->Spec())) {
@@ -1656,6 +1692,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
   // that the global_config might be altered by this, but the pointer will not
   // change.
   server_context->FlushCacheIfNecessary();
+  server_context->TickDaemonHtmlEngine();
 
   ApacheRewriteDriverFactory* factory = server_context->apache_factory();
   ApacheMessageHandler* message_handler = factory->apache_message_handler();
