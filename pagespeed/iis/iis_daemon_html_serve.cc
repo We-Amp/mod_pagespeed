@@ -29,6 +29,16 @@ bool HasLine(const DaemonHtmlHeaderLines& lines, StringPiece name) {
 
 }  // namespace
 
+std::wstring IisWidenRawTarget(const char* raw, size_t length) {
+  std::wstring out;
+  if (raw == nullptr) return out;
+  out.reserve(length);
+  for (size_t i = 0; i < length; ++i) {
+    out.push_back(static_cast<wchar_t>(static_cast<unsigned char>(raw[i])));
+  }
+  return out;
+}
+
 bool IisPristineTarget(const wchar_t* value, size_t length, GoogleString* out) {
   out->clear();
   if (value == nullptr || length == 0) return false;

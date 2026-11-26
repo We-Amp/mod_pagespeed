@@ -29,6 +29,9 @@
     removed takes effect when the application pool recycles. An HTML page
     IIS cached before the option was turned on is answered from that cache
     until it expires; recycle the pool after turning it on.
+  - On a site with inbound URL Rewrite rules, a `PURGE` request may be
+    answered by the site itself and purge nothing; use the admin purge
+    (`/pagespeed_admin/cache?purge=<url>`), which works there.
   - `Vary: Accept` is added to the HTML pages the module rewrites; a page it
     passes through unchanged (a HEAD, an AJAX request, a disallowed URL)
     does not get it.

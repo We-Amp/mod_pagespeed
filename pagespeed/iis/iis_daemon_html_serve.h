@@ -33,6 +33,7 @@
 #define PAGESPEED_IIS_IIS_DAEMON_HTML_SERVE_H_
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "pagespeed/kernel/base/string.h"
@@ -59,6 +60,10 @@ GoogleString IisVaryWithAccept(StringPiece existing);
 // URL Rewrite rule) changes the request: the HTML cache's key.  Each byte of
 // the target is one wide character.  Not a name a request header maps to.
 inline constexpr char kIisPristineTargetVariable[] = "X-PRISTINE-TARGET";
+
+// The value the hook stores: each byte of the raw target as one wide
+// character of the same value (0x00 to 0xFF).
+std::wstring IisWidenRawTarget(const char* raw, size_t length);
 
 // The request target, path and query, from that variable's value: false
 // when it is empty or holds a character that is not a byte.  An

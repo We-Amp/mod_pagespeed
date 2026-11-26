@@ -3267,6 +3267,107 @@
      "plain_port": 8081
     }
    }
+  },
+  {
+   "id": "iis-url-rewrite-inbound-raw-high-byte",
+   "runners": [
+    "live"
+   ],
+   "why": "cache key: a target with a raw high byte is the client's, or nothing",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "vhost": {
+     "url_rewrite_inbound": [
+      [
+       "^blog-(a|b)$",
+       "front"
+      ]
+     ]
+    },
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a?x=\u00e9",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "HEAD",
+       "path": "/front",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a?x=\u00e9",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "pre": [
+       {
+        "sleep_s": {
+         "s": 2
+        }
+       }
+      ],
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     },
+     {
+      "request": {
+       "method": "HEAD",
+       "path": "/front",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": false
+      }
+     }
+    ]
+   }
   }
  ]
 }

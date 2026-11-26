@@ -713,6 +713,9 @@ class IisProvider(conf.Provider):
     def _send(self, method: str, path: str, host: str, headers: HeaderLines, tls: bool = True,
               conn: Optional[http.client.HTTPConnection] = None) -> conf.Response:
         c = conn or self._connection(tls, self._port_of(host))
+        # The request line byte for byte: a character up to U+00FF in a
+        # row's path is that one byte (http.client would refuse it).
+        c._encode_request = lambda request: request.encode("latin-1")
         try:
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
@@ -800,7 +803,7 @@ class IisProvider(conf.Provider):
         hostname = h.rsplit(":", 1)[0] if ":" in h and not h.startswith("[") else h
         site = hashlib.sha256(self.fragment.encode()).hexdigest()
         scheme = b"http" if self._port_of(h) else b"https"
-        return (path.encode(), hostname.encode(), scheme, site.encode())
+        return (path.encode("latin-1"), hostname.encode(), scheme, site.encode())
 
     def stored_entry(self, path: str, host: Optional[str]) -> Optional[conf.StoredEntry]:
         return self.volume.stored_entry(self._key(path, host))

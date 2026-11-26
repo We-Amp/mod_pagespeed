@@ -164,8 +164,8 @@ class MyGlobalModule : public CGlobalModule {
       // target is bytes; each one is kept as one wide character.
       const HTTP_REQUEST* raw = rq->GetRawHttpRequest();
       if (raw->pRawUrl != nullptr && raw->RawUrlLength > 0) {
-        const std::wstring target(raw->pRawUrl,
-                                  raw->pRawUrl + raw->RawUrlLength);
+        const std::wstring target =
+            net_instaweb::IisWidenRawTarget(raw->pRawUrl, raw->RawUrlLength);
         pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
             net_instaweb::kIisPristineTargetVariable, target.c_str());
       }

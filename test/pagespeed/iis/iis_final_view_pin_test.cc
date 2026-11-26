@@ -316,6 +316,16 @@ TEST_F(IisFinalViewPinTest, TheMainRegistrationKeepsTheAnswerForTheFinalView) {
   }
 }
 
+TEST_F(IisFinalViewPinTest, ARequestWithoutItsPristineTargetNeverAgrees) {
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const GoogleString facts = FunctionBody(cc, "staticvoidBuildIisDaemonHtmlFacts(");
+  ASSERT_FALSE(facts.empty());
+  EXPECT_NE(GoogleString::npos, facts.find("facts->url_agreed=pristine_read&&"));
+  const GoogleString dll = ReadStrippedSource("dll_main.cc");
+  EXPECT_NE(GoogleString::npos,
+            dll.find("IisWidenRawTarget(raw->pRawUrl,raw->RawUrlLength)"));
+}
+
 TEST_F(IisFinalViewPinTest, TheBodyIsRecordedOnlyBeforeTheResponseIsCleared) {
   const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
   const GoogleString send = FunctionBody(cc, "IisHttpModule::OnSendResponse(");

@@ -94,6 +94,21 @@ TEST(IisPristineTargetTest, TheTargetIsReadBackByteForByte) {
   EXPECT_EQ("/caf\xe9", out);
 }
 
+TEST(IisPristineTargetTest, TheHookKeepsEveryByteAsItsOwnCharacter) {
+  // A byte at or above 0x80 is one character of the same value, never a
+  // sign-extended one, so the target reads back whole.
+  const char raw[] = "/blog-a?x=\xe9\xff\x80";
+  const std::wstring wide = IisWidenRawTarget(raw, sizeof(raw) - 1);
+  ASSERT_EQ(sizeof(raw) - 1, wide.size());
+  EXPECT_EQ(static_cast<wchar_t>(0xE9), wide[10]);
+  EXPECT_EQ(static_cast<wchar_t>(0xFF), wide[11]);
+  EXPECT_EQ(static_cast<wchar_t>(0x80), wide[12]);
+  GoogleString out;
+  ASSERT_TRUE(IisPristineTarget(wide.data(), wide.size(), &out));
+  EXPECT_EQ(GoogleString(raw, sizeof(raw) - 1), out);
+  EXPECT_TRUE(IisWidenRawTarget(nullptr, 0).empty());
+}
+
 TEST(IisPristineTargetTest, AnythingButBytesIsRefused) {
   GoogleString out = "x";
   EXPECT_FALSE(IisPristineTarget(nullptr, 0, &out));

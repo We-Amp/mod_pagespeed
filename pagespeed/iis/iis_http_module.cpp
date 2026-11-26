@@ -866,12 +866,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		facts->method = method == nullptr ? "" : method;
 		facts->scheme = (raw != nullptr && raw->pSslInfo != nullptr) ? "https" : "http";
 		// The target as the client sent it, taken before any module could
-		// rewrite the request; the current one when that cannot be read.
+		// rewrite the request.  When it cannot be read, the request is never
+		// stored or served: its current target may be another module's.
 		PCWSTR pristine = nullptr;
 		DWORD pristine_length = 0;
-		if (FAILED(http_context->GetRootContext()->GetServerVariable(
-				kIisPristineTargetVariable, &pristine, &pristine_length)) ||
-			!IisPristineTarget(pristine, pristine_length, &facts->path)) {
+		const bool pristine_read =
+			SUCCEEDED(http_context->GetRootContext()->GetServerVariable(
+				kIisPristineTargetVariable, &pristine, &pristine_length)) &&
+			IisPristineTarget(pristine, pristine_length, &facts->path);
+		if (!pristine_read) {
 			facts->path = IisRawRequestTarget(raw);
 		}
 		// The host of the URL this module keys the request on, with the
@@ -898,7 +901,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The server and this module read the path alike, and the request
 		// spells it the one way the cache keys it (iis_daemon_html_serve.h).
 		GoogleString iis_path;
-		facts->url_agreed =
+		facts->url_agreed = pristine_read &&
 			IisInPlaceUrlAgreesForRequest(http_context, *inner->gurl(), &iis_path) &&
 			IisHtmlCachePathIsCanonical(facts->path);
 		if (facts->url_agreed && at_store) {
