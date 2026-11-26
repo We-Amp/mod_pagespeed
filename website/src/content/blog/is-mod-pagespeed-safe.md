@@ -5,6 +5,7 @@ date: 2026-10-19
 author: 'Otto van der Schaaf'
 tags: ['deep-dive', 'security', 'caching', 'architecture', 'mod_pagespeed']
 draft: false
+lastUpdated: 2026-11-26
 ---
 
 Is mod_pagespeed safe? It rewrites the HTML, CSS, JavaScript and images your origin serves, and a wrong rewrite breaks a page or drops a security header. Old reviews call its JavaScript minification risky, and hosting docs warn of crashes. In 2.5.0, a rewrite that fails any check the optimizer runs on it is not applied: mod_pagespeed serves the response without it.
@@ -85,13 +86,13 @@ In the Apache and nginx module builds, libcurl replaced Serf. Several unmaintain
 
 The 2.5.0 image-decoder hardening added 17 regression tests, each seen failing before its fix and passing after. In one hardening pass, review found an image-input crash outside the change's scope; it shipped as a denial-of-service fix in worker 2.0.39.
 
-Changes to escaping, minifiers and cache semantics are also put through agent-assisted adversarial review. Separate read-only reviewers, each with one lens and blind to the others, try to break the change. Claims are checked against the shipped source.
+AI agents do the engineering work and the code review. Reviews use multiple independent lenses using top-tier models. Claims are checked against the shipped source.
 
 An AI reviewer is non-deterministic and has blind spots of its own. It can escalate a change but never clears a gate, and its pass is not a sign-off.
 
-Inputs the nightly fuzzer flags are triaged with agent help: replayed, minimized and root-caused. Fuzzing covers only the surfaces that have a harness, and an oracle can be wrong.
+Inputs the nightly fuzzer flags are triaged by agents: replayed, minimized and root-caused. Fuzzing covers only the surfaces that have a harness, and an oracle can be wrong.
 
-The gates are scripts, not models: the fuzz-seed replay and binary-hardening check above, and a check that every change to product code carries a release note or a stated reason for none. Several gates have self-tests that plant a defect and expect the gate to fail. Publishing a release needs a human's explicit approval.
+The gates are scripts: the fuzz-seed replay and binary-hardening check above, and a check that every change to product code carries a release note or a stated reason for none. Several gates have self-tests that plant a defect and expect the gate to fail. A person approves the signing and publishing of every release; agents do everything else, including site deploys, behind automated gates. Critical or challenging changes also get a person's review. [Why our releases have more gates now](/blog/why-our-releases-have-more-gates/) lists what a release passes, and the release behind one of the gates.
 
 ## Keeping mod_pagespeed safe: updates and settings to check
 
