@@ -219,7 +219,8 @@ struct DaemonHtmlSubstrate {
   const DaemonAbi* abi = nullptr;
   void* cache = nullptr;
   // When set, asked for the handle at each use instead of `cache`, and
-  // `cache` is ignored.  For a server whose handle can change while the
+  // `cache` is ignored.  A handle it returned must stay valid until the
+  // engine is destroyed (a replaced handle is set aside, not closed).  For a server whose handle can change while the
   // engine lives: a volume the optimizer replaced is reopened, and while no
   // handle can be vouched for the answer is null, so nothing is written,
   // removed or served (DaemonAdapter::RecordCacheForRequest).  Each store,
@@ -264,10 +265,11 @@ class DaemonHtmlPurgeOracle {
   void SetSiteEpoch(bool read_ok, uint64 epoch_s);
   // An epoch this process wrote for the site.
   void RaiseSiteEpoch(uint64 epoch_s);
-  // A URL purge this process carried out (the admin path), at `purge_ms`,
-  // under the cache key `url`: fenced here at once, before the purge set the
-  // source reads has polled the purge in.  Bounded; the oldest is dropped
-  // first, by which time the purge set has it.
+  // A URL purge this process carried out (the admin path), at `purge_ms`
+  // (never later than now), under the cache key `url`: fenced here at once,
+  // before the purge set the source reads has polled the purge in.
+  // Bounded: when the oldest has to go, everything stored at or before it
+  // stays fenced.
   void NoteUrlPurge(const GoogleString& url, int64 purge_ms);
   static constexpr size_t kLocalUrlPurgesMax = 1024;
 
@@ -291,6 +293,9 @@ class DaemonHtmlPurgeOracle {
   bool site_epoch_ok_ = true;
   uint64 site_epoch_s_ = 0;
   std::map<GoogleString, int64> local_url_purges_;
+  // Every entry stored at or before this is purged: the newest purge the
+  // bounded map above had to forget.
+  int64 local_url_floor_ms_ = -1;
   std::atomic<bool> recheck_disabled_{false};
 };
 
@@ -568,6 +573,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   bool unavailable_logged_ = false;
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
+  // The handle epoch_written_s_ was written through.
+  void* epoch_cache_ = nullptr;
   // Keys this process removed (or found absent) on a refusal, with the
   // second; bounded.
   std::map<GoogleString, int64> recently_removed_;

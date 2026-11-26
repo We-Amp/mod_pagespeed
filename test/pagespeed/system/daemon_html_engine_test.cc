@@ -89,6 +89,40 @@ TEST(DaemonHtmlPurgeOracleTest, AFailedEpochReadFencesTheWholeSite) {
   EXPECT_TRUE(oracle.Purged("https://a.test/", 1789999990));
 }
 
+// A URL purge the bounded map had to forget still fences everything stored
+// at or before it, whatever its URL, and nothing newer.
+TEST(DaemonHtmlPurgeOracleTest, AForgottenUrlPurgeStillFences) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  const uint32 before_s = static_cast<uint32>(kNowMs / 1000 - 100);
+  oracle.NoteUrlPurge("https://a.test/first", kNowMs - 50000);
+  for (size_t i = 0; i < DaemonHtmlPurgeOracle::kLocalUrlPurgesMax; ++i) {
+    oracle.NoteUrlPurge(StrCat("https://a.test/", IntegerToString(i)),
+                        kNowMs - 1000);
+  }
+  // "first" was the oldest and is forgotten: still fenced.
+  EXPECT_TRUE(oracle.Purged("https://a.test/first", before_s));
+  EXPECT_TRUE(oracle.Purged("https://a.test/never-purged", before_s));
+  // Newer than the forgotten purge, and never purged: not fenced.
+  EXPECT_FALSE(oracle.Purged("https://a.test/never-purged",
+                             static_cast<uint32>(kNowMs / 1000 - 10)));
+  EXPECT_TRUE(oracle.Purged("https://a.test/7",
+                            static_cast<uint32>(kNowMs / 1000 - 10)));
+}
+
+// A URL purge time is never later than now.
+TEST(DaemonHtmlPurgeOracleTest, AFutureUrlPurgeTimeIsClamped) {
+  MockTimer timer(new NullMutex, kNowMs);
+  Source source;
+  DaemonHtmlPurgeOracle oracle(&source, &timer);
+  oracle.NoteUrlPurge("https://a.test/", kNowMs + 3600 * 1000);
+  EXPECT_TRUE(oracle.Purged("https://a.test/",
+                            static_cast<uint32>(kNowMs / 1000)));
+  EXPECT_FALSE(oracle.Purged("https://a.test/",
+                             static_cast<uint32>(kNowMs / 1000 + 1)));
+}
+
 TEST(DaemonHtmlPurgeOracleTest, AFutureGlobalTimeIsClampedWhenFirstSeen) {
   MockTimer timer(new NullMutex, kNowMs);
   Source source;
@@ -603,6 +637,106 @@ TEST_F(DaemonHtmlEngineTest, AnEntryStoredAgainIsRemovedOnTheNextRefusal) {
   abi_.Queue(kPsHtmlStoreActionRefuse, "private");
   Capture(engine.get(), &port, kOrigin, kOrigin, facts);
   EXPECT_EQ(2, CallsOf("ps_cache_remove_site"));
+}
+
+// One entry is shared by every port of a site: a store through one port
+// clears what a refusal through another remembered, so the next refusal
+// removes again.
+TEST_F(DaemonHtmlEngineTest, TheRemovedSetIsKeyedWithoutThePort) {
+  FakeVolumeEntry entry;
+  entry.alternate_id = kPsSentinelOriginal;
+  entry.body = kBody;
+  entry.inserted_at = static_cast<uint32_t>(kNowMs / 1000 - 10);
+  entry.max_age = 300;
+  entry.origin_ct = "text/html";
+  entry.has_hash = true;
+  SHA256(reinterpret_cast<const uint8_t*>(kBody), sizeof(kBody) - 1,
+         entry.hash);
+  volume_
+      .entries()[{FakeDaemonVolume::Key(kSite, "https://www.example.test/page"),
+                  kPsSentinelOriginal}] = entry;
+  abi_.mutable_injection()->sidecar_read_rc = kPsOk;
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts plain = MarkdownRequest();
+  plain.accept_lines.clear();
+  DaemonHtmlRequestFacts other_port = plain;
+  other_port.host = "www.example.test:8443";
+
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+  Capture(engine.get(), &port, kOrigin, kOrigin, plain);
+  EXPECT_EQ(1, CallsOf("ps_cache_remove_site"));
+
+  timer_.AdvanceMs(1000);
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, other_port);
+
+  timer_.AdvanceMs(1000);
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+  Capture(engine.get(), &port, kOrigin, kOrigin, plain);
+  EXPECT_EQ(2, CallsOf("ps_cache_remove_site"));
+}
+
+// A path that does not start with "/" names no volume entry: nothing is
+// read for it, and nothing is stored.
+TEST_F(DaemonHtmlEngineTest, APathWithoutALeadingSlashNamesNoEntry) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.path = "page";
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
+            engine->Serve(facts, &port).kind);
+  EXPECT_TRUE(abi_.serve_facts().empty());
+  EXPECT_EQ(nullptr, engine->StartRecording(facts, &port));
+}
+
+// A URL purge is fenced even while no volume handle can be had.
+TEST_F(DaemonHtmlEngineTest, AUrlPurgeWithoutAHandleIsStillFenced) {
+  DaemonHtmlEngine::Deps deps;
+  deps.substrate.abi = &abi_;
+  deps.substrate.cache_source = []() -> void* { return nullptr; };
+  deps.purge_source = &source_;
+  deps.statistics = &stats_;
+  deps.timer = &timer_;
+  deps.handler = &handler_;
+  deps.limiter = &limiter_;
+  deps.budget = &budget_;
+  DaemonHtmlEngine engine(config_, deps);
+  bool ok = false;
+  engine.OnAdminPurge("https://www.example.test/page", false, kNowMs,
+                      [&ok](bool o, const GoogleString&) { ok = o; });
+  EXPECT_TRUE(ok);
+  EXPECT_TRUE(engine.oracle()->Purged("https://www.example.test/page",
+                                      static_cast<uint32>(kNowMs / 1000)));
+  EXPECT_FALSE(engine.oracle()->Purged("https://www.example.test/other",
+                                       static_cast<uint32>(kNowMs / 1000)));
+}
+
+// The epoch is written again to a volume that replaced the one it was
+// written to.
+TEST_F(DaemonHtmlEngineTest, AReplacedVolumeGetsTheEpochAgain) {
+  source_.purge_set.UpdateGlobalInvalidationTimestampMs(kNowMs - 5000);
+  FakeDaemonVolume replacement;
+  void* handle = &volume_;
+  DaemonHtmlEngine::Deps deps;
+  deps.substrate.abi = &abi_;
+  deps.substrate.cache_source = [&handle]() { return handle; };
+  deps.purge_source = &source_;
+  deps.statistics = &stats_;
+  deps.timer = &timer_;
+  deps.handler = &handler_;
+  deps.limiter = &limiter_;
+  deps.budget = &budget_;
+  DaemonHtmlEngine engine(config_, deps);
+  EXPECT_EQ(1, CallsOf("ps_cache_write_site_purge_epoch"));
+  engine.OnPurgePollTick();
+  EXPECT_EQ(1, CallsOf("ps_cache_write_site_purge_epoch"));
+  handle = &replacement;
+  engine.OnPurgePollTick();
+  EXPECT_EQ(2, CallsOf("ps_cache_write_site_purge_epoch"));
 }
 
 }  // namespace

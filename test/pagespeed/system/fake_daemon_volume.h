@@ -63,6 +63,9 @@ class FakeDaemonVolume : public DaemonAbi {
     return StrCat(scheme == nullptr ? "" : scheme, "://",
                   hostname == nullptr ? "" : hostname, url);
   }
+  // The volume takes a URL path ("/..."), never a full URL: a call with
+  // anything else is refused, as a misuse.
+  static bool IsPath(const char* url) { return url != nullptr && url[0] == '/'; }
   static GoogleString Key(const char* site, const char* url,
                           const char* hostname, const char* scheme) {
     return Key(site, EntryUrl(url, hostname, scheme).c_str());
@@ -112,6 +115,7 @@ class FakeDaemonVolume : public DaemonAbi {
                              const char* scheme, const char* site,
                              const PsWriteParams* params,
                              void** out) const override {
+    if (!IsPath(url)) return kPsErrInvalidArg;
     auto* w = new PendingWrite;
     w->key = Key(site, url, hostname, scheme);
     w->entry.alternate_id = params->alternate_id;
@@ -178,6 +182,10 @@ class FakeDaemonVolume : public DaemonAbi {
   int CacheReadAlternateSite(void*, const char* url, const char* hostname,
                              const char* scheme, const char* site, uint8_t id,
                              void** out) const override {
+    if (!IsPath(url)) {
+      *out = nullptr;
+      return kPsErrInvalidArg;
+    }
     auto it = entries_.find({Key(site, url, hostname, scheme), id});
     if (it == entries_.end()) {
       *out = nullptr;
@@ -259,6 +267,7 @@ class FakeDaemonVolume : public DaemonAbi {
       s.has_hash = true;
       memcpy(s.hash, params->origin_html_hash, kPsHtmlHashBytes);
     }
+    if (!IsPath(params->url)) return kPsErrInvalidArg;
     sidecars_[Key(params->site, params->url, params->hostname,
                   params->scheme)] = s;
     if (out_verdict != nullptr) *out_verdict = 0;
@@ -268,6 +277,10 @@ class FakeDaemonVolume : public DaemonAbi {
   int HeadersSidecarRead(void*, const char* url, const char* hostname,
                          const char* scheme, const char* site,
                          void** out) const override {
+    if (!IsPath(url)) {
+      *out = nullptr;
+      return kPsErrInvalidArg;
+    }
     auto it = sidecars_.find(Key(site, url, hostname, scheme));
     if (it == sidecars_.end()) {
       *out = nullptr;
@@ -310,6 +323,7 @@ class FakeDaemonVolume : public DaemonAbi {
   }
   int CacheRemoveSite(void*, const char* url, const char* hostname,
                       const char* scheme, const char* site) const override {
+    if (!IsPath(url)) return kPsErrInvalidArg;
     const GoogleString key = Key(site, url, hostname, scheme);
     bool any = sidecars_.erase(key) > 0;
     for (auto it = entries_.begin(); it != entries_.end();) {

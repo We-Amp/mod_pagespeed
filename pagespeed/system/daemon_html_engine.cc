@@ -333,18 +333,30 @@ DaemonHtmlHeaderLines FinalViewForStore(
   return out;
 }
 
+// Whether a request path can name a volume entry: a path that starts with
+// "/".  Anything else is neither stored, served nor removed, so a cache key
+// always splits back into its parts exactly (VolumeUrl).
+bool IsVolumePath(StringPiece path) { return !path.empty() && path[0] == '/'; }
+
 // The URL argument of the volume calls for a cache key
-// ("scheme://host[:port]/path?query"): its path and query.  The volume keys
-// an entry by that, the host name, the scheme and the site, as the
-// optimizer worker and this module's other volume readers and writers do;
-// the full URL is what the purge fence is checked under.
+// ("scheme://host[:port]/path?query", built by CacheKey from a path that
+// IsVolumePath accepts, and a host with no "/"): its path and query.  The
+// volume keys an entry by that, the host name, the scheme and the site, as
+// the optimizer worker and this module's other volume readers and writers
+// do; the full URL is what the purge fence is checked under.
 GoogleString VolumeUrl(const GoogleString& url) {
   const size_t sep = url.find("://");
   if (sep == GoogleString::npos) return url;
-  const size_t path = url.find_first_of("/?", sep + 3);
-  if (path == GoogleString::npos) return "/";
-  if (url[path] == '?') return StrCat("/", url.substr(path));
-  return url.substr(path);
+  const size_t path = url.find('/', sep + 3);
+  return path == GoogleString::npos ? GoogleString() : url.substr(path);
+}
+
+// The key of the engine's own per-entry sets: the entry's volume identity,
+// so one entry reached through two ports is one key.
+GoogleString VolumeIdentity(const GoogleString& url,
+                            const GoogleString& hostname,
+                            const GoogleString& scheme) {
+  return StrCat(scheme, "\n", hostname, "\n", VolumeUrl(url));
 }
 
 // The header block the re-store skip compares: what a stored entry does not
@@ -498,6 +510,8 @@ void DaemonHtmlPurgeOracle::RaiseSiteEpoch(uint64 epoch_s) {
 
 void DaemonHtmlPurgeOracle::NoteUrlPurge(const GoogleString& url,
                                          int64 purge_ms) {
+  // A purge time is never later than now (as for the global purge).
+  if (timer_ != nullptr) purge_ms = std::min(purge_ms, timer_->NowMs());
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = local_url_purges_.find(url);
   if (it != local_url_purges_.end()) {
@@ -510,6 +524,11 @@ void DaemonHtmlPurgeOracle::NoteUrlPurge(const GoogleString& url,
          ++i) {
       if (i->second < oldest->second) oldest = i;
     }
+    // The purge set may not have polled the evicted purge in yet: every
+    // entry stored at or before it stays fenced, whatever its URL.  The
+    // evicted purge is the oldest remembered, so this covers nothing newer
+    // than a purge still in the map.
+    local_url_floor_ms_ = std::max(local_url_floor_ms_, oldest->second);
     local_url_purges_.erase(oldest);
   }
   local_url_purges_[url] = purge_ms;
@@ -523,6 +542,7 @@ bool DaemonHtmlPurgeOracle::Purged(const GoogleString& url,
   if (stored_at_s <= site_epoch_s_) return true;
   const int64 stored_ms = static_cast<int64>(stored_at_s) * Timer::kSecondMs;
   if (global_ms >= 0 && stored_ms <= global_ms) return true;
+  if (stored_ms <= local_url_floor_ms_) return true;
   const auto local = local_url_purges_.find(url);
   if (local != local_url_purges_.end() && stored_ms <= local->second) {
     return true;
@@ -915,13 +935,21 @@ void DaemonHtmlEngine::ObservePurgeState() {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     bound = set_bound_;
-    if (global_ms / Timer::kSecondMs <= epoch_written_s_) return;
   }
   if (!bound || config_.mode < DaemonHtmlMode::kServeVariants) {
     return;
   }
   void* cache = Cache();
   if (cache == nullptr) return;
+  {
+    // A replaced volume has none of the epochs written to the one before.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (cache != epoch_cache_) {
+      epoch_cache_ = cache;
+      epoch_written_s_ = -1;
+    }
+    if (global_ms / Timer::kSecondMs <= epoch_written_s_) return;
+  }
   const uint64 epoch_s = static_cast<uint64>(global_ms / Timer::kSecondMs);
   RunOn(deps_.runner, [this, cache, epoch_s] {
     bool all_ok = true;
@@ -957,7 +985,8 @@ void DaemonHtmlEngine::OnStatisticsTick() {
   RunOn(deps_.runner, [this, cache, watched] {
     const DaemonAbi* abi = deps_.substrate.abi;
     const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
-    for (const auto& [url, key] : watched) {
+    for (const auto& [identity, key] : watched) {
+      const GoogleString& url = key.url;
       ServeReads reads(abi);
       bool done = true;
       if (abi->CacheReadAlternateSite(cache, VolumeUrl(url).c_str(),
@@ -985,7 +1014,7 @@ void DaemonHtmlEngine::OnStatisticsTick() {
       }
       if (done) {
         std::lock_guard<std::mutex> lock(mutex_);
-        unpaired_.erase(url);
+        unpaired_.erase(identity);
       }
     }
   });
@@ -994,9 +1023,10 @@ void DaemonHtmlEngine::OnStatisticsTick() {
 void DaemonHtmlEngine::TrackUnpaired(const GoogleString& url,
                                      const GoogleString& hostname,
                                      const GoogleString& scheme) {
+  const GoogleString key = VolumeIdentity(url, hostname, scheme);
   std::lock_guard<std::mutex> lock(mutex_);
-  if (unpaired_.size() >= kUnpairedMax && unpaired_.count(url) == 0) return;
-  unpaired_[url] = Unpaired{url, hostname, scheme};
+  if (unpaired_.size() >= kUnpairedMax && unpaired_.count(key) == 0) return;
+  unpaired_[key] = Unpaired{url, hostname, scheme};
 }
 
 bool DaemonHtmlEngine::RecentlyRemoved(const GoogleString& key, int64 now_s) {
@@ -1084,7 +1114,8 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
                    nullptr, -1);
       return nullptr;
     }
-    if (!HostExactlyConfigured(facts.host, config_.host_names)) {
+    if (!IsVolumePath(facts.path) ||
+        !HostExactlyConfigured(facts.host, config_.host_names)) {
       return nullptr;
     }
   } else if (!deps_.substrate.abi->PublishesHtmlStorePolicy()) {
@@ -1431,7 +1462,7 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
         hash_changed = !same_body;
         // The key is present again (written here or by a peer): a later
         // refusal must read and remove it, whatever this process removed.
-        ForgetRemoved(url);
+        ForgetRemoved(VolumeIdentity(url, hostname, facts.scheme));
         const char* stored_ct = abi->ReadOriginContentType(existing.original);
         bool skip = stored_at > inserted_at;
         if (!skip && same_body &&
@@ -1518,7 +1549,7 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
     TrackUnpaired(url, hostname, facts.scheme);
     return;
   }
-  ForgetRemoved(url);
+  ForgetRemoved(VolumeIdentity(url, hostname, facts.scheme));
   Hook(kAfterCommit);
 
   // The fence: a purge that covers the insert time and became visible while
@@ -1565,9 +1596,11 @@ void DaemonHtmlEngine::MaybeRemoveOnRefusal(
       status == 404 || status == 410;
   if (!removing_response) return;
   const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
-  if (RecentlyRemoved(url, now_s)) return;
   const GoogleString scheme = facts.scheme;
-  port->RunBlocking(DaemonHtmlCommit([this, url, hostname, scheme, now_s] {
+  const GoogleString identity = VolumeIdentity(url, hostname, scheme);
+  if (RecentlyRemoved(identity, now_s)) return;
+  port->RunBlocking(DaemonHtmlCommit([this, url, hostname, scheme, identity,
+                                      now_s] {
     const DaemonAbi* abi = deps_.substrate.abi;
     void* cache = Cache();
     if (cache == nullptr) return;
@@ -1586,7 +1619,7 @@ void DaemonHtmlEngine::MaybeRemoveOnRefusal(
       if (rc == kPsOk) counters_->removed->Add(1);
       counters_->removed_on_refusal->Add(1);
     }
-    NoteRemoved(url, now_s);
+    NoteRemoved(identity, now_s);
   }));
 }
 
@@ -1635,7 +1668,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
     return result;
   }
   result.reason = "other";
-  if (!facts.options_enabled_and_allowed ||
+  if (!facts.options_enabled_and_allowed || !IsVolumePath(facts.path) ||
       !HostExactlyConfigured(facts.host, config_.host_names)) {
     return result;
   }
@@ -1857,17 +1890,43 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     done(true, GoogleString());
     return;
   }
+  // The key a URL purge names, and the fence for it in this process: noted
+  // at once, before anything can fail or wait, so a capture already under
+  // way fails its re-check; peer processes see the purge set's record at
+  // their next poll.  The fence is per URL as spelled after normalisation
+  // (its port included), as the purge set's is; the removal below takes the
+  // entry every port of the site shares.
+  GoogleString hostname;
+  GoogleString cache_url;
+  DaemonHtmlRequestFacts parts;
+  if (global) {
+    oracle_.NoteGlobalPurge(now_ms);
+  } else {
+    const GoogleString key = DaemonHtmlNormalizePurgeUrl(url);
+    const size_t sep = key.find("://");
+    if (sep == GoogleString::npos) {
+      done(true, GoogleString());
+      return;
+    }
+    parts.scheme = key.substr(0, sep);
+    const size_t path_start = key.find_first_of("/?#", sep + 3);
+    parts.host = key.substr(sep + 3, path_start == GoogleString::npos
+                                         ? GoogleString::npos
+                                         : path_start - sep - 3);
+    parts.path = path_start == GoogleString::npos ? GoogleString()
+                                                  : key.substr(path_start);
+    CacheKey(parts, &cache_url, &hostname);
+    oracle_.NoteUrlPurge(cache_url, now_ms);
+  }
   void* cache = Cache();
   if (cache == nullptr) {
     // No volume this process can vouch for: nothing is served from one
-    // either.  The global purge is still fenced here, and a process with a
-    // handle writes its epoch on its purge-poll tick.
-    if (global) oracle_.NoteGlobalPurge(now_ms);
+    // either, and the purge is fenced above.  A process with a handle
+    // writes the global epoch on its purge-poll tick.
     done(true, GoogleString());
     return;
   }
   if (global) {
-    oracle_.NoteGlobalPurge(now_ms);
     const uint64 epoch_s = static_cast<uint64>(
         std::min(now_ms, deps_.timer->NowMs()) / Timer::kSecondMs);
     RunOn(deps_.runner, [this, cache, epoch_s, done] {
@@ -1887,26 +1946,11 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     });
     return;
   }
-  const GoogleString key = DaemonHtmlNormalizePurgeUrl(url);
-  DaemonHtmlRequestFacts parts;
-  const size_t sep = key.find("://");
-  if (sep == GoogleString::npos) {
+  if (!IsVolumePath(parts.path)) {
+    // Names no volume entry; the fence above still holds.
     done(true, GoogleString());
     return;
   }
-  parts.scheme = key.substr(0, sep);
-  const size_t path_start = key.find_first_of("/?#", sep + 3);
-  parts.host = key.substr(sep + 3, path_start == GoogleString::npos
-                                       ? GoogleString::npos
-                                       : path_start - sep - 3);
-  GoogleString hostname;
-  GoogleString cache_url;
-  parts.path = path_start == GoogleString::npos ? GoogleString()
-                                                : key.substr(path_start);
-  CacheKey(parts, &cache_url, &hostname);
-  // Fenced in this process at once; peer processes see the purge set's
-  // record at their next poll.
-  oracle_.NoteUrlPurge(cache_url, now_ms);
   RunOn(deps_.runner, [this, cache, cache_url, hostname, host = parts.host,
                        path = parts.path, scheme = parts.scheme, done] {
     const int rc = deps_.substrate.abi->CacheRemoveSite(
