@@ -297,8 +297,16 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
           net_instaweb::modulePath,
           pGlobalInfo->GetAppPoolName(),
           net_instaweb::message_handler),
-      RQ_SEND_RESPONSE | RQ_RESOLVE_REQUEST_CACHE,
+      RQ_BEGIN_REQUEST | RQ_SEND_RESPONSE | RQ_RESOLVE_REQUEST_CACHE,
       0);
+  if (FAILED(hr)) return hr;
+
+  // The begin-request notification carries one step only, and no serving:
+  // removing an entity tag this module minted from the request's
+  // conditionals, first, before any other module's handler or a forward sees
+  // them (IisHttpModule::OnBeginRequest).
+  hr = pModuleInfo->SetPriorityForRequestNotification(
+      RQ_BEGIN_REQUEST, PRIORITY_ALIAS_FIRST);
   if (FAILED(hr)) return hr;
 
   hr = pModuleInfo->SetPriorityForRequestNotification(

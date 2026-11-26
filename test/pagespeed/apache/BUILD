@@ -37,6 +37,7 @@ pagespeed_cc_test_library(
 pagespeed_cc_test(
     name = "apache",
     srcs = [
+        "apache_conditional_stash_test.cc",
         "apache_config_test.cc",
         "apache_fetch_test.cc",
         "apache_host_names_test.cc",

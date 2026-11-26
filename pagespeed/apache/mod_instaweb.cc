@@ -38,6 +38,7 @@
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
+#include "pagespeed/apache/apache_conditional_stash.h"
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_directive_table.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
@@ -1424,6 +1425,14 @@ apr_status_t pagespeed_log_transaction(request_rec* request) {
   return DECLINED;
 }
 
+// Keeps entity tags this module minted away from every handler and upstream:
+// on every request, whatever the configuration, before mod_proxy, mod_cache
+// and the default handler read the conditionals (module_entity_tags.h).
+int pagespeed_strip_module_entity_tags(request_rec* r) {
+  ApacheStashAndStripClientConditionals(r);
+  return DECLINED;
+}
+
 // Make sure that requests from ourselves don't get marked as coming from
 // this server, as we don't want them matching 'Require local' or any other
 // rule that admits the server's own addresses: the module fetches its own
@@ -1459,6 +1468,11 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
   static const char* const kRunAfterRemoteIp[] = {"mod_remoteip.c", nullptr};
   ap_hook_post_read_request(pagespeed_modify_request, kRunAfterRemoteIp,
                             nullptr, APR_HOOK_FIRST);
+
+  // Before every other post_read_request hook, so no module sees a
+  // conditional this module minted.
+  ap_hook_post_read_request(pagespeed_strip_module_entity_tags, nullptr,
+                            nullptr, APR_HOOK_REALLY_FIRST);
 
   // We register our output filter at (AP_FTYPE_RESOURCE + 1) so that
   // mod_pagespeed runs after mod_include.  See Issue

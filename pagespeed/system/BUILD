@@ -83,6 +83,19 @@ cc_library(
     ],
 )
 
+# The entity tags this module mints (psh-, psm-) and the request rule that
+# strips them from every upstream conditional.  Shared by every port; free
+# of any server's headers.
+cc_library(
+    name = "module_entity_tags",
+    srcs = ["module_entity_tags.cc"],
+    hdrs = ["module_entity_tags.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 cc_library(
     name = "serve_host_names",
     srcs = ["serve_host_names.cc"],

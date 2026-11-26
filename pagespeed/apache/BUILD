@@ -92,6 +92,7 @@ cc_library(
     name = "apache_core",
     target_compatible_with = ["@platforms//os:linux"],
     srcs = [
+        "apache_conditional_stash.cc",
         "apache_fetch.cc",
         "apache_message_handler.cc",
         "apache_mmap_bucket.cc",
@@ -115,6 +116,7 @@ cc_library(
         "streaming_pagespeed_resource_fetch.cc",
     ],
     hdrs = [
+        "apache_conditional_stash.h",
         "apache_fetch.h",
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
@@ -169,6 +171,7 @@ cc_library(
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:inplace_url_agreement",
+        "//pagespeed/system:module_entity_tags",
         # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
         # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",

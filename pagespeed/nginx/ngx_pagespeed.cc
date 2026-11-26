@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <new>
 #include <optional>
 #include <set>
 #include <vector>
@@ -61,6 +62,7 @@
 #include "ngx_daemon_serve_notify.h"
 #include "ngx_etag_match.h"
 #include "ngx_gzip_setter.h"
+#include "ngx_list_filter.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
 #include "ngx_request_body.h"
@@ -97,6 +99,7 @@
 #include "pagespeed/system/inplace_url_agreement.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
+#include "pagespeed/system/module_entity_tags.h"
 #include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/serve_host_names.h"
 #include "pagespeed/system/site_cache_fragment.h"
@@ -5556,6 +5559,89 @@ ngx_int_t ps_self_fetch_post_read_handler(ngx_http_request_t* r) {
   return NGX_DECLINED;
 }
 
+// The module entity tag rule (pagespeed/system/module_entity_tags.h), before
+// any handler evaluates or forwards a conditional: when If-None-Match carries
+// a tag this module minted, every If-None-Match and If-Modified-Since line
+// leaves r->headers_in.headers and the cached pointers are cleared.  Removal
+// from the list is what counts: the proxy and the other upstream modules
+// send every element of it.  The handler runs in POST_READ and again in
+// REWRITE, because a request nginx fails before the phase engine (400 for a
+// missing Host, 494 to 497) and sends through error_page to a location or a
+// named location starts after POST_READ.  The client's fields as they
+// arrived are kept with the request pool, only when either is present; an
+// internal redirect keeps the pool (it clears the module contexts) and a
+// subrequest shares it.  ps_client_conditional_stash() finds them; null
+// means no conditional was recorded, never "read headers_in instead".
+void ps_client_conditional_stash_cleanup(void* data) {
+  static_cast<ClientConditionalStash*>(data)->~ClientConditionalStash();
+}
+
+constexpr char kPsIfNoneMatch[] = "If-None-Match";
+constexpr char kPsIfModifiedSince[] = "If-Modified-Since";
+
+bool ps_header_is(const ngx_table_elt_t& h, const char* name, size_t len) {
+  return h.key.len == len &&
+         ngx_strncasecmp(h.key.data,
+                         reinterpret_cast<u_char*>(const_cast<char*>(name)),
+                         len) == 0;
+}
+
+bool ps_header_is_conditional_to_strip(const ngx_table_elt_t& h) {
+  return ps_header_is(h, kPsIfNoneMatch, STATIC_STRLEN(kPsIfNoneMatch)) ||
+         ps_header_is(h, kPsIfModifiedSince, STATIC_STRLEN(kPsIfModifiedSince));
+}
+
+// The client's conditionals as they arrived, for this request's facts.
+const ClientConditionalStash* ps_client_conditional_stash(
+    ngx_http_request_t* r) {
+  for (ngx_pool_cleanup_t* c = r->pool->cleanup; c != nullptr; c = c->next) {
+    if (c->handler == ps_client_conditional_stash_cleanup) {
+      return static_cast<const ClientConditionalStash*>(c->data);
+    }
+  }
+  return nullptr;
+}
+
+ngx_int_t ps_strip_module_entity_tags_post_read_handler(ngx_http_request_t* r) {
+  if (g_ps_abi_mismatch || ps_client_conditional_stash(r) != nullptr) {
+    return NGX_DECLINED;
+  }
+  StringPieceVector if_none_match, if_modified_since;
+  NgxListIterator it(&r->headers_in.headers.part);
+  for (ngx_table_elt_t* h = it.Next(); h != nullptr; h = it.Next()) {
+    if (ps_header_is(*h, kPsIfNoneMatch, STATIC_STRLEN(kPsIfNoneMatch))) {
+      if_none_match.push_back(str_to_string_piece(h->value));
+    } else if (ps_header_is(*h, kPsIfModifiedSince,
+                            STATIC_STRLEN(kPsIfModifiedSince))) {
+      if_modified_since.push_back(str_to_string_piece(h->value));
+    }
+  }
+  if (if_none_match.empty() && if_modified_since.empty()) {
+    return NGX_DECLINED;  // nothing to keep
+  }
+  ngx_pool_cleanup_t* cln =
+      ngx_pool_cleanup_add(r->pool, sizeof(ClientConditionalStash));
+  if (cln == nullptr) {
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+  auto* stash = new (cln->data) ClientConditionalStash();
+  cln->handler = ps_client_conditional_stash_cleanup;
+  if (!StashClientConditionals(if_none_match, if_modified_since, stash)) {
+    return NGX_DECLINED;
+  }
+  ngx_pool_t* pool = r->pool;
+  if (!NgxListRemoveIf<ngx_table_elt_t, ngx_list_part_t>(
+          &r->headers_in.headers, ps_header_is_conditional_to_strip,
+          [pool](size_t bytes) { return ngx_palloc(pool, bytes); },
+          20 /* as nginx sizes the list */)) {
+    // Never forward what could not be removed.
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+  r->headers_in.if_none_match = nullptr;
+  r->headers_in.if_modified_since = nullptr;
+  return NGX_DECLINED;
+}
+
 // preaccess_handler should be at generic phase before try_files
 ngx_int_t ps_preaccess_handler(ngx_http_request_t* r) {
   ngx_http_core_main_conf_t* cmcf;
@@ -5691,6 +5777,23 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
       return NGX_ERROR;
     }
     *sf_h = ps_self_fetch_post_read_handler;
+
+    // Module-minted entity tags never reach a handler or an upstream; see
+    // ps_strip_module_entity_tags_post_read_handler.
+    ngx_http_handler_pt* strip_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[NGX_HTTP_POST_READ_PHASE].handlers));
+    if (strip_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *strip_h = ps_strip_module_entity_tags_post_read_handler;
+    // And again in REWRITE, which every request reaches, error_page
+    // redirects to a named location included; the handler is idempotent.
+    ngx_http_handler_pt* strip_rewrite_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers));
+    if (strip_rewrite_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *strip_rewrite_h = ps_strip_module_entity_tags_post_read_handler;
 
     // Observe-only Web-Bot-Auth classifier, default-off. Runs in
     // the same phase; early-returns NGX_DECLINED unless WebBotAuth is enabled.

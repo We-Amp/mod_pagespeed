@@ -26,19 +26,31 @@
 namespace net_instaweb {
 namespace {
 
-// Request notifications IIS runs before or during its access decision. None
-// of them may carry work of this module.
+// Request notifications IIS runs during its access decision. None of them may
+// carry work of this module.
 const char* const kStagesBeforeAccessDecision[] = {
-    "RQ_BEGIN_REQUEST",
     "RQ_AUTHENTICATE_REQUEST",
     "RQ_AUTHORIZE_REQUEST",
 };
 
 // Handler overrides for those stages, in the whitespace-free form.
 const char* const kHandlersBeforeAccessDecision[] = {
-    "OnBeginRequest(",        "OnPostBeginRequest(",
-    "OnAuthenticateRequest(", "OnPostAuthenticateRequest(",
+    "OnPostBeginRequest(",
+    "OnAuthenticateRequest(",
+    "OnPostAuthenticateRequest(",
     "OnAuthorizeRequest(",
+};
+
+// RQ_BEGIN_REQUEST, before the access decision, carries exactly one step:
+// removing an entity tag this module minted from the request's conditionals.
+// Its handler may make only these member calls; anything else (serving,
+// configuration, module contexts) is a change to this pin.
+const char* const kCallsAllowedInBeginRequest[] = {
+    "GetRequest",
+    "GetHeader",
+    "DeleteHeader",
+    "GetResponse",
+    "SetStatus",
 };
 
 // Reads a port source file and removes every whitespace byte.
@@ -109,6 +121,57 @@ TEST_F(IisRequestStagePinTest, RequestWorkIsRegisteredAfterAuthorization) {
         << "dll_main.cc names " << stage
         << ": the module would act on a request before IIS has decided "
            "whether the client may have it";
+  }
+}
+
+TEST_F(IisRequestStagePinTest, BeginRequestOnlyStripsModuleEntityTags) {
+  const GoogleString dll = ReadStrippedSource("dll_main.cc");
+  const GoogleString registration =
+      FunctionBody(dll, "HRESULT__stdcallRegisterModule(");
+  ASSERT_FALSE(registration.empty());
+  EXPECT_NE(GoogleString::npos,
+            registration.find(
+                "RQ_BEGIN_REQUEST|RQ_SEND_RESPONSE|RQ_RESOLVE_REQUEST_CACHE,"))
+      << "the conditional strip is no longer registered";
+  EXPECT_NE(GoogleString::npos,
+            registration.find("SetPriorityForRequestNotification("
+                              "RQ_BEGIN_REQUEST,PRIORITY_ALIAS_FIRST)"))
+      << "the conditional strip no longer runs first";
+  EXPECT_EQ(2, CountOf(dll, "RQ_BEGIN_REQUEST"))
+      << "dll_main.cc uses RQ_BEGIN_REQUEST for more than the strip";
+
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const GoogleString begin = FunctionBody(cc, "IisHttpModule::OnBeginRequest(");
+  ASSERT_FALSE(begin.empty())
+      << "OnBeginRequest was not found; this pin needs updating";
+  EXPECT_EQ(1, CountOf(begin, "StashClientConditionals("));
+  EXPECT_NE(GoogleString::npos, begin.find("DeleteHeader("));
+  // One way to end the request (the 500 when a removal fails), one status,
+  // and otherwise the request continues to IIS's access decision.
+  EXPECT_EQ(1, CountOf(begin, "RQ_NOTIFICATION_FINISH_REQUEST"));
+  EXPECT_EQ(1, CountOf(begin, "GetResponse()"));
+  EXPECT_EQ(1, CountOf(begin, "SetStatus(500,"));
+  EXPECT_EQ(2, CountOf(begin, "return"));
+  EXPECT_EQ(1, CountOf(begin, "returnRQ_NOTIFICATION_CONTINUE;"));
+  // Every member call is on the allowed list.
+  for (size_t at = begin.find("->"); at != GoogleString::npos;
+       at = begin.find("->", at + 2)) {
+    const size_t open = begin.find('(', at);
+    ASSERT_NE(GoogleString::npos, open);
+    const GoogleString name = begin.substr(at + 2, open - at - 2);
+    bool allowed = false;
+    for (const char* call : kCallsAllowedInBeginRequest) {
+      allowed = allowed || name == call;
+    }
+    EXPECT_TRUE(allowed) << "OnBeginRequest calls ->" << name
+                         << " before IIS has decided whether the client may "
+                            "have the URL";
+  }
+  // No configuration, context or serving names.
+  for (const char* name : {"config", "Config", "context_", "Context(",
+                           "OnBeginRequestPageSpeed", "ServeFrom", "Fetch"}) {
+    EXPECT_EQ(GoogleString::npos, begin.find(name))
+        << "OnBeginRequest names " << name;
   }
 }
 

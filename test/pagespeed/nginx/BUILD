@@ -161,6 +161,31 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pin for the nginx entity tag strip: both phase registrations and
+# the cached-pointer clearing (nginx cannot be linked into a test).
+pagespeed_cc_test(
+    name = "ngx_module_entity_tags_pin_test",
+    srcs = ["ngx_module_entity_tags_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# In-place removal from an nginx list, on structs laid out like ngx_list_t.
+pagespeed_cc_test(
+    name = "ngx_list_filter_test",
+    srcs = ["ngx_list_filter_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/nginx:ngx_list_filter",
+    ],
+)
+
 # The daemon record completion queue, caps, drop counter and open-attempt
 # latch -- the nginx-free half of the daemon record arm, tested standalone.
 pagespeed_cc_test(

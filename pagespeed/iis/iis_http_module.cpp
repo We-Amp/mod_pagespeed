@@ -37,6 +37,7 @@
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/module_entity_tags.h"
 #include "pagespeed/system/site_cache_fragment.h"
 
 #include "pagespeed/kernel/base/stack_buffer.h"
@@ -419,6 +420,37 @@ namespace net_instaweb
 			*handler_name = "pagespeed_admin";
 			return AdminHandlerFamily::kAdmin;
 		}
+	}
+
+	REQUEST_NOTIFICATION_STATUS
+		IisHttpModule::OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
+	{
+		UNREFERENCED_PARAMETER(pProvider);
+		IHttpRequest* request = pHttpContext->GetRequest();
+		StringPieceVector if_none_match, if_modified_since;
+		USHORT length = 0;
+		PCSTR value = request->GetHeader(HttpAttributes::kIfNoneMatch, &length);
+		if (value != nullptr && length > 0) {
+			if_none_match.push_back(StringPiece(value, length));
+		}
+		length = 0;
+		value = request->GetHeader(HttpAttributes::kIfModifiedSince, &length);
+		if (value != nullptr && length > 0) {
+			if_modified_since.push_back(StringPiece(value, length));
+		}
+		if (StashClientConditionals(if_none_match, if_modified_since,
+		                            &client_conditionals_)) {
+			// Both are removed or the request goes no further: a module tag
+			// must never reach a handler.  Only a field that is present is
+			// deleted.
+			if (FAILED(request->DeleteHeader(HttpAttributes::kIfNoneMatch)) ||
+			    (!if_modified_since.empty() &&
+			     FAILED(request->DeleteHeader(HttpAttributes::kIfModifiedSince)))) {
+				pHttpContext->GetResponse()->SetStatus(500, "Internal Server Error");
+				return RQ_NOTIFICATION_FINISH_REQUEST;
+			}
+		}
+		return RQ_NOTIFICATION_CONTINUE;
 	}
 
 	REQUEST_NOTIFICATION_STATUS
