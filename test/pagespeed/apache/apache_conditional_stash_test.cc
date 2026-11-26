@@ -74,6 +74,17 @@ TEST_F(ApacheConditionalStashTest, NoHookNoStash) {
   EXPECT_EQ(nullptr, ApacheClientConditionalStash(&request_));
 }
 
+// A request without conditionals costs no allocation: nothing is kept.
+TEST_F(ApacheConditionalStashTest, NoConditionalsKeepsNoStash) {
+  apr_table_add(request_.headers_in, "Accept", "text/markdown");
+  ApacheStashAndStripClientConditionals(&request_);
+  EXPECT_EQ(nullptr, ApacheClientConditionalStash(&request_));
+  void* data = nullptr;
+  apr_pool_userdata_get(&data, "mod_pagespeed_client_conditional_stash",
+                        request_.pool);
+  EXPECT_EQ(nullptr, data);
+}
+
 // An internal redirect (DirectoryIndex, ErrorDocument) is a new request on
 // the same pool and headers_in, and runs the hook again: it still reads the
 // fields as the client sent them.

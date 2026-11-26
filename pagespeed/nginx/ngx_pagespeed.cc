@@ -5559,15 +5559,19 @@ ngx_int_t ps_self_fetch_post_read_handler(ngx_http_request_t* r) {
   return NGX_DECLINED;
 }
 
-// The module entity tag rule (pagespeed/system/module_entity_tags.h), on
-// every request in POST_READ, before any handler evaluates or forwards a
-// conditional: when If-None-Match carries a tag this module minted, every
-// If-None-Match and If-Modified-Since line leaves r->headers_in.headers and
-// the cached pointers are cleared.  Removal from the list is what counts:
-// the proxy and the other upstream modules send every element of it.  The
-// client's fields as they arrived are kept with the request pool, which an
-// internal redirect keeps (it clears the module contexts) and a subrequest
-// shares; ps_client_conditional_stash() finds them.
+// The module entity tag rule (pagespeed/system/module_entity_tags.h), before
+// any handler evaluates or forwards a conditional: when If-None-Match carries
+// a tag this module minted, every If-None-Match and If-Modified-Since line
+// leaves r->headers_in.headers and the cached pointers are cleared.  Removal
+// from the list is what counts: the proxy and the other upstream modules
+// send every element of it.  The handler runs in POST_READ and again in
+// REWRITE, because a request nginx fails before the phase engine (400 for a
+// missing Host, 494 to 497) and sends through error_page to a location or a
+// named location starts after POST_READ.  The client's fields as they
+// arrived are kept with the request pool, only when either is present; an
+// internal redirect keeps the pool (it clears the module contexts) and a
+// subrequest shares it.  ps_client_conditional_stash() finds them; null
+// means no conditional was recorded, never "read headers_in instead".
 void ps_client_conditional_stash_cleanup(void* data) {
   static_cast<ClientConditionalStash*>(data)->~ClientConditionalStash();
 }
@@ -5611,6 +5615,9 @@ ngx_int_t ps_strip_module_entity_tags_post_read_handler(ngx_http_request_t* r) {
                             STATIC_STRLEN(kPsIfModifiedSince))) {
       if_modified_since.push_back(str_to_string_piece(h->value));
     }
+  }
+  if (if_none_match.empty() && if_modified_since.empty()) {
+    return NGX_DECLINED;  // nothing to keep
   }
   ngx_pool_cleanup_t* cln =
       ngx_pool_cleanup_add(r->pool, sizeof(ClientConditionalStash));
@@ -5779,6 +5786,14 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
       return NGX_ERROR;
     }
     *strip_h = ps_strip_module_entity_tags_post_read_handler;
+    // And again in REWRITE, which every request reaches, error_page
+    // redirects to a named location included; the handler is idempotent.
+    ngx_http_handler_pt* strip_rewrite_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers));
+    if (strip_rewrite_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *strip_rewrite_h = ps_strip_module_entity_tags_post_read_handler;
 
     // Observe-only Web-Bot-Auth classifier, default-off. Runs in
     // the same phase; early-returns NGX_DECLINED unless WebBotAuth is enabled.

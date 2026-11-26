@@ -43,16 +43,14 @@ const char* const kHandlersBeforeAccessDecision[] = {
 
 // RQ_BEGIN_REQUEST, before the access decision, carries exactly one step:
 // removing an entity tag this module minted from the request's conditionals.
-// It serves nothing; these calls may not appear in its handler.
-const char* const kForbiddenInBeginRequest[] = {
-    "OnBeginRequestPageSpeed(",
-    "ResourceFetch::",
-    "ServeFromIisDaemonSubstrate(",
-    "FetchInPlaceResource(",
-    "WriteEntityChunk",
-    "SetHeader(",
-    "CreateRequestContext(",
-    "GetModuleContextContainer(",
+// Its handler may make only these member calls; anything else (serving,
+// configuration, module contexts) is a change to this pin.
+const char* const kCallsAllowedInBeginRequest[] = {
+    "GetRequest",
+    "GetHeader",
+    "DeleteHeader",
+    "GetResponse",
+    "SetStatus",
 };
 
 // Reads a port source file and removes every whitespace byte.
@@ -146,12 +144,34 @@ TEST_F(IisRequestStagePinTest, BeginRequestOnlyStripsModuleEntityTags) {
   const GoogleString begin = FunctionBody(cc, "IisHttpModule::OnBeginRequest(");
   ASSERT_FALSE(begin.empty())
       << "OnBeginRequest was not found; this pin needs updating";
-  EXPECT_NE(GoogleString::npos, begin.find("StashClientConditionals("));
+  EXPECT_EQ(1, CountOf(begin, "StashClientConditionals("));
   EXPECT_NE(GoogleString::npos, begin.find("DeleteHeader("));
-  for (const char* call : kForbiddenInBeginRequest) {
-    EXPECT_EQ(GoogleString::npos, begin.find(call))
-        << "OnBeginRequest calls " << call
-        << " before IIS has decided whether the client may have the URL";
+  // One way to end the request (the 500 when a removal fails), one status,
+  // and otherwise the request continues to IIS's access decision.
+  EXPECT_EQ(1, CountOf(begin, "RQ_NOTIFICATION_FINISH_REQUEST"));
+  EXPECT_EQ(1, CountOf(begin, "GetResponse()"));
+  EXPECT_EQ(1, CountOf(begin, "SetStatus(500,"));
+  EXPECT_EQ(2, CountOf(begin, "return"));
+  EXPECT_EQ(1, CountOf(begin, "returnRQ_NOTIFICATION_CONTINUE;"));
+  // Every member call is on the allowed list.
+  for (size_t at = begin.find("->"); at != GoogleString::npos;
+       at = begin.find("->", at + 2)) {
+    const size_t open = begin.find('(', at);
+    ASSERT_NE(GoogleString::npos, open);
+    const GoogleString name = begin.substr(at + 2, open - at - 2);
+    bool allowed = false;
+    for (const char* call : kCallsAllowedInBeginRequest) {
+      allowed = allowed || name == call;
+    }
+    EXPECT_TRUE(allowed) << "OnBeginRequest calls ->" << name
+                         << " before IIS has decided whether the client may "
+                            "have the URL";
+  }
+  // No configuration, context or serving names.
+  for (const char* name : {"config", "Config", "context_", "Context(",
+                           "OnBeginRequestPageSpeed", "Serve", "Fetch"}) {
+    EXPECT_EQ(GoogleString::npos, begin.find(name))
+        << "OnBeginRequest names " << name;
   }
 }
 

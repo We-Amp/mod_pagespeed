@@ -18,14 +18,17 @@
 namespace net_instaweb {
 
 // Applies the rule to `r`.  The stash is kept once, for the request as the
-// client sent it: on an internal redirect (which shares the request pool)
-// the first stash stays, so it still holds the fields as they arrived.
+// client sent it, and only when it carries either field: an internal
+// redirect (ErrorDocument; it shares the request pool and runs the hook
+// again) leaves the first stash, so it still holds the fields as they
+// arrived.
 void ApacheStashAndStripClientConditionals(request_rec* r);
 
 // The stash of the request `r` belongs to, found through internal redirects
-// (r->prev) and subrequests (r->main), so a DirectoryIndex or ErrorDocument
-// request reads the client's original fields.  Null when the hook did not
-// run for it.
+// (r->prev) and subrequests (r->main); a DirectoryIndex fast redirect keeps
+// the same request and pool.  Null means no conditional was recorded: the
+// caller treats the request as carrying none and never reads headers_in
+// instead.
 const ClientConditionalStash* ApacheClientConditionalStash(
     const request_rec* r);
 

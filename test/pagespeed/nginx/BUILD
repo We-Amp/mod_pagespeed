@@ -161,6 +161,21 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pin for the nginx entity tag strip: both phase registrations and
+# the cached-pointer clearing (nginx cannot be linked into a test).
+pagespeed_cc_test(
+    name = "ngx_module_entity_tags_pin_test",
+    srcs = ["ngx_module_entity_tags_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # In-place removal from an nginx list, on structs laid out like ngx_list_t.
 pagespeed_cc_test(
     name = "ngx_list_filter_test",

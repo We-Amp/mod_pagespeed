@@ -66,6 +66,10 @@ void ApacheStashAndStripClientConditionals(request_rec* r) {
     apr_table_unset(r->headers_in, HttpAttributes::kIfNoneMatch);
     apr_table_unset(r->headers_in, HttpAttributes::kIfModifiedSince);
   }
+  if (!stash.has_if_none_match && !stash.has_if_modified_since) {
+    // Nothing to keep: no stash means no conditionals.
+    return;
+  }
   ClientConditionalStash* kept = FindStash(r);
   if (kept != nullptr) {
     // A later pass (an internal redirect) sees the fields as left by the

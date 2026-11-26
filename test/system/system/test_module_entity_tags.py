@@ -89,11 +89,14 @@ def echo_origin():
 
 
 def _request(
-    host: str, path: str, headers: Sequence[Tuple[str, str]]
+    host: str, path: str, headers: Sequence[Tuple[str, str]], port: int = 0
 ) -> Tuple[int, List[Tuple[str, str]]]:
-    """One GET with exactly these header lines (repeats kept, in order)."""
-    port = int(os.environ["PAGESPEED_STRIP_TAGS_PORT"])
-    lines = [f"GET {path} HTTP/1.1", f"Host: {host}", "Connection: close", "Accept-Encoding: identity"]
+    """One GET with exactly these header lines (repeats kept, in order).
+
+    An empty `host` sends no Host line."""
+    port = port or int(os.environ["PAGESPEED_STRIP_TAGS_PORT"])
+    lines = [f"GET {path} HTTP/1.1"] + ([f"Host: {host}"] if host else [])
+    lines += ["Connection: close", "Accept-Encoding: identity"]
     lines += [f"{name}: {value}" for name, value in headers]
     with socket.create_connection(("localhost", port), timeout=30) as conn:
         conn.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
@@ -201,6 +204,29 @@ def test_chained_module_origin_never_sees_an_outer_tag():
     # And a foreign tag still crosses both servers.
     _, seen = _through_origin(CHAIN_HOST, [("If-None-Match", 'W/"v1"')])
     assert seen["if-none-match"] == ['W/"v1"'], seen
+
+
+# nginx fails a request without Host (400) before its phases run; an
+# error_page to a named location then starts after POST_READ. The rule still
+# runs there.
+@pytest.mark.skipif(
+    not os.environ.get("PAGESPEED_STRIP_ERROR_PORT"), reason="nginx lane: the error_page listener"
+)
+def test_error_page_to_a_named_location_never_forwards_the_tag():
+    port = int(os.environ["PAGESPEED_STRIP_ERROR_PORT"])
+
+    def through(headers):
+        rid = f"r{next(_IDS)}-{time.monotonic_ns()}"
+        _request("", f"/strip_echo/page.html?rid={rid}", headers, port=port)
+        with _SEEN_LOCK:
+            seen = _SEEN.get(rid)
+        assert seen is not None, "the error_page route never reached the origin"
+        return seen
+
+    # Control: the route forwards the client's conditionals.
+    seen = through([("If-None-Match", 'W/"v1"'), ("If-Modified-Since", PAST)])
+    assert seen["if-none-match"] == ['W/"v1"'], seen
+    _assert_nothing_forwarded(through([("If-None-Match", MARKDOWN_TAG), ("If-Modified-Since", PAST)]))
 
 
 # The server's own static handler answers conditionals. If-Modified-Since

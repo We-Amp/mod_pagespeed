@@ -213,6 +213,10 @@ NGINX_DAEMON_API_PORT="${NGINX_DAEMON_API_PORT:-$((NGINX_PORT + 10010))}"
 # itself behind the strip-*.example.com servers (8080 + 10020 = 18100 at the
 # default).  Resolved after the arguments are parsed, so --port=N moves it too.
 NGINX_STRIP_ECHO_PORT="${NGINX_STRIP_ECHO_PORT:-$((NGINX_PORT + 10020))}"
+# And the listener whose only server sends a 400 (a request without Host)
+# through error_page to a named location in front of that origin (+ 10021 =
+# 18101 at the default).
+NGINX_STRIP_ERROR_PORT="${NGINX_STRIP_ERROR_PORT:-$((NGINX_PORT + 10021))}"
 
 # Configuration
 NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
@@ -1088,6 +1092,18 @@ EOF
 
         location /strip_echo/ {
             proxy_pass http://127.0.0.1:$NGINX_STRIP_ECHO_PORT/;
+        }
+    }
+
+    # A request nginx fails before its phases run (400: no Host) and sends
+    # through error_page to a named location skips POST_READ.
+    server {
+        listen $NGINX_STRIP_ERROR_PORT default_server;
+        server_name strip-error.example.com;
+
+        error_page 400 = @strip_echo_named;
+        location @strip_echo_named {
+            proxy_pass http://127.0.0.1:$NGINX_STRIP_ECHO_PORT;
         }
     }
 
@@ -2014,6 +2030,7 @@ run_tests() {
     # the origin the test starts behind them.
     export PAGESPEED_STRIP_TAGS_PORT="$NGINX_PORT"
     export PAGESPEED_STRIP_ECHO_PORT="$NGINX_STRIP_ECHO_PORT"
+    export PAGESPEED_STRIP_ERROR_PORT="$NGINX_STRIP_ERROR_PORT"
     export PAGESPEED_RULE_PACK_LOG_DIR="$NGINX_LOG_DIR"
     # The optimizer worker's notification socket (lane fixture daemon_arm).
     export PAGESPEED_DAEMON_SOCKET="$DAEMON_SOCKET"
