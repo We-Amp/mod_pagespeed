@@ -52,7 +52,8 @@
     "header_early, expires, auth, alias, default_vhost, in_place,",
     "pagespeed_off_location, compress_markdown, third_party_filter, merge_slashes,",
     "poll_interval_s, chained_module_origin), origin {status, headers, body_ref,",
-    "echo_conditionals}, and steps [{request {method, path, host, headers}, pre,",
+    "echo_conditionals, truncate_body (the body ends before its Content-Length)},",
+    "and steps [{request {method, path, host, headers}, pre,",
     "process, background, expect}]. live pre ops: purge_url {url, form PURGE |",
     "query}, purge_global {via admin | flush_file}, wait_markdown {timeout_s,",
     "expect_ready (default true; false = the copy must NOT become servable",
@@ -17827,6 +17828,76 @@
           {
             "request": {"method": "GET", "path": "/x/../page", "headers": [["Accept", "text/markdown"]]},
             "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-url-encoded-question-mark-apache",
+      "runners": ["live"],
+      "why": "request: a decoded path that reads as another key is refused",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": []},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "stored": false,
+              "counter_delta": {"daemon_html_refused_url_disagree": 1}
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page%3Fx", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_markdown_fallthrough_url_disagree": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-truncated-origin-never-stored",
+      "runners": ["live"],
+      "why": "store: only a whole body is stored",
+      "ports": ["apache"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page",
+          "truncate_body": true
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [],
+            "expect": {"stored": false}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 5, "expect_ready": false}}],
+            "expect": {"status": 200, "stored": false}
           }
         ]
       }

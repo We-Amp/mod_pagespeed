@@ -82,6 +82,7 @@ class _Origin:
         self.headers: HeaderLines = []
         self.body = b""
         self.echo = False
+        self.truncate = False
         self.seen: List[HeaderLines] = []
         # hold_origin: the next response waits for `release` after its
         # headers.
@@ -105,13 +106,21 @@ class _Origin:
                 self.send_response(status)
                 for n, v in headers:
                     self.send_header(n, v)
-                self.send_header("Content-Length", str(len(body)))
+                truncate = origin.truncate
+                # A truncated body: the length promises more than is sent,
+                # and the connection is closed (an origin that broke off).
+                self.send_header("Content-Length",
+                                 str(len(body) + (1024 if truncate else 0)))
                 self.end_headers()
                 if hold is not None:
                     self.wfile.flush()
                     hold.wait(timeout=60)
                 if not head:
                     self.wfile.write(body)
+                if truncate:
+                    self.wfile.flush()
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
 
             def do_GET(self):  # noqa: N802
                 self._answer(False)
@@ -124,9 +133,11 @@ class _Origin:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
-    def configure(self, status: int, headers: HeaderLines, body: bytes, echo: bool) -> None:
+    def configure(self, status: int, headers: HeaderLines, body: bytes, echo: bool,
+                  truncate: bool = False) -> None:
         with self.lock:
             self.status, self.headers, self.body, self.echo = status, headers, body, echo
+            self.truncate = truncate
             self.seen = []
             self.hold_next = False
             self.release.set()
@@ -165,6 +176,9 @@ class ApacheProvider(conf.Provider):
         self.answered_lock = threading.Lock()
         self.log_offset = 0
         self.connections: Dict[str, http.client.HTTPSConnection] = {}
+        self.settle_timeout_s = 30.0
+        # Per path: whether the row's last request for it asked for Markdown.
+        self.last_accept: Dict[str, bool] = {}
 
     # ---- configuration
 
@@ -349,7 +363,7 @@ class ApacheProvider(conf.Provider):
         good = 0
         while time.monotonic() < deadline:
             try:
-                r = self._send("GET", f"/__dhc_generation_{self.generation}", HOST, [], track=False)
+                r = self._send("GET", f"/__dhc_generation_{self.generation}", HOST, [])
                 good = good + 1 if r.status == 410 else 0
             except OSError:
                 good = 0
@@ -370,11 +384,16 @@ class ApacheProvider(conf.Provider):
         self.origin.configure(
             int(origin["status"]), [tuple(h) for h in origin["headers"]],
             bodies[origin["body_ref"]].encode("utf-8"),
-            bool(origin.get("echo_conditionals")))
-        with self.answered_lock:
-            self.answered = {}
-        self.log_offset = self._log_size()
+            bool(origin.get("echo_conditionals")),
+            bool(origin.get("truncate_body")))
+        self.last_accept = {}
+        self._start_window()
         self._write_and_reload(live["mode"])
+        # Every request the reload sent is logged; the row's window starts
+        # after them, so each line counted later belongs to a counted
+        # request.
+        self.settle()
+        self._start_window()
         applied = {"mode", "agent_optimize", "worker"}
         applied |= {f"origin.{k}" for k in conf.ORIGIN_KEYS}
         applied |= set(live.get("vhost", {})) & KNOBS
@@ -388,6 +407,11 @@ class ApacheProvider(conf.Provider):
         for c in self.connections.values():
             c.close()
         self.connections = {}
+
+    def _start_window(self) -> None:
+        with self.answered_lock:
+            self.answered = {}
+        self.log_offset = self._log_size()
 
     def _log_size(self) -> int:
         try:
@@ -410,9 +434,12 @@ class ApacheProvider(conf.Provider):
         return counts
 
     def settle(self) -> None:
+        """Returns once the access log holds a line for every request this
+        provider has an answer for (since the row's window started).  Every
+        request it sends counts: the row's, its probes', its purges'."""
         with self.answered_lock:
             want = dict(self.answered)
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + self.settle_timeout_s
         while True:
             got = self._logged()
             if all(got.get(p, 0) >= n for p, n in want.items()):
@@ -438,7 +465,7 @@ class ApacheProvider(conf.Provider):
         return conn
 
     def _send(self, method: str, path: str, host: str, headers: HeaderLines,
-              process: Optional[str] = None, track: bool = True) -> Response:
+              process: Optional[str] = None) -> Response:
         if process is None:
             conn = self._connect(host)
         else:
@@ -453,17 +480,23 @@ class ApacheProvider(conf.Provider):
                 conn.putheader(name, value)
             conn.endheaders()
             r = conn.getresponse()
-            body = r.read()
+            try:
+                body = r.read()
+            except http.client.IncompleteRead as e:
+                # The server broke the response off (an origin that did).
+                body = e.partial
             response = Response(r.status, list(r.getheaders()), body)
         finally:
             if process is None:
                 conn.close()
-        if track:
+        if True:  # Every answered request is waited for by settle().
             with self.answered_lock:
                 self.answered[local_port] = self.answered.get(local_port, 0) + 1
         return response
 
     def request(self, method, path, host, headers, process=None) -> Response:
+        self.last_accept[path] = any(
+            n.lower() == "accept" and "markdown" in v.lower() for n, v in headers)
         return self._send(method, path, host or HOST, headers, process)
 
     def _probe(self, path: str, host: Optional[str], ask: bool = False) -> dict:
@@ -487,10 +520,14 @@ class ApacheProvider(conf.Provider):
         return StoredEntry(lifetime_s=int(p["lifetime_s"]), sidecar=sidecar)
 
     def markdown_ready(self, path, host) -> bool:
-        # The worker derives a page's copy once a request asks for it; the
-        # probe asks as such a request would, without sending one through the
-        # server, whose counters the row reads.
-        return bool(self._probe(path, host, ask=True).get("markdown_ready"))
+        # The worker derives a page's copy once a request asks for it.  When
+        # the row's last request for the path asked for Markdown, the server
+        # itself asked the worker (the store of an agent request, or the
+        # lost-copy notify of its fall-through) and the probe does not.
+        # Otherwise the probe asks as such a request would, without sending
+        # one through the server, whose counters the row reads.
+        ask = not self.last_accept.get(path, False)
+        return bool(self._probe(path, host, ask=ask).get("markdown_ready"))
 
     def counters(self) -> Dict[str, int]:
         conn = http.client.HTTPConnection(self.server_config.host, self.server_config.port, timeout=30)
@@ -511,13 +548,13 @@ class ApacheProvider(conf.Provider):
             target = url
             if url.startswith("/"):
                 target = url
-            r = self._send("PURGE", target, HOST, [], track=False)
+            r = self._send("PURGE", target, HOST, [])
         elif form == "query":
             full = url if "://" in url else f"{SCHEME}://{HOST}{url}"
             # The console's purge: POST with X-Requested-With, the URL's path.
             target = urlsplit(full).path.lstrip("/")
             r = self._send("POST", "/pagespeed_admin/cache?purge=" + quote(target, safe=""),
-                           HOST, ADMIN_HEADERS, track=False)
+                           HOST, ADMIN_HEADERS)
         else:
             raise ProviderUnsupported(f"purge form {form}")
         if r.status != 200:
@@ -526,7 +563,7 @@ class ApacheProvider(conf.Provider):
     def purge_global(self, via: str) -> None:
         if via == "admin":
             r = self._send("POST", "/pagespeed_global_admin/cache?purge=*", HOST,
-                           ADMIN_HEADERS, track=False)
+                           ADMIN_HEADERS)
             if r.status != 200:
                 raise AssertionError(f"global purge answered {r.status}: {r.body[:200]!r}")
         elif via == "flush_file":

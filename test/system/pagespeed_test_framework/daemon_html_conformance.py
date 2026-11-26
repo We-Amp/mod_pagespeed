@@ -88,7 +88,9 @@ VHOST_KNOBS = frozenset(
         "chained_module_origin",
     ]
 )
-ORIGIN_KEYS = frozenset(["status", "headers", "body_ref", "echo_conditionals"])
+ORIGIN_KEYS = frozenset(
+    ["status", "headers", "body_ref", "echo_conditionals", "truncate_body"]
+)
 STEP_KEYS = frozenset(["request", "pre", "process", "background", "expect"])
 REQUEST_KEYS = frozenset(["method", "path", "host", "headers"])
 OPS = frozenset(

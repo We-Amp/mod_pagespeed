@@ -26,6 +26,7 @@ py_library(
         "assertions.py",
         "client.py",
         "daemon_html_conformance.py",
+        "daemon_html_provider_apache.py",
         "flush_origin.py",
         "pytest_main.py",
         "require.py",
@@ -46,6 +47,14 @@ py_library(
 py_test(
     name = "test_daemon_html_conformance_core",
     srcs = ["test_daemon_html_conformance_core.py"],
+    deps = [":pagespeed_test_framework"],
+    python_version = "PY3",
+)
+
+# The Apache provider's settle(), against a temporary access log.
+py_test(
+    name = "test_daemon_html_provider_apache",
+    srcs = ["test_daemon_html_provider_apache.py"],
     deps = [":pagespeed_test_framework"],
     python_version = "PY3",
 )
