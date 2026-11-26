@@ -190,5 +190,24 @@ TEST(IisMarkdownFinalTest, ThePendingStatusIsAnError) {
   EXPECT_EQ(500, kIisMarkdownPendingStatus);
 }
 
+// ---- the Vary: Accept line of an HTML response that has a Markdown copy
+
+TEST(IisVaryWithAcceptTest, AcceptIsAddedOnceToTheExistingLine) {
+  EXPECT_EQ("Accept", IisVaryWithAccept(""));
+  EXPECT_EQ("Accept-Encoding, Accept", IisVaryWithAccept("Accept-Encoding"));
+  EXPECT_EQ("Accept-Encoding,Cookie, Accept",
+            IisVaryWithAccept("Accept-Encoding,Cookie"));
+}
+
+TEST(IisVaryWithAcceptTest, AnExistingAcceptTokenIsKept) {
+  EXPECT_EQ("Accept", IisVaryWithAccept("Accept"));
+  EXPECT_EQ("accept, Cookie", IisVaryWithAccept("accept, Cookie"));
+  EXPECT_EQ("Cookie , ACCEPT ", IisVaryWithAccept("Cookie , ACCEPT "));
+  // Accept-Encoding is another token.
+  EXPECT_EQ("Accept-Encoding, Accept", IisVaryWithAccept("Accept-Encoding"));
+  // "*" already varies on everything.
+  EXPECT_EQ("*", IisVaryWithAccept("*"));
+}
+
 }  // namespace
 }  // namespace net_instaweb

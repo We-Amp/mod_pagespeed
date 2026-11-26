@@ -85,6 +85,19 @@ bool IisHtmlCachePathIsCanonical(StringPiece target) {
   return true;
 }
 
+GoogleString IisVaryWithAccept(StringPiece existing) {
+  StringPieceVector tokens;
+  SplitStringPieceToVector(existing, ",", &tokens, true);
+  for (StringPiece t : tokens) {
+    TrimWhitespace(&t);
+    if (StringCaseEqual(t, "Accept") || t == "*") return existing.as_string();
+  }
+  StringPiece trimmed = existing;
+  TrimWhitespace(&trimmed);
+  if (trimmed.empty()) return "Accept";
+  return StrCat(existing, ", Accept");
+}
+
 IisMarkdownFinalPlan PlanIisMarkdownFinal(int status, int substatus,
                                           size_t entity_chunks,
                                           const DaemonHtmlHeaderLines& current,

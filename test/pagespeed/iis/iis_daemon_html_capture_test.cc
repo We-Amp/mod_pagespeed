@@ -275,11 +275,53 @@ TEST_F(IisDaemonHtmlCaptureTest, CustomHeadersReachTheFinalViewOnly) {
   EXPECT_FALSE(capture->Finish());
   ASSERT_EQ(2u, abi_->calls.size());
   EXPECT_EQ(kOrigin, StoreView().headers);
+  // The value IIS appended to the module's own Cache-Control line is the
+  // operator's line; the module's directives are not part of the view.
   DaemonHtmlHeaderLines expected = kOrigin;
-  expected.emplace_back("Cache-Control", "max-age=0, no-cache,no-store");
+  expected.emplace_back("Cache-Control", "no-store");
   expected.emplace_back("X-Powered-By", "ASP.NET");
   expected.emplace_back("X-Custom", "v");
   EXPECT_EQ(expected, FinalView().headers);
+}
+
+TEST_F(IisDaemonHtmlCaptureTest, AValueIisAppendedToAModuleLineIsItsOwnLine) {
+  // customHeaders "Cache-Control: public" lands on the module's line as
+  // "max-age=0, no-cache,public": the origin's lifetime stays the view's,
+  // with the operator's directive beside it.
+  std::unique_ptr<IisDaemonHtmlCapture> capture = NewCapture();
+  capture->SetOrigin(200, kOrigin, false);
+  capture->AddBody("<html></html>", 13);
+  capture->NoteBodyEnd();
+  capture->NoteModuleView(kModuleView);
+  capture->NoteFinalView(200, {{"Content-Type", "text/html"},
+                               {"Cache-Control", "max-age=0, no-cache,public"},
+                               {"Vary", "Accept-Encoding"},
+                               {"X-Page-Speed", "2.11.0"}});
+  EXPECT_FALSE(capture->Finish());
+  ASSERT_EQ(2u, abi_->calls.size());
+  DaemonHtmlHeaderLines expected = kOrigin;
+  expected.emplace_back("Cache-Control", "public");
+  EXPECT_EQ(expected, FinalView().headers);
+}
+
+TEST(IisUnmergeFinalViewTest, OnlyAValueAppendedAfterACommaIsSplitOff) {
+  const DaemonHtmlHeaderLines module = {{"Cache-Control", "max-age=0, no-cache"},
+                                        {"X-A", "1"}};
+  EXPECT_EQ((DaemonHtmlHeaderLines{{"Cache-Control", "max-age=0, no-cache"},
+                                   {"Cache-Control", "public"},
+                                   {"X-A", "1"},
+                                   {"X-B", "2"}}),
+            IisUnmergeFinalView(module, {{"Cache-Control", "max-age=0, no-cache,public"},
+                                         {"X-A", "1"},
+                                         {"X-B", "2"}}));
+  // A changed value, or one that only starts the same, is the server's line.
+  EXPECT_EQ((DaemonHtmlHeaderLines{{"Cache-Control", "no-store"}}),
+            IisUnmergeFinalView(module, {{"Cache-Control", "no-store"}}));
+  EXPECT_EQ((DaemonHtmlHeaderLines{{"X-A", "12"}}),
+            IisUnmergeFinalView(module, {{"X-A", "12"}}));
+  // Names compare without regard to case; an empty append is no line.
+  EXPECT_EQ((DaemonHtmlHeaderLines{{"cache-control", "max-age=0, no-cache"}}),
+            IisUnmergeFinalView(module, {{"cache-control", "max-age=0, no-cache, "}}));
 }
 
 TEST_F(IisDaemonHtmlCaptureTest, WithoutTheFinalViewTheStoreViewIsRead) {

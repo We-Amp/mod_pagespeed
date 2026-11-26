@@ -47,6 +47,11 @@ namespace net_instaweb {
 // \ ; : ~ * " < > | space or control bytes.  The query is not read.
 bool IisHtmlCachePathIsCanonical(StringPiece target);
 
+// The Vary value of an HTML response whose page can be answered with its
+// Markdown copy: `existing` with the Accept token added, unless it is there
+// already (or the value is "*").
+GoogleString IisVaryWithAccept(StringPiece existing);
+
 // The response the main registration leaves for a Markdown answer it has
 // kept for the final-view registration: an empty 500 with this sub-status,
 // which IIS does not use.
