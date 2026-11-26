@@ -507,9 +507,39 @@
                   Impersonate="no"
                   Return="ignore" />
 
+    <CustomAction Id="CleanFinalViewRegistration"
+                  Directory="SystemFolder"
+                  ExeCommand="inetsrv\appcmd.exe uninstall module PageSpeedFinalView"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <CustomAction Id="RegisterModule"
                   Directory="SystemFolder"
                   ExeCommand='inetsrv\appcmd.exe install module /name:PageSpeedModule /image:"[INSTALLDIR]pagespeed_iis.dll" /add:true'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <!-- The image's second registration, PageSpeedFinalView: one send
+         notification that runs after IIS's header stages (customHeaders) and
+         dynamic compression, where the module reads the response as it goes
+         out. Registered as a global module without a <modules> entry first
+         (appcmd's /add:true appends one at the end of <modules>, the worst
+         position), then added at the TOP of <modules>: at equal priority IIS
+         runs the send notifications in the reverse order of that list, so
+         the first entry's send runs after every other one's. The installer
+         upgrade gate checks both entries and this order. -->
+    <CustomAction Id="RegisterFinalViewModule"
+                  Directory="SystemFolder"
+                  ExeCommand='inetsrv\appcmd.exe install module /name:PageSpeedFinalView /image:"[INSTALLDIR]pagespeed_iis.dll" /add:false'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <CustomAction Id="AddFinalViewModuleFirst"
+                  Directory="SystemFolder"
+                  ExeCommand="inetsrv\appcmd.exe set config -section:system.webServer/modules /+&quot;[@start,name='PageSpeedFinalView']&quot; /commit:apphost"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
@@ -520,6 +550,13 @@
     <CustomAction Id="UnregisterModule"
                   Directory="SystemFolder"
                   ExeCommand="inetsrv\appcmd.exe uninstall module PageSpeedModule"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="UnregisterFinalViewModule"
+                  Directory="SystemFolder"
+                  ExeCommand="inetsrv\appcmd.exe uninstall module PageSpeedFinalView"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
@@ -642,7 +679,13 @@
       <!-- Install/repair: remove any stale registration, then register. -->
       <Custom Action="CleanRegistration" After="InstallFiles"
               Condition="NOT Installed OR REINSTALL" />
-      <Custom Action="RegisterModule" After="CleanRegistration"
+      <Custom Action="CleanFinalViewRegistration" After="CleanRegistration"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="RegisterModule" After="CleanFinalViewRegistration"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="RegisterFinalViewModule" After="RegisterModule"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="AddFinalViewModuleFirst" After="RegisterFinalViewModule"
               Condition="NOT Installed OR REINSTALL" />
       <!-- ACL grants on cache + logs dirs via well-known SIDs (locale-
            independent). Sole ACL mechanism: util:PermissionEx was
@@ -652,7 +695,7 @@
            Binary table — the exact failure mode the Type-34 deferred-
            exe CAs are designed to avoid. See the GrantCacheAcl
            CustomAction comment block above. -->
-      <Custom Action="GrantCacheAcl" After="RegisterModule"
+      <Custom Action="GrantCacheAcl" After="AddFinalViewModuleFirst"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="GrantLogAcl" After="GrantCacheAcl"
               Condition="NOT Installed OR REINSTALL" />
@@ -678,6 +721,8 @@
 <?endif ?>
       <!-- Uninstall: remove IIS module registration before files go away. -->
       <Custom Action="UnregisterModule" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="UnregisterFinalViewModule" After="UnregisterModule"
               Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 

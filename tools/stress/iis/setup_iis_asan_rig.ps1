@@ -196,6 +196,10 @@ if ($ciImage) {
 }
 & $ac uninstall module PageSpeedModule 2>$null
 Write-Host "uninstall CI PageSpeedModule exit: $LASTEXITCODE"
+# The CI image's second registration loads the same DLL; it goes too (the
+# cleanup puts it back first in modules).
+& $ac uninstall module PageSpeedFinalView 2>$null
+Write-Host "uninstall CI PageSpeedFinalView exit: $LASTEXITCODE"
 
 # 8. Dedicated pool + site (mirrors setup_iis_full.ps1 New-IISSite: no idle timeout, no periodic recycle,
 #    rapidFailProtection off so our deliberate recycles never trip pool-shutdown)

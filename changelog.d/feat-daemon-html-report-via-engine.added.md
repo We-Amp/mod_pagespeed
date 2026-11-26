@@ -1,10 +1,10 @@
 - **`DaemonHtmlCache serve-variants` is accepted, and for now runs as
   report-only.** `serve-variants` is the mode that will store HTML pages and
   serve their Markdown copies to clients that ask for one. In this release no
-  server serves anything in it: on Apache and nginx it behaves exactly like
-  `report-only` (the response is never changed, nothing is stored, the
+  server serves anything in it: on Apache, nginx and IIS it behaves exactly
+  like `report-only` (the response is never changed, nothing is stored, the
   `daemon_html_*` counters count and the decision log writes `report-only`
-  lines), and on IIS and Envoy it is counted as `daemon_html_unavailable`, as
+  lines), and on Envoy it is counted as `daemon_html_unavailable`, as
   `report-only` is there. The value `serve-cached-html` is reserved for a
   later release: setting it logs a warning and leaves the option as it was,
   so a configuration written for that release still loads.

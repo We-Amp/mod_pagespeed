@@ -7,6 +7,7 @@
 #include <httpserv.h>
 #include <memory>
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/thread/win_mutex.h"

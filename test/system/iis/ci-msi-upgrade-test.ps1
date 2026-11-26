@@ -360,6 +360,31 @@ $installScript = {
     }
     Write-Host "PageSpeedModule registered OK"
 
+    # The image's second registration (PageSpeedFinalView) is a global
+    # module too, and it is the FIRST entry of <modules>: IIS runs the send
+    # notifications of one priority in the reverse order of that list, so
+    # only the first entry's send runs after every other module's. appcmd's
+    # own "install module /add:true" appends, the worst position; the
+    # installer inserts it at the top. PageSpeedModule must be in the list.
+    if (-not (Get-WebGlobalModule -Name 'PageSpeedFinalView' -ErrorAction SilentlyContinue)) {
+        Get-Content $log -Tail 30 | Write-Host
+        throw "PageSpeedFinalView not registered as a global module after install"
+    }
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    [xml]$modulesXml = (& $appcmd list config -section:system.webServer/modules) -join "`n"
+    $names = @($modulesXml.SelectNodes('/system.webServer/modules/add') | ForEach-Object { $_.GetAttribute('name') })
+    Write-Host "modules order: $($names -join ', ')"
+    if ($names.Count -eq 0 -or $names[0] -ne 'PageSpeedFinalView') {
+        throw "PageSpeedFinalView is not the first entry of system.webServer/modules (first: '$($names | Select-Object -First 1)')"
+    }
+    if (@($names | Where-Object { $_ -eq 'PageSpeedFinalView' }).Count -ne 1) {
+        throw "PageSpeedFinalView is listed more than once in system.webServer/modules"
+    }
+    if (-not ($names -contains 'PageSpeedModule')) {
+        throw "PageSpeedModule is not in system.webServer/modules"
+    }
+    Write-Host "PageSpeedFinalView registered first in modules OK"
+
     # The license text and the attribution notices install next to the module
     # (Apache-2.0 terms). Missing or empty is a packaging regression.
     $installDir = "C:\Program Files\We-Amp\PageSpeed"
@@ -600,6 +625,13 @@ $uninstallScript = {
     $mod = Get-WebGlobalModule -Name 'PageSpeedModule' -ErrorAction SilentlyContinue
     if ($mod) {
         throw "PageSpeedModule still registered after uninstall"
+    }
+    if (Get-WebGlobalModule -Name 'PageSpeedFinalView' -ErrorAction SilentlyContinue) {
+        throw "PageSpeedFinalView still registered after uninstall"
+    }
+    $left = (& "$env:SystemRoot\system32\inetsrv\appcmd.exe" list config -section:system.webServer/modules) -join "`n"
+    if ($left -match 'PageSpeedFinalView|PageSpeedModule') {
+        throw "a PageSpeed entry is still in system.webServer/modules after uninstall"
     }
     if (Test-Path "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll") {
         throw "pagespeed_iis.dll still present after uninstall"
