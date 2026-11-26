@@ -34,6 +34,9 @@ const char kModPagespeedFixHeadersName[] = "MOD_PAGESPEED_FIX_HEADERS_FILTER";
 const char kModPagespeedInPlaceFilterName[] = "MOD_PAGESPEED_IN_PLACE_FILTER";
 const char kModPagespeedDaemonHtmlReportName[] =
     "MOD_PAGESPEED_DAEMON_HTML_REPORT_FILTER";
+// DaemonHtmlCache's store view, ahead of mod_headers.
+const char kModPagespeedDaemonHtmlStoreViewName[] =
+    "MOD_PAGESPEED_DAEMON_HTML_STORE_VIEW_FILTER";
 // Takes the origin's caching headers for the recorder, before mod_expires and
 // mod_headers act on them.
 const char kModPagespeedInPlaceOriginCachingName[] =

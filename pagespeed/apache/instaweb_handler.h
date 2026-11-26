@@ -125,6 +125,12 @@ class InstawebHandler {
   // resources.
   void HandleAsProxyForAll();
 
+  // DaemonHtmlCache serve-variants: answers a request for a page's Markdown
+  // copy from the optimizer's volume when the HTML cache engine allows it
+  // (apache_daemon_html.h).  Returns false, with the request untouched, for
+  // every request it does not answer.  Needs no in-place optimization.
+  bool ServeDaemonHtmlMarkdown();
+
   // Attempts to handle this as an in-place resource. Returns false if
   // the in-place handling didn't occur, and another handler should take
   // over the request.

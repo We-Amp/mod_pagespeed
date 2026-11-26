@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 #define PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -45,6 +46,8 @@ struct server_rec;
 
 namespace net_instaweb {
 
+class ApacheDaemonHtmlInFlight;
+class SystemDaemonHtmlPurgeSource;
 class ApacheRewriteDriverFactory;
 class ApacheRequestContext;
 class MeasurementProxyUrlNamer;
@@ -110,8 +113,21 @@ class ApacheServerContext : public SystemServerContext {
 
   // The HTML cache engine of this configuration (DaemonHtmlCache), built on
   // first use so a server that never sets the option has none.  It holds the
-  // report-only counters and decision log.
+  // report-only counters and decision log.  With serve-variants and
+  // AgentOptimize on it stores this virtual host's pages and serves their
+  // Markdown copies (apache_daemon_html.h), through the optimizer volume this
+  // process holds, and takes this cache path's admin purges.
   DaemonHtmlEngine* daemon_html_engine();
+
+  // Counts the engine's stores and Markdown answers in flight, which the
+  // destructor waits for.
+  ApacheDaemonHtmlInFlight* daemon_html_in_flight() {
+    return daemon_html_in_flight_.get();
+  }
+
+  // Runs the engine's purge-poll and statistics ticks when they are due.
+  // Called on every request, after FlushCacheIfNecessary; cheap otherwise.
+  void TickDaemonHtmlEngine();
 
   // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
   // endpoints, from this server's DaemonApiSocketPath, or
@@ -232,7 +248,15 @@ class ApacheServerContext : public SystemServerContext {
   // adapter's bound library, and this reference keeps it alive.
   std::shared_ptr<DaemonAdapter> daemon_adapter_;
   std::once_flag daemon_html_engine_once_;
+  // Declared before the engine, which reads it.
+  std::unique_ptr<SystemDaemonHtmlPurgeSource> daemon_html_purge_source_;
+  std::unique_ptr<ApacheDaemonHtmlInFlight> daemon_html_in_flight_;
   std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
+  // Whether the engine was registered as a purge observer of cache_path().
+  bool daemon_html_observing_purges_ = false;
+  // The second each tick last ran, or 0.
+  std::atomic<int64> daemon_html_poll_tick_s_{0};
+  std::atomic<int64> daemon_html_stats_tick_s_{0};
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
   ApacheServerContext(const ApacheServerContext&) = delete;
