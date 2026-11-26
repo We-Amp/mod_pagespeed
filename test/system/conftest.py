@@ -135,6 +135,11 @@ KNOWN_LANE_FIXTURES = frozenset({
     # differ only in DaemonHtmlCache; the decision log is under
     # PAGESPEED_RULE_PACK_LOG_DIR
     "daemon_html_report",
+    # strip-off, strip-agent and strip-chain.example.com on
+    # PAGESPEED_STRIP_TAGS_PORT, proxying /strip_echo/ to an origin the test
+    # starts on PAGESPEED_STRIP_ECHO_PORT, and /strip_tags/plain.txt in their
+    # document root (system/test_module_entity_tags.py)
+    "strip_echo",
     # the self-fetch-access.example.com virtual host on
     # PAGESPEED_SELF_FETCH_ACCESS_PORT: a location under
     # install/mod_pagespeed_test/self_fetch_access/ open to local clients only

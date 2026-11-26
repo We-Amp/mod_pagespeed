@@ -209,6 +209,11 @@ NGINX_DAEMON_SITE_PORT_A="${NGINX_DAEMON_SITE_PORT_A:-$((NGINX_PORT + 10012))}"
 NGINX_DAEMON_SITE_PORT_B="${NGINX_DAEMON_SITE_PORT_B:-$((NGINX_PORT + 10011))}"
 NGINX_DAEMON_API_PORT="${NGINX_DAEMON_API_PORT:-$((NGINX_PORT + 10010))}"
 
+# Lane fixture strip_echo: the origin system/test_module_entity_tags.py starts
+# itself behind the strip-*.example.com servers (8080 + 10020 = 18100 at the
+# default).  Resolved after the arguments are parsed, so --port=N moves it too.
+NGINX_STRIP_ECHO_PORT="${NGINX_STRIP_ECHO_PORT:-$((NGINX_PORT + 10020))}"
+
 # Configuration
 NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
 MODULE_PATH="${MODULE_PATH:-$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
@@ -417,6 +422,11 @@ setup_test_content() {
         rm -rf "$DOC_ROOT/do_not_modify"
         cp -r --preserve=timestamps "$PROJECT_ROOT/install/do_not_modify" "$DOC_ROOT/"
     fi
+
+    # Lane fixture strip_echo: a static file the server answers conditionals
+    # for itself.
+    mkdir -p "$DOC_ROOT/strip_tags"
+    printf 'plain\n' > "$DOC_ROOT/strip_tags/plain.txt"
 
     # Create a simple index.html if nothing exists
     if [ ! -f "$DOC_ROOT/index.html" ]; then
@@ -1042,6 +1052,57 @@ EOF
         root $site_root/c;
         pagespeed LoadFromFile "http://cdn.example.com/" "$site_root/c/";
         $site_common
+    }
+
+EOF
+    fi
+
+    # Lane fixture strip_echo: three servers on the main port in front of the
+    # origin system/test_module_entity_tags.py starts on
+    # 127.0.0.1:$NGINX_STRIP_ECHO_PORT (it records the conditionals it
+    # receives). strip-chain proxies to strip-agent on this same nginx, a module
+    # in front of a module.
+    if [ "$NO_MODULE" = false ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name strip-off.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+
+        location /strip_echo/ {
+            proxy_pass http://127.0.0.1:$NGINX_STRIP_ECHO_PORT/;
+        }
+    }
+
+    server {
+        listen $NGINX_PORT;
+        server_name strip-agent.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel CoreFilters;
+        pagespeed AgentOptimize on;
+
+        location /strip_echo/ {
+            proxy_pass http://127.0.0.1:$NGINX_STRIP_ECHO_PORT/;
+        }
+    }
+
+    server {
+        listen $NGINX_PORT;
+        server_name strip-chain.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+
+        location /strip_echo/ {
+            proxy_pass http://127.0.0.1:$NGINX_PORT;
+            proxy_set_header Host strip-agent.example.com;
+        }
     }
 
 EOF
@@ -1949,6 +2010,10 @@ run_tests() {
     # Where the self-fetch-access.example.com server listens (lane fixture
     # self_fetch_access).
     export PAGESPEED_SELF_FETCH_ACCESS_PORT="$NGINX_PORT"
+    # Lane fixture strip_echo: the strip-*.example.com servers and the port of
+    # the origin the test starts behind them.
+    export PAGESPEED_STRIP_TAGS_PORT="$NGINX_PORT"
+    export PAGESPEED_STRIP_ECHO_PORT="$NGINX_STRIP_ECHO_PORT"
     export PAGESPEED_RULE_PACK_LOG_DIR="$NGINX_LOG_DIR"
     # The optimizer worker's notification socket (lane fixture daemon_arm).
     export PAGESPEED_DAEMON_SOCKET="$DAEMON_SOCKET"
@@ -1977,7 +2042,7 @@ run_tests() {
         if [ -n "$DAEMON_READY" ]; then
             daemon_fixture=",daemon_arm,daemon_html_report"
         fi
-        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi,self_fetch_access${daemon_fixture}}"
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi,self_fetch_access,strip_echo${daemon_fixture}}"
     fi
 
     # doc_root_scratch -- the runner-owned document root and its purge/ and

@@ -42,6 +42,9 @@ LANE_STATE_DIR=/tmp/apache_pagespeed_test
 LANE_FIXTURES_FILE="$LANE_STATE_DIR/lane_fixtures"
 
 FLUSH_ORIGIN_PORT="${FLUSH_ORIGIN_PORT:-8093}"
+# Lane fixture "strip_echo": the origin system/test_module_entity_tags.py
+# starts itself, behind the strip-*.example.com virtual hosts.
+STRIP_ECHO_PORT="${STRIP_ECHO_PORT:-8094}"
 FLUSH_ORIGIN_PID="$LANE_STATE_DIR/flush_origin.pid"
 
 # Lane fixture "remote_config": pagespeed/system/pathological_server.py,
@@ -2675,6 +2678,51 @@ EOF
     sudo a2ensite pagespeed-test-site-identity 2>/dev/null || true
 }
 
+# Lane fixture "strip_echo": three name-based virtual hosts on the secondary
+# port in front of the origin system/test_module_entity_tags.py starts on
+# 127.0.0.1:$STRIP_ECHO_PORT (it records the conditionals it receives), and a
+# static file the default handler answers conditionals for. strip-chain
+# proxies to strip-agent on this same server, a module in front of a module.
+configure_strip_tags_vhosts() {
+    log_info "Configuring the strip-tags vhosts on port $APACHE_SECONDARY_PORT..."
+    sudo mkdir -p /var/www/html/strip_tags
+    printf 'plain\n' | sudo tee /var/www/html/strip_tags/plain.txt > /dev/null
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-strip-tags.conf"
+    sudo tee "$conf" > /dev/null << EOF
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-off.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ProxyPass /strip_echo/ http://127.0.0.1:$STRIP_ECHO_PORT/
+</VirtualHost>
+
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-agent.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedAgentOptimize on
+  ProxyPass /strip_echo/ http://127.0.0.1:$STRIP_ECHO_PORT/
+</VirtualHost>
+
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName strip-chain.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ProxyPreserveHost On
+  RequestHeader set Host strip-agent.example.com
+  ProxyPass /strip_echo/ http://127.0.0.1:$APACHE_SECONDARY_PORT/strip_echo/
+</VirtualHost>
+EOF
+    sudo a2ensite pagespeed-test-strip-tags 2>/dev/null || true
+    provide_fixture strip_echo
+}
+
 # Lane fixture "daemon_html_report": the pages test_daemon_html_report.py fetches.
 write_daemon_html_content() {
     local dir="$1" sudo_cmd="$2" name
@@ -3056,6 +3104,7 @@ EOF
     configure_flush_origin_proxy
     configure_remote_config_vhosts
     configure_site_identity_vhosts
+    configure_strip_tags_vhosts
 
     # Enable required modules (including ssl for HTTPS)
     # reqtimeout is explicit so test_zerocopy_serve.py always exercises

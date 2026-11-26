@@ -191,6 +191,10 @@ run_tests() {
     # Lane fixtures rule_packs / rule_pack_log: the rulepacks*.example.com
     # vhosts are on the secondary port, and the decision log is under LogDir.
     export PAGESPEED_RULE_PACKS_PORT="${PAGESPEED_RULE_PACKS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    # Lane fixture strip_echo (setup_apache_test.sh): the strip-*.example.com
+    # virtual hosts and the port of the origin the test starts behind them.
+    export PAGESPEED_STRIP_TAGS_PORT="${PAGESPEED_STRIP_TAGS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    export PAGESPEED_STRIP_ECHO_PORT="${PAGESPEED_STRIP_ECHO_PORT:-${STRIP_ECHO_PORT:-8094}}"
     # Lane fixture self_fetch_access: the self-fetch-access.example.com vhost
     # is on the secondary port too.
     export PAGESPEED_SELF_FETCH_ACCESS_PORT="${PAGESPEED_SELF_FETCH_ACCESS_PORT:-$PAGESPEED_SECONDARY_PORT}"
