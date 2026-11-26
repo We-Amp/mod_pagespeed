@@ -51,6 +51,10 @@ void NgxDaemonHtmlInitStats(Statistics* statistics);
 // can prove that a read made before the work finished sees nothing.  Unset,
 // it costs nothing.
 extern const char kDaemonHtmlCommitHoldEnv[];
+// The seam's file, or empty when it is not set (read once per process).  A
+// worker logs one error-level line at start when it is set; nginx passes the
+// variable to its workers only when an `env` directive names it.
+const GoogleString& DaemonHtmlCommitHoldFile();
 
 // Runs the engine's blocking work on the record arm's sequence.
 class NgxDaemonHtmlRunner : public DaemonHtmlBlockingRunner {
@@ -130,6 +134,18 @@ enum class NgxMarkdownLine {
   kRemove,
 };
 NgxMarkdownLine ClassifyMarkdownLine(StringPiece name);
+
+// The host a request names, as nginx itself reads it: `server` is nginx's
+// own reading (r->headers_in.server: the request line's host for an
+// absolute-form target, else the Host header's, without its port, as nginx
+// selected the server block by it); `host_header` the Host field value, or
+// null when there is none.  `*host` gets the Host header as received (its
+// port is part of the cache key) when its host part is `server`
+// (case-insensitive), else `server`.  Returns false when the two disagree:
+// nginx answered for another host than the header names, and the request
+// is neither stored nor served.
+bool DaemonHtmlRequestHost(StringPiece server, const StringPiece* host_header,
+                           GoogleString* host);
 
 // The value of the answer's Content-Length line, or -1 when it has none (a
 // 304).

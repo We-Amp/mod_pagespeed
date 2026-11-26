@@ -267,6 +267,31 @@ TEST_F(NgxDaemonHtmlTest, MarkdownLinesAreOwnedKeptOrRemoved) {
   }
 }
 
+// The host is nginx's own reading; the Host header only adds its port, and
+// a header naming another host than the one nginx answered for disagrees.
+TEST_F(NgxDaemonHtmlTest, TheHostIsNginxsOwnReading) {
+  GoogleString host;
+  StringPiece with_port("WWW.example.test:8443");
+  EXPECT_TRUE(DaemonHtmlRequestHost("www.example.test", &with_port, &host));
+  EXPECT_EQ("WWW.example.test:8443", host);
+  StringPiece plain("www.example.test");
+  EXPECT_TRUE(DaemonHtmlRequestHost("www.example.test", &plain, &host));
+  EXPECT_EQ("www.example.test", host);
+  EXPECT_TRUE(DaemonHtmlRequestHost("www.example.test", nullptr, &host));
+  EXPECT_EQ("www.example.test", host);
+  StringPiece trailing_dot("www.example.test.:80");
+  EXPECT_TRUE(DaemonHtmlRequestHost("www.example.test", &trailing_dot, &host));
+  // An absolute-form request line naming another host than the header.
+  StringPiece other("a.example.test");
+  EXPECT_FALSE(DaemonHtmlRequestHost("b.example.test", &other, &host));
+  EXPECT_EQ("b.example.test", host);
+  StringPiece v6("[::1]:8080");
+  EXPECT_TRUE(DaemonHtmlRequestHost("[::1]", &v6, &host));
+  EXPECT_EQ("[::1]:8080", host);
+  StringPiece prefix("www.example.test.evil:80");
+  EXPECT_FALSE(DaemonHtmlRequestHost("www.example.test", &prefix, &host));
+}
+
 TEST_F(NgxDaemonHtmlTest, TheAnswersLength) {
   DaemonHtmlServeResult ok;
   ok.headers = {{"Content-Type", "text/markdown; charset=utf-8"},

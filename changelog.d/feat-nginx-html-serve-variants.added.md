@@ -18,7 +18,13 @@
   the admin page or `cache.flush`, fences everything stored before it, on
   every worker. A static file nginx serves without an upstream
   `Cache-Control` has no lifetime of its own (`expires` is applied after the
-  store decision) and is not stored.
+  store decision) and is not stored. Only a request nginx answers on a first
+  pass, under the URL exactly as sent, is stored or served: a page reached
+  through an internal redirect (`index`, `try_files` to another file or a
+  named location, `error_page`, `X-Accel-Redirect`), a percent-escaped path,
+  a path with a dot segment or merged slashes, and a request line naming
+  another host than `Host` are neither. The Markdown serve needs nginx 1.13.4
+  or later.
 - **nginx: the HTML cache decision log names what the server configuration
   added.** With C API 1.14, nginx's report-only lines now carry `vhost_added`
   as Apache's do: the names of the response headers `add_header` or

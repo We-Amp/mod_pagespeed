@@ -29,10 +29,7 @@ void NgxDaemonHtmlInitStats(Statistics* statistics) {
   statistics->AddVariable(kDaemonHtmlCommitsDropped);
 }
 
-namespace {
-
-// The test seam's file, read once; empty when unset.
-const GoogleString& HoldFile() {
+const GoogleString& DaemonHtmlCommitHoldFile() {
   static const GoogleString* file = [] {
     const char* value = getenv(kDaemonHtmlCommitHoldEnv);
     return new GoogleString(value == nullptr ? "" : value);
@@ -40,8 +37,10 @@ const GoogleString& HoldFile() {
   return *file;
 }
 
+namespace {
+
 void WaitWhileHeld() {
-  const GoogleString& file = HoldFile();
+  const GoogleString& file = DaemonHtmlCommitHoldFile();
   if (file.empty()) return;
   constexpr int kStepMs = 20;
   constexpr int kMaxMs = 60 * 1000;
@@ -187,6 +186,25 @@ NgxMarkdownLine ClassifyMarkdownLine(StringPiece name) {
     return NgxMarkdownLine::kConflict;
   }
   return NgxMarkdownLine::kRemove;
+}
+
+bool DaemonHtmlRequestHost(StringPiece server, const StringPiece* host_header,
+                           GoogleString* host) {
+  server.CopyToString(host);
+  if (host_header == nullptr) return true;
+  StringPiece name = *host_header;
+  // The host part: up to the port's colon, after an IPv6 literal's bracket.
+  const size_t start = name.empty() || name[0] != '[' ? 0 : name.find(']');
+  const size_t colon =
+      start == StringPiece::npos ? StringPiece::npos : name.find(':', start);
+  if (colon != StringPiece::npos) name = name.substr(0, colon);
+  // nginx drops one trailing dot of the name it selects by.
+  if (!name.empty() && name[name.size() - 1] == '.') {
+    name.remove_suffix(1);
+  }
+  if (!StringCaseEqual(name, server)) return false;
+  host_header->CopyToString(host);
+  return true;
 }
 
 int64 DaemonHtmlAnswerContentLength(const DaemonHtmlServeResult& result) {

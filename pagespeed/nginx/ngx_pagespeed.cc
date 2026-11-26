@@ -2742,9 +2742,12 @@ PsDaemonHtmlRequest* ps_daemon_html_state(ps_request_ctx_t* ctx) {
   return ctx->daemon_html;
 }
 
-// Every sent header line of `list` (hash 0 lines are not sent).
+// Every header line of `list`.  Of a response's own list only the lines
+// that are sent (hash 0 lines are not); of an upstream's, every line it
+// received (`all`), so that no module that zeroed a hash hides one.
 void ps_daemon_html_list_lines(const ngx_list_t& list,
-                               DaemonHtmlHeaderLines* lines) {
+                               DaemonHtmlHeaderLines* lines,
+                               bool all = false) {
   const ngx_list_part_t* part = &list.part;
   const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
   for (ngx_uint_t i = 0; /* void */; i++) {
@@ -2754,7 +2757,7 @@ void ps_daemon_html_list_lines(const ngx_list_t& list,
       header = static_cast<ngx_table_elt_t*>(part->elts);
       i = 0;
     }
-    if (header[i].hash == 0) continue;
+    if (header[i].hash == 0 && !all) continue;
     lines->emplace_back(str_to_string_piece(header[i].key).as_string(),
                         str_to_string_piece(header[i].value).as_string());
   }
@@ -2804,20 +2807,31 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
                                   DaemonHtmlRequestFacts* facts) {
   facts->method = str_to_string_piece(r->method_name).as_string();
   facts->scheme = ps_is_https(r) ? "https" : "http";
-  // As received, port included: the port is part of the cache key.
-  facts->host = r->headers_in.host != nullptr
-                    ? str_to_string_piece(r->headers_in.host->value).as_string()
-                    : str_to_string_piece(r->headers_in.server).as_string();
+  // The host nginx itself answers for (the request line's for an
+  // absolute-form target), with the Host header's port when the header names
+  // that host: the port is part of the cache key.
+  StringPiece host_header;
+  if (r->headers_in.host != nullptr) {
+    host_header = str_to_string_piece(r->headers_in.host->value);
+  }
+  const bool host_agreed = DaemonHtmlRequestHost(
+      str_to_string_piece(r->headers_in.server),
+      r->headers_in.host != nullptr ? &host_header : nullptr, &facts->host);
   facts->path = str_to_string_piece(r->unparsed_uri).as_string();
   facts->site = SiteIdFromServerFragment(
       server_context->global_options()->cache_fragment());
   // The cache key is the request target as sent, so the server's reading
   // of it must be that target itself: a path nginx normalised (a dot
-  // segment, an escape, merged slashes) names a resource under another
-  // spelling, and is neither stored nor served under this one.
+  // segment, a percent-escape, merged slashes) names a resource under
+  // another spelling, and is neither stored nor served under this one.  And
+  // only a first pass agrees: after an internal redirect (try_files to a
+  // named location, error_page, X-Accel-Redirect, index) the response comes
+  // from another location, whose access rules the first pass, where the
+  // serve runs, has not applied.
   const StringPiece target = str_to_string_piece(r->unparsed_uri);
   const StringPiece raw_path = target.substr(0, target.find('?'));
-  facts->url_agreed = r == r->main && url.IsWebValid() &&
+  facts->url_agreed = r == r->main && !r->internal && host_agreed &&
+                      url.IsWebValid() &&
                       raw_path == str_to_string_piece(r->uri) &&
                       ps_in_place_url_agrees(r, url);
   facts->authenticated_user = r->headers_in.user.len != 0;
@@ -2861,7 +2875,8 @@ void ps_daemon_html_take_origin_lines(ngx_http_request_t* r,
       r->upstream != nullptr && r->upstream->headers_in.headers.last != nullptr;
   DaemonHtmlHeaderLines upstream;
   if (has_upstream) {
-    ps_daemon_html_list_lines(r->upstream->headers_in.headers, &upstream);
+    ps_daemon_html_list_lines(r->upstream->headers_in.headers, &upstream,
+                              /*all=*/true);
   }
   PsDaemonHtmlRequest* state = ps_daemon_html_state(ctx);
   state->origin_lines = DaemonHtmlOriginLines(out, has_upstream, upstream);
@@ -2955,6 +2970,7 @@ ngx_int_t ps_daemon_html_mark_no_compress(ngx_http_request_t* r,
 
 void ps_daemon_html_undo_no_compress(ngx_http_request_t* r,
                                      PsDaemonHtmlRequest* state) {
+  if (state->no_compress == nullptr) return;  // Never marked.
 #if (NGX_HTTP_GZIP)
   r->gzip_tested = 0;
   r->gzip_ok = 0;
@@ -3107,6 +3123,8 @@ class NgxDaemonHtmlServePort : public DaemonHtmlPort {
         return true;
       }
       ngx_memcpy(copy, result.body.data(), result.body.size());
+      // The pool holds the body from here on; the state keeps the headers.
+      state_->answer.body.clear();
       buf->pos = copy;
       buf->last = copy + result.body.size();
       buf->temporary = 1;
@@ -3146,6 +3164,12 @@ ngx_int_t ps_daemon_html_serve(ngx_http_request_t* r, ps_srv_conf_t* cfg_s,
                                ps_request_ctx_t* ctx,
                                const RewriteOptions* options,
                                const GoogleUrl& url) {
+#if (nginx_version < NGINX_1_13_4)
+  // Before nginx 1.13.4 this handler runs in PREACCESS, and only the module's
+  // reordering of the phase engine puts it after the access phase: the
+  // Markdown serve is left out there rather than depend on it.
+  return NGX_DECLINED;
+#endif
   if (r != r->main || r->internal ||
       (r->method != NGX_HTTP_GET && r->method != NGX_HTTP_HEAD)) {
     return NGX_DECLINED;
@@ -4732,10 +4756,13 @@ std::unique_ptr<DaemonHtmlRecording> ps_start_daemon_html_recording(
   ps_daemon_html_request_facts(r, context, GoogleUrl(ps_determine_url(r)),
                                &facts);
   // The store runs its blocking work through the request's port, which
-  // posts it to the record arm's sequence.
+  // posts it to the record arm's sequence.  Without the store view (taken at
+  // the first header filter) the response is only reported, never stored:
+  // the final view alone may lack what proxy_hide_header hid.
   PsDaemonHtmlRequest* state = ps_daemon_html_state(ctx);
-  std::unique_ptr<DaemonHtmlRecording> recording =
-      engine->StartRecording(facts, &state->store_port, unavailable);
+  std::unique_ptr<DaemonHtmlRecording> recording = engine->StartRecording(
+      facts, state->has_origin_lines ? &state->store_port : nullptr,
+      unavailable);
   if (recording == nullptr) return nullptr;
 
   recording->set_status(r->headers_out.status);
@@ -5950,8 +5977,12 @@ ngx_int_t ps_html_rewrite_fix_headers_filter(ngx_http_request_t* r) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
   // A Markdown answer of the HTML cache: its exact header set, after
   // `expires` and `add_header` (always or not), on the 200, the HEAD and
-  // the 304.  The etag filter enforces it again after the compressors.
+  // the 304, and no trailer fields (`add_trailer`).  The etag filter
+  // enforces it again after the compressors.
   if (ps_daemon_html_markdown(r, ctx)) {
+#if defined(nginx_version) && nginx_version >= 1013002
+    r->expect_trailers = 0;
+#endif
     bool conflict = false;
     if (ps_daemon_html_enforce_markdown(r, ctx->daemon_html, &conflict) !=
         NGX_OK) {
@@ -7137,6 +7168,13 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   // cache path, so each engine is given those of its own path, read from the
   // configuration.
   if (ngx_process == NGX_PROCESS_WORKER || ngx_process == NGX_PROCESS_SINGLE) {
+    if (!DaemonHtmlCommitHoldFile().empty()) {
+      ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+                    "pagespeed: test hook active: HTML cache commits wait "
+                    "while %s exists (%s)",
+                    DaemonHtmlCommitHoldFile().c_str(),
+                    kDaemonHtmlCommitHoldEnv);
+    }
     Statistics* stats = cfg_m->driver_factory->statistics();
     Variable* posted = stats == nullptr
                            ? nullptr
