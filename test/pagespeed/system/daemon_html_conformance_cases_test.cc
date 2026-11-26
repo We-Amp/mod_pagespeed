@@ -77,7 +77,7 @@ const StringSet kVhostKnobs = {"header_add",
                                "proxy_hide", "trailer"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
-const StringSet kLiveStepKeys = {"request", "pre",    "process",
+const StringSet kLiveStepKeys = {"request",    "pre",    "process",
                                  "background", "expect", "window"};
 const StringSet kLiveWindowKeys = {"stale_max_s", "margin_s", "observe_s",
                                    "every_s", "stale"};
