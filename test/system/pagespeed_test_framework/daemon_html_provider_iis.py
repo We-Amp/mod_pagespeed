@@ -526,18 +526,25 @@ class IisProvider(conf.Provider):
 
     def _server_modules(self) -> List[Dict[str, str]]:
         """The server's <modules> entries, in order, with the attributes a
-        site's list repeats them by."""
+        site's list repeats them by. The server's entries are unlocked
+        first: IIS locks its native modules, and a site cannot clear a
+        list with locked entries (the operator this row stands for
+        unlocked them)."""
+        import re
         import xml.etree.ElementTree as ET
-        out = _appcmd("list", "config", "-section:system.webServer/modules", "/xml",
-                      "/config:*")
+        config = os.path.join(os.environ.get("windir", r"C:\Windows"), "system32",
+                              "inetsrv", "config", "applicationHost.config")
+        with open(config, encoding="utf-8-sig") as f:
+            text = f.read()
+        start = text.index("<modules>", text.index("<system.webServer>"))
+        end = text.index("</modules>", start)
+        block = re.sub(r'\s+lockItem="true"', "", text[start:end])
+        if block != text[start:end]:
+            with open(config, "w", encoding="utf-8") as f:
+                f.write(text[:start] + block + text[end:])
         modules = []
-        for add in ET.fromstring(out).iter("add"):
+        for add in ET.fromstring(block + "</modules>").iter("add"):
             entry = {"name": add.get("name")}
-            if add.get("lockItem") == "true":
-                # A site can clear the list only after the server unlocked
-                # its entries: the operator this row stands for did.
-                _appcmd("set", "config", "-section:system.webServer/modules",
-                        f"/[name='{entry['name']}'].lockItem:false", "/commit:apphost")
             for k in ("type", "preCondition"):
                 if add.get(k):
                     entry[k] = add.get(k)
