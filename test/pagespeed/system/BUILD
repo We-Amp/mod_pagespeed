@@ -629,6 +629,7 @@ pagespeed_cc_test(
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_html_purge_observer",
         "//test/pagespeed/kernel/base:kernel_test_util",
+        "@boringssl//:crypto",
     ],
 )
 

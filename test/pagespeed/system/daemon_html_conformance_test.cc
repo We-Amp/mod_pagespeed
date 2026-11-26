@@ -133,6 +133,35 @@ int RcOf(const Json::Value& v) {
   return 99;
 }
 
+// The Cache-Control bits a row names (PS_CC_ORIGIN_*).
+uint16_t CcFlagsOf(const Json::Value& names) {
+  uint16_t out = 0;
+  for (const Json::Value& n : names) {
+    const GoogleString name = n.asString();
+    if (name == "no_cache") out |= kPsCcOriginNoCache;
+    if (name == "must_revalidate") out |= kPsCcOriginMustRevalidate;
+    if (name == "no_store") out |= kPsCcOriginNoStore;
+    if (name == "private") out |= kPsCcOriginPrivate;
+    if (name == "public") out |= kPsCcOriginPublic;
+    if (name == "immutable") out |= kPsCcOriginImmutable;
+    if (name == "s_maxage") out |= kPsCcOriginSMaxagePresent;
+    if (name == "proxy_revalidate") out |= kPsCcOriginProxyRevalidate;
+    if (name == "no_transform") out |= kPsCcOriginNoTransform;
+    if (name == "header_present") out |= kPsCcOriginHeaderPresent;
+  }
+  return out;
+}
+
+// The ps_html_store_classify out_flags bits a row names.
+uint32_t StoreFlagsOf(const Json::Value& names) {
+  uint32_t out = 0;
+  for (const Json::Value& n : names) {
+    if (n.asString() == "needs_validation") out |= 2u;
+    if (n.asString() == "explicit_shared") out |= 8u;
+  }
+  return out;
+}
+
 // One call the engine made, as the runner records it.
 struct Call {
   GoogleString fn;
@@ -314,8 +343,8 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
     *out_reason = IndexOf(kStoreReasons, v.isNull() ? GoogleString("mode")
                                                     : v["reason"].asString());
     *out_lifetime_s = v.isNull() ? 0 : v["lifetime_s"].asUInt();
-    *out_flags = 0;
-    *out_cc_flags = 0;
+    *out_flags = v.isNull() ? 0 : StoreFlagsOf(v["flags"]);
+    *out_cc_flags = v.isNull() ? 0 : CcFlagsOf(v["cc_flags"]);
     *out_sidecar = 0;
     const GoogleString detail = v.isNull() ? "" : v["detail"].asString();
     *out_detail_len = detail.size();
@@ -403,6 +432,8 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
     c.args["lifetime_s"] = lifetime_s;
     c.args["capture_start_ms"] = static_cast<Json::Int64>(capture_start_ms);
     c.args["sidecar_stored"] = sidecar_stored;
+    c.args["store_flags"] = store_flags;
+    c.args["cc_flags"] = cc_flags;
     Json::Value ages(Json::arrayValue);
     for (size_t i = 0; i < age_count; ++i) ages.append(age_lines[i]);
     c.args["age"] = ages;
@@ -501,6 +532,12 @@ class ConformanceAbi : public InjectedVerdictDaemonAbi {
     calls_.push_back(c);
     Json::Value v = Pop("ps_cache_write_headers_sidecar_site");
     if (v.isMember("rc") && RcOf(v["rc"]) != kPsOk) return RcOf(v["rc"]);
+    if (v.isMember("stored") && v["stored"].asInt() == 0) {
+      // The library's gate kept no block.
+      if (out_verdict != nullptr) *out_verdict = 1;
+      if (out_stored != nullptr) *out_stored = 0;
+      return kPsOk;
+    }
     return volume_->CacheWriteHeadersSidecarSite(
         cache, params, names, values, count, out_verdict, out_stored);
   }
@@ -753,11 +790,7 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
         entry.body = Body(e["body_ref"]);
         entry.inserted_at = e["stored_at_s"].asUInt();
         entry.max_age = e["lifetime_s"].asUInt();
-        for (const Json::Value& f : e["cc_flags"]) {
-          if (f.asString() == "no_transform") {
-            entry.cc_flags |= kPsCcOriginNoTransform;
-          }
-        }
+        entry.cc_flags = CcFlagsOf(e["cc_flags"]);
         for (const Json::Value& f : e["flags"]) {
           if (f.asString() == "headers_classified") {
             entry.flags |= kPsFlagHeadersClassified;
@@ -1213,6 +1246,9 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
         }
         if (want.isMember("stored_at_s")) {
           EXPECT_EQ(want["stored_at_s"].asUInt(), e->inserted_at);
+        }
+        if (want.isMember("cc_flags")) {
+          EXPECT_EQ(CcFlagsOf(want["cc_flags"]), e->cc_flags) << "cc_flags";
         }
       }
     }

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "openssl/sha.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -153,6 +154,53 @@ class InlinePort : public DaemonHtmlPort {
   void RunBlocking(DaemonHtmlCommit commit) override { commit.Run(); }
 };
 
+// The injected-verdict library with store verdicts: each call of the store
+// classifier takes the next action and reason (refuse, "mode" when none).
+class StoreAbi : public InjectedVerdictDaemonAbi {
+ public:
+  explicit StoreAbi(const DaemonAbi* inner) : InjectedVerdictDaemonAbi(inner) {}
+
+  void Queue(int action, const char* reason) {
+    verdicts_.push_back({action, reason});
+  }
+
+  int HtmlStoreClassify(int, const char*, const char*, uint32_t, int,
+                        const char* const*, const char* const*, size_t,
+                        uint64_t, int, const char*, size_t, uint64_t, uint32_t,
+                        int* out_reason, uint32_t* out_lifetime_s,
+                        uint32_t* out_flags, uint16_t* out_cc_flags,
+                        int* out_sidecar, char* detail, size_t capacity,
+                        size_t* out_detail_len) const override {
+    std::pair<int, const char*> v = {kPsHtmlStoreActionRefuse, "mode"};
+    if (!verdicts_.empty()) {
+      v = verdicts_.front();
+      verdicts_.erase(verdicts_.begin());
+    }
+    *out_reason = 0;
+    for (size_t i = 0; i < std::size(kReasons); ++i) {
+      if (GoogleString(kReasons[i]) == v.second) {
+        *out_reason = static_cast<int>(i);
+      }
+    }
+    *out_lifetime_s = 300;
+    *out_flags = 0;
+    *out_cc_flags = 0;
+    *out_sidecar = 0;
+    *out_detail_len = 0;
+    if (capacity > 0) detail[0] = '\0';
+    return v.first;
+  }
+  const char* HtmlStoreReasonName(int reason) const override {
+    return reason >= 0 && static_cast<size_t>(reason) < std::size(kReasons)
+               ? kReasons[reason]
+               : nullptr;
+  }
+
+ private:
+  static constexpr const char* kReasons[] = {"none", "mode", "private"};
+  mutable std::vector<std::pair<int, const char*>> verdicts_;
+};
+
 class DaemonHtmlEngineTest : public testing::Test {
  protected:
   DaemonHtmlEngineTest()
@@ -171,10 +219,11 @@ class DaemonHtmlEngineTest : public testing::Test {
     abi_.mutable_injection()->facts.stored_at = 1789999990;
   }
 
-  std::unique_ptr<DaemonHtmlEngine> NewEngine() {
+  std::unique_ptr<DaemonHtmlEngine> NewEngine(bool with_abi = true,
+                                              bool with_cache = true) {
     DaemonHtmlEngine::Deps deps;
-    deps.substrate.abi = &abi_;
-    deps.substrate.cache = &volume_;
+    deps.substrate.abi = with_abi ? &abi_ : nullptr;
+    deps.substrate.cache = with_cache ? &volume_ : nullptr;
     deps.purge_source = &source_;
     deps.statistics = &stats_;
     deps.timer = &timer_;
@@ -194,8 +243,36 @@ class DaemonHtmlEngineTest : public testing::Test {
     f.url_agreed = true;
     f.options_enabled_and_allowed = true;
     f.accept_lines = {"text/markdown"};
+    f.capture_start_ms = kNowMs;
     return f;
   }
+
+  // One captured 200 with the given origin lines and store-snapshot lines.
+  void Capture(DaemonHtmlEngine* engine, DaemonHtmlPort* port,
+               const DaemonHtmlHeaderLines& origin,
+               const DaemonHtmlHeaderLines& at_store,
+               const DaemonHtmlRequestFacts& facts) {
+    std::unique_ptr<DaemonHtmlRecording> rec =
+        engine->StartRecording(facts, port);
+    ASSERT_NE(nullptr, rec);
+    rec->set_status(200);
+    rec->SetOriginHeaders(origin);
+    rec->NoteStoreHeaders(at_store);
+    rec->AddBody(kBody, sizeof(kBody) - 1);
+    rec->Finish(false);
+  }
+
+  int CallsOf(const char* fn) const {
+    int n = 0;
+    for (const GoogleString& name : abi_.CallNames()) {
+      if (name == fn) ++n;
+    }
+    return n;
+  }
+
+  static constexpr char kBody[] = "<html><body>hello</body></html>";
+  const DaemonHtmlHeaderLines kOrigin = {{"Content-Type", "text/html"},
+                                         {"Cache-Control", "max-age=300"}};
 
   std::unique_ptr<ThreadSystem> thread_system_;
   MockTimer timer_;
@@ -205,7 +282,7 @@ class DaemonHtmlEngineTest : public testing::Test {
   DaemonHtmlByteBudget budget_;
   Source source_;
   FakeDaemonVolume volume_;
-  InjectedVerdictDaemonAbi abi_;
+  StoreAbi abi_;
   DaemonHtmlEngine::Config config_;
 };
 
@@ -281,6 +358,131 @@ TEST_F(DaemonHtmlEngineTest, TheCommitRunsOnThePortAndReleasesTheBudget) {
   // its bytes until the commit ran.
   EXPECT_EQ(0, budget_.in_use());
   EXPECT_TRUE(port.held.empty());
+}
+
+// Holds every commit it is given, so a test can drop it unrun.
+class DeferringPort : public InlinePort {
+ public:
+  void RunBlocking(DaemonHtmlCommit commit) override {
+    held.push_back(std::move(commit));
+  }
+  std::vector<DaemonHtmlCommit> held;
+};
+
+TEST_F(DaemonHtmlEngineTest, ACommitDroppedUnrunReleasesItsBudget) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  DeferringPort port;
+  Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
+  ASSERT_EQ(1u, port.held.size());
+  // Held by the pending commit.
+  EXPECT_EQ(static_cast<int64>(sizeof(kBody) - 1), budget_.in_use());
+  port.held.clear();  // Dropped by a port that is shutting down.
+  EXPECT_EQ(0, budget_.in_use());
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+}
+
+TEST_F(DaemonHtmlEngineTest, NoLibraryMeansNoRecordingAndNoCall) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine(/*with_abi=*/false);
+  InlinePort port;
+  EXPECT_EQ(nullptr, engine->StartRecording(MarkdownRequest(), &port));
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
+            engine->Serve(MarkdownRequest(), &port).kind);
+  engine->OnPurgePollTick();
+  engine->OnStatisticsTick();
+  bool ok = false;
+  engine->OnAdminPurge("https://www.example.test/page", false, kNowMs,
+                       [&ok](bool o, const GoogleString&) { ok = o; });
+  EXPECT_TRUE(ok);
+  EXPECT_TRUE(abi_.html_calls().empty());
+}
+
+TEST_F(DaemonHtmlEngineTest, NoCacheHandleStoresNothing) {
+  std::unique_ptr<DaemonHtmlEngine> engine =
+      NewEngine(/*with_abi=*/true, /*with_cache=*/false);
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  InlinePort port;
+  std::unique_ptr<DaemonHtmlRecording> rec =
+      engine->StartRecording(MarkdownRequest(), &port);
+  if (rec != nullptr) {
+    rec->set_status(200);
+    rec->SetOriginHeaders(kOrigin);
+    rec->AddBody(kBody, sizeof(kBody) - 1);
+    rec->Finish(false);
+  }
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+  EXPECT_EQ(0, CallsOf("ps_html_store_write_params"));
+}
+
+TEST_F(DaemonHtmlEngineTest, TheInsertTimeTakesTheOriginsAge) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  InlinePort port;
+  DaemonHtmlHeaderLines origin = kOrigin;
+  origin.emplace_back("Age", "20");
+  // A server stage dropped the Age line before the store snapshot.
+  Capture(engine.get(), &port, origin, kOrigin, MarkdownRequest());
+  bool found = false;
+  for (const InjectedHtmlCall& c : abi_.html_calls()) {
+    if (c.fn != "ps_html_store_write_params") continue;
+    found = true;
+    EXPECT_NE(c.args.end(), std::find(c.args.begin(), c.args.end(), "age=20"));
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(DaemonHtmlEngineTest, ARequestWithoutASiteIsNeitherStoredNorServed) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.site.clear();
+  EXPECT_EQ(nullptr, engine->StartRecording(facts, &port));
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough,
+            engine->Serve(facts, &port).kind);
+  EXPECT_TRUE(abi_.serve_requests().empty());
+}
+
+TEST_F(DaemonHtmlEngineTest, AnEntryStoredAgainIsRemovedOnTheNextRefusal) {
+  // An entry this process removed, stored again by a peer process (the
+  // injected removal leaves the volume as it is), then refused again.
+  FakeVolumeEntry entry;
+  entry.alternate_id = kPsSentinelOriginal;
+  entry.body = kBody;
+  entry.inserted_at = static_cast<uint32_t>(kNowMs / 1000 - 10);
+  entry.max_age = 300;
+  entry.origin_ct = "text/html";
+  entry.has_hash = true;
+  SHA256(reinterpret_cast<const uint8_t*>(kBody), sizeof(kBody) - 1,
+         entry.hash);
+  volume_
+      .entries()[{FakeDaemonVolume::Key(kSite, "https://www.example.test/page"),
+                  kPsSentinelOriginal}] = entry;
+  abi_.mutable_injection()->sidecar_read_rc = kPsOk;  // An empty block.
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.accept_lines.clear();
+
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+  Capture(engine.get(), &port, kOrigin, kOrigin, facts);
+  EXPECT_EQ(1, CallsOf("ps_cache_remove_site"));
+
+  // The same page, fresh and paired: the re-store is skipped.
+  timer_.AdvanceMs(1000);
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  Capture(engine.get(), &port, kOrigin, kOrigin, facts);
+  EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+
+  timer_.AdvanceMs(1000);
+  abi_.Queue(kPsHtmlStoreActionStore, "none");
+  abi_.Queue(kPsHtmlStoreActionRefuse, "private");
+  Capture(engine.get(), &port, kOrigin, kOrigin, facts);
+  EXPECT_EQ(2, CallsOf("ps_cache_remove_site"));
 }
 
 }  // namespace

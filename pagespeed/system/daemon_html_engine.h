@@ -186,7 +186,8 @@ class DaemonHtmlPort : public DaemonHtmlBlockingRunner {
   // Clear every header the response carries in every table the server
   // writes from, then emit exactly result.headers and, unless `head`,
   // result.body.  False when the port could not; the request then falls
-  // through.
+  // through, and the port must undo MarkNoCompress first, so the HTML
+  // answer is sent exactly as it would have been.
   virtual bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult& result,
                                        bool head) = 0;
   // No compression for this response, whatever the server configures.
@@ -447,7 +448,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   static void CacheKey(const DaemonHtmlRequestFacts& facts, GoogleString* url,
                        GoogleString* hostname);
 
-  // §3 state.
+  // The serving conditions.
   void ReadConditions(bool log_change);
   // Logs the not-serving reason once per state.
   void NoteUnavailable();
@@ -461,12 +462,15 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                 int mode, StoreVerdict* out);
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
-              const DaemonHtmlHeaderLines& store_view, const GoogleString& body,
-              bool agent_request);
+              const DaemonHtmlHeaderLines& store_view,
+              const std::vector<GoogleString>& age_lines,
+              const GoogleString& body, bool agent_request);
   void MaybeRemoveOnRefusal(const DaemonHtmlRequestFacts& facts,
                             const GoogleString& url,
                             const GoogleString& hostname, int status,
-                            const StoreVerdict& refusal, DaemonHtmlPort* port);
+                            const StoreVerdict& store,
+                            const StoreVerdict& final_view,
+                            DaemonHtmlPort* port);
   bool RecentlyRemoved(const GoogleString& key, int64 now_s);
   void NoteRemoved(const GoogleString& key, int64 now_s);
   void ForgetRemoved(const GoogleString& key);
@@ -484,7 +488,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   TestHooks* test_hooks_ = nullptr;
 
   mutable std::mutex mutex_;
-  // §3: the serve set and the worker's state.
+  // The serving conditions: the serve set and the worker's state.
   bool set_bound_ = false;
   bool worker_markdown_ = false;
   bool worker_agent_entitled_ = false;

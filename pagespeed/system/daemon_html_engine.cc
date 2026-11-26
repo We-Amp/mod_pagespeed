@@ -27,9 +27,29 @@ constexpr uint32_t kStoreRequestAuthenticatedUser = 2u;
 constexpr uint32_t kStoreRequestHasCookie = 4u;
 constexpr uint32_t kStoreRequestNoStore = 8u;
 
-// ps_html_store_classify's out_flags bit for a response that needs
-// validation before a serve; carried from either view.
+// ps_html_store_classify's out_flags bits carried into the stored entry:
+// needs-validation from either view, explicit-shared only from both.
 constexpr uint32_t kStoreFlagNeedsValidation = 2u;
+constexpr uint32_t kStoreFlagExplicitShared = 8u;
+
+// The Cache-Control bits that widen what a cache may do with an entry: kept
+// only when both views carry them.  Every other bit restricts (or only
+// records that a line was present) and is kept when either view carries it.
+constexpr uint16_t kPermissiveCcFlags =
+    kPsCcOriginPublic | kPsCcOriginImmutable | kPsCcOriginSMaxagePresent;
+
+uint16_t MergeCcFlags(uint16_t a, uint16_t b) {
+  return static_cast<uint16_t>(((a | b) & ~kPermissiveCcFlags) |
+                               (a & b & kPermissiveCcFlags));
+}
+
+uint32_t MergeStoreFlags(uint32_t store, uint32_t final_flags) {
+  uint32_t out =
+      store & ~(kStoreFlagNeedsValidation | kStoreFlagExplicitShared);
+  out |= (store | final_flags) & kStoreFlagNeedsValidation;
+  out |= store & final_flags & kStoreFlagExplicitShared;
+  return out;
+}
 
 // What the body classifier scans; the rest is counted, not kept twice.
 constexpr size_t kBodyPrefixBytes = size_t{64} * 1024;
@@ -54,11 +74,14 @@ const char* const kRemovingReasons[] = {"private", "no_store", "set_cookie",
 // describe this transfer only: never part of the header block compared by
 // the re-store skip.  Date, Age and Expires are recomputed per response by
 // common server configurations (mod_expires), so an otherwise identical
-// response differs in them.
+// response differs in them.  Server and Accept-Ranges are stamped per
+// response by the server and never kept in a block.  Cache-Control and
+// Content-Type are compared through the stored entry's own fields instead.
 const char* const kNotInHeaderBlock[] = {
     "Content-Type",  "Content-Length", "Content-Encoding", "Transfer-Encoding",
     "Cache-Control", "ETag",           "Last-Modified",    "Date",
-    "Age",           "Expires",        "Connection",       "Keep-Alive"};
+    "Age",           "Expires",        "Connection",       "Keep-Alive",
+    "Server",        "Accept-Ranges"};
 
 // Lines a compressor or the server's framing changes on the way out: not a
 // change of the response for the final view.
@@ -295,6 +318,22 @@ void RunOn(DaemonHtmlBlockingRunner* runner, std::function<void()> work) {
     runner->RunBlocking(DaemonHtmlCommit(std::move(work)));
   }
 }
+
+// A byte-budget reservation, released when its last owner goes.
+class BudgetHold {
+ public:
+  BudgetHold(DaemonHtmlByteBudget* budget, int64 bytes)
+      : budget_(budget), bytes_(bytes) {}
+  ~BudgetHold() {
+    if (budget_ != nullptr && bytes_ > 0) budget_->Release(bytes_);
+  }
+  BudgetHold(const BudgetHold&) = delete;
+  BudgetHold& operator=(const BudgetHold&) = delete;
+
+ private:
+  DaemonHtmlByteBudget* budget_;
+  int64 bytes_;
+};
 
 // Frees the read results and the header block of one serve.
 class ServeReads {
@@ -843,14 +882,14 @@ void DaemonHtmlEngine::CountFallThrough(const GoogleString& reason) {
 std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     const DaemonHtmlRequestFacts& facts, DaemonHtmlPort* port) {
   if (config_.mode == DaemonHtmlMode::kOff || !IsSiteId(config_.site) ||
-      (!facts.site.empty() && facts.site != config_.site)) {
+      facts.site != config_.site || deps_.substrate.abi == nullptr) {
     return nullptr;
   }
   const bool serve_mode =
       config_.mode >= DaemonHtmlMode::kServeVariants && config_.agent_optimize;
   bool may_store = false;
   if (serve_mode) {
-    if (serving()) {
+    if (serving() && deps_.substrate.cache != nullptr) {
       may_store = true;
     } else {
       counters_->serve_unavailable->Add(1);
@@ -910,7 +949,7 @@ bool DaemonHtmlEngine::Classify(const DaemonHtmlRecording& r,
 }
 
 void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
-  if (aborted) return;
+  if (aborted || deps_.substrate.abi == nullptr) return;
   if (r->budget_refused_) {
     if (r->may_store_) counters_->refused_budget->Add(1);
     return;
@@ -946,30 +985,38 @@ void DaemonHtmlEngine::FinishRecording(DaemonHtmlRecording* r, bool aborted) {
       verdict.action = kPsHtmlStoreActionStoreNoNotify;
     }
     verdict.lifetime_s = std::min(store.lifetime_s, fin.lifetime_s);
-    verdict.flags |= fin.flags & kStoreFlagNeedsValidation;
-    verdict.cc_flags |= fin.cc_flags & kPsCcOriginNoTransform;
+    // The stored entry takes the more restrictive reading of the two
+    // views' cache directives.
+    verdict.flags = MergeStoreFlags(store.flags, fin.flags);
+    verdict.cc_flags = MergeCcFlags(store.cc_flags, fin.cc_flags);
     const bool agent_request =
         deps_.substrate.abi->WantsAgentMarkdown(
             JoinCollection(r->facts_.accept_lines, ", ").c_str()) == 1;
-    // The body and its budget move to the commit.
-    const int64 reserved = r->reserved_;
+    // The inbound Age as the origin sent it: a server stage that drops the
+    // line does not make the entry younger.
+    std::vector<GoogleString> ages;
+    for (const auto& [name, value] : r->origin_) {
+      if (StringCaseEqual(name, "Age")) ages.push_back(value);
+    }
+    // The body and its budget move to the commit.  The reservation is owned,
+    // so it is released when the commit has run or is dropped unrun.
+    std::shared_ptr<BudgetHold> hold =
+        std::make_shared<BudgetHold>(deps_.budget, r->reserved_);
     r->reserved_ = 0;
     DaemonHtmlRequestFacts facts = r->facts_;
     GoogleString body;
     body.swap(r->body_);
-    DaemonHtmlByteBudget* budget = deps_.budget;
     r->port_->RunBlocking(DaemonHtmlCommit(
         [this, facts = std::move(facts), url, hostname, verdict,
-         store_view = std::move(store_view), body = std::move(body), budget,
-         reserved, agent_request] {
-          Commit(facts, url, hostname, verdict, store_view, body,
+         store_view = std::move(store_view), ages = std::move(ages),
+         body = std::move(body), hold, agent_request] {
+          Commit(facts, url, hostname, verdict, store_view, ages, body,
                  agent_request);
-          if (budget != nullptr && reserved > 0) budget->Release(reserved);
         }));
     return;
   }
-  MaybeRemoveOnRefusal(r->facts_, url, hostname, r->status_,
-                       store.stores() ? fin : store, r->port_);
+  MaybeRemoveOnRefusal(r->facts_, url, hostname, r->status_, store, fin,
+                       r->port_);
 }
 
 void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
@@ -977,6 +1024,7 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
                               const GoogleString& hostname,
                               const StoreVerdict& verdict,
                               const DaemonHtmlHeaderLines& store_view,
+                              const std::vector<GoogleString>& ages,
                               const GoogleString& body, bool agent_request) {
   const DaemonAbi* abi = deps_.substrate.abi;
   void* cache = deps_.substrate.cache;
@@ -986,10 +1034,6 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
 
   // The insert time: computed by the library alone, from the request's
   // start and the inbound Age.  A refused Age stores nothing.
-  std::vector<GoogleString> ages;
-  for (const auto& [name, value] : store_view) {
-    if (StringCaseEqual(name, "Age")) ages.push_back(value);
-  }
   std::vector<const char*> age_lines;
   age_lines.reserve(ages.size());
   for (const GoogleString& a : ages) age_lines.push_back(a.c_str());
@@ -1021,9 +1065,15 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
         const bool same_body = old_hash != nullptr && !IsZeroHash(old_hash) &&
                                memcmp(old_hash, hash, kPsHtmlHashBytes) == 0;
         hash_changed = !same_body;
+        // The key is present again (written here or by a peer): a later
+        // refusal must read and remove it, whatever this process removed.
+        ForgetRemoved(url);
+        const char* stored_ct = abi->ReadOriginContentType(existing.original);
         bool skip = stored_at > inserted_at;
         if (!skip && same_body &&
-            abi->ReadOriginMaxAge(existing.original) == verdict.lifetime_s) {
+            abi->ReadOriginMaxAge(existing.original) == verdict.lifetime_s &&
+            abi->ReadOriginCcFlags(existing.original) == verdict.cc_flags &&
+            stored_ct != nullptr && verdict.content_type == stored_ct) {
           const int64 capture_s = facts.capture_start_ms / Timer::kSecondMs;
           const int64 age = capture_s - static_cast<int64>(stored_at);
           if (age >= 0 && age * 2 < static_cast<int64>(verdict.lifetime_s) &&
@@ -1076,22 +1126,14 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   sidecar.origin_html_hash = hash;
   int sidecar_verdict = 0;
   int sidecar_stored = 0;
+  // A paired write keeps a block even with nothing to carry, so a block
+  // that was not kept is a refusal: nothing is stored.
   if (abi->CacheWriteHeadersSidecarSite(
           cache, &sidecar, names.data(), values.data(), names.size(),
-          &sidecar_verdict, &sidecar_stored) != kPsOk) {
+          &sidecar_verdict, &sidecar_stored) != kPsOk ||
+      sidecar_stored == 0) {
     counters_->sidecar_write_failed->Add(1);
     return;
-  }
-  if (sidecar_stored == 0) {
-    // No block was kept: the entry must not require one.
-    abi->WriteParamsInit(&params);
-    if (abi->HtmlStoreWriteParams(
-            verdict.action, verdict.lifetime_s, verdict.flags, verdict.cc_flags,
-            /*sidecar_stored=*/0, facts.capture_start_ms, age_lines.data(),
-            age_lines.size(), body.size(), content_type.c_str(),
-            &params) != 0) {
-      return;
-    }
   }
   params.origin_html_hash = hash;
   void* handle = nullptr;
@@ -1130,12 +1172,10 @@ void DaemonHtmlEngine::Commit(const DaemonHtmlRequestFacts& facts,
   }
 }
 
-void DaemonHtmlEngine::MaybeRemoveOnRefusal(const DaemonHtmlRequestFacts& facts,
-                                            const GoogleString& url,
-                                            const GoogleString& hostname,
-                                            int status,
-                                            const StoreVerdict& refusal,
-                                            DaemonHtmlPort* port) {
+void DaemonHtmlEngine::MaybeRemoveOnRefusal(
+    const DaemonHtmlRequestFacts& facts, const GoogleString& url,
+    const GoogleString& hostname, int status, const StoreVerdict& store,
+    const StoreVerdict& final_view, DaemonHtmlPort* port) {
   const bool clean_request =
       facts.method == "GET" && facts.url_agreed && !facts.has_authorization &&
       !facts.authenticated_user && !facts.has_cookie &&
@@ -1145,9 +1185,13 @@ void DaemonHtmlEngine::MaybeRemoveOnRefusal(const DaemonHtmlRequestFacts& facts,
       !(facts.has_cache_control &&
         HasDirective(facts.cache_control, "no-store"));
   if (!clean_request) return;
+  // A response-side refusal in either view removes.
+  auto removing = [](const StoreVerdict& v) {
+    return !v.stores() && ValueIn(v.reason, kRemovingReasons) &&
+           v.detail != "request";
+  };
   const bool removing_response =
-      (status == 200 && ValueIn(refusal.reason, kRemovingReasons) &&
-       refusal.detail != "request") ||
+      (status == 200 && (removing(store) || removing(final_view))) ||
       status == 404 || status == 410;
   if (!removing_response) return;
   const int64 now_s = deps_.timer->NowMs() / Timer::kSecondMs;
@@ -1211,16 +1255,11 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   // The serve gate: nothing is read before every part of it holds.
   if (config_.mode < DaemonHtmlMode::kServeVariants ||
       !config_.agent_optimize || !IsSiteId(config_.site) ||
-      (!facts.site.empty() && facts.site != config_.site)) {
+      facts.site != config_.site) {
     return result;
   }
   if (!serving()) {
     NoteUnavailable();
-    return result;
-  }
-  if (!facts.url_agreed) {
-    result.reason = "url_disagree";
-    CountFallThrough(result.reason);
     return result;
   }
   result.reason = "other";
@@ -1234,6 +1273,12 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   const bool has_accept = !facts.accept_lines.empty();
   if (abi->WantsAgentMarkdown(accept.c_str()) != 1) {
     result.reason = "";  // Not a Markdown request at all.
+    return result;
+  }
+  // Counted only for a Markdown request, so the counter means one.
+  if (!facts.url_agreed) {
+    result.reason = "url_disagree";
+    CountFallThrough(result.reason);
     return result;
   }
   if (cache == nullptr) return result;
@@ -1344,7 +1389,8 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   const uint8_t* markdown = nullptr;
   size_t markdown_len = 0;
   if (reads.markdown == nullptr ||
-      abi->ReadContent(reads.markdown, &markdown, &markdown_len) != kPsOk) {
+      abi->ReadContent(reads.markdown, &markdown, &markdown_len) != kPsOk ||
+      markdown_len == 0) {
     // Never an empty answer for a copy that cannot be read.
     result.reason = "absent";
     CountFallThrough(result.reason);

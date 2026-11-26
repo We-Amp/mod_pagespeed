@@ -3750,6 +3750,646 @@
       }
     },
     {
+      "id": "store-final-view-no-cache-kept",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: shorter of the two lifetimes",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "header_present"
+            ]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "no_cache",
+              "header_present"
+            ],
+            "flags": [
+              "needs_validation"
+            ]
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [
+                [
+                  "Cache-Control",
+                  "no-cache"
+                ]
+              ],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_write_params",
+                  "args": {
+                    "store_flags": 2
+                  }
+                }
+              ],
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "cc_flags": [
+                    "no_cache",
+                    "header_present"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-public-only-in-store-view",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: both header views must allow the store",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "public",
+              "header_present"
+            ],
+            "flags": [
+              "explicit_shared"
+            ]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "header_present"
+            ]
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_store_write_params",
+                  "args": {
+                    "store_flags": 0
+                  }
+                }
+              ],
+              "stored": [
+                {
+                  "kind": "original",
+                  "url": "https://www.example.test/page",
+                  "cc_flags": [
+                    "header_present"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-sidecar-not-kept-stores-nothing",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: header block written first",
+      "engine": {
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_cache_write_headers_sidecar_site",
+            "stored": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": [
+                "ps_cache_write_original_site"
+              ],
+              "stored": [],
+              "notify": [],
+              "counters": {
+                "daemon_html_sidecar_write_failed": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "restore-cc-flags-differ",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: re-store skipped only for an unchanged fresh entry",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "headers": [
+              [
+                "X-Frame-Options",
+                "DENY"
+              ]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store_no_notify",
+            "reason": "no_transform",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "no_transform"
+            ]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store_no_notify",
+            "reason": "no_transform",
+            "lifetime_s": 300,
+            "cc_flags": [
+              "no_transform"
+            ]
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ],
+                [
+                  "X-Frame-Options",
+                  "DENY"
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_cache_write_original_site"
+                }
+              ],
+              "counters": {
+                "daemon_html_restore_skipped": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "restore-content-type-differs",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: re-store skipped only for an unchanged fresh entry",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "headers": [
+              [
+                "X-Frame-Options",
+                "DENY"
+              ]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ],
+                [
+                  "X-Frame-Options",
+                  "DENY"
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_cache_write_original_site"
+                }
+              ],
+              "counters": {
+                "daemon_html_restore_skipped": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "restore-skip-server-stamped-lines",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: re-store skipped only for an unchanged fresh entry",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "headers": [
+              [
+                "X-Frame-Options",
+                "DENY"
+              ]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ],
+                [
+                  "X-Frame-Options",
+                  "DENY"
+                ],
+                [
+                  "Server",
+                  "httpd"
+                ],
+                [
+                  "Accept-Ranges",
+                  "bytes"
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": [
+                "ps_cache_write_original_site",
+                "ps_cache_write_headers_sidecar_site"
+              ],
+              "counters": {
+                "daemon_html_restore_skipped": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "remove-on-final-view-private",
+      "runners": [
+        "engine"
+      ],
+      "why": "store: refused re-record removes the entry",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "no_lifetime",
+            "lifetime_s": 0
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "private",
+            "lifetime_s": 0
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                [
+                  "Content-Type",
+                  "text/html; charset=utf-8"
+                ],
+                [
+                  "Cache-Control",
+                  "max-age=300"
+                ],
+                [
+                  "ETag",
+                  "\"v1\""
+                ]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_cache_remove_site",
+                  "args": {
+                    "url": "https://www.example.test/page"
+                  }
+                }
+              ],
+              "counters": {
+                "daemon_html_removed_on_refusal": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "store-insert-time-floored-age-adjusted",
       "runners": ["engine"],
       "why": "purge: insert time is the floored capture start less Age",
