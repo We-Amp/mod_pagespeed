@@ -20,7 +20,7 @@
 # -Credential (the guest Administrator) are required; the credential is never
 # printed. The script refuses the guest a CI gate restores (CI_IIS_VM_NAME,
 # docs/ci/runner-environment.md). The guest needs Web-Dyn-Compression and
-# Web-Stat-Compression, and, unless -Msi is given, the PageSpeed MSI with its
+# Web-Stat-Compression (-InstallFeatures adds them), and, unless -Msi is given, the PageSpeed MSI with its
 # optimizer installed. Windows PowerShell 5.1 compatible; ASCII only.
 
 [CmdletBinding()]
@@ -28,6 +28,8 @@ param(
     [Parameter(Mandatory = $true)][string]$VMName,
     [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credential,
     [string]$Msi = "",
+    # Installs the two compression features first (a lab guest only).
+    [switch]$InstallFeatures,
     [int]$Port = 8301,
     [string]$OutFile = ""
 )
@@ -53,6 +55,13 @@ $session = New-PSSession -VMName $VMName -Credential $Credential
 $exitCode = 0
 $sawSummary = $false
 try {
+    if ($InstallFeatures) {
+        $lines = Invoke-Command -Session $session -ScriptBlock {
+            $r = Install-WindowsFeature -Name Web-Dyn-Compression, Web-Stat-Compression
+            "FEATURES | installed | success={0} restart={1}" -f $r.Success, $r.RestartNeeded
+        }
+        foreach ($l in $lines) { Say "$l" }
+    }
     $pre = Invoke-Command -Session $session -ScriptBlock {
         foreach ($f in @("Web-Dyn-Compression", "Web-Stat-Compression")) {
             $w = Get-WindowsFeature -Name $f
