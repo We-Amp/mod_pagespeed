@@ -20,6 +20,8 @@
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/dechunker.h"
 #include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_daemon_html_serve.h"
+#include "pagespeed/system/module_entity_tags.h"
 //KS: makes things not portable
 #include "pagespeed/iis/iis_module_request_context.h"
 
@@ -138,6 +140,26 @@ public:
 	// the request (Unix milliseconds): the fallback capture start when the
 	// one stamped at GL_PRE_BEGIN_REQUEST cannot be read.
 	int64 created_ms() const { return created_ms_; }
+
+	// The client's If-None-Match and If-Modified-Since as they arrived,
+	// before the begin-request notification removed a module tag from the
+	// request (IisHttpModule::OnBeginRequest), copied here from the module
+	// object that took them when this context is created.  A child request
+	// of this one finds this context, not its own (already stripped)
+	// request.
+	const ClientConditionalStash& client_conditionals() const { return client_conditionals_; }
+	void set_client_conditionals(const ClientConditionalStash& stash) { client_conditionals_ = stash; }
+
+	// DaemonHtmlCache serve-variants: the Markdown answer the main
+	// registration kept for the final-view registration to send
+	// (iis_daemon_html_serve.h).  Taken once.
+	bool markdown_answer_pending() const { return markdown_answer_ != nullptr; }
+	void set_markdown_answer(std::unique_ptr<IisMarkdownAnswer> answer) { markdown_answer_ = std::move(answer); }
+	std::unique_ptr<IisMarkdownAnswer> take_markdown_answer() { return std::move(markdown_answer_); }
+
+	// The capture finished its body, so a commit follows at cleanup
+	// (IisServerContext::NoteDaemonHtmlCommitStarted).
+	void NoteDaemonHtmlBodyEnded();
 protected:
 	virtual ~IisInnerRequestContext();
 private:
@@ -172,6 +194,9 @@ private:
 	bool rewrite_html_;
 	int64 created_ms_;
 	std::unique_ptr<IisDaemonHtmlCapture> daemon_html_capture_;
+	ClientConditionalStash client_conditionals_;
+	std::unique_ptr<IisMarkdownAnswer> markdown_answer_;
+	bool daemon_html_commit_started_ = false;
 
 	IisInnerRequestContext(const IisInnerRequestContext&) = delete;
 	IisInnerRequestContext& operator=(const IisInnerRequestContext&) = delete;

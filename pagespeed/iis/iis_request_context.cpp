@@ -27,17 +27,60 @@ void IisInnerRequestContext::NoteDaemonHtmlModuleView(IHttpResponse* response)
 	}
 }
 
+void IisInnerRequestContext::NoteDaemonHtmlBodyEnded()
+{
+	if (daemon_html_capture_ == nullptr || daemon_html_commit_started_) {
+		return;
+	}
+	daemon_html_commit_started_ = true;
+	server_context_->NoteDaemonHtmlCommitStarted();
+}
+
+namespace {
+
+// Test equipment: while the file PAGESPEED_TEST_HTML_COMMIT_HOLD_FILE names
+// exists, a commit waits (at most a minute), so a test can show that a read
+// made before the commit ran finds nothing.  Unset in production.
+void HoldDaemonHtmlCommitForTest()
+{
+	static const std::string hold_file = [] {
+		char buffer[MAX_PATH] = {0};
+		const DWORD n = GetEnvironmentVariableA(
+			"PAGESPEED_TEST_HTML_COMMIT_HOLD_FILE", buffer, MAX_PATH);
+		return (n > 0 && n < MAX_PATH) ? std::string(buffer, n) : std::string();
+	}();
+	if (hold_file.empty()) {
+		return;
+	}
+	for (int i = 0; i < 600; ++i) {
+		if (GetFileAttributesA(hold_file.c_str()) == INVALID_FILE_ATTRIBUTES) {
+			return;
+		}
+		Sleep(100);
+	}
+}
+
+}  // namespace
+
 void IisInnerRequestContext::CleanupStoredContext()
 {
 	// The response is done with: the HTML cache engine classifies what was
-	// recorded of it.  The final view is missing when the final-view module
-	// entry did not run for this request's site.
+	// recorded of it, and stores it or removes a refused entry, inline.
+	// The final view is missing when the final-view module entry did not
+	// run for this request's site.
 	if (daemon_html_capture_ != nullptr) {
+		if (daemon_html_commit_started_) {
+			HoldDaemonHtmlCommitForTest();
+		}
 		if (daemon_html_capture_->Finish()) {
 			server_context_->NoteDaemonHtmlFinalViewMissing();
 		}
 		daemon_html_capture_.reset();
+		if (daemon_html_commit_started_) {
+			server_context_->NoteDaemonHtmlCommitFinished();
+		}
 	}
+	markdown_answer_.reset();
 	// IIS is done with the request, but the rewriter may still be producing
 	// output for it on its own threads: cut the fetch off from the request
 	// first, so nothing it does from here on can reach IIS.

@@ -38,6 +38,7 @@
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_server_context.h"
 #include "pagespeed/iis/iis_final_view_module.h"
 #include "pagespeed/iis/iis_registration.h"
 #include "pagespeed/iis/iis_configuration.h"
@@ -307,14 +308,27 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
     net_instaweb::cf = new ConfigFactory();
   }
 
+  // The server interface is the same for both registrations: kept for the
+  // admin manager (a site's bindings).
+  net_instaweb::SetIisHttpServer(pGlobalInfo);
+
   HRESULT hr = S_OK;
   if (kind == net_instaweb::IisRegistrationKind::kFinalView) {
-    // One send notification, at PRIORITY_ALIAS_FIRST: IIS runs it after its
+    // A send notification at PRIORITY_ALIAS_FIRST: IIS runs it after its
     // header stages (customHeaders) and dynamic compression, the last point
-    // a module sees the response before it goes out.  It reads that view
-    // and changes nothing (iis_final_view_module.h).
+    // a module sees the response before it goes out.  It reads that view,
+    // and sends a Markdown answer the main registration kept for it with
+    // exactly its own header set (iis_final_view_module.h).  Its
+    // resolve-cache notification, at the same priority and listed first by
+    // the installer, only marks the request as one it will see.
+    net_instaweb::IisFinalViewModuleFactory::set_final_view_module_id(
+        pModuleInfo->GetId());
     hr = pModuleInfo->SetRequestNotifications(
-        new net_instaweb::IisFinalViewModuleFactory(), RQ_SEND_RESPONSE, 0);
+        new net_instaweb::IisFinalViewModuleFactory(),
+        RQ_SEND_RESPONSE | RQ_RESOLVE_REQUEST_CACHE, 0);
+    if (FAILED(hr)) return hr;
+    hr = pModuleInfo->SetPriorityForRequestNotification(
+        RQ_RESOLVE_REQUEST_CACHE, PRIORITY_ALIAS_FIRST);
     if (FAILED(hr)) return hr;
     return pModuleInfo->SetPriorityForRequestNotification(
         RQ_SEND_RESPONSE, PRIORITY_ALIAS_FIRST);
