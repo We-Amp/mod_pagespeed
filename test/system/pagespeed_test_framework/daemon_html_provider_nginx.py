@@ -1038,6 +1038,18 @@ http {{
                 process: Optional[str] = None) -> conf.Response:
         return self._send(self._instance(process), method, path, host or ROW_HOST, headers)
 
+    def _fail_on_crashed_worker(self, inst: _Instance) -> None:
+        """Fails when the instance's error log records a worker that exited on
+        a signal."""
+        path = os.path.join(inst.root, "logs", "error.log")
+        try:
+            with open(path, errors="replace") as f:
+                crashed = [line.strip() for line in f if "exited on signal" in line]
+        except OSError:
+            return
+        if crashed:
+            raise AssertionError(f"nginx {inst.name}: a worker crashed: {crashed[-1]}")
+
     def _stats(self, inst: _Instance) -> Dict[str, int]:
         # A worker of the previous generation that is closing after a reload
         # may drop a connection it had accepted; that is transport, so the
@@ -1050,6 +1062,9 @@ http {{
                 text = r.read().decode("utf-8", "replace")
                 break
             except (http.client.RemoteDisconnected, ConnectionResetError):
+                # A dropped connection is only transport when no worker died:
+                # a crash is never retried away.
+                self._fail_on_crashed_worker(inst)
                 if attempt == 4:
                     raise
                 time.sleep(0.2)

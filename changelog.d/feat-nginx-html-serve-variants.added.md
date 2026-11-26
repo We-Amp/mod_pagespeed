@@ -24,7 +24,8 @@
   named location, `error_page`, `X-Accel-Redirect`), a percent-escaped path,
   a path with a dot segment or merged slashes, and a request line naming
   another host than `Host` are neither. The Markdown serve needs nginx 1.13.4
-  or later.
+  or later. A 304 nginx answers for a page carries no `Vary: Accept`; a
+  cache keeps the `Vary` of the 200 it revalidates.
 - **nginx: the HTML cache decision log names what the server configuration
   added.** With C API 1.14, nginx's report-only lines now carry `vhost_added`
   as Apache's do: the names of the response headers `add_header` or
