@@ -94,7 +94,9 @@ ASK_INTERVAL_S = 2.0
 #   final_view: "removed"     the site's modules list removes PageSpeedFinalView
 #   final_view: "cleared"     the site's modules list is <clear/> followed by
 #                             every module the server lists but
-#                             PageSpeedFinalView
+#                             PageSpeedFinalView (the server's entries are
+#                             unlocked first: IIS locks them by default, and
+#                             a locked list cannot be cleared at all)
 #   custom_errors: "replace"  IIS's custom error pages replace every error
 #                             response (existingResponse Replace)
 #   static_file: true         /static.html (the row's body) and /plain.txt
@@ -504,6 +506,11 @@ class IisProvider(conf.Provider):
         modules = []
         for add in ET.fromstring(out).iter("add"):
             entry = {"name": add.get("name")}
+            if add.get("lockItem") == "true":
+                # A site can clear the list only after the server unlocked
+                # its entries: the operator this row stands for did.
+                _appcmd("set", "config", "-section:system.webServer/modules",
+                        f"/[name='{entry['name']}'].lockItem:false", "/commit:apphost")
             for k in ("type", "preCondition"):
                 if add.get(k):
                     entry[k] = add.get(k)
