@@ -239,6 +239,7 @@ describe("statGroupKey", () => {
     expect(statGroupKey("ipro_served")).toBe("ipro");
     expect(statGroupKey("ipro_daemon_served")).toBe("optimizer");
     expect(statGroupKey("daemon_html_refused_vary")).toBe("html");
+    expect(statGroupKey("daemon_markdown_served")).toBe("html");
     expect(statGroupKey("named-lock-rewrite-scheduler-granted")).toBe("rewriting");
     expect(statGroupKey("low-priority-worked-queue-depth")).toBe("rewriting");
     expect(statGroupKey("pcache-cohorts-dom_hits")).toBe("pcache");
