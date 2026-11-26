@@ -535,7 +535,12 @@ class IisProvider(conf.Provider):
                               "inetsrv", "config", "applicationHost.config")
         with open(config, encoding="utf-8-sig") as f:
             text = f.read()
-        start = text.index("<modules>", text.index("<system.webServer>"))
+        # The element itself, on a line of its own (a comment names it too).
+        found = re.compile(r"^[ \t]*<modules(\s[^>]*)?>", re.M).search(
+            text, text.index("<system.webServer>"))
+        if found is None:
+            raise conf.ProviderUnsupported("no <modules> list in the server's configuration")
+        start = found.start()
         end = text.index("</modules>", start)
         block = re.sub(r'\s+lockItem="true"', "", text[start:end])
         if block != text[start:end]:
