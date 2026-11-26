@@ -2612,7 +2612,7 @@
        {
         "purge_url": {
          "url": "/blog-a",
-         "form": "PURGE"
+         "form": "query"
         }
        }
       ]
