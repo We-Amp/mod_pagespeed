@@ -266,9 +266,9 @@ TEST_F(HttpFilterTest, DaemonHtmlCacheModesAreInert) {
     EXPECT_EQ(FilterHeadersStatus::Continue,
               filter->encodeHeaders(response, true));
     EXPECT_EQ(c.counted, unavailable->Get() - before)
-        << RewriteOptions::ToString(c.mode);
+        << static_cast<int>(c.mode);
     // Not a header added, removed or changed: no Vary, no validator taken.
-    EXPECT_EQ(sent, response) << RewriteOptions::ToString(c.mode);
+    EXPECT_EQ(sent, response) << static_cast<int>(c.mode);
   }
 }
 

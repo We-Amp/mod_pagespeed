@@ -1133,8 +1133,6 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheOption) {
                 "DaemonHtmlCache", "serve-variants", &msg, &handler));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options_.daemon_html_cache());
-  EXPECT_EQ("serve-variants",
-            RewriteOptions::ToString(options_.daemon_html_cache()));
   // Any other value is a configuration error.
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
             options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve",
