@@ -9,7 +9,9 @@
 # -Phase setup     takes an IIS configuration backup and provisions what the
 #                  IIS provider (daemon_html_provider_iis.py) drives:
 #                    * the IIS features it needs (ASP.NET 4.x, basic
-#                      authentication, static and dynamic compression);
+#                      authentication, static and dynamic compression) and,
+#                      when the rig brought its installer, the URL Rewrite
+#                      module;
 #                    * a local user u (password p) for the rows that ask
 #                      for server authentication, with the guest's password
 #                      rules relaxed to allow it;
@@ -54,6 +56,13 @@ function Setup {
     if (-not $svc) { throw "the optimizer service is not installed (an MSI built with -OptimizerDir is needed)" }
     $r = Install-WindowsFeature -Name Web-Asp-Net45, Web-Basic-Auth, Web-Dyn-Compression, Web-Stat-Compression
     Write-Output ("SETUP | features | success={0} restart={1}" -f $r.Success, $r.RestartNeeded)
+    # The URL Rewrite module, when the rig brought its installer.
+    $rewrite = Test-Path "$env:windir\system32\inetsrv\rewrite.dll"
+    if (-not $rewrite -and (Test-Path "$Bin\url-rewrite.msi")) {
+        $p = Start-Process msiexec.exe -ArgumentList "/i `"$Bin\url-rewrite.msi`" /qn /norestart" -Wait -PassThru
+        $rewrite = $p.ExitCode -eq 0 -and (Test-Path "$env:windir\system32\inetsrv\rewrite.dll")
+    }
+    Write-Output ("SETUP | url rewrite | {0}" -f $(if ($rewrite) { "installed" } else { "absent" }))
     Import-Module WebAdministration
     & $appcmd add backup $Backup | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "taking the IIS configuration backup failed" }
@@ -70,6 +79,7 @@ function Setup {
         New-Item -ItemType Directory -Force $d | Out-Null
     }
     Copy-Item "$Bin\DhcOrigin.cs" "$Root\site\App_Code\DhcOrigin.cs" -Force
+    if ($rewrite) { Set-Content -LiteralPath "$Root\url-rewrite.txt" -Value "1" -Encoding ASCII }
     & icacls.exe $Root /grant "IIS_IUSRS:(OI)(CI)M" | Out-Null
 
     $cert = New-SelfSignedCertificate -DnsName "www.example.test" -CertStoreLocation "Cert:\LocalMachine\My"

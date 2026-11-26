@@ -2,7 +2,11 @@
  "about": [
   "IIS-only HTML cache rows (the rig's own knobs: final_view, custom_errors,",
   "static_file, output_cache, ip_binding). Same row shape as",
-  "test/system/daemon_html/conformance_cases.json, whose bodies they use."
+  "test/system/daemon_html/conformance_cases.json, whose bodies they use.",
+  "live-strip-chained-module-origin leaves IIS out: chaining a second module",
+  "in front of the origin needs a reverse proxy (ARR), which the rig does not have.",
+  "live-later-added-short-max-age leaves IIS out for iis-later-added-short-max-age:",
+  "IIS customHeaders cannot replace a header, so the lifetimes conflict."
  ],
  "rows": [
   {
@@ -2482,6 +2486,786 @@
       }
      }
     ]
+   }
+  },
+  {
+   "id": "iis-url-rewrite-inbound-keys-public-path",
+   "runners": [
+    "live"
+   ],
+   "why": "cache key: the URL as the client sent it",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-b",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/front",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-a",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      },
+      "pre": [
+       {
+        "purge_url": {
+         "url": "/blog-a",
+         "form": "PURGE"
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-b",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/blog-b",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     }
+    ],
+    "vhost": {
+     "url_rewrite_inbound": [
+      [
+       "^blog-(a|b)$",
+       "front"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "iis-url-rewrite-outbound-200",
+   "runners": [
+    "live"
+   ],
+   "why": "markdown: response header allowlist (URL Rewrite outbound rule)",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true,
+       "headers_exact": {
+        "X-Outbound": {
+         "count": 1,
+         "value": "leaked"
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8",
+       "headers_absent": [
+        "X-Outbound"
+       ]
+      }
+     }
+    ],
+    "vhost": {
+     "url_rewrite_outbound": [
+      [
+       "X-Outbound",
+       "leaked"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "iis-url-rewrite-outbound-304",
+   "runners": [
+    "live"
+   ],
+   "why": "markdown: response header allowlist (URL Rewrite outbound rule)",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ],
+        [
+         "If-None-Match",
+         "$markdown_etag"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 304,
+       "headers_absent": [
+        "X-Outbound",
+        "Content-Type"
+       ]
+      }
+     }
+    ],
+    "vhost": {
+     "url_rewrite_outbound": [
+      [
+       "X-Outbound",
+       "leaked"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "iis-url-form-escaped-0",
+   "runners": [
+    "live"
+   ],
+   "why": "url agreement: /caf%C3%A9",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%C3%A9",
+       "headers": []
+      },
+      "expect": {
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%C3%A9",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "stored": false,
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "iis-url-form-escaped-1",
+   "runners": [
+    "live"
+   ],
+   "why": "url agreement: /caf%C3%89",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%C3%89",
+       "headers": []
+      },
+      "expect": {
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%C3%89",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "stored": false,
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "iis-url-form-escaped-2",
+   "runners": [
+    "live"
+   ],
+   "why": "url agreement: /caf%E9",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%E9",
+       "headers": []
+      },
+      "expect": {
+       "stored": false
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/caf%E9",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "stored": false,
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "iis-later-added-short-max-age",
+   "runners": [
+    "live"
+   ],
+   "why": "store: IIS customHeaders append to Cache-Control, a conflicting lifetime is no lifetime",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=86400"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": []
+      },
+      "expect": {
+       "stored": true,
+       "stored_lifetime_s": 0
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ]
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 10,
+         "expect_ready": false
+        }
+       }
+      ]
+     }
+    ],
+    "vhost": {
+     "header_add": [
+      [
+       "Cache-Control",
+       "max-age=60"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "iis-non-default-port-purge",
+   "runners": [
+    "live"
+   ],
+   "why": "purge: a site bound to a non-default port",
+   "ports": [
+    "iis"
+   ],
+   "live": {
+    "mode": "serve-variants",
+    "agent_optimize": true,
+    "origin": {
+     "status": 200,
+     "headers": [
+      [
+       "Content-Type",
+       "text/html; charset=utf-8"
+      ],
+      [
+       "Cache-Control",
+       "max-age=300"
+      ],
+      [
+       "ETag",
+       "\"v1\""
+      ]
+     ],
+     "body_ref": "page"
+    },
+    "steps": [
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "X-Forwarded-Proto",
+         "http"
+        ]
+       ],
+       "host": "www.example.test:8081"
+      },
+      "expect": {
+       "status": 200,
+       "stored": true
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ],
+       "host": "www.example.test:8081"
+      },
+      "expect": {
+       "status": 200
+      },
+      "pre": [
+       {
+        "wait_markdown": {
+         "timeout_s": 30
+        }
+       }
+      ]
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ],
+       "host": "www.example.test:8081"
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/markdown; charset=utf-8"
+      }
+     },
+     {
+      "request": {
+       "method": "GET",
+       "path": "/page",
+       "headers": [
+        [
+         "Accept",
+         "text/markdown"
+        ]
+       ],
+       "host": "www.example.test:8081"
+      },
+      "expect": {
+       "status": 200,
+       "content_type": "text/html",
+       "headers_absent": [
+        "X-Robots-Tag"
+       ]
+      },
+      "pre": [
+       {
+        "purge_url": {
+         "url": "http://www.example.test:8081/page",
+         "form": "PURGE"
+        }
+       }
+      ]
+     }
+    ],
+    "vhost": {
+     "plain_port": 8081
+    }
    }
   }
  ]

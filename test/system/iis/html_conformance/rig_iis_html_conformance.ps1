@@ -30,6 +30,9 @@ param(
     [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credential,
     [Parameter(Mandatory = $true)][string]$PythonZip,
     [string]$Msi = "",
+    # The IIS URL Rewrite module's installer (Microsoft's rewrite_amd64
+    # package), for the rows that need it; without it they fail.
+    [string]$UrlRewriteMsi = "",
     # Comma-separated row ids; all rows when empty.
     [string]$Rows = "",
     [string]$OutFile = ""
@@ -66,6 +69,7 @@ foreach ($f in @("DhcOrigin.cs", "run_iis_html_conformance.py", "guest_iis_html_
     Copy-Item (Join-Path $here $f) "$stage\$f"
 }
 Copy-Item -LiteralPath $PythonZip "$stage\python.zip"
+if ($UrlRewriteMsi) { Copy-Item -LiteralPath $UrlRewriteMsi "$stage\url-rewrite.msi" }
 
 $session = New-PSSession -VMName $VMName -Credential $Credential
 $exitCode = 0

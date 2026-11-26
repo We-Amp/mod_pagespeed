@@ -104,8 +104,17 @@ ASK_INTERVAL_S = 2.0
 #   output_cache: true        an output-cache profile for .html
 #   ip_binding: true          an http and https binding with an address
 #                             and no host (127.0.0.1)
+#   url_rewrite_inbound: [[pattern, url], ...]
+#                             URL Rewrite inbound rules, in order (the
+#                             guest's URL Rewrite module)
+#   url_rewrite_outbound: [[header, value], ...]
+#                             URL Rewrite outbound rules that set a response
+#                             header on every response
+#   plain_port: N             an http binding on port N for the row's host; a
+#                             request whose host names :N goes there
 IIS_VHOST_KNOBS = frozenset(["final_view", "custom_errors", "static_file",
-                             "output_cache", "ip_binding"])
+                             "output_cache", "ip_binding", "url_rewrite_inbound",
+                             "url_rewrite_outbound", "plain_port"])
 
 
 class ProviderSetupError(RuntimeError):
@@ -382,6 +391,7 @@ class IisProvider(conf.Provider):
         self._row_seq = itertools.count(1)
         self._auth_locations: Set[str] = set()
         self.processes: Dict[str, int] = {}
+        self.plain_port: Optional[int] = None
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -460,6 +470,23 @@ class IisProvider(conf.Provider):
         if vhost.get("custom_errors") == "replace":
             extra.append('<httpErrors errorMode="Custom" existingResponse="Replace" />')
             applied.add("custom_errors")
+        inbound = vhost.get("url_rewrite_inbound", [])
+        outbound = vhost.get("url_rewrite_outbound", [])
+        if inbound or outbound:
+            if not os.path.exists(os.path.join(self.dir, "url-rewrite.txt")):
+                raise conf.ProviderUnsupported("the guest has no URL Rewrite module")
+            rules = "".join(
+                f'<rule name="in{i}" stopProcessing="true"><match url="{_xml(p)}" />'
+                f'<action type="Rewrite" url="{_xml(u)}" appendQueryString="false" /></rule>'
+                for i, (p, u) in enumerate(inbound))
+            out = "".join(
+                f'<rule name="out{i}"><match serverVariable="RESPONSE_{_xml(h.replace("-", "_"))}" pattern=".*" />'
+                f'<action type="Rewrite" value="{_xml(v)}" /></rule>'
+                for i, (h, v) in enumerate(outbound))
+            extra.append(f"<rewrite><rules>{rules}</rules>"
+                         f"<outboundRules>{out}</outboundRules></rewrite>")
+            applied.update(k for k in ("url_rewrite_inbound", "url_rewrite_outbound")
+                           if k in vhost)
         headers = ['<remove name="X-Powered-By" />']
         for knob in ("header_add", "header_always"):
             for name, value in vhost.get(knob, []):
@@ -530,6 +557,10 @@ class IisProvider(conf.Provider):
             bindings += [f"http/*:{HTTP_PORT}:{alias}", f"https/*:{HTTPS_PORT}:{alias}"]
         if "alias" in vhost:
             applied.add("alias")
+        self.plain_port = vhost.get("plain_port")
+        if self.plain_port:
+            bindings.append(f"http/*:{int(self.plain_port)}:{ROW_HOST}")
+            applied.add("plain_port")
         if vhost.get("ip_binding"):
             bindings += [f"http/127.0.0.1:{HTTP_PORT}:", f"https/127.0.0.1:{HTTPS_PORT}:"]
             applied.add("ip_binding")
@@ -651,7 +682,9 @@ class IisProvider(conf.Provider):
         self._write_configs(self.live)
         self._recycle()
 
-    def _connection(self, tls: bool) -> http.client.HTTPConnection:
+    def _connection(self, tls: bool, port: Optional[int] = None) -> http.client.HTTPConnection:
+        if port is not None:
+            return http.client.HTTPConnection("127.0.0.1", port, timeout=60)
         if tls:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -659,9 +692,15 @@ class IisProvider(conf.Provider):
             return http.client.HTTPSConnection("127.0.0.1", HTTPS_PORT, timeout=60, context=ctx)
         return http.client.HTTPConnection("127.0.0.1", HTTP_PORT, timeout=60)
 
+    def _port_of(self, host: str) -> Optional[int]:
+        """The row's own plain port when `host` names it."""
+        if self.plain_port and host.endswith(f":{int(self.plain_port)}"):
+            return int(self.plain_port)
+        return None
+
     def _send(self, method: str, path: str, host: str, headers: HeaderLines, tls: bool = True,
               conn: Optional[http.client.HTTPConnection] = None) -> conf.Response:
-        c = conn or self._connection(tls)
+        c = conn or self._connection(tls, self._port_of(host))
         try:
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
@@ -748,7 +787,8 @@ class IisProvider(conf.Provider):
         h = (host or ROW_HOST).lower()
         hostname = h.rsplit(":", 1)[0] if ":" in h and not h.startswith("[") else h
         site = hashlib.sha256(self.fragment.encode()).hexdigest()
-        return (path.encode(), hostname.encode(), b"https", site.encode())
+        scheme = b"http" if self._port_of(h) else b"https"
+        return (path.encode(), hostname.encode(), scheme, site.encode())
 
     def stored_entry(self, path: str, host: Optional[str]) -> Optional[conf.StoredEntry]:
         return self.volume.stored_entry(self._key(path, host))
