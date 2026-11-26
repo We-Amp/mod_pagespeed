@@ -205,11 +205,11 @@ function Teardown {
 # One response as compared across the sites: status, header lines without
 # Date (each response has its own), and the body.
 function Snapshot($r, [string]$Site) {
-    # IIS's own error pages name the site's physical path: compared with the
-    # site name taken out, and their length with it (as the Apache and nginx
+    # IIS's own error pages name the site's physical path, port and id:
+    # compared with those taken out, and their length with it (as the Apache and nginx
     # lanes take the host name out).
     $text = [Text.Encoding]::GetEncoding(28591).GetString($r.Body)
-    $plain = $text.Replace($Site, "SITE")
+    $plain = $text.Replace($Site, "SITE").Replace([string]$Sites[$Site].Port, "PORT").Replace([string](Get-Website -Name $Site).id, "ID")
     $shrink = $text.Length - $plain.Length
     $body = [Text.Encoding]::GetEncoding(28591).GetBytes($plain)
     $lines = @()
