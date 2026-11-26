@@ -61,7 +61,11 @@ def test_live_row(provider, row):
         if provider.port in conf.ZERO_SKIP_PORTS:
             pytest.fail(f"{reason}: the {provider.port} lane runs no row for another port")
         pytest.skip(reason)
-    failures = conf.run_row(provider, row, CASES["bodies"])
+    runner = conf.RowRunner(provider, row, CASES["bodies"])
+    failures = runner.run()
+    # What each window step saw, for the terminal summary (conftest).
+    for w in runner.windows:
+        conf.WINDOW_LOG.append(dict(w, row=row["id"]))
     assert failures == [], "\n".join(failures)
 
 

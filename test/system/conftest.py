@@ -957,6 +957,15 @@ def pytest_terminal_summary(terminalreporter):
         f"{counts['passed']} passed, {counts['failed']} failed, {counts['skipped']} skipped, "
         f"{_CONFORMANCE['deselected']} for other ports deselected"
     )
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    for w in conf.WINDOW_LOG:
+        last = "none" if w["last_stale_s"] is None else f"last sent at {w['last_stale_s']:.2f} s"
+        first = "none" if w["first_miss_s"] is None else f"{w['first_miss_s']:.2f} s"
+        terminalreporter.write_line(
+            f"HTML cache conformance window {w['row']} step {w['step']}: "
+            f"{w['stale']} pre-purge answers ({last}), {w['miss']} misses (first sent at {first})"
+        )
     for line in _CONFORMANCE["violations"]:
         terminalreporter.write_line(f"HTML cache conformance skip not allowed: {line}", red=True)
     if _CONFORMANCE["violations"]:

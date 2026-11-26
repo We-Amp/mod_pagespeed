@@ -111,6 +111,9 @@ STEP_KEYS = frozenset(["request", "pre", "process", "background", "expect", "win
 WINDOW_KEYS = frozenset(["stale_max_s", "margin_s", "observe_s", "every_s", "stale"])
 WINDOW_STALE_KEYS = frozenset(["content_type"])
 PURGE_OPS = frozenset(["purge_url", "purge_global"])
+# The window records of the rows run in this process (the lane's test
+# module appends them; conftest prints them in the terminal summary).
+WINDOW_LOG: List[dict] = []
 REQUEST_KEYS = frozenset(["method", "path", "host", "headers"])
 OPS = frozenset(
     [
