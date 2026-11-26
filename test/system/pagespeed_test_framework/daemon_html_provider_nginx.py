@@ -679,6 +679,26 @@ class NginxProvider(conf.Provider):
         self._started.append((pid, inst.conf_path))
         self._wait_generation(inst)
 
+    def _accepting_workers(self, inst: _Instance) -> int:
+        """Worker processes of the instance's master that still accept."""
+        master = inst.master_pid()
+        if master is None:
+            return 0
+        n = 0
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    cmd = f.read().replace(b"\0", b" ").strip()
+            except (OSError, ValueError, IndexError):
+                continue
+            if ppid == master and cmd == b"nginx: worker process":
+                n += 1
+        return n
+
     def _wait_generation(self, inst: _Instance) -> None:
         deadline = time.monotonic() + RELOAD_TIMEOUT_S
         last = ""
@@ -690,7 +710,13 @@ class NginxProvider(conf.Provider):
                 r.read()
                 conn.close()
                 last = r.getheader("X-Dhc-Gen", "")
-                if last == str(inst.generation):
+                # The new generation answers, but a worker of an older one
+                # keeps accepting on the shared listeners until it starts to
+                # exit (closes them and retitles itself "... is shutting
+                # down"); a row request it took would run the previous row's
+                # configuration. So the new generation counts only once it is
+                # the one accepting worker left.
+                if last == str(inst.generation) and self._accepting_workers(inst) == 1:
                     return
             except OSError as e:
                 last = repr(e)
