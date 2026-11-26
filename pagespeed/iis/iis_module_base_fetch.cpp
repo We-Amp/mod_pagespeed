@@ -1095,6 +1095,11 @@ int IisModuleBaseFetch::CollectHeaders()
 				ucp->SecondsToLive = 0;
 			}
 		} 
+		// The module's own header edits are done: what changes after this
+		// is the server's, which the HTML cache's final view reads.
+		if (ctx_ != nullptr) {
+			ctx_->NoteDaemonHtmlModuleView(r);
+		}
 	}
 	
   return 0; 

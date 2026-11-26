@@ -7,6 +7,13 @@ load(
 
 licenses(["notice"])  # Apache 2
 
+# The recording ABI wrapper, for a port's tests that read what its engine
+# hands to the library.
+exports_files(
+    ["recording_daemon_abi.h"],
+    visibility = ["//test/pagespeed/iis:__pkg__"],
+)
+
 cc_binary(
     name = "redis_cache_cluster_setup",
     testonly = True,

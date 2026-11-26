@@ -5,7 +5,9 @@
 #define IIS_REQUEST_CONTEXT_H_
 
 #include <httpserv.h>
+#include <memory>
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/thread/win_mutex.h"
@@ -17,6 +19,7 @@
 #include "pagespeed/iis/iis_psol_request_context.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/dechunker.h"
+#include "pagespeed/iis/iis_daemon_html_capture.h"
 //KS: makes things not portable
 #include "pagespeed/iis/iis_module_request_context.h"
 
@@ -52,6 +55,7 @@ public:
 		, recorder_(nullptr)
 		, rewrite_html_(false)
 		, outer_context_(outer_context)
+		, created_ms_(server_context->timer()->NowMs())
 	{
 		//server_context->message_handler()->Message(kInfo,"create request context for connection to ip %s:%d", local_ip_address.c_str(), local_port);
 		pagespeedRequestPointer.reset(new IisPsolRequestContext(
@@ -117,6 +121,23 @@ public:
 	bool rewrite_html() { return rewrite_html_;}
 	void set_rewrite_html(bool x) { rewrite_html_ = x; }
 	IisModuleRequestContext* outer_context() { return outer_context_; }
+
+	// DaemonHtmlCache: the HTML cache engine's capture of this HTML response
+	// (iis_daemon_html_capture.h), or nullptr.  Fed by the main
+	// registration's send and by the module's own header edits, given its
+	// final view by the final-view registration's send, and finished when
+	// IIS releases the request (CleanupStoredContext).
+	IisDaemonHtmlCapture* daemon_html_capture() { return daemon_html_capture_.get(); }
+	void set_daemon_html_capture(std::unique_ptr<IisDaemonHtmlCapture> capture) {
+		daemon_html_capture_ = std::move(capture);
+	}
+	// The module's own header edits are done (IisModuleBaseFetch::
+	// CollectHeaders): the module view of the capture, read off `response`.
+	void NoteDaemonHtmlModuleView(IHttpResponse* response);
+	// When this context was created, at the module's first notification for
+	// the request (Unix milliseconds): the fallback capture start when the
+	// one stamped at GL_PRE_BEGIN_REQUEST cannot be read.
+	int64 created_ms() const { return created_ms_; }
 protected:
 	virtual ~IisInnerRequestContext();
 private:
@@ -149,6 +170,8 @@ private:
 	IproRecorder* recorder_;
 	IisExperimentAssignment experiment_assignment_;
 	bool rewrite_html_;
+	int64 created_ms_;
+	std::unique_ptr<IisDaemonHtmlCapture> daemon_html_capture_;
 
 	IisInnerRequestContext(const IisInnerRequestContext&) = delete;
 	IisInnerRequestContext& operator=(const IisInnerRequestContext&) = delete;

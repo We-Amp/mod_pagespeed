@@ -184,6 +184,14 @@ TEST_F(IisRequestStagePinTest, TheModuleHandlesNoStageBeforeAuthorization) {
         << "the module declares " << handler
         << " which runs before IIS has decided access";
   }
+  // The image's second registration handles its send notification only.
+  const GoogleString final_view = ReadStrippedSource("iis_final_view_module.h");
+  for (const char* handler : kHandlersBeforeAccessDecision) {
+    EXPECT_EQ(GoogleString::npos, final_view.find(handler))
+        << "the final-view module declares " << handler;
+  }
+  EXPECT_EQ(GoogleString::npos, final_view.find("OnResolveRequestCache("))
+      << "the final-view module takes up requests";
 }
 
 TEST_F(IisRequestStagePinTest, EveryServeIsReachedOnlyFromThatStage) {

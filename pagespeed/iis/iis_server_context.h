@@ -8,8 +8,10 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_html_engine.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/daemon_health.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -77,6 +79,16 @@ namespace net_instaweb {
 			return daemon_serve_stats_.get();
 		}
 
+		// The HTML cache engine of this site (DaemonHtmlCache), built on
+		// first use so a site that never sets the option has none.  It
+		// holds the report-only counters and decision log.
+		DaemonHtmlEngine* daemon_html_engine();
+
+		// A recorded HTML response got no final header view: the
+		// final-view module entry did not run for this site.  Logged once
+		// per site.
+		void NoteDaemonHtmlFinalViewMissing();
+
 	private:
 
 		GoogleString site_app_id_;
@@ -91,6 +103,9 @@ namespace net_instaweb {
 		mutable std::atomic<DaemonHealth> last_daemon_health_{
 			DaemonHealth::kNotConfigured};
 		std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
+		std::once_flag daemon_html_engine_once_;
+		std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
+		std::atomic<bool> daemon_html_final_view_missing_logged_{false};
  		IisServerContext(const IisServerContext&) = delete;
  		IisServerContext& operator=(const IisServerContext&) = delete;
 	};
