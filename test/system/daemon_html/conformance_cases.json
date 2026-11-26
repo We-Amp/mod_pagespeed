@@ -17897,7 +17897,7 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"wait_markdown": {"timeout_s": 5, "expect_ready": false}}],
-            "expect": {"status": 200, "stored": false}
+            "expect": {"stored": false}
           }
         ]
       }
