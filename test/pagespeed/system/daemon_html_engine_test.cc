@@ -715,6 +715,19 @@ TEST_F(DaemonHtmlEngineTest, AUrlPurgeWithoutAHandleIsStillFenced) {
                                        static_cast<uint32>(kNowMs / 1000)));
 }
 
+// A purge of a URL with no path purges the root: it is removed and fenced
+// as "/".
+TEST_F(DaemonHtmlEngineTest, APurgeWithoutAPathPurgesTheRoot) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  bool ok = false;
+  engine->OnAdminPurge("https://www.example.test", false, kNowMs,
+                       [&ok](bool o, const GoogleString&) { ok = o; });
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(1, CallsOf("ps_cache_remove_site"));
+  EXPECT_TRUE(engine->oracle()->Purged("https://www.example.test/",
+                                       static_cast<uint32>(kNowMs / 1000)));
+}
+
 // The epoch is written again to a volume that replaced the one it was
 // written to.
 TEST_F(DaemonHtmlEngineTest, AReplacedVolumeGetsTheEpochAgain) {

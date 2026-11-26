@@ -1913,7 +1913,8 @@ void DaemonHtmlEngine::OnAdminPurge(StringPiece url, bool global, int64 now_ms,
     parts.host = key.substr(sep + 3, path_start == GoogleString::npos
                                          ? GoogleString::npos
                                          : path_start - sep - 3);
-    parts.path = path_start == GoogleString::npos ? GoogleString()
+    // An empty path is the root ("https://host" names "https://host/").
+    parts.path = path_start == GoogleString::npos ? GoogleString("/")
                                                   : key.substr(path_start);
     CacheKey(parts, &cache_url, &hostname);
     oracle_.NoteUrlPurge(cache_url, now_ms);
