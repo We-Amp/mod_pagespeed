@@ -175,6 +175,7 @@ cc_library(
     deps = [
         ":iis_daemon_check",
         ":iis_daemon_html_capture",
+        ":iis_daemon_html_serve",
         ":iis_daemon_record",
         ":iis_daemon_serve",
         ":iis_deferred_release",
@@ -187,6 +188,7 @@ cc_library(
         ":iis_option_token",
         ":iis_proxy_fetch_completion",
         ":iis_registration",
+        ":iis_site_bindings",
         ":iis_self_fetch",
         ":iis_unclaimed_ref",
         ":iis_url_port",
@@ -195,6 +197,7 @@ cc_library(
         "//net/instaweb/http",
         "//net/instaweb/rewriter",
         "//pagespeed/automatic",
+        "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
         "//pagespeed/kernel/html",
@@ -349,6 +352,34 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
         "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# DaemonHtmlCache serve-variants on IIS: the one spelling of a path the HTML
+# cache keeps, and how the final-view registration finalises a pending
+# Markdown answer.  Free of the IIS headers so it is unit-tested on any
+# platform.
+cc_library(
+    name = "iis_daemon_html_serve",
+    srcs = ["iis_daemon_html_serve.cc"],
+    hdrs = ["iis_daemon_html_serve.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# The host names an IIS site's bindings vouch for (free of the IIS headers).
+cc_library(
+    name = "iis_site_bindings",
+    srcs = ["iis_site_bindings.cc"],
+    hdrs = ["iis_site_bindings.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:serve_host_names",
     ],
 )
 
