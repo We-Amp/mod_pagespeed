@@ -62,7 +62,7 @@ foreach ($m in @("daemon_html_conformance.py", "daemon_html_provider_iis.py", "s
 # which the embedded Python has not: the run needs only these three modules.
 Set-Content -LiteralPath "$stage\system\pagespeed_test_framework\__init__.py" -Value "" -Encoding ASCII
 Copy-Item (Join-Path $system "daemon_html\conformance_cases.json") "$stage\system\daemon_html\"
-foreach ($f in @("DhcOrigin.cs", "run_iis_html_conformance.py", "guest_iis_html_conformance.ps1")) {
+foreach ($f in @("DhcOrigin.cs", "run_iis_html_conformance.py", "guest_iis_html_conformance.ps1", "iis_rows.json")) {
     Copy-Item (Join-Path $here $f) "$stage\$f"
 }
 Copy-Item -LiteralPath $PythonZip "$stage\python.zip"

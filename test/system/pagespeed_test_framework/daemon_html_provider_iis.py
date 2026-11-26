@@ -85,6 +85,19 @@ NOTIFY_FROM_MODULE_VOUCHED_STORED = 0x1 | 0x2 | 0x8
 CONTENT_HTML = 0
 ASK_INTERVAL_S = 2.0
 
+# The IIS rig's own knobs, used by test/system/iis/html_conformance/
+# iis_rows.json (the IIS-only rows):
+#   final_view: "removed"     the site's modules list removes PageSpeedFinalView
+#   custom_errors: "replace"  IIS's custom error pages replace every error
+#                             response (existingResponse Replace)
+#   static_file: true         /static.html (the row's body) and /plain.txt
+#                             are served by StaticFileModule, max-age 300
+#   output_cache: true        an output-cache profile for .html
+#   ip_binding: true          an http and https binding with an address
+#                             and no host (127.0.0.1)
+IIS_VHOST_KNOBS = frozenset(["final_view", "custom_errors", "static_file",
+                             "output_cache", "ip_binding"])
+
 
 class ProviderSetupError(RuntimeError):
     """The host does not give this provider what it needs."""
@@ -397,6 +410,26 @@ class IisProvider(conf.Provider):
 
     def _web_config(self, live: dict, applied: Set[str]) -> str:
         vhost = live.get("vhost", {})
+        handlers = []
+        extra = []
+        if vhost.get("static_file"):
+            handlers += [
+                '<add name="dhc-static-html" path="*.html" verb="GET,HEAD" modules="StaticFileModule" resourceType="File" />',
+                '<add name="dhc-static-txt" path="*.txt" verb="GET,HEAD" modules="StaticFileModule" resourceType="File" />']
+            extra.append('<staticContent><clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="00:05:00" /></staticContent>')
+            extra.append('<serverRuntime frequentHitThreshold="1" />')
+            applied.add("static_file")
+        if vhost.get("output_cache"):
+            extra.append('<caching enabled="true" enableKernelCache="true"><profiles>'
+                         '<add extension=".html" policy="CacheForTimePeriod" duration="00:00:30" '
+                         'kernelCachePolicy="CacheForTimePeriod" location="Any" /></profiles></caching>')
+            applied.add("output_cache")
+        if vhost.get("final_view") == "removed":
+            extra.append('<modules><remove name="PageSpeedFinalView" /></modules>')
+            applied.add("final_view")
+        if vhost.get("custom_errors") == "replace":
+            extra.append('<httpErrors errorMode="Custom" existingResponse="Replace" />')
+            applied.add("custom_errors")
         headers = ['<remove name="X-Powered-By" />']
         for knob in ("header_add", "header_always"):
             for name, value in vhost.get(knob, []):
@@ -420,6 +453,7 @@ class IisProvider(conf.Provider):
   <system.webServer>
     <handlers>
       <clear />
+      {chr(10).join(handlers)}
       <add name="dhc-origin" path="*" verb="*" type="DhcOrigin" resourceType="Unspecified" preCondition="integratedMode" />
     </handlers>
     <httpProtocol>
@@ -428,6 +462,7 @@ class IisProvider(conf.Provider):
       </customHeaders>
     </httpProtocol>
     {compression}
+    {chr(10).join(extra)}
   </system.webServer>
 </configuration>
 """
@@ -443,6 +478,9 @@ class IisProvider(conf.Provider):
             bindings += [f"http/*:{HTTP_PORT}:{alias}", f"https/*:{HTTPS_PORT}:{alias}"]
         if "alias" in vhost:
             applied.add("alias")
+        if vhost.get("ip_binding"):
+            bindings += [f"http/127.0.0.1:{HTTP_PORT}:", f"https/127.0.0.1:{HTTPS_PORT}:"]
+            applied.add("ip_binding")
         _appcmd("set", "site", SITE, f"/bindings:{','.join(bindings)}")
         for location in sorted(self._auth_locations):
             for section in ("basicAuthentication", "anonymousAuthentication"):
@@ -544,6 +582,10 @@ class IisProvider(conf.Provider):
                            [tuple(h) for h in origin.get("headers", [])],
                            bodies[origin["body_ref"]].encode("utf-8"))
         open(os.path.join(self.state, "requests.log"), "w").close()
+        with open(os.path.join(self.site_dir, "static.html"), "wb") as f:
+            f.write(bodies[origin["body_ref"]].encode("utf-8"))
+        with open(os.path.join(self.site_dir, "plain.txt"), "w") as f:
+            f.write("plain\n")
         applied = self._write_configs(live)
         self._recycle()
         applied |= {f"origin.{k}" for k in origin}

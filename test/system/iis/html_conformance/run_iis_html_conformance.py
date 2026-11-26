@@ -14,6 +14,9 @@ leave IIS out.
 Prints "RESULT <id> PASS|FAIL|SKIP <detail>" lines and
 "SUMMARY <passed> <failed> <skipped>". Exit status 0 only with no failure.
 
+Then the IIS-only rows of iis_rows.json (beside this file), which use the
+rig's own knobs (daemon_html_provider_iis.IIS_VHOST_KNOBS).
+
 Usage: python run_iis_html_conformance.py <test/system dir> [row id ...]
 """
 
@@ -84,7 +87,11 @@ def main(argv):
             passed += 1
             result("provider-held-commit", "PASS")
 
-    for row in conf.live_rows(cases):
+    # The IIS-only rows, with the rig's own knobs.
+    iis_rows = conf.load_cases(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "iis_rows.json"))["rows"]
+    conf.VHOST_KNOBS = conf.VHOST_KNOBS | iis.IIS_VHOST_KNOBS
+    for row in conf.live_rows(cases) + iis_rows:
         if only and row["id"] not in only:
             continue
         reason = conf.skip_reason(row, provider.port)
