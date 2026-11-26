@@ -17733,7 +17733,6 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [],
             "expect": {"stored": false}
           },
           {
