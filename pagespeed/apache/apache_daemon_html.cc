@@ -124,8 +124,8 @@ void ApplyHeaders(request_rec* r, const DaemonHtmlHeaderLines& lines,
 }  // namespace
 
 bool ApacheDaemonHtmlInFlight::WaitIdleFor(int64 timeout_ms) {
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(timeout_ms);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   while (count_.load(std::memory_order_acquire) != 0) {
     if (std::chrono::steady_clock::now() >= deadline) return false;
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
