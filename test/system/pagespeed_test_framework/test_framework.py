@@ -1305,6 +1305,16 @@ class TestLaneFixtureGate:
         with pytest.raises(pytest.UsageError):
             conftest.require_daemon_lane_advertised("stats_log", "require")
 
+    def test_require_mode_needs_conformance_advertised_where_a_provider_ships(self):
+        import conftest
+        import pytest
+        conftest.require_conformance_advertised("daemon_arm", "", "nginx")
+        conftest.require_conformance_advertised("daemon_arm", "require", "envoy")
+        conftest.require_conformance_advertised(
+            "daemon_arm,daemon_html_conformance", "require", "nginx")
+        with pytest.raises(pytest.UsageError):
+            conftest.require_conformance_advertised("daemon_arm", "require", "nginx")
+
     def test_parse_ignores_blanks_and_spaces(self):
         import conftest
         assert conftest.parse_lane_fixtures(" stats_log, ,cache_flush,") == frozenset(

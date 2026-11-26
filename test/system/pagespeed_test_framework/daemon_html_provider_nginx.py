@@ -832,8 +832,31 @@ class NginxProvider(conf.Provider):
                     lines.append(f"lane_filter_rewrite_body {tpf['rewrites_body']};")
             applied.add("third_party_filter")
 
+        for name in vhost.get("proxy_hide", []):
+            lines.append(f"proxy_hide_header {name};")
+        if "proxy_hide" in vhost:
+            applied.add("proxy_hide")
+        for name, value in vhost.get("trailer", []):
+            lines.append(f'add_trailer {name} "{value}" always;')
+        if "trailer" in vhost:
+            applied.add("trailer")
+
         proxy = f"proxy_pass {upstream};\n            proxy_set_header Host $host;"
-        locations = [f"""
+        if vhost.get("named_location"):
+            # The page comes from a named location, after an internal
+            # redirect: try_files finds no file and falls back to @app.
+            locations = [f"""
+        location / {{
+            root {self.dir}/empty-root;
+            try_files /nonexistent @app;
+        }}
+        location @app {{
+            {proxy}
+        }}"""]
+            os.makedirs(os.path.join(self.dir, "empty-root"), exist_ok=True)
+            applied.add("named_location")
+        else:
+            locations = [f"""
         location / {{
             {proxy}
         }}"""]

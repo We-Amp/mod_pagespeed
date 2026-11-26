@@ -208,6 +208,25 @@ def require_daemon_lane_advertised(raw: str, lane_mode: str) -> None:
         )
 
 
+def require_conformance_advertised(raw: str, lane_mode: str, server_type: str) -> None:
+    """PAGESPEED_DAEMON_LANE=require on a lane whose port ships an HTML cache
+    conformance provider (daemon_html_conformance.PROVIDER_PORTS) with no
+    daemon_html_conformance advertised is an error: otherwise every live row
+    would skip and the lane would read green."""
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    if (
+        lane_mode == "require"
+        and server_type in conf.PROVIDER_PORTS
+        and "daemon_html_conformance" not in parse_lane_fixtures(raw)
+    ):
+        raise pytest.UsageError(
+            f"PAGESPEED_DAEMON_LANE=require on the {server_type} lane, which has an "
+            "HTML cache conformance provider, but PAGESPEED_LANE_FIXTURES does not "
+            f"advertise daemon_html_conformance (got: {raw or '<none>'})"
+        )
+
+
 def wait_until_second_after(
     stamp_sec: int,
     now: Callable[[], float] = time.time,
@@ -742,6 +761,11 @@ def pytest_configure(config):
     validate_advertised_lane_fixtures(os.environ.get("PAGESPEED_LANE_FIXTURES", ""))
     require_daemon_lane_advertised(
         os.environ.get("PAGESPEED_LANE_FIXTURES", ""), os.environ.get("PAGESPEED_DAEMON_LANE", "")
+    )
+    require_conformance_advertised(
+        os.environ.get("PAGESPEED_LANE_FIXTURES", ""),
+        os.environ.get("PAGESPEED_DAEMON_LANE", ""),
+        os.environ.get("PAGESPEED_SERVER_TYPE", ""),
     )
 
     # Scale pytest's per-test timeout past fetch_until's worst-case wall

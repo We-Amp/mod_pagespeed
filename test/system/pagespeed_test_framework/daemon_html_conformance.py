@@ -86,6 +86,9 @@ VHOST_KNOBS = frozenset(
         "merge_slashes",
         "poll_interval_s",
         "chained_module_origin",
+        "named_location",
+        "proxy_hide",
+        "trailer",
     ]
 )
 ORIGIN_KEYS = frozenset(

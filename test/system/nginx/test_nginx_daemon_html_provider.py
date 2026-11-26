@@ -64,3 +64,7 @@ def test_settle_waits_for_a_held_commit(provider):
         assert entry.lifetime_s == 300
     finally:
         provider.teardown()
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
