@@ -37,12 +37,16 @@
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/iis/iis_module_factory.h"
+#include "pagespeed/iis/iis_daemon_html_capture.h"
+#include "pagespeed/iis/iis_final_view_module.h"
+#include "pagespeed/iis/iis_registration.h"
 #include "pagespeed/iis/iis_configuration.h"
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/iis/iis_self_fetch.h"
 #include "pagespeed/iis/log_message_handler.h"
 
 #include <cstdio>
+#include <string>
 #include <google/protobuf/stubs/common.h>
 
 // Release BoringSSL's process-wide TLS slot on DLL unload.
@@ -81,6 +85,8 @@ ConfigFactory* cf = nullptr;
 // AppVerifier's Leak provider (stop 0x900) at FreeLibrary/unload.
 ThreadSystem* dll_thread_system = nullptr;
 Timer* dll_timer = nullptr;
+// The image's two registrations (iis_registration.h).
+IisRegistrations registrations;
 
 }  // namespace net_instaweb
 
@@ -120,6 +126,16 @@ class MyGlobalModule : public CGlobalModule {
       if (remote != raw->Address.pRemoteAddress) {
         IisRelabelSelfFetch(remote);
       }
+    }
+
+    // When the request arrived, for the HTML cache's capture: an entry's
+    // insert time is never later than the moment the origin was asked.
+    // Written over whatever is there, so no earlier stage, and no client,
+    // sets it.
+    if (dll_timer != nullptr) {
+      const std::wstring start = std::to_wstring(dll_timer->NowMs());
+      pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
+          kIisRequestStartVariable, start.c_str());
     }
 
     PCWSTR tmpx = nullptr;
@@ -261,24 +277,52 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
     IHttpServer* pGlobalInfo) {
   UNREFERENCED_PARAMETER(dwServerVersion);
 
-  char mypath[MAX_PATH];
-  GetModuleFileNameA(net_instaweb::currentModule, mypath, MAX_PATH);
-  net_instaweb::moduleFilename = std::string(mypath);
+  // IIS calls this once for each <globalModules> entry that names this
+  // image: the main one and the final-view one, in either order.  The
+  // process-wide setup runs once, and only the main registration sets the
+  // module id every per-request module context is kept under.
+  const net_instaweb::IisRegistrationKind kind =
+      net_instaweb::IisRegistrationKindForName(pModuleInfo->GetName());
+  if (!net_instaweb::registrations.NoteRegistered(kind,
+                                                  pModuleInfo->GetId())) {
+    // The configuration lists the same kind of entry twice: a second main
+    // registration would replace the first one's module id.
+    return HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
+  }
 
-  char* lastslash = strrchr(mypath, '\\');
-  if (lastslash) lastslash[1] = 0;
-  net_instaweb::modulePath = std::string(mypath);
+  if (net_instaweb::registrations.BeginProcessSetup()) {
+    char mypath[MAX_PATH];
+    GetModuleFileNameA(net_instaweb::currentModule, mypath, MAX_PATH);
+    net_instaweb::moduleFilename = std::string(mypath);
 
-  // Initialize the empty data chunk used for zero-length responses.
-  emptydatachunk.DataChunkType = HttpDataChunkFromMemory;
-  emptydatachunk.FromMemory.BufferLength = 0;
-  emptydatachunk.FromMemory.pBuffer = const_cast<char*>(emptystring);
+    char* lastslash = strrchr(mypath, '\\');
+    if (lastslash) lastslash[1] = 0;
+    net_instaweb::modulePath = std::string(mypath);
 
-  net_instaweb::cf = new ConfigFactory();
+    // Initialize the empty data chunk used for zero-length responses.
+    emptydatachunk.DataChunkType = HttpDataChunkFromMemory;
+    emptydatachunk.FromMemory.BufferLength = 0;
+    emptydatachunk.FromMemory.pBuffer = const_cast<char*>(emptystring);
+
+    net_instaweb::cf = new ConfigFactory();
+  }
+
+  HRESULT hr = S_OK;
+  if (kind == net_instaweb::IisRegistrationKind::kFinalView) {
+    // One send notification, at PRIORITY_ALIAS_FIRST: IIS runs it after its
+    // header stages (customHeaders) and dynamic compression, the last point
+    // a module sees the response before it goes out.  It reads that view
+    // and changes nothing (iis_final_view_module.h).
+    hr = pModuleInfo->SetRequestNotifications(
+        new net_instaweb::IisFinalViewModuleFactory(), RQ_SEND_RESPONSE, 0);
+    if (FAILED(hr)) return hr;
+    return pModuleInfo->SetPriorityForRequestNotification(
+        RQ_SEND_RESPONSE, PRIORITY_ALIAS_FIRST);
+  }
 
   // Register global module for preserving pristine URLs.
   auto pGlobalModule = new net_instaweb::MyGlobalModule();
-  HRESULT hr = pModuleInfo->SetGlobalNotifications(
+  hr = pModuleInfo->SetGlobalNotifications(
       pGlobalModule, GL_PRE_BEGIN_REQUEST);
   if (FAILED(hr)) return hr;
 

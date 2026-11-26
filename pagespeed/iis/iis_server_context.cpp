@@ -19,6 +19,7 @@
 
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_daemon_check.h"
+#include "pagespeed/iis/iis_registration.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 namespace net_instaweb {
@@ -65,6 +66,32 @@ namespace net_instaweb {
 				daemon_adapter_);
 		}
 		return verdict;
+	}
+
+	DaemonHtmlEngine* IisServerContext::daemon_html_engine() {
+		std::call_once(daemon_html_engine_once_, [this] {
+			const IisRewriteOptions* options = config();
+			daemon_html_engine_ = NewDaemonHtmlEngineForPort(
+				options->daemon_html_cache(), options->daemon_html_max_bytes(),
+				options->log_dir(),
+				daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi(),
+				statistics(), timer(), message_handler());
+		});
+		return daemon_html_engine_.get();
+	}
+
+	void IisServerContext::NoteDaemonHtmlFinalViewMissing() {
+		if (daemon_html_final_view_missing_logged_.exchange(true)) {
+			return;
+		}
+		message_handler()->Message(
+			kWarning,
+			"DaemonHtmlCache: the %s module entry did not run for this site, "
+			"so the report reads each HTML response's headers as the module "
+			"received them, without the site's customHeaders or later "
+			"changes. Add the entry at the top of the site's modules list "
+			"(the installer does).",
+			kIisFinalViewModuleNameAscii);
 	}
 
 	IisServerContext::~IisServerContext() {

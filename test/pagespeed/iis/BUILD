@@ -646,3 +646,55 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# The image's two registrations: the final-view entry known by its name, the
+# process-wide setup run once, and a second RegisterModule call that leaves
+# the main registration's module id intact.  Header-only, any platform.
+pagespeed_cc_test(
+    name = "iis_registration_test",
+    srcs = ["iis_registration_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/iis:iis_registration",
+    ],
+)
+
+# DaemonHtmlCache on IIS: the header views and the body the port's capture
+# hands to the HTML cache engine (chunk assembly, the size cap, nothing after
+# the body ended, the final view with and without the final-view entry), read
+# at the library's store policy.  The capture is free of the IIS headers; the
+# test loads the stub library, as the engine's own report test does.
+pagespeed_cc_test(
+    name = "iis_daemon_html_capture_test",
+    srcs = [
+        "iis_daemon_html_capture_test.cc",
+        "//test/pagespeed/system:recording_daemon_abi.h",
+    ],
+    data = ["//test/pagespeed/system:libdaemon_stub_html_policy.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/iis:iis_daemon_html_capture",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_engine",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+    ],
+)
+
+# The final-view registration only reads, from its send at
+# PRIORITY_ALIAS_FIRST, through the main registration's module context; the
+# capture's body is fed only before the main send clears the response.
+# Reads the port source as data, so it builds and runs on every platform.
+pagespeed_cc_test(
+    name = "iis_final_view_pin_test",
+    srcs = ["iis_final_view_pin_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
