@@ -170,6 +170,7 @@ pagespeed RateLimitBackgroundFetches on
 pagespeed InPlaceResourceOptimization on
 pagespeed CriticalImagesBeaconEnabled false
 pagespeed BlockingRewriteKey psatest
+pagespeed DaemonHtmlCache report-only
 pagespeed MessageBufferSize 100000
 pagespeed StatisticsPath /mod_pagespeed_statistics
 pagespeed MessagesPath /mod_pagespeed_message
