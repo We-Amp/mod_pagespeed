@@ -13,7 +13,8 @@
   nothing is stored), and on Envoy it is counted as `daemon_html_unavailable`,
   as `report-only` is. The Apache and nginx entries in this section list what
   each server stores and serves, and the guide in
-  `docs/html-cache-serve-variants.md` covers the steps and the limits. The value `serve-cached-html` is reserved for a later release:
+  `docs/html-cache-serve-variants.md` covers the steps and the limits. The value `serve-cached-html` is reserved
+  for a later release:
   setting it logs a warning and leaves the option as it was, so a configuration
   written for that release still loads.
 - **The HTML cache decision log names what the server configuration added.**
