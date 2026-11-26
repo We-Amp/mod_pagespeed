@@ -32,9 +32,18 @@
 //     vouches for a host name, so nothing it sends can start work that
 //     fetches from a host;
 //   * it is never an agent request;
-//   * it never carries HTML: these ports serve no HTML from the worker, and
-//     the worker refuses HTML from the module.  An HTML request builds
-//     nothing, moves DaemonNotifyHtmlRefused(), and the caller sends nothing.
+//   * it never carries HTML, with ONE exception: the HTML cache's own
+//     notification for a page its store wrote (`html_stored` below).  Any
+//     other HTML request builds nothing, moves DaemonNotifyHtmlRefused(), and
+//     the caller sends nothing.
+//
+// The exception is narrow by construction.  An HTML notification is built
+// only with `html_stored` set, and then carries exactly kPsNotifyFlagFromModule
+// | kPsNotifyFlagHostVouched | kPsNotifyFlagHtmlStored: the caller states that
+// the request's host is one of the site's exact configured names and that its
+// own store wrote the page in this volume generation.  Only such a
+// notification may be an agent request.  `html_stored` on anything but HTML
+// builds nothing, so the vouched bit can never ride on a resource.
 
 #ifndef PAGESPEED_SYSTEM_DAEMON_NOTIFY_PARAMS_H_
 #define PAGESPEED_SYSTEM_DAEMON_NOTIFY_PARAMS_H_
@@ -60,6 +69,11 @@ struct ModuleNotifyInput {
   // Both or neither; empty is sent as absent.
   StringPiece option_context;
   StringPiece option_signature;
+  // The HTML cache's notification for a page its store wrote, for a host the
+  // caller vouches for (HostExactlyConfigured).  Legal only with HTML.
+  bool html_stored = false;
+  // With html_stored only: the requesting client asked for the Markdown copy.
+  bool agent_request = false;
 };
 
 // A built notification: the parameter struct and the storage its pointers
@@ -87,7 +101,8 @@ class ModuleNotifyParams {
 };
 
 // Builds the notification for `input` into `*out`.  Returns false, and `*out`
-// holds nothing to send, for HTML content (DaemonNotifyHtmlRefused() moves)
+// holds nothing to send, for HTML content without html_stored
+// (DaemonNotifyHtmlRefused() moves), for html_stored on anything but HTML,
 // and for a request without a site id; the caller then does not call
 // NotifyWorker.
 bool BuildModuleNotifyParams(const DaemonAbi& abi,

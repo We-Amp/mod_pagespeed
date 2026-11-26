@@ -55,6 +55,19 @@ TEST_F(PurgeSetTest, SimpleInvaldations) {
   EXPECT_TRUE(purge_set_.IsValid("b", 1));
 }
 
+TEST_F(PurgeSetTest, ValidIgnoringGlobal) {
+  ASSERT_TRUE(purge_set_.Put("a", 10));
+  ASSERT_TRUE(purge_set_.UpdateGlobalInvalidationTimestampMs(20));
+  // The global timestamp covers both keys for IsValid...
+  EXPECT_FALSE(purge_set_.IsValid("a", 15));
+  EXPECT_FALSE(purge_set_.IsValid("b", 15));
+  // ...and only the key's own record counts here, at or after its time.
+  EXPECT_TRUE(purge_set_.IsValidIgnoringGlobal("a", 15));
+  EXPECT_FALSE(purge_set_.IsValidIgnoringGlobal("a", 10));
+  EXPECT_FALSE(purge_set_.IsValidIgnoringGlobal("a", 9));
+  EXPECT_TRUE(purge_set_.IsValidIgnoringGlobal("b", 15));
+}
+
 TEST_F(PurgeSetTest, NoEvictionsOnUpdateSameEntry) {
   int64 last_eviction_time_ms = 1;
   for (size_t i = 0; i < kMaxSize * 10; ++i) {

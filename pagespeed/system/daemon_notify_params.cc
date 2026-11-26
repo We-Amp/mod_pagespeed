@@ -39,8 +39,11 @@ bool BuildModuleNotifyParams(const DaemonAbi& abi,
                              ModuleNotifyParams* out) {
   // Whatever happens below, nothing from an earlier build is left to send.
   out->params_ = PsNotifyParams{};
-  if (input.content_type == kPsContentHtml) {
-    g_notify_html_refused.BarrierIncrement(1);
+  const bool html = input.content_type == kPsContentHtml;
+  if (html != input.html_stored) {
+    if (html) {
+      g_notify_html_refused.BarrierIncrement(1);
+    }
     return false;
   }
   if (!IsSiteId(input.site)) {
@@ -60,12 +63,15 @@ bool BuildModuleNotifyParams(const DaemonAbi& abi,
   params->scheme = out->scheme_.c_str();
   params->content_type = input.content_type;
   params->mask = input.mask;
-  params->agent_request = 0;
+  params->agent_request = html && input.agent_request ? 1 : 0;
   params->option_context = CStrOrNull(out->option_context_);
   params->option_context_length = out->option_context_.size();
   params->option_signature = CStrOrNull(out->option_signature_);
   params->site = out->site_.c_str();
-  params->notify_flags = kPsNotifyFlagFromModule;
+  params->notify_flags =
+      html ? (kPsNotifyFlagFromModule | kPsNotifyFlagHostVouched |
+              kPsNotifyFlagHtmlStored)
+           : kPsNotifyFlagFromModule;
   return true;
 }
 

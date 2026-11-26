@@ -100,6 +100,13 @@ class PurgeSet {
   // key, and against the overall invalidation timestamp/
   bool IsValid(const GoogleString& key, int64 timestamp_ms) const;
 
+  // Like IsValid, but consults only the purge record of `key` itself and
+  // ignores the global invalidation timestamp: true unless `key` was purged
+  // at or after timestamp_ms.  For a caller that applies its own reading of
+  // the global timestamp (for instance one clamped to the time it was
+  // observed).
+  bool IsValidIgnoringGlobal(const GoogleString& key, int64 timestamp_ms) const;
+
   int64 global_invalidation_timestamp_ms() const {
     return global_invalidation_timestamp_ms_;
   }
