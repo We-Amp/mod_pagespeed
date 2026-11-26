@@ -238,6 +238,9 @@ class ApacheProvider(conf.Provider):
             "  DirectoryIndex /page",
             "  KeepAlive On",
             "  KeepAliveTimeout 60",
+            # A named process is one kept-alive connection: no request cap
+            # may close it during a row (a window step sends dozens).
+            "  MaxKeepAliveRequests 0",
             f'  CustomLog "{self.access_log}" "%{{remote}}p %>s %m %U"',
             # The generation probe: answered by mod_alias, never proxied.
             f"  Redirect 410 /__dhc_generation_{self.generation}",
@@ -472,6 +475,11 @@ class ApacheProvider(conf.Provider):
             conn = self.connections.get(process)
             if conn is None:
                 conn = self.connections[process] = self._connect(host)
+            elif conn.sock is None:
+                # http.client would reconnect, to whichever child accepts:
+                # the row would no longer talk to the process it names.
+                raise AssertionError(
+                    f"process {process}: the server closed the connection that pins it")
         local_port = conn.sock.getsockname()[1]
         try:
             conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)

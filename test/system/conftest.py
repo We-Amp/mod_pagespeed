@@ -865,6 +865,103 @@ def pytest_collection_modifyitems(config, items):
             + "\n".join(errors)
             + f"\nknown: {sorted(KNOWN_LANE_FIXTURES)}"
         )
+    deselect_conformance_rows(config, items)
+
+
+# ---------------------------------------------------------------------------
+# HTML cache conformance table (system/test_daemon_html_conformance.py)
+# ---------------------------------------------------------------------------
+# The Apache lane runs every row whose ports include it and allows no skip;
+# the nginx lane may skip only rows whose ports leave nginx out
+# (daemon_html_conformance.lane_rows and skip_violations). The rows for other
+# ports are deselected on the Apache lane. Once the lane provides the
+# daemon_html_conformance fixture (or requires the daemon lane), a skip
+# outside those rules fails the run even when every test passed, and the
+# terminal summary prints the table's counts.
+CONFORMANCE_NODE = "test_daemon_html_conformance.py::test_live_row["
+_CONFORMANCE = {"port": None, "deselected": 0, "skipped": {}, "outcomes": {}, "violations": []}
+
+
+def conformance_row_id(nodeid: str) -> Optional[str]:
+    """The row id of a conformance table test, or None for any other test."""
+    if CONFORMANCE_NODE not in nodeid or not nodeid.endswith("]"):
+        return None
+    return nodeid.split(CONFORMANCE_NODE, 1)[1][:-1]
+
+
+def conformance_skips_enforced(raw_fixtures: str, lane_mode: str) -> bool:
+    """A lane that can run the table: it provides the fixture, or requires
+    the daemon lane (which conftest fails up front without the fixture)."""
+    return "daemon_html_conformance" in parse_lane_fixtures(raw_fixtures) or lane_mode == "require"
+
+
+def deselect_conformance_rows(config, items) -> None:
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    port = conf.lane_port(os.environ.get("PAGESPEED_SERVER_TYPE", "auto"))
+    _CONFORMANCE["port"] = port
+    rows = {r["id"]: r for r in conf.live_rows(conf.load_cases())}
+    _, left = conf.lane_rows(list(rows.values()), port)
+    left_ids = {r["id"] for r in left}
+    if not left_ids:
+        return
+    kept, dropped = [], []
+    for item in items:
+        (dropped if conformance_row_id(item.nodeid) in left_ids else kept).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+        _CONFORMANCE["deselected"] = len(dropped)
+
+
+def pytest_runtest_logreport(report):
+    rid = conformance_row_id(report.nodeid)
+    if rid is None:
+        return
+    if report.skipped:
+        longrepr = report.longrepr
+        reason = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else str(longrepr)
+        _CONFORMANCE["skipped"][rid] = reason
+        _CONFORMANCE["outcomes"][rid] = "skipped"
+    elif report.failed:
+        _CONFORMANCE["outcomes"][rid] = "failed"
+    elif report.when == "call":
+        _CONFORMANCE["outcomes"].setdefault(rid, "passed")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionfinish(session, exitstatus):
+    from pagespeed_test_framework import daemon_html_conformance as conf
+
+    port = _CONFORMANCE["port"]
+    if port is None or not _CONFORMANCE["skipped"]:
+        return
+    if not conformance_skips_enforced(
+        os.environ.get("PAGESPEED_LANE_FIXTURES", ""), os.environ.get("PAGESPEED_DAEMON_LANE", "")
+    ):
+        return
+    rows = {r["id"]: r for r in conf.live_rows(conf.load_cases())}
+    violations = conf.skip_violations(port, _CONFORMANCE["skipped"], rows)
+    _CONFORMANCE["violations"] = violations
+    if violations and session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter):
+    outcomes = _CONFORMANCE["outcomes"]
+    if not outcomes:
+        return
+    counts = {k: sum(1 for v in outcomes.values() if v == k) for k in ("passed", "failed", "skipped")}
+    terminalreporter.write_line(
+        f"HTML cache conformance on the {_CONFORMANCE['port']} lane: {len(outcomes)} rows, "
+        f"{counts['passed']} passed, {counts['failed']} failed, {counts['skipped']} skipped, "
+        f"{_CONFORMANCE['deselected']} for other ports deselected"
+    )
+    for line in _CONFORMANCE["violations"]:
+        terminalreporter.write_line(f"HTML cache conformance skip not allowed: {line}", red=True)
+    if _CONFORMANCE["violations"]:
+        terminalreporter.write_line(
+            "HTML cache conformance: the run fails on the skips above", red=True, bold=True)
 
 
 # Skip tests based on server configuration

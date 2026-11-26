@@ -14,7 +14,14 @@ origin operations) and hands it to `run_row`.
 The only skip is a row whose `ports` list leaves the provider's port out
 (`skip_reason`). Anything else a provider cannot do is a failure, never a
 skip: `ProviderUnsupported` raised from a provider becomes a failure of the
-row.
+row. The Apache lane is the reference lane and allows no skip at all: the
+rows for other ports are not collected there (`lane_rows`), and a lane that
+skips a row it should run fails the run (`skip_violations`).
+
+Retries: a provider may retry what is transport or setup (a reload that has
+not taken effect yet, a statistics read a closing worker dropped), never a
+request a row asserts on. A row that waits (`wait_markdown`, a `window`)
+waits for a stated deadline and fails at it.
 """
 
 import abc
@@ -94,7 +101,16 @@ VHOST_KNOBS = frozenset(
 ORIGIN_KEYS = frozenset(
     ["status", "headers", "body_ref", "echo_conditionals", "truncate_body"]
 )
-STEP_KEYS = frozenset(["request", "pre", "process", "background", "expect"])
+STEP_KEYS = frozenset(["request", "pre", "process", "background", "expect", "window"])
+# A window step (see RowRunner._run_window): after its purge, the same
+# request is sent to one named process every `every_s` seconds for
+# `observe_s` seconds. A response matching `stale` is the pre-purge entry; it
+# may appear only while the request is sent within `stale_max_s` (the poll
+# interval of the row's server) plus `margin_s` of the purge, and never after
+# a response that did not match it. Every other response must meet `expect`.
+WINDOW_KEYS = frozenset(["stale_max_s", "margin_s", "observe_s", "every_s", "stale"])
+WINDOW_STALE_KEYS = frozenset(["content_type"])
+PURGE_OPS = frozenset(["purge_url", "purge_global"])
 REQUEST_KEYS = frozenset(["method", "path", "host", "headers"])
 OPS = frozenset(
     [
@@ -336,6 +352,47 @@ def skip_reason(row: dict, port: str) -> Optional[str]:
     return None
 
 
+def lane_port(server_type: str) -> Optional[str]:
+    """The port a lane's PAGESPEED_SERVER_TYPE names, or None for a server
+    with no HTML cache port (envoy). "auto" is the Apache lane."""
+    if server_type in ("apache", "auto", ""):
+        return "apache"
+    if server_type in ("nginx", "iis"):
+        return server_type
+    return None
+
+
+# The lanes that allow no skip in the table: the reference lane runs every
+# row whose ports include it, and the rows for other ports are left out of
+# its collection (pytest reports them deselected), so its skip count is 0.
+ZERO_SKIP_PORTS = frozenset(["apache"])
+
+
+def lane_rows(rows: List[dict], port: Optional[str]) -> Tuple[List[dict], List[dict]]:
+    """(rows the lane collects, rows it leaves out). Only a zero-skip lane
+    leaves rows out: those whose ports exclude it. Every other lane collects
+    the whole table and skips by skip_reason."""
+    if port not in ZERO_SKIP_PORTS:
+        return list(rows), []
+    kept = [r for r in rows if skip_reason(r, port) is None]
+    left = [r for r in rows if skip_reason(r, port) is not None]
+    return kept, left
+
+
+def skip_violations(port: str, skipped: Dict[str, str], rows_by_id: Dict[str, dict]) -> List[str]:
+    """The skips a lane may not report, given {row id: skip reason}. On a
+    zero-skip lane every skip is one. On another lane a skip is allowed only
+    for a row whose ports exclude the lane, whatever reason it was given."""
+    out: List[str] = []
+    for rid, reason in sorted(skipped.items()):
+        row = rows_by_id.get(rid)
+        if port in ZERO_SKIP_PORTS:
+            out.append(f"{rid}: skipped on the {port} lane, which allows no skip ({reason})")
+        elif row is None or skip_reason(row, port) is None:
+            out.append(f"{rid}: skipped on the {port} lane, but its ports include {port} ({reason})")
+    return out
+
+
 def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
     """Every key the row uses is one this runner acts on. A key it does not
     know would otherwise be silently ignored."""
@@ -391,6 +448,8 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
                     )
         if not expect:
             errors.append(f"{rid}: {where} expects nothing")
+        if "window" in step:
+            errors += _validate_window(rid, where, step)
         for name, spec in expect.get("headers_exact", {}).items():
             unknown(f"{where} headers_exact {name}", spec, HEADER_EXPECT_KEYS)
             if "count" not in spec:
@@ -403,6 +462,48 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
             for mode in diff.get("against", []):
                 if mode not in MODES:
                     errors.append(f"{rid}: {where} differential mode {mode}")
+    return errors
+
+
+def _validate_window(rid: str, where: str, step: dict) -> List[str]:
+    errors: List[str] = []
+    window = step["window"]
+    if not isinstance(window, dict):
+        return [f"{rid}: {where} window is not an object"]
+    for key in window:
+        if key not in WINDOW_KEYS:
+            errors.append(f"{rid}: unknown {where} window key {key}")
+    for key in WINDOW_KEYS - {"stale"}:
+        value = window.get(key)
+        if not isinstance(value, (int, float)) or value <= 0:
+            errors.append(f"{rid}: {where} window {key} must be a positive number")
+    stale = window.get("stale")
+    if not isinstance(stale, dict) or set(stale) != WINDOW_STALE_KEYS:
+        errors.append(f"{rid}: {where} window stale must name content_type")
+    if step.get("background"):
+        errors.append(f"{rid}: {where} a window step cannot be a background step")
+    if not step.get("process"):
+        errors.append(f"{rid}: {where} a window step names the process it watches")
+    if not any(next(iter(op), None) in PURGE_OPS for op in step.get("pre", [])
+               if isinstance(op, dict)):
+        errors.append(f"{rid}: {where} a window step starts at a purge in its pre ops")
+    expect = step.get("expect", {})
+    for key in expect:
+        if key not in BACKGROUND_EXPECT_KEYS:
+            errors.append(f"{rid}: {where} a window step cannot assert {key}")
+    if "content_type" not in expect:
+        errors.append(f"{rid}: {where} a window step expects a content_type")
+    elif isinstance(stale, dict) and media_type(str(stale.get("content_type", ""))) == media_type(
+        expect["content_type"]
+    ):
+        errors.append(f"{rid}: {where} window stale and expect name the same content type")
+    try:
+        if window["observe_s"] <= window["stale_max_s"] + window["margin_s"]:
+            errors.append(
+                f"{rid}: {where} window observe_s must outlast stale_max_s plus margin_s"
+            )
+    except (KeyError, TypeError):
+        pass
     return errors
 
 
@@ -467,6 +568,10 @@ class RowRunner:
         self.failures: List[str] = []
         self.markdown_etag: Optional[str] = None
         self.mode = self.live["mode"]
+        # When the last purge op returned (the runner's clock).
+        self.purged_at: Optional[float] = None
+        # One record per window step run: what the watched process sent.
+        self.windows: List[dict] = []
 
     # ---- entry
 
@@ -541,8 +646,10 @@ class RowRunner:
                 self._wait_markdown(index, request, arg)
             elif name == "purge_url":
                 self.provider.purge_url(arg["url"], arg.get("form", "PURGE"))
+                self.purged_at = self.clock()
             elif name == "purge_global":
                 self.provider.purge_global(arg["via"])
+                self.purged_at = self.clock()
             elif name == "origin_set":
                 self.provider.set_origin_body(self.bodies[arg["body_ref"]])
             elif name == "hold_origin":
@@ -575,6 +682,9 @@ class RowRunner:
         # The step's counter delta covers its pre ops too: a commit a pre op
         # lets go (release_origin) is counted in the step that released it.
         expect = step["expect"]
+        if "window" in step:
+            self._run_window(index, step)
+            return
         self.provider.settle()
         counters_before = self.provider.counters() if "counter_delta" in expect else None
         self._run_pre(index, step)
@@ -582,6 +692,55 @@ class RowRunner:
         origin_before = len(self.provider.origin_requests())
         response = self._send(step)
         self._check(index, step, response, counters_before, origin_before)
+
+    def _run_window(self, index: int, step: dict) -> None:
+        """Watches one process across a purge: the pre-purge entry (a
+        response matching `stale`) may be served only for a request sent
+        within stale_max_s + margin_s of the purge, never again once a
+        response did not match it, and every other response meets
+        `expect`. It stops at the first failure: one wrong answer is the
+        finding, the ones after it add nothing."""
+        window = step["window"]
+        stale_type = media_type(window["stale"]["content_type"])
+        self.provider.settle()
+        self.purged_at = None
+        self._run_pre(index, step)
+        start = self.purged_at
+        bound = float(window["stale_max_s"]) + float(window["margin_s"])
+        record = {"step": index, "stale": 0, "miss": 0, "last_stale_s": None,
+                  "first_miss_s": None}
+        self.windows.append(record)
+        while True:
+            sent = self.clock() - start
+            r = self._send(step)
+            stale = r.status == 200 and any(
+                media_type(v) == stale_type for v in r.lines("Content-Type"))
+            if stale:
+                record["stale"] += 1
+                record["last_stale_s"] = sent
+                if record["first_miss_s"] is not None:
+                    self._fail(index, (
+                        f"the pre-purge entry was served for a request sent "
+                        f"{sent:.2f} s after the purge, after a miss at "
+                        f"{record['first_miss_s']:.2f} s"))
+                    return
+                if sent > bound:
+                    self._fail(index, (
+                        f"the pre-purge entry was still served for a request sent "
+                        f"{sent:.2f} s after the purge (allowed: {window['stale_max_s']:g} s "
+                        f"poll interval + {window['margin_s']:g} s margin)"))
+                    return
+            else:
+                record["miss"] += 1
+                if record["first_miss_s"] is None:
+                    record["first_miss_s"] = sent
+                before = len(self.failures)
+                self._check(index, step, r, None, 0)
+                if len(self.failures) > before:
+                    return
+            if self.clock() - start >= float(window["observe_s"]):
+                return
+            self.sleep(float(window["every_s"]))
 
     def _start_background(self, index: int, step: dict) -> _Background:
         self._run_pre(index, step)

@@ -10,9 +10,13 @@ rows; a per-lane provider drives the server. A lane whose port is in
 daemon_html_conformance.PROVIDER_PORTS must ship the module
 `pagespeed_test_framework.daemon_html_provider_<port>` exposing
 `make_provider(server_config) -> Provider`; a missing one fails the lane.
-A lane outside that set skips every row until its provider lands. Within a
-lane with a provider, a row is skipped only when its `ports` leave the
-lane's port out.
+A lane outside that set skips every row until its provider lands.
+
+Skips (enforced by test/system/conftest.py once the lane provides the
+daemon_html_conformance fixture): the Apache lane collects only the rows
+whose `ports` include it (the others are reported deselected) and fails the
+run on any skip; another lane may skip only a row whose `ports` leave it
+out.
 """
 
 import os
@@ -25,12 +29,8 @@ CASES = conf.load_cases()
 ROWS = conf.live_rows(CASES)
 
 
-def _port(server_config) -> str:
-    if server_config.is_iis:
-        return "iis"
-    if server_config.is_nginx:
-        return "nginx"
-    return "apache"
+def _port(server_config):
+    return conf.lane_port(server_config.server_type)
 
 
 # What each port's provider needs from its lane, as a lane fixture: without
@@ -48,9 +48,9 @@ def provider(server_config):
     provided = {n.strip() for n in os.environ.get("PAGESPEED_LANE_FIXTURES", "").split(",")}
     if needed is not None and needed not in provided:
         pytest.skip(f"lane fixture {needed} not provided")
-    p = conf.load_provider(port, server_config)
+    p = conf.load_provider(port, server_config) if port is not None else None
     if p is None:
-        pytest.skip(f"no HTML cache conformance provider for the {_port(server_config)} lane yet")
+        pytest.skip(f"no HTML cache conformance provider for the {server_config.server_type} lane yet")
     return p
 
 
@@ -58,6 +58,8 @@ def provider(server_config):
 def test_live_row(provider, row):
     reason = conf.skip_reason(row, provider.port)
     if reason is not None:
+        if provider.port in conf.ZERO_SKIP_PORTS:
+            pytest.fail(f"{reason}: the {provider.port} lane runs no row for another port")
         pytest.skip(reason)
     failures = conf.run_row(provider, row, CASES["bodies"])
     assert failures == [], "\n".join(failures)
