@@ -874,11 +874,21 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			!IisPristineTarget(pristine, pristine_length, &facts->path)) {
 			facts->path = IisRawRequestTarget(raw);
 		}
-		// The host and port of the URL this module keys the request on (the
-		// Host the client sent, with the local port unless it is the
-		// scheme's default): the URL an admin purge on this port names, so a
-		// purge finds the entry on a site bound to another port.
-		facts->host = inner->gurl()->HostAndPort().as_string();
+		// The host of the URL this module keys the request on, with the
+		// port the request came in on unless it is the scheme's default: the
+		// URL an admin purge on this port names, so a purge finds the entry
+		// on a site bound to another port.  The port is the connection's,
+		// never one a request header could remove.
+		facts->host = inner->gurl()->Host().as_string();
+		if (facts->host.find(':') != GoogleString::npos) {
+			facts->host = StrCat("[", facts->host, "]");
+		}
+		const int local_port = inner->local_port();
+		if (local_port > 0 &&
+			!(facts->scheme == "https" && local_port == 443) &&
+			!(facts->scheme == "http" && local_port == 80)) {
+			StrAppend(&facts->host, ":", IntegerToString(local_port));
+		}
 		USHORT length = 0;
 		PCSTR value = nullptr;
 		facts->site = IisRequestSiteId(
