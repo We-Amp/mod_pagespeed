@@ -15,8 +15,10 @@
 #                      rules relaxed to allow it;
 #                    * C:\dhc: the site (an ASP.NET origin, DhcOrigin.cs),
 #                      its state, logs and file caches;
-#                    * pool and site "dhc" on http 8080 and https 8443
-#                      (a self-signed certificate for www.example.test),
+#                    * pool and site "dhc" on http 80 and https 443 (the
+#                      Default Web Site is stopped; a self-signed
+#                      certificate for www.example.test), every file
+#                      kernel-cacheable on its first hit,
 #                      text/markdown in the dynamic compression types;
 #                    * the optimizer service in markdown-static mode with
 #                      agent-optimize on.
@@ -72,8 +74,8 @@ function Setup {
 
     $cert = New-SelfSignedCertificate -DnsName "www.example.test" -CertStoreLocation "Cert:\LocalMachine\My"
     Set-Content -LiteralPath "$Root\cert.txt" -Value $cert.Thumbprint -Encoding ASCII
-    & netsh http add sslcert ipport=0.0.0.0:8443 certhash=$($cert.Thumbprint) appid=$AppId | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "binding the certificate to 8443 failed" }
+    & netsh http add sslcert ipport=0.0.0.0:443 certhash=$($cert.Thumbprint) appid=$AppId | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "binding the certificate to 443 failed" }
 
     if (Test-Path "IIS:\Sites\dhc") { Remove-Website -Name dhc }
     if (Test-Path "IIS:\AppPools\dhc") { Remove-WebAppPool -Name dhc }
@@ -81,8 +83,10 @@ function Setup {
     Set-ItemProperty "IIS:\AppPools\dhc" -Name managedRuntimeVersion -Value "v4.0"
     & $appcmd set config -section:system.applicationHost/applicationPools "/+[name='dhc'].environmentVariables.[name='PAGESPEED_TEST_HTML_COMMIT_HOLD_FILE',value='$Root\state\commit.hold']" /commit:apphost | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "setting the pool's environment failed" }
-    New-Website -Name dhc -Port 8080 -HostHeader "www.example.test" -PhysicalPath "$Root\site" -ApplicationPool dhc | Out-Null
-    New-WebBinding -Name dhc -Protocol https -Port 8443 -HostHeader "www.example.test"
+    if (Test-Path "IIS:\Sites\Default Web Site") { Stop-Website -Name "Default Web Site" }
+    New-Website -Name dhc -Port 80 -HostHeader "www.example.test" -PhysicalPath "$Root\site" -ApplicationPool dhc | Out-Null
+    New-WebBinding -Name dhc -Protocol https -Port 443 -HostHeader "www.example.test"
+    & $appcmd set config dhc -section:system.webServer/serverRuntime /frequentHitThreshold:1 /commit:apphost | Out-Null
     & $appcmd set config -section:system.webServer/httpCompression "/+dynamicTypes.[mimeType='text/markdown',enabled='True']" /commit:apphost | Out-Null
     & $appcmd set config -section:system.webServer/httpCompression /dynamicCompressionDisableCpuUsage:100 /staticCompressionDisableCpuUsage:100 /minFileSizeForComp:1 /commit:apphost | Out-Null
     # The authentication sections are set per location by the provider.
@@ -127,7 +131,7 @@ function Run {
 function Teardown {
     & $appcmd restore backup $Backup | Out-Null
     & $appcmd delete backup $Backup | Out-Null
-    & netsh http delete sslcert ipport=0.0.0.0:8443 | Out-Null
+    & netsh http delete sslcert ipport=0.0.0.0:443 | Out-Null
     if (Test-Path "$Root\cert.txt") {
         $t = (Get-Content "$Root\cert.txt").Trim()
         Remove-Item "Cert:\LocalMachine\My\$t" -ErrorAction SilentlyContinue

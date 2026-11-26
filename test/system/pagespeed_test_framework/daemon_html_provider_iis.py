@@ -7,7 +7,7 @@ It runs inside the IIS host itself (the rig's lab guest), as Administrator,
 next to an IIS the rig provisioned with guest_iis_html_conformance.ps1:
 
   * one site, "dhc", in its own application pool, bound to
-    https://www.example.test:8443 and http://www.example.test:8080, whose
+    https://www.example.test and http://www.example.test (443 and 80), whose
     every path an ASP.NET origin (DhcOrigin.cs) answers with the row's
     status, header lines and body and whose requests it logs;
   * the PageSpeed module with both module entries, PageSpeedFinalView
@@ -58,8 +58,10 @@ HeaderLines = List[Tuple[str, str]]
 ROW_HOST = "www.example.test"
 SITE = "dhc"
 POOL = "dhc"
-HTTP_PORT = 8080
-HTTPS_PORT = 8443
+# The default ports, as a site runs: IIS names a non-default port in the
+# request URL, which the cache key (from Host) does not carry.
+HTTP_PORT = 80
+HTTPS_PORT = 443
 ADMIN_PATH = "/pagespeed_admin"
 GLOBAL_ADMIN_PATH = "/pagespeed_global_admin"
 STATISTICS_PATH = "/pagespeed_admin/statistics"
@@ -79,6 +81,8 @@ WITHHELD_ID = 0xCC
 FACTS_PRESENT = 0x1
 FACTS_BINDING_LIVE = 0x200
 FACTS_WITHHELD = 0x800
+FACTS_NEEDS_VALIDATION = 0x2
+FACTS_VARIANT_PRESENT = 0x100
 SIDECAR_PAIRED = 0
 HASH_BYTES = 32
 NOTIFY_FROM_MODULE_VOUCHED_STORED = 0x1 | 0x2 | 0x8
@@ -200,6 +204,11 @@ class _Volume:
         lib.ps_header_block_pairing.restype = ctypes.c_int
         lib.ps_header_block_pairing.argtypes = [vp, ctypes.POINTER(ctypes.c_uint8)]
         lib.ps_header_block_free.argtypes = [vp]
+        lib.ps_cache_read_site_purge_epoch.restype = ctypes.c_int
+        lib.ps_cache_read_site_purge_epoch.argtypes = [vp, cp, ctypes.POINTER(ctypes.c_uint64)]
+        lib.ps_read_content.restype = ctypes.c_int
+        lib.ps_read_content.argtypes = [vp, ctypes.POINTER(ctypes.c_void_p),
+                                        ctypes.POINTER(ctypes.c_size_t)]
         lib.ps_html_stored_facts_from_reads.restype = ctypes.c_int
         lib.ps_html_stored_facts_from_reads.argtypes = [vp, vp, vp, ctypes.c_int,
                                                         ctypes.POINTER(_PsHtmlStoredFacts)]
@@ -310,9 +319,18 @@ class _Volume:
                     facts.struct_size = ctypes.sizeof(facts)
                     rc = self.lib.ps_html_stored_facts_from_reads(
                         original, markdown, withheld, 1 if paired else 0, ctypes.byref(facts))
-                    ready = (rc == 0 and facts.flags & FACTS_PRESENT
-                             and facts.flags & FACTS_BINDING_LIVE
-                             and not facts.flags & FACTS_WITHHELD)
+                    need = FACTS_PRESENT | FACTS_VARIANT_PRESENT | FACTS_BINDING_LIVE
+                    epoch = ctypes.c_uint64(0)
+                    data, size = ctypes.c_void_p(), ctypes.c_size_t()
+                    ready = (rc == 0 and (facts.flags & need) == need
+                             and not facts.flags & (FACTS_WITHHELD | FACTS_NEEDS_VALIDATION)
+                             and time.time() - facts.stored_at < facts.lifetime_s
+                             and self.lib.ps_cache_read_site_purge_epoch(
+                                 self.cache, key[3], ctypes.byref(epoch)) == 0
+                             and facts.stored_at > epoch.value
+                             and self.lib.ps_read_content(markdown, ctypes.byref(data),
+                                                          ctypes.byref(size)) == 0
+                             and size.value > 0)
             finally:
                 self._free(original, markdown, withheld)
         finally:
@@ -417,7 +435,6 @@ class IisProvider(conf.Provider):
                 '<add name="dhc-static-html" path="*.html" verb="GET,HEAD" modules="StaticFileModule" resourceType="File" />',
                 '<add name="dhc-static-txt" path="*.txt" verb="GET,HEAD" modules="StaticFileModule" resourceType="File" />']
             extra.append('<staticContent><clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="00:05:00" /></staticContent>')
-            extra.append('<serverRuntime frequentHitThreshold="1" />')
             applied.add("static_file")
         if vhost.get("output_cache"):
             extra.append('<caching enabled="true" enableKernelCache="true"><profiles>'
