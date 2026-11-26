@@ -4494,6 +4494,46 @@ bool ps_has_stacked_content_encoding(ngx_http_request_t* r) {
   return false;
 }
 
+// One Vary line on a rewritten page.  The module's own Vary (the rewriter's
+// `Accept` from AgentOptimize, for example) is a list entry, and nginx's
+// header writer states the compressor's `Accept-Encoding` as a second line
+// of its own; a client reads the two as one list (RFC 9110 5.3), but a cache
+// in front may key on the first line alone.  When the page carries exactly
+// one Vary line that does not list the token yet, the token is added to it
+// and the writer's own line withdrawn.
+void ps_merge_compressor_vary(ngx_http_request_t* r, ps_request_ctx_t* ctx) {
+#if (NGX_HTTP_GZIP)
+  if (r != r->main || ctx == nullptr || !ctx->html_rewrite || !r->gzip_vary) {
+    return;
+  }
+  const ngx_http_core_loc_conf_t* clcf =
+      static_cast<ngx_http_core_loc_conf_t*>(
+          ngx_http_get_module_loc_conf(r, ngx_http_core_module));
+  if (clcf == nullptr || !clcf->gzip_vary) {
+    return;
+  }
+  ngx_table_elt_t* vary = nullptr;
+  ngx_table_elt_t* header;
+  NgxListIterator it(&(r->headers_out.headers.part));
+  while ((header = it.Next()) != nullptr) {
+    if (header->hash != 0 && STR_CASE_EQ_LITERAL(header->key, "Vary")) {
+      if (vary != nullptr) return;  // Two lines already: left as they are.
+      vary = header;
+    }
+  }
+  if (vary == nullptr || ps_vary_lists_accept_encoding(vary->value)) {
+    return;
+  }
+  const GoogleString merged =
+      StrCat(str_to_string_piece(vary->value), ", Accept-Encoding");
+  char* value = string_piece_to_pool_string(r->pool, merged);
+  if (value == nullptr) return;  // The writer's own line stays.
+  vary->value.data = reinterpret_cast<u_char*>(value);
+  vary->value.len = merged.size();
+  r->gzip_vary = 0;
+#endif
+}
+
 // The etag filter's work for a Markdown answer of the HTML cache (see
 // ps_etag_header_filter): the header set enforced a final time, a transport
 // conflict counted once, and no compressor's Vary stamp, as the answer
@@ -4528,6 +4568,7 @@ ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
     }
     return ngx_http_ef_next_header_filter(r);
   }
+  ps_merge_compressor_vary(r, ctx);
 #if (NGX_HTTP_GZIP)
   if (ctx && ctx->psol_vary_accept_only) {
     // One shot, and only while the module's Vary is really on this
