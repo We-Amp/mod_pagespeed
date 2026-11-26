@@ -2811,8 +2811,15 @@ void ps_daemon_html_request_facts(ngx_http_request_t* r,
   facts->path = str_to_string_piece(r->unparsed_uri).as_string();
   facts->site = SiteIdFromServerFragment(
       server_context->global_options()->cache_fragment());
-  facts->url_agreed =
-      r == r->main && url.IsWebValid() && ps_in_place_url_agrees(r, url);
+  // The cache key is the request target as sent, so the server's reading
+  // of it must be that target itself: a path nginx normalised (a dot
+  // segment, an escape, merged slashes) names a resource under another
+  // spelling, and is neither stored nor served under this one.
+  const StringPiece target = str_to_string_piece(r->unparsed_uri);
+  const StringPiece raw_path = target.substr(0, target.find('?'));
+  facts->url_agreed = r == r->main && url.IsWebValid() &&
+                      raw_path == str_to_string_piece(r->uri) &&
+                      ps_in_place_url_agrees(r, url);
   facts->authenticated_user = r->headers_in.user.len != 0;
   std::vector<NgxHeaderLine> lines;
   NgxListIterator it(&r->headers_in.headers.part);
