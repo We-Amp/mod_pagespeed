@@ -118,11 +118,11 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_sidecar_unpaired_stale:
     "Stored copies whose saved headers no longer pair with them, found stale. Expected to stay at zero; shown as a warning.",
   daemon_html_purge_race_refused:
-    "Stores removed again because a purge covered them while they were being written.",
+    "Stores removed again because a purge covered them while they were being written. Counted as removed too, unless the copy was already gone.",
   daemon_html_removed:
     "Removal calls that succeeded: purges, lost purge races and refusal removals together.",
   daemon_html_removed_on_refusal:
-    "Stored copies removed because the origin now answers with a response the policy refuses. Inside the removed count.",
+    "Stored copies removed because the origin now answers with a response the policy refuses. Counted as removed too, unless the copy was already gone.",
   daemon_html_restore_skipped:
     "Stores skipped because the entry already held the same body with the same freshness.",
   daemon_html_epoch_write_failed:
@@ -130,9 +130,9 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_html_purge_remove_failed:
     "A purged stored copy could not be removed. Expected to stay at zero; shown as a warning.",
   daemon_html_serve_unavailable:
-    "HTML responses seen in serve-variants mode while serving is not allowed: the optimizer library is below 1.14, the optimizer is not in a markdown mode, or its agent-optimize is off. The module runs as report-only meanwhile.",
+    "HTML responses seen in serve-variants mode while serving is not allowed, usually as the optimizer library is below 1.14, the optimizer is not in a markdown mode, or its agent-optimize is off. It reports only meanwhile. Counts since start.",
   daemon_html_notify_sent:
-    "Notifications sent to the optimizer about a stored HTML response.",
+    "Notifications sent to the optimizer about a stored HTML response, including a repeat request for a Markdown copy that was missing or out of date.",
   daemon_html_notify_limited:
     "Notifications to the optimizer held back by the per-URL rate limit.",
   daemon_markdown_served:
@@ -140,23 +140,23 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_markdown_not_modified:
     "Requests answered 304 because the client already holds the current Markdown copy.",
   daemon_markdown_served_without_preference:
-    "Markdown answers sent to a request that did not ask for Markdown. Must stay at zero.",
+    "The optimizer library said to serve Markdown to a request that did not ask for it; nothing was sent and the request fell through. Must stay at zero.",
   daemon_markdown_transport_conflict:
-    "A Markdown answer clashed with another transport of the same response. Must stay at zero; shown as a warning.",
+    "A Markdown answer still carried a Content-Encoding or Content-Range header (a compression or range filter ignored the module's no-compress mark). Must stay at zero.",
   daemon_markdown_fallthrough_fresh:
-    "Markdown requests that fell through to the origin page because the library reported the stored copy fresh.",
+    "Expected to stay at zero. Fresh is the reason the optimizer gives with a serve answer; this counter exists so every serve reason has one. A count means the library said fresh without serving the Markdown copy.",
   daemon_markdown_fallthrough_mode:
-    "Markdown requests that fell through to the origin page because the HTML cache mode did not allow serving.",
+    "Expected to stay at zero: the optimizer did not read the request as asking for Markdown although the module did. Requests not served because of the mode or because serving is not active are not counted here (see the serving-unavailable counter).",
   daemon_markdown_fallthrough_auth_request:
     "Markdown requests that fell through to the origin page because the request carried credentials.",
   daemon_markdown_fallthrough_cookie_request:
-    "Markdown requests that fell through to the origin page because the request carried a cookie.",
+    "Markdown requests that fell through because the request carried a cookie and the stored page was not marked shareable.",
   daemon_markdown_fallthrough_client_no_cache:
     "Markdown requests that fell through to the origin page because the client asked for no cached answer.",
   daemon_markdown_fallthrough_needs_validation:
-    "Markdown requests that fell through to the origin page because the stored copy needs revalidation.",
+    "Expected to stay at zero for Markdown requests; a page that needs revalidation counts as parent stale.",
   daemon_markdown_fallthrough_stale:
-    "Markdown requests that fell through to the origin page because the stored copy is stale.",
+    "Expected to stay at zero for Markdown requests; a page that is not fresh counts as parent stale.",
   daemon_markdown_fallthrough_headers_not_reproducible:
     "Markdown requests that fell through to the origin page because the saved response headers could not be reproduced.",
   daemon_markdown_fallthrough_sidecar_missing:
@@ -164,11 +164,11 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_markdown_fallthrough_purged:
     "Markdown requests that fell through to the origin page because the stored copy was purged.",
   daemon_markdown_fallthrough_absent:
-    "Markdown requests that fell through to the origin page because nothing is stored for the URL.",
+    "Markdown requests that fell through because nothing is stored for the URL, or the page is stored but no Markdown copy has been made from it yet (or the copy could not be read).",
   daemon_markdown_fallthrough_binding_stale:
-    "Markdown requests that fell through to the origin page because the stored copy no longer matches its optimizer record.",
+    "Markdown requests that fell through because the Markdown copy was made from an earlier version of the page.",
   daemon_markdown_fallthrough_parent_stale:
-    "Markdown requests that fell through to the origin page because the original page the Markdown copy came from is stale.",
+    "Markdown requests that fell through because the page the copy was made from is no longer fresh, or is older than the copy's own lifetime.",
   daemon_markdown_fallthrough_method:
     "Markdown requests that fell through to the origin page because the request method is not served (not GET or HEAD).",
   daemon_markdown_fallthrough_range:
@@ -176,17 +176,17 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   daemon_markdown_fallthrough_cors:
     "Markdown requests that fell through to the origin page because the request is a cross-origin (Origin) request.",
   daemon_markdown_fallthrough_no_transform:
-    "Markdown requests that fell through to the origin page because the stored response forbids transformation.",
+    "Markdown requests that fell through because the stored response, or the request, forbids transformation (no-transform).",
   daemon_markdown_fallthrough_withheld:
     "Markdown requests that fell through to the origin page because the optimizer has withheld a Markdown copy for this page.",
   daemon_markdown_fallthrough_skew:
-    "Markdown requests that fell through to the origin page because the stored copy's timestamps are not trustworthy.",
+    "Markdown requests that fell through because the stored page's time lies more than 5 seconds after the request's (a clock step).",
   daemon_markdown_fallthrough_sidecar_unpaired:
     "Markdown requests that fell through to the origin page because the saved headers do not pair with the stored copy.",
   daemon_markdown_fallthrough_url_disagree:
     "Markdown requests that fell through to the origin page because the server and the module disagree about the URL.",
   daemon_markdown_fallthrough_other:
-    "Markdown requests that fell through to the origin page because a reason this module has no counter for.",
+    "Markdown requests that fell through because the optimizer library could not classify the request, the answer could not be sent, or for a reason this module has no counter for.",
 
   ipro_daemon_served:
     "In-place requests answered with an optimized variant from the optimizer's shared cache, including not-modified revalidations. This is the hit count for optimizer output.",

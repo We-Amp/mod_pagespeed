@@ -21,7 +21,11 @@ export const HTML_CACHE_TEXT = {
     "Unavailable: the HTML cache is on, but no optimizer is configured, the optimizer library is older than the policy, or this server (IIS, Envoy) has no report yet.",
   waiting: "On. No HTML response has been evaluated yet.",
   intro: "Report only: nothing is stored or served because of these numbers.",
-  introServe: "Serve variants: HTML responses the policy allows are stored, and a request that prefers Markdown is answered from the stored copy.",
+  introServe:
+    "Serve variants: where this server, the optimizer library and the optimizer support it and AgentOptimize is on, pages the policy allows are stored and requests that prefer Markdown are answered from the stored copy. Whether that is happening shows in the counters below and in the list of reasons serving may be off; otherwise the numbers are the report.",
+  inferred: "(inferred from the counters)",
+  decisionLog: "Per-request decisions are in the decision log under LogDir/daemon-html on the server.",
+  unavailableSince: "requests could not use serving since the server started",
   mode: "Mode",
   modeNames: { off: "off", "report-only": "report-only", "serve-variants": "serve-variants" },
   modeUnknown: "unknown (configuration not readable)",
@@ -39,13 +43,15 @@ export const HTML_CACHE_TEXT = {
   fallthroughs: "Fall-throughs to the origin page, by reason",
   degraded: "Serving is not active",
   degradedIntro:
-    "The mode is serve-variants but the module is not serving, so it runs as report-only. One of these holds; the server log names which one:",
+    "The mode is serve-variants but the module is not serving, so it runs as report-only. Usually one of these holds; the server log names which one:",
+  degradedHistory: "Serving was not active at some point since the server started. If you have since fixed the cause, this count stops growing. Possible causes:",
   degradedCauses: [
     "optimizer library below 1.14",
     "worker not in a markdown mode",
     "worker agent-optimize off",
+    "the optimizer's shared cache is not open",
   ],
-  noOptimizer: "No optimizer is configured, or this server has no HTML cache yet; nothing is evaluated.",
+  agentOptimizeOff: "With the module's AgentOptimize off, the module only reports and no counter shows it.",
   warnings: "Warnings",
   evaluated: "HTML responses evaluated",
   unavailableCount: "Not evaluated (unavailable)",
@@ -65,7 +71,7 @@ export const HTML_CACHE_WARNINGS: ReadonlyArray<readonly [string, string]> = [
   ["daemon_html_epoch_write_failed", "A purge could not be recorded; the site's stored copies are treated as purged until it can."],
   ["daemon_html_purge_remove_failed", "A purged copy could not be removed from the cache."],
   ["daemon_html_refused_url_disagree", "The server and the module disagree about a request's URL, so nothing is stored for it."],
-  ["daemon_markdown_transport_conflict", "A Markdown answer clashed with another transport of the same response. Should stay at zero."],
+  ["daemon_markdown_transport_conflict", "A Markdown answer still carried a Content-Encoding or Content-Range header (a compression or range filter ignored the module's no-compress mark). Must stay at zero."],
 ];
 
 /** The wait after a failed read of /config, doubled for each further failure, up to the cap. */
@@ -118,8 +124,12 @@ export interface HtmlCacheView {
   storeRefusals: HtmlCacheReason[];
   /** Requests that fell through to the origin page, by reason; largest first. */
   fallthroughs: HtmlCacheReason[];
-  /** True in serve-variants while the module is not serving. */
+  /** True when the mode was inferred from the counters, not read from the configuration. */
+  modeInferred: boolean;
+  /** True in serve-variants while serving is blocked now: the counter rose since the previous sample. */
   servingBlocked: boolean;
+  /** HTML responses that could not use serving since the server started. */
+  servingUnavailableTotal: number;
   /** Warning counters that moved. */
   warnings: HtmlCacheWarning[];
 }
@@ -146,7 +156,9 @@ export function htmlCacheMode(config: unknown): HtmlCacheMode {
         : null;
   if (text === null) return null;
   const value = text.match(MODE_LINE)?.[1];
-  return value === "report-only" || value === "serve-variants" ? value : "off";
+  if (value === undefined || value === "off") return "off";
+  // A value this console does not know (a newer server): the mode is unknown, not off.
+  return value === "report-only" || value === "serve-variants" ? value : null;
 }
 
 function byCount(rows: HtmlCacheReason[]): HtmlCacheReason[] {
@@ -169,7 +181,20 @@ const ENGINE_REFUSALS: ReadonlyArray<readonly [string, string]> = [
   ["sidecar_write_failed", "daemon_html_sidecar_write_failed"],
 ];
 
-export function htmlCacheView(stats: Record<string, unknown>, mode: HtmlCacheMode = null): HtmlCacheView {
+/**
+ * `previousServeUnavailable` is daemon_html_serve_unavailable at the previous
+ * poll, null on the first. That counter only grows, so "serving is blocked
+ * now" means it rose between two polls; otherwise it is history.
+ */
+export function htmlCacheServeUnavailable(stats: Record<string, unknown>): number {
+  return count(stats, "daemon_html_serve_unavailable");
+}
+
+export function htmlCacheView(
+  stats: Record<string, unknown>,
+  mode: HtmlCacheMode = null,
+  previousServeUnavailable: number | null = null,
+): HtmlCacheView {
   const evaluated = count(stats, "daemon_html_evaluated");
   const wouldStore = count(stats, "daemon_html_would_store");
   const refused = count(stats, "daemon_html_refused");
@@ -223,7 +248,10 @@ export function htmlCacheView(stats: Record<string, unknown>, mode: HtmlCacheMod
     markdownNotModified,
     storeRefusals,
     fallthroughs,
-    servingBlocked: effective === "serve-variants" && serveUnavailable > 0,
+    modeInferred: mode === null && effective !== null,
+    servingBlocked:
+      effective === "serve-variants" && previousServeUnavailable !== null && serveUnavailable > previousServeUnavailable,
+    servingUnavailableTotal: effective === "serve-variants" ? serveUnavailable : 0,
     warnings,
   };
 }

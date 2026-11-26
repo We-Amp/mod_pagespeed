@@ -16,6 +16,7 @@
     HTML_CACHE_TEXT as text,
     configRetryDelayMs,
     htmlCacheMode,
+    htmlCacheServeUnavailable,
     htmlCacheView,
     type HtmlCacheMode,
   } from "$lib/utils/html-cache";
@@ -24,6 +25,9 @@
   let mode: HtmlCacheMode = null;
   let configFailures = 0;
   let configRetryAt = 0;
+  // daemon_html_serve_unavailable at the previous poll: it only grows, so a
+  // rise between two polls is what says serving is blocked now.
+  let previousServeUnavailable: number | null = null;
   const poll = usePolling(async () => {
     if (mode === null && Date.now() >= configRetryAt) {
       mode = await api.getConfig().then(htmlCacheMode, () => null);
@@ -32,7 +36,10 @@
         configRetryAt = Date.now() + configRetryDelayMs(configFailures);
       }
     }
-    return htmlCacheView((await api.getStats()).variables, mode);
+    const variables = (await api.getStats()).variables;
+    const result = htmlCacheView(variables, mode, previousServeUnavailable);
+    previousServeUnavailable = htmlCacheServeUnavailable(variables);
+    return result;
   });
   const view = $derived(poll.data);
 </script>
@@ -48,15 +55,21 @@
       <p class="note" data-testid="html-cache-unavailable">{text.unavailable}</p>
     {:else}
       <p class="note" data-testid="html-cache-mode">
-        {text.mode}: {view.mode === null ? text.modeUnknown : text.modeNames[view.mode]}.
+        {text.mode}: {view.mode === null ? text.modeUnknown : text.modeNames[view.mode]}{view.modeInferred ? ` ${text.inferred}` : ""}.
         {view.mode === "serve-variants" ? text.introServe : text.intro}
       </p>
-      {#if view.servingBlocked}
-        <div data-testid="html-cache-degraded">
-          <p class="note"><strong>{text.degraded}.</strong> {text.degradedIntro}</p>
+      <p class="note" data-testid="html-cache-log">{text.decisionLog}</p>
+      {#if view.servingBlocked || view.servingUnavailableTotal > 0}
+        <div data-testid={view.servingBlocked ? "html-cache-degraded" : "html-cache-degraded-history"}>
+          {#if view.servingBlocked}
+            <p class="note"><strong>{text.degraded}.</strong> {text.degradedIntro}</p>
+          {:else}
+            <p class="note">{formatCount(view.servingUnavailableTotal)} {text.unavailableSince}. {text.degradedHistory}</p>
+          {/if}
           <ul>
             {#each text.degradedCauses as cause (cause)}<li>{cause}</li>{/each}
           </ul>
+          <p class="note">{text.agentOptimizeOff}</p>
         </div>
       {/if}
       {#if view.warnings.length > 0}

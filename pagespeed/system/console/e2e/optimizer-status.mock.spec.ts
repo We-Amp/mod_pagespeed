@@ -223,7 +223,7 @@ test("phone: the status page does not scroll sideways", async ({ page }) => {
   ).toBe(true);
 });
 
-test("serve-variants: mode, engine counters, the degraded causes and the warnings", async ({ page }) => {
+test("serve-variants: mode, engine counters, the degraded causes as history and the warnings", async ({ page }) => {
   await mockAdmin(page, "pagespeed_admin", {
     ...F.allReplies(),
     config: F.ok({
@@ -247,9 +247,11 @@ test("serve-variants: mode, engine counters, the degraded causes and the warning
   await ready(page);
   const panel = page.locator("#optimizer-html-cache");
   await expect(page.getByTestId("html-cache-mode")).toContainText("serve-variants");
-  await expect(page.getByTestId("html-cache-degraded")).toContainText("optimizer library below 1.14");
-  await expect(page.getByTestId("html-cache-degraded")).toContainText("worker not in a markdown mode");
-  await expect(page.getByTestId("html-cache-degraded")).toContainText("worker agent-optimize off");
+  await expect(page.getByTestId("html-cache-degraded-history")).toContainText("optimizer library below 1.14");
+  await expect(page.getByTestId("html-cache-degraded-history")).toContainText("worker not in a markdown mode");
+  await expect(page.getByTestId("html-cache-degraded-history")).toContainText("worker agent-optimize off");
+  await expect(page.getByTestId("html-cache-degraded-history")).toContainText("3 requests could not use serving since the server started");
+  await expect(page.getByTestId("html-cache-log")).toContainText("LogDir/daemon-html");
   await expect(page.getByTestId("html-cache-warnings")).toContainText("daemon_html_epoch_write_failed");
   await expect(page.getByTestId("html-cache-engine")).toContainText("Markdown answers (200): 6");
   await expect(panel.getByRole("table", { name: /Fall-throughs/ })).toContainText("stale");

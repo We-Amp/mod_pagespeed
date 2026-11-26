@@ -121,15 +121,40 @@ describe("serve-variants", () => {
     expect(view.servingBlocked).toBe(false);
   });
 
-  it("names the degraded state when serving is unavailable", () => {
-    const view = htmlCacheView({ daemon_html_serve_unavailable: 4, daemon_html_evaluated: 4 }, "serve-variants");
-    expect(view.servingBlocked).toBe(true);
+  it("says serving is blocked now only while the counter rises between polls", () => {
+    const stats = { daemon_html_serve_unavailable: 4, daemon_html_evaluated: 4 };
+    // First poll: no earlier sample, so it is history.
+    const first = htmlCacheView(stats, "serve-variants", null);
+    expect(first.servingBlocked).toBe(false);
+    expect(first.servingUnavailableTotal).toBe(4);
+    // Rising: blocked now.
+    expect(htmlCacheView({ ...stats, daemon_html_serve_unavailable: 6 }, "serve-variants", 4).servingBlocked).toBe(true);
+    // Flat after the cause was fixed: history only, with the count.
+    const flat = htmlCacheView(stats, "serve-variants", 4);
+    expect(flat.servingBlocked).toBe(false);
+    expect(flat.servingUnavailableTotal).toBe(4);
+    expect(htmlCacheView(stats, "report-only", 1).servingBlocked).toBe(false);
+    expect(htmlCacheView(stats, "report-only", 1).servingUnavailableTotal).toBe(0);
+  });
+
+  it("names the causes, including the optimizer's cache and the module's AgentOptimize", () => {
     expect(HTML_CACHE_TEXT.degradedCauses).toEqual([
       "optimizer library below 1.14",
       "worker not in a markdown mode",
       "worker agent-optimize off",
+      "the optimizer's shared cache is not open",
     ]);
-    expect(htmlCacheView({ daemon_html_serve_unavailable: 4 }, "report-only").servingBlocked).toBe(false);
+    expect(HTML_CACHE_TEXT.agentOptimizeOff).toContain("AgentOptimize off");
+    // The intro does not claim storing or serving in every state.
+    expect(HTML_CACHE_TEXT.introServe).toContain("where this server");
+    expect(HTML_CACHE_TEXT.introServe).toContain("otherwise the numbers are the report");
+  });
+
+  it("marks an inferred mode and treats an unknown listed value as unknown", () => {
+    expect(htmlCacheView({ daemon_html_stored: 1 }).modeInferred).toBe(true);
+    expect(htmlCacheView({}, "serve-variants").modeInferred).toBe(false);
+    expect(htmlCacheView({}).modeInferred).toBe(false);
+    expect(htmlCacheMode({ config: "Options\n  DaemonHtmlCache (dhc)   serve-cached-html\n" })).toBeNull();
   });
 
   it("shows exactly the five warning counters, only when they moved and the cache is on", () => {
