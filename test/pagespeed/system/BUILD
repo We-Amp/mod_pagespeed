@@ -610,6 +610,43 @@ pagespeed_cc_test(
     ],
 )
 
+# The same runner over the degrade and fault rows, with the stub library
+# (a real binding loaded through LoadDaemonAbi) answering instead of the fake.
+pagespeed_cc_test(
+    name = "daemon_html_conformance_stub_test",
+    srcs = [
+        "daemon_html_conformance_test.cc",
+        "fake_daemon_volume.h",
+        "injected_verdict_daemon_abi.h",
+        "recording_daemon_abi.h",
+    ],
+    copts = ["-DDAEMON_HTML_CONFORMANCE_ON_STUB"],
+    data = [
+        ":libdaemon_stub_html_serve.so",
+        ":libdaemon_stub_html_serve_partial.so",
+        "//test/system/daemon_html:conformance_cases.json",
+    ],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_engine",
+        "//pagespeed/system:daemon_html_purge_observer",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+        "@boringssl//:crypto",
+        "@jsoncpp",
+    ],
+)
+
 # The HTML cache engine's own pieces: purge keys, the oracle's fail-closed
 # epoch and clamp, the byte budget, and the degrade path.
 pagespeed_cc_test(

@@ -25,6 +25,7 @@ py_library(
         "__init__.py",
         "assertions.py",
         "client.py",
+        "daemon_html_conformance.py",
         "flush_origin.py",
         "pytest_main.py",
         "require.py",
@@ -35,8 +36,18 @@ py_library(
     # `from pagespeed_test_framework import ...` (without this, only the
     # workspace root is importable and every dependent py_test fails at
     # import with ModuleNotFoundError).
+    # The HTML cache conformance cases the live runner core loads.
+    data = ["//test/system/daemon_html:conformance_cases.json"],
     imports = [".."],
     visibility = ["//visibility:public"],
+)
+
+# The HTML cache live runner core, driven through a fake provider.
+py_test(
+    name = "test_daemon_html_conformance_core",
+    srcs = ["test_daemon_html_conformance_core.py"],
+    deps = [":pagespeed_test_framework"],
+    python_version = "PY3",
 )
 
 # Unit tests for the framework itself

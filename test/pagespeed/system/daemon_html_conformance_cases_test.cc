@@ -269,10 +269,32 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
       const Json::Value& calls = ex["calls"];
       if (!calls.isArray()) c.Fail(sw, "calls is not an array");
       for (Json::ArrayIndex j = 0; calls.isArray() && j < calls.size(); ++j) {
-        c.Keys(sw + " call", calls[j], {"fn", "args"}, {"fn"});
+        c.Keys(sw + " call", calls[j], {"fn", "args", "exact"}, {"fn"});
         c.LibraryFn(sw + " call fn", calls[j]["fn"]);
         if (calls[j].isMember("args") && !calls[j]["args"].isObject()) {
           c.Fail(sw + " call", "args is not an object");
+        }
+        if (calls[j].isMember("exact")) {
+          // Struct prefixes whose every field the call's args must name.
+          const Json::Value& exact = calls[j]["exact"];
+          if (!exact.isArray() || exact.empty()) {
+            c.Fail(sw + " call", "exact is not a list of struct prefixes");
+          }
+          for (Json::ArrayIndex k = 0; exact.isArray() && k < exact.size();
+               ++k) {
+            // Only the structs the function's record carries.
+            const GoogleString fn = calls[j]["fn"].asString();
+            const GoogleString prefix =
+                exact[k].isString() ? exact[k].asString() : GoogleString();
+            const bool ok =
+                (prefix == "request" && (fn == "ps_html_serve_classify" ||
+                                         fn == "ps_html_store_classify")) ||
+                (prefix == "stored" && fn == "ps_html_serve_classify");
+            if (!ok) {
+              c.Fail(sw + " call",
+                     StrCat("exact ", prefix, " is not recorded for ", fn));
+            }
+          }
         }
       }
     }
@@ -462,6 +484,40 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsMalformedRows) {
   EXPECT_FALSE(LabelIsPublicSafe("tracked as XYZ-99"));
   EXPECT_FALSE(LabelIsPublicSafe("an X-Y event"));
   EXPECT_TRUE(LabelIsPublicSafe("validator: 304 set (RFC 9110 15.4.5)"));
+}
+
+// An exact prefix the function's record does not carry would assert
+// nothing.
+TEST(DaemonHtmlConformanceCasesTest, RejectsAnExactStructTheCallDoesNotRecord) {
+  Json::Value bodies(Json::objectValue);
+  Checker c(bodies);
+  Json::Value engine(Json::objectValue);
+  engine["verdicts"] = Json::Value(Json::arrayValue);
+  Json::Value step(Json::objectValue);
+  step["kind"] = "serve";
+  Json::Value call(Json::objectValue);
+  call["fn"] = "ps_html_store_classify";
+  call["exact"].append("stored");
+  step["expect"]["calls"].append(call);
+  call["fn"] = "ps_html_serve_classify";
+  call["exact"][0] = "request";
+  call["exact"].append("stored");
+  step["expect"]["calls"].append(call);
+  engine["steps"].append(step);
+  CheckEngine(c, "row", engine);
+  // Only the store classifier's "stored" is refused; the serve
+  // classifier records both structs.
+  std::vector<GoogleString> refused;
+  for (const GoogleString& e : c.errors()) {
+    if (e.find("is not recorded for") != GoogleString::npos) {
+      refused.push_back(e);
+    }
+  }
+  ASSERT_EQ(1u, refused.size()) << JoinCollection(c.errors(), "\n");
+  EXPECT_NE(GoogleString::npos,
+            refused[0].find(
+                "exact stored is not recorded for ps_html_store_classify"))
+      << refused[0];
 }
 
 }  // namespace
