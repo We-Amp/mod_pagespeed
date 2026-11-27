@@ -2707,10 +2707,10 @@ GoogleString RewriteOptions::LaterReleaseOptionWarning(StringPiece name,
                   "runs as serve-variants, which serves the Markdown copies "
                   "of stored pages only");
   }
-  for (const char* later : {kDaemonHtmlCacheServeScope, kDaemonHtmlCacheMaxAge,
-                            kDaemonHtmlCacheCredentialed,
-                            kDaemonHtmlCacheIgnoreCookies,
-                            kDaemonHtmlCacheIgnoreCookie}) {
+  for (const char* later :
+       {kDaemonHtmlCacheServeScope, kDaemonHtmlCacheMaxAge,
+        kDaemonHtmlCacheCredentialed, kDaemonHtmlCacheIgnoreCookies,
+        kDaemonHtmlCacheIgnoreCookie}) {
     if (StringCaseEqual(name, later)) {
       return StrCat("'", later,
                     "' takes effect with DaemonHtmlCache serve-cached-html, "

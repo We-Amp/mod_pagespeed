@@ -1177,8 +1177,7 @@ TEST_F(LegacyConfigCompatTest, NginxLaterReleaseDirectivesLoadInert) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             options.daemon_html_cache());
   EXPECT_EQ(86400, options.daemon_html_cache_max_age_s());
-  EXPECT_EQ("_my_ab _my_prefix*",
-            options.daemon_html_cache_ignore_cookie());
+  EXPECT_EQ("_my_ab _my_prefix*", options.daemon_html_cache_ignore_cookie());
 }
 
 #endif  // !LEGACY_CONFIG_APACHE

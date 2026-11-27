@@ -156,8 +156,8 @@ TEST_F(ApacheConfigTest, DaemonHtmlCacheModesParse) {
             config_.daemon_html_cache());
   EXPECT_EQ(1, handler.MessagesOfType(kWarning));
   EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
-            config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve",
-                                               &msg, &handler));
+            config_.ParseAndSetOptionFromName1("DaemonHtmlCache", "serve", &msg,
+                                               &handler));
 }
 
 // The settings of the serve-cached-html mode load on this server, every value

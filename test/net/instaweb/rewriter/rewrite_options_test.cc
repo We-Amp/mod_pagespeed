@@ -1208,8 +1208,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
   // With no handler the caller gets the warning as the message.
   msg.clear();
   ASSERT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "off",
-                                                &msg, &handler));
+            options_.ParseAndSetOptionFromName1("DaemonHtmlCache", "off", &msg,
+                                                &handler));
   msg.clear();
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
@@ -1369,8 +1369,8 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsMerge) {
             vhost.ParseAndSetOptionFromName1("DaemonHtmlCacheIgnoreCookie",
                                              "vhost_b", &msg, &handler));
   ASSERT_EQ(RewriteOptions::kOptionOk,
-            vhost.ParseAndSetOptionFromName1("DaemonHtmlCacheServeScope",
-                                             "all", &msg, &handler));
+            vhost.ParseAndSetOptionFromName1("DaemonHtmlCacheServeScope", "all",
+                                             &msg, &handler));
   RewriteOptions merged(&thread_system_);
   merged.Merge(global);
   merged.Merge(vhost);
