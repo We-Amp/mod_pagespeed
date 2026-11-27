@@ -395,9 +395,12 @@ class IisProvider(conf.Provider):
         self._hold_requested = False
         # Client ports of the connections each named process and each purge
         # was sent on, for process_ids().
-        self.process_ports: Dict[str, Set[int]] = {}
-        self.purge_ports: Set[int] = set()
+        # (client port, sent ms, answered ms) of each request a named process
+        # and each purge went on, for process_ids(): client ports are reused.
+        self.process_ports: Dict[str, List[Tuple[int, float, float]]] = {}
+        self.purge_ports: List[Tuple[int, float, float]] = []
         self.last_port = 0
+        self.last_window = (0, 0.0, 0.0)
         self.max_processes = 1
         self.live: dict = {}
         self.mode = "off"
@@ -681,7 +684,11 @@ class IisProvider(conf.Provider):
         self.live = live
         self.mode = live.get("mode", "off")
         self.process_ports = {}
-        self.purge_ports = set()
+        self.purge_ports = []
+        # The request record of this row only.
+        trace = os.path.join(self.state, "trace.log")
+        if os.path.exists(trace):
+            os.unlink(trace)
         self.fragment = f"dhc-{next(self._row_seq)}-{row_id}"[:60]
         self._clear_hold()
         origin = live.get("origin", {})
@@ -732,6 +739,7 @@ class IisProvider(conf.Provider):
             if c.sock is None:
                 c.connect()
             self.last_port = c.sock.getsockname()[1]
+            sent_ms = time.time() * 1000
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
             for name, value in headers:
@@ -739,6 +747,7 @@ class IisProvider(conf.Provider):
             c.endheaders()
             r = c.getresponse()
             body = r.read()
+            self.last_window = (self.last_port, sent_ms, time.time() * 1000)
             return conf.Response(r.status, list(r.getheaders()), body)
         finally:
             if conn is None:
@@ -767,7 +776,7 @@ class IisProvider(conf.Provider):
         c = self._pinned_connection(process)
         try:
             r = self._send(method, path, host or ROW_HOST, headers, conn=c)
-            self.process_ports.setdefault(process, set()).add(self.last_port)
+            self.process_ports.setdefault(process, []).append(self.last_window)
             return r
         finally:
             c.close()
@@ -912,7 +921,7 @@ class IisProvider(conf.Provider):
         r = self._send("POST", target, ROW_HOST,
                        [("X-Requested-With", "XMLHttpRequest"), ("Content-Length", "0")],
                        tls=conn is not None, conn=conn)
-        self.purge_ports.add(self.last_port)
+        self.purge_ports.append(self.last_window)
         if r.status != 200:
             raise conf.ProviderUnsupported(f"POST {target}: {r.status} {r.body[:200]!r}")
 
@@ -930,7 +939,7 @@ class IisProvider(conf.Provider):
         try:
             if form == "PURGE":
                 r = self._send("PURGE", path, host, [], tls=tls, conn=conn)
-                self.purge_ports.add(self.last_port)
+                self.purge_ports.append(self.last_window)
                 if r.status != 200:
                     raise conf.ProviderUnsupported(f"PURGE {url}: {r.status} {r.body[:200]!r}")
             elif form == "query":
@@ -981,7 +990,8 @@ class IisProvider(conf.Provider):
         trace) names for each client connection a named process's requests
         and the purges were sent on."""
         self.settle()
-        by_port: Dict[int, Set[str]] = {}
+        # (client port, ms, pid) of every request the module recorded.
+        records: List[Tuple[int, float, str]] = []
         try:
             with open(os.path.join(self.state, "trace.log"), encoding="latin-1") as f:
                 for line in f:
@@ -990,13 +1000,18 @@ class IisProvider(conf.Provider):
                         continue
                     for p in parts:
                         if p.startswith("client_port="):
-                            by_port.setdefault(int(p.split("=", 1)[1]), set()).add(parts[0])
+                            records.append((int(p.split("=", 1)[1]), float(parts[1]), parts[0]))
         except OSError:
             raise conf.ProviderUnsupported("no request record (the pool's trace file)")
-        out: Dict[str, Set[str]] = {}
-        for name, ports in self.process_ports.items():
-            out[name] = set().union(*(by_port.get(p, set()) for p in ports))
-        purge = set().union(*(by_port.get(p, set()) for p in self.purge_ports)) if self.purge_ports else set()
+
+        def pids(windows: List[Tuple[int, float, float]]) -> Set[str]:
+            # The record on the same client port inside the request's own
+            # send-to-answer window (a small margin for the two clocks' reads).
+            return {pid for port, sent, done in windows for rport, ms, pid in records
+                    if rport == port and sent - 50 <= ms <= done + 50}
+
+        out: Dict[str, Set[str]] = {name: pids(w) for name, w in self.process_ports.items()}
+        purge = pids(self.purge_ports) if self.purge_ports else set()
         if purge:
             out["purge"] = purge
         return out
