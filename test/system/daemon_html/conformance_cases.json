@@ -5751,6 +5751,286 @@
       }
     },
     {
+      "id": "store-ajax-x-requested-with",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-Requested-With", "XMLHttpRequest"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
+              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-x-requested-with-lowercase",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["x-requested-with", "xmlhttprequest"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
+              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-x-microsoftajax",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-MicrosoftAjax", "Delta=true"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
+              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-x-prototype-version",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-Prototype-Version", "1.7.3"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
+              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-report-only",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "config": {"mode": "report-only"},
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-Requested-With", "XMLHttpRequest"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify"],
+              "counters": {"daemon_html_refused_request_header": 1, "daemon_html_evaluated": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-other-requested-with-allowed",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [
+          {"fn": "ps_html_store_classify", "view": "store", "action": "store", "reason": "none", "lifetime_s": 300},
+          {"fn": "ps_html_store_classify", "view": "final", "action": "store", "reason": "none", "lifetime_s": 300}
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-Requested-With", "com.example.app"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_store_classify"}, {"fn": "ps_cache_write_original_site"}],
+              "counters": {"daemon_html_refused_request_header": 0, "daemon_html_stored": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "store-ajax-empty-marker-allowed",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [
+          {"fn": "ps_html_store_classify", "view": "store", "action": "store", "reason": "none", "lifetime_s": 300},
+          {"fn": "ps_html_store_classify", "view": "final", "action": "store", "reason": "none", "lifetime_s": 300}
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-MicrosoftAjax", ""]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_store_classify"}, {"fn": "ps_cache_write_original_site"}],
+              "counters": {"daemon_html_refused_request_header": 0, "daemon_html_stored": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "store-url-disagree",
       "runners": ["engine"],
       "why": "request: server and module read the URL differently",
@@ -13005,6 +13285,208 @@
       }
     },
     {
+      "id": "serve-ajax-x-requested-with",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["X-Requested-With", "XMLHttpRequest"]]
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],
+              "serve": {"kind": "fall_through", "reason": "request_header"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-ajax-x-requested-with-lowercase",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["x-requested-with", "xmlhttprequest"]]
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],
+              "serve": {"kind": "fall_through", "reason": "request_header"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-ajax-x-microsoftajax",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["X-MicrosoftAjax", "Delta=true"]]
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],
+              "serve": {"kind": "fall_through", "reason": "request_header"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-ajax-x-prototype-version",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["X-Prototype-Version", "1.7.3"]]
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],
+              "serve": {"kind": "fall_through", "reason": "request_header"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-ajax-other-requested-with-allowed",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [
+          {"fn": "ps_html_serve_classify", "action": "fall_through", "reason": "stale", "wants_markdown": true}
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["X-Requested-With", "com.example.app"]]
+            },
+            "expect": {
+              "calls": [{"fn": "ps_html_serve_classify"}],
+              "serve": {"kind": "fall_through", "reason": "stale"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "serve-url-disagree",
       "runners": ["engine"],
       "why": "request: server and module read the URL differently",
@@ -18241,6 +18723,202 @@
               },
               "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-ajax-never-stores-never-hits",
+      "runners": ["live"],
+      "why": "request: an AJAX request is never stored or answered from the cache",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["X-Requested-With", "XMLHttpRequest"]]},
+            "pre": [{"origin_set": {"body_ref": "page_v2"}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-Requested-With": "XMLHttpRequest"},
+              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["X-Requested-With", "XMLHttpRequest"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-Requested-With": "XMLHttpRequest"},
+              "counter_delta": {
+                "daemon_markdown_fallthrough_request_header": 1,
+                "daemon_html_refused_request_header": 1,
+                "daemon_markdown_served": 0,
+                "daemon_html_stored": 0
+              }
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["X-MicrosoftAjax", "Delta=true"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-MicrosoftAjax": "Delta=true"},
+              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["X-MicrosoftAjax", "Delta=true"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-MicrosoftAjax": "Delta=true"},
+              "counter_delta": {
+                "daemon_markdown_fallthrough_request_header": 1,
+                "daemon_html_refused_request_header": 1,
+                "daemon_markdown_served": 0,
+                "daemon_html_stored": 0
+              }
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["X-Prototype-Version", "1.7.3"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-Prototype-Version": "1.7.3"},
+              "counter_delta": {"daemon_html_refused_request_header": 1, "daemon_html_stored": 0}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["X-Prototype-Version", "1.7.3"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "origin_saw": {"X-Prototype-Version": "1.7.3"},
+              "counter_delta": {
+                "daemon_markdown_fallthrough_request_header": 1,
+                "daemon_html_refused_request_header": 1,
+                "daemon_markdown_served": 0,
+                "daemon_html_stored": 0
+              }
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "counter_delta": {"daemon_markdown_served": 1},
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-ajax-other-requested-with-allowed",
+      "runners": ["live"],
+      "why": "request: an AJAX request is never stored or answered from the cache",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["X-Requested-With", "com.example.app"]]},
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "stored": true,
+              "counter_delta": {"daemon_html_refused_request_header": 0}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["X-Requested-With", "com.example.app"]]
+            },
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "counter_delta": {"daemon_markdown_served": 1, "daemon_markdown_fallthrough_request_header": 0},
+              "headers_exact": {
+                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
+                "Content-Length": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"},
+                "Vary": {"count": 1, "value": "Accept"},
+                "X-Robots-Tag": {"count": 1, "value": "noindex"},
+                "Age": {"count": 1},
+                "ETag": {"count": 1}
+              },
+              "headers_only": true
             }
           }
         ]

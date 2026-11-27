@@ -215,6 +215,22 @@ TEST_F(NgxDaemonHtmlTest, RequestFactsCountEveryLine) {
   EXPECT_TRUE(with_stash.accept_lines.empty());
 }
 
+TEST_F(NgxDaemonHtmlTest, TheFirstAjaxMarkerIsKept) {
+  DaemonHtmlRequestFacts none;
+  FillDaemonHtmlRequestHeaderFacts(
+      {{"X-Requested-With", "com.example.app"}, {"X-MicrosoftAjax", ""}},
+      nullptr, &none);
+  EXPECT_EQ("", none.ajax_marker);
+
+  DaemonHtmlRequestFacts facts;
+  FillDaemonHtmlRequestHeaderFacts({{"Accept", "text/markdown"},
+                                    {"x-prototype-version", "1.7"},
+                                    {"X-Requested-With", "XMLHttpRequest"}},
+                                   nullptr, &facts);
+  EXPECT_EQ("X-Prototype-Version", facts.ajax_marker);
+  EXPECT_EQ((std::vector<GoogleString>{"text/markdown"}), facts.accept_lines);
+}
+
 TEST_F(NgxDaemonHtmlTest, AnEmptyFieldIsPresent) {
   DaemonHtmlRequestFacts facts;
   FillDaemonHtmlRequestHeaderFacts(

@@ -1285,7 +1285,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
                                                  "if_unmodified_since",
                                                  "if_range",
                                                  "range",
-                                                 "origin"};
+                                                 "origin",
+                                                 "headers"};
     for (const GoogleString& key : r.getMemberNames()) {
       EXPECT_EQ(1u, kKeys.count(key)) << "unknown request key " << key;
     }
@@ -1326,6 +1327,12 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     f.has_if_range = r.get("if_range", false).asBool();
     f.has_range = r.get("range", false).asBool();
     f.has_origin = r.get("origin", false).asBool();
+    // Other request header lines, read as every port reads them.
+    for (const Json::Value& line : r["headers"]) {
+      const char* marker =
+          DaemonHtmlAjaxMarker(line[0].asString(), line[1].asString());
+      if (marker != nullptr && f.ajax_marker.empty()) f.ajax_marker = marker;
+    }
     return f;
   }
 

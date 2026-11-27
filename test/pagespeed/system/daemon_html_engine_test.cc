@@ -178,6 +178,23 @@ TEST(DaemonHtmlByteBudgetTest, NeverExceedsItsCapacityUnderContention) {
   budget.Release(1000);
 }
 
+TEST(DaemonHtmlAjaxMarkerTest, NamesTheMarkersTheServerPortsTreatAsAjax) {
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequest"));
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("x-requested-with", " xmlhttprequest "));
+  EXPECT_EQ(nullptr,
+            DaemonHtmlAjaxMarker("X-Requested-With", "com.example.app"));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Requested-With", ""));
+  EXPECT_STREQ("X-MicrosoftAjax",
+               DaemonHtmlAjaxMarker("X-MICROSOFTAJAX", "Delta=true"));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-MicrosoftAjax", " "));
+  EXPECT_STREQ("X-Prototype-Version",
+               DaemonHtmlAjaxMarker("X-Prototype-Version", "1.7.3"));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Prototype-Version", ""));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("Accept", "XMLHttpRequest"));
+}
+
 class InlinePort : public DaemonHtmlPort {
  public:
   bool ClearAndEmitAllowlisted(const DaemonHtmlServeResult&, bool) override {
@@ -415,6 +432,26 @@ TEST_F(DaemonHtmlEngineTest, ACommitDroppedUnrunReleasesItsBudget) {
   port.held.clear();  // Dropped by a port that is shutting down.
   EXPECT_EQ(0, budget_.in_use());
   EXPECT_EQ(0, CallsOf("ps_cache_write_headers_sidecar_site"));
+}
+
+TEST_F(DaemonHtmlEngineTest, AnAjaxRequestIsNeitherStoredNorServed) {
+  std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
+  InlinePort port;
+  DaemonHtmlRequestFacts facts = MarkdownRequest();
+  facts.ajax_marker = "X-Requested-With";
+  EXPECT_EQ(nullptr, engine->StartRecording(facts, &port));
+  const DaemonHtmlServeResult result = engine->Serve(facts, &port);
+  EXPECT_EQ(DaemonHtmlServeResult::kFallThrough, result.kind);
+  EXPECT_EQ("request_header", result.reason);
+  // Nothing read from the volume, nothing classified.
+  EXPECT_EQ(0, CallsOf("ps_headers_sidecar_read"));
+  EXPECT_EQ(0, CallsOf("ps_html_stored_facts_from_reads"));
+  EXPECT_EQ(0, CallsOf("ps_html_serve_classify"));
+  EXPECT_EQ(1, stats_.GetVariable("daemon_html_refused_request_header")->Get());
+  EXPECT_EQ(
+      1,
+      stats_.GetVariable("daemon_markdown_fallthrough_request_header")->Get());
+  EXPECT_EQ(0, budget_.in_use());
 }
 
 TEST_F(DaemonHtmlEngineTest, NoLibraryMeansNoRecordingAndNoCall) {

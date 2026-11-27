@@ -302,6 +302,7 @@ const char* const RewriteStats::kDaemonHtmlEngineCounters[] = {
     "daemon_html_stored",
     "daemon_html_refused_budget",
     "daemon_html_refused_url_disagree",
+    "daemon_html_refused_request_header",
     "daemon_html_sidecar_write_failed",
     "daemon_html_sidecar_unpaired_stale",
     "daemon_html_purge_race_refused",
@@ -352,6 +353,7 @@ const char* const RewriteStats::kDaemonMarkdownFallthroughReasons[] = {
     // The engine's own.
     "sidecar_unpaired",
     "url_disagree",
+    "request_header",
     "other",
     nullptr,
 };

@@ -135,6 +135,10 @@ void FillDaemonHtmlRequestHeaderFacts(const std::vector<NgxHeaderLine>& lines,
                                       const ClientConditionalStash* stash,
                                       DaemonHtmlRequestFacts* facts) {
   for (const auto& [name, value] : lines) {
+    if (facts->ajax_marker.empty()) {
+      const char* marker = DaemonHtmlAjaxMarker(name, value);
+      if (marker != nullptr) facts->ajax_marker = marker;
+    }
     if (StringCaseEqual(name, "Accept")) {
       facts->accept_lines.push_back(value.as_string());
     } else if (StringCaseEqual(name, "Cache-Control")) {

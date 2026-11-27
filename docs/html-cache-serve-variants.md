@@ -149,6 +149,11 @@ Consequences to plan for:
   `200`.
 - `Cache-Control: private` keeps the copy out of shared caches, including CDNs
   that ignore `Vary`. Behind a CDN, `Age` can cost extra cache misses.
+- A script's request is never stored and never answered with the Markdown
+  copy: one carrying `X-Requested-With: XMLHttpRequest` (any case), or a
+  non-empty `X-MicrosoftAjax` or `X-Prototype-Version`. It counts
+  `daemon_html_refused_request_header` (store) or
+  `daemon_markdown_fallthrough_request_header` (Markdown request).
 
 ### Apache
 

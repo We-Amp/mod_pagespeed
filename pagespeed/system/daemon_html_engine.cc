@@ -41,6 +41,9 @@ constexpr int kSidecarNever = 2;
 
 // The library that formats vhost_added (and the serve-side lines).
 constexpr int kVhostAddedMinor = 14;
+// The first library whose decision-line grammar admits the request_header
+// reason; an older one would refuse the whole line.
+constexpr int kRequestHeaderReasonMinor = 15;
 
 // The Cache-Control bits that widen what a cache may do with an entry: kept
 // only when both views carry them.  Every other bit restricts (or only
@@ -468,6 +471,22 @@ class ServeReads {
 
 }  // namespace
 
+const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value) {
+  TrimWhitespace(&value);
+  if (StringCaseEqual(name, "X-Requested-With")) {
+    // As RequestHeaders::IsXmlHttpRequest reads it: another value (an
+    // Android WebView sends the app's package name) is not a script.
+    return StringCaseEqual(value, "XMLHttpRequest") ? "X-Requested-With"
+                                                    : nullptr;
+  }
+  if (value.empty()) return nullptr;
+  if (StringCaseEqual(name, "X-MicrosoftAjax")) return "X-MicrosoftAjax";
+  if (StringCaseEqual(name, "X-Prototype-Version")) {
+    return "X-Prototype-Version";
+  }
+  return nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // DaemonHtmlPurgeOracle
 
@@ -592,6 +611,8 @@ struct DaemonHtmlEngine::Counters {
         refused_budget(s->GetVariable("daemon_html_refused_budget")),
         refused_url_disagree(
             s->GetVariable("daemon_html_refused_url_disagree")),
+        refused_request_header(
+            s->GetVariable("daemon_html_refused_request_header")),
         sidecar_write_failed(
             s->GetVariable("daemon_html_sidecar_write_failed")),
         sidecar_unpaired_stale(
@@ -637,6 +658,7 @@ struct DaemonHtmlEngine::Counters {
   Variable* stored;
   Variable* refused_budget;
   Variable* refused_url_disagree;
+  Variable* refused_request_header;
   Variable* sidecar_write_failed;
   Variable* sidecar_unpaired_stale;
   Variable* purge_race_refused;
@@ -1134,6 +1156,17 @@ std::unique_ptr<DaemonHtmlRecording> DaemonHtmlEngine::StartRecording(
     if (unavailable != nullptr) *unavailable = true;
     return nullptr;
   }
+  if (!facts.ajax_marker.empty()) {
+    // A script's request: the origin may have answered it with a fragment,
+    // which must never be kept under the page's key.  In report-only too,
+    // so the report says what serving would do.
+    counters_->refused_request_header->Add(1);
+    if (deps_.substrate.abi->VersionMinor() >= kRequestHeaderReasonMinor) {
+      LogServeSide("refuse", "request_header", facts.host, facts.path, 0, 0, 0,
+                   nullptr, -1, may_store ? "serve-variants" : "report-only");
+    }
+    return nullptr;
+  }
   return std::unique_ptr<DaemonHtmlRecording>(
       new DaemonHtmlRecording(this, facts, port, may_store));
 }
@@ -1290,12 +1323,10 @@ void DaemonHtmlEngine::Report(const DaemonHtmlRecording& r,
             now_ms, /*request_path=*/true);
 }
 
-void DaemonHtmlEngine::LogServeSide(const char* action,
-                                    const GoogleString& reason,
-                                    const GoogleString& host,
-                                    const GoogleString& path, int status,
-                                    uint64 size, uint32 lifetime_s,
-                                    const char* variant, int64 age_s) {
+void DaemonHtmlEngine::LogServeSide(
+    const char* action, const GoogleString& reason, const GoogleString& host,
+    const GoogleString& path, int status, uint64 size, uint32 lifetime_s,
+    const char* variant, int64 age_s, const char* mode) {
   if (log_ == nullptr) return;
   const int64 now_ms = deps_.timer->NowMs();
   const GoogleString log_path = DaemonHtmlLogPath(path);
@@ -1303,7 +1334,7 @@ void DaemonHtmlEngine::LogServeSide(const char* action,
       {"ts_ms", Integer64ToString(now_ms)},
       {"host", DaemonHtmlIsLogHost(host) ? host : GoogleString()},
       {"path", log_path},
-      {"mode", "serve-variants"},
+      {"mode", mode},
       {"action", action},
       {"reason", reason},
       {"status", status > 0 ? IntegerToString(status) : GoogleString()},
@@ -1694,6 +1725,17 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   if (!facts.url_agreed) {
     result.reason = "url_disagree";
     CountFallThrough(result.reason);
+    return result;
+  }
+  // A script's request is never answered from the cache: it may want a
+  // fragment where the cache holds the page.
+  if (!facts.ajax_marker.empty()) {
+    result.reason = "request_header";
+    CountFallThrough(result.reason);
+    if (abi->VersionMinor() >= kRequestHeaderReasonMinor) {
+      LogServeSide("refuse", "request_header", facts.host, facts.path, 0, 0, 0,
+                   nullptr, -1);
+    }
     return result;
   }
   void* cache = Cache();

@@ -949,6 +949,16 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		facts->has_range = request->GetHeader(HttpHeaderRange) != nullptr;
 		facts->has_if_range = request->GetHeader(HttpHeaderIfRange) != nullptr;
 		facts->has_origin = request->GetHeader("Origin") != nullptr;
+		for (PCSTR name : {"X-Requested-With", "X-MicrosoftAjax", "X-Prototype-Version"}) {
+			length = 0;
+			value = request->GetHeader(name, &length);
+			const char* marker = value == nullptr ? nullptr :
+				net_instaweb::DaemonHtmlAjaxMarker(name, StringPiece(value, length));
+			if (marker != nullptr) {
+				facts->ajax_marker = marker;
+				break;
+			}
+		}
 		if (options != nullptr) {
 			facts->options_enabled_and_allowed =
 				options->enabled() && options->IsAllowed(inner->gurl()->Spec());

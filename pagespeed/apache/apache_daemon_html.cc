@@ -52,6 +52,14 @@ bool Has(const apr_table_t* table, const char* name) {
   return table != nullptr && apr_table_get(table, name) != nullptr;
 }
 
+int FindAjaxMarker(void* rec, const char* key, const char* value) {
+  const char* marker = DaemonHtmlAjaxMarker(key == nullptr ? "" : key,
+                                            value == nullptr ? "" : value);
+  if (marker == nullptr) return 1;
+  *static_cast<GoogleString*>(rec) = marker;
+  return 0;  // The first one is kept.
+}
+
 // A transport line one of the two tables carries (the first one found).
 const char* FindLine(const request_rec* r, const char* name) {
   const char* value = apr_table_get(r->headers_out, name);
@@ -212,6 +220,14 @@ int ApacheDaemonHtmlAgentClass(request_rec* r,
   return agent_class;
 }
 
+GoogleString ApacheDaemonHtmlAjaxMarker(const apr_table_t* headers_in) {
+  GoogleString marker;
+  if (headers_in != nullptr) {
+    apr_table_do(FindAjaxMarker, &marker, headers_in, nullptr);
+  }
+  return marker;
+}
+
 void FillApacheDaemonHtmlRequestFacts(request_rec* r,
                                       ApacheServerContext* context,
                                       const RewriteOptions* options,
@@ -266,6 +282,7 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   facts->has_origin = Has(in, HttpAttributes::kOrigin);
   facts->agent_class = ApacheDaemonHtmlAgentClass(
       r, ApacheDaemonHtmlAgentClassCounters(context));
+  facts->ajax_marker = ApacheDaemonHtmlAjaxMarker(in);
   // When the request entered httpd, so never later than the origin's fetch.
   facts->capture_start_ms = apr_time_as_msec(r->request_time);
   if (options != nullptr) {
