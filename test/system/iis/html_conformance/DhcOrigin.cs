@@ -69,8 +69,15 @@ public class DhcOrigin : IHttpHandler
         if (hold)
         {
             string held = Path.Combine(State, "held");
-            DateTime until = DateTime.UtcNow.AddSeconds(120);
+            DateTime start = DateTime.UtcNow;
+            DateTime until = start.AddSeconds(120);
             while (File.Exists(held) && DateTime.UtcNow < until) Thread.Sleep(20);
+            lock (Lock)
+            {
+                File.AppendAllText(Path.Combine(State, "holds.log"),
+                    Process.GetCurrentProcess().Id + " " + ctx.Request.RawUrl + " held_ms=" +
+                    (int)(DateTime.UtcNow - start).TotalMilliseconds + "\n");
+            }
         }
 
         string[] spec = File.ReadAllLines(Path.Combine(State, "origin.txt"));
