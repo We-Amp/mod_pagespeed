@@ -77,12 +77,15 @@ const StringSet kVhostKnobs = {"header_add",
                                "proxy_hide", "trailer"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
-const StringSet kLiveStepKeys = {"request", "pre", "process", "background",
-                                 "expect"};
+const StringSet kLiveStepKeys = {"request",    "pre",    "process",
+                                 "background", "expect", "window"};
+const StringSet kLiveWindowKeys = {"stale_max_s", "margin_s", "observe_s",
+                                   "every_s", "stale"};
 const StringSet kLiveRequestKeys = {"method", "path", "host", "headers"};
-const StringSet kLiveOps = {"purge_url",      "purge_global", "wait_markdown",
-                            "sleep_s",        "origin_set",   "hold_origin",
-                            "release_origin", "set_mode"};
+const StringSet kLiveOps = {
+    "purge_url",      "purge_global", "wait_markdown",
+    "sleep_s",        "origin_set",   "hold_origin",
+    "release_origin", "set_mode",     "wait_origin_held"};
 const StringSet kLiveExpectKeys = {"status",         "content_type",
                                    "headers_exact",  "headers_absent",
                                    "stored",         "stored_lifetime_s",
@@ -352,6 +355,11 @@ void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l) {
       c.HeaderList(sw + " request", s["request"], "headers");
     }
     if (s.isMember("pre")) c.Ops(sw + " pre", s["pre"], kLiveOps);
+    if (s.isMember("window") &&
+        c.Keys(sw + " window", s["window"], kLiveWindowKeys, kLiveWindowKeys)) {
+      c.Keys(sw + " window stale", s["window"]["stale"], {"content_type"},
+             {"content_type"});
+    }
     const Json::Value& ex = s["expect"];
     if (!c.Keys(sw + " expect", ex, kLiveExpectKeys, {})) continue;
     if (ex.empty()) c.Fail(sw, "expect asserts nothing");

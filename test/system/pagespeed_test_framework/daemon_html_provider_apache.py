@@ -88,6 +88,9 @@ class _Origin:
         # headers.
         self.hold_next = False
         self.release = threading.Event()
+        # (method, path) of each response held now (headers out, body
+        # waiting for release).
+        self.holding: List[Tuple[str, str]] = []
         origin = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -114,7 +117,15 @@ class _Origin:
                 self.end_headers()
                 if hold is not None:
                     self.wfile.flush()
-                    hold.wait(timeout=60)
+                    held = (self.command, self.path)
+                    with origin.lock:
+                        origin.holding.append(held)
+                    try:
+                        hold.wait(timeout=60)
+                    finally:
+                        with origin.lock:
+                            if held in origin.holding:
+                                origin.holding.remove(held)
                 if not head:
                     self.wfile.write(body)
                 if truncate:
@@ -174,6 +185,9 @@ class ApacheProvider(conf.Provider):
         self.fragment = ""
         self.answered: Dict[int, int] = {}
         self.answered_lock = threading.Lock()
+        self.process_ports: Dict[str, set] = {}
+        self.purge_ports: set = set()
+        self.last_port = 0
         self.log_offset = 0
         self.connections: Dict[str, http.client.HTTPSConnection] = {}
         self.settle_timeout_s = 30.0
@@ -238,7 +252,13 @@ class ApacheProvider(conf.Provider):
             "  DirectoryIndex /page",
             "  KeepAlive On",
             "  KeepAliveTimeout 60",
-            f'  CustomLog "{self.access_log}" "%{{remote}}p %>s %m %U"',
+            # A named process is one kept-alive connection: no request cap
+            # may close it during a row (a window step sends dozens).
+            "  MaxKeepAliveRequests 0",
+            # The client port, then (last) the pid of the child that
+            # answered: settle() counts lines per port, process_ids() maps
+            # ports to children.
+            f'  CustomLog "{self.access_log}" "%{{remote}}p %>s %m %U %P"',
             # The generation probe: answered by mod_alias, never proxied.
             f"  Redirect 410 /__dhc_generation_{self.generation}",
             '  ProxyPassMatch "^/__dhc_generation_" !',
@@ -411,6 +431,8 @@ class ApacheProvider(conf.Provider):
     def _start_window(self) -> None:
         with self.answered_lock:
             self.answered = {}
+            self.process_ports = {}
+            self.purge_ports = set()
         self.log_offset = self._log_size()
 
     def _log_size(self) -> int:
@@ -472,6 +494,11 @@ class ApacheProvider(conf.Provider):
             conn = self.connections.get(process)
             if conn is None:
                 conn = self.connections[process] = self._connect(host)
+            elif conn.sock is None:
+                # http.client would reconnect, to whichever child accepts:
+                # the row would no longer talk to the process it names.
+                raise AssertionError(
+                    f"process {process}: the server closed the connection that pins it")
         local_port = conn.sock.getsockname()[1]
         try:
             conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
@@ -492,7 +519,41 @@ class ApacheProvider(conf.Provider):
         if True:  # Every answered request is waited for by settle().
             with self.answered_lock:
                 self.answered[local_port] = self.answered.get(local_port, 0) + 1
+                if process is not None:
+                    self.process_ports.setdefault(process, set()).add(local_port)
+        self.last_port = local_port
         return response
+
+    def held_requests(self) -> List[Tuple[str, str]]:
+        with self.origin.lock:
+            return list(self.origin.holding)
+
+    def process_ids(self) -> Dict[str, set]:
+        """The child pid (%P) the access log recorded for each request on a
+        named process's connection and for each purge, once settle() saw
+        every answered request logged."""
+        self.settle()
+        pids: Dict[int, set] = {}
+        try:
+            with open(self.access_log, "rb") as f:
+                f.seek(self.log_offset)
+                data = f.read().decode("latin-1")
+        except OSError:
+            data = ""
+        for line in data.splitlines():
+            parts = line.split(" ")
+            if len(parts) >= 5 and parts[0].isdigit():
+                pids.setdefault(int(parts[0]), set()).add(parts[-1])
+        with self.answered_lock:
+            named = {n: set(p) for n, p in self.process_ports.items()}
+            purge_ports = set(self.purge_ports)
+        out: Dict[str, set] = {}
+        for name, ports in named.items():
+            out[name] = set().union(*(pids.get(p, set()) for p in ports))
+        purge = set().union(*(pids.get(p, set()) for p in purge_ports)) if purge_ports else set()
+        if purge:
+            out["purge"] = purge
+        return out
 
     def request(self, method, path, host, headers, process=None) -> Response:
         self.last_accept[path] = any(
@@ -557,6 +618,8 @@ class ApacheProvider(conf.Provider):
                            HOST, ADMIN_HEADERS)
         else:
             raise ProviderUnsupported(f"purge form {form}")
+        with self.answered_lock:
+            self.purge_ports.add(self.last_port)
         if r.status != 200:
             raise AssertionError(f"purge of {url} ({form}) answered {r.status}: {r.body[:200]!r}")
 
@@ -564,6 +627,8 @@ class ApacheProvider(conf.Provider):
         if via == "admin":
             r = self._send("POST", "/pagespeed_global_admin/cache?purge=*", HOST,
                            ADMIN_HEADERS)
+            with self.answered_lock:
+                self.purge_ports.add(self.last_port)
             if r.status != 200:
                 raise AssertionError(f"global purge answered {r.status}: {r.body[:200]!r}")
         elif via == "flush_file":

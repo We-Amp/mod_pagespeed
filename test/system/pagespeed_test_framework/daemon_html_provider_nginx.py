@@ -122,6 +122,9 @@ class _OriginState:
         self.hold_next = False
         self.release = threading.Event()
         self.held: List[threading.Event] = []
+        # (method, path) of each response held now (headers out, body
+        # waiting).
+        self.holding: List[Tuple[str, str]] = []
         self.requests: List[HeaderLines] = []
 
     def reset(self, status: int, headers: HeaderLines, body: bytes) -> None:
@@ -175,7 +178,15 @@ class _OriginHandler(BaseHTTPRequestHandler):
         if gate is not None:
             # The headers are out; the body waits for release_origin, so the
             # server has started the response (and its capture) before it.
-            gate.wait(120)
+            held = (self.command, self.path)
+            with st.lock:
+                st.holding.append(held)
+            try:
+                gate.wait(120)
+            finally:
+                with st.lock:
+                    if held in st.holding:
+                        st.holding.remove(held)
         if send_body:
             self.wfile.write(body)
 
@@ -545,6 +556,11 @@ class _Instance:
         self.conf_path = os.path.join(root, "nginx.conf")
         self.pid_path = os.path.join(root, "nginx.pid")
         self.generation = 0
+        # Requests this provider sent the instance since the row's setup,
+        # and where the row's part of its access log starts.
+        self.sent = 0
+        self.purges = 0
+        self.log_offset = 0
         for d in ("logs", "client_body_temp", "proxy_temp", "fastcgi_temp",
                   "uwsgi_temp", "scgi_temp"):
             os.makedirs(os.path.join(root, d), exist_ok=True)
@@ -971,7 +987,9 @@ http {{
         text/html html;
     }}
     default_type application/octet-stream;
-    access_log {inst.root}/logs/access.log;
+    # The pid of the worker that answered each request (process_ids).
+    log_format dhc '$pid $request_method $uri';
+    access_log {inst.root}/logs/access.log dhc;
     sendfile off;
 
     pagespeed AdminPath {ADMIN_PATH};
@@ -1020,6 +1038,10 @@ http {{
                 raise conf.ProviderUnsupported(f"nginx {inst.name} reload: {r.stderr.strip()}")
         for inst in self.instances.values():
             self._wait_generation(inst)
+        for inst in self.instances.values():
+            inst.sent = 0
+            inst.purges = 0
+            inst.log_offset = self._access_log_size(inst)
         applied = set(applied)
         applied |= {f"origin.{k}" for k in origin}  # status, headers, body_ref, echo
         if "worker" in live:
@@ -1048,6 +1070,7 @@ http {{
                                             context=ctx)
         else:
             c = http.client.HTTPConnection("127.0.0.1", inst.ports["plain"], timeout=60)
+        inst.sent += 1
         try:
             c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             c.putheader("Host", host)
@@ -1059,6 +1082,61 @@ http {{
             return conf.Response(r.status, list(r.getheaders()), body)
         finally:
             c.close()
+
+    def _access_log_size(self, inst: _Instance) -> int:
+        try:
+            return os.path.getsize(os.path.join(inst.root, "logs", "access.log"))
+        except OSError:
+            return 0
+
+    def _access_lines(self, inst: _Instance) -> List[Tuple[str, str, str]]:
+        """(pid, method, uri) of the row's requests in the instance's access
+        log: the generation probe and statistics reads left out."""
+        try:
+            with open(os.path.join(inst.root, "logs", "access.log"), "rb") as f:
+                f.seek(inst.log_offset)
+                data = f.read().decode("latin-1")
+        except OSError:
+            return []
+        out = []
+        for line in data.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) != 3 or parts[2] in ("/__dhc_probe", GLOBAL_STATISTICS_PATH):
+                continue
+            out.append((parts[0], parts[1], parts[2]))
+        return out
+
+    def held_requests(self) -> List[Tuple[str, str]]:
+        with self.origin.lock:
+            return list(self.origin.holding)
+
+    def process_ids(self) -> Dict[str, Set[str]]:
+        """The worker pids in each instance's access log (one line per
+        answered request, written in the log phase); waits until every
+        request this provider sent the instance is there."""
+        out: Dict[str, Set[str]] = {}
+        purge: Set[str] = set()
+        deadline = time.monotonic() + SETTLE_TIMEOUT_S
+        for name, inst in self.instances.items():
+            while True:
+                lines = self._access_lines(inst)
+                if len(lines) >= inst.sent:
+                    break
+                if time.monotonic() >= deadline:
+                    raise conf.ProviderUnsupported(
+                        f"nginx {name}: {inst.sent} requests sent, {len(lines)} logged")
+                time.sleep(0.05)
+            row = [pid for pid, method, uri in lines
+                   if not (method == "PURGE" or uri.startswith(ADMIN_PATH)
+                           or uri.startswith(GLOBAL_ADMIN_PATH))]
+            if row:
+                out[name] = set(row)
+            purge |= {pid for pid, method, uri in lines
+                      if method == "PURGE" or uri.startswith(ADMIN_PATH)
+                      or uri.startswith(GLOBAL_ADMIN_PATH)}
+        if purge:
+            out["purge"] = purge
+        return out
 
     def request(self, method: str, path: str, host: Optional[str], headers: HeaderLines,
                 process: Optional[str] = None) -> conf.Response:

@@ -54,11 +54,14 @@
     "poll_interval_s, chained_module_origin), origin {status, headers, body_ref,",
     "echo_conditionals, truncate_body (the body ends before its Content-Length)},",
     "and steps [{request {method, path, host, headers}, pre,",
-    "process, background, expect}]. live pre ops: purge_url {url, form PURGE |",
+    "process, background, window, expect}]. live pre ops: purge_url {url, form PURGE |",
     "query}, purge_global {via admin | flush_file}, wait_markdown {timeout_s,",
     "expect_ready (default true; false = the copy must NOT become servable",
     "within the timeout)}, sleep_s,",
-    "origin_set, hold_origin, release_origin, set_mode. live expect keys: status,",
+    "origin_set, hold_origin, release_origin, set_mode, wait_origin_held {method,",
+    "path, timeout_s} (the held origin response for that request has its",
+    "headers out and waits; a step that releases the origin must wait for it",
+    "first, before any purge in its pre ops). live expect keys: status,",
     "content_type, headers_exact (name -> {count, value | contains}),",
     "headers_only (no header beyond headers_exact and the server core's",
     "transport lines Date, Server, Connection, Keep-Alive, Transfer-Encoding),",
@@ -73,6 +76,22 @@
     "the next step ran and asserts only its own response (status, content_type,",
     "headers_*, body_*, length_matches_body). Volume, counter and origin reads",
     "come after the provider settled every commit of answered requests.",
+    "A window step {stale_max_s, margin_s, observe_s, every_s, stale",
+    "{content_type}} watches its process across the purge in its pre ops: it",
+    "sends its request every every_s until observe_s after the purge returned.",
+    "A response with the stale content type (the pre-purge entry) is allowed",
+    "only for a request sent within stale_max_s (the server's poll interval)",
+    "plus margin_s of the purge, and never after a response without it; every",
+    "other response meets expect (response keys only). margin_s 2 covers the",
+    "whole-second poll clock (a process checks once the second count reaches",
+    "its last check plus the interval) and the spacing of the requests.",
+    "A row whose steps name processes is checked after its last step: each",
+    "named process was one server process, no two names were the same one,",
+    "and the purges of a window step were answered by a process other than",
+    "the one it watches.",
+    "The window rows keep the origin body unchanged across the purge: a new",
+    "body unbinds the old Markdown copy by itself and would hide a process",
+    "that never saw the purge.",
     "",
     "bodies: fixture bodies referenced by body_ref."
   ],
@@ -14994,6 +15013,7 @@
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [
+              {"wait_origin_held": {"method": "GET", "path": "/page", "timeout_s": 30}},
               {"purge_url": {"url": "/page", "form": "PURGE"}},
               {"release_origin": {}},
               {"wait_markdown": {"timeout_s": 10, "expect_ready": false}}
@@ -15007,74 +15027,6 @@
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"sleep_s": {"s": 6}}],
-            "expect": {"status": 200, "content_type": "text/html"}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"sleep_s": {"s": 1}}],
-            "expect": {"status": 200, "content_type": "text/html", "stored": true}
-          },
-          {
-            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "live-race-cross-process-url",
-      "runners": ["live"],
-      "why": "purge: capture-time fence",
-      "live": {
-        "mode": "serve-variants",
-        "agent_optimize": true,
-        "vhost": {"poll_interval_s": 3},
-        "origin": {
-          "status": 200,
-          "headers": [
-            ["Content-Type", "text/html; charset=utf-8"],
-            ["Cache-Control", "max-age=300"],
-            ["ETag", "\"v1\""]
-          ],
-          "body_ref": "page"
-        },
-        "steps": [
-          {
-            "request": {"method": "GET", "path": "/page", "headers": []},
-            "pre": [{"hold_origin": {}}],
-            "process": "a",
-            "expect": {"status": 200},
-            "background": true
-          },
-          {
-            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [
-              {"purge_url": {"url": "/page", "form": "PURGE"}},
-              {"release_origin": {}},
-              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}},
-              {"sleep_s": {"s": 4}}
-            ],
-            "process": "b",
-            "expect": {"status": 200, "content_type": "text/html"}
-          },
-          {
-            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 3}}],
-            "process": "b",
             "expect": {"status": 200, "content_type": "text/html"}
           },
           {
@@ -15129,6 +15081,7 @@
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [
+              {"wait_origin_held": {"method": "GET", "path": "/page", "timeout_s": 30}},
               {"purge_global": {"via": "admin"}},
               {"release_origin": {}},
               {"wait_markdown": {"timeout_s": 10, "expect_ready": false}}
@@ -15167,9 +15120,9 @@
       }
     },
     {
-      "id": "live-race-cross-process-global",
+      "id": "live-race-cross-process-window-url",
       "runners": ["live"],
-      "why": "purge: capture-time fence",
+      "why": "purge: visible to every process within one poll interval",
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -15186,26 +15139,32 @@
         "steps": [
           {
             "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "process": "b",
+            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
             "pre": [{"hold_origin": {}}],
             "process": "a",
-            "expect": {"status": 200},
+            "expect": {"status": 200, "content_type": "text/html"},
             "background": true
           },
           {
             "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [
-              {"purge_global": {"via": "admin"}},
-              {"release_origin": {}},
-              {"wait_markdown": {"timeout_s": 10, "expect_ready": false}},
-              {"sleep_s": {"s": 4}}
-            ],
+            "pre": [{"wait_origin_held": {"method": "GET", "path": "/page", "timeout_s": 30}}, {"purge_url": {"url": "/page", "form": "PURGE"}}, {"release_origin": {}}],
             "process": "b",
-            "expect": {"status": 200, "content_type": "text/html"}
-          },
-          {
-            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
-            "pre": [{"sleep_s": {"s": 3}}],
-            "process": "b",
+            "window": {
+              "stale_max_s": 3,
+              "margin_s": 2,
+              "observe_s": 10,
+              "every_s": 0.25,
+              "stale": {"content_type": "text/markdown; charset=utf-8"}
+            },
             "expect": {"status": 200, "content_type": "text/html"}
           },
           {
@@ -15216,20 +15175,68 @@
           {
             "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
             "pre": [{"wait_markdown": {"timeout_s": 30}}],
-            "expect": {
-              "status": 200,
-              "content_type": "text/markdown; charset=utf-8",
-              "headers_exact": {
-                "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
-                "Content-Length": {"count": 1},
-                "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
-                "X-Robots-Tag": {"count": 1, "value": "noindex"},
-                "Age": {"count": 1},
-                "ETag": {"count": 1}
-              },
-              "headers_only": true
-            }
+            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-race-cross-process-window-global",
+      "runners": ["live"],
+      "why": "purge: visible to every process within one poll interval",
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"poll_interval_s": 3},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "process": "b",
+            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"hold_origin": {}}],
+            "process": "a",
+            "expect": {"status": 200, "content_type": "text/html"},
+            "background": true
+          },
+          {
+            "request": {"method": "HEAD", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_origin_held": {"method": "GET", "path": "/page", "timeout_s": 30}}, {"purge_global": {"via": "admin"}}, {"release_origin": {}}],
+            "process": "b",
+            "window": {
+              "stale_max_s": 3,
+              "margin_s": 2,
+              "observe_s": 10,
+              "every_s": 0.25,
+              "stale": {"content_type": "text/markdown; charset=utf-8"}
+            },
+            "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"sleep_s": {"s": 1}}],
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {"status": 200, "content_type": "text/markdown; charset=utf-8"}
           }
         ]
       }
