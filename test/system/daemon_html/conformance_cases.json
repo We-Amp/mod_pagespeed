@@ -34022,6 +34022,140 @@
       }
     },
     {
+      "id": "m2-restore-skip-never-without-v2",
+      "runners": ["engine"],
+      "why": "freshness: an entry without the store record is re-stored, even under the same stamp",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "library": {
+          "minor": 15
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": false,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit", "request_anonymous"]
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "store",
+            "reason": "none",
+            "lifetime_s": 300,
+            "flags": ["lifetime_explicit", "request_anonymous"]
+          },
+          {
+            "fn": "ps_html_serve_classify",
+            "action": "fall_through",
+            "reason": "absent",
+            "wants_markdown": true
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_cache_write_headers_sidecar_site",
+                  "args": {
+                    "format": 3,
+                    "policy_stamp": "5a17c0de00000001"
+                  }
+                },
+                {
+                  "fn": "ps_cache_write_original_site"
+                }
+              ],
+              "counters": {
+                "daemon_html_restore_skipped": 0,
+                "daemon_html_upgrade_restores": 1,
+                "daemon_html_stored": 1
+              }
+            }
+          },
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_serve_classify",
+                  "args": {
+                    "stored.store_v2": true,
+                    "stored.anonymous_recorded": true,
+                    "stored.entry_policy_stamp": "5a17c0de00000001"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "m2-restore-skip-credential-state-differs",
       "runners": ["engine"],
       "why": "freshness: an unchanged page re-stores when the anonymous bit differs",
