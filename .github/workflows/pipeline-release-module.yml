@@ -303,6 +303,13 @@ jobs:
           fi
           [ "$CANDIDATE" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a candidate is a dry run"; exit 1; }
           [ "$REHEARSAL" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a rehearsal is a dry run"; exit 1; }
+          # A real run signs and publishes from its tag ref only: the jobs of the
+          # `release` environment refuse any other ref in their if:, so a real
+          # run started on a branch stops here rather than skip its signing.
+          if [ "$DRY_RUN" = false ] && [ "$GITHUB_REF" != "refs/tags/${TAG}" ]; then
+            echo "::error::a real run runs on its tag ref refs/tags/${TAG}, not '${GITHUB_REF}': dispatch it with --ref ${TAG}, or as a dry run"
+            exit 1
+          fi
           # What the build does is separate from whether anything is signed.
           # A real run and a candidate build the release exactly (final
           # stamps, strict pair checks, the cPanel gates); only a plain dry
@@ -3767,7 +3774,7 @@ jobs:
   windows-sign:
     name: "Sign the Windows binaries${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
     needs: [version, windows-ready, adopt]
-    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -4020,7 +4027,7 @@ jobs:
   msi-sign:
     name: "Sign the Windows installer${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
     needs: [version, msi-build, adopt]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -4666,7 +4673,7 @@ jobs:
   sign-checksums:
     name: "Sign SHA256SUMS${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
     needs: [version, adopt, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -4923,7 +4930,7 @@ jobs:
   create-release:
     name: "Create the GitHub release${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
     needs: [version, adopt, validate, sign-checksums, provenance]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' && startsWith(github.ref, 'refs/tags/module-v') && github.ref == format('refs/tags/{0}', needs.version.outputs.tag) }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
     runs-on: ubuntu-24.04
     timeout-minutes: 30

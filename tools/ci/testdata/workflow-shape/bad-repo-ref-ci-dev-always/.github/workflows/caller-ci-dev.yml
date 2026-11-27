@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  workflow_dispatch:
+    inputs:
+      full:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  pr:
+    if: ${{ always() && github.ref == 'refs/heads/ci-dev' }}
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@ci-dev
+  full:
+    if: ${{ inputs.full && github.ref == 'refs/heads/ci-dev' }}
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev

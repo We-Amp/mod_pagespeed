@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  gate:
+    uses: We-Amp/mod_pagespeed/.github/workflows/gate-x.yml@ci-dev

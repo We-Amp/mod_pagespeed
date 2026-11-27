@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  event-guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "dispatch on $REF"
+  plan:
+    needs: event-guard
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo plan
+  sign-checksums:
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.outputs.dry_run == 'false' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - run: echo sign

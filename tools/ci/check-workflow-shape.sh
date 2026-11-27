@@ -100,6 +100,30 @@
 #       steps of these jobs and must run before any secret is readable; a
 #       secret at job level (env:, with:) or in an earlier step would be
 #       readable by them;
+#   (env-tag-ref) in every workflow: a job that names an environment does so
+#       on one line with a literal name (no mapping form, no expression), and
+#       each job with `environment: release` has a one-line if: with no ||,
+#       always(, failure( or cancelled( (bar !cancelled()), no group right
+#       after ${{ and no compared group (`(...) == false`), that carries
+#       startsWith(github.ref, 'refs/tags/ in its one-line if:, so a run on a
+#       branch never requests the environment (in pipeline-release-module.yml
+#       also github.ref == format('refs/tags/{0}', needs.version.outputs.tag),
+#       and the if: starts with ${{ !cancelled() && );
+#       the one exception is nginx-org-rebuild.yml, whose release jobs run on
+#       the ref its event-guard job pins (a module-v* tag, or exactly
+#       refs/heads/master); an environment spelled release in another case
+#       is refused (GitHub matches the names without regard to case); and such
+#       a workflow (and nginx-org-rebuild.yml) has no workflow-level
+#       defaults: and only standard shells (bash, pwsh, powershell, sh, cmd,
+#       python), so no custom shell can skip a guard script;
+#   (repo-ref) in every workflow: a `uses:` of this repository
+#       (We-Amp/mod_pagespeed/..., owner and name in any case), at job or step
+#       level, names @master or @ci-dev and no other ref; @ci-dev only in a job
+#       whose one-line if: carries github.ref == 'refs/heads/ci-dev' as a term
+#       of its own (between ${{ or && and && or }}), with no ||, no negation
+#       other than !cancelled() and !=, and no always(, failure( or bare
+#       cancelled(. A called workflow runs under its caller's ref, so a
+#       ci-dev callee may run only under refs/heads/ci-dev, never as master;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -313,6 +337,80 @@ release_env_if_records() {
       if (index($0, "needs.version.outputs.dry_run == \047false\047")) has_dry=1
       if (index($0, "needs.version.outputs.candidate != \047true\047")) has_cand=1
       if (index($0, "needs.version.outputs.rehearsal != \047true\047")) has_reh=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the env-tag-ref rule, one per line, tab separated: "<job> <line>
+# <kind>", kind being "form" (an environment that is not a one-line literal
+# name), "noref" (environment: release without the tag-ref term in its if:)
+# or "notag" (pipeline-release-module.yml: without the term that binds the
+# ref to the version job's tag).
+env_tag_ref_records() { # FILE MODULE_LANE(0|1)
+  awk -v tab="${TAB}" -v lane="$2" '
+    function flush() {
+      if (job != "" && rel_line > 0) {
+        if (bypass) printf "%s%s%d%sbypass\n", job, tab, rel_line, tab
+        if (!has_ref) printf "%s%s%d%snoref\n", job, tab, rel_line, tab
+        else if (lane == 1 && !has_tag) printf "%s%s%d%snotag\n", job, tab, rel_line, tab
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); rel_line=0; has_ref=0; has_tag=0; bypass=0; next }
+    injobs && /^    ["\047]?environment["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v)
+      if (v == "" || index(v, "${{") || index(v, "{") || v !~ /^["\047]?[A-Za-z0-9_-]+["\047]?$/) { printf "%s%s%d%sform\n", job, tab, NR, tab; next }
+      gsub(/["\047]/, "", v)
+      # GitHub matches environment names without regard to case: any other
+      # spelling of release would be the same environment under a name the
+      # rules below do not see.
+      if (tolower(v) == "release" && v != "release") { printf "%s%s%d%sform\n", job, tab, NR, tab; next }
+      if (v == "release") rel_line=NR
+    }
+    injobs && /^    if:/ {
+      # Each term stands on its own between ${{ or && and && or }}, so a
+      # negation or a wider expression around it does not count.
+      if ($0 ~ /(\$\{\{ |&& )startsWith\(github\.ref, \047refs\/tags\/[A-Za-z0-9._-]*\047\)( &&| \}\})/) has_ref=1
+      if ($0 ~ /&& github\.ref == format\(\047refs\/tags\/\{0\}\047, needs\.version\.outputs\.tag\)( &&| \}\})/) has_tag=1
+      # The terms must all hold: no ||, no negation (!cancelled() and != aside)
+      # and no status function that runs the job whatever they say
+      # (!cancelled() only adds a condition).
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
+      if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) bypass=1
+      # No wrapper around the terms: nothing opens a group right after ${{,
+      # and no group is compared (`(... && true) == false` inverts them).
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) bypass=1
+      # The module lane: the condition starts with ${{ !cancelled() && .
+      if (lane == 1 && $0 !~ /^    if: \$\{\{ !cancelled\(\) && .* \}\}[[:space:]]*$/) bypass=1
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# Facts for the repo-ref rule, one per line, tab separated: "<job> <line>
+# <uses value> <guarded 0|1>" for each uses: (job or step level) of a job,
+# guarded being 1 when the job's one-line if: carries the ci-dev ref term
+# (see the rule above).
+repo_ref_records() {
+  awk -v tab="${TAB}" '
+    function flush(   i) { for (i = 1; i <= n; i++) printf "%s%s%s%s%s%s%d\n", job, tab, ln[i], tab, val[i], tab, guarded }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job=""; n=0 }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); n=0; guarded=0; next }
+    injobs && /^    ["\047]?if["\047]?[[:space:]]*:/ {
+      g = ($0 ~ /(\$\{\{ |&& )github\.ref == \047refs\/heads\/ci-dev\047( &&| \}\})/)
+      c=$0; gsub(/[[:space:]]+/, "", c); gsub(/!cancelled\(\)/, "", c); gsub(/!=/, "", c)
+      if (index(c, "||") || index(c, "!") || index(c, "always(") || index(c, "failure(") || index(c, "cancelled(")) g = 0
+      if (index(c, "${{(") || index(c, ")==") || index(c, ")!=")) g = 0
+      guarded = g
+    }
+    injobs && /^[[:space:]]+(-[[:space:]]+)?["\047]?uses["\047]?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      n++; ln[n]=NR; val[n]=v
     }
     END { flush() }
   ' "$1"
@@ -882,6 +980,46 @@ EOF
 $(release_env_if_records "${wf}")
 EOF
   fi
+  # (env-tag-ref) a job of the release environment refuses a branch ref in its
+  # if:, so no deployment is requested from one. nginx-org-rebuild.yml runs its
+  # release jobs on the ref its event guard pins instead.
+  et_lane=0
+  [ "${base}" != "pipeline-release-module.yml" ] || et_lane=1
+  et_guarded=0
+  if [ "${base}" = "nginx-org-rebuild.yml" ]; then
+    # The ref pin must be in the event-guard job itself.
+    et_eg="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]#]/ { inj = 0 } inj && !/^[[:space:]]*#/ { print }' "${wf}")"
+    # shellcheck disable=SC2016  # literal workflow text
+    if printf '%s\n' "${et_eg}" | grep -qF '          [[ "$REF" =~ ^refs/tags/module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \' \
+      || { printf '%s\n' "${et_eg}" | grep -qxF '          ALLOWED_REFS: "refs/heads/master"' \
+           && printf '%s\n' "${et_eg}" | grep -qE '^          \[ "\$REF" = "\$ALLOWED_REFS" \] \|\| \{ .*exit 1; \}$'; }; then
+      et_guarded=1
+    fi
+  fi
+  # A workflow with a job of the release environment, and the nginx.org lane,
+  # take no workflow-level defaults: and no shell other than the standard
+  # ones: a custom shell (`shell: 'true {0}'`) would skip every guard script.
+  if [ "${base}" = "nginx-org-rebuild.yml" ] \
+    || grep -qiE '^    ["'"'"']?environment["'"'"']?[[:space:]]*:[[:space:]]*["'"'"']?release["'"'"']?[[:space:]]*(#.*)?$' "${wf}"; then
+    if grep -qE '^["'"'"']?defaults["'"'"']?[[:space:]]*:' "${wf}"; then
+      err "${wf}: a workflow with a job of the release environment takes no workflow-level defaults: (rule env-tag-ref)"
+    fi
+    et_sh="$(grep -nE '^[[:space:]]+["'"'"']?shell["'"'"']?[[:space:]]*:' "${wf}" | grep -vE '^[0-9]+:[[:space:]]+shell:[[:space:]]*(bash|pwsh|powershell|sh|cmd|python)[[:space:]]*(#.*)?$' || true)"
+    [ -z "${et_sh}" ] || err "${wf}: a workflow with a job of the release environment runs only the standard shells (bash, pwsh, powershell, sh, cmd, python): ${et_sh} (rule env-tag-ref)"
+  fi
+  while IFS=$'\t' read -r sjob sline skind; do
+    [ -n "${sjob}" ] || continue
+    case "${skind}" in
+      form) err "${wf}:${sline}: job '${sjob}' names its environment in a form the gate cannot read; write \`environment: <name>\` on one line, and the release environment as \`release\` in lower case (rule env-tag-ref)" ;;
+      noref)
+        [ "${et_guarded}" = 1 ] && continue
+        err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks startsWith(github.ref, 'refs/tags/...') (rule env-tag-ref)" ;;
+      bypass) err "${wf}:${sline}: job '${sjob}' names environment release but its if: has ||, a negation, always(, failure( or cancelled( (other than !cancelled() and !=), a group right after \${{ or a compared group, or (in the module lane) does not start with \${{ !cancelled() && , any of which can bypass its ref terms (rule env-tag-ref)" ;;
+      notag) err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks github.ref == format('refs/tags/{0}', needs.version.outputs.tag) (rule env-tag-ref)" ;;
+    esac
+  done <<EOF
+$(env_tag_ref_records "${wf}" "${et_lane}")
+EOF
   if [ "${base}" = "pipeline-release-module.yml" ] && grep -q '^  adopt:[[:space:]]*$' "${wf}"; then
     while IFS= read -r aprob; do
       [ -n "${aprob}" ] || continue
@@ -913,6 +1051,22 @@ EOF
     err "${wf}:${sline}: a secret in a workflow-level expression (outside jobs); read secrets in a hosted job (rule g)"
   done <<EOF
 $(toplevel_secret_lines "${wf}")
+EOF
+
+  # (repo-ref) every workflow: this repository's workflows and actions by
+  # @master, or by @ci-dev only under refs/heads/ci-dev.
+  while IFS="${TAB}" read -r rjob rline rval rguard; do
+    [ -n "${rjob}" ] || continue
+    rlow="$(printf '%s' "${rval}" | tr '[:upper:]' '[:lower:]')"
+    case "${rlow}" in we-amp/mod_pagespeed/*|we-amp/mod_pagespeed@*) ;; *) continue ;; esac
+    case "${rval}" in
+      *@master) ;;
+      *@ci-dev)
+        [ "${rguard}" = 1 ] || err "${wf}:${rline}: job '${rjob}' uses '${rval}' but its if: does not carry github.ref == 'refs/heads/ci-dev' as a term of its own (no ||, no negation): a ci-dev callee must never run under another ref (rule repo-ref)" ;;
+      *) err "${wf}:${rline}: job '${rjob}' uses '${rval}': this repository's workflows and actions are named @master, or @ci-dev under refs/heads/ci-dev, never another ref (rule repo-ref)" ;;
+    esac
+  done <<EOF
+$(repo_ref_records "${wf}")
 EOF
 
   # (slsa) every workflow: a call of the SLSA generator names the generic
