@@ -3371,17 +3371,18 @@ RewriteOptions::WriteableJavascriptLibraryIdentification() {
 
 void RewriteOptions::Merge(const RewriteOptions& src) {
   DCHECK(!frozen_);
-#ifndef NDEBUG
+  // UpdateCachePurgeSet unfreezes src, marks it modified on its own thread
+  // and freezes it again, all under this lock, and its purge set is merged
+  // under it below. Read the rest of what it writes under the lock too, or a
+  // merge on another thread sees src half way.
+  bool modify;
   {
-    // UpdateCachePurgeSet unfreezes src, marks it modified on its own thread
-    // and freezes it again, all under this lock; read src's state outside
-    // that, or a merge on another thread sees it half way.
     ThreadSystem::ScopedReader read_lock(src.cache_purge_mutex_.get());
+#ifndef NDEBUG
     CHECK(src.MergeOK());  // DCHECK outside of the #ifndef does not link.
-  }
 #endif
-
-  bool modify = src.modified_;
+    modify = src.modified_;
+  }
 
   // Options that already forbid all disabled filters accept no merge that
   // turns on a filter not on before it, whether through the enabled set, a
