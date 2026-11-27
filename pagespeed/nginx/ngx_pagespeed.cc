@@ -2991,18 +2991,24 @@ ngx_int_t ps_daemon_html_reset_headers(ngx_http_request_t* r) {
 
 // No compressor touches this response: nginx's gzip filter reads its test
 // as done and failed, and every compressor (gzip, brotli and the like) skips
-// a response that already has a Content-Encoding.  That one is an entry that
-// is never sent (hash 0), so the client never sees it.
+// a response that already has a Content-Encoding.  For a plain answer that
+// one is an entry that is never sent (hash 0), so the client never sees it;
+// for a coded copy it is the answer's own Content-Encoding line, sent once.
 ngx_int_t ps_daemon_html_mark_no_compress(ngx_http_request_t* r,
                                           PsDaemonHtmlRequest* state) {
 #if (NGX_HTTP_GZIP)
   r->gzip_tested = 1;
   r->gzip_ok = 0;
 #endif
-  ngx_table_elt_t* h =
-      ps_daemon_html_push_line(r, "Content-Encoding", "identity");
+  const GoogleString* coding = nullptr;
+  for (const auto& [name, value] : state->answer.headers) {
+    if (StringCaseEqual(name, "Content-Encoding")) coding = &value;
+  }
+  ngx_table_elt_t* h = ps_daemon_html_push_line(
+      r, "Content-Encoding",
+      coding == nullptr ? StringPiece("identity") : StringPiece(*coding));
   if (h == nullptr) return NGX_ERROR;
-  h->hash = 0;
+  if (coding == nullptr) h->hash = 0;
   r->headers_out.content_encoding = h;
   state->no_compress = h;
   return NGX_OK;
@@ -3019,6 +3025,8 @@ void ps_daemon_html_undo_no_compress(ngx_http_request_t* r,
       r->headers_out.content_encoding == state->no_compress) {
     r->headers_out.content_encoding = nullptr;
   }
+  // A coded answer's own line is withdrawn with it.
+  state->no_compress->hash = 0;
   state->no_compress = nullptr;
 }
 
@@ -3036,7 +3044,8 @@ ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
   ngx_http_headers_out_t* out = &r->headers_out;
   NgxListIterator it(&out->headers.part);
   for (ngx_table_elt_t* h = it.Next(); h != nullptr; h = it.Next()) {
-    if (h->hash == 0) continue;
+    // The no-compress mark: a coded answer's own Content-Encoding.
+    if (h->hash == 0 || h == state->no_compress) continue;
     switch (ClassifyMarkdownLine(str_to_string_piece(h->key))) {
       case NgxMarkdownLine::kTransport:
         break;
@@ -3092,6 +3101,8 @@ ngx_int_t ps_daemon_html_enforce_markdown(ngx_http_request_t* r,
       out->content_type_len = semi == GoogleString::npos ? value.size() : semi;
     } else if (StringCaseEqual(name, "Content-Length")) {
       // Set by the emit; never restored here once a stage cleared it.
+    } else if (StringCaseEqual(name, "Content-Encoding")) {
+      // The no-compress mark carries it (ps_daemon_html_mark_no_compress).
     } else if (StringCaseEqual(name, "Cache-Control")) {
       char* cc = string_piece_to_pool_string(r->pool, value);
       if (cc == nullptr || ps_set_cache_control(r, cc) != NGX_OK) {

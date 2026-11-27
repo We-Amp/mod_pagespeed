@@ -939,6 +939,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (value != nullptr) {
 			facts->accept_lines.emplace_back(value, length);
 		}
+		// As received: IIS joins repeated lines with ", ", one list.
+		length = 0;
+		value = request->GetHeader(HttpHeaderAcceptEncoding, &length);
+		if (value != nullptr) {
+			facts->accept_encoding_lines.emplace_back(value, length);
+		}
 		// The conditionals as they arrived (the begin-request notification
 		// may have removed a module tag from the request since).
 		CopyClientConditionals(inner->client_conditionals(), facts);

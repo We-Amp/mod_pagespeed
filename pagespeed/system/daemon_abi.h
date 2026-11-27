@@ -427,6 +427,12 @@ inline constexpr uint32_t kPsNotifyFlagFromModule = 0x2u;
 // kPsNotifyFlagHostVouched and HTML; nothing in this module sends it unless
 // the HTML serve set is bound.
 inline constexpr uint32_t kPsNotifyFlagHtmlStored = 0x8u;
+// Published at 1.16: "compress the stored Markdown copy of this page": the
+// module served the plain copy because a coded copy was missing or not
+// bound.  Legal only together with kPsNotifyFlagFromModule,
+// kPsNotifyFlagHostVouched, kPsNotifyFlagHtmlStored and HTML, and sent only
+// to a worker that advertises its Markdown codings (the 1.16 set).
+inline constexpr uint32_t kPsNotifyFlagMarkdownCompress = 0x10u;
 
 // Content types, as the peer numbers them.
 enum PsContentType {
@@ -739,6 +745,17 @@ inline constexpr int kHtmlServeSetMinor = 14;
 // size (see the size constants below).
 inline constexpr int kHtmlServe15SetMinor = 15;
 
+// The 1.16 set: compressed Markdown copies (the coding choice, the facts call
+// that reads one coded copy, the coded entity tag and the worker's published
+// codings), with the request's markdown_encoding word and the verdict's
+// markdown_encoding field.
+//
+// BOUND OPTIONALLY, AS ONE SET, AND ONLY ON TOP OF THE 1.15 SET.  Without it
+// the Markdown path serves the plain copy exactly as before: no coded read,
+// no Content-Encoding, the 1.15 verdict size, and neither of the two 1.16
+// request bits.
+inline constexpr int kHtmlServe16SetMinor = 16;
+
 // Sentinel-shaped alternate ids the HTML cache reads by exact id.  The
 // content-hash record (0x3C) and the Markdown copy (0x7C) are the
 // optimizer's; the withheld marker (0xCC, published at 1.13) is its record
@@ -747,6 +764,11 @@ inline constexpr int kHtmlServe15SetMinor = 15;
 inline constexpr uint8_t kPsSentinelContentHash = 0x3C;
 inline constexpr uint8_t kPsSentinelAgentMarkdown = 0x7C;
 inline constexpr uint8_t kPsSentinelMarkdownWithheld = 0xCC;
+// Published at 1.16: the brotli and the gzip copy of the Markdown copy, read
+// by exact id and handed to HtmlStoredFactsFromReadsCoded, which alone says
+// whether one may be sent.  Never written by this module.
+inline constexpr uint8_t kPsSentinelMarkdownBr = 0xDC;
+inline constexpr uint8_t kPsSentinelMarkdownGzip = 0xEC;
 
 // Stored-entry flags published at 1.13.  CLASSIFIED: the writer ran the
 // response through the headers-sidecar gate; with SIDECAR_REQUIRED a
@@ -802,6 +824,19 @@ inline constexpr uint32_t kPsHtmlServeRequestFreshOnly = 64u;
 inline constexpr uint32_t kPsHtmlServeRequestHtmlFallback = 128u;
 inline constexpr uint32_t kPsHtmlServeRequestConditional = 256u;
 inline constexpr uint32_t kPsHtmlServeRequestExplicitPublic = 512u;
+// 1.16, read only together with a verdict of the 1.16 size: identity is in
+// the order MarkdownSelectEncoding returned (the plain copy may stand in for
+// a coded one that is not bound), and that order was empty ("none
+// acceptable": the Markdown path falls through).
+inline constexpr uint32_t kPsHtmlServeRequestIdentityOk = 1024u;
+inline constexpr uint32_t kPsHtmlServeRequestEncodingNone = 2048u;
+
+// The codings a stored Markdown copy exists in (1.16): the plain copy and
+// its gzip and brotli copies.  PsHtmlServeRequest::markdown_encoding,
+// PsHtmlServeVerdict::markdown_encoding, MarkdownSelectEncoding's order.
+inline constexpr int kPsMarkdownEncodingIdentity = 0;
+inline constexpr int kPsMarkdownEncodingGzip = 1;
+inline constexpr int kPsMarkdownEncodingBr = 2;
 
 // PsHtmlServeRequest::serve_scope (1.15); any other value reads as agents.
 inline constexpr int kPsHtmlServeScopeAgents = 0;
@@ -826,6 +861,14 @@ inline constexpr uint32_t kPsHtmlFactsWithheld = 0x800u;
 // 1.15: the entry carries kPsFlagHtmlStoreV2 / kPsFlagAnonymousRecorded.
 inline constexpr uint32_t kPsHtmlFactsStoreV2 = 0x1000u;
 inline constexpr uint32_t kPsHtmlFactsAnonymousRecorded = 0x2000u;
+// 1.16, set by HtmlStoredFactsFromReadsCoded only, for the one coded read it
+// was given: that copy is bound to the page and the plain copy (it may be
+// sent), or it is the optimizer's record that this coding of the current
+// plain copy is not smaller (none will be written, so none is asked for).
+inline constexpr uint32_t kPsHtmlFactsGzipCopyBound = 0x4000u;
+inline constexpr uint32_t kPsHtmlFactsBrCopyBound = 0x8000u;
+inline constexpr uint32_t kPsHtmlFactsGzipNotSmaller = 0x10000u;
+inline constexpr uint32_t kPsHtmlFactsBrNotSmaller = 0x20000u;
 
 // PsHtmlStoredFacts::withheld_reason, with kPsHtmlFactsWithheld.
 inline constexpr int kPsHtmlWithheldBelowFloor = 1;
@@ -911,8 +954,13 @@ struct PsHtmlServeRequest {
   int serve_scope;               // kPsHtmlServeScope*
   int agent_class;               // 0 unknown, 1 to kPsHtmlAgentClassMax
   uint32_t html_max_lifetime_s;  // 0 = no cap; only shortens the lifetime
-  uint32_t reserved;             // zero
-  uint64_t policy_stamp;         // 0 = none
+  // 1.16, in the word 1.15 reserved (zero): the kPsMarkdownEncoding* coding
+  // asked for.  Both names are the same word, as in the peer's header.
+  union {
+    uint32_t markdown_encoding;
+    uint32_t reserved;
+  };
+  uint64_t policy_stamp;  // 0 = none
 };
 
 struct PsHtmlStoredFacts {
@@ -971,7 +1019,15 @@ struct PsHtmlServeVerdict {
   uint32_t age_s;
   int not_modified;
   char etag[kPsHtmlMarkdownEtagChars + 8];
+  // 1.16: with the Markdown action, the kPsMarkdownEncoding* coding of the
+  // copy to send; written only into a verdict of the 1.16 size.
+  int markdown_encoding;
+  int reserved_1_16;  // zero
 };
+
+// The verdict size a library below 1.16 knows: where the 1.16 field starts.
+inline constexpr size_t kPsHtmlServeVerdictSize15 =
+    offsetof(PsHtmlServeVerdict, markdown_encoding);
 
 #if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
 static_assert(sizeof(PsSidecarWriteParams) == 64,
@@ -1008,8 +1064,15 @@ static_assert(sizeof(PsHtmlCookieSpan) == 24,
 static_assert(sizeof(PsHtmlCookieClass) == 48 &&
                   offsetof(PsHtmlCookieClass, first_blocking) == 16,
               "the cookie class layout no longer matches the published one");
-static_assert(sizeof(PsHtmlServeVerdict) == 64,
+static_assert(sizeof(PsHtmlServeVerdict) == 72,
               "the serve verdict layout no longer matches the published one");
+static_assert(kPsHtmlServeVerdictSize15 == 64,
+              "the 1.16 verdict field must start where the 1.15 size ends");
+static_assert(offsetof(PsHtmlServeVerdict, reserved_1_16) == 68,
+              "the serve verdict layout no longer matches the published one");
+static_assert(offsetof(PsHtmlServeRequest, markdown_encoding) ==
+                  offsetof(PsHtmlServeRequest, reserved),
+              "markdown_encoding is the word 1.15 reserved");
 static_assert(offsetof(PsHtmlServeVerdict, etag) == 32,
               "the serve verdict layout no longer matches the published one");
 #endif
@@ -1360,6 +1423,64 @@ class DaemonAbi {
     return -1;
   }
 
+  // ---------------------------------------------------------------------
+  // The 1.16 set (see kHtmlServe16SetMinor).
+  //
+  // True only when HasHtmlServe15Set() is, the library reports minor
+  // kHtmlServe16SetMinor or later, AND it exports every entry point below.
+  // When false none of them is bound and each answers -1 without reaching
+  // the library; HtmlServeClassify then sends the 1.15 verdict size, a zero
+  // markdown_encoding and neither 1.16 request bit, whatever the caller set.
+  virtual bool HasHtmlServe16Set() const { return false; }
+
+  // Why HasHtmlServe16Set() is false, as one clause for an operator's log.
+  // Empty when the set is bound.
+  virtual GoogleString HtmlServe16SetUnavailableReason() const {
+    return "the optimizer library binding does not provide C API 1.16";
+  }
+
+  // ps_markdown_select_encoding: the number of kPsMarkdownEncoding* values
+  // written to out_order (room for 3), most preferred first; 0 for "none
+  // acceptable"; -1 for a malformed call or an unbound set.  `lines` are the
+  // request's Accept-Encoding lines as received, `count` of them (0: absent).
+  virtual int MarkdownSelectEncoding(const char* const* /*lines*/,
+                                     size_t /*count*/,
+                                     int* /*out_order*/) const {
+    return -1;
+  }
+
+  // ps_html_stored_facts_from_reads_coded: as HtmlStoredFactsFromReadsEx,
+  // with the exact-id read of one coded copy (`coded`, null when it missed)
+  // of `coding` (gzip or br), which sets that coding's COPY_BOUND or
+  // NOT_SMALLER fact.  -1 for a malformed call or an unbound set.
+  virtual int HtmlStoredFactsFromReadsCoded(
+      const void* /*original*/, const void* /*markdown*/,
+      const void* /*withheld_marker*/, int /*sidecar_present*/,
+      const void* /*block*/, const void* /*coded*/, int /*coding*/,
+      PsHtmlStoredFacts* /*out*/) const {
+    return -1;
+  }
+
+  // ps_html_markdown_etag_coded: the copy's tag in one coding (identity is
+  // HtmlMarkdownEtag's), as HtmlMarkdownEtag answers; -1 for an unbound set.
+  virtual int HtmlMarkdownEtagCoded(const uint8_t* /*binding_hash*/,
+                                    const uint8_t* /*markdown_hash*/,
+                                    int /*coding*/, char* /*buf*/,
+                                    size_t /*capacity*/,
+                                    size_t* /*out_len*/) const {
+    return -1;
+  }
+
+  // ps_read_shared_config_markdown_codings: a bit set of the codings the
+  // worker writes coded copies in (1 << kPsMarkdownEncodingGzip,
+  // 1 << kPsMarkdownEncodingBr), 0 for neither, -1 for a worker that
+  // publishes none (it writes no coded copies and refuses
+  // kPsNotifyFlagMarkdownCompress) or an unbound set.  Reads a file: on a
+  // timer, never per request.
+  virtual int ReadSharedConfigMarkdownCodings(const char* /*cache_path*/) const {
+    return -1;
+  }
+
   // Returns kPsOk and stores an opaque cache handle in *out_cache, or an
   // error code.  A successful open must be matched with CacheClose.
   virtual int CacheOpen(const PsCacheConfig* config,
@@ -1654,6 +1775,12 @@ inline size_t HtmlServeRequestSize(const DaemonAbi& abi) {
 inline size_t HtmlStoredFactsSize(const DaemonAbi& abi) {
   return abi.HasHtmlServe15Set() ? sizeof(PsHtmlStoredFacts)
                                  : kPsHtmlStoredFactsSize14;
+}
+// The verdict's struct_size: the full size only for a library that binds
+// the 1.16 set, which is the only one that writes markdown_encoding.
+inline size_t HtmlServeVerdictSize(const DaemonAbi& abi) {
+  return abi.HasHtmlServe16Set() ? sizeof(PsHtmlServeVerdict)
+                                 : kPsHtmlServeVerdictSize15;
 }
 inline size_t SidecarWriteParamsSize(const DaemonAbi& abi) {
   return abi.HasHtmlServe15Set() ? sizeof(PsSidecarWriteParams)

@@ -40,7 +40,8 @@ bool BuildModuleNotifyParams(const DaemonAbi& abi,
   // Whatever happens below, nothing from an earlier build is left to send.
   out->params_ = PsNotifyParams{};
   const bool html = input.content_type == kPsContentHtml;
-  if (html != input.html_stored) {
+  if (html != input.html_stored ||
+      (input.markdown_compress && !input.html_stored)) {
     if (html) {
       g_notify_html_refused.BarrierIncrement(1);
     }
@@ -70,7 +71,8 @@ bool BuildModuleNotifyParams(const DaemonAbi& abi,
   params->site = out->site_.c_str();
   params->notify_flags =
       html ? (kPsNotifyFlagFromModule | kPsNotifyFlagHostVouched |
-              kPsNotifyFlagHtmlStored)
+              kPsNotifyFlagHtmlStored |
+              (input.markdown_compress ? kPsNotifyFlagMarkdownCompress : 0u))
            : kPsNotifyFlagFromModule;
   return true;
 }

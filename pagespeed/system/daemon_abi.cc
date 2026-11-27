@@ -398,6 +398,26 @@ using HtmlStoredFactsFromReadsExFn = int (*)(const void*, const void*,
                                              const void*, int, const void*,
                                              PsHtmlStoredFacts*);
 
+// The 1.16 set.
+using MarkdownSelectEncodingFn = int (*)(const char* const*, size_t, int*);
+using HtmlStoredFactsFromReadsCodedFn = int (*)(const void*, const void*,
+                                                const void*, int, const void*,
+                                                const void*, int,
+                                                PsHtmlStoredFacts*);
+using HtmlMarkdownEtagCodedFn = int (*)(const uint8_t*, const uint8_t*, int,
+                                        char*, size_t, size_t*);
+using ReadSharedConfigMarkdownCodingsFn = int (*)(const char*);
+
+// The resolved 1.16 set.  Filled as a whole or left empty: see
+// LibraryDaemonAbi::BindHtmlServe16Set.
+struct HtmlServe16SetFns {
+  MarkdownSelectEncodingFn select_encoding = nullptr;
+  HtmlStoredFactsFromReadsCodedFn stored_facts_from_reads_coded = nullptr;
+  HtmlMarkdownEtagCodedFn markdown_etag_coded = nullptr;
+  ReadSharedConfigMarkdownCodingsFn read_shared_config_markdown_codings =
+      nullptr;
+};
+
 // The resolved 1.15 set.  Filled as a whole or left empty: see
 // LibraryDaemonAbi::BindHtmlServe15Set.
 struct HtmlServe15SetFns {
@@ -512,8 +532,20 @@ class LibraryDaemonAbi : public DaemonAbi {
                         const PsHtmlStoredFacts* facts,
                         PsHtmlServeVerdict* out) const override {
     if (!HasHtmlServeSet()) return -1;
-    if (HasHtmlServe15Set() || request == nullptr || facts == nullptr) {
+    if (HasHtmlServe16Set() || request == nullptr || facts == nullptr ||
+        out == nullptr) {
       return html_serve_.serve_classify(request, facts, out);
+    }
+    if (HasHtmlServe15Set()) {
+      // A library below 1.16 is sent the 1.15 verdict size, and nothing it
+      // could read as a coding: the plain copy, exactly as before.
+      PsHtmlServeRequest plain_request = *request;
+      if (plain_request.struct_size >= sizeof(PsHtmlServeRequest)) {
+        plain_request.markdown_encoding = 0;
+      }
+      plain_request.request_flags &= ~(kPsHtmlServeRequestIdentityOk |
+                                       kPsHtmlServeRequestEncodingNone);
+      return ServeClassifyAtVerdictSize15(&plain_request, facts, out);
     }
     // A library below 1.15 reads only the 1.14 prefix of a larger request:
     // it would serve HTML in serve-cached-html with no scope, no cap and no
@@ -524,11 +556,33 @@ class LibraryDaemonAbi : public DaemonAbi {
     if (short_request.struct_size > kPsHtmlServeRequestSize14) {
       short_request.struct_size = kPsHtmlServeRequestSize14;
     }
+    short_request.request_flags &= ~(kPsHtmlServeRequestIdentityOk |
+                                     kPsHtmlServeRequestEncodingNone);
     PsHtmlStoredFacts short_facts = *facts;
     if (short_facts.struct_size > kPsHtmlStoredFactsSize14) {
       short_facts.struct_size = kPsHtmlStoredFactsSize14;
     }
-    return html_serve_.serve_classify(&short_request, &short_facts, out);
+    return ServeClassifyAtVerdictSize15(&short_request, &short_facts, out);
+  }
+
+  // The verdict at no more than the 1.15 size, and the caller's struct_size
+  // and 1.16 field (zero) restored after: a library below 1.16 never writes
+  // past the 1.15 verdict.
+  int ServeClassifyAtVerdictSize15(const PsHtmlServeRequest* request,
+                                   const PsHtmlStoredFacts* facts,
+                                   PsHtmlServeVerdict* out) const {
+    const size_t size = out->struct_size;
+    if (size <= kPsHtmlServeVerdictSize15) {
+      return html_serve_.serve_classify(request, facts, out);
+    }
+    out->struct_size = kPsHtmlServeVerdictSize15;
+    const int rc = html_serve_.serve_classify(request, facts, out);
+    out->struct_size = size;
+    if (size >= sizeof(PsHtmlServeVerdict)) {
+      out->markdown_encoding = kPsMarkdownEncodingIdentity;
+      out->reserved_1_16 = 0;
+    }
+    return rc;
   }
 
   const char* HtmlServeReasonName(int reason) const override {
@@ -632,6 +686,44 @@ class LibraryDaemonAbi : public DaemonAbi {
     if (!HasHtmlServe15Set()) return -1;
     return html_serve15_.stored_facts_from_reads_ex(
         original, markdown, withheld_marker, sidecar_present, block, out);
+  }
+
+  bool HasHtmlServe16Set() const override {
+    return html_serve16_.select_encoding != nullptr;
+  }
+
+  GoogleString HtmlServe16SetUnavailableReason() const override {
+    return html_serve16_unavailable_;
+  }
+
+  int MarkdownSelectEncoding(const char* const* lines, size_t count,
+                             int* out_order) const override {
+    if (!HasHtmlServe16Set()) return -1;
+    return html_serve16_.select_encoding(lines, count, out_order);
+  }
+
+  int HtmlStoredFactsFromReadsCoded(const void* original, const void* markdown,
+                                    const void* withheld_marker,
+                                    int sidecar_present, const void* block,
+                                    const void* coded, int coding,
+                                    PsHtmlStoredFacts* out) const override {
+    if (!HasHtmlServe16Set()) return -1;
+    return html_serve16_.stored_facts_from_reads_coded(
+        original, markdown, withheld_marker, sidecar_present, block, coded,
+        coding, out);
+  }
+
+  int HtmlMarkdownEtagCoded(const uint8_t* binding_hash,
+                            const uint8_t* markdown_hash, int coding, char* buf,
+                            size_t capacity, size_t* out_len) const override {
+    if (!HasHtmlServe16Set()) return -1;
+    return html_serve16_.markdown_etag_coded(binding_hash, markdown_hash,
+                                             coding, buf, capacity, out_len);
+  }
+
+  int ReadSharedConfigMarkdownCodings(const char* cache_path) const override {
+    if (!HasHtmlServe16Set()) return -1;
+    return html_serve16_.read_shared_config_markdown_codings(cache_path);
   }
 
   int HtmlMarkdownEtag(const uint8_t* binding_hash,
@@ -1202,6 +1294,39 @@ class LibraryDaemonAbi : public DaemonAbi {
     }
     html_serve15_ = fns;
     html_serve15_unavailable_.clear();
+    BindHtmlServe16Set();
+  }
+
+  // The 1.16 set, ALL OR NOTHING and only on top of a bound 1.15 set, under
+  // the same rules.
+  void BindHtmlServe16Set() {
+    const int minor = version_minor_();
+    if (minor < kHtmlServe16SetMinor) {
+      html_serve16_unavailable_ =
+          StrCat("the optimizer library reports C API ",
+                 IntegerToString(version_major_()), ".", IntegerToString(minor),
+                 "; compressed Markdown copies need ",
+                 IntegerToString(kRequiredAbiMajor), ".",
+                 IntegerToString(kHtmlServe16SetMinor), " or a later minor");
+      return;
+    }
+    HtmlServe16SetFns fns;
+    GoogleString missing;
+    const bool bound =
+        Bind("ps_html_stored_facts_from_reads_coded",
+             &fns.stored_facts_from_reads_coded, &missing) &&
+        Bind("ps_html_markdown_etag_coded", &fns.markdown_etag_coded,
+             &missing) &&
+        Bind("ps_read_shared_config_markdown_codings",
+             &fns.read_shared_config_markdown_codings, &missing) &&
+        Bind("ps_markdown_select_encoding", &fns.select_encoding, &missing);
+    if (!bound) {
+      html_serve16_unavailable_ =
+          StrCat(missing, "; the C API 1.16 set is not used");
+      return;
+    }
+    html_serve16_ = fns;
+    html_serve16_unavailable_.clear();
   }
 
  private:
@@ -1236,6 +1361,9 @@ class LibraryDaemonAbi : public DaemonAbi {
   HtmlServe15SetFns html_serve15_;
   GoogleString html_serve15_unavailable_ =
       "the HTML serve set was not bound, so neither is the C API 1.15 set";
+  HtmlServe16SetFns html_serve16_;
+  GoogleString html_serve16_unavailable_ =
+      "the C API 1.15 set was not bound, so neither is the C API 1.16 set";
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
   CacheWriteOriginalSiteFn cache_write_original_site_ = nullptr;

@@ -181,6 +181,8 @@ TEST_F(NgxDaemonHtmlTest, RequestFactsCountEveryLine) {
       {"Range", "bytes=0-1"},
       {"If-Range", "\"a\""},
       {"Origin", "https://other.test"},
+      {"Accept-Encoding", "br;q=0.5"},
+      {"accept-encoding", "gzip"},
       // Read from the stash only, never from the lines.
       {"If-None-Match", "W/\"psm-x\""},
       {"If-Modified-Since", "Sun, 15 Nov 2026 12:00:00 GMT"},
@@ -189,6 +191,9 @@ TEST_F(NgxDaemonHtmlTest, RequestFactsCountEveryLine) {
   FillDaemonHtmlRequestHeaderFacts(lines, nullptr, &facts);
   EXPECT_EQ((std::vector<GoogleString>{"text/html;q=0.5", "text/markdown"}),
             facts.accept_lines);
+  // Every Accept-Encoding line as received, never joined.
+  EXPECT_EQ((std::vector<GoogleString>{"br;q=0.5", "gzip"}),
+            facts.accept_encoding_lines);
   EXPECT_TRUE(facts.has_cache_control);
   EXPECT_EQ("max-age=0, no-transform", facts.cache_control);
   EXPECT_TRUE(facts.has_pragma);

@@ -320,6 +320,30 @@ TEST_F(DaemonNotifyNeverHtmlTest, OnlyTheHtmlStoreNotifiesHtml) {
   EXPECT_EQ(refused_before + 1, DaemonNotifyHtmlRefused());
 }
 
+// The compress demand rides only on the HTML-stored shape: all four bits
+// with HTML, and never on a resource or without the store's statement.
+TEST_F(DaemonNotifyNeverHtmlTest, TheCompressDemandIsTheStoredPageShape) {
+  ModuleNotifyInput input;
+  input.url = "https://example.com/a/page";
+  input.hostname = "example.com";
+  input.scheme = "https";
+  input.site = kSite;
+  input.content_type = kPsContentHtml;
+  input.html_stored = true;
+  input.markdown_compress = true;
+  ModuleNotifyParams built;
+  ASSERT_TRUE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(kPsNotifyFlagFromModule | kPsNotifyFlagHostVouched |
+                kPsNotifyFlagHtmlStored | kPsNotifyFlagMarkdownCompress,
+            built.params().notify_flags);
+  EXPECT_EQ(kPsContentHtml, built.params().content_type);
+  input.html_stored = false;
+  EXPECT_FALSE(BuildModuleNotifyParams(*abi_, input, &built));
+  input.content_type = kPsContentImage;
+  EXPECT_FALSE(BuildModuleNotifyParams(*abi_, input, &built));
+  EXPECT_EQ(0u, built.params().struct_size);
+}
+
 TEST_F(DaemonNotifyNeverHtmlTest, TheBindingHasNoUnsitedCacheCalls) {
   // The arms ran against this library in every case above.  It does not
   // export the unsited cache calls, so the module cannot have resolved them.
