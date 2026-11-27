@@ -1,6 +1,7 @@
 - **Configurations written for the upcoming cached HTML mode keep loading.**
   `DaemonHtmlCacheServeScope agents|all`, `DaemonHtmlCacheMaxAge` (0 to 86400
-  seconds), `DaemonHtmlCacheCredentialed anonymous-only|explicit-public`,
+  seconds, default 3600; it only ever shortens the lifetime the origin gives
+  a page), `DaemonHtmlCacheCredentialed anonymous-only|explicit-public`,
   `DaemonHtmlCacheIgnoreCookies on|off` and the repeatable
   `DaemonHtmlCacheIgnoreCookie <name|prefix*>` are accepted on Apache, nginx,
   IIS and Envoy, with a warning each that they take effect with

@@ -1248,7 +1248,7 @@ TEST_F(RewriteOptionsTest, DaemonHtmlCacheServeCachedHtmlRunsAsServeVariants) {
 TEST_F(RewriteOptionsTest, DaemonHtmlCacheLaterReleaseSettingsParseInert) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAgents,
             options_.daemon_html_cache_serve_scope());
-  EXPECT_EQ(60, options_.daemon_html_cache_max_age_s());
+  EXPECT_EQ(3600, options_.daemon_html_cache_max_age_s());
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheCredentialedAnonymousOnly,
             options_.daemon_html_cache_credentialed());
   EXPECT_TRUE(options_.daemon_html_cache_ignore_cookies());

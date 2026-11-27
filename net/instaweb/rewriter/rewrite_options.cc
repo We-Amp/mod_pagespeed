@@ -1501,12 +1501,14 @@ void RewriteOptions::AddProperties() {
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
-  AddBaseProperty(int64{60}, &RewriteOptions::daemon_html_cache_max_age_,
+  AddBaseProperty(int64{3600}, &RewriteOptions::daemon_html_cache_max_age_,
                   "dhcma", kDaemonHtmlCacheMaxAge, kServerScope,
                   "The longest a page stored by DaemonHtmlCache "
                   "serve-cached-html is served, in seconds, 0 to 86400 "
-                  "(default 60; 0 means no cap). Takes effect with "
-                  "serve-cached-html, which this release does not have.",
+                  "(default 3600; 0 means no cap). It only shortens the "
+                  "lifetime the origin gives a page, never extends it. "
+                  "Takes effect with serve-cached-html, which this release "
+                  "does not have.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);

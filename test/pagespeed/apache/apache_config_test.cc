@@ -187,6 +187,8 @@ TEST_F(ApacheConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
       {"DaemonHtmlCacheIgnoreCookie", "_my_pref*", true},
       {"DaemonHtmlCacheIgnoreCookie", "a=b", false},
   };
+  // The default cap is an hour.
+  EXPECT_EQ(3600, config_.daemon_html_cache_max_age_s());
   MockMessageHandler handler(new NullMutex);
   int warnings = 0;
   for (const Line& line : kLines) {

@@ -156,6 +156,7 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
       {"DaemonHtmlCacheIgnoreCookie", "a b", false},
   };
   EnvoyRewriteOptions options(&thread_system_);
+  EXPECT_EQ(3600, options.daemon_html_cache_max_age_s());
   int warnings = 0;
   int failures = 0;
   for (const auto& line : kLines) {

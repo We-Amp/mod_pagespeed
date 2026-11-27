@@ -2979,7 +2979,8 @@ class RewriteOptions {
   DaemonHtmlCacheServeScope daemon_html_cache_serve_scope() const {
     return daemon_html_cache_serve_scope_.value();
   }
-  // Seconds, 0 to kDaemonHtmlCacheMaxAgeLimitS; 0 means no cap.
+  // Seconds, 0 to kDaemonHtmlCacheMaxAgeLimitS (default 3600); 0 means no
+  // cap.  The cap only shortens the origin's lifetime, never extends it.
   int64 daemon_html_cache_max_age_s() const {
     return daemon_html_cache_max_age_.value();
   }
