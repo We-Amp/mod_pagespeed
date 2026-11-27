@@ -60,6 +60,9 @@ class IisDaemonHtmlPurgeSource : public DaemonHtmlPurgeSource {
   mutable int64 read_ms_ = -1;
   mutable int64 mtime_s_ = -1;
   mutable int64 size_ = -1;
+  // When the file was last found missing, unreadable or torn; -1 after a
+  // good read. Such a file is looked at again at most once a second.
+  mutable int64 failed_ms_ = -1;
 };
 
 }  // namespace net_instaweb

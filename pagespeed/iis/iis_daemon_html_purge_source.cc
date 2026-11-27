@@ -36,10 +36,20 @@ IisDaemonHtmlPurgeSource::IisDaemonHtmlPurgeSource(
 void IisDaemonHtmlPurgeSource::Refresh() const {
   NullMessageHandler handler;
   const int64 now_ms = timer_->NowMs();
+  {
+    // A site never purged has no file: do not stat it on every decision.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (failed_ms_ >= 0 && now_ms - failed_ms_ < Timer::kSecondMs) {
+      return;
+    }
+  }
   int64 mtime_s = -1;
   int64 size = -1;
-  if (!file_system_->Mtime(purge_file_, &mtime_s, &handler)) mtime_s = -1;
-  if (!file_system_->Size(purge_file_, &size, &handler)) size = -1;
+  if (!file_system_->Mtime(purge_file_, &mtime_s, &handler)) {
+    mtime_s = -1;
+  } else if (!file_system_->Size(purge_file_, &size, &handler)) {
+    size = -1;
+  }
   std::lock_guard<std::mutex> lock(mutex_);
   if (mtime_s == mtime_s_ && size == size_ && read_ms_ >= 0 &&
       now_ms - read_ms_ < Timer::kSecondMs) {
@@ -70,9 +80,11 @@ void IisDaemonHtmlPurgeSource::Refresh() const {
   }
   if (!parsed) {
     // A missing, unreadable or torn file says nothing: the last view stays,
-    // and the next decision reads again.
+    // and a decision a second later reads again.
+    failed_ms_ = now_ms;
     return;
   }
+  failed_ms_ = -1;
   mtime_s_ = mtime_s;
   size_ = size;
   read_ms_ = now_ms;

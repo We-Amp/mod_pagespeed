@@ -58,6 +58,7 @@ class IisDaemonHtmlPurgeSourceTest : public ::testing::Test {
 
 TEST_F(IisDaemonHtmlPurgeSourceTest, APurgeAnotherProcessWroteIsSeenAtOnce) {
   const int64 now = timer_.NowMs();
+  WriteFile("-1\n");
   EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
   // Another worker process purges the URL: the system options have not
   // polled it in yet.
@@ -80,6 +81,7 @@ TEST_F(IisDaemonHtmlPurgeSourceTest, ThePurgesTheOptionsHoldAreNeverLost) {
 TEST_F(IisDaemonHtmlPurgeSourceTest, TheNewerGlobalPurgeOfTheTwoCounts) {
   const int64 now = timer_.NowMs();
   system_.global_ms = now - 100;
+  WriteFile("-1\n");
   EXPECT_EQ(now - 100, source_->GlobalInvalidationTimestampMs());
   WriteFile(StrCat(Integer64ToString(now - 50), "\n"));
   EXPECT_EQ(now - 50, source_->GlobalInvalidationTimestampMs());
@@ -108,12 +110,31 @@ TEST_F(IisDaemonHtmlPurgeSourceTest, AFailedReadKeepsTheViewAndIsRetried) {
   ASSERT_TRUE(file_system_.RemoveFile(kFile, &handler_));
   timer_.AdvanceMs(1000);
   EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
-  // The next good file is read at the next decision, unchanged size and
-  // second included.
+  // The next good file is read at the first decision a second after the
+  // failed one, unchanged size and second included.
   const GoogleString other = "https://www.example.test/othe";
   WriteFile(StrCat("-1\n", Integer64ToString(now - 5), " ", other, "\n"));
+  EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(other, now - 10));
+  timer_.AdvanceMs(1000);
   EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(other, now - 10));
   EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+}
+
+TEST_F(IisDaemonHtmlPurgeSourceTest, AMissingFileIsLookedAtOnceASecond) {
+  // A site never purged: many decisions in a second stat the file once.
+  const int64 now = timer_.NowMs();
+  file_system_.ClearStats();
+  for (int i = 0; i < 50; ++i) {
+    EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+    source_->GlobalInvalidationTimestampMs();
+    timer_.AdvanceMs(10);
+  }
+  EXPECT_EQ(1, file_system_.num_input_file_stats());
+  // The first purge creates the file; it is seen within the second.
+  WriteFile(StrCat("-1\n", Integer64ToString(now - 5), " ", kUrl, "\n"));
+  timer_.AdvanceMs(500);
+  EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+  EXPECT_EQ(2, file_system_.num_input_file_stats());
 }
 
 TEST_F(IisDaemonHtmlPurgeSourceTest, AFileRewrittenWithinOneSecondIsReadAgain) {
