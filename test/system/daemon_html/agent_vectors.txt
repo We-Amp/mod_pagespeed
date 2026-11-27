@@ -1,0 +1,382 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# Shared user-agent vectors for the known-agent classifier.
+#
+# Format
+#   Lines starting with '#' are comments; blank lines are ignored.
+#   "# token: <token>" comment lines list the table tokens the vectors are
+#   checked against (the "token" field of every entry in the agent table,
+#   website/src/data/ai-crawlers.json). The token runs to the end of the
+#   line and may contain spaces.
+#   Every other line is one vector: <expected class><TAB><user agent>.
+#   The user agent is everything after the first TAB, verbatim, with no
+#   trimming and no escapes. The literal "(empty)" stands for the empty
+#   user agent (a request with an empty or missing User-Agent header).
+#
+# Matching rule
+#   A table token matches a user agent when it occurs in it, compared
+#   case-insensitively (ASCII), and both ends of the occurrence fall on a
+#   token boundary. A boundary is the start or the end of the string, or
+#   one of the characters: space ( ) ; /
+#   A token that contains a space matches as one phrase: the whole phrase,
+#   with its single spaces, must occur, and only its two ends are checked.
+#   Characters inside a token ('-', '.', '/', '_') are literal. There is no
+#   substring match, no glob and no regular expression.
+#
+# Classes
+#   3  a table token matches the user agent
+#   0  no table token matches (unknown)
+#   Class 1 comes from a signature verifier, never from the user agent, and
+#   class 2 is never produced, so no vector expects either.
+#
+# token: GPTBot
+# token: OAI-SearchBot
+# token: ChatGPT-User
+# token: ClaudeBot
+# token: Claude-SearchBot
+# token: Claude-User
+# token: anthropic-ai
+# token: Claude-Web
+# token: PerplexityBot
+# token: Perplexity-User
+# token: Bytespider
+# token: CCBot
+# token: Amazonbot
+# token: Meta-ExternalAgent
+# token: Meta-ExternalFetcher
+# token: cohere-ai
+# token: DuckAssistBot
+# token: YouBot
+# token: MistralAI-User
+# token: AI2Bot-DeepResearchEval
+# token: AI2Bot
+# token: Diffbot-User
+# token: Diffbot
+# token: Google-CloudVertexBot
+# token: AddSearchBot
+# token: AgentDataBot
+# token: AgentTimes
+# token: aiHitBot
+# token: AIWebIndex
+# token: amazon-kendra
+# token: amazon-QBusiness
+# token: AmazonBuyForMe
+# token: Amzn-SearchBot
+# token: Amzn-User
+# token: Andibot
+# token: Anomura
+# token: ApifyBot
+# token: ApifyWebsiteContentCrawler
+# token: Applebot
+# token: Aranet-SearchBot
+# token: atlassian-bot
+# token: Awario
+# token: AzureAI-SearchBot
+# token: bedrockbot
+# token: bigsur.ai
+# token: BixelBot
+# token: Bravebot
+# token: Brightbot
+# token: BuddyBot
+# token: Channel3Bot
+# token: ChatGLM-Spider
+# token: ChatGPT Agent
+# token: Claude-Code
+# token: Cloudflare-AutoRAG
+# token: CloudflareBrowserRenderingCrawler
+# token: CloudVertexBot
+# token: cohere-training-data-crawler
+# token: Cotoyogi
+# token: CragCrawler
+# token: Crawl4AI
+# token: Crawlspace
+# token: Datenbank Crawler
+# token: DeepSeekBot
+# token: DoubaoBot
+# token: Echobot Bot
+# token: EchoboxBot
+# token: ERNIEBot
+# token: ExaBot
+# token: ExaSearchBot
+# token: FacebookBot
+# token: Factset_spyderbot
+# token: FirecrawlAgent
+# token: FriendlyCrawler
+# token: GeistHaus-PageFetcher
+# token: Gemini-Deep-Research
+# token: Google-Agent
+# token: Google-Firebase
+# token: Google-Gemini-CLI
+# token: Google-NotebookLM
+# token: GoogleAgent-Mariner
+# token: GoogleAgent-URLContext
+# token: GoogleOther
+# token: HenkBot
+# token: iAskBot
+# token: iaskspider/2.0
+# token: iaskspider
+# token: ICC-Crawler
+# token: ImagesiftBot
+# token: imageSpider
+# token: img2dataset
+# token: ISSCyberRiskCrawler
+# token: kagi-fetcher
+# token: Kangaroo Bot
+# token: KeenableBot
+# token: Kimi-Agent
+# token: Kimi-SearchBot
+# token: Kimi-User
+# token: KimiBot
+# token: KlaviyoAIBot
+# token: KunatoCrawler
+# token: laion-huggingface-processor
+# token: LAIONDownloader
+# token: LinerBot
+# token: Linguee Bot
+# token: LinkupBot
+# token: Manus-User
+# token: meta-webindexer
+# token: MistralAI-Index
+# token: MistralAI-Training
+# token: Mozilla-Tabstack
+# token: MyCentralAIScraperBot
+# token: NagetBot
+# token: netEstate Imprint Crawler
+# token: NotebookLM
+# token: NovaAct
+# token: OAI-AdsBot
+# token: omgili
+# token: PanguBot
+# token: Panscient
+# token: PetalBot
+# token: PhindBot
+# token: Poggio-Citations
+# token: Poseidon Research Crawler
+# token: qodercli
+# token: QualifiedBot
+# token: Querit-SearchBot
+# token: QueritBot
+# token: QuillBot
+# token: QwenBot
+# token: Reflectionbot
+# token: SBIntuitionsBot
+# token: SemrushBot-OCOB
+# token: SemrushBot-SWA
+# token: Shap-User
+# token: ShapBot
+# token: Sidetrade indexer bot
+# token: TavilyBot
+# token: Terra Cotta
+# token: TerraCotta
+# token: Thinkbot
+# token: TikTokSpider
+# token: Timpibot
+# token: TongyiBot
+# token: TwinAgent
+# token: VelenPublicWebCrawler
+# token: WARDBot
+# token: wpbot
+# token: WRTNBot
+# token: YandexAdditional
+# token: YiyanBot
+# token: ZanistaBot
+
+# --- User agents in the published shape of table agents (class 3) ---
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.1; +https://openai.com/gptbot)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +Claude-User@anthropic.com)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-SearchBot/1.0; +Claude-SearchBot@anthropic.com)
+3	anthropic-ai
+3	Claude-Web/1.0 (web crawler; +https://www.anthropic.com/; bots@anthropic.com)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)
+3	Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; Bytespider; spider-feedback@bytedance.com)
+3	CCBot/2.0 (https://commoncrawl.org/faq/)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot) Chrome/119.0.6045.214 Safari/537.36
+3	meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)
+3	meta-externalfetcher/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)
+3	Mozilla/5.0 (compatible; FacebookBot/1.0; +https://developers.facebook.com/docs/sharing/webmasters/facebookbot/)
+3	cohere-ai
+3	DuckAssistBot/1.2; (+http://duckduckgo.com/duckassistbot.html)
+3	Mozilla/5.0 (compatible; YouBot (+http://www.you.com))
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; MistralAI-User/1.0; +https://docs.mistral.ai/robots)
+3	Mozilla/5.0 (compatible) AI2Bot (+https://www.allenai.org/crawler)
+3	Mozilla/5.0 (compatible; Diffbot/0.1; +http://www.diffbot.com)
+3	Google-CloudVertexBot
+3	Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)
+3	Mozilla/5.0 (Linux; Android 7.0;) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; PetalBot;+https://webmaster.petalsearch.com/site/petalbot)
+3	Mozilla/5.0 (compatible; GoogleOther)
+3	Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; TikTokSpider; ttspider-feedback@tiktok.com)
+3	Timpibot/0.8 (+http://www.timpi.io)
+3	omgili/0.5 +http://omgili.com
+3	Mozilla/5.0 (compatible; ImagesiftBot; +imagesift.com)
+3	Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0 (compatible; img2dataset; +https://github.com/rom1504/img2dataset)
+3	Mozilla/5.0 (compatible; YandexAdditional/3.0; +http://yandex.com/bots)
+3	iaskspider/2.0(+http://iask.com/help/help_index.html)
+3	Mozilla/5.0 (compatible; SemrushBot-SWA; +http://www.semrush.com/bot.html)
+3	Mozilla/5.0 (compatible; SemrushBot-OCOB/1; +https://www.semrush.com/bot/)
+3	Mozilla/5.0 (compatible; Kangaroo Bot/1.0; +https://example.test/bot)
+3	Linguee Bot (http://www.linguee.com/bot; bot@linguee.com)
+3	Mozilla/5.0 (compatible; PhindBot/1.0; +https://www.phind.com/bot)
+3	Mozilla/5.0 (compatible; QuillBot; +https://example.test/bot)
+3	Mozilla/5.0 (compatible; DeepSeekBot/1.0; +https://example.test/bot)
+3	Mozilla/5.0 (compatible; OAI-AdsBot/1.0; +https://openai.com/adsbot)
+3	Claude-Code/2.0.14 (external, cli)
+3	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bedrockbot/1.0)
+3	bigsur.ai/1.0
+3	Mozilla/5.0 (compatible; ExaBot/3.0; +http://www.exabot.com/go/robot)
+#
+# --- Every multi-word token as a phrase (class 3) ---
+3	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 ChatGPT Agent
+3	ChatGPT Agent/1.0
+3	Datenbank Crawler/1.0 (+https://example.test/)
+3	Mozilla/5.0 (compatible; Datenbank Crawler)
+3	Echobot Bot/1.0
+3	(Echobot Bot)
+3	Kangaroo Bot
+3	x;Kangaroo Bot;y
+3	Linguee Bot/2.0
+3	netEstate Imprint Crawler (+http://www.example.test/imprint-crawler/)
+3	Mozilla/5.0 (compatible; Poseidon Research Crawler/1.0; +https://example.test/)
+3	Mozilla/5.0 (compatible; Sidetrade indexer bot; +https://example.test/)
+3	Mozilla/5.0 (compatible; Terra Cotta/1.0)
+3	/Terra Cotta/
+3	TerraCotta/1.0
+#
+# --- Multi-word tokens with broken boundaries or broken phrases (class 0) ---
+0	ChatGPTAgent/1.0
+0	ChatGPT-Agent/1.0
+0	ChatGPT  Agent/1.0
+0	ChatGPT Agents/1.0
+0	MyChatGPT Agent/1.0
+0	ChatGPT Agent-Beta/1.0
+0	ChatGPT/1.0
+0	Agent/1.0
+0	Datenbank-Crawler/1.0
+0	Datenbank CrawlerX/1.0
+0	XDatenbank Crawler/1.0
+0	Echobot/1.0
+0	Echobot BotX/1.0
+0	Echobot  Bot
+0	Kangaroo-Bot/1.0
+0	Kangaroo Botanist/1.0
+0	Kangaroo/1.0
+0	Linguee Bots
+0	Linguee-Bot/1.0
+0	netEstate Imprint/1.0
+0	Imprint Crawler/1.0
+0	netEstate  Imprint Crawler
+0	Poseidon Research/1.0
+0	Poseidon Research Crawlers/1.0
+0	Sidetrade indexer/1.0
+0	indexer bot/1.0
+0	Sidetrade indexer bots
+0	Terra  Cotta/1.0
+0	Terra Cottage/1.0
+0	Terra-Cotta/1.0
+#
+# --- Case variants (class 3: matching is case-insensitive) ---
+3	gptbot/1.0
+3	GPTBOT/1.0
+3	Mozilla/5.0 (compatible; claudebot/1.0)
+3	CLAUDE-USER/1.0
+3	AppleBot/0.1
+3	ccbot/2.0
+3	PERPLEXITYBOT
+3	chatgpt agent
+3	KANGAROO BOT/1.0
+3	terra cotta
+3	Mozilla/5.0 (compatible; YANDEXADDITIONAL/3.0)
+3	BIGSUR.AI
+#
+# --- Boundary placement (class 3: start, end, space, parentheses, ';' and '/') ---
+3	GPTBot
+3	(GPTBot)
+3	;GPTBot;
+3	/GPTBot/
+3	x GPTBot y
+3	Foo/1.0 ClaudeBot
+3	Mozilla/5.0 (compatible; Foo/1.0; +https://example.test/gptbot)
+# iaskspider is a token of its own, so a broken version suffix still matches.
+3	iaskspider/2.0x
+#
+# --- Substring near misses (class 0: never a substring) ---
+0	GPTBotX/1.0
+0	NotGPTBot/1.0
+0	MyClaudeBotty/1.0
+0	XCCBot/2.0
+0	CCBotanist/1.0
+0	PerplexityBot2/1.0
+0	ClaudeBot-Lite/1.0
+0	Claude-User-Extra/1.0
+0	Claude/1.0
+0	Claude
+0	GPT/1.0
+0	anthropic
+0	Applebot-Extended/1.0
+0	Applebots/1.0
+0	Diffbots/1.0
+0	Amazon-bot/1.0
+0	Amazonbot2/1.0
+0	Mozilla/5.0 (compatible; GoogleOther-Image/1.0)
+0	GPTBot.example.test
+0	GPTBot,Foo/1.0
+0	+GPTBot
+0	GPTBot@example.test
+0	_ClaudeBot_
+0	iaskspider2.0
+0	bigsur-ai/1.0
+0	bigsurXai/1.0
+0	Google-Extended
+#
+# --- Glob- and pattern-shaped strings (class 0: never a glob) ---
+0	GPT*
+0	*Bot*
+0	*
+0	Claude?ot/1.0
+0	GPTBo.
+0	[GC]CBot/1.0
+0	GPTB%t
+0	.*
+0	(?i)^gptbot$
+0	GPTBot|ClaudeBot
+#
+# --- Empty user agent (class 0) ---
+0	(empty)
+#
+# --- Ordinary browsers (class 0) ---
+0	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+0	Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36
+0	Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+0	Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0
+0	Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0
+0	Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15
+0	Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1
+0	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0
+0	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 OPR/115.0.0.0
+#
+# --- Crawlers and clients that are not in the table (class 0) ---
+0	Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+0	Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.204 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+0	Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36
+0	Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)
+0	Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)
+0	DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)
+0	facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)
+0	Twitterbot/1.0
+0	Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)
+0	Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)
+0	Mozilla/5.0 (compatible; SemrushBot/7~bl; +http://www.semrush.com/bot.html)
+0	Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)
+0	LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)
+0	Mozilla/5.0 (compatible; MJ12bot/v1.4.8; http://mj12bot.com/)
+0	Mozilla/5.0 (compatible; AdsBot-Google; +http://www.google.com/adsbot.html)
+0	Mozilla/5.0 (compatible; Google-InspectionTool/1.0;)
+0	curl/8.4.0
+0	python-requests/2.31.0
+0	Wget/1.21.4
+0	Go-http-client/1.1

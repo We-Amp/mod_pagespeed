@@ -275,6 +275,18 @@ class TestTheFile:
     def test_has_live_rows(self):
         assert len(ROWS) > 100
 
+    def test_pending_rows_are_held_back_and_counted_apart(self):
+        pending = conf.pending_rows(CASES)
+        assert all("pending" in r for r in pending)
+        assert not any("pending" in r for r in ROWS.values())
+        ids = {r["id"] for r in pending}
+        assert ids.isdisjoint(ROWS)
+        live = [r for r in CASES["rows"] if "live" in r.get("runners", [])]
+        assert len(ROWS) + len(pending) == len(live)
+        assert len(ROWS) == conf.LIVE_ROWS_THAT_RUN
+        assert len(pending) == conf.LIVE_ROWS_PENDING
+        print(f"live rows: {len(ROWS)} run, {len(pending)} pending")
+
     def test_every_live_row_uses_only_keys_the_runner_acts_on(self):
         errors = []
         for row in ROWS.values():

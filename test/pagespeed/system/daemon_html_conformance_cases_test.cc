@@ -6,7 +6,13 @@
 // and that every row has the documented shape with values from the closed
 // sets, that row labels stay public-safe, and that every body reference
 // resolves. It runs no row: the engine runner and the live runner do.
+//
+// A pending row (marked with kPendingSupport) describes the cached-HTML serve
+// path before its support exists. Both runners skip it and count it apart;
+// this check still checks it, against the key and value sets that path adds,
+// and refuses those additions on a row that is not pending.
 
+#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <regex>
@@ -73,8 +79,10 @@ const StringSet kVhostKnobs = {"header_add",
                                "third_party_filter",
                                "merge_slashes",
                                "poll_interval_s",
-                               "chained_module_origin", "named_location",
-                               "proxy_hide", "trailer"};
+                               "chained_module_origin",
+                               "named_location",
+                               "proxy_hide",
+                               "trailer"};
 const StringSet kOriginKeys = {"status", "headers", "body_ref",
                                "echo_conditionals", "truncate_body"};
 const StringSet kLiveStepKeys = {"request",    "pre",    "process",
@@ -94,6 +102,71 @@ const StringSet kLiveExpectKeys = {"status",         "content_type",
                                    "origin_saw",     "origin_saw_absent",
                                    "counter_delta",  "differential",
                                    "headers_only"};
+
+// The one pending value, and what a pending row may add to the sets above.
+const char kPendingSupport[] = "serve-cached-html";
+const StringSet kConfigKeysM2 = {"serve_scope",   "max_age_s",
+                                 "credentialed",  "ignore_cookies",
+                                 "ignore_cookie", "policy_stamp"};
+const StringSet kResponseKeysM2 = {"split_at"};
+const StringSet kLibraryKeysM2 = {"missing"};
+const StringSet kStepKindsM2 = {"unsafe", "unsafe_many", "emit_fails",
+                                "begin_recording", "configure"};
+const StringSet kEngineStepKeysM2 = {"repeat", "count"};
+const StringSet kEngineOpsM2 = {"disable_credential_skip", "unsafe"};
+const StringSet kEngineExpectKeysM2 = {
+    "headers_absent",       "classify_calls",     "decision_lines",
+    "recording_started",    "config_error",       "fence_before_remove",
+    "removed_count",        "fence_map_size_max", "fences_kept",
+    "oldest_fenced",        "newest_fenced",      "agent_class",
+    "classify_agent_calls", "agent_vectors"};
+const StringSet kServeKindsM2 = {"as_origin"};
+const StringSet kServeKeysM2 = {"body_ref", "header_order",
+                                "suppress_recording"};
+const StringSet kModesM2 = {"serve-cached-html"};
+const StringSet kVhostKnobsM2 = {"serve_scope",
+                                 "max_age_s",
+                                 "credentialed",
+                                 "ignore_cookies",
+                                 "expires_by_type",
+                                 "deflate",
+                                 "ssi",
+                                 "substitute",
+                                 "proxy_html",
+                                 "sub_filter",
+                                 "rewriter_off_for_type",
+                                 "rewriter_declines",
+                                 "disable_rewrite_on_no_transform",
+                                 "tls_front",
+                                 "respect_xfp",
+                                 "redirect"};
+const StringSet kLiveOpsM2 = {"set_vhost", "protect", "origin_fail",
+                              "fill_read_queue", "release_slow"};
+const StringSet kLiveStepKeysM2 = {"abort_after_ms"};
+const StringSet kLiveExpectKeysM2 = {"origin_requests_delta",
+                                     "hit",
+                                     "status_in",
+                                     "age_at_least",
+                                     "rewriter_visible",
+                                     "body_equals_miss",
+                                     "body_contains",
+                                     "header_multiset_equals_miss",
+                                     "expires_equals_storing_miss",
+                                     "log_contains",
+                                     "client_aborted",
+                                     "hit_vs_miss",
+                                     "token_binding",
+                                     "hit_stops_within_s",
+                                     "body_cred_identity",
+                                     "log_count"};
+const StringSet kOriginAppKinds = {"static", "cgi", "proxy"};
+
+// The set a row may use: the base set, plus the additions on a pending row.
+StringSet For(bool pending, const StringSet& base, const StringSet& added) {
+  StringSet out = base;
+  if (pending) out.insert(added.begin(), added.end());
+  return out;
+}
 
 class Checker {
  public:
@@ -198,11 +271,18 @@ class Checker {
   std::vector<GoogleString> errors_;
 };
 
-void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
+void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
+                 bool pending = false) {
   if (!c.Keys(w, e, kEngineKeys, {"verdicts", "steps"})) return;
-  if (e.isMember("config")) c.Keys(w + " config", e["config"], kConfigKeys, {});
+  if (e.isMember("config")) {
+    c.Keys(w + " config", e["config"], For(pending, kConfigKeys, kConfigKeysM2),
+           {});
+    c.OneOf(w + " config", e["config"], "mode",
+            For(pending, {"off", "report-only", "serve-variants"}, kModesM2));
+  }
   if (e.isMember("library")) {
-    c.Keys(w + " library", e["library"], kLibraryKeys, {});
+    c.Keys(w + " library", e["library"],
+           For(pending, kLibraryKeys, kLibraryKeysM2), {});
   }
   if (e.isMember("volume")) {
     const Json::Value& vol = e["volume"];
@@ -230,25 +310,35 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
   for (Json::ArrayIndex i = 0; i < steps.size(); ++i) {
     const GoogleString sw = StrCat(w, " step ", IntegerToString(i));
     const Json::Value& s = steps[i];
-    if (!c.Keys(sw, s, kEngineStepKeys, {"kind", "expect"})) continue;
-    c.OneOf(sw, s, "kind", kStepKinds);
+    if (!c.Keys(sw, s, For(pending, kEngineStepKeys, kEngineStepKeysM2),
+                {"kind", "expect"})) {
+      continue;
+    }
+    c.OneOf(sw, s, "kind", For(pending, kStepKinds, kStepKindsM2));
     const GoogleString kind = s["kind"].asString();
-    if ((kind == "capture" || kind == "serve" || kind == "admin_purge") &&
-        !s.isMember("request")) {
+    if (kind != "poll_tick" && kind != "stats_tick" && !s.isMember("request")) {
       c.Fail(sw, "missing request");
     }
-    if (kind == "capture") {
+    if (kind == "capture" || kind == "unsafe") {
       if (!s.isMember("response")) c.Fail(sw, "missing response");
     } else if (s.isMember("response") || s.isMember("during")) {
       c.Fail(sw, "response and during belong to capture steps");
     }
+    if (kind == "unsafe" && s.isMember("during")) {
+      c.Fail(sw, "during belongs to capture steps");
+    }
     if (kind == "admin_purge" && !s["request"]["url"].isString()) {
       c.Fail(sw, "admin_purge request has no url");
     }
-    if (s.isMember("pre")) c.Ops(sw + " pre", s["pre"], kEngineOps);
-    if (s.isMember("response")) {
+    const StringSet ops = For(pending, kEngineOps, kEngineOpsM2);
+    if (s.isMember("pre")) c.Ops(sw + " pre", s["pre"], ops);
+    if (kind == "unsafe" && s.isMember("response")) {
+      c.Keys(sw + " response", s["response"],
+             {"status", "location", "content_location"}, {"status"});
+    } else if (s.isMember("response")) {
       const Json::Value& r = s["response"];
-      c.Keys(sw + " response", r, kResponseKeys, {"status", "origin"});
+      c.Keys(sw + " response", r, For(pending, kResponseKeys, kResponseKeysM2),
+             {"status", "origin"});
       for (const char* key :
            {"origin", "store_delta", "final_delta", "module"}) {
         c.HeaderList(sw + " response", r, key);
@@ -262,12 +352,15 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
         c.Keys(sw + " during", during[j], {"point", "do"}, {"point", "do"});
         c.OneOf(sw + " during", during[j], "point", kPoints);
         if (during[j].isMember("do")) {
-          c.Ops(sw + " during do", during[j]["do"], kEngineOps);
+          c.Ops(sw + " during do", during[j]["do"], ops);
         }
       }
     }
     const Json::Value& ex = s["expect"];
-    if (!c.Keys(sw + " expect", ex, kEngineExpectKeys, {})) continue;
+    if (!c.Keys(sw + " expect", ex,
+                For(pending, kEngineExpectKeys, kEngineExpectKeysM2), {})) {
+      continue;
+    }
     if (ex.empty()) c.Fail(sw, "expect asserts nothing");
     if (ex.isMember("calls")) {
       const Json::Value& calls = ex["calls"];
@@ -311,9 +404,13 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
     }
     if (ex.isMember("serve")) {
       c.Keys(sw + " serve", ex["serve"],
-             {"kind", "status", "reason", "headers_exact", "body_bytes"},
+             For(pending,
+                 {"kind", "status", "reason", "headers_exact", "body_bytes"},
+                 kServeKeysM2),
              {"kind"});
-      c.OneOf(sw + " serve", ex["serve"], "kind", kServeKinds);
+      c.OneOf(sw + " serve", ex["serve"], "kind",
+              For(pending, kServeKinds, kServeKindsM2));
+      c.BodyRef(sw + " serve", ex["serve"]);
     }
     c.OneOf(sw + " expect", ex, "admin_response", {"ok", "error"});
     for (const char* key : {"stored", "removed", "notify", "purge_set_added"}) {
@@ -327,17 +424,27 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e) {
   }
 }
 
-void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l) {
+void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l,
+               bool pending = false) {
   if (!c.Keys(w, l, kLiveKeys, {"mode", "agent_optimize", "origin", "steps"})) {
     return;
   }
-  c.OneOf(w, l, "mode", kModes);
-  if (l.isMember("vhost")) c.Keys(w + " vhost", l["vhost"], kVhostKnobs, {});
+  c.OneOf(w, l, "mode", For(pending, kModes, kModesM2));
+  if (l.isMember("vhost")) {
+    c.Keys(w + " vhost", l["vhost"], For(pending, kVhostKnobs, kVhostKnobsM2),
+           {});
+  }
   if (l.isMember("worker")) {
     c.Keys(w + " worker", l["worker"], {"html_mode", "agent_optimize"}, {});
   }
   const Json::Value& origin = l["origin"];
-  if (c.Keys(w + " origin", origin, kOriginKeys, {"status", "headers"})) {
+  if (pending && origin.isMember("app")) {
+    // The adversarial origin app: request paths name its endpoints.
+    c.Keys(w + " origin", origin, {"app", "kind"}, {"app", "kind"});
+    c.OneOf(w + " origin", origin, "app", {"adversarial"});
+    c.OneOf(w + " origin", origin, "kind", kOriginAppKinds);
+  } else if (c.Keys(w + " origin", origin, kOriginKeys,
+                    {"status", "headers"})) {
     c.HeaderList(w + " origin", origin, "headers");
     c.BodyRef(w + " origin", origin);
   }
@@ -349,19 +456,27 @@ void CheckLive(Checker& c, const GoogleString& w, const Json::Value& l) {
   for (Json::ArrayIndex i = 0; i < steps.size(); ++i) {
     const GoogleString sw = StrCat(w, " step ", IntegerToString(i));
     const Json::Value& s = steps[i];
-    if (!c.Keys(sw, s, kLiveStepKeys, {"request", "expect"})) continue;
+    if (!c.Keys(sw, s, For(pending, kLiveStepKeys, kLiveStepKeysM2),
+                {"request", "expect"})) {
+      continue;
+    }
     if (c.Keys(sw + " request", s["request"], kLiveRequestKeys,
                {"method", "path", "headers"})) {
       c.HeaderList(sw + " request", s["request"], "headers");
     }
-    if (s.isMember("pre")) c.Ops(sw + " pre", s["pre"], kLiveOps);
+    if (s.isMember("pre")) {
+      c.Ops(sw + " pre", s["pre"], For(pending, kLiveOps, kLiveOpsM2));
+    }
     if (s.isMember("window") &&
         c.Keys(sw + " window", s["window"], kLiveWindowKeys, kLiveWindowKeys)) {
       c.Keys(sw + " window stale", s["window"]["stale"], {"content_type"},
              {"content_type"});
     }
     const Json::Value& ex = s["expect"];
-    if (!c.Keys(sw + " expect", ex, kLiveExpectKeys, {})) continue;
+    if (!c.Keys(sw + " expect", ex,
+                For(pending, kLiveExpectKeys, kLiveExpectKeysM2), {})) {
+      continue;
+    }
     if (ex.empty()) c.Fail(sw, "expect asserts nothing");
     c.BodyRef(sw + " expect", ex);
     if (ex.isMember("headers_exact")) {
@@ -436,9 +551,14 @@ TEST(DaemonHtmlConformanceCasesTest, EveryRowHasTheDocumentedShape) {
     const Json::Value& row = rows[i];
     const GoogleString id = row["id"].isString() ? row["id"].asString() : "";
     const GoogleString w = StrCat("row '", id, "'");
-    if (!c.Keys(w, row, {"id", "runners", "why", "ports", "engine", "live"},
+    if (!c.Keys(w, row,
+                {"id", "runners", "why", "ports", "engine", "live", "pending"},
                 {"id", "runners", "why"})) {
       continue;
+    }
+    const bool pending = row.isMember("pending");
+    if (pending && row["pending"].asString() != kPendingSupport) {
+      c.Fail(w, StrCat("pending is not \"", kPendingSupport, "\""));
     }
     if (!std::regex_match(id, kId)) c.Fail(w, "id is not [a-z0-9-]");
     if (!ids.insert(id).second) c.Fail(w, "duplicate id");
@@ -460,11 +580,22 @@ TEST(DaemonHtmlConformanceCasesTest, EveryRowHasTheDocumentedShape) {
     }
     if (row.isMember("engine")) {
       ++engine_rows;
-      CheckEngine(c, w + " engine", row["engine"]);
+      CheckEngine(c, w + " engine", row["engine"], pending);
     }
     if (row.isMember("live")) {
       ++live_rows;
-      CheckLive(c, w + " live", row["live"]);
+      CheckLive(c, w + " live", row["live"], pending);
+    }
+    // A pending row must need the marker: checked as a row the runners run
+    // today, it must use at least one key or value only a pending row may.
+    // Otherwise a failing row could be hidden by marking it.
+    if (pending) {
+      Checker today(doc["bodies"]);
+      if (row.isMember("engine")) CheckEngine(today, w, row["engine"], false);
+      if (row.isMember("live")) CheckLive(today, w, row["live"], false);
+      if (today.errors().empty()) {
+        c.Fail(w, "pending, but uses no key or value only a pending row may");
+      }
     }
   }
   for (const GoogleString& e : c.errors()) ADD_FAILURE() << e;
@@ -493,6 +624,66 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsMalformedRows) {
   EXPECT_FALSE(LabelIsPublicSafe("tracked as XYZ-99"));
   EXPECT_FALSE(LabelIsPublicSafe("an X-Y event"));
   EXPECT_TRUE(LabelIsPublicSafe("validator: 304 set (RFC 9110 15.4.5)"));
+}
+
+// The cached-HTML serve additions are accepted on a pending row only: a row
+// the runners run today must not carry a key they would not act on.
+TEST(DaemonHtmlConformanceCasesTest, OnlyPendingRowsUseTheServeCachedHtmlKeys) {
+  Json::Value bodies(Json::objectValue);
+  bodies["page"] = "<html></html>";
+  Json::Value live(Json::objectValue);
+  live["mode"] = "serve-cached-html";
+  live["agent_optimize"] = true;
+  live["origin"]["app"] = "adversarial";
+  live["origin"]["kind"] = "proxy";
+  live["vhost"]["serve_scope"] = "agents";
+  Json::Value step(Json::objectValue);
+  step["request"]["method"] = "GET";
+  step["request"]["path"] = "/fresh";
+  step["request"]["headers"] = Json::Value(Json::arrayValue);
+  step["expect"]["origin_requests_delta"] = 0;
+  live["steps"].append(step);
+  Checker today(bodies);
+  CheckLive(today, "row", live, /*pending=*/false);
+  // The mode, the knob, the origin form (two keys missing, two unknown) and
+  // the expect key.
+  EXPECT_LE(4u, today.errors().size()) << JoinCollection(today.errors(), "\n");
+  Checker pending(bodies);
+  CheckLive(pending, "row", live, /*pending=*/true);
+  EXPECT_TRUE(pending.errors().empty())
+      << JoinCollection(pending.errors(), "\n");
+
+  Json::Value engine(Json::objectValue);
+  engine["config"]["mode"] = "serve-cached-html";
+  engine["verdicts"] = Json::Value(Json::arrayValue);
+  Json::Value unsafe(Json::objectValue);
+  unsafe["kind"] = "unsafe";
+  unsafe["request"]["method"] = "POST";
+  unsafe["response"]["status"] = 303;
+  unsafe["response"]["location"] = "/fresh";
+  unsafe["expect"]["removed_count"] = 2;
+  engine["steps"].append(unsafe);
+  Checker engine_today(bodies);
+  CheckEngine(engine_today, "row", engine, /*pending=*/false);
+  EXPECT_LE(3u, engine_today.errors().size())
+      << JoinCollection(engine_today.errors(), "\n");
+  Checker engine_pending(bodies);
+  CheckEngine(engine_pending, "row", engine, /*pending=*/true);
+  EXPECT_TRUE(engine_pending.errors().empty())
+      << JoinCollection(engine_pending.errors(), "\n");
+}
+
+// Pending rows name the one support they wait for.
+TEST(DaemonHtmlConformanceCasesTest, PendingRowsNameTheServeCachedHtmlPath) {
+  const Json::Value doc = LoadCases();
+  int pending = 0;
+  for (const Json::Value& row : doc["rows"]) {
+    if (!row.isMember("pending")) continue;
+    ++pending;
+    EXPECT_EQ(kPendingSupport, row["pending"].asString()) << row["id"];
+  }
+  std::printf("conformance cases: %d pending rows (%s)\n", pending,
+              kPendingSupport);
 }
 
 // An exact prefix the function's record does not carry would assert

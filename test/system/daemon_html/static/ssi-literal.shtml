@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2026 We-Amp B.V. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SSI literal</title>
+</head>
+<body>
+<h1>SSI literal</h1>
+<p>The directive below expands once, at the first response.</p>
+<p id="ssi-parsed">parsed:<!--#echo var="DATE_GMT" -->:parsed</p>
+<p>The included fragment is plain text that holds an SSI directive. It is
+inserted verbatim (text/plain is not parsed for SSI), so the response carries
+the directive as text. A cached copy must carry the same text and must not
+expand it.</p>
+<!--#include virtual="ssi-fragment.txt" -->
+<p>End of page.</p>
+</body>
+</html>
