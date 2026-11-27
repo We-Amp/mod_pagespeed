@@ -195,6 +195,7 @@ function Probe-Request([string]$Case, [string]$Target, [string]$Method = "GET", 
         Show $Case "wire.status" $r.Status
         foreach ($l in $r.Lines) { Show $Case "wire.header" $l }
         Show $Case "wire.body" (Body-Facts $r)
+        if ($r.Status -ge 400) { Show $Case "wire.error" ((($r.Text -replace '(?s)<style.*?</style>', ' ' -replace '<[^>]*>', ' ' -replace '\s+', ' ').Trim()) | ForEach-Object { $_.Substring(0, [Math]::Min(300, $_.Length)) }) }
         foreach ($l in (Read-ProbeLog $id)) { Show $Case "probe" ($l -replace '^id=[^|]*\|t=\d+\|', '') }
     }
     # The response is left in $script:Last: everything a function writes
@@ -608,12 +609,13 @@ function Run {
     Make-Replay "kseed" "kmark" -Alter
     foreach ($c in @(@("kern", "/kern/page.html", "B.serve_html,B.nodisarm"), @("kern2", "/kern2/page.html", "B.serve_html"), @("oc", "/oc/page.html", "B.serve_html,B.nodisarm"), @("oc2", "/oc2/page.html", "B.serve_html"))) {
         for ($i = 0; $i -lt 4; $i++) { Probe-Request "$($c[0])_hit" $c[1] "GET" @{ "X-Probe-Act" = $c[2]; "X-Probe-Stored" = "kmark" } -Quiet }
+        Freb-Order "$($c[0])_hit" $c[1]
         $marked = 0
         for ($i = 0; $i -lt 4; $i++) {
             Probe-Request "$($c[0])_plain" $c[1] "GET" @{} -Quiet
             if ($script:Last.Text -match 'probe hit') { $marked++ }
         }
-        if ($c[0] -like "oc*") { Freb-Order "$($c[0])_hit" $c[1] }
+        Freb-Order "$($c[0])_plain" $c[1]
         Show $c[0] "after 4 hits ($($c[2])) and 4 plain GETs" ("hits reached the pipeline {0}/4; plain GETs reached it {1}/4; plain GETs carrying the hit's bytes {2}/4; kernel cache: {3}" -f (Reached "$($c[0])_hit"), (Reached "$($c[0])_plain"), $marked, (Kernel-Hits $c[1]))
     }
     # Controls: a static text file the module leaves alone (kernel cache),
