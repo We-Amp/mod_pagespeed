@@ -38,6 +38,10 @@ def _port(server_config):
 PROVIDER_FIXTURES = {
     "apache": "daemon_html_conformance",
     "nginx": "daemon_html_conformance",
+    # The IIS provider runs inside the IIS rig's guest
+    # (test/system/iis/html_conformance/); the IIS system-test lane does not
+    # advertise the fixture, so it skips these rows.
+    "iis": "daemon_html_conformance",
 }
 
 

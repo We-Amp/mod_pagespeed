@@ -65,6 +65,14 @@ bool IisParseRequestStartMs(const wchar_t* value, size_t length, int64* out_ms);
 // a rewrite invalidates).
 DaemonHtmlHeaderLines IisDaemonHtmlViewLines(const DaemonHtmlHeaderLines& raw);
 
+// The final view as IIS's own stages wrote it, with what they appended to a
+// line of the module view split off into a line of its own.  IIS adds a
+// customHeaders value to an existing line of the same name ("max-age=0,
+// no-cache" becomes "max-age=0, no-cache,public"); compared as whole lines,
+// the module's own directives would read as the server's.
+DaemonHtmlHeaderLines IisUnmergeFinalView(const DaemonHtmlHeaderLines& module,
+                                          const DaemonHtmlHeaderLines& final);
+
 class IisDaemonHtmlCapture {
  public:
   explicit IisDaemonHtmlCapture(std::unique_ptr<DaemonHtmlRecording> recording);
@@ -108,6 +116,7 @@ class IisDaemonHtmlCapture {
 
  private:
   std::unique_ptr<DaemonHtmlRecording> recording_;
+  DaemonHtmlHeaderLines module_view_;
   int status_ = 0;
   bool module_view_taken_ = false;
   bool body_broken_ = false;
