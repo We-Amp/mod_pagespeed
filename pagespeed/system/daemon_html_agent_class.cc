@@ -35,40 +35,50 @@ DaemonHtmlAgentClass ClassifyDaemonHtmlAgent(StringPiece user_agent,
 
 namespace {
 
-void Add(Statistics* statistics, const char* name) {
-  Variable* v = statistics->FindVariable(name);
+Variable* Find(Statistics* statistics, const char* name) {
+  return statistics == nullptr ? nullptr : statistics->FindVariable(name);
+}
+
+void Add(Variable* v) {
   if (v != nullptr) v->Add(1);
 }
 
 }  // namespace
 
-void CountDaemonHtmlAgentClass(const DaemonHtmlAgentClass& result,
-                               Statistics* statistics) {
-  if (statistics == nullptr) return;
-  switch (result.agent_class) {
-    case kDaemonHtmlAgentClassSigned:
-      Add(statistics, kDaemonHtmlAgentClassC1);
-      break;
-    case kDaemonHtmlAgentClassToken:
-      Add(statistics, kDaemonHtmlAgentClassC3);
-      break;
-    default:
-      Add(statistics, kDaemonHtmlAgentClassC4);
-      break;
-  }
-  if (result.c1_not_ready) Add(statistics, kDaemonHtmlAgentClassC1NotReady);
-  if (result.signature_failed) {
-    Add(statistics, kDaemonHtmlAgentClassSignatureFailed);
-  }
+DaemonHtmlAgentClassCounters::DaemonHtmlAgentClassCounters(
+    Statistics* statistics)
+    : c1(Find(statistics, kDaemonHtmlAgentClassC1)),
+      c3(Find(statistics, kDaemonHtmlAgentClassC3)),
+      c4(Find(statistics, kDaemonHtmlAgentClassC4)),
+      c1_not_ready(Find(statistics, kDaemonHtmlAgentClassC1NotReady)),
+      signature_failed(Find(statistics, kDaemonHtmlAgentClassSignatureFailed)) {
 }
 
-int DaemonHtmlAgentClassSlot::Resolve(StringPiece user_agent,
-                                      DaemonHtmlAgentSignature signature,
-                                      Statistics* statistics) {
+void CountDaemonHtmlAgentClass(const DaemonHtmlAgentClass& result,
+                               const DaemonHtmlAgentClassCounters* counters) {
+  if (counters == nullptr) return;
+  switch (result.agent_class) {
+    case kDaemonHtmlAgentClassSigned:
+      Add(counters->c1);
+      break;
+    case kDaemonHtmlAgentClassToken:
+      Add(counters->c3);
+      break;
+    default:
+      Add(counters->c4);
+      break;
+  }
+  if (result.c1_not_ready) Add(counters->c1_not_ready);
+  if (result.signature_failed) Add(counters->signature_failed);
+}
+
+int DaemonHtmlAgentClassSlot::Resolve(
+    StringPiece user_agent, DaemonHtmlAgentSignature signature,
+    const DaemonHtmlAgentClassCounters* counters) {
   if (!resolved_) {
     const DaemonHtmlAgentClass result =
         ClassifyDaemonHtmlAgent(user_agent, signature);
-    CountDaemonHtmlAgentClass(result, statistics);
+    CountDaemonHtmlAgentClass(result, counters);
     agent_class_ = result.agent_class;
     resolved_ = true;
   }

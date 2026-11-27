@@ -330,6 +330,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
+        ":daemon_html_agent_class",
         ":daemon_html_decision_log",
         ":daemon_html_purge_observer",
         ":daemon_record_arm",

@@ -29,6 +29,7 @@ namespace net_instaweb {
 
 class KnownAgentMatcher;
 class Statistics;
+class Variable;
 
 constexpr int kDaemonHtmlAgentClassUnknown = 0;
 constexpr int kDaemonHtmlAgentClassSigned = 1;
@@ -64,9 +65,22 @@ DaemonHtmlAgentClass ClassifyDaemonHtmlAgent(
     StringPiece user_agent, DaemonHtmlAgentSignature signature,
     const KnownAgentMatcher* matcher = nullptr);
 
-// Adds one request to the counters.  `statistics` may be null.
+// The counters, resolved once (the engine holds one set,
+// DaemonHtmlEngine::agent_class_counters()), so counting a request is plain
+// increments with no name lookup.  Null statistics, or a name that is not
+// registered, leaves that counter null and uncounted.
+struct DaemonHtmlAgentClassCounters {
+  explicit DaemonHtmlAgentClassCounters(Statistics* statistics);
+  Variable* c1 = nullptr;
+  Variable* c3 = nullptr;
+  Variable* c4 = nullptr;
+  Variable* c1_not_ready = nullptr;
+  Variable* signature_failed = nullptr;
+};
+
+// Adds one request to the counters.  `counters` may be null.
 void CountDaemonHtmlAgentClass(const DaemonHtmlAgentClass& result,
-                               Statistics* statistics);
+                               const DaemonHtmlAgentClassCounters* counters);
 
 // The once-per-request record a port keeps with the client request.
 class DaemonHtmlAgentClassSlot {
@@ -78,7 +92,7 @@ class DaemonHtmlAgentClassSlot {
   // On the first call, classifies, counts and keeps the class; every later
   // call returns the kept class and neither classifies nor counts.
   int Resolve(StringPiece user_agent, DaemonHtmlAgentSignature signature,
-              Statistics* statistics);
+              const DaemonHtmlAgentClassCounters* counters);
 
  private:
   bool resolved_ = false;

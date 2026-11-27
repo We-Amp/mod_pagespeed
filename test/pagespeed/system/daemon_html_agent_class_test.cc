@@ -28,12 +28,14 @@ class DaemonHtmlAgentClassTest : public testing::Test {
         stats_(thread_system_.get()) {
     // The counters are registered with the engine's.
     RewriteStats::InitStats(&stats_);
+    counters_ = std::make_unique<DaemonHtmlAgentClassCounters>(&stats_);
   }
 
   int64 Count(const char* name) { return stats_.GetVariable(name)->Get(); }
 
   std::unique_ptr<ThreadSystem> thread_system_;
   SimpleStats stats_;
+  std::unique_ptr<DaemonHtmlAgentClassCounters> counters_;
 };
 
 TEST_F(DaemonHtmlAgentClassTest, ClassValuesAreTheScopes) {
@@ -55,7 +57,7 @@ TEST_F(DaemonHtmlAgentClassTest, EverySharedVector) {
         << "agent_vectors.txt:" << v.line << ": " << v.user_agent;
     EXPECT_FALSE(result.c1_not_ready);
     EXPECT_FALSE(result.signature_failed);
-    CountDaemonHtmlAgentClass(result, &stats_);
+    CountDaemonHtmlAgentClass(result, counters_.get());
     (v.expected_class == 3 ? c3 : c4)++;
   }
   EXPECT_EQ(c3, Count(kDaemonHtmlAgentClassC3));
@@ -85,7 +87,7 @@ TEST_F(DaemonHtmlAgentClassTest, AVerifiedSignatureIsClassOne) {
     EXPECT_EQ(kDaemonHtmlAgentClassSigned, result.agent_class) << ua;
     EXPECT_FALSE(result.c1_not_ready);
     EXPECT_FALSE(result.signature_failed);
-    CountDaemonHtmlAgentClass(result, &stats_);
+    CountDaemonHtmlAgentClass(result, counters_.get());
   }
   EXPECT_EQ(3, Count(kDaemonHtmlAgentClassC1));
   EXPECT_EQ(0, Count(kDaemonHtmlAgentClassC3));
@@ -98,12 +100,12 @@ TEST_F(DaemonHtmlAgentClassTest, NotReadyGivesTheUserAgentsClass) {
       ClassifyDaemonHtmlAgent(kGptBot, DaemonHtmlAgentSignature::kNotReady);
   EXPECT_EQ(kDaemonHtmlAgentClassToken, result.agent_class);
   EXPECT_TRUE(result.c1_not_ready);
-  CountDaemonHtmlAgentClass(result, &stats_);
+  CountDaemonHtmlAgentClass(result, counters_.get());
   result =
       ClassifyDaemonHtmlAgent(kBrowser, DaemonHtmlAgentSignature::kNotReady);
   EXPECT_EQ(kDaemonHtmlAgentClassUnknown, result.agent_class);
   EXPECT_TRUE(result.c1_not_ready);
-  CountDaemonHtmlAgentClass(result, &stats_);
+  CountDaemonHtmlAgentClass(result, counters_.get());
   EXPECT_EQ(2, Count(kDaemonHtmlAgentClassC1NotReady));
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC3));
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC4));
@@ -118,12 +120,37 @@ TEST_F(DaemonHtmlAgentClassTest, AFailedSignatureDropsToTheUserAgentsClass) {
   EXPECT_EQ(kDaemonHtmlAgentClassToken, result.agent_class);
   EXPECT_TRUE(result.signature_failed);
   EXPECT_FALSE(result.c1_not_ready);
-  CountDaemonHtmlAgentClass(result, &stats_);
+  CountDaemonHtmlAgentClass(result, counters_.get());
   result = ClassifyDaemonHtmlAgent(kBrowser, DaemonHtmlAgentSignature::kFailed);
   EXPECT_EQ(kDaemonHtmlAgentClassUnknown, result.agent_class);
-  CountDaemonHtmlAgentClass(result, &stats_);
+  CountDaemonHtmlAgentClass(result, counters_.get());
   EXPECT_EQ(2, Count(kDaemonHtmlAgentClassSignatureFailed));
   EXPECT_EQ(0, Count(kDaemonHtmlAgentClassC1));
+}
+
+// Without statistics every handle is null and counting is a no-op.
+TEST_F(DaemonHtmlAgentClassTest, CountersFromNullStatistics) {
+  const DaemonHtmlAgentClassCounters none(nullptr);
+  EXPECT_EQ(nullptr, none.c1);
+  EXPECT_EQ(nullptr, none.c3);
+  EXPECT_EQ(nullptr, none.c4);
+  EXPECT_EQ(nullptr, none.c1_not_ready);
+  EXPECT_EQ(nullptr, none.signature_failed);
+  CountDaemonHtmlAgentClass(
+      ClassifyDaemonHtmlAgent(kGptBot, DaemonHtmlAgentSignature::kNotReady),
+      &none);
+  EXPECT_EQ(0, Count(kDaemonHtmlAgentClassC3));
+}
+
+// The handles are resolved once, to the registered counters.
+TEST_F(DaemonHtmlAgentClassTest, CountersAreTheRegisteredOnes) {
+  EXPECT_EQ(stats_.GetVariable(kDaemonHtmlAgentClassC1), counters_->c1);
+  EXPECT_EQ(stats_.GetVariable(kDaemonHtmlAgentClassC3), counters_->c3);
+  EXPECT_EQ(stats_.GetVariable(kDaemonHtmlAgentClassC4), counters_->c4);
+  EXPECT_EQ(stats_.GetVariable(kDaemonHtmlAgentClassC1NotReady),
+            counters_->c1_not_ready);
+  EXPECT_EQ(stats_.GetVariable(kDaemonHtmlAgentClassSignatureFailed),
+            counters_->signature_failed);
 }
 
 TEST_F(DaemonHtmlAgentClassTest, NullStatisticsCountNothing) {
@@ -142,11 +169,11 @@ TEST_F(DaemonHtmlAgentClassTest, TheSlotResolvesOnce) {
   EXPECT_FALSE(slot.resolved());
   EXPECT_EQ(0, slot.agent_class());
   EXPECT_EQ(3, slot.Resolve(kGptBot, DaemonHtmlAgentSignature::kNotReady,
-                            &stats_));
+                            counters_.get()));
   EXPECT_TRUE(slot.resolved());
   EXPECT_EQ(3, slot.Resolve(kBrowser, DaemonHtmlAgentSignature::kVerified,
-                            &stats_));
-  EXPECT_EQ(3, slot.Resolve("", DaemonHtmlAgentSignature::kFailed, &stats_));
+                            counters_.get()));
+  EXPECT_EQ(3, slot.Resolve("", DaemonHtmlAgentSignature::kFailed, counters_.get()));
   EXPECT_EQ(3, slot.agent_class());
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC3));
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC1NotReady));

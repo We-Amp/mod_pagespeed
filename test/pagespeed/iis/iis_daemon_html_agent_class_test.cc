@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 //
-// The HTML cache's agent class on IIS.  The begin-request notification
-// classifies the User-Agent (IIS has no signature verifier here); the class
-// is counted, and kept on the request context, where that one context is
-// created, for a site whose HTML cache is on; the request facts read it from
-// there.  The notifications sit behind the IIS runtime headers, so where it
+// The HTML cache's agent class on IIS: classified from the User-Agent (IIS
+// has no signature verifier here), counted and kept on the request context
+// where that one context is created, for a site whose HTML cache is on; the
+// request facts read it from there.  The notifications sit behind the IIS runtime headers, so where it
 // happens is pinned by reading the port source as data; the classes come
 // from the shared vectors.
 
@@ -51,7 +50,7 @@ GoogleString Body(const GoogleString& src, const char* signature) {
   return "";
 }
 
-// Every shared vector, classified as the begin-request notification does.
+// Every shared vector, classified as the port does.
 TEST(IisDaemonHtmlAgentClassTest, EverySharedVector) {
   for (const AgentVector& v : LoadAgentVectors().vectors) {
     EXPECT_EQ(v.expected_class,
@@ -62,41 +61,45 @@ TEST(IisDaemonHtmlAgentClassTest, EverySharedVector) {
   }
 }
 
-TEST(IisDaemonHtmlAgentClassTest, BeginRequestClassifiesTheUserAgent) {
-  const GoogleString body =
-      Body(ReadStrippedSource("iis_http_module.cpp"),
-           "IisHttpModule::OnBeginRequest(INIHttpContext*pHttpContext,");
-  ASSERT_FALSE(body.empty()) << "renamed; update this pin";
-  EXPECT_NE(GoogleString::npos,
-            body.find("value=request->GetHeader(HttpHeaderUserAgent,&length);"
-                      "agent_class_=ClassifyDaemonHtmlAgent("));
-  EXPECT_NE(GoogleString::npos,
-            body.find("DaemonHtmlAgentSignature::kNone);"));
-  // Classified only: no counter moves here.
-  EXPECT_EQ(GoogleString::npos, body.find("CountDaemonHtmlAgentClass"));
-}
-
-// Counted once, where the request's one context is created; a child
-// request finds its parent's context and creates none.
-TEST(IisDaemonHtmlAgentClassTest, CountedWhereTheContextIsCreated) {
+// Classified (a token scan) and counted once, where the request's one
+// context is created, and only for a site whose HTML cache is on: no other
+// request reads or scans the User-Agent.  A child request finds its
+// parent's context and creates none.
+TEST(IisDaemonHtmlAgentClassTest, OnlyWhereTheContextIsCreatedWithAnEngine) {
   const GoogleString src = ReadStrippedSource("iis_http_module.cpp");
   const size_t keep =
       src.find("ctx->GetInnerContext()->set_client_conditionals("
                "client_conditionals_);");
   ASSERT_NE(GoogleString::npos, keep);
   const size_t gate = src.find(
-      "sc->daemon_html_engine(inner->process_context()->site_id())!=nullptr)"
-      "{inner->set_agent_class(agent_class_.agent_class);"
-      "CountDaemonHtmlAgentClass(agent_class_,sc->statistics());}",
+      "DaemonHtmlEngine*engine=sc==nullptr?nullptr:"
+      "sc->daemon_html_engine(inner->process_context()->site_id());"
+      "if(engine!=nullptr){",
       keep);
   ASSERT_NE(GoogleString::npos, gate);
-  EXPECT_LT(gate - keep, 400u);
-  size_t count = 0;
-  for (size_t at = src.find("CountDaemonHtmlAgentClass("); at != GoogleString::npos;
-       at = src.find("CountDaemonHtmlAgentClass(", at + 1)) {
-    ++count;
+  EXPECT_LT(gate - keep, 800u);
+  const size_t read = src.find("GetHeader(HttpHeaderUserAgent,&ua_length);", gate);
+  const size_t scan = src.find("ClassifyDaemonHtmlAgent(", gate);
+  const size_t count = src.find(
+      "CountDaemonHtmlAgentClass(agent_class,&engine->agent_class_counters());",
+      gate);
+  ASSERT_NE(GoogleString::npos, read);
+  ASSERT_NE(GoogleString::npos, scan);
+  ASSERT_NE(GoogleString::npos, count);
+  EXPECT_LT(read, scan);
+  EXPECT_LT(scan, count);
+  EXPECT_LT(count - gate, 600u);
+  // Nowhere else: the begin-request notification neither reads nor scans.
+  for (const char* once :
+       {"ClassifyDaemonHtmlAgent(", "CountDaemonHtmlAgentClass(",
+        "HttpHeaderUserAgent"}) {
+    size_t n = 0;
+    for (size_t at = src.find(once); at != GoogleString::npos;
+         at = src.find(once, at + 1)) {
+      ++n;
+    }
+    EXPECT_EQ(1u, n) << once;
   }
-  EXPECT_EQ(1u, count);
 }
 
 TEST(IisDaemonHtmlAgentClassTest, TheFactsReadTheKeptClass) {

@@ -173,9 +173,21 @@ const request_rec* ClientRequest(const request_rec* r) {
 
 }  // namespace
 
-int ApacheDaemonHtmlAgentClass(request_rec* r, bool classify,
-                               Statistics* statistics) {
-  if (r == nullptr || !classify) return kDaemonHtmlAgentClassUnknown;
+const DaemonHtmlAgentClassCounters* ApacheDaemonHtmlAgentClassCounters(
+    ApacheServerContext* context) {
+  if (context == nullptr || context->global_config()->daemon_html_cache() ==
+                                RewriteOptions::kDaemonHtmlCacheOff) {
+    return nullptr;
+  }
+  DaemonHtmlEngine* engine = context->daemon_html_engine();
+  return engine == nullptr ? nullptr : &engine->agent_class_counters();
+}
+
+int ApacheDaemonHtmlAgentClass(request_rec* r,
+                               const DaemonHtmlAgentClassCounters* counters) {
+  if (r == nullptr || counters == nullptr) {
+    return kDaemonHtmlAgentClassUnknown;
+  }
   const request_rec* client = ClientRequest(r);
   apr_pool_t* pool = client->pool;
   void* data = nullptr;
@@ -195,7 +207,7 @@ int ApacheDaemonHtmlAgentClass(request_rec* r, bool classify,
   DaemonHtmlAgentClassSlot* slot = new (memory) DaemonHtmlAgentClassSlot();
   const int agent_class =
       slot->Resolve(user_agent == nullptr ? "" : user_agent,
-                    DaemonHtmlAgentSignature::kNone, statistics);
+                    DaemonHtmlAgentSignature::kNone, counters);
   apr_pool_userdata_setn(slot, kAgentClassKey, apr_pool_cleanup_null, pool);
   return agent_class;
 }
@@ -252,8 +264,8 @@ void FillApacheDaemonHtmlRequestFacts(request_rec* r,
   facts->has_range = Has(in, "Range");
   facts->has_if_range = Has(in, "If-Range");
   facts->has_origin = Has(in, HttpAttributes::kOrigin);
-  facts->agent_class =
-      ApacheDaemonHtmlAgentClass(r, /*classify=*/true, context->statistics());
+  facts->agent_class = ApacheDaemonHtmlAgentClass(
+      r, ApacheDaemonHtmlAgentClassCounters(context));
   // When the request entered httpd, so never later than the origin's fetch.
   facts->capture_start_ms = apr_time_as_msec(r->request_time);
   if (options != nullptr) {

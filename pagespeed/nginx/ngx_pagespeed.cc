@@ -2818,7 +2818,8 @@ int ps_daemon_html_agent_class(ngx_http_request_t* r) {
           ->agent_class();
     }
   }
-  if (ps_daemon_html_engine(main) == nullptr) {
+  DaemonHtmlEngine* engine = ps_daemon_html_engine(main);
+  if (engine == nullptr) {
     return kDaemonHtmlAgentClassUnknown;
   }
   ngx_pool_cleanup_t* cln =
@@ -2834,7 +2835,7 @@ int ps_daemon_html_agent_class(ngx_http_request_t* r) {
           ? StringPiece()
           : str_to_string_piece(main->headers_in.user_agent->value);
   return slot->Resolve(user_agent, ps_webbotauth_agent_signature(main),
-                       ps_get_srv_config(main)->server_context->statistics());
+                       &engine->agent_class_counters());
 }
 
 // The request as the HTML cache engine reads it.  `url` is the URL this

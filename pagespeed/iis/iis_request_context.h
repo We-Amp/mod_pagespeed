@@ -151,8 +151,8 @@ public:
 	void set_client_conditionals(const ClientConditionalStash& stash) { client_conditionals_ = stash; }
 
 	// The request's agent class (pagespeed/system/daemon_html_agent_class.h),
-	// computed at the begin-request notification and set here when this
-	// context is created; a child request finds this context.
+	// computed and set when this context is created, for a site whose HTML
+	// cache is on; a child request finds this context.
 	int agent_class() const { return agent_class_; }
 	void set_agent_class(int agent_class) { agent_class_ = agent_class; }
 

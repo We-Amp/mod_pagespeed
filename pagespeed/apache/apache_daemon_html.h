@@ -50,7 +50,6 @@ namespace net_instaweb {
 class ApacheServerContext;
 class GoogleUrl;
 class RewriteOptions;
-class Statistics;
 
 // The output filter that applies the Markdown header set a last time.
 extern const char kApacheMarkdownHeadersFilterName[];
@@ -94,10 +93,14 @@ bool ApacheDaemonHtmlMainRequest(const request_rec* r);
 // it shares that pool and runs post_read_request again) and a subrequest
 // find it.  The post_read_request hook computes it first.  httpd has no
 // signature verifier here, so the class is the User-Agent's own (3 or 0).
-// `classify` false (DaemonHtmlCache off for the server) neither computes nor
-// keeps anything and gives 0.
-int ApacheDaemonHtmlAgentClass(request_rec* r, bool classify,
-                               Statistics* statistics);
+// `counters` (the server's HTML cache engine's) null, DaemonHtmlCache off for
+// the server, neither computes nor keeps anything and gives 0.
+int ApacheDaemonHtmlAgentClass(request_rec* r,
+                               const DaemonHtmlAgentClassCounters* counters);
+
+// The counters of `context`'s HTML cache engine, or null when it has none.
+const DaemonHtmlAgentClassCounters* ApacheDaemonHtmlAgentClassCounters(
+    ApacheServerContext* context);
 
 // The engine's view of one request.  `context` is the request's server
 // context, `url` the module's reading of the request URL (the scheme comes

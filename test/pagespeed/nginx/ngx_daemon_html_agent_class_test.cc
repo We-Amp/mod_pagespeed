@@ -126,10 +126,14 @@ TEST(NgxDaemonHtmlAgentClassTest, KeptOncePerClientRequest) {
   const size_t lookup = body.find(
       "for(ngx_pool_cleanup_t*c=main->pool->cleanup;c!=nullptr;c=c->next){"
       "if(c->handler==ps_daemon_html_agent_class_cleanup){return");
-  const size_t gate = body.find("if(ps_daemon_html_engine(main)==nullptr)");
+  const size_t gate = body.find(
+      "DaemonHtmlEngine*engine=ps_daemon_html_engine(main);"
+      "if(engine==nullptr)");
   const size_t add = body.find("ngx_pool_cleanup_add(main->pool,");
+  // Counted with the engine's counters, resolved once: no name lookup.
   const size_t resolve = body.find(
-      "slot->Resolve(user_agent,ps_webbotauth_agent_signature(main),");
+      "slot->Resolve(user_agent,ps_webbotauth_agent_signature(main),"
+      "&engine->agent_class_counters());");
   ASSERT_NE(GoogleString::npos, main);
   ASSERT_NE(GoogleString::npos, lookup);
   ASSERT_NE(GoogleString::npos, gate);

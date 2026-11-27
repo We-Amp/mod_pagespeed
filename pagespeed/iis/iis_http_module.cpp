@@ -442,12 +442,6 @@ namespace net_instaweb
 		if (value != nullptr && length > 0) {
 			if_modified_since.push_back(StringPiece(value, length));
 		}
-		// The agent class, from the first User-Agent line: a token scan only.
-		length = 0;
-		value = request->GetHeader(HttpHeaderUserAgent, &length);
-		agent_class_ = ClassifyDaemonHtmlAgent(
-			value == nullptr ? StringPiece() : StringPiece(value, length),
-			DaemonHtmlAgentSignature::kNone);
 		if (StashClientConditionals(if_none_match, if_modified_since,
 		                            &client_conditionals_)) {
 			// Both are removed or the request goes no further: a module tag
@@ -1452,16 +1446,25 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The client's conditionals as they arrived, for the HTML cache: this
 		// module object took them at the begin-request notification.
 		ctx->GetInnerContext()->set_client_conditionals(client_conditionals_);
-		// The agent class, counted once per request: only here, where the
-		// request's one context is created, and only for a site whose HTML
-		// cache is on.
+		// The agent class, classified and counted once per request: only here,
+		// where the request's one context is created (a child request finds
+		// its parent's), and only for a site whose HTML cache is on, so no
+		// other request pays for the scan.  The User-Agent value as IIS holds
+		// it (HTTP.sys may have joined repeated lines with ", ", which is not
+		// a token boundary).  IIS has no signature verifier here.
 		{
 			IisInnerRequestContext* inner = ctx->GetInnerContext();
 			IisServerContext* sc = inner->server_context();
-			if (sc != nullptr &&
-				sc->daemon_html_engine(inner->process_context()->site_id()) != nullptr) {
-				inner->set_agent_class(agent_class_.agent_class);
-				CountDaemonHtmlAgentClass(agent_class_, sc->statistics());
+			DaemonHtmlEngine* engine = sc == nullptr ? nullptr :
+				sc->daemon_html_engine(inner->process_context()->site_id());
+			if (engine != nullptr) {
+				USHORT ua_length = 0;
+				PCSTR ua = pHttpContext->GetRequest()->GetHeader(HttpHeaderUserAgent, &ua_length);
+				const DaemonHtmlAgentClass agent_class = ClassifyDaemonHtmlAgent(
+					ua == nullptr ? StringPiece() : StringPiece(ua, ua_length),
+					DaemonHtmlAgentSignature::kNone);
+				inner->set_agent_class(agent_class.agent_class);
+				CountDaemonHtmlAgentClass(agent_class, &engine->agent_class_counters());
 			}
 		}
 		bool is_resource = ctx->GetInnerContext()->is_resource();

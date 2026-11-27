@@ -294,18 +294,21 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# The in-place recorder seam is behaviour-free -- the same object, built at
-# the same point with the same arguments, now through the shared gate -- so
-# there is nothing to execute, and linking the port into a test is
-# impossible (nginx is a headers-only library in this build graph).
-# test/pagespeed/nginx/ngx_daemon_seam_test.cc reads these sources to pin
-# the seam; see the test for why.
+# The Web Bot Auth handler, read by
+# test/pagespeed/nginx/ngx_daemon_html_agent_class_test.cc to pin that the
+# HTML cache's agent class reads the stored verdict and never recomputes it.
 filegroup(
     name = "ngx_webbotauth_handler_src",
     srcs = ["ngx_webbotauth_handler.cc"],
     visibility = ["//visibility:public"],
 )
 
+# The in-place recorder seam is behaviour-free -- the same object, built at
+# the same point with the same arguments, now through the shared gate -- so
+# there is nothing to execute, and linking the port into a test is
+# impossible (nginx is a headers-only library in this build graph).
+# test/pagespeed/nginx/ngx_daemon_seam_test.cc reads these sources to pin
+# the seam; see the test for why.
 filegroup(
     name = "ngx_pagespeed_src",
     srcs = [

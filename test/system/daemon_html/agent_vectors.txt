@@ -333,6 +333,16 @@
 0	bigsurXai/1.0
 0	Google-Extended
 #
+# --- Non-ASCII bytes (case folding is ASCII only; a non-ASCII byte is never a
+# boundary, and never folds into an ASCII letter) ---
+0	KimiBot/1.0
+0	Kangaroo Bot/1.0
+0	GPTBОt/1.2
+0	éGPTBot/1.2
+0	GPTBoté
+3	İ GPTBot/1.2
+3	Mozilla/5.0 (über; GPTBot/1.2)
+
 # --- Glob- and pattern-shaped strings (class 0: never a glob) ---
 0	GPT*
 0	*Bot*

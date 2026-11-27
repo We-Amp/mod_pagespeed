@@ -192,10 +192,11 @@ def main(argv):
 
 
 def self_test():
+    key = "token"  # the agent file's field name
     table = [
-        {"token": "GPTBot", "kind": "training", "operator": "x"},
-        {"token": "ChatGPT Agent", "kind": "fetcher"},
-        {"token": "iaskspider/2.0", "kind": "other"},
+        {key: "GPTBot", "kind": "training", "operator": "x"},
+        {key: "ChatGPT Agent", "kind": "fetcher"},
+        {key: "iaskspider/2.0", "kind": "other"},
     ]
     data = json.dumps(table).encode()
     pin = {
@@ -229,11 +230,11 @@ def self_test():
     assert fails(check, pin, data, inc + 'KNOWN_AGENT("Extra", kOther)\n')
     # Tokens the matcher cannot use are refused.
     for bad in ["", " GPTBot", "GPTBot/", "(x", "a  b", "café", "a\tb", 'a"b']:
-        bad_data = json.dumps([{"token": bad, "kind": "other"}]).encode()
+        bad_data = json.dumps([{key: bad, "kind": "other"}]).encode()
         assert fails(entries, bad_data), bad
-    assert fails(entries, json.dumps([{"token": "x", "kind": "nope"}]).encode())
-    assert fails(entries, json.dumps([{"token": "x", "kind": "other"},
-                                      {"token": "X", "kind": "other"}]).encode())
+    assert fails(entries, json.dumps([{key: "x", "kind": "nope"}]).encode())
+    assert fails(entries, json.dumps([{key: "x", "kind": "other"},
+                                      {key: "X", "kind": "other"}]).encode())
     assert fails(entries, b"[]")
     # The command line, end to end.
     with tempfile.TemporaryDirectory() as d:

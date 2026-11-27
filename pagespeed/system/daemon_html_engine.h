@@ -79,6 +79,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/system/daemon_html_agent_class.h"
 #include "pagespeed/system/daemon_html_purge_observer.h"
 #include "pagespeed/system/serve_host_names.h"
 
@@ -497,6 +498,11 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   // Whether the engine stores and serves now.
   bool serving() const;
   const Config& config() const { return config_; }
+  // The agent class counters, resolved once for this engine's statistics;
+  // the port counts each request's class with them.
+  const DaemonHtmlAgentClassCounters& agent_class_counters() const {
+    return agent_class_counters_;
+  }
 
   void set_test_hooks(TestHooks* hooks) { test_hooks_ = hooks; }
   DaemonHtmlPurgeOracle* oracle() { return &oracle_; }
@@ -564,6 +570,7 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   Deps deps_;
   DaemonHtmlPurgeOracle oracle_;
   std::unique_ptr<Counters> counters_;
+  const DaemonHtmlAgentClassCounters agent_class_counters_;
   std::shared_ptr<DaemonHtmlDecisionLog> log_;
   TestHooks* test_hooks_ = nullptr;
 

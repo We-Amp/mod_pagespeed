@@ -14,7 +14,6 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_unclaimed_ref.h"
-#include "pagespeed/system/daemon_html_agent_class.h"
 #include "pagespeed/system/module_entity_tags.h"
 
 namespace net_instaweb
@@ -41,12 +40,6 @@ public:
 	// The client's conditionals as they arrived (see OnBeginRequest).  This
 	// module object lives for one request.
 	const ClientConditionalStash& client_conditionals() const { return client_conditionals_; }
-
-	// The request's agent class for the HTML cache serve scope, from its
-	// User-Agent (OnBeginRequest; IIS has no signature verifier here).  It
-	// is counted, and kept on the request context, only when that context is
-	// created for a site with an HTML cache engine.
-	const DaemonHtmlAgentClass& agent_class() const { return agent_class_; }
 
 	// Runs after IIS authentication and authorization (see RegisterModule):
 	// everything this module serves for a request is served from here.
@@ -115,7 +108,6 @@ private:
 	// module goes away at the end of the request.
 	UnclaimedRef<IisProcessContext> process_context__;
 	ClientConditionalStash client_conditionals_;
-	DaemonHtmlAgentClass agent_class_;
 	IisHttpModule(const IisHttpModule&) = delete;
 	IisHttpModule& operator=(const IisHttpModule&) = delete;
 };

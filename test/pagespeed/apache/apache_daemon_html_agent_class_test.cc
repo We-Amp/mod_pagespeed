@@ -35,6 +35,7 @@ class ApacheDaemonHtmlAgentClassTest : public testing::Test {
       : thread_system_(Platform::CreateThreadSystem()),
         stats_(thread_system_.get()) {
     RewriteStats::InitStats(&stats_);
+    counters_ = std::make_unique<DaemonHtmlAgentClassCounters>(&stats_);
   }
 
   void SetUp() override {
@@ -57,6 +58,7 @@ class ApacheDaemonHtmlAgentClassTest : public testing::Test {
 
   std::unique_ptr<ThreadSystem> thread_system_;
   SimpleStats stats_;
+  std::unique_ptr<DaemonHtmlAgentClassCounters> counters_;
   request_rec request_;
 };
 
@@ -70,7 +72,7 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, EverySharedVector) {
       apr_table_set(r.headers_in, HttpAttributes::kUserAgent,
                     v.user_agent.c_str());
     }
-    EXPECT_EQ(v.expected_class, ApacheDaemonHtmlAgentClass(&r, true, &stats_))
+    EXPECT_EQ(v.expected_class, ApacheDaemonHtmlAgentClass(&r, counters_.get()))
         << "agent_vectors.txt:" << v.line << ": " << v.user_agent;
     MockApache::CleanupRequest(&r);
   }
@@ -80,25 +82,26 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, EverySharedVector) {
 TEST_F(ApacheDaemonHtmlAgentClassTest, TheFirstUserAgentLine) {
   apr_table_add(request_.headers_in, "User-Agent", "Mozilla/5.0");
   apr_table_add(request_.headers_in, "user-agent", kGptBot);
-  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
 }
 
 TEST_F(ApacheDaemonHtmlAgentClassTest, NoUserAgentIsUnknown) {
-  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC4));
 }
 
-// With the cache off nothing is computed, counted or kept.
+// With the cache off (no engine counters) nothing is computed, counted or
+// kept.
 TEST_F(ApacheDaemonHtmlAgentClassTest, OffKeepsNothing) {
   apr_table_set(request_.headers_in, "User-Agent", kGptBot);
-  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, false, &stats_));
+  EXPECT_EQ(0, ApacheDaemonHtmlAgentClass(&request_, nullptr));
   EXPECT_EQ(0, Classified());
   void* data = nullptr;
   apr_pool_userdata_get(&data, "mod_pagespeed_daemon_html_agent_class",
                         request_.pool);
   EXPECT_EQ(nullptr, data);
   // A later pass with the cache on is the first computation.
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
   EXPECT_EQ(1, Classified());
 }
 
@@ -108,7 +111,7 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, OffKeepsNothing) {
 // own headers would say otherwise.
 TEST_F(ApacheDaemonHtmlAgentClassTest, AnInternalRedirectClassifiesOnce) {
   apr_table_set(request_.headers_in, "User-Agent", kGptBot);
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
 
   request_rec redirected;
   memset(&redirected, 0, sizeof(redirected));
@@ -116,14 +119,14 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, AnInternalRedirectClassifiesOnce) {
   redirected.headers_in = apr_table_make(request_.pool, 4);
   apr_table_set(redirected.headers_in, "User-Agent", "Mozilla/5.0");
   redirected.prev = &request_;
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&redirected, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&redirected, counters_.get()));
 
   request_rec again;
   memset(&again, 0, sizeof(again));
   again.pool = request_.pool;
   again.headers_in = redirected.headers_in;
   again.prev = &redirected;
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&again, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&again, counters_.get()));
 
   EXPECT_EQ(1, Count(kDaemonHtmlAgentClassC3));
   EXPECT_EQ(1, Classified());
@@ -132,7 +135,7 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, AnInternalRedirectClassifiesOnce) {
 // A subrequest has a pool of its own; it reads the main request's class.
 TEST_F(ApacheDaemonHtmlAgentClassTest, ASubrequestReadsTheMainRequests) {
   apr_table_set(request_.headers_in, "User-Agent", kGptBot);
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
   apr_pool_t* sub_pool = nullptr;
   ASSERT_EQ(APR_SUCCESS, apr_pool_create(&sub_pool, request_.pool));
   request_rec sub;
@@ -140,7 +143,7 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, ASubrequestReadsTheMainRequests) {
   sub.pool = sub_pool;
   sub.headers_in = apr_table_make(sub_pool, 4);
   sub.main = &request_;
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&sub, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&sub, counters_.get()));
   EXPECT_EQ(1, Classified());
 }
 
@@ -155,8 +158,8 @@ TEST_F(ApacheDaemonHtmlAgentClassTest, ASubrequestFirstKeepsItForTheMain) {
   sub.pool = sub_pool;
   sub.headers_in = apr_table_make(sub_pool, 4);
   sub.main = &request_;
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&sub, true, &stats_));
-  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, true, &stats_));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&sub, counters_.get()));
+  EXPECT_EQ(3, ApacheDaemonHtmlAgentClass(&request_, counters_.get()));
   EXPECT_EQ(1, Classified());
 }
 
@@ -180,9 +183,8 @@ TEST(ApacheDaemonHtmlAgentClassPinTest, ThePostReadRequestHookComputesIt) {
   const size_t end = src.find("voidmod_pagespeed_register_hooks(", hook);
   const size_t unplugged = src.find("unplugged()", hook);
   const size_t call = src.find(
-      "ApacheDaemonHtmlAgentClass(r,server_context->global_config()->"
-      "daemon_html_cache()!=RewriteOptions::kDaemonHtmlCacheOff,"
-      "server_context->statistics());",
+      "ApacheDaemonHtmlAgentClass(r,ApacheDaemonHtmlAgentClassCounters("
+      "server_context));",
       hook);
   ASSERT_NE(GoogleString::npos, call);
   EXPECT_LT(unplugged, call);

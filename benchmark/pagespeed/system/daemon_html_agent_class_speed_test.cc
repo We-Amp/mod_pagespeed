@@ -44,14 +44,15 @@ const char* const kBrowsers[] = {
 
 constexpr int kRounds = 2000000;
 
-double NsPerRequest(const KnownAgentMatcher* matcher, Statistics* stats,
+double NsPerRequest(const KnownAgentMatcher* matcher,
+                    const DaemonHtmlAgentClassCounters* counters,
                     Variable* pregate, int* sink) {
   const size_t n = sizeof(kBrowsers) / sizeof(kBrowsers[0]);
   const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < kRounds; ++i) {
     const DaemonHtmlAgentClass result = ClassifyDaemonHtmlAgent(
         kBrowsers[i % n], DaemonHtmlAgentSignature::kNone, matcher);
-    CountDaemonHtmlAgentClass(result, stats);
+    CountDaemonHtmlAgentClass(result, counters);
     pregate->Add(1);
     *sink += result.agent_class;
   }
@@ -65,17 +66,19 @@ TEST(DaemonHtmlAgentClassSpeedTest, UnknownPathAgainstAnEmptyClassifier) {
   SimpleStats stats(threads.get());
   RewriteStats::InitStats(&stats);
   Variable* pregate = stats.AddVariable("pregate_stand_in");
+  // Resolved once, as the engine holds them.
+  const DaemonHtmlAgentClassCounters counters(&stats);
   const KnownAgent unused[] = {{"x", 1, KnownAgentKind::kOther}};
   KnownAgentMatcher empty(unused, 0);
   const KnownAgentMatcher* table = &KnownAgentMatcher::Default();
   int sink = 0;
   // Warm both, then alternate so neither run gets the warmer cache.
-  NsPerRequest(&empty, &stats, pregate, &sink);
-  NsPerRequest(table, &stats, pregate, &sink);
+  NsPerRequest(&empty, &counters, pregate, &sink);
+  NsPerRequest(table, &counters, pregate, &sink);
   std::vector<double> empty_ns, table_ns;
   for (int run = 0; run < 5; ++run) {
-    empty_ns.push_back(NsPerRequest(&empty, &stats, pregate, &sink));
-    table_ns.push_back(NsPerRequest(table, &stats, pregate, &sink));
+    empty_ns.push_back(NsPerRequest(&empty, &counters, pregate, &sink));
+    table_ns.push_back(NsPerRequest(table, &counters, pregate, &sink));
   }
   std::sort(empty_ns.begin(), empty_ns.end());
   std::sort(table_ns.begin(), table_ns.end());
