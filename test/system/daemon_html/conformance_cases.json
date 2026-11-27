@@ -68,7 +68,8 @@
     "headers_absent, stored (an original entry for the request URL is present",
     "in the volume after the step, read by exact id), stored_lifetime_s,",
     "sidecar_absent, body_ref,",
-    "body_bytes, length_matches_body, origin_saw, origin_saw_absent,",
+    "body_bytes, body_contains (strings the body must hold),",
+    "length_matches_body, origin_saw, origin_saw_absent,",
     "counter_delta, differential {against: modes, allow_vary_accept}. The request",
     "header value $markdown_etag is replaced by the ETag of the last Markdown 200.",
     "counter_delta spans the whole step, its pre ops included. allow_vary_accept",
@@ -18968,7 +18969,7 @@
               "status": 200,
               "content_type": "text/markdown; charset=utf-8",
               "counter_delta": {"daemon_markdown_served": 1},
-              "body_ref": "page_md",
+              "body_contains": ["Version one."],
               "headers_exact": {
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},

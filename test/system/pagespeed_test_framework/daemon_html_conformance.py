@@ -63,6 +63,7 @@ BACKGROUND_EXPECT_KEYS = frozenset(
         "headers_absent",
         "body_ref",
         "body_bytes",
+        "body_contains",
         "length_matches_body",
     ]
 )
@@ -140,6 +141,7 @@ EXPECT_KEYS = frozenset(
         "sidecar_absent",
         "body_ref",
         "body_bytes",
+        "body_contains",
         "length_matches_body",
         "origin_saw",
         "origin_saw_absent",
@@ -369,8 +371,8 @@ def live_rows(cases: dict) -> List[dict]:
 # The live rows that run today and the ones held back, pinned so a row cannot
 # leave the run unnoticed: marking a row pending, or adding one, changes these
 # in the same change.
-LIVE_ROWS_THAT_RUN = 128
-LIVE_ROWS_PENDING = 99
+LIVE_ROWS_THAT_RUN = 130
+LIVE_ROWS_PENDING = 100
 
 
 def pending_rows(cases: dict) -> List[dict]:
@@ -511,6 +513,11 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
                 errors.append(f"{rid}: {where} headers_exact {name} has no count")
         if "body_ref" in expect and expect["body_ref"] not in bodies:
             errors.append(f"{rid}: {where} body_ref")
+        contains = expect.get("body_contains", [])
+        if not isinstance(contains, list) or not all(
+            isinstance(t, str) and t for t in contains
+        ):
+            errors.append(f"{rid}: {where} body_contains is not a list of strings")
         diff = expect.get("differential")
         if diff is not None:
             unknown(f"{where} differential", diff, {"against", "allow_vary_accept"})
@@ -962,6 +969,9 @@ class RowRunner:
             want = self.bodies[expect["body_ref"]].encode("utf-8")
             if r.body != want:
                 fail(f"body is not {expect['body_ref']} ({len(r.body)} bytes)")
+        for text in expect.get("body_contains", []):
+            if text.encode("utf-8") not in r.body:
+                fail(f"body does not contain {text!r}")
         if "body_bytes" in expect and len(r.body) != expect["body_bytes"]:
             fail(f"{len(r.body)} body bytes, expected {expect['body_bytes']}")
         if expect.get("length_matches_body"):
