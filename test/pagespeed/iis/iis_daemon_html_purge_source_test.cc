@@ -92,8 +92,27 @@ TEST_F(IisDaemonHtmlPurgeSourceTest, AMissingOrMalformedFileAddsNothing) {
   EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
   WriteFile(StrCat("x\n", Integer64ToString(now - 5), " ", kUrl, "\n"));
   EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+  timer_.AdvanceMs(1000);
   // A record in the far future is refused, as the purge context refuses it.
   WriteFile(StrCat("-1\n", Integer64ToString(now + 3600 * 1000), " ", kUrl, "\n"));
+  EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+}
+
+TEST_F(IisDaemonHtmlPurgeSourceTest, AFailedReadKeepsTheViewAndIsRetried) {
+  const int64 now = timer_.NowMs();
+  WriteFile(StrCat("-1\n", Integer64ToString(now - 5), " ", kUrl, "\n"));
+  EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+  // A torn or unparseable file, then none at all: the purge stays known.
+  WriteFile("x\n");
+  EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+  ASSERT_TRUE(file_system_.RemoveFile(kFile, &handler_));
+  timer_.AdvanceMs(1000);
+  EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
+  // The next good file is read at the next decision, unchanged size and
+  // second included.
+  const GoogleString other = "https://www.example.test/othe";
+  WriteFile(StrCat("-1\n", Integer64ToString(now - 5), " ", other, "\n"));
+  EXPECT_FALSE(source_->IsUrlValidIgnoringGlobal(other, now - 10));
   EXPECT_TRUE(source_->IsUrlValidIgnoringGlobal(kUrl, now - 10));
 }
 

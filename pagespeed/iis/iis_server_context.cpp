@@ -212,15 +212,28 @@ namespace net_instaweb {
 		statistics()->GetVariable(kDaemonHtmlCommitsFinished)->Add(1);
 	}
 
-	void IisServerContext::TraceDaemonHtml(const char* event,
-	                                       const GoogleString& url,
-	                                       const GoogleString& detail) {
+	namespace {
+
+	const std::string& DaemonHtmlTraceFile() {
 		static const std::string trace_file = [] {
 			char buffer[MAX_PATH] = {0};
 			const DWORD n = GetEnvironmentVariableA(
 				"PAGESPEED_TEST_HTML_TRACE_FILE", buffer, MAX_PATH);
 			return (n > 0 && n < MAX_PATH) ? std::string(buffer, n) : std::string();
 		}();
+		return trace_file;
+	}
+
+	}  // namespace
+
+	bool IisServerContext::daemon_html_trace_on() {
+		return !DaemonHtmlTraceFile().empty();
+	}
+
+	void IisServerContext::TraceDaemonHtml(const char* event,
+	                                       const GoogleString& url,
+	                                       const GoogleString& detail) {
+		const std::string& trace_file = DaemonHtmlTraceFile();
 		if (trace_file.empty()) return;
 		static std::atomic<bool> announced(false);
 		if (!announced.exchange(true)) {

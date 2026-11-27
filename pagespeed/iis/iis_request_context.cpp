@@ -74,11 +74,14 @@ void IisInnerRequestContext::CleanupStoredContext()
 		if (daemon_html_commit_started_) {
 			HoldDaemonHtmlCommitForTest();
 		}
-		server_context_->TraceDaemonHtml("commit-begin", daemon_html_trace_url_, "");
+		const bool trace = IisServerContext::daemon_html_trace_on();
+		if (trace) {
+			server_context_->TraceDaemonHtml("commit-begin", daemon_html_trace_url_, "");
+		}
 		if (daemon_html_capture_->Finish()) {
 			server_context_->NoteDaemonHtmlFinalViewMissing();
 		}
-		{
+		if (trace) {
 			Statistics* stats = server_context_->statistics();
 			server_context_->TraceDaemonHtml("commit-end", daemon_html_trace_url_,
 				StrCat("stored=", Integer64ToString(stats->GetVariable("daemon_html_stored")->Get()),

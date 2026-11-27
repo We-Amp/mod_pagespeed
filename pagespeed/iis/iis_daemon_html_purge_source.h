@@ -13,7 +13,8 @@
 // modification time or size changed and at least once a second, and holds
 // an entry purged when either view says so.  It never replaces the server's
 // own purge set, so a purge this process made and has not written to the
-// file yet is still seen.
+// file yet is still seen; and a read that fails, or finds the file missing
+// or torn, keeps the previous view and is tried again at the next decision.
 //
 // Free of the IIS headers; thread-safe.
 

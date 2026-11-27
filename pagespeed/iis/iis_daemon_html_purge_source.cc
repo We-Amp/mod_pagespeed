@@ -45,18 +45,17 @@ void IisDaemonHtmlPurgeSource::Refresh() const {
       now_ms - read_ms_ < Timer::kSecondMs) {
     return;
   }
-  mtime_s_ = mtime_s;
-  size_ = size;
-  read_ms_ = now_ms;
   // As large as the file can be (the purge context bounds it).
   PurgeSet fresh(kMaxPurgeBytes);
   GoogleString buffer;
+  bool parsed = false;
   if (mtime_s >= 0 &&
       file_system_->ReadFile(purge_file_.c_str(), &buffer, &handler)) {
     StringPieceVector lines;
     SplitStringPieceToVector(buffer, "\n", &lines, true);
     int64 timestamp_ms = 0;
     if (!lines.empty() && ValidTimestamp(lines[0], now_ms, &timestamp_ms)) {
+      parsed = true;
       fresh.UpdateGlobalInvalidationTimestampMs(timestamp_ms);
       for (size_t i = 1; i < lines.size(); ++i) {
         const StringPiece line = lines[i];
@@ -69,6 +68,14 @@ void IisDaemonHtmlPurgeSource::Refresh() const {
       }
     }
   }
+  if (!parsed) {
+    // A missing, unreadable or torn file says nothing: the last view stays,
+    // and the next decision reads again.
+    return;
+  }
+  mtime_s_ = mtime_s;
+  size_ = size;
+  read_ms_ = now_ms;
   from_file_.Swap(&fresh);
 }
 

@@ -133,6 +133,8 @@ namespace net_instaweb {
 		// production; a no-op then.
 		void TraceDaemonHtml(const char* event, const GoogleString& url,
 		                     const GoogleString& detail);
+		// Whether that trace is on: callers build its strings only then.
+		static bool daemon_html_trace_on();
 
 		// A recorded HTML response got no final header view: the
 		// final-view module entry did not run for this site.  Logged once
