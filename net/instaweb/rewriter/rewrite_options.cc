@@ -3372,7 +3372,13 @@ RewriteOptions::WriteableJavascriptLibraryIdentification() {
 void RewriteOptions::Merge(const RewriteOptions& src) {
   DCHECK(!frozen_);
 #ifndef NDEBUG
-  CHECK(src.MergeOK());  // DCHECK outside of the #ifndef does not link.
+  {
+    // UpdateCachePurgeSet unfreezes src, marks it modified on its own thread
+    // and freezes it again, all under this lock; read src's state outside
+    // that, or a merge on another thread sees it half way.
+    ThreadSystem::ScopedReader read_lock(src.cache_purge_mutex_.get());
+    CHECK(src.MergeOK());  // DCHECK outside of the #ifndef does not link.
+  }
 #endif
 
   bool modify = src.modified_;
@@ -3570,7 +3576,11 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
 void RewriteOptions::MergeOnlyProcessScopeOptions(const RewriteOptions& src) {
   DCHECK(!frozen_);
 #ifndef NDEBUG  // MergeOK is only around in CHECK-enabled builds.
-  CHECK(src.MergeOK());
+  {
+    // As in Merge: src's state is read under the lock its updates hold.
+    ThreadSystem::ScopedReader read_lock(src.cache_purge_mutex_.get());
+    CHECK(src.MergeOK());
+  }
 #endif
 
   DCHECK_EQ(all_options_.size(), src.all_options_.size());

@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -5165,6 +5166,55 @@ TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsProcessScope) {
   ASSERT_NE(nullptr, property);
   EXPECT_EQ(RewriteOptions::kProcessScopeStrict, property->scope());
   EXPECT_FALSE(options_.expose_version_in_headers());
+}
+
+namespace {
+
+// Updates the options' purge set over and over, as a server's purge poll does
+// on whichever thread runs it.
+class PurgeSetUpdater : public ThreadSystem::Thread {
+ public:
+  PurgeSetUpdater(ThreadSystem* threads, RewriteOptions* options, int updates)
+      : Thread(threads, "purge_set_updater", ThreadSystem::kJoinable),
+        options_(options),
+        updates_(updates) {}
+
+  void Run() override {
+    for (int i = 0; i < updates_; ++i) {
+      CopyOnWrite<PurgeSet> purges(options_->purge_set());
+      purges.MakeWriteable()->Put(StrCat("http://example.com/", i), 1000 + i);
+      options_->UpdateCachePurgeSet(purges);
+    }
+  }
+
+ private:
+  RewriteOptions* options_;
+  const int updates_;
+};
+
+}  // namespace
+
+// A request thread clones the server's options while another thread updates
+// their purge set. The update unfreezes, modifies and refreezes the options
+// under the purge lock; a clone must not see them in between (before, a
+// CHECK-enabled build aborted in Merge).
+TEST_F(RewriteOptionsTest, CloneWhileAnotherThreadUpdatesThePurgeSet) {
+  ThreadSystem* threads = thread_system();
+  RewriteOptions server(threads);
+  server.set_cache_invalidation_timestamp_mutex(threads->NewRWLock());
+  server.ComputeSignature();
+
+  const int kUpdates = 3000;
+  PurgeSetUpdater updater(threads, &server, kUpdates);
+  ASSERT_TRUE(updater.Start());
+  for (int i = 0; i < 3 * kUpdates; ++i) {
+    std::unique_ptr<RewriteOptions> request(server.Clone());
+    EXPECT_TRUE(request != nullptr);
+  }
+  updater.Join();
+  std::unique_ptr<RewriteOptions> last(server.Clone());
+  EXPECT_FALSE(last->IsUrlCacheValid(
+      StrCat("http://example.com/", kUpdates - 1), 1000, true));
 }
 
 }  // namespace net_instaweb
