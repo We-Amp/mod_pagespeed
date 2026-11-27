@@ -370,7 +370,7 @@ def live_rows(cases: dict) -> List[dict]:
 # leave the run unnoticed: marking a row pending, or adding one, changes these
 # in the same change.
 LIVE_ROWS_THAT_RUN = 128
-LIVE_ROWS_PENDING = 96
+LIVE_ROWS_PENDING = 99
 
 
 def pending_rows(cases: dict) -> List[dict]:

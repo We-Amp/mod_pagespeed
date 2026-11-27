@@ -1808,7 +1808,7 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
   EXPECT_EQ(194, kRegisteredRows);
-  EXPECT_EQ(223, pending_rows);
+  EXPECT_EQ(229, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }
