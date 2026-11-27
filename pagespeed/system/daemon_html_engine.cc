@@ -961,7 +961,7 @@ void DaemonHtmlEngine::NoteServe15Unavailable() {
   }
   // serve-variants with the credentialed policy at its defaults runs exactly
   // as it did before 1.15: nothing the operator set goes unapplied.
-  if (config_.mode == DaemonHtmlMode::kServeVariants &&
+  if (config_.mode != DaemonHtmlMode::kServeCachedHtml &&
       config_.credentialed == kPsHtmlCredentialedAnonymousOnly &&
       config_.ignore_cookies && config_.ignore_cookie.empty()) {
     return;
