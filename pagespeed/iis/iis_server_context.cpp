@@ -321,6 +321,29 @@ namespace net_instaweb {
 		return daemon_html_engine_.get();
 	}
 
+	void IisServerContext::RefreshDaemonHtmlPurgeSet() {
+		if (cache_path() == nullptr) return;
+		WIN32_FILE_ATTRIBUTE_DATA data;
+		if (!GetFileAttributesExA(cache_path()->purge_file().c_str(),
+				GetFileExInfoStandard, &data)) {
+			return;  // No purge was ever written.
+		}
+		const uint64_t mtime =
+			(static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+			data.ftLastWriteTime.dwLowDateTime;
+		const uint64_t size =
+			(static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+		if (daemon_html_purge_file_mtime_.load() == mtime &&
+			daemon_html_purge_file_size_.load() == size) {
+			return;
+		}
+		// Recorded before the read: a purge written during it changes the
+		// file again and is read by the next decision.
+		daemon_html_purge_file_mtime_.store(mtime);
+		daemon_html_purge_file_size_.store(size);
+		cache_path()->RefreshPurgeSetNow();
+	}
+
 	void IisServerContext::MaybeTickDaemonHtmlEngine() {
 		DaemonHtmlEngine* engine = daemon_html_engine_if_built();
 		if (engine == nullptr ||

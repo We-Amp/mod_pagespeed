@@ -296,6 +296,12 @@ void SystemCachePath::FlushCacheIfNecessary() {
   }
 }
 
+void SystemCachePath::RefreshPurgeSetNow() {
+  if (!unplugged_) {
+    purge_context_->PollFileSystemNow();
+  }
+}
+
 void SystemCachePath::AddServerContext(SystemServerContext* server_context) {
   ScopedMutex lock(mutex_.get());
   server_context_set_.insert(server_context);

@@ -1068,6 +1068,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		BuildIisDaemonHtmlFacts(http_context, inner, options, /*at_store=*/false, &facts);
 		IisDaemonHtmlServePort port(http_context, inner);
 		const GoogleString trace_url = StrCat(facts.scheme, "://", facts.host, facts.path);
+		// Every URL purge written so far, another worker process's included.
+		server_context->RefreshDaemonHtmlPurgeSet();
 		server_context->TraceDaemonHtml("serve-begin", trace_url, "");
 		const DaemonHtmlServeResult result = engine->Serve(facts, &port);
 		server_context->TraceDaemonHtml("serve-end", trace_url,
