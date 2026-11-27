@@ -98,34 +98,14 @@ struct HtmlServeInjection {
   PsHtmlServeVerdict verdict = {};
 
   // ps_html_serve_reason_name: index = reason; nullptr past the end.
-  std::vector<const char*> reason_names = {"fresh",
-                                           "mode",
-                                           "auth_request",
-                                           "cookie_request",
-                                           "client_no_cache",
-                                           "needs_validation",
-                                           "stale",
-                                           "headers_not_reproducible",
-                                           "sidecar_missing",
-                                           "purged",
-                                           "absent",
-                                           "binding_stale",
-                                           "parent_stale",
-                                           "method",
-                                           "range",
-                                           "cors",
-                                           "no_transform",
-                                           "withheld",
-                                           "skew",
-                                           // 1.15
-                                           "scope",
-                                           "capped",
-                                           "conditional",
-                                           "credentialed",
-                                           "legacy_entry",
-                                           "policy_mismatch",
-                                           "request_header",
-                                           "path"};
+  std::vector<const char*> reason_names = {
+      "fresh", "mode", "auth_request", "cookie_request", "client_no_cache",
+      "needs_validation", "stale", "headers_not_reproducible",
+      "sidecar_missing", "purged", "absent", "binding_stale", "parent_stale",
+      "method", "range", "cors", "no_transform", "withheld", "skew",
+      // 1.15
+      "scope", "capped", "conditional", "credentialed", "legacy_entry",
+      "policy_mismatch", "request_header", "path"};
 
   // ps_html_store_write_params: the return code, and on success the insert
   // time it stamps (0 = capture_start_ms floored to seconds).
@@ -165,11 +145,11 @@ struct HtmlServeInjection {
 
   // The 1.15 request policy: the return code and the answer of each.
   int guard_rc = 0;
-  PsHtmlRequestGuard guard = {sizeof(PsHtmlRequestGuard), kPsHtmlGuardNone,
-                              -1, 0};
+  PsHtmlRequestGuard guard = {sizeof(PsHtmlRequestGuard), kPsHtmlGuardNone, -1,
+                              0};
   int cookies_rc = 0;
-  PsHtmlCookieClass cookies = {sizeof(PsHtmlCookieClass), kPsHtmlCookiesNone,
-                               0, {0, 0, 0}, 0};
+  PsHtmlCookieClass cookies = {
+      sizeof(PsHtmlCookieClass), kPsHtmlCookiesNone, 0, {0, 0, 0}, 0};
   int ignore_cookie_guard = 1;
   int ignore_cookie_warning = 0;
   int policy_stamp_rc = 0;
@@ -394,7 +374,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
                       size_t addition_count, uint64_t* out) const override {
     std::vector<GoogleString> args = {Num(credentialed), Num(ignore_builtin),
                                       Num(list_version)};
-    for (size_t i = 0; i < addition_count; ++i) args.push_back(Str(additions[i]));
+    for (size_t i = 0; i < addition_count; ++i)
+      args.push_back(Str(additions[i]));
     Record("ps_html_policy_stamp", args);
     if (!HasHtmlServe15Set() || out == nullptr) return -1;
     if (injection_.policy_stamp_rc != 0) return injection_.policy_stamp_rc;
@@ -411,7 +392,8 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   int HeaderBlockPolicyStamp(const void* block, uint64_t* out) const override {
-    Record("ps_header_block_policy_stamp", {block == nullptr ? "null" : "block"});
+    Record("ps_header_block_policy_stamp",
+           {block == nullptr ? "null" : "block"});
     if (!HasHtmlServe15Set() || block == nullptr || out == nullptr) return -1;
     if (injection_.block_stamp_rc < 0) return injection_.block_stamp_rc;
     *out = injection_.block_stamp;

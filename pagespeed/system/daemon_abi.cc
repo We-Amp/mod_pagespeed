@@ -589,10 +589,9 @@ class LibraryDaemonAbi : public DaemonAbi {
                           size_t ignorable_capacity,
                           PsHtmlCookieClass* out) const override {
     if (!HasHtmlServe15Set()) return -1;
-    return html_serve15_.classify_cookies(lines, line_count, ignore_builtin,
-                                          additions, addition_count,
-                                          ignorable_values, ignorable_capacity,
-                                          out);
+    return html_serve15_.classify_cookies(
+        lines, line_count, ignore_builtin, additions, addition_count,
+        ignorable_values, ignorable_capacity, out);
   }
 
   int HtmlIgnoreCookieGuard(const char* addition,
@@ -1169,12 +1168,12 @@ class LibraryDaemonAbi : public DaemonAbi {
   void BindHtmlServe15Set() {
     const int minor = version_minor_();
     if (minor < kHtmlServe15SetMinor) {
-      html_serve15_unavailable_ = StrCat(
-          "the optimizer library reports C API ",
-          IntegerToString(version_major_()), ".", IntegerToString(minor),
-          "; serving cached HTML and the credentialed policy need ",
-          IntegerToString(kRequiredAbiMajor), ".",
-          IntegerToString(kHtmlServe15SetMinor), " or a later minor");
+      html_serve15_unavailable_ =
+          StrCat("the optimizer library reports C API ",
+                 IntegerToString(version_major_()), ".", IntegerToString(minor),
+                 "; serving cached HTML and the credentialed policy need ",
+                 IntegerToString(kRequiredAbiMajor), ".",
+                 IntegerToString(kHtmlServe15SetMinor), " or a later minor");
       return;
     }
     HtmlServe15SetFns fns;

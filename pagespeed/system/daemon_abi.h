@@ -908,11 +908,11 @@ struct PsHtmlServeRequest {
   uint32_t request_flags;
   uint32_t now_seconds;
   // 1.15.
-  int serve_scope;                // kPsHtmlServeScope*
-  int agent_class;                // 0 unknown, 1 to kPsHtmlAgentClassMax
-  uint32_t html_max_lifetime_s;   // 0 = no cap; only shortens the lifetime
-  uint32_t reserved;              // zero
-  uint64_t policy_stamp;          // 0 = none
+  int serve_scope;               // kPsHtmlServeScope*
+  int agent_class;               // 0 unknown, 1 to kPsHtmlAgentClassMax
+  uint32_t html_max_lifetime_s;  // 0 = no cap; only shortens the lifetime
+  uint32_t reserved;             // zero
+  uint64_t policy_stamp;         // 0 = none
 };
 
 struct PsHtmlStoredFacts {

@@ -238,9 +238,9 @@ class StoreAbi : public InjectedVerdictDaemonAbi {
                         uint32_t request_flags, int, const char* const*,
                         const char* const*, size_t, uint64_t, int, const char*,
                         size_t, uint64_t, uint32_t, int* out_reason,
-                        uint32_t* out_lifetime_s,
-                        uint32_t* out_flags, uint16_t* out_cc_flags,
-                        int* out_sidecar, char* detail, size_t capacity,
+                        uint32_t* out_lifetime_s, uint32_t* out_flags,
+                        uint16_t* out_cc_flags, int* out_sidecar, char* detail,
+                        size_t capacity,
                         size_t* out_detail_len) const override {
     store_modes.push_back(mode);
     store_request_flags.push_back(request_flags);
@@ -861,8 +861,9 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
   abi_.Queue(kPsHtmlStoreActionStore, "none");
   abi_.Queue(kPsHtmlStoreActionStore, "none");
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
-  EXPECT_EQ(1, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
-                   ->Get());
+  EXPECT_EQ(
+      1,
+      stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   ASSERT_FALSE(abi_.store_modes.empty());
   EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.store_modes[0]);
   EXPECT_EQ(IntegerToString(static_cast<int>(kPsSidecarWriteParamsSize13)),
@@ -874,8 +875,9 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlRunsAsServeVariantsBelowFifteen) {
   // Once per state: the next response counts, and logs nothing more.
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
   engine->OnPurgePollTick();
-  EXPECT_EQ(2, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
-                   ->Get());
+  EXPECT_EQ(
+      2,
+      stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
 
   // A library that gains the set (a restart of the optimizer) is read on the
@@ -910,10 +912,10 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
   EXPECT_EQ(sizeof(PsHtmlServeRequest), r.struct_size);
   EXPECT_EQ(kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestConditional |
                 kPsHtmlServeRequestExplicitPublic,
-            r.request_flags & (kPsHtmlServeRequestFreshOnly |
-                               kPsHtmlServeRequestConditional |
-                               kPsHtmlServeRequestExplicitPublic |
-                               kPsHtmlServeRequestHtmlFallback));
+            r.request_flags &
+                (kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestConditional |
+                 kPsHtmlServeRequestExplicitPublic |
+                 kPsHtmlServeRequestHtmlFallback));
   EXPECT_EQ(kPsHtmlServeScopeAll, r.serve_scope);
   EXPECT_EQ(3, r.agent_class);
   EXPECT_EQ(120u, r.html_max_lifetime_s);
@@ -941,12 +943,13 @@ TEST_F(DaemonHtmlEngineTest, ServeCachedHtmlSendsTheFifteenRequest) {
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
   ASSERT_FALSE(abi_.store_modes.empty());
   EXPECT_EQ(kPsHtmlCacheServeCachedHtml, abi_.store_modes[0]);
-  EXPECT_NE(0u, abi_.store_request_flags[0] &
-                    kPsHtmlStoreRequestExplicitPublic);
+  EXPECT_NE(0u,
+            abi_.store_request_flags[0] & kPsHtmlStoreRequestExplicitPublic);
   EXPECT_EQ(IntegerToString(static_cast<int>(sizeof(PsSidecarWriteParams))),
             SidecarWriteSize(abi_));
-  EXPECT_EQ(0, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
-                   ->Get());
+  EXPECT_EQ(
+      0,
+      stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
   EXPECT_EQ(0, handler_.MessagesOfType(kWarning));
 }
 
@@ -973,14 +976,15 @@ TEST_F(DaemonHtmlEngineTest, ServeVariantsOnAFifteenLibrarySendsModeTwo) {
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
   ASSERT_FALSE(abi_.store_modes.empty());
   EXPECT_EQ(kPsHtmlCacheServeVariants, abi_.store_modes[0]);
-  EXPECT_EQ(0u, abi_.store_request_flags[0] &
-                    kPsHtmlStoreRequestExplicitPublic);
+  EXPECT_EQ(0u,
+            abi_.store_request_flags[0] & kPsHtmlStoreRequestExplicitPublic);
 }
 
 // serve-variants on a 1.14 library keeps the earlier cookie rule.  That is
 // worth a warning only when the operator set a credentialed-policy setting
 // that then has no effect.
-TEST_F(DaemonHtmlEngineTest, ServeVariantsBelowFifteenWarnsOnlyForUnappliedPolicy) {
+TEST_F(DaemonHtmlEngineTest,
+       ServeVariantsBelowFifteenWarnsOnlyForUnappliedPolicy) {
   {
     std::unique_ptr<DaemonHtmlEngine> engine = NewEngine();
     InlinePort port;
@@ -994,15 +998,15 @@ TEST_F(DaemonHtmlEngineTest, ServeVariantsBelowFifteenWarnsOnlyForUnappliedPolic
   Capture(engine.get(), &port, kOrigin, kOrigin, MarkdownRequest());
   engine->OnPurgePollTick();
   EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
-  EXPECT_NE(GoogleString::npos,
-            Logged().find("DaemonHtmlCacheCredentialed"));
+  EXPECT_NE(GoogleString::npos, Logged().find("DaemonHtmlCacheCredentialed"));
   // The 1.14 library is never told explicit-public.
   ASSERT_FALSE(abi_.store_request_flags.empty());
   for (uint32_t flags : abi_.store_request_flags) {
     EXPECT_EQ(0u, flags & kPsHtmlStoreRequestExplicitPublic);
   }
-  EXPECT_EQ(0, stats_.GetVariable("daemon_html_serve_cached_html_unavailable")
-                   ->Get());
+  EXPECT_EQ(
+      0,
+      stats_.GetVariable("daemon_html_serve_cached_html_unavailable")->Get());
 }
 
 TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {
@@ -1012,9 +1016,8 @@ TEST(DaemonHtmlModeTest, EveryOptionModeMapsAndOnlyLaterModesServe) {
             DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheReportOnly));
   EXPECT_EQ(DaemonHtmlMode::kServeVariants,
             DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheServeVariants));
-  EXPECT_EQ(
-      DaemonHtmlMode::kServeCachedHtml,
-      DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheServeCachedHtml));
+  EXPECT_EQ(DaemonHtmlMode::kServeCachedHtml,
+            DaemonHtmlModeFor(RewriteOptions::kDaemonHtmlCacheServeCachedHtml));
   EXPECT_FALSE(DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheOff));
   EXPECT_FALSE(
       DaemonHtmlCacheServes(RewriteOptions::kDaemonHtmlCacheReportOnly));
@@ -1048,8 +1051,7 @@ TEST(DaemonHtmlModeTest, TheServeSettingsReachTheEngineConfig) {
              {"DaemonHtmlCacheIgnoreCookie", "_my_ab"},
              {"DaemonHtmlCacheIgnoreCookie", "_my_pref*"}}) {
       ASSERT_EQ(RewriteOptions::kOptionOk,
-                options.ParseAndSetOptionFromName1(name, value, &msg,
-                                                   &handler))
+                options.ParseAndSetOptionFromName1(name, value, &msg, &handler))
           << name;
     }
     FillDaemonHtmlServeSettings(options, &config);

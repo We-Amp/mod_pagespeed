@@ -381,10 +381,9 @@ class RecordingDaemonAbi : public DaemonAbi {
                           size_t addition_count, PsHtmlCookieSpan* values,
                           size_t capacity,
                           PsHtmlCookieClass* out) const override {
-    return Count(), inner_->HtmlClassifyCookies(lines, line_count,
-                                                ignore_builtin, additions,
-                                                addition_count, values,
-                                                capacity, out);
+    return Count(), inner_->HtmlClassifyCookies(
+                        lines, line_count, ignore_builtin, additions,
+                        addition_count, values, capacity, out);
   }
   int HtmlIgnoreCookieGuard(const char* addition,
                             int* out_warning) const override {
@@ -393,9 +392,9 @@ class RecordingDaemonAbi : public DaemonAbi {
   int HtmlPolicyStamp(int credentialed, int ignore_builtin,
                       uint32_t list_version, const char* const* additions,
                       size_t addition_count, uint64_t* out) const override {
-    return Count(), inner_->HtmlPolicyStamp(credentialed, ignore_builtin,
-                                            list_version, additions,
-                                            addition_count, out);
+    return Count(),
+           inner_->HtmlPolicyStamp(credentialed, ignore_builtin, list_version,
+                                   additions, addition_count, out);
   }
   int HtmlUnsafeMethodInvalidates(const char* method,
                                   int status) const override {
@@ -408,9 +407,9 @@ class RecordingDaemonAbi : public DaemonAbi {
                                  const void* withheld, int sidecar_present,
                                  const void* block,
                                  PsHtmlStoredFacts* out) const override {
-    return Count(), inner_->HtmlStoredFactsFromReadsEx(
-                        original, markdown, withheld, sidecar_present, block,
-                        out);
+    return Count(),
+           inner_->HtmlStoredFactsFromReadsEx(original, markdown, withheld,
+                                              sidecar_present, block, out);
   }
 
  private:

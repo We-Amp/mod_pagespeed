@@ -937,10 +937,9 @@ void DaemonHtmlEngine::ReadServe15Condition(bool log_change) {
   const DaemonAbi* abi = deps_.substrate.abi;
   const bool set15 = abi != nullptr && abi->HasHtmlServe15Set();
   const GoogleString reason =
-      set15 ? GoogleString()
-      : abi == nullptr
-          ? GoogleString("no optimizer library is loaded")
-          : abi->HtmlServe15SetUnavailableReason();
+      set15            ? GoogleString()
+      : abi == nullptr ? GoogleString("no optimizer library is loaded")
+                       : abi->HtmlServe15SetUnavailableReason();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (set15 != set15_bound_ || reason != set15_reason_) {
@@ -1894,8 +1893,7 @@ DaemonHtmlServeResult DaemonHtmlEngine::Serve(
   if (facts.has_range) request_flags |= kPsHtmlServeRequestHasRange;
   if (facts.has_if_range) request_flags |= kPsHtmlServeRequestHasIfRange;
   if (facts.has_origin) request_flags |= kPsHtmlServeRequestHasOrigin;
-  const bool cached_html =
-      effective_mode() == DaemonHtmlMode::kServeCachedHtml;
+  const bool cached_html = effective_mode() == DaemonHtmlMode::kServeCachedHtml;
   if (abi->HasHtmlServe15Set()) {
     if (config_.credentialed == kPsHtmlCredentialedExplicitPublic) {
       request_flags |= kPsHtmlServeRequestExplicitPublic;
@@ -2161,7 +2159,8 @@ void FillDaemonHtmlServeSettings(const RewriteOptions& options,
                                 RewriteOptions::kDaemonHtmlCacheServeScopeAll
                             ? kPsHtmlServeScopeAll
                             : kPsHtmlServeScopeAgents;
-  config->max_age_s = static_cast<uint32_t>(options.daemon_html_cache_max_age_s());
+  config->max_age_s =
+      static_cast<uint32_t>(options.daemon_html_cache_max_age_s());
   config->credentialed =
       options.daemon_html_cache_credentialed() ==
               RewriteOptions::kDaemonHtmlCacheCredentialedExplicitPublic
@@ -2172,7 +2171,8 @@ void FillDaemonHtmlServeSettings(const RewriteOptions& options,
   StringPieceVector names;
   SplitStringPieceToVector(options.daemon_html_cache_ignore_cookie(), " ",
                            &names, true);
-  for (StringPiece name : names) config->ignore_cookie.push_back(name.as_string());
+  for (StringPiece name : names)
+    config->ignore_cookie.push_back(name.as_string());
 }
 
 std::unique_ptr<DaemonHtmlEngine> NewDaemonHtmlEngineForPort(

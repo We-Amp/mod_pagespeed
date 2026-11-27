@@ -210,12 +210,11 @@ TEST_F(DaemonAbiTest, TheFifteenConstantsAreThePublishedValues) {
   EXPECT_EQ(3, kPsHtmlCacheServeCachedHtml);
   // The new request bits do not overlap the 1.14 ones, nor the new facts
   // bits the 1.14 facts.
-  EXPECT_EQ(0u, (kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestHtmlFallback |
-                 kPsHtmlServeRequestConditional |
-                 kPsHtmlServeRequestExplicitPublic) &
-                    63u);
-  EXPECT_EQ(0u,
-            (kPsHtmlFactsStoreV2 | kPsHtmlFactsAnonymousRecorded) & 0xFFFu);
+  EXPECT_EQ(
+      0u, (kPsHtmlServeRequestFreshOnly | kPsHtmlServeRequestHtmlFallback |
+           kPsHtmlServeRequestConditional | kPsHtmlServeRequestExplicitPublic) &
+              63u);
+  EXPECT_EQ(0u, (kPsHtmlFactsStoreV2 | kPsHtmlFactsAnonymousRecorded) & 0xFFFu);
 }
 
 TEST_F(DaemonAbiTest, TheServeSetConstantsAreThePublishedValues) {
@@ -315,8 +314,8 @@ class HtmlServeSetTest : public DaemonAbiTest {
     guard.reason = 77;
     const char* names[] = {"X-Forwarded-Host"};
     const char* values[] = {"evil.example"};
-    EXPECT_EQ(-1, abi.HtmlRequestGuard("/a;b", names, values, 1, "http",
-                                       &guard));
+    EXPECT_EQ(-1,
+              abi.HtmlRequestGuard("/a;b", names, values, 1, "http", &guard));
     EXPECT_EQ(77, guard.reason);
     const char* lines[] = {"sid=1"};
     PsHtmlCookieClass cookies = {};
@@ -587,8 +586,8 @@ TEST_F(HtmlServe15SetTest, TheRequestGuardReachesTheLibrary) {
   const char* values[] = {"text/html", "http", "evil.example"};
   PsHtmlRequestGuard guard = {};
   guard.struct_size = sizeof(guard);
-  ASSERT_EQ(0, abi->HtmlRequestGuard("/a;b?c", names, values, 3, "http",
-                                     &guard));
+  ASSERT_EQ(0,
+            abi->HtmlRequestGuard("/a;b?c", names, values, 3, "http", &guard));
   EXPECT_EQ(kPsHtmlGuardPath, guard.reason);
   EXPECT_EQ(-1, guard.header_index);
   ASSERT_EQ(0,
@@ -596,8 +595,7 @@ TEST_F(HtmlServe15SetTest, TheRequestGuardReachesTheLibrary) {
   EXPECT_EQ(kPsHtmlGuardRequestHeader, guard.reason);
   EXPECT_EQ(2, guard.header_index);
   EXPECT_EQ(0, guard.xfp);
-  ASSERT_EQ(0,
-            abi->HtmlRequestGuard("/a", names, values, 2, "https", &guard));
+  ASSERT_EQ(0, abi->HtmlRequestGuard("/a", names, values, 2, "https", &guard));
   EXPECT_EQ(kPsHtmlGuardRequestHeader, guard.reason);
   EXPECT_EQ(1, guard.header_index);
   EXPECT_EQ(1, guard.xfp);
@@ -606,8 +604,8 @@ TEST_F(HtmlServe15SetTest, TheRequestGuardReachesTheLibrary) {
   // The library's argument checks stand: a short struct, a NULL path.
   PsHtmlRequestGuard short_guard = {};
   short_guard.struct_size = 8;
-  EXPECT_EQ(-1, abi->HtmlRequestGuard("/a", names, values, 2, "http",
-                                      &short_guard));
+  EXPECT_EQ(
+      -1, abi->HtmlRequestGuard("/a", names, values, 2, "http", &short_guard));
   EXPECT_EQ(-1,
             abi->HtmlRequestGuard(nullptr, names, values, 2, "http", &guard));
 }
@@ -644,12 +642,12 @@ TEST_F(HtmlServe15SetTest, TheRequestPolicyCallsReachTheLibrary) {
   uint64_t a = 0;
   uint64_t b = 0;
   const char* additions[] = {"_my_ab"};
-  ASSERT_EQ(0, abi->HtmlPolicyStamp(kPsHtmlCredentialedAnonymousOnly, 1,
-                                    kPsHtmlCookieListVersion, additions, 1,
-                                    &a));
-  ASSERT_EQ(0, abi->HtmlPolicyStamp(kPsHtmlCredentialedExplicitPublic, 1,
-                                    kPsHtmlCookieListVersion, additions, 1,
-                                    &b));
+  ASSERT_EQ(0,
+            abi->HtmlPolicyStamp(kPsHtmlCredentialedAnonymousOnly, 1,
+                                 kPsHtmlCookieListVersion, additions, 1, &a));
+  ASSERT_EQ(0,
+            abi->HtmlPolicyStamp(kPsHtmlCredentialedExplicitPublic, 1,
+                                 kPsHtmlCookieListVersion, additions, 1, &b));
   EXPECT_NE(0u, a);
   EXPECT_NE(a, b);
   EXPECT_EQ(-1, abi->HtmlPolicyStamp(7, 1, 1, nullptr, 0, &a));
@@ -727,7 +725,8 @@ TEST_F(HtmlServe15SetTest, AFourteenLibraryIsSentOnlyTheFourteenShape) {
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_TRUE(abi->HasHtmlServeSet());
   const GoogleString reason15 = abi->HtmlServe15SetUnavailableReason();
-  EXPECT_NE(GoogleString::npos, reason15.find("reports C API 1.14")) << reason15;
+  EXPECT_NE(GoogleString::npos, reason15.find("reports C API 1.14"))
+      << reason15;
   EXPECT_NE(GoogleString::npos, reason15.find("1.15")) << reason15;
   ExpectUnbound15Answers(*abi);
 
@@ -748,8 +747,8 @@ TEST_F(HtmlServe15SetTest, AFourteenLibraryIsSentOnlyTheFourteenShape) {
   PsHtmlStoredFacts facts = {};
   facts.struct_size = sizeof(facts);
   facts.entry_policy_stamp = 77;
-  ASSERT_EQ(0, abi->HtmlStoredFactsFromReads(&original, nullptr, nullptr, 0,
-                                             &facts));
+  ASSERT_EQ(
+      0, abi->HtmlStoredFactsFromReads(&original, nullptr, nullptr, 0, &facts));
   EXPECT_EQ(sizeof(PsHtmlStoredFacts), facts.struct_size);
   EXPECT_NE(0u, facts.flags & kPsHtmlFactsPresent);
   EXPECT_EQ(0u, facts.entry_policy_stamp);
@@ -777,8 +776,8 @@ TEST_F(HtmlServe15SetTest, AFourteenLibraryIsSentOnlyTheFourteenShape) {
   int verdict = -1;
   int stored = -1;
   EXPECT_EQ(kPsErrInvalidArg,
-            abi->CacheWriteHeadersSidecarSite(cache, &sidecar, names, values,
-                                              1, &verdict, &stored));
+            abi->CacheWriteHeadersSidecarSite(cache, &sidecar, names, values, 1,
+                                              &verdict, &stored));
   sidecar.write_flags = 0;
   EXPECT_EQ(kPsOk, abi->CacheWriteHeadersSidecarSite(
                        cache, &sidecar, names, values, 1, &verdict, &stored));
@@ -807,7 +806,8 @@ TEST_F(HtmlServe15SetTest, AFifteenLibraryWithoutTheSetKeepsTheFourteenSet) {
 
 // Without the 1.14 set there is no 1.15 set either.
 TEST_F(HtmlServe15SetTest, NoFourteenSetMeansNoFifteenSet) {
-  std::unique_ptr<DaemonAbi> abi = Load("13", "libdaemon_stub_html_serve_15.so");
+  std::unique_ptr<DaemonAbi> abi =
+      Load("13", "libdaemon_stub_html_serve_15.so");
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_FALSE(abi->HasHtmlServeSet());
   ExpectUnbound15Answers(*abi);

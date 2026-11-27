@@ -224,8 +224,8 @@ TEST_F(EnvoyVHostConfigTest, DaemonHtmlCacheLaterReleaseValueTable) {
                                               c.value, &rec))
         << c.key << " " << c.value;
     // Accepted with effect: no warning of its own.
-    EXPECT_EQ(0, rec.Count("takes effect with") +
-                     rec.Count("runs as serve-variants"))
+    EXPECT_EQ(
+        0, rec.Count("takes effect with") + rec.Count("runs as serve-variants"))
         << c.key << " " << c.value;
     EXPECT_EQ(c.loads ? 0 : 1, rec.Count("Failed to set option"))
         << c.key << " " << c.value;

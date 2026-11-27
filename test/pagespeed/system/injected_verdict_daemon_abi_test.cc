@@ -347,8 +347,8 @@ TEST_F(InjectedVerdictDaemonAbiTest, TheFifteenSetIsInjectable) {
   EXPECT_FALSE(fake_->HtmlServe15SetUnavailableReason().empty());
   PsHtmlRequestGuard guard = {};
   guard.struct_size = sizeof(guard);
-  EXPECT_EQ(-1, fake_->HtmlRequestGuard("/", nullptr, nullptr, 0, "http",
-                                        &guard));
+  EXPECT_EQ(-1,
+            fake_->HtmlRequestGuard("/", nullptr, nullptr, 0, "http", &guard));
   EXPECT_EQ(0, fake_->HtmlUnsafeMethodInvalidates("POST", 200));
 
   HtmlServeInjection* inj = fake_->mutable_injection();
