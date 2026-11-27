@@ -160,8 +160,7 @@ DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
     const ApacheConfig* config = global_config();
     const DaemonAbi* abi =
         daemon_adapter_ == nullptr ? nullptr : daemon_adapter_->abi();
-    if (config->daemon_html_cache() !=
-            RewriteOptions::kDaemonHtmlCacheServeVariants ||
+    if (!DaemonHtmlCacheServes(config->daemon_html_cache()) ||
         !config->agent_optimize() || abi == nullptr) {
       // Nothing to serve: report-only, exactly as before.
       daemon_html_engine_ = NewDaemonHtmlEngineForPort(
@@ -170,9 +169,10 @@ DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
       return;
     }
     DaemonHtmlEngine::Config engine_config;
-    engine_config.mode = DaemonHtmlMode::kServeVariants;
+    engine_config.mode = DaemonHtmlModeFor(config->daemon_html_cache());
     engine_config.max_bytes = config->daemon_html_max_bytes();
     engine_config.agent_optimize = true;
+    FillDaemonHtmlServeSettings(*config, &engine_config);
     // This record's own names; a request served for another record that
     // shares this configuration names another site and is never stored or
     // served here.
@@ -248,8 +248,7 @@ DaemonHtmlEngine* ApacheServerContext::daemon_html_engine() {
 
 void ApacheServerContext::TickDaemonHtmlEngine() {
   const ApacheConfig* config = global_config();
-  if (config->daemon_html_cache() !=
-          RewriteOptions::kDaemonHtmlCacheServeVariants ||
+  if (!DaemonHtmlCacheServes(config->daemon_html_cache()) ||
       !config->agent_optimize()) {
     return;
   }

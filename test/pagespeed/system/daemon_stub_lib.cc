@@ -126,6 +126,23 @@
 //                                with PS_STUB_HTML_SERVE: the set without
 //                                ps_cache_read_site_purge_epoch.  The set is
 //                                bound as a whole, so none of it is used.
+//   PS_STUB_HTML_SERVE_15        with PS_STUB_HTML_SERVE: also the 1.15 set
+//                                (request guard, cookie classification, the
+//                                ignore-list guard, policy stamp, the
+//                                unsafe-method predicate, the block's stamp
+//                                and the facts call that reads it), and the
+//                                1.15 serve verdicts: a serve-cached-html
+//                                request short of the 1.15 size falls
+//                                through with `scope`.  Bound only when the
+//                                reported minor is 15 or later.
+//   PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
+//                                with PS_STUB_HTML_SERVE_15: the 1.15 set
+//                                without ps_html_unsafe_method_invalidates,
+//                                the LAST one bound, so none of it is used.
+//   PS_STUB_ECHO_SIZES (setting) every serve verdict carries the request's
+//                                struct_size in age_s and the facts'
+//                                struct_size in not_modified, so a test sees
+//                                the sizes the binding sent.
 //
 // WHY THIS FILE MODELS THE PEER'S VALIDATION RATHER THAN JUST SUCCEEDING.
 // A stand-in that accepts everything cannot fail the way the real library
@@ -883,6 +900,10 @@ struct StubServeRequest {
   uint32_t now_seconds;
 };
 
+// The size a 1.15 request has (the 1.14 one plus scope, class, cap, a
+// reserved word and the stamp).
+constexpr size_t kServeRequestSize15 = 88;
+
 struct StubStoredFacts {
   size_t struct_size;
   uint32_t flags;
@@ -1112,7 +1133,19 @@ const char* ps_html_serve_reason_name(int reason) {
                                        "cors",
                                        "no_transform",
                                        "withheld",
-                                       "skew"};
+                                       "skew"
+#ifdef PS_STUB_HTML_SERVE_15
+                                       ,
+                                       "scope",
+                                       "capped",
+                                       "conditional",
+                                       "credentialed",
+                                       "legacy_entry",
+                                       "policy_mismatch",
+                                       "request_header",
+                                       "path"
+#endif
+  };
   if (reason < 0 ||
       static_cast<size_t>(reason) >= sizeof(kNames) / sizeof(kNames[0])) {
     return nullptr;
@@ -1175,8 +1208,19 @@ int ps_html_serve_classify(const StubServeRequest* request,
   StubServeVerdict v;
   memset(&v, 0, sizeof(v));
   v.wants_markdown = ps_wants_agent_markdown(request->accept);
+#ifdef PS_STUB_HTML_SERVE_15
+  // A 1.15 library reads the 1.15 fields as zero from a shorter request:
+  // scope agents, class unknown, which refuses serve-cached-html.
+  const bool short_cached_html =
+      request->mode == 3 && request->struct_size < kServeRequestSize15;
+#else
+  const bool short_cached_html = false;
+#endif
   if (request->mode < 2) {
     v.reason = 1;  // mode
+  } else if (short_cached_html) {
+    v.reason = 19;  // scope
+    v.enforce = 1;
   } else if ((facts->flags & 0x1u) == 0) {
     v.reason = 10;  // absent
     v.enforce = 1;
@@ -1191,6 +1235,10 @@ int ps_html_serve_classify(const StubServeRequest* request,
       v.not_modified =
           ps_if_none_match_matches_weak(request->if_none_match, v.etag) == 1;
     }
+  }
+  if (EnvOr("PS_STUB_ECHO_SIZES", 0) != 0) {
+    v.age_s = static_cast<uint32_t>(request->struct_size);
+    v.not_modified = static_cast<int>(facts->struct_size);
   }
   const size_t size = out->struct_size;
   v.struct_size = size;
@@ -1256,6 +1304,36 @@ int ps_html_stored_facts_from_reads(const void* original, const void* markdown,
   }
   return 0;
 }
+
+#ifdef PS_STUB_HTML_SERVE_15
+struct StubStoredFacts15 {
+  StubStoredFacts base;
+  uint64_t entry_policy_stamp;
+};
+
+int ps_header_block_policy_stamp(const void* block, uint64_t* out);
+
+int ps_html_stored_facts_from_reads_ex(const void* original,
+                                       const void* markdown,
+                                       const void* withheld_marker,
+                                       int sidecar_present, const void* block,
+                                       StubStoredFacts15* out) {
+  if (out == nullptr || out->base.struct_size < sizeof(StubStoredFacts)) {
+    return -1;
+  }
+  const size_t size = out->base.struct_size;
+  if (ps_html_stored_facts_from_reads(original, markdown, withheld_marker,
+                                      sidecar_present, &out->base) != 0) {
+    return -1;
+  }
+  if (size >= sizeof(StubStoredFacts15)) {
+    uint64_t stamp = 0;
+    if (block != nullptr) ps_header_block_policy_stamp(block, &stamp);
+    out->entry_policy_stamp = stamp;
+  }
+  return 0;
+}
+#endif  // PS_STUB_HTML_SERVE_15
 
 int ps_cache_write_headers_sidecar_site(void* cache,
                                         const StubSidecarWriteParams* params,
@@ -1356,6 +1434,193 @@ int ps_header_block_pairing(const void* block, const uint8_t* entry_hash) {
 }
 
 void ps_header_block_free(void* block) { free(block); }
+
+#ifdef PS_STUB_HTML_SERVE_15
+// ---------------------------------------------------------------------------
+// The 1.15 set, in the flavour that exports it.  The argument checks are the
+// real library's; the rules are a small, fixed subset of them, enough for a
+// test to see each answer reach the caller.
+// ---------------------------------------------------------------------------
+
+struct StubRequestGuard {
+  size_t struct_size;
+  int reason;
+  int header_index;
+  int xfp;
+};
+
+struct StubCookieSpan {
+  size_t line;
+  size_t offset;
+  size_t length;
+};
+
+struct StubCookieClass {
+  size_t struct_size;
+  int cookie_class;
+  int malformed;
+  StubCookieSpan first_blocking;
+  size_t ignorable_count;
+};
+
+static bool StubCaseEqual(const char* a, const char* b) {
+  for (; *a != '\0' && *b != '\0'; ++a, ++b) {
+    char x = *a, y = *b;
+    if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
+    if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
+    if (x != y) return false;
+  }
+  return *a == *b;
+}
+
+// Refuses a `;` in the path, an X-Forwarded-Host line, and an
+// X-Forwarded-Proto that is not the keyed scheme.
+int ps_html_request_guard(const char* raw_path, const char* const* names,
+                          const char* const* values, size_t count,
+                          const char* keyed_scheme, StubRequestGuard* out) {
+  if (raw_path == nullptr || keyed_scheme == nullptr || out == nullptr ||
+      out->struct_size < sizeof(StubRequestGuard) ||
+      (count > 0 && (names == nullptr || values == nullptr))) {
+    return -1;
+  }
+  out->reason = 0;
+  out->header_index = -1;
+  out->xfp = 0;
+  const char* query = strchr(raw_path, '?');
+  const char* semi = strchr(raw_path, ';');
+  if (semi != nullptr && (query == nullptr || semi < query)) {
+    out->reason = 2;  // path
+    return 0;
+  }
+  for (size_t i = 0; i < count; ++i) {
+    if (names[i] == nullptr || values[i] == nullptr) return -1;
+    if (StubCaseEqual(names[i], "X-Forwarded-Host")) {
+      out->reason = 1;
+      out->header_index = static_cast<int>(i);
+      return 0;
+    }
+    if (StubCaseEqual(names[i], "X-Forwarded-Proto") &&
+        !StubCaseEqual(values[i], keyed_scheme)) {
+      out->reason = 1;
+      out->header_index = static_cast<int>(i);
+      out->xfp = 1;
+      return 0;
+    }
+  }
+  return 0;
+}
+
+// One Cookie line of `name=value` pairs: `_ga` and `_gid` are ignorable,
+// anything else blocks.
+int ps_html_classify_cookies(const char* const* lines, size_t line_count,
+                             int ignore_builtin, const char* const* additions,
+                             size_t addition_count,
+                             StubCookieSpan* ignorable_values,
+                             size_t ignorable_capacity, StubCookieClass* out) {
+  if ((line_count > 0 && lines == nullptr) ||
+      (addition_count > 0 && additions == nullptr) || out == nullptr ||
+      out->struct_size < sizeof(StubCookieClass) ||
+      (ignorable_values == nullptr && ignorable_capacity != 0)) {
+    return -1;
+  }
+  out->cookie_class = 0;
+  out->malformed = 0;
+  memset(&out->first_blocking, 0, sizeof(out->first_blocking));
+  out->ignorable_count = 0;
+  for (size_t l = 0; l < line_count; ++l) {
+    const char* line = lines[l];
+    if (line == nullptr) return -1;
+    size_t pos = 0;
+    const size_t n = strlen(line);
+    while (pos < n) {
+      while (pos < n && (line[pos] == ' ' || line[pos] == ';')) ++pos;
+      if (pos >= n) break;
+      const size_t name_at = pos;
+      while (pos < n && line[pos] != '=' && line[pos] != ';') ++pos;
+      if (pos >= n || line[pos] != '=') {
+        out->cookie_class = 2;
+        out->malformed = 1;
+        return 0;
+      }
+      const size_t name_len = pos - name_at;
+      ++pos;
+      const size_t value_at = pos;
+      while (pos < n && line[pos] != ';') ++pos;
+      const bool listed =
+          ignore_builtin != 0 &&
+          ((name_len == 3 && strncmp(line + name_at, "_ga", 3) == 0) ||
+           (name_len == 4 && strncmp(line + name_at, "_gid", 4) == 0));
+      if (!listed) {
+        out->cookie_class = 2;
+        out->first_blocking.line = l;
+        out->first_blocking.offset = name_at;
+        out->first_blocking.length = name_len;
+        return 0;
+      }
+      if (out->ignorable_count < ignorable_capacity) {
+        StubCookieSpan* v = &ignorable_values[out->ignorable_count];
+        v->line = l;
+        v->offset = value_at;
+        v->length = pos - value_at;
+      }
+      ++out->ignorable_count;
+      out->cookie_class = 1;
+    }
+  }
+  if (out->ignorable_count > ignorable_capacity) {
+    out->cookie_class = 2;
+    memset(&out->first_blocking, 0, sizeof(out->first_blocking));
+  }
+  return 0;
+}
+
+// Refuses `*` alone and a prefix shorter than 3 characters; warns for any
+// accepted prefix.
+int ps_html_ignore_cookie_guard(const char* addition, int* out_warning) {
+  if (addition == nullptr) return -1;
+  const size_t n = strlen(addition);
+  const bool prefix = n > 0 && addition[n - 1] == '*';
+  if (out_warning != nullptr) *out_warning = 0;
+  if (n == 0 || (prefix && n - 1 < 3)) return 0;
+  if (prefix && out_warning != nullptr) *out_warning = 1;
+  return 1;
+}
+
+// Not the real hash: credentialed, the switch, the version and the number of
+// additions, offset so it is never zero.
+int ps_html_policy_stamp(int credentialed, int ignore_builtin,
+                         uint32_t list_version, const char* const* additions,
+                         size_t addition_count, uint64_t* out) {
+  if ((credentialed != 0 && credentialed != 1) || out == nullptr ||
+      (addition_count > 0 && additions == nullptr)) {
+    return -1;
+  }
+  *out = 0x1000000ull + static_cast<uint64_t>(credentialed) * 0x100000ull +
+         static_cast<uint64_t>(ignore_builtin != 0) * 0x10000ull +
+         static_cast<uint64_t>(list_version) * 0x100ull + addition_count;
+  return 0;
+}
+
+#ifndef PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
+int ps_html_unsafe_method_invalidates(const char* method, int status) {
+  if (status < 200 || status > 399) return 0;
+  if (method == nullptr || *method == '\0') return 1;
+  static const char* const kSafe[] = {"GET", "HEAD", "OPTIONS", "TRACE"};
+  for (size_t i = 0; i < sizeof(kSafe) / sizeof(kSafe[0]); ++i) {
+    if (strcmp(method, kSafe[i]) == 0) return 0;
+  }
+  return 1;
+}
+#endif  // PS_STUB_OMIT_UNSAFE_METHOD_INVALIDATES
+
+// A stub block carries no stamp unless PS_STUB_POLICY_STAMP names one.
+int ps_header_block_policy_stamp(const void* block, uint64_t* out) {
+  if (block == nullptr || out == nullptr) return -1;
+  const long stamp = EnvOr("PS_STUB_POLICY_STAMP", 0);
+  *out = static_cast<uint64_t>(stamp);
+  return stamp != 0 ? 1 : 0;
+}
+#endif  // PS_STUB_HTML_SERVE_15
 
 int ps_cache_remove_site(void* cache, const char* url, const char* hostname,
                          const char* scheme, const char* site) {

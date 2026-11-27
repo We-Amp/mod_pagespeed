@@ -288,20 +288,20 @@ class RewriteOptions {
   // stored, nothing is served, and the response is not changed.
   // Serve-variants is the mode that stores HTML pages and serves their
   // Markdown copies to requests that ask for one; a server that does not
-  // store and serve yet runs it exactly as report-only.  The value
-  // serve-cached-html, which a later release adds, is accepted with a warning
-  // as serve-variants: it serves the Markdown copies only, so a configuration
-  // written for that release keeps loading and keeps serving them.
+  // store and serve yet runs it exactly as report-only.  Serve-cached-html
+  // is to also serve a stored page itself, within DaemonHtmlCacheServeScope
+  // and DaemonHtmlCacheMaxAge (not built yet: it serves the Markdown copies
+  // as serve-variants does); it needs optimizer C API 1.15 and runs as
+  // serve-variants with an older library.  The modes are ordered: a mode at
+  // or after serve-variants stores and serves Markdown copies.
   enum DaemonHtmlCacheMode {
     kDaemonHtmlCacheOff,
     kDaemonHtmlCacheReportOnly,
     kDaemonHtmlCacheServeVariants,
+    kDaemonHtmlCacheServeCachedHtml,
   };
 
-  // The settings of the serve-cached-html mode a later release adds.  This
-  // release parses and keeps them so that a configuration written for that
-  // release keeps loading; they change nothing here, and setting one warns
-  // that it takes effect with serve-cached-html.
+  // The settings of the serve-cached-html mode and the credentialed policy.
   // DaemonHtmlCacheServeScope: which requests may get a stored page.
   enum DaemonHtmlCacheServeScope {
     kDaemonHtmlCacheServeScopeAgents,
@@ -2974,8 +2974,8 @@ class RewriteOptions {
   void set_daemon_html_cache(DaemonHtmlCacheMode x) {
     set_option(x, &daemon_html_cache_);
   }
-  // The serve-cached-html settings (see DaemonHtmlCacheServeScope): stored,
-  // and read by nothing in this release.
+  // The serve-cached-html settings (see DaemonHtmlCacheServeScope), read by
+  // the HTML cache engine (FillDaemonHtmlServeSettings).
   DaemonHtmlCacheServeScope daemon_html_cache_serve_scope() const {
     return daemon_html_cache_serve_scope_.value();
   }
@@ -3348,12 +3348,6 @@ class RewriteOptions {
   // or false when it gives none.
   static bool DeprecatedOptionMessage(StringPiece name, StringPiece arg1,
                                       StringPiece arg2, GoogleString* message);
-
-  // For a setting a later release gives an effect (the serve-cached-html
-  // mode and its settings), the warning the parser gives once it is
-  // accepted; empty for any other setting.
-  static GoogleString LaterReleaseOptionWarning(StringPiece name,
-                                                StringPiece arg);
 
   // Whether a DaemonHtmlCacheIgnoreCookie value is one cookie name, or a
   // prefix of one followed by '*'.

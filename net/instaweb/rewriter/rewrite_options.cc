@@ -1484,20 +1484,23 @@ void RewriteOptions::AddProperties() {
                   "could be stored and changes nothing else; or "
                   "serve-variants, which stores HTML pages to serve their "
                   "Markdown copies and, on a server that does not serve "
-                  "them yet, runs as report-only.",
+                  "them yet, runs as report-only; or serve-cached-html, "
+                  "which serves the Markdown copies as serve-variants does "
+                  "(serving a stored page itself comes in a later release) "
+                  "and runs as serve-variants with an optimizer library "
+                  "before C API 1.15.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
-  // The settings of the serve-cached-html mode a later release adds: parsed
-  // and kept so that its configuration keeps loading here, and read by
-  // nothing.  Not part of the signature, like DaemonHtmlCache.
+  // The settings of the serve-cached-html mode and the credentialed policy,
+  // read by the HTML cache engine.  Not part of the signature, like
+  // DaemonHtmlCache.
   AddBaseProperty(kDaemonHtmlCacheServeScopeAgents,
                   &RewriteOptions::daemon_html_cache_serve_scope_, "dhcss",
                   kDaemonHtmlCacheServeScope, kServerScope,
                   "Which requests DaemonHtmlCache serve-cached-html serves a "
-                  "stored page to: agents (default) or all. Takes effect "
-                  "with serve-cached-html, which this release does not "
-                  "have.",
+                  "stored page to: agents (default) or all. Applies to the "
+                  "stored-page answer, which a later release adds.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1507,8 +1510,8 @@ void RewriteOptions::AddProperties() {
                   "serve-cached-html is served, in seconds, 0 to 86400 "
                   "(default 3600; 0 means no cap). It only shortens the "
                   "lifetime the origin gives a page, never extends it. "
-                  "Takes effect with serve-cached-html, which this release "
-                  "does not have.",
+                  "Applies to the stored-page answer, which a later release "
+                  "adds.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1517,16 +1520,17 @@ void RewriteOptions::AddProperties() {
                   kDaemonHtmlCacheCredentialed, kServerScope,
                   "Whether DaemonHtmlCache stores and serves a page for a "
                   "request with a cookie: anonymous-only (default) or "
-                  "explicit-public. Takes effect with serve-cached-html, "
-                  "which this release does not have.",
+                  "explicit-public. Needs optimizer C API 1.15.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
   AddBaseProperty(true, &RewriteOptions::daemon_html_cache_ignore_cookies_,
                   "dhcics", kDaemonHtmlCacheIgnoreCookies, kServerScope,
                   "Whether DaemonHtmlCache ignores the built-in list of "
-                  "analytics cookies (default on). Takes effect with "
-                  "serve-cached-html, which this release does not have.",
+                  "analytics cookies (default on). Accepted and checked "
+                  "now; takes effect in a later release, and until then "
+                  "every cookie, an analytics cookie included, counts as a "
+                  "cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1534,9 +1538,10 @@ void RewriteOptions::AddProperties() {
                   &RewriteOptions::daemon_html_cache_ignore_cookie_, "dhcic",
                   kDaemonHtmlCacheIgnoreCookie, kServerScope,
                   "A cookie name, or a prefix ending in *, that "
-                  "DaemonHtmlCache also ignores; repeatable. Takes effect "
-                  "with serve-cached-html, which this release does not "
-                  "have.",
+                  "DaemonHtmlCache also ignores; repeatable. Accepted and "
+                  "checked now; takes effect in a later release, and until "
+                  "then every cookie, an analytics cookie included, counts "
+                  "as a cookie.",
                   true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -2700,29 +2705,6 @@ bool RewriteOptions::DeprecatedOptionMessage(StringPiece name,
   return false;
 }
 
-GoogleString RewriteOptions::LaterReleaseOptionWarning(StringPiece name,
-                                                       StringPiece arg) {
-  if (StringCaseEqual(name, kDaemonHtmlCache)) {
-    if (!StringCaseEqual(arg, "serve-cached-html")) return GoogleString();
-    return StrCat("'", kDaemonHtmlCache,
-                  " serve-cached-html' is not available in this release; it "
-                  "runs as serve-variants, which serves the Markdown copies "
-                  "of stored pages only");
-  }
-  for (const char* later :
-       {kDaemonHtmlCacheServeScope, kDaemonHtmlCacheMaxAge,
-        kDaemonHtmlCacheCredentialed, kDaemonHtmlCacheIgnoreCookies,
-        kDaemonHtmlCacheIgnoreCookie}) {
-    if (StringCaseEqual(name, later)) {
-      return StrCat("'", later,
-                    "' takes effect with DaemonHtmlCache serve-cached-html, "
-                    "which this release does not have; it is accepted and "
-                    "has no effect");
-    }
-  }
-  return GoogleString();
-}
-
 bool RewriteOptions::IsValidDaemonHtmlCacheIgnoreCookie(StringPiece value) {
   if (value.empty()) return false;
   if (value.ends_with("*")) value.remove_suffix(1);
@@ -2757,19 +2739,6 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
   if (result != RewriteOptions::kOptionNameUnknown) {
     if (result == RewriteOptions::kOptionOk) {
       WarnDeprecatedOption(name, DeprecatedWhen::kWhenAccepted, handler);
-      // The serve-cached-html settings, and the mode itself (set as
-      // serve-variants), parse so that a configuration written for the
-      // release that adds them still loads; each says what it does here.
-      GoogleString warning = LaterReleaseOptionWarning(name, arg);
-      if (!warning.empty()) {
-        if (handler != nullptr) {
-          handler->Message(kWarning, "%s", warning.c_str());
-        } else if (msg != nullptr) {
-          // To a caller that reports the message itself.
-          *msg = warning;
-        }
-        return result;
-      }
     }
     return FormatSetOptionMessage(result, name, arg, error_detail, msg);
   }
@@ -3133,11 +3102,10 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kDaemonHtmlCacheOff;
   } else if (StringCaseEqual(value_string, "report-only")) {
     *value = kDaemonHtmlCacheReportOnly;
-  } else if (StringCaseEqual(value_string, "serve-variants") ||
-             // The mode a later release adds runs as the Markdown-only part
-             // of it here: see LaterReleaseOptionWarning.
-             StringCaseEqual(value_string, "serve-cached-html")) {
+  } else if (StringCaseEqual(value_string, "serve-variants")) {
     *value = kDaemonHtmlCacheServeVariants;
+  } else if (StringCaseEqual(value_string, "serve-cached-html")) {
+    *value = kDaemonHtmlCacheServeCachedHtml;
   } else {
     return false;
   }
@@ -4045,6 +4013,8 @@ GoogleString RewriteOptions::ToString(DaemonHtmlCacheMode mode) {
       return "report-only";
     case kDaemonHtmlCacheServeVariants:
       return "serve-variants";
+    case kDaemonHtmlCacheServeCachedHtml:
+      return "serve-cached-html";
   }
   return "?";
 }

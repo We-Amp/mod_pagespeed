@@ -107,6 +107,33 @@ DEFINES = {
     "kPsHtmlModeMarkdownStatic": "PS_HTML_MODE_MARKDOWN_STATIC",
     "kPsHtmlModeMarkdownRendered": "PS_HTML_MODE_MARKDOWN_RENDERED",
     "kPsHtmlModeFull": "PS_HTML_MODE_FULL",
+    # C API 1.15.
+    "kPsFlagAnonymousRecorded": "PS_FLAG_ANONYMOUS_RECORDED",
+    "kPsFlagHtmlStoreV2": "PS_FLAG_HTML_STORE_V2",
+    "kPsHtmlStoreRequestExplicitPublic":
+        "PS_HTML_STORE_REQUEST_EXPLICIT_PUBLIC",
+    "kPsHtmlStoreFlagRequestAnonymous": "PS_HTML_STORE_FLAG_REQUEST_ANONYMOUS",
+    "kPsHtmlServeRequestFreshOnly": "PS_HTML_SERVE_REQUEST_FRESH_ONLY",
+    "kPsHtmlServeRequestHtmlFallback": "PS_HTML_SERVE_REQUEST_HTML_FALLBACK",
+    "kPsHtmlServeRequestConditional": "PS_HTML_SERVE_REQUEST_CONDITIONAL",
+    "kPsHtmlServeRequestExplicitPublic":
+        "PS_HTML_SERVE_REQUEST_EXPLICIT_PUBLIC",
+    "kPsHtmlServeScopeAgents": "PS_HTML_SERVE_SCOPE_AGENTS",
+    "kPsHtmlServeScopeAll": "PS_HTML_SERVE_SCOPE_ALL",
+    "kPsHtmlAgentClassMax": "PS_HTML_AGENT_CLASS_MAX",
+    "kPsHtmlFactsStoreV2": "PS_HTML_FACTS_STORE_V2",
+    "kPsHtmlFactsAnonymousRecorded": "PS_HTML_FACTS_ANONYMOUS_RECORDED",
+    "kPsSidecarWritePolicyBlock": "PS_SIDECAR_WRITE_POLICY_BLOCK",
+    "kPsHtmlGuardNone": "PS_HTML_GUARD_NONE",
+    "kPsHtmlGuardRequestHeader": "PS_HTML_GUARD_REQUEST_HEADER",
+    "kPsHtmlGuardPath": "PS_HTML_GUARD_PATH",
+    "kPsHtmlCookiesNone": "PS_HTML_COOKIES_NONE",
+    "kPsHtmlCookiesIgnorableOnly": "PS_HTML_COOKIES_IGNORABLE_ONLY",
+    "kPsHtmlCookiesBlocking": "PS_HTML_COOKIES_BLOCKING",
+    "kPsHtmlCookieListVersion": "PS_HTML_COOKIE_LIST_VERSION",
+    "kPsHtmlCredentialedAnonymousOnly": "PS_HTML_CREDENTIALED_ANONYMOUS_ONLY",
+    "kPsHtmlCredentialedExplicitPublic":
+        "PS_HTML_CREDENTIALED_EXPLICIT_PUBLIC",
 }
 
 # Module constant -> optimizer enumerator in the ps_html_cache_mode_t enum.
@@ -131,7 +158,18 @@ STRUCTS = {
     "PsHtmlServeRequest": "ps_html_serve_request_t",
     "PsHtmlStoredFacts": "ps_html_stored_facts_t",
     "PsHtmlServeVerdict": "ps_html_serve_verdict_t",
+    "PsHtmlRequestGuard": "ps_html_request_guard_t",
+    "PsHtmlCookieSpan": "ps_html_cookie_span_t",
+    "PsHtmlCookieClass": "ps_html_cookie_class_t",
 }
+
+# The module's bound sets: the function that binds each (daemon_abi.cc), the
+# struct of resolved pointers it fills, and the constant naming the minor
+# that must publish every symbol it binds.
+SETS = (
+    ("BindHtmlServeSet", "HtmlServeSetFns", "kHtmlServeSetMinor"),
+    ("BindHtmlServe15Set", "HtmlServe15SetFns", "kHtmlServe15SetMinor"),
+)
 
 # Array lengths spelled with a constant on either side.
 LENGTHS = {
@@ -253,14 +291,18 @@ def peer_struct(text, name):
     return _fields(body)
 
 
-def module_serve_set(abi_cc_text):
-    m = re.search(r"void\s+BindHtmlServeSet\(\)\s*\{(.*?)\n  \}", abi_cc_text,
-                  re.S)
+def _binder_body(text, binder):
+    m = re.search(r"void\s+%s\(\)\s*\{(.*?)\n  \}" % binder, text, re.S)
     if not m:
-        raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
-    symbols = re.findall(r'Bind\("(ps_\w+)"', m.group(1))
+        raise DriftError("could not find %s in daemon_abi.cc" % binder)
+    return m.group(1)
+
+
+def module_serve_set(abi_cc_text, binder="BindHtmlServeSet"):
+    symbols = re.findall(r'Bind\(\s*"(ps_\w+)"',
+                         _binder_body(abi_cc_text, binder))
     if not symbols:
-        raise DriftError("BindHtmlServeSet binds no symbol")
+        raise DriftError("%s binds no symbol" % binder)
     return symbols
 
 
@@ -281,30 +323,28 @@ def _params(arglist):
     return out
 
 
-def module_prototypes(abi_cc_text):
-    """symbol -> (return type, [argument types]) for the HTML serve set, from
-    the Bind() calls in BindHtmlServeSet, the HtmlServeSetFns members and the
-    *Fn aliases."""
+def module_prototypes(abi_cc_text, sets=None):
+    """symbol -> (return type, [argument types]) for every bound set, from
+    the Bind() calls in each binder, the members of its struct of pointers
+    and the *Fn aliases."""
     text = _strip_comments(abi_cc_text)
     aliases = {}
     for m in re.finditer(r"using\s+(\w+Fn)\s*=\s*(.*?)\(\s*\*\s*\)\s*\((.*?)\)\s*;",
                          text, re.S):
         aliases[m.group(1)] = (_norm_type(m.group(2)), _params(m.group(3)))
-    m = re.search(r"struct\s+HtmlServeSetFns\s*\{(.*?)\};", text, re.S)
-    if not m:
-        raise DriftError("could not find HtmlServeSetFns in daemon_abi.cc")
-    member_types = dict((name, fn) for fn, name in
-                        re.findall(r"(\w+Fn)\s+(\w+)\s*=", m.group(1)))
-    m = re.search(r"void\s+BindHtmlServeSet\(\)\s*\{(.*?)\n  \}", text, re.S)
-    if not m:
-        raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
     out = {}
-    for sym, member in re.findall(r'Bind\(\s*"(ps_\w+)",\s*&fns\.(\w+)',
-                                  m.group(1)):
-        fn = member_types.get(member)
-        if fn is None or fn not in aliases:
-            raise DriftError("cannot resolve the type bound for %s" % sym)
-        out[sym] = aliases[fn]
+    for binder, fns, _ in (SETS if sets is None else sets):
+        m = re.search(r"struct\s+%s\s*\{(.*?)\};" % fns, text, re.S)
+        if not m:
+            raise DriftError("could not find %s in daemon_abi.cc" % fns)
+        member_types = dict((name, fn) for fn, name in
+                            re.findall(r"(\w+Fn)\s+(\w+)\s*=", m.group(1)))
+        for sym, member in re.findall(r'Bind\(\s*"(ps_\w+)",\s*&fns\.(\w+)',
+                                      _binder_body(text, binder)):
+            fn = member_types.get(member)
+            if fn is None or fn not in aliases:
+                raise DriftError("cannot resolve the type bound for %s" % sym)
+            out[sym] = aliases[fn]
     return out
 
 
@@ -353,8 +393,20 @@ def check(abi_h, abi_cc, peer_h, alternate_id_h, symbols_lds):
                             "    module:    %s\n    optimizer: %s" %
                             (mine, peer, a, b))
         checked += 1
+    stripped_cc = _strip_comments(abi_cc)
+    sets = []
+    for s in SETS:
+        if re.search(r"void\s+%s\(\)" % s[0], stripped_cc):
+            sets.append(s)
+        elif s[2] in ours:
+            # A set the header declares must be read, or a renamed binder
+            # would drop its prototypes and minors from the gate silently.
+            raise DriftError("daemon_abi.h has %s but daemon_abi.cc has no "
+                             "%s" % (s[2], s[0]))
+    if not sets or sets[0][0] != "BindHtmlServeSet":
+        raise DriftError("could not find BindHtmlServeSet in daemon_abi.cc")
     theirs_protos = peer_prototypes(peer_h)
-    for sym, proto in sorted(module_prototypes(abi_cc).items()):
+    for sym, proto in sorted(module_prototypes(abi_cc, sets).items()):
         if sym not in theirs_protos:
             problems.append("the optimizer's pagespeed.h declares no %s" % sym)
         elif proto != theirs_protos[sym]:
@@ -363,19 +415,20 @@ def check(abi_h, abi_cc, peer_h, alternate_id_h, symbols_lds):
                                         theirs_protos[sym][0],
                                         ", ".join(theirs_protos[sym][1])))
         checked += 1
-    required = ours.get("kHtmlServeSetMinor")
-    if required is None:
-        problems.append("daemon_abi.h has no kHtmlServeSetMinor")
-    else:
-        minors = peer_symbol_minors(symbols_lds)
-        for sym in module_serve_set(abi_cc):
+    minors = peer_symbol_minors(symbols_lds)
+    for binder, _, minor_name in sets:
+        required = ours.get(minor_name)
+        if required is None:
+            problems.append("daemon_abi.h has no %s" % minor_name)
+            continue
+        for sym in module_serve_set(abi_cc, binder):
             if sym not in minors:
                 problems.append("the optimizer does not export %s" % sym)
             elif minors[sym] > required:
                 problems.append(
                     "%s is published at 1.%d, after the 1.%d the module "
-                    "requires for the HTML serve set" %
-                    (sym, minors[sym], required))
+                    "requires for the set %s binds" %
+                    (sym, minors[sym], required, binder))
             checked += 1
     if problems:
         raise DriftError("\n".join(problems))
@@ -392,6 +445,7 @@ inline constexpr uint8_t kPsSentinelAgentMarkdown = 0x7C;
 inline constexpr uint32_t kPsNotifyFlagHtmlStored = 0x8u;
 inline constexpr int kPsHtmlCacheServeVariants = 2;
 inline constexpr int kHtmlServeSetMinor = 14;
+inline constexpr int kHtmlServe15SetMinor = 15;
 inline constexpr size_t kPsHtmlHashBytes = 32;
 struct PsHtmlStoredFacts {
   size_t struct_size;
@@ -410,6 +464,13 @@ struct HtmlServeSetFns {
     Bind("ps_html_serve_classify", &fns.serve_classify, &e) &&
     Bind("ps_wants_agent_markdown", &fns.wants_agent_markdown, &e);
   }
+using HtmlUnsafeFn = int (*)(const char*, int);
+struct HtmlServe15SetFns {
+  HtmlUnsafeFn unsafe = nullptr;
+};
+  void BindHtmlServe15Set() {
+    Bind("ps_html_unsafe_method_invalidates", &fns.unsafe, &e);
+  }
 """
 SELF_PEER_H = """
 #define PS_NOTIFY_FLAG_HTML_STORED 0x8u
@@ -426,10 +487,12 @@ typedef struct {
 PS_EXPORT int ps_html_serve_classify(const ps_html_stored_facts_t* facts,
                                      uint32_t now);
 PS_EXPORT int ps_wants_agent_markdown(const char* accept);
+PS_EXPORT int ps_html_unsafe_method_invalidates(const char* method, int status);
 """
 SELF_ALT = "enum class AlternateId : uint8_t {\n  kAgentMarkdown = 0x7C,  // md\n};\n"
 SELF_LDS = """PAGESPEED_1.2 { global: ps_wants_agent_markdown; };
 PAGESPEED_1.14 { global: ps_html_serve_classify; } PAGESPEED_1.13;
+PAGESPEED_1.15 { global: ps_html_unsafe_method_invalidates; } PAGESPEED_1.14;
 """
 
 
@@ -444,7 +507,7 @@ def self_test():
     cases = 0
     try:
         args = [SELF_ABI_H, SELF_ABI_CC, SELF_PEER_H, SELF_ALT, SELF_LDS]
-        assert check(*args) == 9
+        assert check(*args) == 11
         cases += 1
         drifts = [
             (0, "0x8u;", "0x10u;"),                        # a value moved
@@ -469,6 +532,13 @@ def self_test():
              "PS_EXPORT long ps_wants_agent_markdown"),    # return changed
             (1, "int (*)(const PsHtmlStoredFacts*, uint32_t)",
              "int (*)(const PsHtmlStoredFacts*, uint64_t)"),  # module drifts
+            (2, "int ps_html_unsafe_method_invalidates(const char* method, int",
+             "int ps_html_unsafe_method_invalidates(const char* method, long"),
+            (4, "PAGESPEED_1.15 { global: ps_html_unsafe_method_invalidates;",
+             "PAGESPEED_1.16 { global: ps_html_unsafe_method_invalidates;"),
+            (0, "kHtmlServe15SetMinor = 15", "kHtmlServe16SetMinor = 15"),
+            (1, "struct HtmlServe15SetFns", "struct HtmlServe15Set"),
+            (1, "void BindHtmlServe15Set()", "void BindHtmlServeNext()"),
         ]
         for index, old, new in drifts:
             mutated = list(args)

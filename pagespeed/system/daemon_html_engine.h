@@ -24,8 +24,10 @@
 //     the process-wide byte budget;
 //   * the exact header set a Markdown answer carries.
 //
-// WHEN IT ACTS AT ALL.  Only in the serve-variants mode with AgentOptimize
-// on, and only while four conditions hold, read at creation and on every
+// WHEN IT ACTS AT ALL.  Only in the serve-variants mode or a later one
+// (serve-cached-html, which needs the library's 1.15 set and otherwise runs
+// as serve-variants: effective_mode) with AgentOptimize on, and only while
+// four conditions hold, read at creation and on every
 // purge-poll tick (never per request): the library binds the whole HTML
 // serve set (DaemonAbi::HasHtmlServeSet), the worker's HTML mode is one of
 // the two markdown modes, and the worker reports agent-optimize on.  Any
@@ -97,8 +99,24 @@ enum class DaemonHtmlMode {
   kOff,
   kReportOnly,
   kServeVariants,
-  kServeCachedHtml,  // Not built; treated as kServeVariants for Markdown.
+  // Serves the Markdown copies exactly as kServeVariants does, and sends the
+  // library the serve-cached-html mode with the 1.15 request fields.  Runs
+  // as kServeVariants while the library lacks the 1.15 set (see
+  // DaemonHtmlEngine::effective_mode).  The stored-HTML answer itself is not
+  // built yet: such a verdict falls through.
+  kServeCachedHtml,
 };
+
+// The engine mode a DaemonHtmlCache setting asks for.
+DaemonHtmlMode DaemonHtmlModeFor(RewriteOptions::DaemonHtmlCacheMode mode);
+
+// Whether a DaemonHtmlCache setting stores pages and serves from them
+// (serve-variants or any later mode).  Every port asks this, never `==` or
+// `!=` against one mode, so a mode added later is accepted wherever
+// serve-variants is.
+inline bool DaemonHtmlCacheServes(RewriteOptions::DaemonHtmlCacheMode mode) {
+  return mode >= RewriteOptions::kDaemonHtmlCacheServeVariants;
+}
 
 using DaemonHtmlHeaderLines =
     std::vector<std::pair<GoogleString, GoogleString>>;
@@ -152,7 +170,8 @@ struct DaemonHtmlRequestFacts {
   bool options_enabled_and_allowed = false;
   // The request's agent class (daemon_html_agent_class.h): 0 unknown, 1 a
   // signed agent, 3 a known agent's User-Agent token; 2 is never produced.
-  // The port computes it once per client request.  Not sent yet.
+  // The port computes it once per client request.  Sent in the
+  // serve-cached-html mode.
   int agent_class = 0;
 };
 
@@ -421,7 +440,24 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
     // DaemonHtmlMaxBytes: the largest body recorded.
     int64 max_bytes = 2 << 20;
     bool agent_optimize = false;
-    int serve_scope = 0;  // Not used yet.
+    // The serve-cached-html settings (FillDaemonHtmlServeSettings).
+    // DaemonHtmlCacheServeScope: kPsHtmlServeScopeAgents or ...All.
+    int serve_scope = 0;
+    // DaemonHtmlCacheMaxAge: 0 = no cap; it only shortens the origin's
+    // lifetime, and only on the HTML path.
+    uint32_t max_age_s = 3600;
+    // DaemonHtmlCacheCredentialed: kPsHtmlCredentialedAnonymousOnly or
+    // ...ExplicitPublic.
+    int credentialed = 0;
+    // DaemonHtmlCacheIgnoreCookies, and the DaemonHtmlCacheIgnoreCookie
+    // additions in order.  Not applied yet: every cookie still sets
+    // HAS_COOKIE, and a non-default value is logged once
+    // (NoteIgnoreCookieSettingsInert).
+    bool ignore_cookies = true;
+    std::vector<GoogleString> ignore_cookie;
+    // The stamp of the credentialed policy, sent as the request's
+    // policy_stamp; 0 = none.
+    uint64_t policy_stamp = 0;
     // The names this vhost's configuration lists.
     ConfiguredHostNames host_names;
     // This vhost's site id.
@@ -510,6 +546,13 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
 
   // Whether the engine stores and serves now.
   bool serving() const;
+  // The mode the engine runs: the configured one, except that
+  // serve-cached-html runs as serve-variants while the library lacks the 1.15
+  // set (DaemonAbi::HasHtmlServe15Set), read with the other serving
+  // conditions.  The library is never sent the serve-cached-html mode then.
+  // The binding is fixed when the library is loaded, so in a server this
+  // changes only with a server restart.
+  DaemonHtmlMode effective_mode() const;
   const Config& config() const { return config_; }
   // The agent class counters, resolved once for this engine's statistics;
   // the port counts each request's class with them.
@@ -537,6 +580,15 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   void ReadConditions(bool log_change);
   // Logs the not-serving reason once per state.
   void NoteUnavailable();
+  // The 1.15 set: read with the serving conditions, and its absence logged
+  // once per state for a configuration that stores and serves.
+  void ReadServe15Condition(bool log_change);
+  void NoteServe15Unavailable();
+  // Logs once that the two ignore-cookie settings, set to anything but
+  // their defaults, have no effect yet.
+  void NoteIgnoreCookieSettingsInert();
+  // The mode name a decision line carries for a store or serve.
+  const char* ServeModeName() const;
   void ObservePurgeState();
   void WriteEpoch(void* cache, uint64 epoch_s, bool* all_ok);
   void ReadSiteEpoch();
@@ -558,7 +610,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
                     const GoogleString& host, const GoogleString& path,
                     int status, uint64 size, uint32 lifetime_s,
                     const char* variant, int64 age_s,
-                    const char* mode = "serve-variants");
+                    // nullptr: the mode that runs (ServeModeName).
+                    const char* mode = nullptr);
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
               const DaemonHtmlHeaderLines& store_view,
@@ -595,6 +648,11 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   bool worker_agent_entitled_ = false;
   GoogleString unavailable_reason_;
   bool unavailable_logged_ = false;
+  // The 1.15 set, and why it is absent (empty while bound).
+  bool set15_bound_ = false;
+  GoogleString set15_reason_;
+  bool set15_logged_ = false;
+  bool ignore_cookie_logged_ = false;
   // The newest global purge (seconds) this process wrote as an epoch.
   int64 epoch_written_s_ = -1;
   // The handle epoch_written_s_ was written through.
@@ -609,6 +667,11 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   };
   std::map<GoogleString, Unpaired> unpaired_;
 };
+
+// Copies the serve-cached-html settings (scope, cap, credentialed policy,
+// ignore list) from `options` into `config`.
+void FillDaemonHtmlServeSettings(const RewriteOptions& options,
+                                 DaemonHtmlEngine::Config* config);
 
 // The engine a server port builds from its DaemonHtmlCache settings, or
 // nullptr for off.  Until the port stores and serves, serve-variants runs

@@ -177,18 +177,6 @@ namespace net_instaweb {
 		return found;
 	}
 
-	DaemonHtmlMode DaemonHtmlModeFor(RewriteOptions::DaemonHtmlCacheMode mode) {
-		switch (mode) {
-		case RewriteOptions::kDaemonHtmlCacheOff:
-			return DaemonHtmlMode::kOff;
-		case RewriteOptions::kDaemonHtmlCacheReportOnly:
-			return DaemonHtmlMode::kReportOnly;
-		case RewriteOptions::kDaemonHtmlCacheServeVariants:
-			return DaemonHtmlMode::kServeVariants;
-		}
-		return DaemonHtmlMode::kOff;
-	}
-
 	}  // namespace
 
 	void SetIisHttpServer(IHttpServer* server) { iis_http_server = server; }
@@ -260,16 +248,14 @@ namespace net_instaweb {
 
 	bool IisServerContext::daemon_html_serves_variants() const {
 		const RewriteOptions* options = global_options();
-		return options->daemon_html_cache() ==
-			RewriteOptions::kDaemonHtmlCacheServeVariants &&
+		return DaemonHtmlCacheServes(options->daemon_html_cache()) &&
 			options->agent_optimize();
 	}
 
 	DaemonHtmlEngine* IisServerContext::daemon_html_engine(uint32_t iis_site_id) {
 		std::call_once(daemon_html_engine_once_, [this, iis_site_id] {
 			const IisRewriteOptions* options = config();
-			if (options->daemon_html_cache() !=
-				RewriteOptions::kDaemonHtmlCacheServeVariants) {
+			if (!DaemonHtmlCacheServes(options->daemon_html_cache())) {
 				daemon_html_engine_ = NewDaemonHtmlEngineForPort(
 					options->daemon_html_cache(), options->daemon_html_max_bytes(),
 					options->log_dir(),
@@ -307,6 +293,7 @@ namespace net_instaweb {
 			config.mode = DaemonHtmlModeFor(options->daemon_html_cache());
 			config.max_bytes = options->daemon_html_max_bytes();
 			config.agent_optimize = options->agent_optimize();
+			FillDaemonHtmlServeSettings(*options, &config);
 			config.host_names = IisSiteHostNames(bindings);
 			config.site = IisRequestSiteId(iis_site_id, iis_site_id,
 				options->cache_fragment());

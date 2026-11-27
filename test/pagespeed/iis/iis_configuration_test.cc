@@ -308,9 +308,8 @@ TEST_F(IisConfigurationTest, HonorRequestFreshnessDefaultsOffAndParses) {
   EXPECT_FALSE(off.daemon_serve_honor_request_freshness());
 }
 
-// DaemonHtmlCache takes serve-variants here too (inert on this server, like
-// report-only); serve-cached-html, the mode a later release adds, is accepted
-// with a warning as serve-variants, in either line form.
+// DaemonHtmlCache takes serve-variants and serve-cached-html here too, in
+// either line form, with no warning.
 TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   IisRewriteOptions variants(nullptr);
   ParseAndGetConfig("pagespeed DaemonHtmlCache serve-variants\n", "",
@@ -328,13 +327,13 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   IisRewriteOptions later(nullptr);
   TestConfigFileGetConfig(cf, input, later);
   TestConfigFileRelease(cf);
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             later.daemon_html_cache());
-  EXPECT_EQ(1, recorder.CountContaining("it runs as serve-variants"));
+  EXPECT_EQ(0, recorder.CountContaining("runs as serve-variants"));
   EXPECT_EQ(0, recorder.CountContaining("Error handling config line"));
 
-  // The legacy "name value" line form maps it the same way, with the same
-  // warning, and warns once for each of the settings.
+  // The legacy "name value" line form reads them the same way, also with no
+  // warning.
   RecordingMessageHandler legacy_recorder;
   ConfigurationFile* legacy_cf = CreateTestConfigFile(
       "DaemonHtmlCache serve-cached-html\n"
@@ -348,17 +347,10 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   IisRewriteOptions legacy(nullptr);
   TestConfigFileGetConfig(legacy_cf, input, legacy);
   TestConfigFileRelease(legacy_cf);
-  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeCachedHtml,
             legacy.daemon_html_cache());
-  EXPECT_EQ(1, legacy_recorder.CountContaining("it runs as serve-variants"));
-  EXPECT_EQ(5, legacy_recorder.CountContaining(
-                   "takes effect with DaemonHtmlCache serve-cached-html"));
-  for (const char* name :
-       {"'DaemonHtmlCacheServeScope'", "'DaemonHtmlCacheMaxAge'",
-        "'DaemonHtmlCacheCredentialed'", "'DaemonHtmlCacheIgnoreCookies'",
-        "'DaemonHtmlCacheIgnoreCookie'"}) {
-    EXPECT_EQ(1, legacy_recorder.CountContaining(name)) << name;
-  }
+  EXPECT_EQ(0, legacy_recorder.CountContaining("runs as serve-variants"));
+  EXPECT_EQ(0, legacy_recorder.CountContaining("takes effect with"));
   // The invalid value is refused with the parser's warning; the valid one
   // stays.
   EXPECT_EQ(1, legacy_recorder.CountContaining(
@@ -369,8 +361,8 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
 }
 
 // The settings of the serve-cached-html mode load from pagespeed.config, every
-// value of each, with one warning each and no effect; an invalid value is
-// refused with the parser's warning and leaves the setting as it was.
+// value of each, with no warning; an invalid value is refused with the
+// parser's warning and leaves the setting as it was.
 TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
   RecordingMessageHandler recorder;
   ConfigurationFile* cf = CreateTestConfigFile(
@@ -396,8 +388,7 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
   TestConfigFileGetConfig(cf, input, rwo);
   TestConfigFileRelease(cf);
 
-  EXPECT_EQ(10, recorder.CountContaining(
-                    "takes effect with DaemonHtmlCache serve-cached-html"));
+  EXPECT_EQ(0, recorder.CountContaining("takes effect with"));
   EXPECT_EQ(5, recorder.CountContaining("Error handling config line"));
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
             rwo.daemon_html_cache_serve_scope());
@@ -409,9 +400,10 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseSettingsParse) {
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheOff, rwo.daemon_html_cache());
 }
 
-// One line for every value and form of the later release's directives that
-// this release must load, in both line forms, and the lines just outside them
-// that it must refuse (logged and skipped, as for any directive here).
+// One line for every value and form of the serve-cached-html directives that
+// this release loads (with effect and no warning), in both line forms, and
+// the lines just outside them that it must refuse (logged and skipped, as for
+// any directive here).  The same lines load inert on the earlier release.
 TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseLineTable) {
   const struct {
     const char* line;  // name and value
@@ -456,14 +448,13 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheLaterReleaseLineTable) {
           recorder.CountContaining(
               "takes effect with DaemonHtmlCache serve-cached-html") +
           recorder.CountContaining("it runs as serve-variants");
+      EXPECT_EQ(0, later) << line;
       if (c.loads) {
-        EXPECT_EQ(1, later) << line;
         EXPECT_EQ(0, recorder.CountContaining("Error handling config line"))
             << line;
         EXPECT_EQ(0, recorder.CountContaining("Failed to set option"))
             << line;
       } else {
-        EXPECT_EQ(0, later) << line;
         // Logged: the line itself, or the setter's refusal.
         EXPECT_LE(1, recorder.CountContaining(c.line) +
                          recorder.CountContaining("Failed to set option"))

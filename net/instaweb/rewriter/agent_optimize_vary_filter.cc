@@ -333,6 +333,7 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
   // depends on Accept for every client, whatever this request sent.
   // The body is never changed here — the sole effect is the Vary: Accept
   // signal.
+  // Every mode at or after serve-variants (the modes are ordered).
   const bool may_serve_markdown = driver()->options()->daemon_html_cache() >=
                                   RewriteOptions::kDaemonHtmlCacheServeVariants;
   if (!may_serve_markdown &&

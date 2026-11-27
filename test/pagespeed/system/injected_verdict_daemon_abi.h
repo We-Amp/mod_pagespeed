@@ -64,6 +64,12 @@ struct RecordedServeRequest {
        if_none_match_null = true;
   uint32_t request_flags = 0;
   uint32_t now_seconds = 0;
+  // The 1.15 fields, recorded only from a request of the 1.15 size (zero
+  // otherwise, which is what the library reads then).
+  int serve_scope = 0;
+  int agent_class = 0;
+  uint32_t html_max_lifetime_s = 0;
+  uint64_t policy_stamp = 0;
 };
 
 // A header block the fake hands out.  Owned by the fake until
@@ -80,6 +86,10 @@ struct InjectedHeaderBlock {
 struct HtmlServeInjection {
   bool has_set = true;
   GoogleString unavailable_reason;
+  // The 1.15 set.  Off by default: the fake is a 1.14 library unless a case
+  // says otherwise.
+  bool has_set_15 = false;
+  GoogleString unavailable_reason_15 = "the fake library reports C API 1.14";
 
   // ps_html_serve_classify: the return code and the verdict.  The verdict is
   // copied into the caller's struct only as far as its struct_size reaches,
@@ -88,25 +98,14 @@ struct HtmlServeInjection {
   PsHtmlServeVerdict verdict = {};
 
   // ps_html_serve_reason_name: index = reason; nullptr past the end.
-  std::vector<const char*> reason_names = {"fresh",
-                                           "mode",
-                                           "auth_request",
-                                           "cookie_request",
-                                           "client_no_cache",
-                                           "needs_validation",
-                                           "stale",
-                                           "headers_not_reproducible",
-                                           "sidecar_missing",
-                                           "purged",
-                                           "absent",
-                                           "binding_stale",
-                                           "parent_stale",
-                                           "method",
-                                           "range",
-                                           "cors",
-                                           "no_transform",
-                                           "withheld",
-                                           "skew"};
+  std::vector<const char*> reason_names = {
+      "fresh", "mode", "auth_request", "cookie_request", "client_no_cache",
+      "needs_validation", "stale", "headers_not_reproducible",
+      "sidecar_missing", "purged", "absent", "binding_stale", "parent_stale",
+      "method", "range", "cors", "no_transform", "withheld", "skew",
+      // 1.15
+      "scope", "capped", "conditional", "credentialed", "legacy_entry",
+      "policy_mismatch", "request_header", "path"};
 
   // ps_html_store_write_params: the return code, and on success the insert
   // time it stamps (0 = capture_start_ms floored to seconds).
@@ -143,6 +142,21 @@ struct HtmlServeInjection {
   int html_mode = kPsHtmlModeMarkdownStatic;
   int agent_entitled = 1;
   int wants_markdown = 0;
+
+  // The 1.15 request policy: the return code and the answer of each.
+  int guard_rc = 0;
+  PsHtmlRequestGuard guard = {sizeof(PsHtmlRequestGuard), kPsHtmlGuardNone, -1,
+                              0};
+  int cookies_rc = 0;
+  PsHtmlCookieClass cookies = {
+      sizeof(PsHtmlCookieClass), kPsHtmlCookiesNone, 0, {0, 0, 0}, 0};
+  int ignore_cookie_guard = 1;
+  int ignore_cookie_warning = 0;
+  int policy_stamp_rc = 0;
+  uint64_t policy_stamp = 0x5A5A;
+  int unsafe_invalidates = 0;
+  int block_stamp_rc = 0;
+  uint64_t block_stamp = 0;
 };
 
 class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
@@ -184,6 +198,13 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
   }
 
   bool HasHtmlServeSet() const override { return injection_.has_set; }
+  bool HasHtmlServe15Set() const override {
+    return injection_.has_set && injection_.has_set_15;
+  }
+  GoogleString HtmlServe15SetUnavailableReason() const override {
+    return HasHtmlServe15Set() ? GoogleString()
+                               : injection_.unavailable_reason_15;
+  }
   // It answers the store policy itself, whatever the inner library has.
   bool PublishesHtmlStorePolicy() const override { return true; }
   GoogleString HtmlServeSetUnavailableReason() const override {
@@ -208,6 +229,12 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
       r.if_none_match_null = request->if_none_match == nullptr;
       r.request_flags = request->request_flags;
       r.now_seconds = request->now_seconds;
+      if (request->struct_size >= sizeof(PsHtmlServeRequest)) {
+        r.serve_scope = request->serve_scope;
+        r.agent_class = request->agent_class;
+        r.html_max_lifetime_s = request->html_max_lifetime_s;
+        r.policy_stamp = request->policy_stamp;
+      }
     }
     serve_requests_.push_back(r);
     serve_facts_.push_back(facts == nullptr ? PsHtmlStoredFacts() : *facts);
@@ -272,12 +299,105 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
             withheld_marker == nullptr ? "null" : "withheld",
             Num(sidecar_present)});
     if (injection_.facts_rc != 0) return injection_.facts_rc;
-    if (out == nullptr || out->struct_size < sizeof(PsHtmlStoredFacts)) {
+    return CopyFacts(out);
+  }
+
+  // The 1.15 set.  Each records its call and answers the injection.
+  int HtmlStoredFactsFromReadsEx(const void* original, const void* markdown,
+                                 const void* withheld_marker,
+                                 int sidecar_present, const void* block,
+                                 PsHtmlStoredFacts* out) const override {
+    Record("ps_html_stored_facts_from_reads_ex",
+           {original == nullptr ? "null" : "original",
+            markdown == nullptr ? "null" : "markdown",
+            withheld_marker == nullptr ? "null" : "withheld",
+            Num(sidecar_present), block == nullptr ? "null" : "block"});
+    if (!HasHtmlServe15Set()) return -1;
+    if (injection_.facts_rc != 0) return injection_.facts_rc;
+    return CopyFacts(out);
+  }
+
+  int HtmlRequestGuard(const char* raw_path, const char* const* names,
+                       const char* const* values, size_t count,
+                       const char* keyed_scheme,
+                       PsHtmlRequestGuard* out) const override {
+    std::vector<GoogleString> args = {Str(raw_path), Str(keyed_scheme)};
+    for (size_t i = 0; i < count; ++i) {
+      args.push_back(StrCat(Str(names[i]), ": ", Str(values[i])));
+    }
+    Record("ps_html_request_guard", args);
+    if (!HasHtmlServe15Set()) return -1;
+    if (injection_.guard_rc != 0) return injection_.guard_rc;
+    if (out == nullptr || out->struct_size < sizeof(PsHtmlRequestGuard)) {
       return -1;
     }
-    *out = injection_.facts;
-    out->struct_size = sizeof(PsHtmlStoredFacts);
+    *out = injection_.guard;
+    out->struct_size = sizeof(PsHtmlRequestGuard);
     return 0;
+  }
+
+  int HtmlClassifyCookies(const char* const* lines, size_t line_count,
+                          int ignore_builtin, const char* const* additions,
+                          size_t addition_count,
+                          PsHtmlCookieSpan* /*ignorable_values*/,
+                          size_t ignorable_capacity,
+                          PsHtmlCookieClass* out) const override {
+    std::vector<GoogleString> args = {Num(ignore_builtin),
+                                      Num(ignorable_capacity)};
+    for (size_t i = 0; i < line_count; ++i) {
+      args.push_back(StrCat("line=", Str(lines[i])));
+    }
+    for (size_t i = 0; i < addition_count; ++i) {
+      args.push_back(StrCat("add=", Str(additions[i])));
+    }
+    Record("ps_html_classify_cookies", args);
+    if (!HasHtmlServe15Set()) return -1;
+    if (injection_.cookies_rc != 0) return injection_.cookies_rc;
+    if (out == nullptr || out->struct_size < sizeof(PsHtmlCookieClass)) {
+      return -1;
+    }
+    *out = injection_.cookies;
+    out->struct_size = sizeof(PsHtmlCookieClass);
+    return 0;
+  }
+
+  int HtmlIgnoreCookieGuard(const char* addition,
+                            int* out_warning) const override {
+    Record("ps_html_ignore_cookie_guard", {Str(addition)});
+    if (!HasHtmlServe15Set() || addition == nullptr) return -1;
+    if (out_warning != nullptr) *out_warning = injection_.ignore_cookie_warning;
+    return injection_.ignore_cookie_guard;
+  }
+
+  int HtmlPolicyStamp(int credentialed, int ignore_builtin,
+                      uint32_t list_version, const char* const* additions,
+                      size_t addition_count, uint64_t* out) const override {
+    std::vector<GoogleString> args = {Num(credentialed), Num(ignore_builtin),
+                                      Num(list_version)};
+    for (size_t i = 0; i < addition_count; ++i)
+      args.push_back(Str(additions[i]));
+    Record("ps_html_policy_stamp", args);
+    if (!HasHtmlServe15Set() || out == nullptr) return -1;
+    if (injection_.policy_stamp_rc != 0) return injection_.policy_stamp_rc;
+    *out = injection_.policy_stamp;
+    return 0;
+  }
+
+  int HtmlUnsafeMethodInvalidates(const char* method,
+                                  int status) const override {
+    Record("ps_html_unsafe_method_invalidates",
+           {method == nullptr ? "(null)" : method, Num(status)});
+    if (!HasHtmlServe15Set()) return 0;
+    return injection_.unsafe_invalidates;
+  }
+
+  int HeaderBlockPolicyStamp(const void* block, uint64_t* out) const override {
+    Record("ps_header_block_policy_stamp",
+           {block == nullptr ? "null" : "block"});
+    if (!HasHtmlServe15Set() || block == nullptr || out == nullptr) return -1;
+    if (injection_.block_stamp_rc < 0) return injection_.block_stamp_rc;
+    *out = injection_.block_stamp;
+    return injection_.block_stamp != 0 ? 1 : 0;
   }
 
   int HtmlMarkdownEtag(const uint8_t* binding_hash,
@@ -443,6 +563,20 @@ class InjectedVerdictDaemonAbi : public RecordingDaemonAbi {
       out.push_back(kDigits[bytes[i] & 0x0F]);
     }
     return out;
+  }
+
+  // The injected facts, written only as far as the caller's struct_size
+  // reaches, which is left as the caller set it (as the library does).  A
+  // struct short of the 1.14 size is a malformed call.
+  int CopyFacts(PsHtmlStoredFacts* out) const {
+    if (out == nullptr || out->struct_size < kPsHtmlStoredFactsSize14) {
+      return -1;
+    }
+    const size_t size = out->struct_size;
+    PsHtmlStoredFacts f = injection_.facts;
+    f.struct_size = size;
+    memcpy(out, &f, size < sizeof(f) ? size : sizeof(f));
+    return 0;
   }
 
   void Record(const char* fn, std::vector<GoogleString> args) const {

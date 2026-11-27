@@ -25,6 +25,7 @@ waits for a stated deadline and fails at it.
 """
 
 import abc
+import copy
 import http.client
 import importlib
 import json
@@ -151,6 +152,10 @@ EXPECT_KEYS = frozenset(
 )
 HEADER_EXPECT_KEYS = frozenset(["count", "value", "contains"])
 MODES = frozenset(["off", "report-only", "serve-variants"])
+
+# The mode a row may run in only as a mode-audit rerun (mode_audit_rows); a
+# row of the table that names it is a pending row.
+AUDIT_MODE = "serve-cached-html"
 
 MARKDOWN_ETAG = "$markdown_etag"
 
@@ -375,6 +380,30 @@ LIVE_ROWS_THAT_RUN = 130
 LIVE_ROWS_PENDING = 100
 
 
+def mode_audit_rows(rows: List[dict]) -> List[dict]:
+    """The mode audit: every row that runs serve-variants and asks for a
+    Markdown copy, again in serve-cached-html. That mode serves the Markdown
+    copies exactly as serve-variants does (its stored-HTML answer is a request
+    without a Markdown preference), so each row must pass unchanged. Rows that
+    switch or compare modes (set_mode, differential) are about the modes
+    themselves and are left out. Each copy is marked `mode_audit`, carries its
+    own id, and is checked by validate_row like any row."""
+    out = []
+    for row in rows:
+        live = row.get("live", {})
+        if live.get("mode") != "serve-variants":
+            continue
+        text = json.dumps(live)
+        if "text/markdown" not in text or "set_mode" in text or "differential" in text:
+            continue
+        audit = copy.deepcopy(row)
+        audit["id"] = f"{row['id']}-in-{AUDIT_MODE}"
+        audit["mode_audit"] = row["id"]
+        audit["live"]["mode"] = AUDIT_MODE
+        out.append(audit)
+    return out
+
+
 def pending_rows(cases: dict) -> List[dict]:
     """The live rows held back as pending, counted apart from the lane's
     run and skip counts. The change that adds their support removes the
@@ -450,7 +479,8 @@ def validate_row(row: dict, bodies: Dict[str, str]) -> List[str]:
     if live is None:
         return [f"{rid}: no live body"]
     unknown("live", live, LIVE_KEYS)
-    if live.get("mode") not in MODES:
+    if live.get("mode") not in MODES and not (
+            row.get("mode_audit") and live.get("mode") == AUDIT_MODE):
         errors.append(f"{rid}: mode {live.get('mode')}")
     for port in row.get("ports", []):
         if port not in PORTS:

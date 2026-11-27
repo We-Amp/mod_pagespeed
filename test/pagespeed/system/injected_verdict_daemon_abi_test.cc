@@ -71,7 +71,7 @@ TEST_F(InjectedVerdictDaemonAbiTest, EveryServeVerdictCanBeInjected) {
   for (int action :
        {kPsHtmlServeActionFallThrough, kPsHtmlServeActionServeHtml,
         kPsHtmlServeActionServeMarkdown, kPsHtmlServeActionValidate}) {
-    for (int reason = 0; reason < 19; ++reason) {
+    for (int reason = 0; reason < 27; ++reason) {
       for (int not_modified : {0, 1}) {
         PsHtmlServeVerdict* v = &fake_->mutable_injection()->verdict;
         v->action = action;
@@ -96,7 +96,16 @@ TEST_F(InjectedVerdictDaemonAbiTest, EveryServeVerdictCanBeInjected) {
     }
   }
   EXPECT_STREQ("skew", fake_->HtmlServeReasonName(18));
-  EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(19));
+  // Every 1.15 reason, in the library's order.
+  EXPECT_STREQ("scope", fake_->HtmlServeReasonName(19));
+  EXPECT_STREQ("capped", fake_->HtmlServeReasonName(20));
+  EXPECT_STREQ("conditional", fake_->HtmlServeReasonName(21));
+  EXPECT_STREQ("credentialed", fake_->HtmlServeReasonName(22));
+  EXPECT_STREQ("legacy_entry", fake_->HtmlServeReasonName(23));
+  EXPECT_STREQ("policy_mismatch", fake_->HtmlServeReasonName(24));
+  EXPECT_STREQ("request_header", fake_->HtmlServeReasonName(25));
+  EXPECT_STREQ("path", fake_->HtmlServeReasonName(26));
+  EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(27));
   EXPECT_EQ(nullptr, fake_->HtmlServeReasonName(-1));
 
   // A malformed-call answer is injectable too, and then nothing is written.
@@ -328,6 +337,89 @@ TEST_F(InjectedVerdictDaemonAbiTest, OtherCallsStillReachTheRealBinding) {
   EXPECT_EQ(inner_->VersionMinor(), fake_->VersionMinor());
   EXPECT_EQ(before + 1, fake_->calls());
   EXPECT_TRUE(fake_->html_calls().empty());
+}
+
+// The 1.15 set is off until a case turns it on, and then every call answers
+// its injection; the 1.15 request fields are recorded only from a request of
+// the 1.15 size.
+TEST_F(InjectedVerdictDaemonAbiTest, TheFifteenSetIsInjectable) {
+  EXPECT_FALSE(fake_->HasHtmlServe15Set());
+  EXPECT_FALSE(fake_->HtmlServe15SetUnavailableReason().empty());
+  PsHtmlRequestGuard guard = {};
+  guard.struct_size = sizeof(guard);
+  EXPECT_EQ(-1,
+            fake_->HtmlRequestGuard("/", nullptr, nullptr, 0, "http", &guard));
+  EXPECT_EQ(0, fake_->HtmlUnsafeMethodInvalidates("POST", 200));
+
+  HtmlServeInjection* inj = fake_->mutable_injection();
+  inj->has_set_15 = true;
+  EXPECT_TRUE(fake_->HasHtmlServe15Set());
+  EXPECT_EQ("", fake_->HtmlServe15SetUnavailableReason());
+  inj->guard.reason = kPsHtmlGuardRequestHeader;
+  inj->guard.header_index = 1;
+  inj->guard.xfp = 1;
+  const char* names[] = {"Accept", "X-Forwarded-Proto"};
+  const char* values[] = {"*/*", "https"};
+  ASSERT_EQ(0, fake_->HtmlRequestGuard("/p", names, values, 2, "http", &guard));
+  EXPECT_EQ(kPsHtmlGuardRequestHeader, guard.reason);
+  EXPECT_EQ(1, guard.header_index);
+  EXPECT_EQ(1, guard.xfp);
+  EXPECT_EQ("ps_html_request_guard", fake_->html_calls().back().fn);
+  EXPECT_EQ("X-Forwarded-Proto: https", fake_->html_calls().back().args[3]);
+
+  inj->cookies.cookie_class = kPsHtmlCookiesBlocking;
+  PsHtmlCookieClass cookies = {};
+  cookies.struct_size = sizeof(cookies);
+  const char* lines[] = {"sid=1"};
+  ASSERT_EQ(0, fake_->HtmlClassifyCookies(lines, 1, 1, nullptr, 0, nullptr, 0,
+                                          &cookies));
+  EXPECT_EQ(kPsHtmlCookiesBlocking, cookies.cookie_class);
+  inj->ignore_cookie_guard = 0;
+  EXPECT_EQ(0, fake_->HtmlIgnoreCookieGuard("*", nullptr));
+  uint64_t stamp = 0;
+  ASSERT_EQ(0, fake_->HtmlPolicyStamp(0, 1, 1, nullptr, 0, &stamp));
+  EXPECT_EQ(0x5A5Au, stamp);
+  inj->unsafe_invalidates = 1;
+  EXPECT_EQ(1, fake_->HtmlUnsafeMethodInvalidates("POST", 200));
+  inj->block_stamp = 99;
+  int block = 0;
+  EXPECT_EQ(1, fake_->HeaderBlockPolicyStamp(&block, &stamp));
+  EXPECT_EQ(99u, stamp);
+
+  inj->facts.flags = kPsHtmlFactsPresent | kPsHtmlFactsStoreV2;
+  inj->facts.entry_policy_stamp = 99;
+  PsHtmlStoredFacts facts = {};
+  facts.struct_size = sizeof(facts);
+  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReadsEx(&block, nullptr, nullptr, 1,
+                                                 &block, &facts));
+  EXPECT_EQ(99u, facts.entry_policy_stamp);
+  // A 1.14-size facts struct gets the 1.14 prefix and keeps its size.
+  PsHtmlStoredFacts short_facts = {};
+  short_facts.struct_size = kPsHtmlStoredFactsSize14;
+  ASSERT_EQ(0, fake_->HtmlStoredFactsFromReads(&block, nullptr, nullptr, 1,
+                                               &short_facts));
+  EXPECT_EQ(kPsHtmlStoredFactsSize14, short_facts.struct_size);
+  EXPECT_EQ(0u, short_facts.entry_policy_stamp);
+
+  PsHtmlServeRequest request = {};
+  request.struct_size = sizeof(request);
+  request.method = "GET";
+  request.serve_scope = kPsHtmlServeScopeAll;
+  request.agent_class = 3;
+  request.html_max_lifetime_s = 60;
+  request.policy_stamp = 7;
+  PsHtmlServeVerdict out = {};
+  out.struct_size = sizeof(out);
+  ASSERT_EQ(0, fake_->HtmlServeClassify(&request, &facts, &out));
+  request.struct_size = kPsHtmlServeRequestSize14;
+  ASSERT_EQ(0, fake_->HtmlServeClassify(&request, &facts, &out));
+  ASSERT_EQ(2u, fake_->serve_requests().size());
+  EXPECT_EQ(kPsHtmlServeScopeAll, fake_->serve_requests()[0].serve_scope);
+  EXPECT_EQ(3, fake_->serve_requests()[0].agent_class);
+  EXPECT_EQ(60u, fake_->serve_requests()[0].html_max_lifetime_s);
+  EXPECT_EQ(7u, fake_->serve_requests()[0].policy_stamp);
+  EXPECT_EQ(0, fake_->serve_requests()[1].agent_class);
+  EXPECT_EQ(0u, fake_->serve_requests()[1].policy_stamp);
 }
 
 }  // namespace

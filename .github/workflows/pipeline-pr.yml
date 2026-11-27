@@ -466,6 +466,15 @@ jobs:
             pagespeed/system/daemon_abi.cc "${RUNNER_TEMP}/opt-pagespeed.h" \
             "${RUNNER_TEMP}/opt-alternate_id.h" "${RUNNER_TEMP}/opt-symbols.lds"
 
+      # The HTML cache modes are ordered; a `==` or `!=` against serve-variants
+      # treats every later mode as "does not serve" on that server.
+      - name: HTML cache mode audit - self-test
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/ci/check_daemon_html_mode_audit.py --self-test
+      - name: HTML cache mode audit
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/ci/check_daemon_html_mode_audit.py .
+
       - name: Legacy-docs guard - self-test
         if: ${{ !cancelled() }}
         run: sh tools/ci/check_legacy_docs.sh --self-test

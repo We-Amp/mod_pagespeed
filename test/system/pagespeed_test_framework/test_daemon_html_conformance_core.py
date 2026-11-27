@@ -13,6 +13,7 @@ which is how these tests prove the runner notices.
 Run with: python -m pytest -v test_daemon_html_conformance_core.py
 """
 
+import json
 import threading
 from typing import Dict, List, Optional
 
@@ -286,6 +287,28 @@ class TestTheFile:
         assert len(ROWS) == conf.LIVE_ROWS_THAT_RUN
         assert len(pending) == conf.LIVE_ROWS_PENDING
         print(f"live rows: {len(ROWS)} run, {len(pending)} pending")
+
+    def test_the_mode_audit_reruns_every_markdown_row_in_serve_cached_html(self):
+        audit = conf.mode_audit_rows(list(ROWS.values()))
+        assert audit, "no serve-variants Markdown row to rerun"
+        by_source = {r["mode_audit"]: r for r in audit}
+        for rid, row in ROWS.items():
+            live = row["live"]
+            text = json.dumps(live)
+            wanted = (live["mode"] == "serve-variants" and "text/markdown" in text
+                      and "set_mode" not in text and "differential" not in text)
+            assert (rid in by_source) == wanted, rid
+            if wanted:
+                copy_row = by_source[rid]
+                assert copy_row["live"]["mode"] == "serve-cached-html"
+                assert copy_row["id"] == rid + "-in-serve-cached-html"
+                assert copy_row["live"]["steps"] == live["steps"]
+                assert live["mode"] == "serve-variants"  # the table is untouched
+                assert conf.validate_row(copy_row, BODIES) == []
+        # Only an audit copy may name the mode.
+        plain = dict(next(iter(by_source.values())))
+        plain.pop("mode_audit")
+        assert any("mode" in e for e in conf.validate_row(plain, BODIES))
 
     def test_every_live_row_uses_only_keys_the_runner_acts_on(self):
         errors = []
