@@ -568,25 +568,6 @@ void PurgeContext::PollFileSystem() {
   mutex_->Unlock();
 }
 
-void PurgeContext::PollFileSystemNow() {
-  const int64 now_ms = timer_->NowMs();
-  const int64 global_purge_index = purge_index_->Get();
-  mutex_->Lock();
-  if (!reading_) {
-    const bool needs_update = local_purge_index_ < global_purge_index;
-    if (needs_update) {
-      local_purge_index_ = global_purge_index;
-    }
-    reading_ = true;
-    mutex_->Unlock();
-    purge_poll_timestamp_ms_->Set(now_ms);
-    ReadFileAndCallCallbackIfChanged(needs_update);
-    mutex_->Lock();
-    reading_ = false;
-  }
-  mutex_->Unlock();
-}
-
 void PurgeContext::ReadFileAndCallCallbackIfChanged(bool needs_update) {
   CopyOnWrite<PurgeSet> purges_from_file;
   PurgeSet* mutable_purges_from_file = purges_from_file.MakeWriteable();

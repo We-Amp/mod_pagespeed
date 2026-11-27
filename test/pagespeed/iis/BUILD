@@ -671,6 +671,20 @@ pagespeed_cc_test(
     ],
 )
 
+# The IIS purge source: another process's purge seen at once, the server's
+# own purges never lost.  Any platform.
+pagespeed_cc_test(
+    name = "iis_daemon_html_purge_source_test",
+    srcs = ["iis_daemon_html_purge_source_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/iis:iis_daemon_html_purge_source",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/util",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The host names an IIS site's bindings vouch for.  Any platform.
 pagespeed_cc_test(
     name = "iis_site_bindings_test",

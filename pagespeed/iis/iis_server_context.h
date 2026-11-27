@@ -112,12 +112,7 @@ namespace net_instaweb {
 		// and one statistics tick per kDaemonHtmlStatisticsTickMs.
 		void MaybeTickDaemonHtmlEngine();
 
-		// Before an HTML cache serve or commit decision: when the purge
-		// file changed since this process last read it (its modification
-		// time or size), read it now, whatever the purge poll interval, so
-		// the fence holds every URL purge another worker process wrote.
-		// One file stat otherwise.  Thread-safe.
-		void RefreshDaemonHtmlPurgeSet();
+
 		static constexpr int64 kDaemonHtmlStatisticsTickMs = 10 * 1000;
 
 		// The capture of an HTML response finished its body, so the engine
@@ -181,16 +176,17 @@ namespace net_instaweb {
 			DaemonHealth::kNotConfigured};
 		std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 		std::once_flag daemon_html_engine_once_;
-		// What the serving engine reads purges from; declared before the
-		// engine, which borrows it.
+		// What the serving engine reads purges from (the server's own purge
+		// state and the purge file as it is now, iis_daemon_html_purge_source.h);
+		// declared before the engine, which borrows them.
+		std::unique_ptr<DaemonHtmlPurgeSource> daemon_html_system_purge_source_;
 		std::unique_ptr<DaemonHtmlPurgeSource> daemon_html_purge_source_;
 		std::unique_ptr<DaemonHtmlEngine> daemon_html_engine_;
 		std::atomic<DaemonHtmlEngine*> daemon_html_engine_built_{nullptr};
 		bool daemon_html_observing_ = false;
 		std::atomic<int64> daemon_html_last_poll_tick_ms_{0};
 		std::atomic<int64> daemon_html_last_stats_tick_ms_{0};
-		std::atomic<uint64_t> daemon_html_purge_file_mtime_{0};
-		std::atomic<uint64_t> daemon_html_purge_file_size_{0};
+
 		std::atomic<bool> daemon_html_final_view_missing_logged_{false};
 		std::atomic<bool> daemon_html_markdown_not_finalized_{false};
 		std::atomic<bool> daemon_html_final_view_seen_{false};

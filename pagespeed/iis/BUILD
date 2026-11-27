@@ -175,6 +175,7 @@ cc_library(
     deps = [
         ":iis_daemon_check",
         ":iis_daemon_html_capture",
+        ":iis_daemon_html_purge_source",
         ":iis_daemon_html_serve",
         ":iis_daemon_record",
         ":iis_daemon_serve",
@@ -369,6 +370,20 @@ cc_library(
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_html_engine",
+    ],
+)
+
+# The purge state the HTML cache engine reads on IIS: the server's own, plus
+# the purge file as it is now (free of the IIS headers).
+cc_library(
+    name = "iis_daemon_html_purge_source",
+    srcs = ["iis_daemon_html_purge_source.cc"],
+    hdrs = ["iis_daemon_html_purge_source.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache",
         "//pagespeed/system:daemon_html_engine",
     ],
 )

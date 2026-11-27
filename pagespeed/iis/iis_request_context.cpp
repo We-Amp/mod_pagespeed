@@ -74,9 +74,6 @@ void IisInnerRequestContext::CleanupStoredContext()
 		if (daemon_html_commit_started_) {
 			HoldDaemonHtmlCommitForTest();
 		}
-		// The commit's purge re-check sees every URL purge written so far,
-		// another worker process's included.
-		server_context_->RefreshDaemonHtmlPurgeSet();
 		server_context_->TraceDaemonHtml("commit-begin", daemon_html_trace_url_, "");
 		if (daemon_html_capture_->Finish()) {
 			server_context_->NoteDaemonHtmlFinalViewMissing();

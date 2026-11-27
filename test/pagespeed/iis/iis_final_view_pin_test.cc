@@ -326,21 +326,16 @@ TEST_F(IisFinalViewPinTest, ARequestWithoutItsPristineTargetNeverAgrees) {
             dll.find("IisWidenRawTarget(raw->pRawUrl,raw->RawUrlLength)"));
 }
 
-TEST_F(IisFinalViewPinTest, EveryDecisionReadsThePurgesOtherProcessesWrote) {
-  // A worker process polls the purge file only at the purge poll interval;
-  // the serve and the commit refresh it first (another process's purge).
-  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
-  const GoogleString serve = FunctionBody(cc, "staticboolServeIisMarkdownAnswer(");
-  const size_t refresh_at = serve.find("server_context->RefreshDaemonHtmlPurgeSet();");
-  ASSERT_NE(GoogleString::npos, refresh_at);
-  EXPECT_LT(refresh_at, serve.find("engine->Serve("));
-  const GoogleString inner = ReadStrippedSource("iis_request_context.cpp");
-  const GoogleString cleanup =
-      FunctionBody(inner, "voidIisInnerRequestContext::CleanupStoredContext()");
-  const size_t commit_refresh =
-      cleanup.find("server_context_->RefreshDaemonHtmlPurgeSet();");
-  ASSERT_NE(GoogleString::npos, commit_refresh);
-  EXPECT_LT(commit_refresh, cleanup.find("daemon_html_capture_->Finish()"));
+TEST_F(IisFinalViewPinTest, TheEngineReadsThePurgeFileAsItIsNow) {
+  // A worker process polls the purge file only at the purge poll interval:
+  // the engine's purge source is the IIS one, which also reads the file as
+  // it is on disk now (another process's purge).
+  const GoogleString cc = ReadStrippedSource("iis_server_context.cpp");
+  const size_t iis_at = cc.find("daemon_html_purge_source_.reset(newIisDaemonHtmlPurgeSource(");
+  const size_t deps_at = cc.find("deps.purge_source=daemon_html_purge_source_.get();");
+  ASSERT_NE(GoogleString::npos, iis_at);
+  ASSERT_NE(GoogleString::npos, deps_at);
+  EXPECT_LT(iis_at, deps_at);
 }
 
 TEST_F(IisFinalViewPinTest, TheBodyIsRecordedOnlyBeforeTheResponseIsCleared) {

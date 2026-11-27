@@ -342,24 +342,6 @@ TEST_P(PurgeContextTest, InvalidTimestampInPurgeRecord) {
   EXPECT_EQ(ExpectStat(6), file_parse_failures());
 }
 
-TEST_P(PurgeContextTest, PollNowReadsAPurgeWrittenWithinTheInterval) {
-  // Context 2 has just read the file; context 1, another process, then
-  // writes a purge.
-  scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-  EXPECT_TRUE(PollAndTest2("a", timer_.NowMs()));
-  const int64 purge_ms = timer_.NowMs();
-  purge_context1_->AddPurgeUrl("a", purge_ms, ExpectSuccess());
-  scheduler_.AdvanceTimeMs(1000);
-  if (!HasValidStats()) {
-    // No shared purge index to say the file changed: inside the interval
-    // a poll does not read it.
-    EXPECT_TRUE(PollAndTest2("a", purge_ms - 1));
-  }
-  // A poll that must see every purge written so far reads it now.
-  purge_context2_->PollFileSystemNow();
-  EXPECT_FALSE(purge_set2_->IsValid("a", purge_ms - 1));
-}
-
 // We test with use_null_statistics == GetParam() as both true and false.
 INSTANTIATE_TEST_SUITE_P(PurgeContextTestInstance, PurgeContextTest,
                          ::testing::Bool());

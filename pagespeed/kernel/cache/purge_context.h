@@ -129,11 +129,6 @@ class PurgeContext {
   // expired.  This can be called on every request.
   void PollFileSystem();
 
-  // PollFileSystem without the interval: reads the file now, unless a read
-  // is already in progress, for a caller that must see every purge written
-  // so far (another process's included) before it decides.
-  void PollFileSystemNow();
-
   // To test whether URLs are purged, you must capture a PurgeSet by registering
   // a callback.  The PurgeSet is passed to the callback using a CopyOnWrite
   // wrapper so that the callback can efficiently share the storage.
