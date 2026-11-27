@@ -6,7 +6,8 @@
   `DaemonHtmlCacheIgnoreCookie <name|prefix*>` are accepted on Apache, nginx,
   IIS and Envoy, with a warning each that they take effect with
   `DaemonHtmlCache serve-cached-html`; in this release they have no effect. An
-  invalid value is still a configuration error. `DaemonHtmlCache
+  invalid value is refused, as for any other directive: a configuration error
+  on Apache and nginx, a logged and skipped line on IIS and Envoy. `DaemonHtmlCache
   serve-cached-html` now runs as `serve-variants`, with a warning, instead of
   being ignored: it serves the Markdown copies of stored pages and never serves
   stored HTML. A configuration written for the release that adds the mode

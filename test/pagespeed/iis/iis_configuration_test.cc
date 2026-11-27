@@ -333,11 +333,39 @@ TEST_F(IisConfigurationTest, DaemonHtmlCacheModesParse) {
   EXPECT_EQ(1, recorder.CountContaining("it runs as serve-variants"));
   EXPECT_EQ(0, recorder.CountContaining("Error handling config line"));
 
-  // The legacy "name value" line form maps it the same way.
+  // The legacy "name value" line form maps it the same way, with the same
+  // warning, and warns once for each of the settings.
+  RecordingMessageHandler legacy_recorder;
+  ConfigurationFile* legacy_cf = CreateTestConfigFile(
+      "DaemonHtmlCache serve-cached-html\n"
+      "DaemonHtmlCacheServeScope all\n"
+      "DaemonHtmlCacheMaxAge 60\n"
+      "DaemonHtmlCacheCredentialed explicit-public\n"
+      "DaemonHtmlCacheIgnoreCookies off\n"
+      "DaemonHtmlCacheIgnoreCookie _my_ab\n"
+      "DaemonHtmlCacheMaxAge 86401\n",
+      &legacy_recorder, global_config_, nullptr);
   IisRewriteOptions legacy(nullptr);
-  ParseAndGetConfig("DaemonHtmlCache serve-cached-html\n", "", &legacy);
+  TestConfigFileGetConfig(legacy_cf, input, legacy);
+  TestConfigFileRelease(legacy_cf);
   EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeVariants,
             legacy.daemon_html_cache());
+  EXPECT_EQ(1, legacy_recorder.CountContaining("it runs as serve-variants"));
+  EXPECT_EQ(5, legacy_recorder.CountContaining(
+                   "takes effect with DaemonHtmlCache serve-cached-html"));
+  for (const char* name :
+       {"'DaemonHtmlCacheServeScope'", "'DaemonHtmlCacheMaxAge'",
+        "'DaemonHtmlCacheCredentialed'", "'DaemonHtmlCacheIgnoreCookies'",
+        "'DaemonHtmlCacheIgnoreCookie'"}) {
+    EXPECT_EQ(1, legacy_recorder.CountContaining(name)) << name;
+  }
+  // The invalid value is refused with the parser's warning; the valid one
+  // stays.
+  EXPECT_EQ(1, legacy_recorder.CountContaining(
+                   "Failed to set option [DaemonHtmlCacheMaxAge]"));
+  EXPECT_EQ(60, legacy.daemon_html_cache_max_age_s());
+  EXPECT_EQ(RewriteOptions::kDaemonHtmlCacheServeScopeAll,
+            legacy.daemon_html_cache_serve_scope());
 }
 
 // The settings of the serve-cached-html mode load from pagespeed.config, every
