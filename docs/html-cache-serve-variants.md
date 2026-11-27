@@ -150,9 +150,9 @@ Consequences to plan for:
 - `Cache-Control: private` keeps the copy out of shared caches, including CDNs
   that ignore `Vary`. Behind a CDN, `Age` can cost extra cache misses.
 - A script's request is never stored and never answered with the Markdown
-  copy: one whose `X-Requested-With` lists `XMLHttpRequest` (any case, also
-  in a value joined from repeated lines), or that carries a non-empty
-  `X-MicrosoftAjax` or `X-Prototype-Version`. It counts
+  copy: one whose `X-Requested-With` contains `XMLHttpRequest` anywhere
+  (any case, also in a value joined from repeated lines), or that carries a
+  non-empty `X-MicrosoftAjax` or `X-Prototype-Version`. It counts
   `daemon_html_refused_request_header` (store) or
   `daemon_markdown_fallthrough_request_header` (Markdown request). In
   `report-only` such a request is not evaluated either: it counts only in

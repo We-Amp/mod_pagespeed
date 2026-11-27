@@ -474,16 +474,12 @@ class ServeReads {
 const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value) {
   TrimWhitespace(&value);
   if (StringCaseEqual(name, "X-Requested-With")) {
-    // Any element of the list: a server that joins repeated lines into one
-    // value (httpd, IIS) and a client that sends "XMLHttpRequest, x" are
-    // both read as a script, as an origin matching the token anywhere
-    // would.  Another value (an Android WebView sends the app's package
-    // name) is not a script.
-    StringPieceVector tokens;
-    SplitStringPieceToVector(value, ",", &tokens, true);
-    for (StringPiece token : tokens) {
-      TrimWhitespace(&token);
-      if (StringCaseEqual(token, "XMLHttpRequest")) return "X-Requested-With";
+    // Anywhere in the value, as an origin matching the token anywhere
+    // (Rails' xhr?) reads it: a value a server joined from repeated lines
+    // (httpd, IIS) and "XMLHttpRequest, x" are both a script.  Another
+    // value (an Android WebView sends the app's package name) is not.
+    if (FindIgnoreCase(value, "XMLHttpRequest") != StringPiece::npos) {
+      return "X-Requested-With";
     }
     return nullptr;
   }

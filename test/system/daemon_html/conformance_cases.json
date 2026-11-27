@@ -5830,6 +5830,45 @@
       }
     },
     {
+      "id": "store-ajax-x-requested-with-substring",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never stored",
+      "engine": {
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "capture_start_ms": 1790000000000,
+              "headers": [["X-Requested-With", "XMLHttpRequestX"]]
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_store_classify", "ps_cache_write_original_site"],
+              "counters": {"daemon_html_refused_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "store-ajax-x-requested-with-lowercase",
       "runners": ["engine"],
       "why": "request: an AJAX request is never stored",
@@ -13394,6 +13433,46 @@
               "options_enabled_and_allowed": true,
               "accept": ["text/markdown"],
               "headers": [["X-Requested-With", "com.example.app, xmlhttprequest"]]
+            },
+            "expect": {
+              "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],
+              "serve": {"kind": "fall_through", "reason": "request_header"},
+              "counters": {"daemon_markdown_fallthrough_request_header": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "serve-ajax-x-requested-with-substring",
+      "runners": ["engine"],
+      "why": "request: an AJAX request is never answered from the cache",
+      "engine": {
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": []
+          },
+          {"kind": "markdown", "url": "https://www.example.test/page", "body_ref": "page_md"}
+        ],
+        "verdicts": [],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "headers": [["X-Requested-With", "XMLHttpRequestX"]]
             },
             "expect": {
               "calls_exclude": ["ps_html_serve_classify", "ps_cache_read_alternate_site"],

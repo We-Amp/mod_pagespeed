@@ -1,6 +1,7 @@
 - **The HTML cache never stores or answers a script's request.** A request
-  whose `X-Requested-With` lists `XMLHttpRequest` (compared without regard to
-  case, also when repeated lines were joined into one value), or that carries
+  whose `X-Requested-With` contains `XMLHttpRequest` anywhere in its value
+  (compared without regard to case, so also when repeated lines were joined
+  into one value), or that carries
   a non-empty `X-MicrosoftAjax` or `X-Prototype-Version` header, is no longer
   stored by `DaemonHtmlCache serve-variants` on Apache and nginx. A page
   fragment an origin returns to such a request can therefore no longer be

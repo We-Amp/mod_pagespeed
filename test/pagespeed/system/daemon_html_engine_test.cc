@@ -196,8 +196,12 @@ TEST(DaemonHtmlAjaxMarkerTest, NamesTheMarkersTheServerPortsTreatAsAjax) {
                DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequest,x"));
   EXPECT_EQ(nullptr,
             DaemonHtmlAjaxMarker("X-Requested-With", "com.example.app, other"));
-  EXPECT_EQ(nullptr,
-            DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequestX"));
+  // Contained anywhere, as an origin matching the token anywhere reads it.
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttpRequestX"));
+  EXPECT_STREQ("X-Requested-With",
+               DaemonHtmlAjaxMarker("X-Requested-With", "my-xmlhttprequest"));
+  EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Requested-With", "XMLHttp"));
   EXPECT_EQ(nullptr, DaemonHtmlAjaxMarker("X-Requested-With", " , "));
   EXPECT_STREQ("X-MicrosoftAjax",
                DaemonHtmlAjaxMarker("X-MICROSOFTAJAX", "Delta=true"));
