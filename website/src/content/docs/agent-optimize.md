@@ -3,7 +3,7 @@ title: 'Serve Markdown to AI agents'
 description: 'Serve AI agents a rendered Markdown copy of your pages at the same URL, and synthesize an /llms.txt — off by default, nothing leaves your server.'
 order: 60
 group: 'Agents'
-lastUpdated: 2026-11-14
+lastUpdated: 2026-11-27
 faq:
   - q: 'Does this change what browsers and search engines see?'
     a: 'No. Browsers and crawlers receive your normal HTML at the same URL. Only a request that explicitly negotiates the agent representation (Accept: text/markdown), on a deployment where you have enabled agent optimization, receives the rendered-Markdown copy. The response carries Vary: Accept so shared caches never mix the two.'
@@ -63,6 +63,12 @@ exists yet, so a CDN in front of nginx keys the two apart from the first
 request. With agent optimization off, `Vary` is as before. Stylesheets,
 scripts and images are not affected.
 
+:::next-release{after="2.10.0"}
+On Apache with `DaemonHtmlCache serve-variants`, the HTML responses of your
+pages name `Accept` in their `Vary` as well, so a CDN in front of the server
+keys the two apart.
+:::
+
 - `x-markdown-tokens` (nginx module) — an estimate of the number of tokens in
   the Markdown body, so an agent can budget its context before reading it. The estimate is
   the body size in bytes divided by four, rounded down; no tokenizer is run, so
@@ -80,9 +86,73 @@ agent optimization on the worker (`--agent-optimize`, or
 analysis (`--enable-browser-analysis`), since the Markdown copy is produced from
 the rendered DOM.
 
+:::next-release{after="2.10.0"}
+The module's HTML cache path (below) derives the Markdown copy without a
+browser and does not need `--enable-browser-analysis`.
+:::
+
 While the flag is off, an agent request **transparently receives the normal
 HTML** of the same URL — never an error, never a half-rendered page. Turning the
 feature off is always safe.
+
+:::next-release{after="2.10.0"}
+## Serve the Markdown copy from the module (Apache and nginx)
+
+On Apache and nginx the mod_pagespeed module can keep a copy of each HTML page
+and answer an agent request with the Markdown copy that the worker derives from
+it, with no browser rendering. This is the `DaemonHtmlCache serve-variants`
+mode. It is opt-in, and it needs both halves: the module configuration and a
+worker started with the right flags. The module alone does nothing.
+
+1. Install the optimizer and restart it before you reload the web server. A
+   worker from an earlier release refuses the module's notifications.
+2. Start the worker with `--html-mode markdown-static` (or `markdown-rendered`)
+   and `--agent-optimize`. The Docker images set the second flag with
+   `PAGESPEED_AGENT_OPTIMIZE=true` but have no variable for the HTML mode yet
+   and do not pass arguments through; set the mode with the `html_mode` key in
+   `pagespeed.json`, which the worker reads at start from the directory that
+   holds its cache volume (`/data` by default in the images), or with
+   `PATCH /v1/config` on the worker's API, with the management API enabled
+   (`PAGESPEED_API_PORT` or `PAGESPEED_API_SOCKET`). The mode applies to the
+   whole worker: in a `markdown-*` mode it writes no optimized HTML variants for any site it
+   serves, and variants already stored are served until the page changes, is
+   refreshed or is purged.
+3. In the module, turn on `AgentOptimize` and start with `report-only`:
+
+   ```nginx
+   pagespeed AgentOptimize on;
+   pagespeed DaemonHtmlCache report-only;
+   ```
+
+   On Apache the directives are `ModPagespeedAgentOptimize on` and
+   `ModPagespeedDaemonHtmlCache report-only`. Set both in the virtual host (or at
+   server level), not inside `<Location>`, `<Directory>` or `.htaccess`: there,
+   `AgentOptimize` does not turn serving on, and `AgentOptimize off` does not
+   stop it. To keep a path out, turn PageSpeed off there (`ModPagespeed off`) or
+   use `ModPagespeedDisallow`.
+   `report-only` changes nothing a client receives. It counts which pages the
+   module could store and why it would refuse the others, so you can see what
+   `serve-variants` would do for your site first.
+4. When the counters look right, change the value to `serve-variants` and
+   reload. If the module or worker does not allow serving, the module logs why
+   when the state changes and keeps running as `report-only`.
+   `DaemonHtmlCache off` turns the feature off again.
+
+Only pages that your origin gives an explicit lifetime (`max-age`, `s-maxage`
+or `Expires`), and that a shared cache may keep, are stored. A `no-cache` page,
+or a static file nginx serves without an upstream `Cache-Control`, gains
+nothing. On nginx, an `add_header Cache-Control` beside the origin's own line
+also leaves the page with no lifetime, so set the lifetime at the origin. The
+first request for a page gets HTML; the Markdown copy is derived after the page is stored. The Markdown answer
+carries only a fixed set of headers, so server-wide headers such as
+`Strict-Transport-Security` are not applied to it: set those at a stage in front
+of the server. It is never compressed.
+
+The module's operator guide, `docs/html-cache-serve-variants.md` in the
+[mod_pagespeed repository](https://github.com/We-Amp/mod_pagespeed), lists what
+is stored and served on each server, how purging works, the limits and the
+counters. IIS does not serve Markdown copies yet.
+:::
 
 ## State a content-use policy (`content-signal`)
 
@@ -200,11 +270,7 @@ copy and `/llms.txt`, which follow the page they were made from.
 
 **Never stored.** A response is not stored when it sets a cookie
 (`Set-Cookie`), or when it carries `Cache-Control: private` or
-`Cache-Control: no-store`. A response is stored only when its `Vary` names
-nothing beyond `Accept-Encoding`, `User-Agent`, `Accept` and `Save-Data`. Any
-other field, including `Vary: Cookie`, and `Vary: *`, means it is not stored. For
-a response that varies on `Accept`, `User-Agent` or `Save-Data`, those request
-headers take part in choosing which stored copy answers.
+`Cache-Control: no-store`.
 
 A response is stored only when its `Vary` names
 nothing beyond `Accept-Encoding`. Any other field, including `Vary: Accept`,
@@ -257,6 +323,12 @@ Start the worker with `--agent-optimize` (and `--enable-browser-analysis`), then
 add `--agent-optimize-llms-txt` if you also want the synthesized `/llms.txt`.
 Evaluate it in staging first: the capability is experimental and its flags may
 change.
+
+:::next-release{after="2.10.0"}
+To have the module serve the Markdown copy, follow the steps in
+[Serve the Markdown copy from the module](#serve-the-markdown-copy-from-the-module-apache-and-nginx)
+and try `report-only` before `serve-variants`.
+:::
 
 See also: [Analyze pages with headless Chrome](/docs/browser-analysis/). For the
 design and rationale,
