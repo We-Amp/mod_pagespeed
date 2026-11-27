@@ -821,8 +821,33 @@ class IisProvider(conf.Provider):
                 c.close()
         raise conf.ProviderUnsupported(f"no connection reached worker {pid}")
 
+    def _stats_summed(self) -> Dict[str, int]:
+        """Every serving worker's statistics, summed: for settle() only (a
+        worker's finished commits never exceed its started ones, so equal
+        sums mean every worker is done). Counters are read pinned."""
+        total: Dict[str, int] = {}
+        read: Set[int] = set()
+        for _ in range(PIN_ATTEMPTS):
+            if len(read) >= self.max_processes:
+                break
+            c = self._connection(tls=True)
+            try:
+                pid = self._origin_pid(conn=c)
+                if pid in read:
+                    continue
+                for name, value in self._stats_of(c).items():
+                    total[name] = total.get(name, 0) + value
+                read.add(pid)
+            except (OSError, http.client.HTTPException):
+                pass
+            finally:
+                c.close()
+        if not read:
+            raise conf.ProviderUnsupported("no worker answered the statistics")
+        return total
+
     def commits(self) -> Tuple[int, int]:
-        s = self._stats()
+        s = self._stats_summed()
         return s.get(STARTED, 0), s.get(FINISHED, 0)
 
     def settle(self) -> None:
