@@ -21,7 +21,12 @@
 
 #include "pagespeed/system/redis_cache.h"
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <atomic>
+#include <cerrno>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -59,6 +64,15 @@ static const int kTimeoutUs = 100 * Timer::kMsUs;
 // say) can exceed the 100 ms kTimeoutUs on a loaded host or in a sanitizer
 // build; the tight value is only needed by the scripted timeout tests.
 static const int kRealServerTimeoutUs = 2 * Timer::kSecondUs;
+// Operation timeout for the caches that talk to the in-process scripted
+// servers, except in the cases that measure the timeout itself. The client
+// deadline runs on the wall clock while each scripted server is a thread a
+// loaded host can leave unscheduled for longer than kTimeoutUs. The client
+// then gave up in the middle of the handshake and closed its socket, and the
+// server's reply went to a closed peer (issue #899). With this deadline the
+// client waits for the server's answer; a server that goes wrong still ends
+// the case at once, because it closes the connection.
+static const int kScriptedServerTimeoutUs = 10 * Timer::kSecondUs;
 // Database index for the caches that talk to the in-process scripted
 // servers: those servers assert that the startup handshake SELECTs
 // database 0 (see kSelectRequest in the server threads below).
@@ -173,11 +187,11 @@ class RedisCacheTest : public CacheTestBase {
     cache_.back()->StartUp();
   }
 
-  void InitRedisWithCustomServer() {
-    cache_.emplace_back(
-        new RedisCache("localhost", custom_server_port_, thread_system_.get(),
-                       &handler_, &timer_, kReconnectionDelayMs, kTimeoutUs,
-                       &statistics_, kDatabaseIndex, kTTLSec));
+  void InitRedisWithCustomServer(int timeout_us = kScriptedServerTimeoutUs) {
+    cache_.emplace_back(new RedisCache("localhost", custom_server_port_,
+                                       thread_system_.get(), &handler_, &timer_,
+                                       kReconnectionDelayMs, timeout_us,
+                                       &statistics_, kDatabaseIndex, kTTLSec));
   }
 
   void InitRedisWithUnreachableServer() {
@@ -249,6 +263,11 @@ class RedisCacheTest : public CacheTestBase {
   }
 
   static void SetUpTestCase() {
+    // A write to a peer that has closed its end, by a scripted server or by
+    // the client under test, must fail that write and so the one case, not
+    // end the whole binary with SIGPIPE. Every server that hosts the cache
+    // ignores SIGPIPE the same way.
+    signal(SIGPIPE, SIG_IGN);
     apr_initialize();
     TcpServerThreadForTesting::PickListenPortOnce(&custom_server_port_);
     CHECK_NE(custom_server_port_, 0);
@@ -494,10 +513,14 @@ class RedisGetRespondingServerThread : public TcpServerThreadForTesting {
     char requestBuf[STATIC_STRLEN(kSelectRequest) + 1];
     apr_size_t recvSize = sizeof(requestBuf) - 1;
 
-    apr_socket_recv(sock, requestBuf, &recvSize);
+    apr_status_t status = apr_socket_recv(sock, requestBuf, &recvSize);
     EXPECT_EQ(STATIC_STRLEN(kSelectRequest), recvSize);
     requestBuf[recvSize] = 0;
     EXPECT_STREQ(kSelectRequest, requestBuf);
+    if (status != APR_SUCCESS) {
+      apr_socket_close(sock);
+      return;
+    }
 
     apr_socket_send(sock, kSelectAnswer, &answer_size_select);
 
@@ -511,12 +534,13 @@ class RedisGetRespondingServerThread : public TcpServerThreadForTesting {
     char buf[STATIC_STRLEN(kRequest) + 1];
     apr_size_t size = sizeof(buf) - 1;
 
-    apr_socket_recv(sock, buf, &size);
+    status = apr_socket_recv(sock, buf, &size);
     EXPECT_EQ(STATIC_STRLEN(kRequest), size);
     buf[size] = 0;
     EXPECT_STREQ(kRequest, buf);
-
-    apr_socket_send(sock, kAnswer, &answer_size);
+    if (status == APR_SUCCESS) {
+      apr_socket_send(sock, kAnswer, &answer_size);
+    }
     apr_socket_close(sock);
   }
 };
@@ -570,6 +594,18 @@ TEST_F(RedisCacheTest, ReconnectsUntilSuccessWithTimeout) {
   timer_.AdvanceMs(1);
   EXPECT_TRUE(Cache()->IsHealthy());  // Reconnection is allowed.
   CheckGet(kSomeKey, kSomeValue);
+}
+
+// A write to a peer that has gone away fails that write with EPIPE, so the
+// case that made it fails and the binary goes on (issue #899).
+TEST_F(RedisCacheTest, WriteToAClosedPeerFailsOnlyThatWrite) {
+  int fds[2];
+  ASSERT_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+  close(fds[1]);
+  errno = 0;
+  EXPECT_EQ(-1, write(fds[0], "x", 1));
+  EXPECT_EQ(EPIPE, errno);
+  close(fds[0]);
 }
 
 TEST_F(RedisCacheTest, ReconnectsIfStartUpFailed) {
@@ -935,7 +971,7 @@ TEST_F(RedisCacheTest, ShutDownDuringConnection) {
 class RedisCacheOperationTimeoutTest : public RedisCacheTest {
  protected:
   void SetUp() override {
-    InitRedisWithCustomServer();
+    InitRedisWithCustomServer(kTimeoutUs);
     CHECK(StartCustomServer<RedisNotRespondingOperationTimeoutServerThread>());
     cache_[0]->StartUp();
   }
@@ -1046,8 +1082,8 @@ TEST_F(RedisCacheTest, RejectedAuthIsNotFoundBacksOffAndDoesNotLogPassword) {
   std::atomic<int> connections{0};
   cache_.emplace_back(new RedisCache(
       "localhost", custom_server_port_, thread_system_.get(), &handler_,
-      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
-      kTTLSec));
+      &timer_, kReconnectionDelayMs, kScriptedServerTimeoutUs, &statistics_,
+      kDatabaseIndex, kTTLSec));
   cache_[0]->SetCredentials("alice", password);
   custom_server_ = std::make_unique<RedisAuthRejectingServerThread>(
       custom_server_port_, thread_system_.get(), &connections);
@@ -1157,8 +1193,8 @@ TEST_F(RedisCacheTest, ReconnectAuthenticatesAgain) {
   std::mutex seen_mutex;
   cache_.emplace_back(new RedisCache(
       "localhost", custom_server_port_, thread_system_.get(), &handler_,
-      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
-      kTTLSec));
+      &timer_, kReconnectionDelayMs, kScriptedServerTimeoutUs, &statistics_,
+      kDatabaseIndex, kTTLSec));
   cache_[0]->SetCredentials("alice", "pw-4f2a");
   auto start_server = [&] {
     WaitForCustomServerShutdown();
@@ -1196,8 +1232,8 @@ TEST_F(RedisCacheTest, PasswordOnlyAuthUsesSingleArgumentForm) {
   std::mutex seen_mutex;
   cache_.emplace_back(new RedisCache(
       "localhost", custom_server_port_, thread_system_.get(), &handler_,
-      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
-      kTTLSec));
+      &timer_, kReconnectionDelayMs, kScriptedServerTimeoutUs, &statistics_,
+      kDatabaseIndex, kTTLSec));
   cache_[0]->SetCredentials("", "pw-4f2a");
   custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
       custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
@@ -1219,10 +1255,11 @@ TEST_F(RedisCacheTest, PasswordOnlyAuthUsesSingleArgumentForm) {
 TEST_F(RedisCacheTest, ConfiguredTtlIsSetOnEachWrite) {
   std::vector<std::vector<GoogleString>> seen;
   std::mutex seen_mutex;
-  cache_.emplace_back(new RedisCache(
-      "localhost", custom_server_port_, thread_system_.get(), &handler_,
-      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
-      /* ttl_sec= */ 3600));
+  cache_.emplace_back(
+      new RedisCache("localhost", custom_server_port_, thread_system_.get(),
+                     &handler_, &timer_, kReconnectionDelayMs,
+                     kScriptedServerTimeoutUs, &statistics_, kDatabaseIndex,
+                     /* ttl_sec= */ 3600));
   custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
       custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
   ASSERT_TRUE(custom_server_->Start());
@@ -1248,8 +1285,8 @@ TEST_F(RedisCacheTest, WithoutATtlAWriteSetsNoExpiry) {
   std::mutex seen_mutex;
   cache_.emplace_back(new RedisCache(
       "localhost", custom_server_port_, thread_system_.get(), &handler_,
-      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
-      kTTLSec));
+      &timer_, kReconnectionDelayMs, kScriptedServerTimeoutUs, &statistics_,
+      kDatabaseIndex, kTTLSec));
   custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
       custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
   ASSERT_TRUE(custom_server_->Start());
