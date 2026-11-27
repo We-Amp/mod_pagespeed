@@ -3818,8 +3818,8 @@ bool RewriteOptions::ClearSignatureWithCaution() {
 }
 
 bool RewriteOptions::IsEqual(const RewriteOptions& that) const {
-  DCHECK(frozen_);
-  DCHECK(that.frozen_);
+  // signature() checks that each side is frozen, under that side's lock: a
+  // purge-set update unfreezes and refreezes the server's options under it.
   if (signature() != that.signature()) {
     return false;
   }

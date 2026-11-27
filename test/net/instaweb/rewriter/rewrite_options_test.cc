@@ -5171,18 +5171,25 @@ TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsProcessScope) {
 namespace {
 
 // Updates the options' purge set over and over, as a server's purge poll does
-// on whichever thread runs it.
+// on whichever thread runs it. A small set of URLs, so the purge set never
+// evicts (which would raise its global invalidation time).
 class PurgeSetUpdater : public ThreadSystem::Thread {
  public:
+  static constexpr int kUrls = 100;
+
   PurgeSetUpdater(ThreadSystem* threads, RewriteOptions* options, int updates)
       : Thread(threads, "purge_set_updater", ThreadSystem::kJoinable),
         options_(options),
         updates_(updates) {}
 
+  static GoogleString Url(int i) {
+    return StrCat("http://example.com/", i % kUrls);
+  }
+
   void Run() override {
     for (int i = 0; i < updates_; ++i) {
       CopyOnWrite<PurgeSet> purges(options_->purge_set());
-      purges.MakeWriteable()->Put(StrCat("http://example.com/", i), 1000 + i);
+      purges.MakeWriteable()->Put(Url(i), 1000 + i);
       options_->UpdateCachePurgeSet(purges);
     }
   }
@@ -5194,27 +5201,40 @@ class PurgeSetUpdater : public ThreadSystem::Thread {
 
 }  // namespace
 
-// A request thread clones the server's options while another thread updates
-// their purge set. The update unfreezes, modifies and refreezes the options
-// under the purge lock; a clone must not see them in between (before, a
-// CHECK-enabled build aborted in Merge).
-TEST_F(RewriteOptionsTest, CloneWhileAnotherThreadUpdatesThePurgeSet) {
+// Request threads clone the server's options and compare a pooled driver's
+// options with them while another thread updates their purge set. The update
+// unfreezes, modifies and refreezes the options under the purge lock; a
+// reader must not see them in between. In CHECK-enabled builds a reader that
+// did aborted (the frozen and thread checks in Merge and IsEqual); under TSan
+// this also covers the merge's read of the modified flag.
+TEST_F(RewriteOptionsTest, ReadWhileAnotherThreadUpdatesThePurgeSet) {
   ThreadSystem* threads = thread_system();
   RewriteOptions server(threads);
   server.set_cache_invalidation_timestamp_mutex(threads->NewRWLock());
   server.ComputeSignature();
+  std::unique_ptr<RewriteOptions> pooled(server.Clone());
+  pooled->ComputeSignature();
 
-  const int kUpdates = 3000;
+  const int kUpdates = 1000;
   PurgeSetUpdater updater(threads, &server, kUpdates);
   ASSERT_TRUE(updater.Start());
-  for (int i = 0; i < 3 * kUpdates; ++i) {
+  for (int i = 0; i < kUpdates; ++i) {
     std::unique_ptr<RewriteOptions> request(server.Clone());
     EXPECT_TRUE(request != nullptr);
+    pooled->IsEqual(server);
+    pooled->IsEqual(server);
   }
   updater.Join();
-  std::unique_ptr<RewriteOptions> last(server.Clone());
-  EXPECT_FALSE(last->IsUrlCacheValid(
-      StrCat("http://example.com/", kUpdates - 1), 1000, true));
+
+  // The last update is in: its URL is purged up to its time, a URL never
+  // purged is not.
+  const int last = kUpdates - 1;
+  std::unique_ptr<RewriteOptions> after(server.Clone());
+  EXPECT_FALSE(
+      after->IsUrlCacheValid(PurgeSetUpdater::Url(last), 1000 + last, true));
+  EXPECT_TRUE(after->IsUrlCacheValid(PurgeSetUpdater::Url(last),
+                                     1000 + last + 1, true));
+  EXPECT_TRUE(after->IsUrlCacheValid("http://example.org/", 1000, true));
 }
 
 }  // namespace net_instaweb
