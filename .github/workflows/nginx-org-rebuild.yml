@@ -12,20 +12,32 @@
 # there, as it takes a module release. The cells are deb suites (Debian 13,
 # Ubuntu 24.04) and the Enterprise Linux 9 yum tree (an rpm).
 #
-# Runs: workflow_dispatch only, by a person, on the tag of the current module
-# release (`gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z -f ...`).
-# The dispatch ref is the module release: the run builds that release and no
-# other, and the jobs of the protected `release` environment accept it.
+# Runs: workflow_dispatch only, by a person, on master, naming the tag of the
+# current module release in the module_tag input
+# (`gh workflow run nginx-org-rebuild.yml --ref master -f module_tag=module-vX.Y.Z -f ...`).
+# The workflow file and its tooling are the master commit the run is at
+# (github.sha): every checkout names that commit, so the plan, the approval
+# and the signing jobs all run one reviewed tree. A dispatch on any other ref,
+# a tag included, is refused.
 #
 # Trust. The source is the release's own source tarball, checked against the
 # release's SHA256SUMS, whose signature is checked against
-# RELEASE-SIGNING-KEY.asc from master; the commit stamp in the tarball must be
-# the manifest's source_sha and the commit of the tag. The nginx source is
-# checked against the sha256 given at dispatch and its signature against the
-# nginx.org signing keys pinned on master (tools/ci/nginx-org-source-signers.asc).
-# The tooling (tools/ci, test/package-test) comes from master, so the leg table,
-# the gates and the tests can change without a module release; the packages are
-# built by the build scripts of the release's tree, as for the release itself.
+# RELEASE-SIGNING-KEY.asc of the run's commit; the commit stamp in the tarball
+# must be the manifest's source_sha and the commit of module_tag. The nginx
+# source is checked against the sha256 given at dispatch and its signature
+# against the nginx.org signing keys pinned next to the tooling
+# (tools/ci/nginx-org-source-signers.asc). The tooling (tools/ci,
+# test/package-test) comes from the run's commit, so the leg table, the gates
+# and the tests can change without a module release; the packages are built by
+# the build scripts, Bazel files and patches of the release's tarball, never by
+# those of the run's commit. The driver's own part of each leg also comes from
+# the run's commit: the inline container script (with the LASTCHANGE pin of
+# the package revision), the choice of each leg's image and the environment
+# the leg runs with.
+#
+# Re-runs. "Re-run failed jobs" does not re-run an event-guard job that
+# passed, so the actor of a re-run is not checked again there; the required
+# reviewers of the `release` environment are the check on that path.
 #
 # Every job runs on a GitHub-hosted runner. Only sign-checksums and
 # create-release, in the protected `release` environment and only when dry_run
@@ -44,6 +56,10 @@ name: nginx-org-rebuild
 on:
   workflow_dispatch:
     inputs:
+      module_tag:
+        description: "The current module release to build (module-vX.Y.Z)"
+        required: true
+        type: string
       nginx_version:
         description: "nginx.org stable version to build for (X.Y.Z)"
         required: true
@@ -83,9 +99,8 @@ concurrency:
 env:
   PACKAGES_URL: https://packages.modpagespeed.com
 # The key fingerprints the lane checks against (the release key, the package
-# repository's key, nginx.org's source signers) come from master with the key
-# files (`nginx_org_lane.sh pins`), not from this file: the workflow runs from
-# the release tag, and a key change on master must not wait for a release.
+# repository's key, nginx.org's source signers) come with the key files
+# (`nginx_org_lane.sh pins`), from the run's commit like all the tooling.
 
 jobs:
   event-guard:
@@ -94,21 +109,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: A person's dispatch on a module release tag
+      # The shape gate pins this job (tools/ci/check-workflow-shape.sh, rule
+      # release-env): master only, a person only, module_tag by its grammar.
+      - name: A person's dispatch on master for a module release tag
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           ACTOR: ${{ github.actor }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          MODULE_TAG: ${{ inputs.module_tag }}
+          ALLOWED_REFS: "refs/heads/master"
         run: |
           set -euo pipefail
           [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }
           for a in "$ACTOR" "$TRIGGERING_ACTOR"; do
             case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac
           done
-          [[ "$REF" =~ ^refs/tags/module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-            || { echo "::error::dispatch this lane on the tag of the current module release (--ref module-vX.Y.Z), not '$REF'"; exit 1; }
-          echo "dispatch on ${REF} by ${ACTOR} accepted"
+          [ "$REF" = "$ALLOWED_REFS" ] || { echo "::error::dispatch this lane on master (--ref master -f module_tag=module-vX.Y.Z), not on '$REF'"; exit 1; }
+          [[ "$MODULE_TAG" =~ ^module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::module_tag must be module-vX.Y.Z"; exit 1; }
+          echo "dispatch on ${REF} for ${MODULE_TAG} by ${ACTOR} accepted"
 
   # ---------------------------------------------------------------------
   # Plan, hosted: inputs, the current release and its signature, the nginx
@@ -121,6 +140,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
+      module_tag: ${{ steps.inputs.outputs.module_tag }}
       version: ${{ steps.inputs.outputs.version }}
       lane_tag: ${{ steps.inputs.outputs.lane_tag }}
       lane_revision: ${{ steps.inputs.outputs.lane_revision }}
@@ -134,10 +154,10 @@ jobs:
       build_previous: ${{ steps.previous.outputs.build_previous }}
       dry_run: ${{ steps.inputs.outputs.dry_run }}
     steps:
-      - name: Checkout master (lane tooling and the published keys)
+      - name: Checkout the run's commit (lane tooling and the published keys)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           path: lane-tools
           sparse-checkout: |
             tools/ci
@@ -145,14 +165,14 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: The pinned key fingerprints (from master)
+      - name: The pinned key fingerprints
         run: bash lane-tools/tools/ci/nginx_org_lane.sh pins | tee -a "$GITHUB_ENV"
 
       # Inputs reach the scripts through the environment only.
       - name: Check the inputs
         id: inputs
         env:
-          MODULE_TAG: ${{ github.ref_name }}
+          MODULE_TAG: ${{ inputs.module_tag }}
           NGINX_VERSION: ${{ inputs.nginx_version }}
           NGINX_SHA256: ${{ inputs.nginx_sha256 }}
           LANE_REVISION: ${{ inputs.lane_revision }}
@@ -172,7 +192,7 @@ jobs:
       - name: The tag is the current, published module release
         env:
           GH_TOKEN: ${{ github.token }}
-          MODULE_TAG: ${{ github.ref_name }}
+          MODULE_TAG: ${{ steps.inputs.outputs.module_tag }}
           LANE_TAG: ${{ steps.inputs.outputs.lane_tag }}
         run: |
           set -euo pipefail
@@ -193,7 +213,7 @@ jobs:
       - name: Download the module release's manifest, checksums and source
         env:
           GH_TOKEN: ${{ github.token }}
-          MODULE_TAG: ${{ github.ref_name }}
+          MODULE_TAG: ${{ steps.inputs.outputs.module_tag }}
           VERSION: ${{ steps.inputs.outputs.version }}
         run: |
           set -euo pipefail
@@ -207,7 +227,7 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          MODULE_TAG: ${{ github.ref_name }}
+          MODULE_TAG: ${{ steps.inputs.outputs.module_tag }}
         run: |
           set -euo pipefail
           L=lane-tools/tools/ci/nginx_org_lane.sh
@@ -318,9 +338,7 @@ jobs:
               printf '%s: published %s\n' "$c" "$(printf '%s\n' "$out" | tr '\n' ' ')"
               pn="$(printf '%s\n' "$out" | sed -n 's/^nginx=//p')"
               bash "$L" new-line "$pn" "$NGINX_VERSION"
-              entry="$(printf '%s\n' "$out" | jq -Rn --arg base "$base" \
-                '[inputs | capture("^(?<k>[a-z0-9_]+)=(?<v>.*)$")] | from_entries
-                 | {source: "repo", version, nginx, sha256, url: ($base + "/" + .filename)}')"
+              entry="$(printf '%s\n' "$out" | bash "$L" previous-entry "$base")"
             fi
             prev="$(jq -c --arg c "$c" --argjson e "$entry" '. + {($c): $e}' <<<"$prev")"
           done
@@ -329,6 +347,32 @@ jobs:
             echo "previous=${prev}"
             echo "build_previous=${need_build}"
           } >> "$GITHUB_OUTPUT"
+
+      # What the approver of the `release` environment approves: the
+      # workflow commit, the module release and its source commit.
+      - name: Summary for the approval
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          MODULE_TAG: ${{ steps.inputs.outputs.module_tag }}
+          SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+          LANE_TAG: ${{ steps.inputs.outputs.lane_tag }}
+          NGINX_VERSION: ${{ inputs.nginx_version }}
+          DRY_RUN: ${{ steps.inputs.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### nginx.org lane plan"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| workflow commit | \`${WORKFLOW_SHA}\` (${WORKFLOW_REF}) |"
+            echo "| module_tag | \`${MODULE_TAG}\` |"
+            echo "| source_sha | \`${SOURCE_SHA}\` |"
+            echo "| lane tag | \`${LANE_TAG}\` |"
+            echo "| nginx | ${NGINX_VERSION} |"
+            echo "| dry run | ${DRY_RUN} |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------
   # Build, hosted: the cells from the release's source, then the gates.
@@ -352,10 +396,10 @@ jobs:
       SOURCE_ASSET: ${{ needs.plan.outputs.source_asset }}
       SOURCE_SHA256: ${{ needs.plan.outputs.source_sha256 }}
     steps:
-      - name: Checkout master (lane tooling and tests)
+      - name: Checkout the run's commit (lane tooling and tests)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           path: lane-tools
           sparse-checkout: |
             tools/ci
@@ -366,7 +410,7 @@ jobs:
       - name: Download and extract the release's source
         env:
           GH_TOKEN: ${{ github.token }}
-          MODULE_TAG: ${{ github.ref_name }}
+          MODULE_TAG: ${{ needs.plan.outputs.module_tag }}
         run: |
           set -euo pipefail
           D="${RUNNER_TEMP}/dl"
@@ -405,8 +449,9 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
 
-      # The build driver and the leg table come from master; the build
-      # scripts it runs in each leg's container are the release's.
+      # The build driver and the leg table come from the run's commit; what
+      # it runs in each leg's container (install/nginx/build_*.sh, the Bazel
+      # files, the patches) is the release's tarball in $WS, nothing else.
       - name: Build the cells
         run: |
           set -euo pipefail
@@ -489,10 +534,10 @@ jobs:
       PREVIOUS: ${{ needs.plan.outputs.previous }}
       NGINX_VERSION: ${{ inputs.nginx_version }}
     steps:
-      - name: Checkout master (lane tooling and tests)
+      - name: Checkout the run's commit (lane tooling and tests)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           path: lane-tools
           sparse-checkout: |
             tools/ci
@@ -601,10 +646,10 @@ jobs:
       NGINX_VERSION: ${{ inputs.nginx_version }}
       NGINX_SHA256: ${{ inputs.nginx_sha256 }}
     steps:
-      - name: Checkout master (tooling)
+      - name: Checkout the run's commit (tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           sparse-checkout: tools/ci
           persist-credentials: false
 
@@ -650,10 +695,12 @@ jobs:
   # ---------------------------------------------------------------------
   # Real runs only (dry_run false), hosted, in the protected `release`
   # environment. The signing key lives in sign-checksums alone; the release
-  # job holds only GITHUB_TOKEN.
+  # job holds only GITHUB_TOKEN. The job names carry module_tag, its
+  # source_sha and the workflow commit, so the pending approval shows what
+  # it approves (the plan's summary has the same table).
   # ---------------------------------------------------------------------
   sign-checksums:
-    name: Sign SHA256SUMS
+    name: "Sign SHA256SUMS (${{ needs.plan.outputs.module_tag }}, source ${{ needs.plan.outputs.source_sha }}, workflow ${{ github.sha }})"
     needs: [plan, validate]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
@@ -667,10 +714,10 @@ jobs:
           name: release-assets
           path: assets
 
-      - name: Checkout master (published release key)
+      - name: Checkout the run's commit (published release key)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           path: trust
           sparse-checkout: |
             RELEASE-SIGNING-KEY.asc
@@ -684,7 +731,7 @@ jobs:
           cd assets
           sha256sum -c SHA256SUMS
 
-      - name: The pinned key fingerprints (from master)
+      - name: The pinned key fingerprints
         run: bash trust/tools/ci/nginx_org_lane.sh pins | tee -a "$GITHUB_ENV"
 
       - name: Sign SHA256SUMS (detached, armored)
@@ -769,7 +816,7 @@ jobs:
   # other workflow), checked against the set, published, never marked latest,
   # and its tag is checked to name the module release's commit.
   create-release:
-    name: Create the GitHub release
+    name: "Create the GitHub release (${{ needs.plan.outputs.module_tag }}, source ${{ needs.plan.outputs.source_sha }}, workflow ${{ github.sha }})"
     needs: [plan, validate, sign-checksums, provenance]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.provenance.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
     # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
@@ -784,12 +831,12 @@ jobs:
       SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
       NGINX_VERSION: ${{ inputs.nginx_version }}
       NGINX_SHA256: ${{ inputs.nginx_sha256 }}
-      MODULE_TAG: ${{ github.ref_name }}
+      MODULE_TAG: ${{ needs.plan.outputs.module_tag }}
     steps:
-      - name: Checkout master (tooling)
+      - name: Checkout the run's commit (tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.sha }}
           path: tooling
           sparse-checkout: tools/ci
           persist-credentials: false
@@ -839,6 +886,14 @@ jobs:
           # been published while this run waited for its approvals).
           latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
           [ "$latest" = "$MODULE_TAG" ] || { echo "::error::${MODULE_TAG} is no longer the current module release (latest is ${latest}); nothing was released"; exit 1; }
+          # module_tag still names the commit the plan verified (an annotated
+          # tag dereferenced), so the release cannot follow a moved tag.
+          obj="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MODULE_TAG}" --jq '"\(.object.type) \(.object.sha)"')"
+          case "$obj" in
+            "tag "*) commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj#tag }" --jq '"\(.object.type) \(.object.sha)"')" ;;
+            *) commit="$obj" ;;
+          esac
+          [ "$commit" = "commit ${SOURCE_SHA}" ] || { echo "::error::${MODULE_TAG} now points at '${commit}', not the verified source commit ${SOURCE_SHA}; nothing was released"; exit 1; }
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${LANE_TAG}" >/dev/null 2>&1; then
             echo "::error::the tag ${LANE_TAG} exists; a published lane release is never replaced"; exit 1
           fi

@@ -740,7 +740,12 @@ that commit. The run never enters the `release` environment, and ends with a
 seal of its artifacts (docs/ci/release.md, "A candidate run").
 `tools/ci/check-workflow-shape.sh` requires every `environment: release` job
 of the module lane to refuse a dry run, a candidate and a rehearsal in its
-`if:`.
+`if:`. The nginx.org lane (`nginx-org-rebuild.yml`) is dispatched on master
+for the module release in its `module_tag` input; the same rule (release-env)
+requires its `release` jobs to refuse a dry run, its event guard to admit
+exactly `refs/heads/master` (the `eg_refs_for` entry), a person and a
+`module-vX.Y.Z` tag, and every checkout to be the run's own commit
+(docs/ci/release.md, "The nginx.org rebuild lane").
 
 A real run of a tag whose message names a candidate run (the
 `Release-Candidate-*` trailers) adopts that run's artifacts instead of
