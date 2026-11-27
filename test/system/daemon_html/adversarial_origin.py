@@ -33,8 +33,8 @@ parse_markers(body) returns (token, cred_hash), either None when missing.
 
 Credential hash
 ---------------
-For each of the request headers Cookie, Authorization and X-Test-User, in
-that order, one field is appended to a byte string:
+For each of the request headers Cookie, Authorization, X-Test-User and
+Proxy-Authorization, in that order, one field is appended to a byte string:
 
     absent header  -> b"-"
     present header -> b"+" + <decimal byte length> + b":" + <value bytes>
@@ -44,7 +44,7 @@ arrives more than once, its values are joined with b"\\n" in arrival order
 (a newline cannot occur inside a header value). The hash is the first 16
 hex digits, uppercase, of SHA-256 over the concatenation. An absent header
 and an empty header hash differently. The anonymous request (all three
-absent) hashes SHA-256(b"---"), which is ANONYMOUS_CRED_HASH.
+absent) hashes SHA-256(b"----"), which is ANONYMOUS_CRED_HASH.
 
 /fresh and /counter-json also carry "counter:<n>:counter", the number of
 GET/HEAD requests the origin has answered for that path so far.
@@ -56,11 +56,18 @@ Control endpoints (never cacheable: Cache-Control: no-store)
     POST /_control/reset              clears counters, failures, waiters
     POST /_control/fail?path=P&status=S
                                       GET P answers S (status=0 clears)
-    POST /_control/release?path=/slow releases every held /slow request
+    POST /_control/release?path=/slow releases every held /slow request;
+                                      &sticky=1 also answers later ones at
+                                      once, until the next reset
     GET  /_control/waiting?path=/slow JSON {"waiting": n}
 
 Every response, control endpoints and errors included, carries Date and
-X-Robots-Tag: noindex. All content is synthetic.
+X-Robots-Tag: noindex. All content is synthetic. The control endpoints are
+unauthenticated: a public deployment must not route /_control/ to the app.
+
+The CGI origin kind of the live lanes runs this app's handlers through a
+CGI shim the Apache lane provider owns; it forwards to one running server
+so the request counts stay in one place.
 """
 
 import argparse
@@ -79,6 +86,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_BIG_BYTES = 6 * 1024 * 1024
 DEFAULT_SLOW_TIMEOUT = 30.0
+# Held /slow requests beyond this many are answered 503 at once, so a burst
+# cannot exhaust the threads of a small container.
+MAX_SLOW_WAITERS = 8
 CSRF_LATE_OFFSET = 64 * 1024
 SUBST_A_COUNT = 4096
 
@@ -99,10 +109,10 @@ _VALIDATOR_LM_TS = email.utils.parsedate_to_datetime(
     VALIDATOR_LAST_MODIFIED).timestamp()
 
 
-def credential_hash(cookie, authorization, test_user):
-    """Hash of the three credential header values; None means absent."""
+def credential_hash(cookie, authorization, test_user, proxy_authorization=None):
+    """Hash of the credential header values; None means absent."""
     buf = bytearray()
-    for value in (cookie, authorization, test_user):
+    for value in (cookie, authorization, test_user, proxy_authorization):
         if value is None:
             buf += b"-"
         else:
@@ -168,6 +178,7 @@ class OriginState:
         self.failures = {}
         self.release_gen = {}
         self.waiting = {}
+        self.open_paths = set()
 
     def count(self, key):
         with self.lock:
@@ -178,6 +189,7 @@ class OriginState:
         with self.cond:
             self.counts.clear()
             self.failures.clear()
+            self.open_paths.clear()
             for path in list(self.release_gen):
                 self.release_gen[path] += 1
             self.cond.notify_all()
@@ -186,6 +198,10 @@ class OriginState:
         """Blocks until released or timed out; returns True when released."""
         deadline = time.monotonic() + self.slow_timeout
         with self.cond:
+            if path in self.open_paths:
+                return True
+            if self.waiting.get(path, 0) >= MAX_SLOW_WAITERS:
+                return None
             gen = self.release_gen.get(path, 0)
             self.waiting[path] = self.waiting.get(path, 0) + 1
             try:
@@ -198,8 +214,10 @@ class OriginState:
             finally:
                 self.waiting[path] -= 1
 
-    def release(self, path):
+    def release(self, path, sticky=False):
         with self.cond:
+            if sticky:
+                self.open_paths.add(path)
             self.release_gen[path] = self.release_gen.get(path, 0) + 1
             self.cond.notify_all()
 
@@ -219,6 +237,7 @@ HTML_TYPE = "text/html; charset=utf-8"
 # Endpoints whose GET response is a plain page: path -> (Cache-Control or
 # None, extra headers, paragraph).
 SIMPLE = {
+    "/item": ("max-age=60", [], "Item page, invalidated by POST /item."),
     "/short": ("max-age=8", [], "Short lifetime."),
     "/cap": ("max-age=3600", [], "Long lifetime, above a typical cap."),
     "/smax": ("max-age=5, s-maxage=60", [], "Shared lifetime differs."),
@@ -244,7 +263,7 @@ GET_PATHS = sorted(set(SIMPLE) | {
     "/echo-ga", "/reflect-host", "/csrf", "/nonce", "/gzip", "/csrf-late",
     "/inline-nonce", "/ua-variant", "/auth", "/subst", "/validators",
     "/slow", "/big", "/residual", "/counter-json"})
-UNSAFE_PATHS = ("/fresh", "/item", "/fail")
+UNSAFE_PATHS = ("/fresh", "/item", "/fail", "/slow")
 UNSAFE_METHODS = ("POST", "PUT", "DELETE", "PATCH")
 
 
@@ -291,7 +310,7 @@ class AdversarialHandler(BaseHTTPRequestHandler):
             vals = self.headers.get_all(name)
             return None if vals is None else "\n".join(vals)
         return credential_hash(get("Cookie"), get("Authorization"),
-                               get("X-Test-User"))
+                               get("X-Test-User"), get("Proxy-Authorization"))
 
     def _page(self, status, cache_control, title, body_html, extra=(),
               head_extra="", token=None):
@@ -350,7 +369,7 @@ class AdversarialHandler(BaseHTTPRequestHandler):
                               _html("Method not allowed", "", _new_token(),
                                     self._cred()))
         self.state.count("%s %s" % (self.command, path))
-        if path == "/fresh":
+        if path in ("/fresh", "/slow"):
             if self.command == "DELETE":
                 return self._send(204, [("Cache-Control", "no-store")], None)
             return self._page(200, "no-store", "Updated",
@@ -388,8 +407,9 @@ class AdversarialHandler(BaseHTTPRequestHandler):
             return self._json(200, {"reset": True})
         if path == "/_control/release":
             p = query.get("path", ["/slow"])[0]
-            self.state.release(p)
-            return self._json(200, {"released": p})
+            sticky = query.get("sticky", ["0"])[0] == "1"
+            self.state.release(p, sticky)
+            return self._json(200, {"released": p, "sticky": sticky})
         if path == "/_control/fail":
             p = query.get("path", [None])[0]
             try:
@@ -546,6 +566,10 @@ class AdversarialHandler(BaseHTTPRequestHandler):
         body = _html("slow", "<p>Held until released.</p>", _new_token(),
                      self._cred())
         released = self.state.hold("/slow")
+        if released is None:
+            return self._send(503, [("Cache-Control", "no-store")],
+                              b"too many held requests\n",
+                              content_type="text/plain")
         self._send(200, [("Cache-Control", "max-age=30"),
                          ("X-Origin-Slow",
                           "released" if released else "timeout")], body)
@@ -555,8 +579,16 @@ class AdversarialHandler(BaseHTTPRequestHandler):
                      self._cred())
         line = b"<p>" + b"b" * 1020 + b"</p>\n"
         reps = self.state.big_bytes // len(line) + 2
-        body = head + line * reps
-        self._send(200, [("Cache-Control", "max-age=60")], body)
+        # Streamed line by line: the page is never held in memory whole.
+        self._start(200, [("Cache-Control", "max-age=60"),
+                          ("Content-Type", HTML_TYPE),
+                          ("Content-Length", str(len(head) + len(line) * reps))])
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(head)
+            for _ in range(reps):
+                self.wfile.write(line)
+        self.log_request(200, len(head) + len(line) * reps)
 
     def _get_residual(self, query):
         user = self.headers.get("X-Test-User")

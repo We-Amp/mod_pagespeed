@@ -90,10 +90,12 @@ class AdversarialOriginTest(unittest.TestCase):
 
     def test_credential_hash_definition(self):
         self.assertEqual(ao.ANONYMOUS_CRED_HASH,
-                         hashlib.sha256(b"---").hexdigest()[:16].upper())
+                         hashlib.sha256(b"----").hexdigest()[:16].upper())
         self.assertEqual(
             ao.credential_hash("a=b", None, ""),
-            hashlib.sha256(b"+3:a=b-+0:").hexdigest()[:16].upper())
+            hashlib.sha256(b"+3:a=b-+0:-").hexdigest()[:16].upper())
+        self.assertNotEqual(ao.credential_hash(None, None, None, "Basic eA=="),
+                            ao.ANONYMOUS_CRED_HASH)
         self.assertNotEqual(ao.credential_hash("", None, None),
                             ao.credential_hash(None, None, None))
         # Length prefixes keep the fields from sliding into each other.
@@ -434,6 +436,79 @@ class AdversarialOriginTest(unittest.TestCase):
         st, h, _ = self.o.request("POST", "/fail", body=b"")
         self.assertEqual(st, 500)
         self.assertCommon(h)
+
+    def test_get_item_and_post_slow(self):
+        h, _ = self.assertPage("/item", cc="max-age=60")
+        st, _, _ = self.o.request("POST", "/slow", body=b"")
+        self.assertEqual(st, 200)
+
+    def test_slow_sticky_release(self):
+        st, _, _ = self.o.request("POST", "/_control/release?path=/slow&sticky=1")
+        self.assertEqual(st, 200)
+        start = time.monotonic()
+        st, h, _ = self.o.get("/slow")
+        self.assertEqual(h.get("X-Origin-Slow"), "released")
+        self.assertLess(time.monotonic() - start, 2)
+        self.o.request("POST", "/_control/reset")
+
+    def test_slow_waiters_capped(self):
+        o = Origin(slow_timeout=3.0)
+        try:
+            threads = [threading.Thread(target=o.get, args=("/slow",))
+                       for _ in range(ao.MAX_SLOW_WAITERS)]
+            for t in threads:
+                t.start()
+            self._wait_waiting(o, ao.MAX_SLOW_WAITERS)
+            st, _, _ = o.get("/slow")
+            self.assertEqual(st, 503)
+            o.request("POST", "/_control/release?path=/slow")
+            for t in threads:
+                t.join(5)
+        finally:
+            o.close()
+
+    def test_proxy_authorization_in_credential_hash(self):
+        _, body = self.assertPage("/me", cc="max-age=60",
+                                  headers={"Proxy-Authorization": "Basic eA=="})
+        self.assertEqual(ao.parse_markers(body)[1],
+                         ao.credential_hash(None, None, None, "Basic eA=="))
+
+    def test_every_live_row_request_is_answered(self):
+        """Each request the live rows send to this origin gets an answer of
+        the kind the row expects at the origin: never a 404 or 405, and the
+        origin-level statuses (304, 303, 204, 500, 401) as stated."""
+        cases = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "conformance_cases.json")
+        with open(cases, encoding="utf-8") as f:
+            doc = json.load(f)
+        served_by_server = {"/static.html", "/ssi-literal.shtml"}
+        checked = 0
+        for row in doc["rows"]:
+            live = row.get("live")
+            if not live or live.get("origin", {}).get("app") != "adversarial":
+                continue
+            for step in live["steps"]:
+                r = step["request"]
+                path, method = r["path"], r["method"]
+                if (path in served_by_server or path.startswith("//") or ";" in path
+                        or "%2F" in path or (path == "/slow" and method == "GET")):
+                    continue
+                st, _, _ = self.o.request(method, path, dict(r["headers"]),
+                                          body=b"" if method != "GET" and method != "HEAD"
+                                          else None)
+                self.assertNotIn(st, (404, 405), "%s %s in %s" % (method, path, row["id"]))
+                want = step["expect"].get("status")
+                for op in step.get("pre", []):
+                    if "origin_fail" in op:
+                        f = op["origin_fail"]
+                        self.o.request("POST", "/_control/fail?path=%s&status=%d"
+                                       % (f["path"], f["status"]), body=b"")
+                        st, _, _ = self.o.request(method, path, dict(r["headers"]))
+                        self.o.request("POST", "/_control/reset", body=b"")
+                if want in (304, 303, 204, 500, 401):
+                    self.assertEqual(st, want, "%s %s in %s" % (method, path, row["id"]))
+                checked += 1
+        self.assertGreater(checked, 100)
 
     def test_unsafe_elsewhere_405(self):
         st, h, _ = self.o.request("POST", "/me", body=b"")

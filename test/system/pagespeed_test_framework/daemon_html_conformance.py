@@ -366,6 +366,13 @@ def live_rows(cases: dict) -> List[dict]:
             if "live" in r.get("runners", []) and "pending" not in r]
 
 
+# The live rows that run today and the ones held back, pinned so a row cannot
+# leave the run unnoticed: marking a row pending, or adding one, changes these
+# in the same change.
+LIVE_ROWS_THAT_RUN = 128
+LIVE_ROWS_PENDING = 96
+
+
 def pending_rows(cases: dict) -> List[dict]:
     """The live rows held back as pending, counted apart from the lane's
     run and skip counts. The change that adds their support removes the

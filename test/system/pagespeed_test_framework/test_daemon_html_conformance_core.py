@@ -283,6 +283,8 @@ class TestTheFile:
         assert ids.isdisjoint(ROWS)
         live = [r for r in CASES["rows"] if "live" in r.get("runners", [])]
         assert len(ROWS) + len(pending) == len(live)
+        assert len(ROWS) == conf.LIVE_ROWS_THAT_RUN
+        assert len(pending) == conf.LIVE_ROWS_PENDING
         print(f"live rows: {len(ROWS)} run, {len(pending)} pending")
 
     def test_every_live_row_uses_only_keys_the_runner_acts_on(self):

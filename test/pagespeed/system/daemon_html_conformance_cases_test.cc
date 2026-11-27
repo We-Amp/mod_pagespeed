@@ -105,8 +105,10 @@ const StringSet kLiveExpectKeys = {"status",         "content_type",
 
 // The one pending value, and what a pending row may add to the sets above.
 const char kPendingSupport[] = "serve-cached-html";
-const StringSet kConfigKeysM2 = {"serve_scope", "max_age_s", "credentialed",
-                                 "ignore_cookies", "ignore_cookie"};
+const StringSet kConfigKeysM2 = {"serve_scope",   "max_age_s",
+                                 "credentialed",  "ignore_cookies",
+                                 "ignore_cookie", "policy_stamp"};
+const StringSet kResponseKeysM2 = {"split_at"};
 const StringSet kLibraryKeysM2 = {"missing"};
 const StringSet kStepKindsM2 = {"unsafe", "unsafe_many", "emit_fails",
                                 "begin_recording", "configure"};
@@ -139,7 +141,7 @@ const StringSet kVhostKnobsM2 = {"serve_scope",
                                  "respect_xfp",
                                  "redirect"};
 const StringSet kLiveOpsM2 = {"set_vhost", "protect", "origin_fail",
-                              "fill_read_queue"};
+                              "fill_read_queue", "release_slow"};
 const StringSet kLiveStepKeysM2 = {"abort_after_ms"};
 const StringSet kLiveExpectKeysM2 = {"origin_requests_delta",
                                      "hit",
@@ -154,7 +156,9 @@ const StringSet kLiveExpectKeysM2 = {"origin_requests_delta",
                                      "client_aborted",
                                      "hit_vs_miss",
                                      "token_binding",
-                                     "hit_stops_within_s"};
+                                     "hit_stops_within_s",
+                                     "body_cred_identity",
+                                     "log_count"};
 const StringSet kOriginAppKinds = {"static", "cgi", "proxy"};
 
 // The set a row may use: the base set, plus the additions on a pending row.
@@ -333,7 +337,8 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
              {"status", "location", "content_location"}, {"status"});
     } else if (s.isMember("response")) {
       const Json::Value& r = s["response"];
-      c.Keys(sw + " response", r, kResponseKeys, {"status", "origin"});
+      c.Keys(sw + " response", r, For(pending, kResponseKeys, kResponseKeysM2),
+             {"status", "origin"});
       for (const char* key :
            {"origin", "store_delta", "final_delta", "module"}) {
         c.HeaderList(sw + " response", r, key);
@@ -580,6 +585,17 @@ TEST(DaemonHtmlConformanceCasesTest, EveryRowHasTheDocumentedShape) {
     if (row.isMember("live")) {
       ++live_rows;
       CheckLive(c, w + " live", row["live"], pending);
+    }
+    // A pending row must need the marker: checked as a row the runners run
+    // today, it must use at least one key or value only a pending row may.
+    // Otherwise a failing row could be hidden by marking it.
+    if (pending) {
+      Checker today(doc["bodies"]);
+      if (row.isMember("engine")) CheckEngine(today, w, row["engine"], false);
+      if (row.isMember("live")) CheckLive(today, w, row["live"], false);
+      if (today.errors().empty()) {
+        c.Fail(w, "pending, but uses no key or value only a pending row may");
+      }
     }
   }
   for (const GoogleString& e : c.errors()) ADD_FAILURE() << e;

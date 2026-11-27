@@ -39,7 +39,10 @@ py_library(
 py_test(
     name = "test_adversarial_origin",
     srcs = ["test_adversarial_origin.py"],
-    data = [":static_pages"],
+    data = [
+        "conformance_cases.json",
+        ":static_pages",
+    ],
     python_version = "PY3",
     deps = [":adversarial_origin"],
 )
