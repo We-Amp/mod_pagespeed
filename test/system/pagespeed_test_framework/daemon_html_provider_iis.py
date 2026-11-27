@@ -954,7 +954,8 @@ class IisProvider(conf.Provider):
 
     def purge_global(self, via: str) -> None:
         if via == "admin":
-            conn = self._purge_connection(False)
+            # Over https, so a row that names processes can send it to "a".
+            conn = self._purge_connection(True)
             try:
                 self._admin_post(f"{GLOBAL_ADMIN_PATH}/cache?purge=*", conn)
             finally:
