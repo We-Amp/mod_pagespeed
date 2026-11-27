@@ -177,6 +177,31 @@ TEST_F(ApacheDaemonHtmlTest, OnlyAMainRequestIsAnswered) {
   EXPECT_FALSE(ApacheDaemonHtmlMainRequest(&request_));
 }
 
+// Every line is read, in order, and the first marker is kept.
+TEST_F(ApacheDaemonHtmlTest, TheFirstAjaxMarkerIsKept) {
+  apr_table_t* in = apr_table_make(request_.pool, 4);
+  EXPECT_EQ("", ApacheDaemonHtmlAjaxMarker(in));
+  EXPECT_EQ("", ApacheDaemonHtmlAjaxMarker(nullptr));
+  apr_table_add(in, "X-Requested-With", "com.example.app");
+  apr_table_add(in, "X-MicrosoftAjax", "");
+  EXPECT_EQ("", ApacheDaemonHtmlAjaxMarker(in));
+  apr_table_add(in, "x-requested-with", "XMLHttpRequest");
+  apr_table_add(in, "X-Prototype-Version", "1.7");
+  EXPECT_EQ("X-Requested-With", ApacheDaemonHtmlAjaxMarker(in));
+}
+
+// httpd joins repeated request lines into one value (headers_in is merged
+// as the request is read): a marker among them is still found.
+TEST_F(ApacheDaemonHtmlTest, AMarkerInAMergedLineIsFound) {
+  apr_table_t* in = apr_table_make(request_.pool, 4);
+  apr_table_merge(in, "X-Requested-With", "com.example.app");
+  EXPECT_EQ("", ApacheDaemonHtmlAjaxMarker(in));
+  apr_table_merge(in, "X-Requested-With", "XMLHttpRequest");
+  EXPECT_STREQ("com.example.app, XMLHttpRequest",
+               apr_table_get(in, "X-Requested-With"));
+  EXPECT_EQ("X-Requested-With", ApacheDaemonHtmlAjaxMarker(in));
+}
+
 // A decoded path is a key only when the first "?" of the key is the real
 // boundary of the query: "/a%3Fb" decodes to "/a?b", which would read as
 // the path "/a" with the query "b".

@@ -178,6 +178,7 @@ function withPrefix(stats: Record<string, unknown>, prefix: string): HtmlCacheRe
 const ENGINE_REFUSALS: ReadonlyArray<readonly [string, string]> = [
   ["budget", "daemon_html_refused_budget"],
   ["url_disagree", "daemon_html_refused_url_disagree"],
+  ["request_header", "daemon_html_refused_request_header"],
   ["sidecar_write_failed", "daemon_html_sidecar_write_failed"],
 ];
 
@@ -234,8 +235,8 @@ export function htmlCacheView(
     refused,
     unavailable,
     wouldStorePercent: evaluated > 0 ? Math.min(100, Math.round((wouldStore / evaluated) * 100)) : null,
-    // The engine's URL-disagreement refusal is its own counter, not a report reason.
-    reasons: reasons.filter((r) => r.name !== "budget" && r.name !== "url_disagree"),
+    // The engine's own refusals are their own counters, not report reasons.
+    reasons: reasons.filter((r) => !ENGINE_REFUSALS.some(([name]) => name === r.name)),
     mode: effective,
     stored,
     removed: count(stats, "daemon_html_removed"),

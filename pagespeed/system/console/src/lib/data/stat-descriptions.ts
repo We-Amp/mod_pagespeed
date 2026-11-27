@@ -113,6 +113,8 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Store refusals: the process-wide buffer budget for HTML bodies was exhausted.",
   daemon_html_refused_url_disagree:
     "Store refusals: the server and the module disagree about the request's URL. Shown as a warning.",
+  daemon_html_refused_request_header:
+    "Store refusals: the request came from a script (X-Requested-With: XMLHttpRequest, X-MicrosoftAjax or X-Prototype-Version), so nothing is recorded for it. Not part of the evaluated responses.",
   daemon_html_sidecar_write_failed:
     "Stores abandoned because the saved response headers could not be written; nothing is stored in that case.",
   daemon_html_sidecar_unpaired_stale:
@@ -185,6 +187,8 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Markdown requests that fell through to the origin page because the saved headers do not pair with the stored copy.",
   daemon_markdown_fallthrough_url_disagree:
     "Markdown requests that fell through to the origin page because the server and the module disagree about the URL.",
+  daemon_markdown_fallthrough_request_header:
+    "Markdown requests that fell through to the origin page because the request came from a script (X-Requested-With: XMLHttpRequest, X-MicrosoftAjax or X-Prototype-Version).",
   daemon_markdown_fallthrough_other:
     "Markdown requests that fell through because the optimizer library could not classify the request, the answer could not be sent, or for a reason this module has no counter for.",
 

@@ -102,6 +102,10 @@ int ApacheDaemonHtmlAgentClass(request_rec* r,
 const DaemonHtmlAgentClassCounters* ApacheDaemonHtmlAgentClassCounters(
     ApacheServerContext* context);
 
+// The first AJAX marker (DaemonHtmlAjaxMarker) among the request's header
+// lines, or empty.
+GoogleString ApacheDaemonHtmlAjaxMarker(const apr_table_t* headers_in);
+
 // The engine's view of one request.  `context` is the request's server
 // context, `url` the module's reading of the request URL (the scheme comes
 // from it), `options` the request's options (null leaves

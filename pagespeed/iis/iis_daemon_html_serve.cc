@@ -116,6 +116,19 @@ bool IisHtmlCachePathIsCanonical(StringPiece target) {
   return true;
 }
 
+GoogleString IisDaemonHtmlAjaxMarker(
+    const std::function<bool(const char* name, StringPiece* value)>& header) {
+  static const char* const kNames[] = {"X-Requested-With", "X-MicrosoftAjax",
+                                       "X-Prototype-Version"};
+  for (const char* name : kNames) {
+    StringPiece value;
+    if (!header(name, &value)) continue;
+    const char* marker = DaemonHtmlAjaxMarker(name, value);
+    if (marker != nullptr) return marker;
+  }
+  return GoogleString();
+}
+
 GoogleString IisVaryWithAccept(StringPiece existing) {
   StringPieceVector tokens;
   SplitStringPieceToVector(existing, ",", &tokens, true);

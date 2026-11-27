@@ -149,6 +149,14 @@ Consequences to plan for:
   `200`.
 - `Cache-Control: private` keeps the copy out of shared caches, including CDNs
   that ignore `Vary`. Behind a CDN, `Age` can cost extra cache misses.
+- A script's request is never stored and never answered with the Markdown
+  copy: one whose `X-Requested-With` contains `XMLHttpRequest` anywhere
+  (any case, also in a value joined from repeated lines), or that carries a
+  non-empty `X-MicrosoftAjax` or `X-Prototype-Version`. It counts
+  `daemon_html_refused_request_header` (store) or
+  `daemon_markdown_fallthrough_request_header` (Markdown request). In
+  `report-only` such a request is not evaluated either: it counts only in
+  `daemon_html_refused_request_header`.
 
 ### Apache
 
@@ -218,12 +226,13 @@ All are on the statistics page and in the admin console's HTML cache panel.
 
 | Counter | Meaning |
 |---|---|
-| `daemon_html_evaluated`, `daemon_html_would_store`, `daemon_html_refused`, `daemon_html_refused_<reason>` | The judgement of each HTML response, as in `report-only`. |
+| `daemon_html_evaluated`, `daemon_html_would_store`, `daemon_html_refused`, `daemon_html_refused_<reason>` | The judgement of each HTML response, as in `report-only` (the engine's own refusals below excepted). |
 | `daemon_html_stored`, `daemon_html_removed`, `daemon_html_removed_on_refusal` | Entries written and removed. |
+| `daemon_html_refused_url_disagree`, `daemon_html_refused_request_header`, `daemon_html_refused_budget` | Requests the engine itself refused to record (a URL the server and the module read differently, a script's request, the body budget). Not part of `daemon_html_evaluated` or `daemon_html_refused`. |
 | `daemon_html_serve_unavailable` | HTML responses seen while the library or worker does not allow serving. |
 | `daemon_html_notify_sent`, `daemon_html_notify_limited` | Requests to the worker to derive a copy, and ones skipped by the rate limit. |
 | `daemon_markdown_served`, `daemon_markdown_not_modified` | Markdown `200` and `304` answers. |
-| `daemon_markdown_fallthrough_<reason>` | Requests that preferred Markdown and got HTML, by reason (for example `absent`, `stale`, `withheld`, `url_disagree`). |
+| `daemon_markdown_fallthrough_<reason>` | Requests that preferred Markdown and got HTML, by reason (for example `absent`, `stale`, `withheld`, `url_disagree`, `request_header`). |
 | `daemon_html_sidecar_write_failed`, `daemon_html_epoch_write_failed`, `daemon_html_purge_remove_failed` | Failures to investigate. |
 | `daemon_markdown_served_without_preference`, `daemon_markdown_transport_conflict` | Should stay 0. |
 

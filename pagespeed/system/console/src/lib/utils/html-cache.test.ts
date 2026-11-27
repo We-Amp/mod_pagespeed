@@ -102,6 +102,7 @@ describe("serve-variants", () => {
         daemon_html_refused_budget: 1,
         daemon_html_refused_vary: 4,
         daemon_html_refused_url_disagree: 2,
+        daemon_html_refused_request_header: 3,
       },
       "serve-variants",
     );
@@ -113,6 +114,7 @@ describe("serve-variants", () => {
       { name: "absent", count: 2 },
     ]);
     expect(view.storeRefusals).toEqual([
+      { name: "request_header", count: 3 },
       { name: "url_disagree", count: 2 },
       { name: "budget", count: 1 },
     ]);
@@ -181,7 +183,7 @@ describe("serve-variants", () => {
 
   it("describes every counter the module registers for the engine", () => {
     const engine = [
-      "stored", "refused_budget", "refused_url_disagree", "sidecar_write_failed", "sidecar_unpaired_stale",
+      "stored", "refused_budget", "refused_url_disagree", "refused_request_header", "sidecar_write_failed", "sidecar_unpaired_stale",
       "purge_race_refused", "removed", "removed_on_refusal", "restore_skipped", "epoch_write_failed",
       "purge_remove_failed", "serve_unavailable", "notify_sent", "notify_limited",
     ].map((n) => `daemon_html_${n}`);
@@ -191,7 +193,7 @@ describe("serve-variants", () => {
     const reasons = [
       "fresh", "mode", "auth_request", "cookie_request", "client_no_cache", "needs_validation", "stale",
       "headers_not_reproducible", "sidecar_missing", "purged", "absent", "binding_stale", "parent_stale",
-      "method", "range", "cors", "no_transform", "withheld", "skew", "sidecar_unpaired", "url_disagree", "other",
+      "method", "range", "cors", "no_transform", "withheld", "skew", "sidecar_unpaired", "url_disagree", "request_header", "other",
     ].map((n) => `daemon_markdown_fallthrough_${n}`);
     for (const name of [...engine, ...markdown, ...reasons]) {
       expect(statDescriptionSource(name), name).toBe("exact");

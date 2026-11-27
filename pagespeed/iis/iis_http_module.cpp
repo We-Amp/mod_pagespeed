@@ -949,6 +949,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		facts->has_range = request->GetHeader(HttpHeaderRange) != nullptr;
 		facts->has_if_range = request->GetHeader(HttpHeaderIfRange) != nullptr;
 		facts->has_origin = request->GetHeader("Origin") != nullptr;
+		facts->ajax_marker = IisDaemonHtmlAjaxMarker(
+			[request](const char* name, StringPiece* header_value) {
+				USHORT header_length = 0;
+				PCSTR raw_value = request->GetHeader(name, &header_length);
+				if (raw_value == nullptr) return false;
+				*header_value = StringPiece(raw_value, header_length);
+				return true;
+			});
 		if (options != nullptr) {
 			facts->options_enabled_and_allowed =
 				options->enabled() && options->IsAllowed(inner->gurl()->Spec());

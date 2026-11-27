@@ -33,6 +33,7 @@
 #define PAGESPEED_IIS_IIS_DAEMON_HTML_SERVE_H_
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,13 @@ bool IisHtmlCachePathIsCanonical(StringPiece target);
 // Markdown copy: `existing` with the Accept token added, unless it is there
 // already (or the value is "*").
 GoogleString IisVaryWithAccept(StringPiece existing);
+
+// The first AJAX marker (DaemonHtmlAjaxMarker) of a request, or empty.
+// `header` gives the value IIS holds for a request header name (one value
+// per name, repeated lines joined with commas) and returns false when the
+// request has none.
+GoogleString IisDaemonHtmlAjaxMarker(
+    const std::function<bool(const char* name, StringPiece* value)>& header);
 
 // The server variable the global GL_PRE_BEGIN_REQUEST notification sets to
 // the request target as the client sent it, before any module (an inbound

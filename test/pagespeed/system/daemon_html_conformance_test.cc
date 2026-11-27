@@ -1285,7 +1285,8 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
                                                  "if_unmodified_since",
                                                  "if_range",
                                                  "range",
-                                                 "origin"};
+                                                 "origin",
+                                                 "headers"};
     for (const GoogleString& key : r.getMemberNames()) {
       EXPECT_EQ(1u, kKeys.count(key)) << "unknown request key " << key;
     }
@@ -1326,6 +1327,12 @@ class EngineRowRunner : public DaemonHtmlEngine::TestHooks {
     f.has_if_range = r.get("if_range", false).asBool();
     f.has_range = r.get("range", false).asBool();
     f.has_origin = r.get("origin", false).asBool();
+    // Other request header lines, read as every port reads them.
+    for (const Json::Value& line : r["headers"]) {
+      const char* marker =
+          DaemonHtmlAjaxMarker(line[0].asString(), line[1].asString());
+      if (marker != nullptr && f.ajax_marker.empty()) f.ajax_marker = marker;
+    }
     return f;
   }
 
@@ -1807,8 +1814,8 @@ TEST(DaemonHtmlEngineRowsMeta, EveryEngineRowIsRegistered) {
   EXPECT_EQ(engine_rows, kRegisteredRows);
   // Pinned, so a row cannot leave the run unnoticed: marking a row pending,
   // or adding one, changes these in the same change.
-  EXPECT_EQ(194, kRegisteredRows);
-  EXPECT_EQ(229, pending_rows);
+  EXPECT_EQ(210, kRegisteredRows);
+  EXPECT_EQ(231, pending_rows);
   std::printf("engine rows: %d registered, %d pending\n", kRegisteredRows,
               pending_rows);
 }

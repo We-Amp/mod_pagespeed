@@ -139,6 +139,9 @@ struct DaemonHtmlRequestFacts {
   bool has_range = false;
   bool has_if_range = false;
   bool has_origin = false;
+  // The first AJAX marker the request carries (DaemonHtmlAjaxMarker), or
+  // empty.  A request with one is never stored and never served.
+  GoogleString ajax_marker;
   // The options context, passed through to a notification.
   GoogleString option_context;
   GoogleString option_signature;
@@ -152,6 +155,16 @@ struct DaemonHtmlRequestFacts {
   // The port computes it once per client request.  Not sent yet.
   int agent_class = 0;
 };
+
+// The name of the AJAX marker one request header line is, or nullptr: an
+// X-Requested-With whose value contains XMLHttpRequest (compared
+// case-insensitively), or an X-MicrosoftAjax or X-Prototype-Version with any
+// non-empty value.  A
+// script's request for a page may get a fragment from the origin, so the
+// HTML cache neither stores the answer under the page's key nor answers the
+// request from the cache.  Each port feeds every request header line here and
+// keeps the first match in DaemonHtmlRequestFacts::ajax_marker.
+const char* DaemonHtmlAjaxMarker(StringPiece name, StringPiece value);
 
 // What the engine asks the port to do with one request.
 struct DaemonHtmlServeResult {
@@ -544,7 +557,8 @@ class DaemonHtmlEngine : public DaemonHtmlPurgeObserver {
   void LogServeSide(const char* action, const GoogleString& reason,
                     const GoogleString& host, const GoogleString& path,
                     int status, uint64 size, uint32 lifetime_s,
-                    const char* variant, int64 age_s);
+                    const char* variant, int64 age_s,
+                    const char* mode = "serve-variants");
   void Commit(const DaemonHtmlRequestFacts& facts, const GoogleString& url,
               const GoogleString& hostname, const StoreVerdict& verdict,
               const DaemonHtmlHeaderLines& store_view,
