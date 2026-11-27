@@ -142,8 +142,8 @@
 //   PS_STUB_HTML_SERVE_16        with PS_STUB_HTML_SERVE_15: also the 1.16
 //                                set (the coding choice, the coded facts,
 //                                the coded tag and the published codings,
-//                                PS_STUB_MARKDOWN_CODINGS, default 3), the
-//                                reason no_acceptable_encoding, and the 1.16
+//                                PS_STUB_MARKDOWN_CODINGS, default 6: both),
+//                                the reason no_acceptable_encoding, the 1.16
 //                                verdict field: a verdict of the 1.16 size
 //                                to serve Markdown names the coding asked
 //                                for when its BOUND fact is set, else
@@ -1848,7 +1848,7 @@ int ps_html_markdown_etag_coded(const uint8_t* binding_hash,
 
 int ps_read_shared_config_markdown_codings(const char* cache_path) {
   if (cache_path == nullptr) return -1;
-  return static_cast<int>(EnvOr("PS_STUB_MARKDOWN_CODINGS", 3));
+  return static_cast<int>(EnvOr("PS_STUB_MARKDOWN_CODINGS", 6));
 }
 #endif  // PS_STUB_HTML_SERVE_16
 #endif  // PS_STUB_HTML_SERVE_15

@@ -969,7 +969,8 @@ TEST_F(HtmlServe16SetTest, TheCodingCallsReachTheLibrary) {
   EXPECT_EQ(0, abi->MarkdownSelectEncoding(refused, 1, order));
   EXPECT_EQ(-1, abi->MarkdownSelectEncoding(lines, 1, nullptr));
 
-  EXPECT_EQ(3, abi->ReadSharedConfigMarkdownCodings("/unused"));
+  EXPECT_EQ((1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr),
+            abi->ReadSharedConfigMarkdownCodings("/unused"));
   setenv("PS_STUB_MARKDOWN_CODINGS", "-1", 1);
   EXPECT_EQ(-1, abi->ReadSharedConfigMarkdownCodings("/unused"));
 

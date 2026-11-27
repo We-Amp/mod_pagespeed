@@ -468,7 +468,8 @@ TEST_F(InjectedVerdictDaemonAbiTest, TheSixteenSetIsInjectable) {
                    hash, hash, kPsMarkdownEncodingIdentity, tag, sizeof(tag),
                    &len));
   EXPECT_EQ(in->etag, tag);
-  EXPECT_EQ(3, fake_->ReadSharedConfigMarkdownCodings("/c"));
+  EXPECT_EQ((1 << kPsMarkdownEncodingGzip) | (1 << kPsMarkdownEncodingBr),
+            fake_->ReadSharedConfigMarkdownCodings("/c"));
 
   PsHtmlServeVerdict first = {};
   first.action = kPsHtmlServeActionServeMarkdown;
