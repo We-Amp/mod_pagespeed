@@ -9,8 +9,11 @@
 //
 // A pending row (marked with kPendingSupport) describes the cached-HTML serve
 // path before its support exists. Both runners skip it and count it apart;
-// this check still checks it, against the key and value sets that path adds,
-// and refuses those additions on a row that is not pending.
+// this check still checks it, against the key and value sets that path adds.
+// The engine runner reads every engine addition, so any engine row may use
+// them, and the engine runner itself proves that each pending engine row
+// still fails; the live additions stay refused on a live row that is not
+// pending.
 
 #include <cstdio>
 #include <fstream>
@@ -94,14 +97,21 @@ const StringSet kLiveOps = {
     "purge_url",      "purge_global", "wait_markdown",
     "sleep_s",        "origin_set",   "hold_origin",
     "release_origin", "set_mode",     "wait_origin_held"};
-const StringSet kLiveExpectKeys = {"status",         "content_type",
-                                   "headers_exact",  "headers_absent",
-                                   "stored",         "stored_lifetime_s",
-                                   "sidecar_absent", "body_ref",
-                                   "body_bytes",     "body_contains",
+const StringSet kLiveExpectKeys = {"status",
+                                   "content_type",
+                                   "headers_exact",
+                                   "headers_absent",
+                                   "stored",
+                                   "stored_lifetime_s",
+                                   "sidecar_absent",
+                                   "body_ref",
+                                   "body_bytes",
+                                   "body_contains",
                                    "length_matches_body",
-                                   "origin_saw",     "origin_saw_absent",
-                                   "counter_delta",  "differential",
+                                   "origin_saw",
+                                   "origin_saw_absent",
+                                   "counter_delta",
+                                   "differential",
                                    "headers_only"};
 
 // The one pending value, and what a pending row may add to the sets above.
@@ -272,18 +282,37 @@ class Checker {
   std::vector<GoogleString> errors_;
 };
 
+// The name of a request header line given under both request-header keys
+// (headers and request_headers, which the engine runner merges), or "".
+GoogleString HeaderUnderBothKeys(const Json::Value& request) {
+  for (const Json::Value& a : request["headers"]) {
+    for (const Json::Value& b : request["request_headers"]) {
+      if (a.isArray() && b.isArray() && a.size() == 2 && b.size() == 2 &&
+          StringCaseEqual(a[0].asString(), b[0].asString())) {
+        return a[0].asString();
+      }
+    }
+  }
+  return GoogleString();
+}
+
+// The engine runner reads every engine addition, so any engine row may use
+// them; `pending` is kept for symmetry with CheckLive.
+constexpr bool kEngineAdditions = true;
+
 void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
-                 bool pending = false) {
+                 bool /*pending*/ = false) {
   if (!c.Keys(w, e, kEngineKeys, {"verdicts", "steps"})) return;
   if (e.isMember("config")) {
-    c.Keys(w + " config", e["config"], For(pending, kConfigKeys, kConfigKeysM2),
-           {});
+    c.Keys(w + " config", e["config"],
+           For(kEngineAdditions, kConfigKeys, kConfigKeysM2), {});
     c.OneOf(w + " config", e["config"], "mode",
-            For(pending, {"off", "report-only", "serve-variants"}, kModesM2));
+            For(kEngineAdditions, {"off", "report-only", "serve-variants"},
+                kModesM2));
   }
   if (e.isMember("library")) {
     c.Keys(w + " library", e["library"],
-           For(pending, kLibraryKeys, kLibraryKeysM2), {});
+           For(kEngineAdditions, kLibraryKeys, kLibraryKeysM2), {});
   }
   if (e.isMember("volume")) {
     const Json::Value& vol = e["volume"];
@@ -311,11 +340,12 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
   for (Json::ArrayIndex i = 0; i < steps.size(); ++i) {
     const GoogleString sw = StrCat(w, " step ", IntegerToString(i));
     const Json::Value& s = steps[i];
-    if (!c.Keys(sw, s, For(pending, kEngineStepKeys, kEngineStepKeysM2),
+    if (!c.Keys(sw, s,
+                For(kEngineAdditions, kEngineStepKeys, kEngineStepKeysM2),
                 {"kind", "expect"})) {
       continue;
     }
-    c.OneOf(sw, s, "kind", For(pending, kStepKinds, kStepKindsM2));
+    c.OneOf(sw, s, "kind", For(kEngineAdditions, kStepKinds, kStepKindsM2));
     const GoogleString kind = s["kind"].asString();
     if (kind != "poll_tick" && kind != "stats_tick" && !s.isMember("request")) {
       c.Fail(sw, "missing request");
@@ -331,14 +361,24 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
     if (kind == "admin_purge" && !s["request"]["url"].isString()) {
       c.Fail(sw, "admin_purge request has no url");
     }
-    const StringSet ops = For(pending, kEngineOps, kEngineOpsM2);
+    if (s.isMember("request")) {
+      c.HeaderList(sw + " request", s["request"], "headers");
+      c.HeaderList(sw + " request", s["request"], "request_headers");
+      const GoogleString both = HeaderUnderBothKeys(s["request"]);
+      if (!both.empty()) {
+        c.Fail(sw, StrCat("request header ", both,
+                          " is named under both headers and request_headers"));
+      }
+    }
+    const StringSet ops = For(kEngineAdditions, kEngineOps, kEngineOpsM2);
     if (s.isMember("pre")) c.Ops(sw + " pre", s["pre"], ops);
     if (kind == "unsafe" && s.isMember("response")) {
       c.Keys(sw + " response", s["response"],
              {"status", "location", "content_location"}, {"status"});
     } else if (s.isMember("response")) {
       const Json::Value& r = s["response"];
-      c.Keys(sw + " response", r, For(pending, kResponseKeys, kResponseKeysM2),
+      c.Keys(sw + " response", r,
+             For(kEngineAdditions, kResponseKeys, kResponseKeysM2),
              {"status", "origin"});
       for (const char* key :
            {"origin", "store_delta", "final_delta", "module"}) {
@@ -359,7 +399,8 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
     }
     const Json::Value& ex = s["expect"];
     if (!c.Keys(sw + " expect", ex,
-                For(pending, kEngineExpectKeys, kEngineExpectKeysM2), {})) {
+                For(kEngineAdditions, kEngineExpectKeys, kEngineExpectKeysM2),
+                {})) {
       continue;
     }
     if (ex.empty()) c.Fail(sw, "expect asserts nothing");
@@ -405,12 +446,12 @@ void CheckEngine(Checker& c, const GoogleString& w, const Json::Value& e,
     }
     if (ex.isMember("serve")) {
       c.Keys(sw + " serve", ex["serve"],
-             For(pending,
+             For(kEngineAdditions,
                  {"kind", "status", "reason", "headers_exact", "body_bytes"},
                  kServeKeysM2),
              {"kind"});
       c.OneOf(sw + " serve", ex["serve"], "kind",
-              For(pending, kServeKinds, kServeKindsM2));
+              For(kEngineAdditions, kServeKinds, kServeKindsM2));
       c.BodyRef(sw + " serve", ex["serve"]);
     }
     c.OneOf(sw + " expect", ex, "admin_response", {"ok", "error"});
@@ -587,13 +628,14 @@ TEST(DaemonHtmlConformanceCasesTest, EveryRowHasTheDocumentedShape) {
       ++live_rows;
       CheckLive(c, w + " live", row["live"], pending);
     }
-    // A pending row must need the marker: checked as a row the runners run
-    // today, it must use at least one key or value only a pending row may.
-    // Otherwise a failing row could be hidden by marking it.
-    if (pending) {
+    // A pending live row must need the marker: checked as a row the live
+    // runner runs today, it must use at least one key or value only a
+    // pending row may.  Otherwise a failing row could be hidden by marking
+    // it.  (A pending engine row must still fail on the engine runner,
+    // which checks that itself.)
+    if (pending && row.isMember("live")) {
       Checker today(doc["bodies"]);
-      if (row.isMember("engine")) CheckEngine(today, w, row["engine"], false);
-      if (row.isMember("live")) CheckLive(today, w, row["live"], false);
+      CheckLive(today, w, row["live"], false);
       if (today.errors().empty()) {
         c.Fail(w, "pending, but uses no key or value only a pending row may");
       }
@@ -627,8 +669,10 @@ TEST(DaemonHtmlConformanceCasesTest, RejectsMalformedRows) {
   EXPECT_TRUE(LabelIsPublicSafe("validator: 304 set (RFC 9110 15.4.5)"));
 }
 
-// The cached-HTML serve additions are accepted on a pending row only: a row
-// the runners run today must not carry a key they would not act on.
+// The cached-HTML serve additions to the live body are accepted on a pending
+// row only: a row the live runner runs today must not carry a key it would
+// not act on.  The engine runner reads every engine addition, so an engine
+// row may use them whether or not it is pending.
 TEST(DaemonHtmlConformanceCasesTest, OnlyPendingRowsUseTheServeCachedHtmlKeys) {
   Json::Value bodies(Json::objectValue);
   bodies["page"] = "<html></html>";
@@ -666,12 +710,43 @@ TEST(DaemonHtmlConformanceCasesTest, OnlyPendingRowsUseTheServeCachedHtmlKeys) {
   engine["steps"].append(unsafe);
   Checker engine_today(bodies);
   CheckEngine(engine_today, "row", engine, /*pending=*/false);
-  EXPECT_LE(3u, engine_today.errors().size())
+  EXPECT_TRUE(engine_today.errors().empty())
       << JoinCollection(engine_today.errors(), "\n");
   Checker engine_pending(bodies);
   CheckEngine(engine_pending, "row", engine, /*pending=*/true);
   EXPECT_TRUE(engine_pending.errors().empty())
       << JoinCollection(engine_pending.errors(), "\n");
+}
+
+// The engine runner merges the two request-header keys into one list, so a
+// header named under both is ambiguous and refused.
+TEST(DaemonHtmlConformanceCasesTest, RejectsAHeaderNamedUnderBothKeys) {
+  Json::Value bodies(Json::objectValue);
+  Json::Value engine(Json::objectValue);
+  engine["verdicts"] = Json::Value(Json::arrayValue);
+  Json::Value step(Json::objectValue);
+  step["kind"] = "serve";
+  Json::Value line(Json::arrayValue);
+  line.append("X-Forwarded-Host");
+  line.append("a.example");
+  step["request"]["headers"].append(line);
+  line[0] = "x-forwarded-host";  // the same name, in another case
+  step["request"]["request_headers"].append(line);
+  step["expect"]["serve"]["kind"] = "fall_through";
+  engine["steps"].append(step);
+  Checker both(bodies);
+  CheckEngine(both, "row", engine);
+  ASSERT_EQ(1u, both.errors().size()) << JoinCollection(both.errors(), "\n");
+  EXPECT_NE(GoogleString::npos,
+            both.errors()[0].find("named under both headers and "
+                                  "request_headers"))
+      << both.errors()[0];
+
+  // Different names under the two keys are one merged list.
+  engine["steps"][0]["request"]["request_headers"][0][0] = "X-Forwarded-Proto";
+  Checker merged(bodies);
+  CheckEngine(merged, "row", engine);
+  EXPECT_TRUE(merged.errors().empty()) << JoinCollection(merged.errors(), "\n");
 }
 
 // Pending rows name the one support they wait for.

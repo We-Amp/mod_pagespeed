@@ -100,8 +100,12 @@
     "PENDING ROWS. A row may carry pending (the one value serve-cached-html): it",
     "describes the cached-HTML serve path before its engine and runner support",
     "exist. Both runners skip pending rows and count them apart from the zero-skip",
-    "count; the shape check still checks them, and only a pending row may use a",
-    "key or value marked (serve-cached-html) below. The change that adds the",
+    "count; the shape check still checks them. The engine runner reads every",
+    "engine key and value marked (serve-cached-html) below, so any engine row may",
+    "use them; it runs each pending engine row to its end in a check of its own,",
+    "which fails when the row uses a key the runner does not read, or when the",
+    "row already passes (its marker must then go). Only a pending row may use a",
+    "live key or value marked (serve-cached-html). The change that adds the",
     "support removes the markers.",
     "",
     "(serve-cached-html) engine body: config adds serve_scope (agents | all),",
@@ -109,8 +113,11 @@
     "explicit-public), ignore_cookies, ignore_cookie (list), policy_stamp (the",
     "vhost stamp the fake's ps_html_policy_stamp returns; absent =",
     "5a17c0de00000001), and the mode serve-cached-html; library adds missing",
-    "(1.15 symbols left unbound). Volume original adds content_type, store_v2 and",
-    "anonymous_recorded; sidecar adds format (3) and policy_stamp, the ONE source",
+    "(1.15 symbols left unbound). A row whose config names any of these settings",
+    "or that mode runs on a library of minor 15 unless its library says",
+    "otherwise; every other row, on minor 14. Volume original adds",
+    "content_type, store_v2 and anonymous_recorded; sidecar adds format (3) and",
+    "policy_stamp, the ONE source",
     "of an entry's stamp (absent = none). DEFAULTS: an original without store_v2",
     "or anonymous_recorded has both set (the earlier rows describe such entries);",
     "every serve-cached-html row states them. A store verdict's flags are exactly",
@@ -118,12 +125,14 @@
     "agent_class (0 to 3; absent = classified from user_agent), user_agent,",
     "signature (signed_agent | verified_bot | not_ready | failed),",
     "internal_redirect, internal, served_from_cache, cookie_lines,",
-    "proxy_authorization, request_headers ([name, value]), raw_path, if_match,",
-    "if_unmodified_since. Step kinds add unsafe (request, response {status,",
-    "location and content_location, each a line or a list of lines, split_at for",
-    "a capture's chunk boundary}), unsafe_many",
-    "(count requests to distinct targets), emit_fails (a serve whose EmitAsOrigin",
-    "returns false), begin_recording and configure; a step may carry repeat (the",
+    "proxy_authorization, request_headers ([name, value]; merged with headers",
+    "into one list, and a header name given under both is a row error), raw_path,",
+    "if_match, if_unmodified_since. Step kinds add unsafe (request, response",
+    "{status, location and content_location, each a line or a list of lines}),",
+    "unsafe_many (count requests to distinct targets, the request path with -<n>",
+    "appended), emit_fails (a serve whose EmitAsOrigin returns false),",
+    "begin_recording and configure; a capture response adds split_at (its chunk",
+    "boundary); a step may carry repeat (the",
     "same request that many times; counters are the deltas over all of them). Ops",
     "add disable_credential_skip (a _for_testing setter on the engine that no",
     "directive, option or environment variable reaches and product code never",
@@ -131,7 +140,8 @@
     "emit-time refusal is reachable; only rows whose request carries a",
     "credential use it) and, inside during, unsafe {method, status, url}.",
     "Verdicts add ps_html_classify_cookies {class, first_blocking,",
-    "ignorable_values}, ps_html_request_guard {reason, header_index, xfp},",
+    "ignorable_values, ignorable_count (the count reported, when more than the",
+    "values listed)}, ps_html_request_guard {reason, header_index, xfp},",
     "ps_html_ignore_cookie_guard {accepted, warning}, ps_html_policy_stamp",
     "{value} and ps_html_unsafe_method_invalidates",
     "{value}; ps_cache_remove_site rc may name not_found or io. Expect adds serve",
@@ -141,7 +151,8 @@
     "({contains} or null), fence_before_remove, removed_count,",
     "fence_map_size_max, fences_kept, oldest_fenced, newest_fenced, agent_class,",
     "classify_agent_calls and agent_vectors (every line of that vector file);",
-    "volume_epoch_s null means the epoch was never written.",
+    "volume_epoch_s null means the epoch was never written; removed may list",
+    "urls; a stored entry may say its kind (original).",
     "Counter names are the engine's.",
     "",
     "(serve-cached-html) live body: origin may be {app adversarial, kind static |",
@@ -21827,7 +21838,6 @@
     {
       "id": "m2-no-second-classify-after-markdown-served",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: a served Markdown copy needs no second classify",
       "engine": {
         "config": {
@@ -21908,7 +21918,6 @@
     {
       "id": "m2-no-second-classify-in-serve-variants",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html fallback: serve-variants never asks for the page",
       "engine": {
         "config": {
@@ -25772,7 +25781,7 @@
           },
           {
             "kind": "epoch",
-            "site": "www.example.test",
+            "site": "default",
             "epoch_s": 1789999995
           }
         ],
@@ -30812,7 +30821,6 @@
     {
       "id": "m2-store-anonymous-bit-mode2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an anonymous store sets the anonymous bit",
       "engine": {
         "config": {
@@ -32138,7 +32146,6 @@
     {
       "id": "m2-store-anonymous-bit-mode3",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "credentials: an anonymous store sets the anonymous bit",
       "engine": {
         "config": {
@@ -32953,7 +32960,8 @@
             "kind": "sidecar",
             "url": "https://www.example.test/page",
             "headers": [
-              ["X-Frame-Options", "DENY"]
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
             ]
           }
         ],
@@ -32992,7 +33000,8 @@
               "origin": [
                 ["Content-Type", "text/html; charset=utf-8"],
                 ["Cache-Control", "max-age=300"],
-                ["ETag", "\"v1\""]
+                ["ETag", "\"v1\""],
+                ["X-Frame-Options", "DENY"]
               ],
               "store_delta": [],
               "final_delta": [],
@@ -33208,7 +33217,6 @@
     {
       "id": "m2-restore-skip-unchanged-v2",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "freshness: an unchanged anonymous page with the same stamp",
       "engine": {
         "config": {
@@ -33468,7 +33476,7 @@
                 {
                   "fn": "ps_cache_remove_site",
                   "args": {
-                    "site": "www.example.test",
+                    "site": "default",
                     "url": "https://www.example.test/page"
                   }
                 }
@@ -35666,7 +35674,6 @@
     {
       "id": "m2-class-token-01",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -35734,7 +35741,6 @@
     {
       "id": "m2-class-token-02",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -35802,7 +35808,6 @@
     {
       "id": "m2-class-token-03",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -35870,7 +35875,6 @@
     {
       "id": "m2-class-token-04",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -35938,7 +35942,6 @@
     {
       "id": "m2-class-token-05",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36006,7 +36009,6 @@
     {
       "id": "m2-class-token-06",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36074,7 +36076,6 @@
     {
       "id": "m2-class-token-07",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36142,7 +36143,6 @@
     {
       "id": "m2-class-token-08",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36210,7 +36210,6 @@
     {
       "id": "m2-class-token-09",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36278,7 +36277,6 @@
     {
       "id": "m2-class-token-10",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36346,7 +36344,6 @@
     {
       "id": "m2-class-token-11",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36414,7 +36411,6 @@
     {
       "id": "m2-class-token-12",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: the user agent's class from the shared vectors",
       "engine": {
         "config": {
@@ -36482,7 +36478,6 @@
     {
       "id": "m2-class-all-vectors",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: every shared vector gives its expected class",
       "engine": {
         "config": {
@@ -36541,7 +36536,6 @@
     {
       "id": "m2-class-c1-from-verifier-signed",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: a signature verdict and the user agent",
       "ports": ["nginx"],
       "engine": {
@@ -36614,7 +36608,6 @@
     {
       "id": "m2-class-c1-from-verifier-verified",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: a signature verdict and the user agent",
       "ports": ["nginx"],
       "engine": {
@@ -36687,7 +36680,6 @@
     {
       "id": "m2-class-c1-not-ready",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: a signature verdict and the user agent",
       "ports": ["nginx"],
       "engine": {
@@ -36760,7 +36752,6 @@
     {
       "id": "m2-class-failed-signature-drops",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: a signature verdict and the user agent",
       "ports": ["nginx"],
       "engine": {
@@ -36833,7 +36824,6 @@
     {
       "id": "m2-class-once-per-main-request",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "agent class: computed once per main request",
       "engine": {
         "config": {
@@ -36894,7 +36884,10 @@
             },
             "expect": {
               "agent_class": 3,
-              "classify_agent_calls": 1
+              "classify_agent_calls": 1,
+              "counters": {
+                "daemon_html_agent_class_c3": 1
+              }
             }
           }
         ]
@@ -43243,7 +43236,6 @@
     {
       "id": "m2-html-gate-url-disagree",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request the engine does not evaluate",
       "engine": {
         "config": {
@@ -43307,7 +43299,6 @@
     {
       "id": "m2-html-gate-host-not-configured",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request the engine does not evaluate",
       "engine": {
         "config": {
@@ -43371,7 +43362,6 @@
     {
       "id": "m2-html-gate-internal-request",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request the engine does not evaluate",
       "engine": {
         "config": {
@@ -43436,7 +43426,6 @@
     {
       "id": "m2-html-gate-options-off",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request the engine does not evaluate",
       "engine": {
         "config": {
@@ -43500,7 +43489,6 @@
     {
       "id": "m2-html-gate-agent-optimize-off",
       "runners": ["engine"],
-      "pending": "serve-cached-html",
       "why": "html path: a request the engine does not evaluate",
       "engine": {
         "config": {
@@ -45905,6 +45893,622 @@
               "body_ref": "page"
             },
             "expect": {
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-guard-skipped-fails",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "unkeyed header and path: the guard sees the request's headers and its raw path",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          },
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "agent_class": 3,
+              "request_headers": [
+                ["X-Forwarded-Host", "attacker.example"]
+              ],
+              "raw_path": "/page;x.css"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/page;x.css",
+                    "header_names": ["X-Forwarded-Host"],
+                    "header_values": ["attacker.example"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              }
+            }
+          },
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "request_headers": [
+                ["X-Forwarded-Host", "attacker.example"]
+              ],
+              "raw_path": "/page;x.css",
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/page;x.css",
+                    "header_names": ["X-Forwarded-Host"],
+                    "header_values": ["attacker.example"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-cookie-capacity-blocks",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "credentials: more listed cookie values than the engine holds count as blocking",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_classify_cookies",
+            "class": "ignorable_only",
+            "ignorable_values": ["GA1.2.3"],
+            "ignorable_count": 100000
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "agent_class": 3,
+              "cookie": true,
+              "cookie_lines": ["_ga=GA1.2.3"]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_classify_cookies"
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "cookie_request"
+              },
+              "decision_lines": {
+                "contains": ["\"reason\":\"cookie_request\"", "\"detail\":\"capacity\""],
+                "absent": ["GA1.2.3"]
+              },
+              "counters": {
+                "daemon_html_refused_cookie": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-path-double-encoded-slash",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "deception path: a double-encoded slash passes the guard and the store refuses it",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "none"
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "store",
+            "action": "refuse",
+            "reason": "path"
+          },
+          {
+            "fn": "ps_html_store_classify",
+            "view": "final",
+            "action": "refuse",
+            "reason": "path"
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/a%252Fb",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "raw_path": "/a%252Fb",
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "raw_path": "/a%252Fb"
+                  }
+                },
+                {
+                  "fn": "ps_html_store_classify",
+                  "args": {
+                    "view": "store",
+                    "url_path": "/a%252Fb"
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
+              "counters": {
+                "daemon_html_refused_path": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-ajax-underscore-name-no-read-mode2",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker spelled with underscores: refused before any read",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/markdown"],
+              "agent_class": 3,
+              "request_headers": [
+                ["X_Requested_With", "XMLHttpRequest"]
+              ]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X_Requested_With"],
+                    "header_values": ["XMLHttpRequest"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "decision_lines": {
+                "contains": ["\"detail\":\"X_Requested_With\""]
+              },
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-ajax-underscore-name-no-read-mode3",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker spelled with underscores: refused before any read",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "volume": [
+          {
+            "kind": "original",
+            "url": "https://www.example.test/page",
+            "stored_at_s": 1789999990,
+            "lifetime_s": 300,
+            "body_ref": "page",
+            "paired": true,
+            "cc_flags": [],
+            "content_type": "text/html; charset=utf-8",
+            "store_v2": true,
+            "anonymous_recorded": true
+          },
+          {
+            "kind": "sidecar",
+            "url": "https://www.example.test/page",
+            "format": 3,
+            "policy_stamp": "5a17c0de00000001",
+            "headers": [
+              ["X-Frame-Options", "DENY"],
+              ["Cache-Control", "max-age=300"]
+            ]
+          }
+        ],
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "serve",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "accept": ["text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"],
+              "agent_class": 3,
+              "request_headers": [
+                ["X_MicrosoftAjax", "1"]
+              ]
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X_MicrosoftAjax"],
+                    "header_values": ["1"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_read_best_site", "ps_cache_read_alternate_site", "ps_headers_sidecar_read", "ps_html_stored_facts_from_reads", "ps_html_serve_classify"],
+              "serve": {
+                "kind": "fall_through",
+                "reason": "request_header"
+              },
+              "decision_lines": {
+                "contains": ["\"detail\":\"X_MicrosoftAjax\""]
+              },
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-ajax-underscore-name-no-store-mode2",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker spelled with underscores: refused before the store",
+      "engine": {
+        "config": {
+          "mode": "serve-variants",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "request_headers": [
+                ["X_Requested_With", "XMLHttpRequest"]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X_Requested_With"],
+                    "header_values": ["XMLHttpRequest"]
+                  }
+                }
+              ],
+              "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
+              "counters": {
+                "daemon_html_refused_request_header": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "m2-ajax-underscore-name-no-store-mode3",
+      "runners": ["engine"],
+      "pending": "serve-cached-html",
+      "why": "ajax marker spelled with underscores: refused before the store",
+      "engine": {
+        "config": {
+          "mode": "serve-cached-html",
+          "serve_scope": "agents",
+          "max_age_s": 60,
+          "credentialed": "anonymous-only",
+          "ignore_cookies": true,
+          "ignore_cookie": [],
+          "policy_stamp": "5a17c0de00000001"
+        },
+        "verdicts": [
+          {
+            "fn": "ps_html_request_guard",
+            "reason": "request_header",
+            "header_index": 0,
+            "xfp": false
+          }
+        ],
+        "steps": [
+          {
+            "kind": "capture",
+            "request": {
+              "method": "GET",
+              "scheme": "https",
+              "host": "www.example.test",
+              "path": "/page",
+              "url_agreed": true,
+              "options_enabled_and_allowed": true,
+              "request_headers": [
+                ["X_MicrosoftAjax", "1"]
+              ],
+              "capture_start_ms": 1790000000000
+            },
+            "response": {
+              "status": 200,
+              "origin": [
+                ["Content-Type", "text/html; charset=utf-8"],
+                ["Cache-Control", "max-age=300"],
+                ["ETag", "\"v1\""]
+              ],
+              "store_delta": [],
+              "final_delta": [],
+              "module": [],
+              "body_ref": "page"
+            },
+            "expect": {
+              "calls": [
+                {
+                  "fn": "ps_html_request_guard",
+                  "args": {
+                    "header_names": ["X_MicrosoftAjax"],
+                    "header_values": ["1"]
+                  }
+                }
+              ],
               "calls_exclude": ["ps_cache_write_original_site", "ps_cache_write_headers_sidecar_site"],
               "counters": {
                 "daemon_html_refused_request_header": 1
