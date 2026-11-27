@@ -768,24 +768,31 @@ class IisProvider(conf.Provider):
         """The module's statistics summed over the pool's worker processes:
         each process keeps its own."""
         total: Dict[str, int] = {}
-        for pid in sorted(set(self._pids())):
-            conn = None
-            for _ in range(PIN_ATTEMPTS):
-                c = self._connection(tls=True)
-                try:
-                    if self._origin_pid(conn=c) == pid:
-                        conn = c
-                        break
-                except (OSError, http.client.HTTPException):
-                    pass
-                c.close()
-            if conn is None:
-                raise conf.ProviderUnsupported(f"no connection reached worker {pid}")
+        wanted = set(self._pids())
+        read: Set[int] = set()
+        # New connections go to the workers that serve; a worker that takes
+        # none (draining after a recycle) has no request of this row.
+        for _ in range(PIN_ATTEMPTS):
+            if read >= wanted or len(read) >= self.max_processes:
+                break
+            c = self._connection(tls=True)
             try:
-                for name, value in self._stats_of(conn).items():
+                pid = self._origin_pid(conn=c)
+                if pid in read:
+                    continue
+                for name, value in self._stats_of(c).items():
                     total[name] = total.get(name, 0) + value
+                read.add(pid)
+            except (OSError, http.client.HTTPException):
+                pass
             finally:
-                conn.close()
+                c.close()
+        if not read:
+            raise conf.ProviderUnsupported("no worker answered the statistics")
+        skipped = wanted - read
+        if skipped:
+            print(f"dhc: statistics of workers {sorted(read)}; not answering: "
+                  f"{sorted(skipped)}", flush=True)
         return total
 
     def commits(self) -> Tuple[int, int]:
