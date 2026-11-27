@@ -184,6 +184,10 @@ jobs:
         run: tools/ci/test_check_ci_rot.sh
       - name: Hygiene gate credential-rule fixtures
         run: tools/ci/test_check_public_hygiene.sh
+      # docs/install-nginx.md names the nginx.org version the packages are
+      # built for (fixtures, then the doc).
+      - name: nginx.org version in the install docs
+        run: tools/ci/test_check_nginx_doc_version.sh
 
   ci-tooling-tests:
     permissions:
@@ -279,6 +283,7 @@ jobs:
           tools/ci/test_pair_rehearsal_shape.sh
           tools/ci/test_cache_gen_for_version.sh
           bash tools/ci/test_assert_release_stamp.sh
+          bash tools/ci/test_assert_nginx_tarball_version.sh
       # Every digest in install/nginx/toolchain-images.lock must carry the
       # build provenance attestation of toolchain-images.yml on master. Checked
       # here, on a hosted runner, because some build runners have a gh without
