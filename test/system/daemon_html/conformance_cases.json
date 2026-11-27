@@ -61,7 +61,12 @@
     "origin_set, hold_origin, release_origin, set_mode, wait_origin_held {method,",
     "path, timeout_s} (the held origin response for that request has its",
     "headers out and waits; a step that releases the origin must wait for it",
-    "first, before any purge in its pre ops). live expect keys: status,",
+    "first, before any purge in its pre ops), wait_coded {codings (br, gzip),",
+    "timeout_s} (the volume holds those coded copies of the request URL's",
+    "Markdown copy), restart_worker {gzip_level, brotli_level} (the optimizer",
+    "worker restarted on the same volume with these levels and the server",
+    "reloaded; the provider restores the defaults after the row). live expect",
+    "keys: status,",
     "content_type, headers_exact (name -> {count, value | contains}),",
     "headers_only (no header beyond headers_exact and the server core's",
     "transport lines Date, Server, Connection, Keep-Alive, Transfer-Encoding),",
@@ -69,7 +74,10 @@
     "in the volume after the step, read by exact id), stored_lifetime_s,",
     "sidecar_absent, body_ref,",
     "body_bytes, body_contains (strings the body must hold),",
-    "length_matches_body, origin_saw, origin_saw_absent,",
+    "length_matches_body, decoded_equals_step (the body decoded by its one",
+    "Content-Encoding, none, gzip or br, equals an earlier step's body, by",
+    "index), header_equals_step ({name: index}: the lines equal that step's),",
+    "origin_saw, origin_saw_absent,",
     "counter_delta, differential {against: modes, allow_vary_accept}. The request",
     "header value $markdown_etag is replaced by the ETag of the last Markdown 200.",
     "counter_delta spans the whole step, its pre ops included. allow_vary_accept",
@@ -13899,7 +13907,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -13947,7 +13955,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14032,7 +14040,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14201,7 +14209,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14299,7 +14307,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14350,7 +14358,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14468,7 +14476,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14495,7 +14503,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14614,7 +14622,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
@@ -14658,7 +14666,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -14707,7 +14715,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
@@ -15249,7 +15257,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15277,7 +15285,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15319,7 +15327,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15347,7 +15355,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15389,7 +15397,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15417,7 +15425,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15466,7 +15474,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15509,7 +15517,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15541,7 +15549,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15583,7 +15591,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15615,7 +15623,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15776,7 +15784,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -15840,7 +15848,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16239,7 +16247,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16295,7 +16303,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16354,7 +16362,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -16597,7 +16605,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16653,7 +16661,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16712,7 +16720,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -16769,7 +16777,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16825,7 +16833,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16884,7 +16892,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -16941,7 +16949,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -16997,7 +17005,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17056,7 +17064,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17113,7 +17121,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17169,7 +17177,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17228,7 +17236,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17285,7 +17293,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17340,7 +17348,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17396,7 +17404,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17452,7 +17460,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17511,7 +17519,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17569,7 +17577,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17626,7 +17634,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17682,7 +17690,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17741,7 +17749,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17797,7 +17805,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17812,7 +17820,7 @@
     {
       "id": "live-compression-configured-200",
       "runners": ["live"],
-      "why": "markdown: never compressed",
+      "why": "markdown: the plain copy is never compressed",
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -17840,7 +17848,7 @@
             "request": {
               "method": "GET",
               "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip, br"]]
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip;q=0.5, br;q=0.5, identity"]]
             },
             "expect": {
               "status": 200,
@@ -17849,7 +17857,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -17864,7 +17872,7 @@
     {
       "id": "live-compression-configured-304",
       "runners": ["live"],
-      "why": "markdown: never compressed",
+      "why": "markdown: the plain copy is never compressed",
       "live": {
         "mode": "serve-variants",
         "agent_optimize": true,
@@ -17894,7 +17902,7 @@
               "path": "/page",
               "headers": [
                 ["Accept", "text/markdown"],
-                ["Accept-Encoding", "gzip, br"],
+                ["Accept-Encoding", "gzip;q=0.5, br;q=0.5, identity"],
                 ["If-None-Match", "$markdown_etag"]
               ]
             },
@@ -17903,7 +17911,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": [
@@ -17952,7 +17960,7 @@
             "request": {
               "method": "GET",
               "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip;q=0.5, identity"]]
             },
             "expect": {
               "status": 200,
@@ -17996,7 +18004,7 @@
             "request": {
               "method": "GET",
               "path": "/page",
-              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip;q=0.5, identity"]]
             },
             "expect": {
               "status": 200,
@@ -18047,7 +18055,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18096,7 +18104,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Transfer-Encoding": {"count": 1, "value": "chunked"},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18140,7 +18148,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18208,7 +18216,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18231,7 +18239,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18280,7 +18288,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18697,7 +18705,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"],
@@ -18747,7 +18755,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -18889,7 +18897,7 @@
               "headers_exact": {
                 "ETag": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"}
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}
               },
               "headers_only": true,
               "headers_absent": ["X-Robots-Tag", "Age", "Expires", "Set-Cookie", "Content-Type", "Content-Language"]
@@ -18930,7 +18938,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -19064,7 +19072,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -19117,7 +19125,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -19345,7 +19353,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -19642,7 +19650,7 @@
                 "Content-Type": {"count": 1, "value": "text/markdown; charset=utf-8"},
                 "Content-Length": {"count": 1},
                 "Cache-Control": {"count": 1, "value": "private"},
-                "Vary": {"count": 1, "value": "Accept"},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
                 "X-Robots-Tag": {"count": 1, "value": "noindex"},
                 "Age": {"count": 1},
                 "ETag": {"count": 1}
@@ -48216,6 +48224,675 @@
             },
             "expect": {
               "stored": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-br",
+      "runners": ["live"],
+      "why": "RFC 9110 8.4: markdown copy sent br-coded as stored",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_served_br": 1, "daemon_markdown_transport_conflict": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-gzip",
+      "runners": ["live"],
+      "why": "RFC 9110 8.4: markdown copy sent gzip-coded as stored",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "gzip"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_served_gzip": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-identity",
+      "runners": ["live"],
+      "why": "RFC 9110 12.5.5: Vary lists Accept-Encoding on the plain copy",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true,
+              "counter_delta": {"daemon_markdown_served_identity": 1}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-q-order",
+      "runners": ["live"],
+      "why": "RFC 9110 12.5.3: the coding with the highest q",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip;q=1, br;q=0.5"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "gzip"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-identity-refused",
+      "runners": ["live"],
+      "why": "RFC 9110 12.5.3: identity;q=0 and no coding: origin answers",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "identity;q=0"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/html",
+              "counter_delta": {"daemon_markdown_fallthrough_no_acceptable_encoding": 1, "daemon_markdown_served": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-no-double-compression",
+      "runners": ["live"],
+      "why": "markdown: a coded copy is never compressed again",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "vhost": {"compress_markdown": true},
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "gzip"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "gzip"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_transport_conflict": 0}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_transport_conflict": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-backfill",
+      "runners": ["live"],
+      "why": "markdown: a copy stored before coded copies gets them on demand",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true},
+            "pre": [{"restart_worker": {"gzip_level": 0, "brotli_level": 0}}]
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [{"wait_markdown": {"timeout_s": 30}}],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_absent": ["Content-Encoding"],
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_encoded_copy_missing": 1, "daemon_markdown_compress_demand_sent": 0}
+            }
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "pre": [{"restart_worker": {"gzip_level": 6, "brotli_level": 6}}],
+            "expect": {"status": 200, "content_type": "text/html"}
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_absent": ["Content-Encoding"],
+              "counter_delta": {"daemon_markdown_compress_demand_sent": 1}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1,
+              "counter_delta": {"daemon_markdown_compress_demand_sent": 0}
+            },
+            "pre": [{"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-head",
+      "runners": ["live"],
+      "why": "RFC 9110 9.3.2: HEAD gets the coded headers and no body",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1
+            }
+          },
+          {
+            "request": {
+              "method": "HEAD",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "body_bytes": 0,
+              "header_equals_step": {"Content-Length": 2, "ETag": 2}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-inm-304",
+      "runners": ["live"],
+      "why": "RFC 9110 13.1.2: a 304 only for the coding's own tag",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {
+                "Content-Encoding": {"count": 1, "value": "br"},
+                "Content-Length": {"count": 1},
+                "Vary": {"count": 1, "value": "Accept, Accept-Encoding"},
+                "ETag": {"count": 1},
+                "Cache-Control": {"count": 1, "value": "private"}
+              },
+              "headers_absent": ["Content-Range"],
+              "length_matches_body": true,
+              "decoded_equals_step": 1
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [
+                ["Accept", "text/markdown"],
+                ["Accept-Encoding", "br"],
+                ["If-None-Match", "$markdown_etag"]
+              ]
+            },
+            "expect": {
+              "status": 304,
+              "headers_exact": {"ETag": {"count": 1}, "Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "header_equals_step": {"ETag": 2},
+              "headers_absent": ["Content-Encoding", "Content-Type"]
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["If-None-Match", "$markdown_etag"]]
+            },
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_absent": ["Content-Encoding"],
+              "decoded_equals_step": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-md-enc-range-origin",
+      "runners": ["live"],
+      "why": "RFC 9110 14.2: a range request is never answered from a copy",
+      "ports": ["apache", "nginx"],
+      "live": {
+        "mode": "serve-variants",
+        "agent_optimize": true,
+        "origin": {
+          "status": 200,
+          "headers": [
+            ["Content-Type", "text/html; charset=utf-8"],
+            ["Cache-Control", "max-age=300"],
+            ["ETag", "\"v1\""]
+          ],
+          "body_ref": "page"
+        },
+        "steps": [
+          {
+            "request": {"method": "GET", "path": "/page", "headers": []},
+            "expect": {"status": 200, "content_type": "text/html", "stored": true}
+          },
+          {
+            "request": {"method": "GET", "path": "/page", "headers": [["Accept", "text/markdown"]]},
+            "pre": [
+              {"wait_markdown": {"timeout_s": 30}},
+              {"wait_coded": {"codings": ["br", "gzip"], "timeout_s": 30}}
+            ],
+            "expect": {
+              "status": 200,
+              "content_type": "text/markdown; charset=utf-8",
+              "headers_exact": {"Vary": {"count": 1, "value": "Accept, Accept-Encoding"}},
+              "headers_absent": ["Content-Encoding"],
+              "length_matches_body": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "path": "/page",
+              "headers": [["Accept", "text/markdown"], ["Accept-Encoding", "br"], ["Range", "bytes=0-9"]]
+            },
+            "expect": {
+              "status": 206,
+              "content_type": "text/html",
+              "headers_absent": ["Content-Encoding"],
+              "counter_delta": {"daemon_markdown_fallthrough_range": 1}
             }
           }
         ]

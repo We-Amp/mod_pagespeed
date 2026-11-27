@@ -11,7 +11,11 @@ exact id, with its lifetime and stored header block, and whether its
 Markdown copy is servable now. It writes nothing. One JSON object on stdout:
 
   {"present": bool, "lifetime_s": int, "stored_at": int, "sidecar": [[n, v]],
-   "markdown_ready": bool}
+   "markdown_ready": bool, "coded": {"br": bool, "gzip": bool}}
+
+"coded" says whether the volume holds the brotli and the gzip copy of the
+Markdown copy with bytes (an entry without bytes is the optimizer's record
+that the coding is not smaller).
 
 With --ask-socket, a stored page whose Markdown copy is not servable yet is
 also asked for once, through the worker's notification socket, exactly as
@@ -33,6 +37,8 @@ PS_OK = 0
 SENTINEL_ORIGINAL = 0x0C
 SENTINEL_MARKDOWN = 0x7C
 SENTINEL_WITHHELD = 0xCC
+SENTINEL_MARKDOWN_BR = 0xDC
+SENTINEL_MARKDOWN_GZIP = 0xEC
 FACTS_PRESENT = 0x1
 FACTS_NEEDS_VALIDATION = 0x2
 FACTS_VARIANT_PRESENT = 0x100
@@ -102,6 +108,9 @@ def _bind(lib):
              ctypes.c_char_p, ctypes.c_uint8, ctypes.POINTER(vp)],
         ),
         "ps_read_free": (None, [vp]),
+        "ps_read_content": (
+            ctypes.c_int, [vp, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t)]
+        ),
         "ps_read_origin_max_age": (ctypes.c_uint32, [vp]),
         "ps_read_cache_inserted_at": (ctypes.c_uint32, [vp]),
         "ps_headers_sidecar_read": (
@@ -148,9 +157,17 @@ def probe(args) -> dict:
         raise RuntimeError(f"ps_cache_open: {rc}")
     url, host = args.url.encode(), args.hostname.encode()
     scheme, site = args.scheme.encode(), args.site.encode()
-    out = {"present": False, "markdown_ready": False}
+    out = {"present": False, "markdown_ready": False, "coded": {"br": False, "gzip": False}}
     reads = {}
     try:
+        for name, alt in (("br", SENTINEL_MARKDOWN_BR), ("gzip", SENTINEL_MARKDOWN_GZIP)):
+            r = ctypes.c_void_p()
+            if lib.ps_cache_read_alternate_site(
+                    cache, url, host, scheme, site, alt, ctypes.byref(r)) == PS_OK:
+                data, size = ctypes.c_void_p(), ctypes.c_size_t(0)
+                out["coded"][name] = lib.ps_read_content(
+                    r, ctypes.byref(data), ctypes.byref(size)) == PS_OK and size.value > 0
+                lib.ps_read_free(r)
         for name, alt in (("original", SENTINEL_ORIGINAL),
                           ("markdown", SENTINEL_MARKDOWN),
                           ("withheld", SENTINEL_WITHHELD)):

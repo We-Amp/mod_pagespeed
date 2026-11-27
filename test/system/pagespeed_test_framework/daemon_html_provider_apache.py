@@ -53,6 +53,10 @@ HOST = "www.example.test"
 # What the admin console sends with a state-changing cache action.
 ADMIN_HEADERS = [("X-Requested-With", "XMLHttpRequest"), ("Content-Length", "0")]
 SCHEME = "https"
+# The optimizer worker's default compression levels, which restart_worker
+# restores after a row.
+WORKER_GZIP_LEVEL = 6
+WORKER_BROTLI_LEVEL = 6
 PROBE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "daemon_html_volume_probe.py")
 
@@ -193,6 +197,9 @@ class ApacheProvider(conf.Provider):
         self.settle_timeout_s = 30.0
         # Per path: whether the row's last request for it asked for Markdown.
         self.last_accept: Dict[str, bool] = {}
+        # The worker's compression levels when a row changed them
+        # (restart_worker); None while they are the defaults.
+        self.worker_levels: Optional[Tuple[int, int]] = None
 
     # ---- configuration
 
@@ -427,6 +434,9 @@ class ApacheProvider(conf.Provider):
         for c in self.connections.values():
             c.close()
         self.connections = {}
+        if self.worker_levels not in (None, (WORKER_GZIP_LEVEL, WORKER_BROTLI_LEVEL)):
+            self.restart_worker(WORKER_GZIP_LEVEL, WORKER_BROTLI_LEVEL)
+        self.worker_levels = None
 
     def _start_window(self) -> None:
         with self.answered_lock:
@@ -589,6 +599,24 @@ class ApacheProvider(conf.Provider):
         # one through the server, whose counters the row reads.
         ask = not self.last_accept.get(path, False)
         return bool(self._probe(path, host, ask=ask).get("markdown_ready"))
+
+    def coded_ready(self, path, host, codings) -> bool:
+        coded = self._probe(path, host).get("coded", {})
+        return all(coded.get(c) for c in codings)
+
+    def restart_worker(self, gzip_level: int, brotli_level: int) -> None:
+        # The lane's restart script for the conformance worker: the same
+        # volume, socket and mode, with these levels (it waits for the socket).
+        script = _env("PAGESPEED_DHC_RESTART")
+        out = subprocess.run(
+            ["bash", script, "--gzip-level", str(gzip_level), "--brotli-level", str(brotli_level)],
+            capture_output=True, text=True, timeout=120)
+        if out.returncode != 0:
+            raise ProviderUnsupported(f"the worker did not restart: {out.stderr.strip()[-400:]}")
+        self.worker_levels = (gzip_level, brotli_level)
+        # Every server process reads the restarted worker's state anew.
+        if self.fragment:
+            self._write_and_reload(self.mode)
 
     def counters(self) -> Dict[str, int]:
         conn = http.client.HTTPConnection(self.server_config.host, self.server_config.port, timeout=30)
