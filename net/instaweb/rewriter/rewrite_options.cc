@@ -3026,8 +3026,8 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromNameInternal(
                                  : GoogleString();
         StringPieceVector existing;
         SplitStringPieceToVector(names, " ", &existing, true);
-        for (StringPiece name : existing) {
-          if (name == value) {
+        for (StringPiece listed : existing) {
+          if (listed == value) {
             set_option(names, &daemon_html_cache_ignore_cookie_);
             return kOptionOk;
           }
