@@ -39,6 +39,7 @@ pagespeed_cc_test(
     srcs = [
         "apache_conditional_stash_test.cc",
         "apache_config_test.cc",
+        "apache_daemon_html_agent_class_test.cc",
         "apache_daemon_html_test.cc",
         "apache_fetch_test.cc",
         "apache_host_names_test.cc",
@@ -87,8 +88,10 @@ pagespeed_cc_test(
     deps = [
         # log_message_handler_test.cc includes spdlog sinks directly.
         "@spdlog//:spdlog",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:optimization_thread_policy",
         "//test/pagespeed/apache:test_base",
+        "//test/pagespeed/kernel/http:agent_vectors",
     ],
 )
 

@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "The optimizer commit whose agent list (path below) the compiled-in",
+    "known-agent table pagespeed/kernel/http/known_agent_table.inc is a",
+    "snapshot of. It is separate from optimizer-test-pin.json on purpose: a",
+    "test-pin bump never changes the table. To move it, set optimizer_commit",
+    "and sha256 (of the file at that commit) together, then run",
+    "tools/gen_known_agent_table.py generate on a copy of the file; the",
+    "pull-request tier fails when the snapshot and the pinned file differ."
+  ],
+  "optimizer_commit": "c57874988a77aa7c8071a84bfacf7c3c14d118c8",
+  "path": "website/src/data/ai-crawlers.json",
+  "sha256": "071999065665de831ae5bfd06da76e09666c3fdc896a41a53737ec5079ca5f89"
+}

@@ -168,6 +168,7 @@ cc_library(
         # binding (and its -ldl) enters the build -- not in the system library
         # every port links.
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_html_purge_source",
         "//pagespeed/system:daemon_record_arm",

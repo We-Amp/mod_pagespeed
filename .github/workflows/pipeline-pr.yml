@@ -363,6 +363,26 @@ jobs:
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" \
             "${RUNNER_TEMP}/optimizer-test-pin-MODULE.bazel" bazel/repositories.bzl
 
+      # The compiled-in known-agent table is a snapshot of the optimizer's
+      # agent list at its own pin; it must be exactly what the generator
+      # writes from that file.
+      - name: Known-agent table generator - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/gen_known_agent_table.py --self-test
+
+      - name: Known-agent table matches its pinned agent list
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          PIN=test/system/known-agent-table-pin.json
+          COMMIT=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$PIN")
+          FILE=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['path'])" "$PIN")
+          bash tools/ci/fetch_retry.sh \
+            "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}/${FILE}" \
+            "${RUNNER_TEMP}/known-agent-table.json"
+          python3 tools/gen_known_agent_table.py check "$PIN" \
+            "${RUNNER_TEMP}/known-agent-table.json" pagespeed/kernel/http/known_agent_table.inc
+
       - name: Changelog fragment tools - self-tests
         if: ${{ !cancelled() }}
         run: |

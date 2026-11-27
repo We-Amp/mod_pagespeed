@@ -725,6 +725,22 @@ pagespeed_cc_test(
 # PRIORITY_ALIAS_FIRST, through the main registration's module context; the
 # capture's body is fed only before the main send clears the response.
 # Reads the port source as data, so it builds and runs on every platform.
+# The HTML cache's agent class on IIS: the shared vectors, and where the
+# port classifies, counts and keeps it, pinned by reading the port source.
+# Builds and runs on every platform.
+pagespeed_cc_test(
+    name = "iis_daemon_html_agent_class_test",
+    srcs = ["iis_daemon_html_agent_class_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:daemon_html_agent_class",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/kernel/http:agent_vectors",
+    ],
+)
+
 pagespeed_cc_test(
     name = "iis_final_view_pin_test",
     srcs = ["iis_final_view_pin_test.cc"],

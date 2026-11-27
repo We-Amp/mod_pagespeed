@@ -1515,6 +1515,13 @@ int pagespeed_modify_request(request_rec* r) {
     return APACHE_OK;
   }
   ApacheTreatSelfFetchAsRemote(r);
+  // The agent class, once per client request: an internal redirect runs this
+  // hook again and finds the first pass's.
+  ApacheDaemonHtmlAgentClass(
+      r,
+      server_context->global_config()->daemon_html_cache() !=
+          RewriteOptions::kDaemonHtmlCacheOff,
+      server_context->statistics());
   return APACHE_OK;
 }
 

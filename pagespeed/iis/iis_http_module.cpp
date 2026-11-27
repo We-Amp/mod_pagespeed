@@ -442,6 +442,12 @@ namespace net_instaweb
 		if (value != nullptr && length > 0) {
 			if_modified_since.push_back(StringPiece(value, length));
 		}
+		// The agent class, from the first User-Agent line: a token scan only.
+		length = 0;
+		value = request->GetHeader(HttpHeaderUserAgent, &length);
+		agent_class_ = ClassifyDaemonHtmlAgent(
+			value == nullptr ? StringPiece() : StringPiece(value, length),
+			DaemonHtmlAgentSignature::kNone);
 		if (StashClientConditionals(if_none_match, if_modified_since,
 		                            &client_conditionals_)) {
 			// Both are removed or the request goes no further: a module tag
@@ -942,6 +948,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The conditionals as they arrived (the begin-request notification
 		// may have removed a module tag from the request since).
 		CopyClientConditionals(inner->client_conditionals(), facts);
+		facts->agent_class = inner->agent_class();
 		facts->has_if_match = request->GetHeader(HttpHeaderIfMatch) != nullptr;
 		facts->has_if_unmodified_since =
 			request->GetHeader(HttpHeaderIfUnmodifiedSince) != nullptr;
@@ -1445,6 +1452,18 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// The client's conditionals as they arrived, for the HTML cache: this
 		// module object took them at the begin-request notification.
 		ctx->GetInnerContext()->set_client_conditionals(client_conditionals_);
+		// The agent class, counted once per request: only here, where the
+		// request's one context is created, and only for a site whose HTML
+		// cache is on.
+		{
+			IisInnerRequestContext* inner = ctx->GetInnerContext();
+			IisServerContext* sc = inner->server_context();
+			if (sc != nullptr &&
+				sc->daemon_html_engine(inner->process_context()->site_id()) != nullptr) {
+				inner->set_agent_class(agent_class_.agent_class);
+				CountDaemonHtmlAgentClass(agent_class_, sc->statistics());
+			}
+		}
 		bool is_resource = ctx->GetInnerContext()->is_resource();
 		// TODO(oschaaf): 1.9-> is_resource arg not used?!
 		auto response_category = ps_route_request(pHttpContext, ctx, is_resource);

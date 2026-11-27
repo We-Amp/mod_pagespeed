@@ -209,6 +209,7 @@ cc_library(
         # The shared daemon substrate: the startup check, the record arm and
         # the serve arm with its notifications.
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_agent_class",
         "//pagespeed/system:daemon_html_engine",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",

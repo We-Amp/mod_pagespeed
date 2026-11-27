@@ -308,6 +308,18 @@ cc_library(
     ],
 )
 
+# The agent class of a request for the HTML cache serve scope.
+cc_library(
+    name = "daemon_html_agent_class",
+    srcs = ["daemon_html_agent_class.cc"],
+    hdrs = ["daemon_html_agent_class.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http:known_agent_table",
+    ],
+)
+
 # The HTML cache engine: store, Markdown serve and purge fence for every port,
 # with every policy verdict from the library through the run-time binding.
 # The same LICENSING BOUNDARY as :daemon_adapter applies.

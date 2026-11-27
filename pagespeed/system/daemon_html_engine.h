@@ -146,7 +146,10 @@ struct DaemonHtmlRequestFacts {
   int64 capture_start_ms = 0;
   // options->enabled() and options->IsAllowed(url) for this request.
   bool options_enabled_and_allowed = false;
-  GoogleString agent_class;  // Not used yet; empty.
+  // The request's agent class (daemon_html_agent_class.h): 0 unknown, 1 a
+  // signed agent, 3 a known agent's User-Agent token; 2 is never produced.
+  // The port computes it once per client request.  Not sent yet.
+  int agent_class = 0;
 };
 
 // What the engine asks the port to do with one request.

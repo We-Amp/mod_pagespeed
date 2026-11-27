@@ -219,6 +219,27 @@ pagespeed_cc_test(
     ],
 )
 
+# The HTML cache's agent class on nginx: the verifier's verdicts and the
+# shared vectors through the nginx-free half, and where the module computes
+# and keeps the class, pinned by reading its source.
+pagespeed_cc_test(
+    name = "ngx_daemon_html_agent_class_test",
+    srcs = ["ngx_daemon_html_agent_class_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+        "//pagespeed/nginx:ngx_webbotauth_handler_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//pagespeed/nginx:ngx_daemon_html",
+        "//pagespeed/system:daemon_html_agent_class",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/kernel/http:agent_vectors",
+    ],
+)
+
 # The composed response of the daemon serve arm -- the nginx-free half of
 # that arm, tested standalone.
 pagespeed_cc_test(

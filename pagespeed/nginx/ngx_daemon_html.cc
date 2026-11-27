@@ -12,6 +12,7 @@
 
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/webbotauth/classifier.h"
 #include "pagespeed/nginx/ngx_daemon_record_completion.h"
 #include "pagespeed/system/module_entity_tags.h"
 
@@ -111,6 +112,23 @@ void NgxDaemonHtmlRunner::RunBlocking(DaemonHtmlCommit commit) {
   }
   Add(posted_);
   sequence_->Add(new DaemonHtmlTask(std::move(commit), bounded_, finished_));
+}
+
+DaemonHtmlAgentSignature NgxDaemonHtmlAgentSignature(
+    bool enabled, const StringPiece* verdict, StringPiece verified_bot_suffix) {
+  if (!enabled) return DaemonHtmlAgentSignature::kNone;
+  if (verdict == nullptr) return DaemonHtmlAgentSignature::kNotReady;
+  using webbotauth::Verdict;
+  using webbotauth::VerdictToken;
+  if (*verdict == VerdictToken(Verdict::kSignedAgent) ||
+      (!verified_bot_suffix.empty() &&
+       verdict->ends_with(verified_bot_suffix))) {
+    return DaemonHtmlAgentSignature::kVerified;
+  }
+  if (*verdict == VerdictToken(Verdict::kUnknown)) {
+    return DaemonHtmlAgentSignature::kFailed;
+  }
+  return DaemonHtmlAgentSignature::kNone;
 }
 
 void FillDaemonHtmlRequestHeaderFacts(const std::vector<NgxHeaderLine>& lines,
